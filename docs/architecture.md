@@ -139,7 +139,7 @@ commit protocols and sink integrations are outside the project.
 Arrow, Parquet, OpenDAL, and the future DataFusion layer follow one recorded
 latest upstream Lance revision. Exact workspace pins and the committed lockfile
 preserve its resolved versions, including transitive family components. See
-[dependency alignment](dependencies.md) for the baseline and local audit.
+[dependency alignment](dependencies.md) for the baseline and update procedure.
 
 ## References
 

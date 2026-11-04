@@ -28,19 +28,6 @@ DataFusion is only an unused workspace dependency pin for the later generated
 column layer. It is not built or present in the resolved graph yet. The layer
 must inherit it through `workspace = true`; do not import types through Lance.
 
-## Local verification
-
-```sh
-python3 scripts/check_lance_dependencies.py
-```
-
-The script reads the baseline from `[workspace.metadata.lance]` and checks the
-resolved Cargo metadata with all features, locked and offline. It rejects
-version/source drift for all packages in these families, including duplicate
-versions and transitive components. Download dependencies with
-`cargo fetch --locked` first if the local cache is empty. This is a local
-development check; no CI workflow is added.
-
 ## Updating the baseline
 
 1. Resolve the latest default-branch SHA of `lance-format/lance` and inspect
@@ -48,7 +35,8 @@ development check; no CI workflow is added.
 2. Update the workspace pins, baseline metadata, this document, and lockfile
    together. New backend/format/layer crates inherit workspace dependencies.
    Add new family components to the same version baseline.
-3. Run the local alignment check, feature builds, tests, Clippy and Rustdoc.
+3. Compare resolved dependency-family versions with the upstream lockfile, then
+   run feature builds, tests, Clippy and Rustdoc.
 
 The recorded SHA is a version reference, not a Git dependency on Lance. Builds
 do not query upstream or automatically change dependency versions.

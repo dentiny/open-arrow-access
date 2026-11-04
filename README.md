@@ -115,7 +115,6 @@ the baseline and update procedure. DataFusion is pinned for the future layer
 but is not part of the current dependency graph.
 
 ```sh
-python3 scripts/check_lance_dependencies.py
 cargo fmt --all -- --check
 cargo check --workspace --no-default-features
 cargo test --workspace --all-features --locked
