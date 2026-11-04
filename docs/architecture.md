@@ -122,7 +122,10 @@ schema and optional reader-context contracts.
 - `storage/` builds OpenDAL operators; shared reads are independent of the Fs
   constructor. Production file reads and metadata access go through OpenDAL.
 - `file-format/` consumes shared byte accessors. Its Parquet bridge implements
-  Arrow Rust's `AsyncFileReader` using exact ranges.
+  Arrow Rust's `AsyncFileReader` using exact ranges. Each format has its own
+  directory under `src/`. In `src/parquet/`, `accessor.rs`, `input.rs` and
+  `reader.rs` own their respective structs and implementations; `mod.rs` declares
+  the modules, exports the accessor and provides common error conversion.
 - The facade forwards independent, additive `storage-fs` / `format-parquet`
   features. Features make implementations available; they do not change runtime
   ordering or silently attach layers.
