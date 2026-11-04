@@ -1,0 +1,60 @@
+[package]
+name = "open-arrow-access"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Composable read access to Apache Arrow streams"
+repository.workspace = true
+
+[workspace]
+members = ["core", "storage", "file-format"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/dentiny/open-arrow-access"
+
+[workspace.dependencies]
+arrow-array = "59.3"
+arrow-schema = "59.3"
+bytes = "1"
+futures = "0.3"
+thiserror = "2"
+opendal = { version = "0.59.5", default-features = false }
+parquet = { version = "59.3", default-features = false, features = ["arrow", "async", "snap"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tempfile = "3"
+open-arrow-access-core = { path = "core", version = "0.1.0" }
+open-arrow-access-storage = { path = "storage", version = "0.1.0", default-features = false }
+open-arrow-access-file-format = { path = "file-format", version = "0.1.0", default-features = false }
+
+[features]
+default = []
+storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
+format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
+
+[dependencies]
+open-arrow-access-core.workspace = true
+open-arrow-access-storage = { workspace = true, optional = true }
+open-arrow-access-file-format = { workspace = true, optional = true }
+
+[dev-dependencies]
+arrow-array.workspace = true
+arrow-schema.workspace = true
+bytes.workspace = true
+futures.workspace = true
+parquet.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
+[[example]]
+name = "read_parquet"
+required-features = ["storage-fs", "format-parquet"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[lints]
+workspace = true
