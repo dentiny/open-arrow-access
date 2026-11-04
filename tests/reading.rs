@@ -284,6 +284,7 @@ struct OpenObserverAccessor<A> {
 impl<A: Accessor> Layer<A> for OpenObserverLayer {
     type Layered = OpenObserverAccessor<A>;
 
+    /// Capture the event label while wrapping either a byte or a record accessor.
     fn layer(&self, inner: A) -> Self::Layered {
         OpenObserverAccessor {
             inner,
@@ -297,6 +298,7 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
     type Request = A::Request;
     type Reader = A::Reader;
 
+    /// Record wrapper call order and forward the request and returned reader unchanged.
     fn open(&self, request: Self::Request) -> BoxFuture<'_, Result<Box<Self::Reader>>> {
         self.events.lock().unwrap().push(self.label);
         self.inner.open(request)
@@ -304,10 +306,12 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
 }
 
 impl<A: ByteAccessor> ByteAccessor for OpenObserverAccessor<A> {
+    /// Preserve the wrapped accessor's optional discovery capability.
     fn can_list(&self) -> bool {
         self.inner.can_list()
     }
 
+    /// Delegate discovery so wrapping does not introduce or hide unsupported behavior.
     fn list(&self, prefix: ObjectRef) -> BoxFuture<'_, Result<ObjectStream>> {
         self.inner.list(prefix)
     }

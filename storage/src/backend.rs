@@ -32,6 +32,7 @@ impl Accessor for OpenDalAccessor {
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
 
+    /// Stat the object and create an OpenDAL byte reader with known length and ranges.
     fn open(&self, object: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {
         Box::pin(async move {
             let path = object.locator();
@@ -114,10 +115,13 @@ impl Reader for OpenDalReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
 
+    /// Borrow the source and byte length captured when the object was opened.
     fn metadata(&self) -> &ByteMetadata {
         &self.metadata
     }
 
+    /// Read one bounded chunk and advance the cursor only after a successful read.
+    /// EOF and read failures terminate subsequent sequential consumption.
     fn next(&mut self) -> BoxFuture<'_, Result<Option<Bytes>>> {
         Box::pin(async move {
             if self.finished || self.offset == self.len {
@@ -143,10 +147,12 @@ impl Reader for OpenDalReader {
 }
 
 impl ByteReader for OpenDalReader {
+    /// Advertise exact range access provided by the shared OpenDAL reader.
     fn capabilities(&self) -> ReaderCapabilities {
         ReaderCapabilities { range_read: true }
     }
 
+    /// Validate and fetch an exact range without moving the sequential cursor.
     fn read_range(&mut self, range: Range<u64>) -> BoxFuture<'_, Result<Bytes>> {
         Box::pin(self.read_exact_range(range))
     }

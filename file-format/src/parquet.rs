@@ -37,6 +37,8 @@ where
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
 
+    /// Open ranged byte input, inspect Parquet metadata and construct an ordered reader.
+    /// Validate projection and retain the output schema before returning any batches.
     fn open(&self, request: ReadRequest) -> BoxFuture<'_, Result<Box<dyn RecordReader>>> {
         Box::pin(async move {
             let input = self.inner.open(request.object.clone()).await?;
@@ -117,6 +119,7 @@ struct ParquetInput {
 }
 
 impl AsyncFileReader for ParquetInput {
+    /// Bridge a Parquet byte-range request to the backend-independent byte reader.
     fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, ParquetResult<Bytes>> {
         Box::pin(async move {
             self.inner
@@ -126,6 +129,7 @@ impl AsyncFileReader for ParquetInput {
         })
     }
 
+    /// Fetch footer/schema metadata through range reads, honoring metadata/index options.
     fn get_metadata<'a>(
         &'a mut self,
         options: Option<&'a ArrowReaderOptions>,
@@ -162,10 +166,13 @@ impl Reader for ParquetReader {
     type Item = RecordBatch;
     type Metadata = RecordMetadata;
 
+    /// Borrow the fixed output schema and source selected during opening.
     fn metadata(&self) -> &RecordMetadata {
         &self.metadata
     }
 
+    /// Decode the next ordered batch, apply field order and restore schema metadata.
+    /// Stop reading permanently after EOF or the first decoding/projection failure.
     fn next(&mut self) -> BoxFuture<'_, Result<Option<RecordBatch>>> {
         Box::pin(async move {
             if self.finished {

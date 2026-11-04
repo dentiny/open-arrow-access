@@ -79,6 +79,7 @@ impl Accessor for MemoryAccessor {
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
 
+    /// Return an application-owned in-memory reader for the requested opaque locator.
     fn open(&self, source: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {
         Box::pin(async move {
             Ok(Box::new(MemoryReader {
@@ -106,10 +107,12 @@ impl Reader for MemoryReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
 
+    /// Describe the in-memory byte representation exposed by this fixture reader.
     fn metadata(&self) -> &ByteMetadata {
         &self.metadata
     }
 
+    /// Emit the fixture bytes once, then report EOF without producing empty chunks.
     fn next(&mut self) -> BoxFuture<'_, Result<Option<Bytes>>> {
         Box::pin(async move {
             if self.emitted || self.bytes.is_empty() {
@@ -122,12 +125,14 @@ impl Reader for MemoryReader {
 }
 
 impl ByteReader for MemoryReader {
+    /// Advertise the range capability configured for this test backend.
     fn capabilities(&self) -> ReaderCapabilities {
         ReaderCapabilities {
             range_read: self.ranged,
         }
     }
 
+    /// Return the exact requested slice or reject unsupported/invalid ranges.
     fn read_range(&mut self, range: Range<u64>) -> BoxFuture<'_, Result<Bytes>> {
         Box::pin(async move {
             if !self.ranged {
@@ -167,6 +172,7 @@ pub struct ByteObserverAccessor<A> {
 impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Layer<A> for ByteObserverLayer {
     type Layered = ByteObserverAccessor<A>;
 
+    /// Attach shared observations while preserving the byte accessor contract.
     fn layer(&self, inner: A) -> Self::Layered {
         ByteObserverAccessor {
             inner,
@@ -181,6 +187,7 @@ impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Accessor
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
 
+    /// Open the inner input and wrap its reader with range/drop observations.
     fn open(&self, request: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {
         Box::pin(async move {
             Ok(Box::new(ByteObserverReader {
@@ -197,6 +204,7 @@ struct ByteObserverReader {
 }
 
 impl Drop for ByteObserverReader {
+    /// Record reader destruction to verify that stopping consumption releases input.
     fn drop(&mut self) {
         self.observations.drops.fetch_add(1, Ordering::SeqCst);
     }
@@ -206,20 +214,24 @@ impl Reader for ByteObserverReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
 
+    /// Forward metadata without altering the input representation.
     fn metadata(&self) -> &ByteMetadata {
         self.inner.metadata()
     }
 
+    /// Delegate sequential consumption without changing chunks, EOF or errors.
     fn next(&mut self) -> BoxFuture<'_, Result<Option<Bytes>>> {
         self.inner.next()
     }
 }
 
 impl ByteReader for ByteObserverReader {
+    /// Preserve the wrapped reader's actual range capability.
     fn capabilities(&self) -> ReaderCapabilities {
         self.inner.capabilities()
     }
 
+    /// Count each range request, inject a requested failure, or delegate unchanged.
     fn read_range(&mut self, range: Range<u64>) -> BoxFuture<'_, Result<Bytes>> {
         Box::pin(async move {
             self.observations.range_reads.fetch_add(1, Ordering::SeqCst);

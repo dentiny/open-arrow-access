@@ -54,6 +54,7 @@ impl Accessor for FsAccessor {
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
 
+    /// Validate a root-relative file locator, then open it through the OpenDAL adapter.
     fn open(&self, object: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {
         let path = object.locator();
         if path.is_empty()

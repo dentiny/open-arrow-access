@@ -16,12 +16,14 @@ impl ObjectRef {
 }
 
 impl From<&str> for ObjectRef {
+    /// Copy a borrowed locator into an owned object reference.
     fn from(value: &str) -> Self {
         Self::new(value)
     }
 }
 
 impl From<String> for ObjectRef {
+    /// Take ownership of a locator without interpreting its backend-specific syntax.
     fn from(value: String) -> Self {
         Self::new(value)
     }
@@ -38,6 +40,7 @@ pub struct ReadOptions {
 }
 
 impl Default for ReadOptions {
+    /// Select all fields with a target batch size of 8192 rows.
     fn default() -> Self {
         Self {
             batch_size: NonZeroUsize::new(8192).unwrap(),

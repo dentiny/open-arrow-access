@@ -12,10 +12,12 @@ impl Reader for FailingReader {
     type Item = u8;
     type Metadata = ();
 
+    /// Expose unit metadata for a reader used only to test stream failure handling.
     fn metadata(&self) -> &() {
         &()
     }
 
+    /// Record a poll and inject an error to verify that the stream never polls again.
     fn next(&mut self) -> BoxFuture<'_, Result<Option<u8>>> {
         Box::pin(async move {
             self.0.fetch_add(1, Ordering::SeqCst);
