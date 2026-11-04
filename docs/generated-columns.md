@@ -2,7 +2,8 @@
 
 Status: required feature, designed here for a separate follow-up PR. The initial
 framework only supplies the reusable contracts. This change does not implement
-expression evaluation or add a DataFusion dependency/feature to the manifest.
+expression evaluation or enable DataFusion. The workspace only records an
+unused dependency pin for the follow-up layer.
 
 ## Semantics
 
@@ -118,8 +119,11 @@ reader. Add that optional extension together with a real source and tests;
 The planned public feature is `layer-generated-columns`, default-off. Register
 it only when the follow-up implementation is usable. Keep expression types and
 DataFusion dependencies inside the layer package; core remains Arrow-facing.
-Use DataFusion directly with an Arrow-compatible version instead of importing
-it through Lance. No Lance writer, sink, catalog, or SQL query service is needed.
+Use DataFusion directly through the workspace pin, aligned with Arrow and
+OpenDAL to the same upstream Lance commit. Follow the
+[dependency alignment policy](dependencies.md); importing through Lance would
+not replace this requirement. No Lance writer, sink, catalog, or SQL query
+service is needed.
 
 This is a useful first production layer for the PR-6 workstream. Metrics can be
 added separately. Parallel read and unordered emission remain independent

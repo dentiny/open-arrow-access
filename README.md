@@ -109,7 +109,13 @@ engine to the initial framework.
 
 ## Development
 
+Dependency versions track a recorded latest upstream Lance commit, including
+resolved patch versions. See [dependency alignment](docs/dependencies.md) for
+the baseline and update procedure. DataFusion is pinned for the future layer
+but is not part of the current dependency graph.
+
 ```sh
+python3 scripts/check_lance_dependencies.py
 cargo fmt --all -- --check
 cargo check --workspace --no-default-features
 cargo test --workspace --all-features --locked

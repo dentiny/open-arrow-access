@@ -133,6 +133,11 @@ The project output boundary is Arrow records. Internal temporary inputs may be
 introduced for materialization in a later decompression PR; downstream writes,
 commit protocols and sink integrations are outside the project.
 
+Arrow, Parquet, OpenDAL, and the future DataFusion layer follow one recorded
+latest upstream Lance revision. Exact workspace pins and the committed lockfile
+preserve its resolved versions, including transitive family components. See
+[dependency alignment](dependencies.md) for the baseline and local audit.
+
 ## References
 
 - [OpenDAL Operator](https://opendal.apache.org/docs/rust/opendal/struct.Operator.html)
