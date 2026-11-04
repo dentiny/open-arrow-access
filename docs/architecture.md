@@ -20,8 +20,8 @@ flowchart TD
 ## Reader
 
 `Reader` has associated `Item` and `Metadata` types. Metadata is available when
-opening finishes. `next` returns a Send boxed future yielding one item, EOF or
-an error. Byte readers return nonempty `Bytes` chunks; record readers return
+opening finishes. `next` is an `async fn` with a Send future yielding one item,
+EOF or an error. Byte readers return nonempty `Bytes` chunks; record readers return
 `RecordBatch` values with one fixed schema. Sequential order is the default.
 
 `ByteReader` specializes this contract with `ByteMetadata` and optional exact
@@ -37,6 +37,13 @@ need bounded materialization or another valid random-access mechanism.
 `RecordReader` specializes the same reader protocol with `RecordMetadata`.
 `into_stream` owns the reader and stops polling it after EOF or the first error.
 No background execution is created by these contracts.
+
+Project-owned I/O methods (`open`, `list`, `next`, `read_range`) are declared as
+`async fn` on traits and implementations. Apply the re-exported `#[async_trait]`
+attribute to those traits/impls: it retains Send futures and `dyn` compatibility.
+Capability queries and already-loaded metadata stay synchronous and perform no I/O.
+The Parquet `AsyncFileReader` bridge must retain upstream's `BoxFuture` method
+signatures; its wrappers only box calls to the private `async fn` read helpers.
 
 ## Capability
 
@@ -121,6 +128,9 @@ schema and optional reader-context contracts.
 - `core/` depends on common types and Arrow, never concrete backends or formats.
 - `storage/` builds OpenDAL operators; shared reads are independent of the Fs
   constructor. Production file reads and metadata access go through OpenDAL.
+  `FsAccessor::new(root).await` offloads OpenDAL's synchronous root inspection,
+  creation and canonicalization to Tokio's blocking pool; initialization requires
+  a Tokio runtime and starts only when the future is polled.
 - `file-format/` consumes shared byte accessors. Its Parquet bridge implements
   Arrow Rust's `AsyncFileReader` using exact ranges. Each format has its own
   directory under `src/`. In `src/parquet/`, `accessor.rs`, `input.rs` and

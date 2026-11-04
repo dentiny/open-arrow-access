@@ -1,8 +1,8 @@
 use std::{collections::HashSet, sync::Arc};
 
 use open_arrow_access_core::{
-    Accessor, BoxFuture, ByteReader, Capability, Error, ErrorKind, ObjectRef, ReadRequest,
-    RecordMetadata, RecordReader, Result,
+    Accessor, ByteReader, Capability, Error, ErrorKind, ObjectRef, ReadRequest, RecordMetadata,
+    RecordReader, Result, async_trait,
 };
 use parquet::arrow::{ProjectionMask, async_reader::ParquetRecordBatchStreamBuilder};
 
@@ -22,6 +22,7 @@ impl<A> ParquetAccessor<A> {
     }
 }
 
+#[async_trait]
 impl<A> Accessor for ParquetAccessor<A>
 where
     A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>,
@@ -40,76 +41,74 @@ where
 
     /// Open ranged byte input, inspect Parquet metadata and construct an ordered reader.
     /// Validate projection and retain the output schema before returning any batches.
-    fn open(&self, request: ReadRequest) -> BoxFuture<'_, Result<Box<dyn RecordReader>>> {
-        Box::pin(async move {
-            let input = self.inner.open(request.object.clone()).await?;
-            if !input.capability().read_with_range || input.metadata().content_length.is_none() {
-                return Err(Error::new(
-                    ErrorKind::Unsupported,
-                    "open_parquet",
-                    "Parquet requires range reads and a known byte length; materialize sequential input first",
-                ));
-            }
-            let mut builder = ParquetRecordBatchStreamBuilder::new(ParquetInput::new(input))
-                .await
-                .map_err(|e| decode_error("inspect_parquet", e))?;
+    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
+        let input = self.inner.open(request.object.clone()).await?;
+        if !input.capability().read_with_range || input.metadata().content_length.is_none() {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "open_parquet",
+                "Parquet requires range reads and a known byte length; materialize sequential input first",
+            ));
+        }
+        let mut builder = ParquetRecordBatchStreamBuilder::new(ParquetInput::new(input))
+            .await
+            .map_err(|e| decode_error("inspect_parquet", e))?;
 
-            // The native projection mask selects fields in file order. Reorder
-            // decoded top-level fields separately to honor the caller's order.
-            // The native stream drops schema metadata; retain it from inspection.
-            let mut schema = builder.schema().clone();
-            if let Some(columns) = request.options.projection.as_ref() {
-                let mut seen = HashSet::new();
-                let mut indices = Vec::with_capacity(columns.len());
-                for name in columns {
-                    if !seen.insert(name) {
-                        return Err(Error::new(
-                            ErrorKind::InvalidInput,
-                            "project",
-                            format!("duplicate field {name:?}"),
-                        ));
-                    }
-                    indices.push(builder.schema().index_of(name).map_err(|e| {
-                        Error::new(
-                            ErrorKind::InvalidInput,
-                            "project",
-                            format!("unknown field {name:?}"),
-                        )
-                        .with_source(e)
-                    })?);
+        // The native projection mask selects fields in file order. Reorder
+        // decoded top-level fields separately to honor the caller's order.
+        // The native stream drops schema metadata; retain it from inspection.
+        let mut schema = builder.schema().clone();
+        if let Some(columns) = request.options.projection.as_ref() {
+            let mut seen = HashSet::new();
+            let mut indices = Vec::with_capacity(columns.len());
+            for name in columns {
+                if !seen.insert(name) {
+                    return Err(Error::new(
+                        ErrorKind::InvalidInput,
+                        "project",
+                        format!("duplicate field {name:?}"),
+                    ));
                 }
-                schema = Arc::new(
-                    schema
-                        .project(&indices)
-                        .map_err(|e| decode_error("project", e))?,
-                );
-                let mask = ProjectionMask::roots(builder.parquet_schema(), indices);
-                builder = builder.with_projection(mask);
+                indices.push(builder.schema().index_of(name).map_err(|e| {
+                    Error::new(
+                        ErrorKind::InvalidInput,
+                        "project",
+                        format!("unknown field {name:?}"),
+                    )
+                    .with_source(e)
+                })?);
             }
-            let stream = builder
-                .with_batch_size(request.options.batch_size.get())
-                .build()
-                .map_err(|e| decode_error("open_parquet", e))?;
-            let reorder = request
-                .options
-                .projection
-                .as_ref()
-                .map(|columns| {
-                    columns
-                        .iter()
-                        .map(|name| stream.schema().index_of(name))
-                        .collect::<std::result::Result<Vec<_>, _>>()
-                })
-                .transpose()
-                .map_err(|e| decode_error("project", e))?;
-            Ok(Box::new(ParquetReader::new(
-                stream,
-                RecordMetadata {
-                    schema,
-                    source: Some(request.object),
-                },
-                reorder,
-            )) as Box<dyn RecordReader>)
-        })
+            schema = Arc::new(
+                schema
+                    .project(&indices)
+                    .map_err(|e| decode_error("project", e))?,
+            );
+            let mask = ProjectionMask::roots(builder.parquet_schema(), indices);
+            builder = builder.with_projection(mask);
+        }
+        let stream = builder
+            .with_batch_size(request.options.batch_size.get())
+            .build()
+            .map_err(|e| decode_error("open_parquet", e))?;
+        let reorder = request
+            .options
+            .projection
+            .as_ref()
+            .map(|columns| {
+                columns
+                    .iter()
+                    .map(|name| stream.schema().index_of(name))
+                    .collect::<std::result::Result<Vec<_>, _>>()
+            })
+            .transpose()
+            .map_err(|e| decode_error("project", e))?;
+        Ok(Box::new(ParquetReader::new(
+            stream,
+            RecordMetadata {
+                schema,
+                source: Some(request.object),
+            },
+            reorder,
+        )) as Box<dyn RecordReader>)
     }
 }

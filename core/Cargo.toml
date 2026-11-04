@@ -9,6 +9,7 @@ description = "Shared reader, accessor, and layer contracts for Open Arrow Acces
 [dependencies]
 arrow-array.workspace = true
 arrow-schema.workspace = true
+async-trait.workspace = true
 bytes.workspace = true
 futures.workspace = true
 thiserror.workspace = true

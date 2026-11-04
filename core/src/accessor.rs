@@ -1,12 +1,15 @@
 use std::sync::Arc;
 
-use futures::{future::BoxFuture, stream::BoxStream};
+use futures::stream::BoxStream;
 
-use crate::{ByteReader, Capability, Error, ErrorKind, ObjectRef, Reader, Result};
+use crate::{ByteReader, Capability, Error, ErrorKind, ObjectRef, Reader, Result, async_trait};
 
 /// Factory for readers. The request and reader types keep bytes and Arrow records
 /// statically distinct while sharing the same opening and layering contract.
+/// Implementations use the re-exported `#[async_trait]` attribute so asynchronous
+/// opening remains usable through `dyn` accessors with Send futures.
 #[deny(missing_docs)]
+#[async_trait]
 pub trait Accessor: Send + Sync {
     /// Selection and options needed to open one reader, interpreted by the accessor.
     type Request: Send;
@@ -32,9 +35,10 @@ pub trait Accessor: Send + Sync {
     /// Returns an error if the request is invalid, the input cannot be accessed,
     /// or opening/inspection fails. Failures encountered while consuming items
     /// are subsequently returned by [`Reader::next`].
-    fn open(&self, request: Self::Request) -> BoxFuture<'_, Result<Box<Self::Reader>>>;
+    async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>>;
 }
 
+#[async_trait]
 impl<A: Accessor + ?Sized> Accessor for Arc<A> {
     type Request = A::Request;
     type Reader = A::Reader;
@@ -45,8 +49,8 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
     }
 
     /// Delegate opening to the shared accessor without sharing the returned reader.
-    fn open(&self, request: Self::Request) -> BoxFuture<'_, Result<Box<Self::Reader>>> {
-        (**self).open(request)
+    async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
+        (**self).open(request).await
     }
 }
 
@@ -55,6 +59,7 @@ pub type ObjectStream = BoxStream<'static, Result<ObjectRef>>;
 /// Optional byte-accessor discovery boundary, reserved for directory/source PRs.
 /// The initial filesystem adapter does not expose directory scans.
 #[deny(missing_docs)]
+#[async_trait]
 pub trait ByteAccessor: Accessor<Request = ObjectRef, Reader = dyn ByteReader> {
     /// Discover object references under an accessor-defined `prefix`.
     ///
@@ -67,20 +72,19 @@ pub trait ByteAccessor: Accessor<Request = ObjectRef, Reader = dyn ByteReader> {
     ///
     /// The default returns [`ErrorKind::Unsupported`]. Implementations also report
     /// invalid selections, access failures and failures starting discovery.
-    fn list(&self, _prefix: ObjectRef) -> BoxFuture<'_, Result<ObjectStream>> {
-        Box::pin(async {
-            Err(Error::new(
-                ErrorKind::Unsupported,
-                "list",
-                "accessor does not support discovery",
-            ))
-        })
+    async fn list(&self, _prefix: ObjectRef) -> Result<ObjectStream> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "list",
+            "accessor does not support discovery",
+        ))
     }
 }
 
+#[async_trait]
 impl<A: ByteAccessor + ?Sized> ByteAccessor for Arc<A> {
     /// Forward discovery while preserving its lazy stream and errors.
-    fn list(&self, prefix: ObjectRef) -> BoxFuture<'_, Result<ObjectStream>> {
-        (**self).list(prefix)
+    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
+        (**self).list(prefix).await
     }
 }

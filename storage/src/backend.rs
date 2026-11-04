@@ -3,8 +3,8 @@
 use std::{num::NonZeroUsize, ops::Range};
 
 use open_arrow_access_core::{
-    Accessor, BoxFuture, ByteMetadata, ByteReader, Bytes, Capability, Error, ErrorKind, ObjectRef,
-    Reader, Result,
+    Accessor, ByteMetadata, ByteReader, Bytes, Capability, Error, ErrorKind, ObjectRef, Reader,
+    Result, async_trait,
 };
 use opendal::Operator;
 
@@ -28,6 +28,7 @@ impl OpenDalAccessor {
     }
 }
 
+#[async_trait]
 impl Accessor for OpenDalAccessor {
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
@@ -46,41 +47,39 @@ impl Accessor for OpenDalAccessor {
     }
 
     /// Stat the object and create an OpenDAL byte reader with known length and ranges.
-    fn open(&self, object: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {
-        Box::pin(async move {
-            let path = object.locator();
-            let metadata = self
-                .operator
-                .stat(path)
-                .await
-                .map_err(|e| map_error("stat", path, e))?;
-            if !metadata.is_file() {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "open",
-                    "object is not a regular file",
-                ));
-            }
-            let inner = self
-                .operator
-                .reader_with(path)
-                .concurrent(1)
-                .await
-                .map_err(|e| map_error("open", path, e))?;
-            let len = metadata.content_length();
-            Ok(Box::new(OpenDalReader {
-                inner,
-                metadata: ByteMetadata {
-                    source: Some(object),
-                    content_length: Some(len),
-                    version: None,
-                },
-                offset: 0,
-                len,
-                chunk_size: self.chunk_size.get(),
-                finished: false,
-            }) as Box<dyn ByteReader>)
-        })
+    async fn open(&self, object: ObjectRef) -> Result<Box<dyn ByteReader>> {
+        let path = object.locator();
+        let metadata = self
+            .operator
+            .stat(path)
+            .await
+            .map_err(|e| map_error("stat", path, e))?;
+        if !metadata.is_file() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "open",
+                "object is not a regular file",
+            ));
+        }
+        let inner = self
+            .operator
+            .reader_with(path)
+            .concurrent(1)
+            .await
+            .map_err(|e| map_error("open", path, e))?;
+        let len = metadata.content_length();
+        Ok(Box::new(OpenDalReader {
+            inner,
+            metadata: ByteMetadata {
+                source: Some(object),
+                content_length: Some(len),
+                version: None,
+            },
+            offset: 0,
+            len,
+            chunk_size: self.chunk_size.get(),
+            finished: false,
+        }) as Box<dyn ByteReader>)
     }
 }
 
@@ -124,6 +123,7 @@ impl OpenDalReader {
     }
 }
 
+#[async_trait]
 impl Reader for OpenDalReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
@@ -144,34 +144,33 @@ impl Reader for OpenDalReader {
 
     /// Read one bounded chunk and advance the cursor only after a successful read.
     /// EOF and read failures terminate subsequent sequential consumption.
-    fn next(&mut self) -> BoxFuture<'_, Result<Option<Bytes>>> {
-        Box::pin(async move {
-            if self.finished || self.offset == self.len {
+    async fn next(&mut self) -> Result<Option<Bytes>> {
+        if self.finished || self.offset == self.len {
+            self.finished = true;
+            return Ok(None);
+        }
+        let end = self
+            .offset
+            .saturating_add(self.chunk_size as u64)
+            .min(self.len);
+        match self.read_exact_range(self.offset..end).await {
+            Ok(bytes) => {
+                self.offset = end;
+                Ok(Some(bytes))
+            }
+            Err(error) => {
                 self.finished = true;
-                return Ok(None);
+                Err(error)
             }
-            let end = self
-                .offset
-                .saturating_add(self.chunk_size as u64)
-                .min(self.len);
-            match self.read_exact_range(self.offset..end).await {
-                Ok(bytes) => {
-                    self.offset = end;
-                    Ok(Some(bytes))
-                }
-                Err(error) => {
-                    self.finished = true;
-                    Err(error)
-                }
-            }
-        })
+        }
     }
 }
 
+#[async_trait]
 impl ByteReader for OpenDalReader {
     /// Validate and fetch an exact range without moving the sequential cursor.
-    fn read_range(&mut self, range: Range<u64>) -> BoxFuture<'_, Result<Bytes>> {
-        Box::pin(self.read_exact_range(range))
+    async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
+        self.read_exact_range(range).await
     }
 }
 

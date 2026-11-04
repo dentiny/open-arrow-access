@@ -11,18 +11,32 @@ use std::{
 use arrow_array::{Int64Array, StringArray};
 use futures::TryStreamExt;
 use open_arrow_access::{
-    Accessor, AccessorExt, BoxFuture, ByteAccessor, Capability, ErrorKind, Layer, ObjectRef,
-    ObjectStream, ReadOptions, ReadRequest, Result, file_format::ParquetAccessor, into_stream,
+    Accessor, AccessorExt, ByteAccessor, Capability, ErrorKind, Layer, ObjectRef, ObjectStream,
+    ReadOptions, ReadRequest, Result, async_trait, file_format::ParquetAccessor, into_stream,
     storage::FsAccessor,
 };
 use parquet::basic::Compression;
 use support::{ByteObserverLayer, MemoryAccessor, Observations, SequentialLayer, fixture, ids};
 
 #[tokio::test]
+async fn filesystem_initialization_is_lazy_and_send() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("new-root");
+    let initialize = FsAccessor::new(root.clone());
+    // OpenDAL's builder may create the root, but construction of an unpolled
+    // future must not start that filesystem work.
+    assert!(!root.exists());
+    // Spawning also verifies that initialization can move between Tokio workers.
+    let fs = tokio::spawn(initialize).await.unwrap().unwrap();
+    assert!(root.is_dir());
+    assert!(fs.capability().read);
+}
+
+#[tokio::test]
 async fn local_parquet_preserves_values_nulls_and_order_across_row_groups() {
     for compression in [Compression::UNCOMPRESSED, Compression::SNAPPY] {
         let fixture = fixture(compression);
-        let accessor = ParquetAccessor::new(FsAccessor::new(fixture.dir.path()).unwrap());
+        let accessor = ParquetAccessor::new(FsAccessor::new(fixture.dir.path()).await.unwrap());
         let mut reader = accessor
             .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
                 batch_size: NonZeroUsize::new(2).unwrap(),
@@ -67,7 +81,7 @@ async fn local_parquet_preserves_values_nulls_and_order_across_row_groups() {
 #[tokio::test]
 async fn projection_honors_requested_field_order_and_schema() {
     let fixture = fixture(Compression::UNCOMPRESSED);
-    let accessor = ParquetAccessor::new(FsAccessor::new(fixture.dir.path()).unwrap());
+    let accessor = ParquetAccessor::new(FsAccessor::new(fixture.dir.path()).await.unwrap());
     let reader = accessor
         .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
             projection: Some(vec!["title".into(), "id".into()]),
@@ -96,7 +110,7 @@ async fn projection_honors_requested_field_order_and_schema() {
 #[tokio::test]
 async fn zero_column_projection_preserves_row_count() {
     let fixture = fixture(Compression::UNCOMPRESSED);
-    let accessor = ParquetAccessor::new(FsAccessor::new(fixture.dir.path()).unwrap());
+    let accessor = ParquetAccessor::new(FsAccessor::new(fixture.dir.path()).await.unwrap());
     let reader = accessor
         .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
             projection: Some(vec![]),
@@ -113,7 +127,7 @@ async fn zero_column_projection_preserves_row_count() {
 #[tokio::test]
 async fn projection_rejects_unknown_and_duplicate_fields() {
     let fixture = fixture(Compression::UNCOMPRESSED);
-    let accessor = ParquetAccessor::new(FsAccessor::new(fixture.dir.path()).unwrap());
+    let accessor = ParquetAccessor::new(FsAccessor::new(fixture.dir.path()).await.unwrap());
     for columns in [vec!["missing".into()], vec!["id".into(), "id".into()]] {
         let result = accessor
             .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
@@ -130,6 +144,7 @@ async fn byte_reader_has_bounded_chunks_and_independent_range_cursor() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("data.bin"), b"abcdefghij").unwrap();
     let fs = FsAccessor::new(dir.path())
+        .await
         .unwrap()
         .with_chunk_size(NonZeroUsize::new(3).unwrap());
     let mut reader = fs.open("data.bin".into()).await.unwrap();
@@ -152,7 +167,7 @@ async fn byte_reader_has_bounded_chunks_and_independent_range_cursor() {
 #[tokio::test]
 async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
     let dir = tempfile::tempdir().unwrap();
-    let fs = FsAccessor::new(dir.path()).unwrap();
+    let fs = FsAccessor::new(dir.path()).await.unwrap();
     let error = fs.open("missing.parquet".into()).await.err().unwrap();
     assert_eq!(error.kind(), ErrorKind::NotFound);
     assert!(error.source().is_some());
@@ -170,14 +185,14 @@ async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
         fs.list("".into()).await.err().unwrap().kind(),
         ErrorKind::Unsupported
     );
-    assert!(FsAccessor::new("relative/root").is_err());
+    assert!(FsAccessor::new("relative/root").await.is_err());
 }
 
 #[tokio::test]
 async fn empty_file_and_invalid_ranges_have_explicit_behavior() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("empty"), []).unwrap();
-    let fs = FsAccessor::new(dir.path()).unwrap();
+    let fs = FsAccessor::new(dir.path()).await.unwrap();
     let mut reader = fs.open("empty".into()).await.unwrap();
     assert!(reader.next().await.unwrap().is_none());
     assert!(reader.read_range(0..0).await.unwrap().is_empty());
@@ -195,7 +210,7 @@ async fn empty_file_and_invalid_ranges_have_explicit_behavior() {
 async fn malformed_parquet_returns_contextual_decode_error() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("broken.parquet"), b"not a parquet file").unwrap();
-    let accessor = ParquetAccessor::new(FsAccessor::new(dir.path()).unwrap());
+    let accessor = ParquetAccessor::new(FsAccessor::new(dir.path()).await.unwrap());
     let error = accessor
         .open(ReadRequest::new("broken.parquet"))
         .await
@@ -239,6 +254,7 @@ async fn dropping_reader_does_not_start_background_reads_and_errors_are_terminal
     let fixture = fixture(Compression::UNCOMPRESSED);
     let observations = Arc::new(Observations::default());
     let byte_accessor = FsAccessor::new(fixture.dir.path())
+        .await
         .unwrap()
         .layer(ByteObserverLayer(observations.clone()));
     let accessor = ParquetAccessor::new(byte_accessor);
@@ -294,6 +310,7 @@ impl<A: Accessor> Layer<A> for OpenObserverLayer {
     }
 }
 
+#[async_trait]
 impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
     type Request = A::Request;
     type Reader = A::Reader;
@@ -304,16 +321,17 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
     }
 
     /// Record wrapper call order and forward the request and returned reader unchanged.
-    fn open(&self, request: Self::Request) -> BoxFuture<'_, Result<Box<Self::Reader>>> {
+    async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
         self.events.lock().unwrap().push(self.label);
-        self.inner.open(request)
+        self.inner.open(request).await
     }
 }
 
+#[async_trait]
 impl<A: ByteAccessor> ByteAccessor for OpenObserverAccessor<A> {
     /// Delegate discovery so wrapping does not introduce or hide unsupported behavior.
-    fn list(&self, prefix: ObjectRef) -> BoxFuture<'_, Result<ObjectStream>> {
-        self.inner.list(prefix)
+    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
+        self.inner.list(prefix).await
     }
 }
 
@@ -326,6 +344,7 @@ async fn one_layer_contract_composes_at_byte_and_record_boundaries_in_known_orde
         events: events.clone(),
     };
     let bytes = FsAccessor::new(fixture.dir.path())
+        .await
         .unwrap()
         .layer(layer("inner-byte"))
         .layer(layer("outer-byte"));
@@ -360,7 +379,7 @@ async fn one_layer_contract_composes_at_byte_and_record_boundaries_in_known_orde
 #[tokio::test]
 async fn capability_downgrade_matches_operations_and_blocks_parquet() {
     let fixture = fixture(Compression::UNCOMPRESSED);
-    let fs = FsAccessor::new(fixture.dir.path()).unwrap();
+    let fs = FsAccessor::new(fixture.dir.path()).await.unwrap();
     assert!(fs.capability().read_with_range);
     let bytes = fs.layer(SequentialLayer);
     assert!(bytes.capability().read);
@@ -388,6 +407,7 @@ async fn capability_downgrade_matches_operations_and_blocks_parquet() {
 
 struct ListingAccessor(MemoryAccessor);
 
+#[async_trait]
 impl Accessor for ListingAccessor {
     type Request = ObjectRef;
     type Reader = dyn open_arrow_access::ByteReader;
@@ -401,17 +421,16 @@ impl Accessor for ListingAccessor {
     }
 
     /// Delegate opening; reader capabilities intentionally do not include listing.
-    fn open(&self, request: ObjectRef) -> BoxFuture<'_, Result<Box<Self::Reader>>> {
-        self.0.open(request)
+    async fn open(&self, request: ObjectRef) -> Result<Box<Self::Reader>> {
+        self.0.open(request).await
     }
 }
 
+#[async_trait]
 impl ByteAccessor for ListingAccessor {
     /// Return one discovered object matching the fixture's sole namespace.
-    fn list(&self, _prefix: ObjectRef) -> BoxFuture<'_, Result<ObjectStream>> {
-        Box::pin(async {
-            Ok(Box::pin(futures::stream::iter([Ok("entry".into())])) as ObjectStream)
-        })
+    async fn list(&self, _prefix: ObjectRef) -> Result<ObjectStream> {
+        Ok(Box::pin(futures::stream::iter([Ok("entry".into())])) as ObjectStream)
     }
 }
 

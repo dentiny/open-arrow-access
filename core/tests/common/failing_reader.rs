@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use open_arrow_access_core::{BoxFuture, Capability, Error, ErrorKind, Reader, Result};
+use open_arrow_access_core::{Capability, Error, ErrorKind, Reader, Result, async_trait};
 
 /// Inject an I/O error on every poll and count calls, including unintended retries.
 pub(crate) struct FailingReader {
@@ -17,6 +17,7 @@ impl FailingReader {
     }
 }
 
+#[async_trait]
 impl Reader for FailingReader {
     type Item = u8;
     type Metadata = ();
@@ -35,10 +36,8 @@ impl Reader for FailingReader {
     }
 
     /// Record a poll and fail so tests can detect consumers polling after an error.
-    fn next(&mut self) -> BoxFuture<'_, Result<Option<u8>>> {
-        Box::pin(async move {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Err(Error::new(ErrorKind::Io, "test_read", "injected failure"))
-        })
+    async fn next(&mut self) -> Result<Option<u8>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(Error::new(ErrorKind::Io, "test_read", "injected failure"))
     }
 }

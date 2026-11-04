@@ -32,6 +32,7 @@ opendal = "0.59.2"
 # See docs/dependencies.md when updating this baseline.
 arrow-array = "=59.3.0"
 arrow-schema = "=59.3.0"
+async-trait = "=0.1.91"
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
 datafusion = { version = "=55.2.0", default-features = false }
 bytes = "1"

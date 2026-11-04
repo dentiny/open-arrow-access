@@ -9,8 +9,8 @@ use std::{
 use arrow_array::{ArrayRef, Int64Array, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access::{
-    Accessor, BoxFuture, ByteAccessor, ByteMetadata, ByteReader, Bytes, Capability, Error,
-    ErrorKind, Layer, ObjectRef, ObjectStream, Reader, RecordBatch, Result, SchemaRef,
+    Accessor, ByteAccessor, ByteMetadata, ByteReader, Bytes, Capability, Error, ErrorKind, Layer,
+    ObjectRef, ObjectStream, Reader, RecordBatch, Result, SchemaRef, async_trait,
 };
 use parquet::{arrow::ArrowWriter, basic::Compression, file::properties::WriterProperties};
 
@@ -75,6 +75,7 @@ impl MemoryAccessor {
     }
 }
 
+#[async_trait]
 impl Accessor for MemoryAccessor {
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
@@ -89,19 +90,17 @@ impl Accessor for MemoryAccessor {
     }
 
     /// Return an application-owned in-memory reader for the requested opaque locator.
-    fn open(&self, source: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {
-        Box::pin(async move {
-            Ok(Box::new(MemoryReader {
-                metadata: ByteMetadata {
-                    source: Some(source),
-                    content_length: Some(self.bytes.len() as u64),
-                    version: None,
-                },
-                bytes: self.bytes.clone(),
-                ranged: self.ranged,
-                emitted: false,
-            }) as Box<dyn ByteReader>)
-        })
+    async fn open(&self, source: ObjectRef) -> Result<Box<dyn ByteReader>> {
+        Ok(Box::new(MemoryReader {
+            metadata: ByteMetadata {
+                source: Some(source),
+                content_length: Some(self.bytes.len() as u64),
+                version: None,
+            },
+            bytes: self.bytes.clone(),
+            ranged: self.ranged,
+            emitted: false,
+        }) as Box<dyn ByteReader>)
     }
 }
 
@@ -112,6 +111,7 @@ struct MemoryReader {
     emitted: bool,
 }
 
+#[async_trait]
 impl Reader for MemoryReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
@@ -131,37 +131,34 @@ impl Reader for MemoryReader {
     }
 
     /// Emit the fixture bytes once, then report EOF without producing empty chunks.
-    fn next(&mut self) -> BoxFuture<'_, Result<Option<Bytes>>> {
-        Box::pin(async move {
-            if self.emitted || self.bytes.is_empty() {
-                return Ok(None);
-            }
-            self.emitted = true;
-            Ok(Some(self.bytes.clone()))
-        })
+    async fn next(&mut self) -> Result<Option<Bytes>> {
+        if self.emitted || self.bytes.is_empty() {
+            return Ok(None);
+        }
+        self.emitted = true;
+        Ok(Some(self.bytes.clone()))
     }
 }
 
+#[async_trait]
 impl ByteReader for MemoryReader {
     /// Return the exact requested slice or reject unsupported/invalid ranges.
-    fn read_range(&mut self, range: Range<u64>) -> BoxFuture<'_, Result<Bytes>> {
-        Box::pin(async move {
-            if !self.ranged {
-                return Err(Error::new(
-                    ErrorKind::Unsupported,
-                    "read_range",
-                    "sequential only",
-                ));
-            }
-            if range.start > range.end || range.end > self.bytes.len() as u64 {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "read_range",
-                    "invalid range",
-                ));
-            }
-            Ok(self.bytes.slice(range.start as usize..range.end as usize))
-        })
+    async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
+        if !self.ranged {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "read_range",
+                "sequential only",
+            ));
+        }
+        if range.start > range.end || range.end > self.bytes.len() as u64 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "read_range",
+                "invalid range",
+            ));
+        }
+        Ok(self.bytes.slice(range.start as usize..range.end as usize))
     }
 }
 
@@ -192,6 +189,7 @@ impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Layer<A> for Byt
     }
 }
 
+#[async_trait]
 impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Accessor
     for ByteObserverAccessor<A>
 {
@@ -204,13 +202,11 @@ impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Accessor
     }
 
     /// Open the inner input and wrap its reader with range/drop observations.
-    fn open(&self, request: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {
-        Box::pin(async move {
-            Ok(Box::new(ByteObserverReader {
-                inner: self.inner.open(request).await?,
-                observations: self.observations.clone(),
-            }) as Box<dyn ByteReader>)
-        })
+    async fn open(&self, request: ObjectRef) -> Result<Box<dyn ByteReader>> {
+        Ok(Box::new(ByteObserverReader {
+            inner: self.inner.open(request).await?,
+            observations: self.observations.clone(),
+        }) as Box<dyn ByteReader>)
     }
 }
 
@@ -219,10 +215,11 @@ struct ByteObserverReader {
     observations: Arc<Observations>,
 }
 
+#[async_trait]
 impl<A: ByteAccessor> ByteAccessor for ByteObserverAccessor<A> {
     /// Preserve discovery whenever the observed byte accessor exposes it.
-    fn list(&self, prefix: ObjectRef) -> BoxFuture<'_, Result<ObjectStream>> {
-        self.inner.list(prefix)
+    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
+        self.inner.list(prefix).await
     }
 }
 
@@ -233,6 +230,7 @@ impl Drop for ByteObserverReader {
     }
 }
 
+#[async_trait]
 impl Reader for ByteObserverReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
@@ -248,25 +246,24 @@ impl Reader for ByteObserverReader {
     }
 
     /// Delegate sequential consumption without changing chunks, EOF or errors.
-    fn next(&mut self) -> BoxFuture<'_, Result<Option<Bytes>>> {
-        self.inner.next()
+    async fn next(&mut self) -> Result<Option<Bytes>> {
+        self.inner.next().await
     }
 }
 
+#[async_trait]
 impl ByteReader for ByteObserverReader {
     /// Count each range request, inject a requested failure, or delegate unchanged.
-    fn read_range(&mut self, range: Range<u64>) -> BoxFuture<'_, Result<Bytes>> {
-        Box::pin(async move {
-            self.observations.range_reads.fetch_add(1, Ordering::SeqCst);
-            if self.observations.fail_reads.load(Ordering::SeqCst) {
-                return Err(Error::new(
-                    ErrorKind::Io,
-                    "read_range",
-                    "injected read failure",
-                ));
-            }
-            self.inner.read_range(range).await
-        })
+    async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
+        self.observations.range_reads.fetch_add(1, Ordering::SeqCst);
+        if self.observations.fail_reads.load(Ordering::SeqCst) {
+            return Err(Error::new(
+                ErrorKind::Io,
+                "read_range",
+                "injected read failure",
+            ));
+        }
+        self.inner.read_range(range).await
     }
 }
 
@@ -284,6 +281,7 @@ impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Layer<A> for Seq
     }
 }
 
+#[async_trait]
 impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Accessor for SequentialAccessor<A> {
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
@@ -297,15 +295,14 @@ impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Accessor for Seq
     }
 
     /// Open the wrapped input behind a sequential-only reader interface.
-    fn open(&self, request: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {
-        Box::pin(async move {
-            Ok(Box::new(SequentialReader(self.0.open(request).await?)) as Box<dyn ByteReader>)
-        })
+    async fn open(&self, request: ObjectRef) -> Result<Box<dyn ByteReader>> {
+        Ok(Box::new(SequentialReader(self.0.open(request).await?)) as Box<dyn ByteReader>)
     }
 }
 
 struct SequentialReader(Box<dyn ByteReader>);
 
+#[async_trait]
 impl Reader for SequentialReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
@@ -324,9 +321,10 @@ impl Reader for SequentialReader {
     }
 
     /// Forward sequential chunks without exposing upstream range access.
-    fn next(&mut self) -> BoxFuture<'_, Result<Option<Bytes>>> {
-        self.0.next()
+    async fn next(&mut self) -> Result<Option<Bytes>> {
+        self.0.next().await
     }
 }
 
+#[async_trait]
 impl ByteReader for SequentialReader {}

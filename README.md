@@ -23,7 +23,7 @@ use open_arrow_access::{
 };
 
 async fn read() -> Result<()> {
-    let files = FsAccessor::new("/absolute/data/root")?;
+    let files = FsAccessor::new("/absolute/data/root").await?;
     let parquet = ParquetAccessor::new(files);
     let mut reader = parquet.open(ReadRequest::new("part.parquet")).await?;
     let schema = reader.metadata().schema.clone();
@@ -60,7 +60,7 @@ decompression. Parallel reads and unordered emission are not implemented.
 ## Extension contracts
 
 ```text
-Accessor::open(request) -> Reader
+Accessor::open(request).await -> Reader
 Accessor::capability() -> effective operation support
 Reader::capability()   -> opened representation's operation support
 Reader::metadata()      -> stable typed metadata
@@ -72,6 +72,13 @@ OpenDAL Fs -> ByteReader -> ParquetAccessor -> RecordReader -> Arrow stream
 
 The same generic accessor/layer protocol applies to bytes and records. Their
 associated types keep compressed bytes distinct from decoded Arrow batches.
+I/O methods (`open`, `list`, `next`, `read_range`) use `async fn`; implementations
+apply the re-exported `#[async_trait]` attribute to preserve `dyn` compatibility
+and Send futures. Capability, metadata and configuration-only methods remain
+synchronous. Fs initialization is also asynchronous:
+`FsAccessor::new(root).await?` moves OpenDAL's synchronous builder to Tokio's
+blocking pool. Call it within a Tokio runtime.
+
 `capability()` follows OpenDAL's reporting pattern, with `read`,
 `read_with_range`, and accessor-only `list` flags. Layers forward or update
 them to match the operations they actually expose. `ByteReader::read_range`

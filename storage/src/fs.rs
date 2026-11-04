@@ -4,7 +4,8 @@ use std::{
 };
 
 use open_arrow_access_core::{
-    Accessor, BoxFuture, ByteAccessor, ByteReader, Capability, Error, ErrorKind, ObjectRef, Result,
+    Accessor, ByteAccessor, ByteReader, Capability, Error, ErrorKind, ObjectRef, Result,
+    async_trait,
 };
 use opendal::{Operator, services::Fs};
 
@@ -21,7 +22,12 @@ pub struct FsAccessor {
 }
 
 impl FsAccessor {
-    pub fn new(root: impl AsRef<Path>) -> Result<Self> {
+    /// Initialize OpenDAL's filesystem service without blocking a Tokio worker.
+    ///
+    /// OpenDAL may inspect/create the root and resolve filesystem symlinks. Its
+    /// synchronous builder runs on Tokio's blocking pool when this future is
+    /// polled. The caller must run this method inside a Tokio runtime.
+    pub async fn new(root: impl AsRef<Path> + Send) -> Result<Self> {
         let root = root.as_ref();
         if !root.is_absolute() {
             return Err(Error::new(
@@ -37,8 +43,20 @@ impl FsAccessor {
                 "root must be valid UTF-8",
             )
         })?;
-        let operator = Operator::new(Fs::default().root(root))
-            .map_err(|e| map_error("configure_fs", root, e))?;
+        let root = root.to_owned();
+        let operator = tokio::task::spawn_blocking(move || {
+            Operator::new(Fs::default().root(&root))
+                .map_err(|e| map_error("configure_fs", &root, e))
+        })
+        .await
+        .map_err(|e| {
+            Error::new(
+                ErrorKind::Io,
+                "configure_fs",
+                "filesystem initialization task failed",
+            )
+            .with_source(e)
+        })??;
         Ok(Self {
             inner: OpenDalAccessor::new(operator),
         })
@@ -50,6 +68,7 @@ impl FsAccessor {
     }
 }
 
+#[async_trait]
 impl Accessor for FsAccessor {
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
@@ -60,23 +79,22 @@ impl Accessor for FsAccessor {
     }
 
     /// Validate a root-relative file locator, then open it through the OpenDAL adapter.
-    fn open(&self, object: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {
+    async fn open(&self, object: ObjectRef) -> Result<Box<dyn ByteReader>> {
         let path = object.locator();
         if path.is_empty()
             || Path::new(path)
                 .components()
                 .any(|c| !matches!(c, Component::Normal(_)))
         {
-            return Box::pin(async {
-                Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "open",
-                    "expected a nonempty root-relative object path",
-                ))
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "open",
+                "expected a nonempty root-relative object path",
+            ));
         }
-        self.inner.open(object)
+        self.inner.open(object).await
     }
 }
 
+#[async_trait]
 impl ByteAccessor for FsAccessor {}

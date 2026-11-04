@@ -15,7 +15,7 @@ async fn main() -> Result<()> {
         )
         .with_source(error)
     })?;
-    let accessor = ParquetAccessor::new(FsAccessor::new(root)?);
+    let accessor = ParquetAccessor::new(FsAccessor::new(root).await?);
     let mut reader = accessor.open(ReadRequest::new(path)).await?;
     println!("Schema: {:?}", reader.metadata().schema);
     let mut rows = 0;

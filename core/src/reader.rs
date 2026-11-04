@@ -1,8 +1,10 @@
 use std::ops::Range;
 
-use futures::{future::BoxFuture, stream::BoxStream};
+use futures::stream::BoxStream;
 
-use crate::{Bytes, Capability, Error, ErrorKind, ObjectRef, RecordBatch, Result, SchemaRef};
+use crate::{
+    Bytes, Capability, Error, ErrorKind, ObjectRef, RecordBatch, Result, SchemaRef, async_trait,
+};
 
 /// A pull-based asynchronous reader. Metadata is available before the first item.
 ///
@@ -10,7 +12,10 @@ use crate::{Bytes, Capability, Error, ErrorKind, ObjectRef, RecordBatch, Result,
 /// library's work: implementations must not leave detached producer tasks running.
 /// A future returned by `next` is Send. Cancelling a pending call need not make a
 /// stateful decoder resumable; drop the reader after cancelling such a call.
+/// Implementations use the re-exported `#[async_trait]` attribute for their
+/// asynchronous methods while retaining support for `dyn` readers.
 #[deny(missing_docs)]
+#[async_trait]
 pub trait Reader: Send {
     /// Unit emitted by a successful read, such as Bytes or RecordBatch.
     type Item: Send + 'static;
@@ -41,7 +46,7 @@ pub trait Reader: Send {
     /// Returns failures encountered while fetching or decoding the next item.
     /// An error terminates consumption; implementations must not transparently
     /// replay items that have already been delivered.
-    fn next(&mut self) -> BoxFuture<'_, Result<Option<Self::Item>>>;
+    async fn next(&mut self) -> Result<Option<Self::Item>>;
 }
 
 /// Metadata about the bytes currently exposed by a reader.
@@ -58,6 +63,7 @@ pub struct ByteMetadata {
 /// Byte specialization used by storage, byte layers, and decompression wrappers.
 /// Sequential chunks must be nonempty; use None for EOF.
 #[deny(missing_docs)]
+#[async_trait]
 pub trait ByteReader: Reader<Item = Bytes, Metadata = ByteMetadata> {
     /// Read exactly the half-open `range` in the current byte representation.
     ///
@@ -71,14 +77,12 @@ pub trait ByteReader: Reader<Item = Bytes, Metadata = ByteMetadata> {
     /// The default returns [`ErrorKind::Unsupported`]. Implementations reject
     /// reversed or out-of-bounds ranges and report short reads or I/O failures
     /// instead of silently returning fewer bytes than requested.
-    fn read_range(&mut self, _range: Range<u64>) -> BoxFuture<'_, Result<Bytes>> {
-        Box::pin(async {
-            Err(Error::new(
-                ErrorKind::Unsupported,
-                "read_range",
-                "reader is sequential only",
-            ))
-        })
+    async fn read_range(&mut self, _range: Range<u64>) -> Result<Bytes> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "read_range",
+            "reader is sequential only",
+        ))
     }
 }
 

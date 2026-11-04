@@ -18,5 +18,6 @@ pub use request::{ObjectRef, ReadOptions, ReadOptionsProvider, ReadRequest};
 
 pub use arrow_array::RecordBatch;
 pub use arrow_schema::{Schema, SchemaRef};
+/// Attribute for implementing the asynchronous accessor and reader traits.
+pub use async_trait::async_trait;
 pub use bytes::Bytes;
-pub use futures::future::BoxFuture;
