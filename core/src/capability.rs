@@ -1,0 +1,28 @@
+/// Operations exposed by an accessor or reader after all adapters and layers.
+///
+/// This follows OpenDAL's capability-reporting pattern. Flags describe the
+/// current interface, not every operation supported by its underlying backend.
+/// Transparent layers forward them; transforming layers must update them to
+/// match the operations they actually expose. Unset flags mean unsupported.
+///
+/// Accessors report supported operations before opening. Readers report the
+/// abilities of the opened representation, which can be more specific. `read`
+/// describes sequential consumption; `read_with_range` adds exact byte ranges.
+/// Readers never advertise `list`, which is an accessor-only operation.
+///
+/// A supported operation can still fail for a particular request, for example
+/// because of permissions, missing input, invalid options or unknown length.
+/// Capabilities perform no I/O and provide no authorization or snapshot guarantee.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[deny(missing_docs)]
+pub struct Capability {
+    /// Can open/read the interface's item type through [`crate::Reader::next`].
+    pub read: bool,
+    /// Can read exact ranges in the current byte representation without moving
+    /// the sequential cursor, through [`crate::ByteReader::read_range`].
+    /// Implies `read`; always false for record interfaces.
+    pub read_with_range: bool,
+    /// Can discover object references through [`crate::ByteAccessor::list`].
+    /// Always false for readers and interfaces that do not expose discovery.
+    pub list: bool,
+}

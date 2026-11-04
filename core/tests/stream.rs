@@ -4,13 +4,23 @@ use std::sync::{
 };
 
 use futures::{StreamExt, TryStreamExt};
-use open_arrow_access_core::{BoxFuture, Error, ErrorKind, Reader, Result, into_stream};
+use open_arrow_access_core::{
+    BoxFuture, Capability, Error, ErrorKind, Reader, Result, into_stream,
+};
 
 struct FailingReader(Arc<AtomicUsize>);
 
 impl Reader for FailingReader {
     type Item = u8;
     type Metadata = ();
+
+    /// Advertise consumption even though the fixture injects a runtime I/O failure.
+    fn capability(&self) -> Capability {
+        Capability {
+            read: true,
+            ..Capability::default()
+        }
+    }
 
     /// Expose unit metadata for a reader used only to test stream failure handling.
     fn metadata(&self) -> &() {

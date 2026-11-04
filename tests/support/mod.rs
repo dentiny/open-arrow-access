@@ -9,8 +9,8 @@ use std::{
 use arrow_array::{ArrayRef, Int64Array, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access::{
-    Accessor, BoxFuture, ByteMetadata, ByteReader, Bytes, Error, ErrorKind, Layer, ObjectRef,
-    Reader, ReaderCapabilities, RecordBatch, Result, SchemaRef,
+    Accessor, BoxFuture, ByteAccessor, ByteMetadata, ByteReader, Bytes, Capability, Error,
+    ErrorKind, Layer, ObjectRef, ObjectStream, Reader, RecordBatch, Result, SchemaRef,
 };
 use parquet::{arrow::ArrowWriter, basic::Compression, file::properties::WriterProperties};
 
@@ -79,6 +79,15 @@ impl Accessor for MemoryAccessor {
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
 
+    /// Report sequential reads and the range support configured for this fixture.
+    fn capability(&self) -> Capability {
+        Capability {
+            read: true,
+            read_with_range: self.ranged,
+            ..Capability::default()
+        }
+    }
+
     /// Return an application-owned in-memory reader for the requested opaque locator.
     fn open(&self, source: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {
         Box::pin(async move {
@@ -107,6 +116,15 @@ impl Reader for MemoryReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
 
+    /// Report sequential reads and the range support configured for this fixture.
+    fn capability(&self) -> Capability {
+        Capability {
+            read: true,
+            read_with_range: self.ranged,
+            ..Capability::default()
+        }
+    }
+
     /// Describe the in-memory byte representation exposed by this fixture reader.
     fn metadata(&self) -> &ByteMetadata {
         &self.metadata
@@ -125,13 +143,6 @@ impl Reader for MemoryReader {
 }
 
 impl ByteReader for MemoryReader {
-    /// Advertise the range capability configured for this test backend.
-    fn capabilities(&self) -> ReaderCapabilities {
-        ReaderCapabilities {
-            range_read: self.ranged,
-        }
-    }
-
     /// Return the exact requested slice or reject unsupported/invalid ranges.
     fn read_range(&mut self, range: Range<u64>) -> BoxFuture<'_, Result<Bytes>> {
         Box::pin(async move {
@@ -187,6 +198,11 @@ impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Accessor
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
 
+    /// Forward effective capabilities because observation preserves supported operations.
+    fn capability(&self) -> Capability {
+        self.inner.capability()
+    }
+
     /// Open the inner input and wrap its reader with range/drop observations.
     fn open(&self, request: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {
         Box::pin(async move {
@@ -203,6 +219,13 @@ struct ByteObserverReader {
     observations: Arc<Observations>,
 }
 
+impl<A: ByteAccessor> ByteAccessor for ByteObserverAccessor<A> {
+    /// Preserve discovery whenever the observed byte accessor exposes it.
+    fn list(&self, prefix: ObjectRef) -> BoxFuture<'_, Result<ObjectStream>> {
+        self.inner.list(prefix)
+    }
+}
+
 impl Drop for ByteObserverReader {
     /// Record reader destruction to verify that stopping consumption releases input.
     fn drop(&mut self) {
@@ -213,6 +236,11 @@ impl Drop for ByteObserverReader {
 impl Reader for ByteObserverReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
+
+    /// Forward effective capabilities because observation preserves supported operations.
+    fn capability(&self) -> Capability {
+        self.inner.capability()
+    }
 
     /// Forward metadata without altering the input representation.
     fn metadata(&self) -> &ByteMetadata {
@@ -226,11 +254,6 @@ impl Reader for ByteObserverReader {
 }
 
 impl ByteReader for ByteObserverReader {
-    /// Preserve the wrapped reader's actual range capability.
-    fn capabilities(&self) -> ReaderCapabilities {
-        self.inner.capabilities()
-    }
-
     /// Count each range request, inject a requested failure, or delegate unchanged.
     fn read_range(&mut self, range: Range<u64>) -> BoxFuture<'_, Result<Bytes>> {
         Box::pin(async move {
@@ -246,3 +269,64 @@ impl ByteReader for ByteObserverReader {
         })
     }
 }
+
+/// Test-only wrapper modeling a decoder that cannot preserve upstream byte ranges.
+pub struct SequentialLayer;
+
+pub struct SequentialAccessor<A>(A);
+
+impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Layer<A> for SequentialLayer {
+    type Layered = SequentialAccessor<A>;
+
+    /// Wrap a byte accessor while preserving its request and reader types.
+    fn layer(&self, inner: A) -> Self::Layered {
+        SequentialAccessor(inner)
+    }
+}
+
+impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Accessor for SequentialAccessor<A> {
+    type Request = ObjectRef;
+    type Reader = dyn ByteReader;
+
+    /// Remove range access and discovery, which this wrapper does not implement.
+    fn capability(&self) -> Capability {
+        Capability {
+            read: self.0.capability().read,
+            ..Capability::default()
+        }
+    }
+
+    /// Open the wrapped input behind a sequential-only reader interface.
+    fn open(&self, request: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {
+        Box::pin(async move {
+            Ok(Box::new(SequentialReader(self.0.open(request).await?)) as Box<dyn ByteReader>)
+        })
+    }
+}
+
+struct SequentialReader(Box<dyn ByteReader>);
+
+impl Reader for SequentialReader {
+    type Item = Bytes;
+    type Metadata = ByteMetadata;
+
+    /// Advertise only the sequential consumption exposed by this wrapper.
+    fn capability(&self) -> Capability {
+        Capability {
+            read: self.0.capability().read,
+            ..Capability::default()
+        }
+    }
+
+    /// Preserve metadata because this test wrapper does not transform the bytes.
+    fn metadata(&self) -> &ByteMetadata {
+        self.0.metadata()
+    }
+
+    /// Forward sequential chunks without exposing upstream range access.
+    fn next(&mut self) -> BoxFuture<'_, Result<Option<Bytes>>> {
+        self.0.next()
+    }
+}
+
+impl ByteReader for SequentialReader {}

@@ -3,8 +3,8 @@
 use std::{num::NonZeroUsize, ops::Range};
 
 use open_arrow_access_core::{
-    Accessor, BoxFuture, ByteMetadata, ByteReader, Bytes, Error, ErrorKind, ObjectRef, Reader,
-    ReaderCapabilities, Result,
+    Accessor, BoxFuture, ByteMetadata, ByteReader, Bytes, Capability, Error, ErrorKind, ObjectRef,
+    Reader, Result,
 };
 use opendal::Operator;
 
@@ -31,6 +31,19 @@ impl OpenDalAccessor {
 impl Accessor for OpenDalAccessor {
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
+
+    /// Map OpenDAL's effective read/stat support to the operations this adapter exposes.
+    fn capability(&self) -> Capability {
+        let upstream = self.operator.info().capability();
+        let read = upstream.read && upstream.stat;
+        // This adapter requires stat for length and uses OpenDAL's range-read contract.
+        // OpenDAL's listing support is not exposed by this adapter yet.
+        Capability {
+            read,
+            read_with_range: read,
+            ..Capability::default()
+        }
+    }
 
     /// Stat the object and create an OpenDAL byte reader with known length and ranges.
     fn open(&self, object: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {
@@ -115,6 +128,15 @@ impl Reader for OpenDalReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
 
+    /// Report sequential and exact-range access on the opened byte representation.
+    fn capability(&self) -> Capability {
+        Capability {
+            read: true,
+            read_with_range: true,
+            ..Capability::default()
+        }
+    }
+
     /// Borrow the source and byte length captured when the object was opened.
     fn metadata(&self) -> &ByteMetadata {
         &self.metadata
@@ -147,11 +169,6 @@ impl Reader for OpenDalReader {
 }
 
 impl ByteReader for OpenDalReader {
-    /// Advertise exact range access provided by the shared OpenDAL reader.
-    fn capabilities(&self) -> ReaderCapabilities {
-        ReaderCapabilities { range_read: true }
-    }
-
     /// Validate and fetch an exact range without moving the sequential cursor.
     fn read_range(&mut self, range: Range<u64>) -> BoxFuture<'_, Result<Bytes>> {
         Box::pin(self.read_exact_range(range))

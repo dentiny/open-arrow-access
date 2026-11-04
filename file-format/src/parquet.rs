@@ -2,8 +2,8 @@ use std::{collections::HashSet, ops::Range, sync::Arc};
 
 use futures::StreamExt;
 use open_arrow_access_core::{
-    Accessor, BoxFuture, ByteReader, Bytes, Error, ErrorKind, ObjectRef, ReadRequest, Reader,
-    RecordBatch, RecordMetadata, RecordReader, Result,
+    Accessor, BoxFuture, ByteReader, Bytes, Capability, Error, ErrorKind, ObjectRef, ReadRequest,
+    Reader, RecordBatch, RecordMetadata, RecordReader, Result,
 };
 use parquet::{
     arrow::{
@@ -37,12 +37,21 @@ where
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
 
+    /// Expose record reading when the wrapped byte accessor supports exact ranges.
+    fn capability(&self) -> Capability {
+        let input = self.inner.capability();
+        Capability {
+            read: input.read && input.read_with_range,
+            ..Capability::default()
+        }
+    }
+
     /// Open ranged byte input, inspect Parquet metadata and construct an ordered reader.
     /// Validate projection and retain the output schema before returning any batches.
     fn open(&self, request: ReadRequest) -> BoxFuture<'_, Result<Box<dyn RecordReader>>> {
         Box::pin(async move {
             let input = self.inner.open(request.object.clone()).await?;
-            if !input.capabilities().range_read || input.metadata().content_length.is_none() {
+            if !input.capability().read_with_range || input.metadata().content_length.is_none() {
                 return Err(Error::new(
                     ErrorKind::Unsupported,
                     "open_parquet",
@@ -165,6 +174,14 @@ struct ParquetReader {
 impl Reader for ParquetReader {
     type Item = RecordBatch;
     type Metadata = RecordMetadata;
+
+    /// Report record consumption without exposing the decoder's internal byte ranges.
+    fn capability(&self) -> Capability {
+        Capability {
+            read: true,
+            ..Capability::default()
+        }
+    }
 
     /// Borrow the fixed output schema and source selected during opening.
     fn metadata(&self) -> &RecordMetadata {

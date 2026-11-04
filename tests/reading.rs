@@ -11,12 +11,12 @@ use std::{
 use arrow_array::{Int64Array, StringArray};
 use futures::TryStreamExt;
 use open_arrow_access::{
-    Accessor, AccessorExt, BoxFuture, ByteAccessor, ErrorKind, Layer, ObjectRef, ObjectStream,
-    ReadOptions, ReadRequest, Result, file_format::ParquetAccessor, into_stream,
+    Accessor, AccessorExt, BoxFuture, ByteAccessor, Capability, ErrorKind, Layer, ObjectRef,
+    ObjectStream, ReadOptions, ReadRequest, Result, file_format::ParquetAccessor, into_stream,
     storage::FsAccessor,
 };
 use parquet::basic::Compression;
-use support::{ByteObserverLayer, MemoryAccessor, Observations, fixture, ids};
+use support::{ByteObserverLayer, MemoryAccessor, Observations, SequentialLayer, fixture, ids};
 
 #[tokio::test]
 async fn local_parquet_preserves_values_nulls_and_order_across_row_groups() {
@@ -134,7 +134,7 @@ async fn byte_reader_has_bounded_chunks_and_independent_range_cursor() {
         .with_chunk_size(NonZeroUsize::new(3).unwrap());
     let mut reader = fs.open("data.bin".into()).await.unwrap();
     assert_eq!(reader.metadata().content_length, Some(10));
-    assert!(reader.capabilities().range_read);
+    assert!(reader.capability().read_with_range);
     assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"abc");
     assert_eq!(reader.read_range(7..10).await.unwrap().as_ref(), b"hij");
     assert!(reader.read_range(5..5).await.unwrap().is_empty());
@@ -165,7 +165,7 @@ async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
         fs.open("subdir/".into()).await.err().unwrap().kind(),
         ErrorKind::InvalidInput
     );
-    assert!(!fs.can_list());
+    assert!(!fs.capability().list);
     assert_eq!(
         fs.list("".into()).await.err().unwrap().kind(),
         ErrorKind::Unsupported
@@ -298,6 +298,11 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
     type Request = A::Request;
     type Reader = A::Reader;
 
+    /// Forward effective capabilities because observation preserves supported operations.
+    fn capability(&self) -> Capability {
+        self.inner.capability()
+    }
+
     /// Record wrapper call order and forward the request and returned reader unchanged.
     fn open(&self, request: Self::Request) -> BoxFuture<'_, Result<Box<Self::Reader>>> {
         self.events.lock().unwrap().push(self.label);
@@ -306,11 +311,6 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
 }
 
 impl<A: ByteAccessor> ByteAccessor for OpenObserverAccessor<A> {
-    /// Preserve the wrapped accessor's optional discovery capability.
-    fn can_list(&self) -> bool {
-        self.inner.can_list()
-    }
-
     /// Delegate discovery so wrapping does not introduce or hide unsupported behavior.
     fn list(&self, prefix: ObjectRef) -> BoxFuture<'_, Result<ObjectStream>> {
         self.inner.list(prefix)
@@ -329,18 +329,23 @@ async fn one_layer_contract_composes_at_byte_and_record_boundaries_in_known_orde
         .unwrap()
         .layer(layer("inner-byte"))
         .layer(layer("outer-byte"));
-    assert!(!bytes.can_list());
+    assert!(!bytes.capability().list);
     assert_eq!(
         bytes.list("".into()).await.err().unwrap().kind(),
         ErrorKind::Unsupported
     );
     // Also verify object-safe injection through an Arc, as third-party adapters use.
     let bytes: Arc<dyn ByteAccessor> = Arc::new(bytes);
+    assert!(bytes.capability().read_with_range);
     let records = ParquetAccessor::new(bytes).layer(layer("record"));
+    assert!(records.capability().read);
+    assert!(!records.capability().read_with_range);
     let reader = records
         .open(ReadRequest::new("data.parquet"))
         .await
         .unwrap();
+    assert!(reader.capability().read);
+    assert!(!reader.capability().read_with_range);
     let batches = into_stream(reader).try_collect::<Vec<_>>().await.unwrap();
     assert_eq!(
         batches.iter().flat_map(ids).collect::<Vec<_>>(),
@@ -350,4 +355,90 @@ async fn one_layer_contract_composes_at_byte_and_record_boundaries_in_known_orde
         *events.lock().unwrap(),
         vec!["record", "outer-byte", "inner-byte"]
     );
+}
+
+#[tokio::test]
+async fn capability_downgrade_matches_operations_and_blocks_parquet() {
+    let fixture = fixture(Compression::UNCOMPRESSED);
+    let fs = FsAccessor::new(fixture.dir.path()).unwrap();
+    assert!(fs.capability().read_with_range);
+    let bytes = fs.layer(SequentialLayer);
+    assert!(bytes.capability().read);
+    assert!(!bytes.capability().read_with_range);
+    let mut reader = bytes.open("data.parquet".into()).await.unwrap();
+    assert!(!reader.capability().read_with_range);
+    assert_eq!(
+        reader.read_range(0..4).await.err().unwrap().kind(),
+        ErrorKind::Unsupported
+    );
+    assert!(!reader.next().await.unwrap().unwrap().is_empty());
+
+    let records = ParquetAccessor::new(bytes);
+    assert!(!records.capability().read);
+    assert_eq!(
+        records
+            .open(ReadRequest::new("data.parquet"))
+            .await
+            .err()
+            .unwrap()
+            .kind(),
+        ErrorKind::Unsupported
+    );
+}
+
+struct ListingAccessor(MemoryAccessor);
+
+impl Accessor for ListingAccessor {
+    type Request = ObjectRef;
+    type Reader = dyn open_arrow_access::ByteReader;
+
+    /// Add implemented object discovery to the underlying fixture's read abilities.
+    fn capability(&self) -> Capability {
+        Capability {
+            list: true,
+            ..self.0.capability()
+        }
+    }
+
+    /// Delegate opening; reader capabilities intentionally do not include listing.
+    fn open(&self, request: ObjectRef) -> BoxFuture<'_, Result<Box<Self::Reader>>> {
+        self.0.open(request)
+    }
+}
+
+impl ByteAccessor for ListingAccessor {
+    /// Return one discovered object matching the fixture's sole namespace.
+    fn list(&self, _prefix: ObjectRef) -> BoxFuture<'_, Result<ObjectStream>> {
+        Box::pin(async {
+            Ok(Box::pin(futures::stream::iter([Ok("entry".into())])) as ObjectStream)
+        })
+    }
+}
+
+#[tokio::test]
+async fn listing_capability_survives_transparent_layer_and_shared_accessor() {
+    let accessor: Arc<dyn ByteAccessor> = Arc::new(
+        ListingAccessor(MemoryAccessor::new("data".into(), true))
+            .layer(ByteObserverLayer(Arc::new(Observations::default())))
+            .layer(OpenObserverLayer {
+                label: "list-observer",
+                events: Arc::new(Mutex::new(Vec::new())),
+            }),
+    );
+    assert!(accessor.capability().list);
+    let objects = accessor
+        .list("".into())
+        .await
+        .unwrap()
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    assert_eq!(objects.len(), 1);
+    assert_eq!(objects[0].locator(), "entry");
+    let reader = accessor
+        .open(objects.into_iter().next().unwrap())
+        .await
+        .unwrap();
+    assert!(reader.capability().read_with_range);
+    assert!(!reader.capability().list);
 }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures::{future::BoxFuture, stream::BoxStream};
 
-use crate::{ByteReader, Error, ErrorKind, ObjectRef, Reader, Result};
+use crate::{ByteReader, Capability, Error, ErrorKind, ObjectRef, Reader, Result};
 
 /// Factory for readers. The request and reader types keep bytes and Arrow records
 /// statically distinct while sharing the same opening and layering contract.
@@ -12,6 +12,13 @@ pub trait Accessor: Send + Sync {
     type Request: Send;
     /// Reader interface returned by this accessor, including its item and metadata types.
     type Reader: Reader + ?Sized;
+
+    /// Report effective operations after all adapters/layers, without I/O.
+    ///
+    /// Wrappers must forward or adjust these flags to match their own interface.
+    /// A supported operation can still fail for a particular request. The opened
+    /// reader reports its own representation's abilities via [`Reader::capability`].
+    fn capability(&self) -> Capability;
 
     /// Open the input selected by `request` and return an independently owned reader.
     ///
@@ -32,6 +39,11 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
     type Request = A::Request;
     type Reader = A::Reader;
 
+    /// Forward the shared accessor's effective operation support.
+    fn capability(&self) -> Capability {
+        (**self).capability()
+    }
+
     /// Delegate opening to the shared accessor without sharing the returned reader.
     fn open(&self, request: Self::Request) -> BoxFuture<'_, Result<Box<Self::Reader>>> {
         (**self).open(request)
@@ -44,19 +56,12 @@ pub type ObjectStream = BoxStream<'static, Result<ObjectRef>>;
 /// The initial filesystem adapter does not expose directory scans.
 #[deny(missing_docs)]
 pub trait ByteAccessor: Accessor<Request = ObjectRef, Reader = dyn ByteReader> {
-    /// Report whether this accessor implements object discovery through [`Self::list`].
-    ///
-    /// The default is false. This is an ability report, not a guarantee that any
-    /// particular listing request will succeed or that its results form a snapshot.
-    fn can_list(&self) -> bool {
-        false
-    }
-
     /// Discover object references under an accessor-defined `prefix`.
     ///
     /// The accessor defines prefix interpretation, recursion and listing order.
     /// Objects are returned as a stream so discovery need not collect all results
     /// in memory. Additional I/O errors may occur while consuming that stream.
+    /// Implementations must set [`Capability::list`] to match their support.
     ///
     /// # Errors
     ///
@@ -74,11 +79,6 @@ pub trait ByteAccessor: Accessor<Request = ObjectRef, Reader = dyn ByteReader> {
 }
 
 impl<A: ByteAccessor + ?Sized> ByteAccessor for Arc<A> {
-    /// Forward the discovery capability of the shared accessor.
-    fn can_list(&self) -> bool {
-        (**self).can_list()
-    }
-
     /// Forward discovery while preserving its lazy stream and errors.
     fn list(&self, prefix: ObjectRef) -> BoxFuture<'_, Result<ObjectStream>> {
         (**self).list(prefix)

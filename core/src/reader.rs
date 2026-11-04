@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use futures::{future::BoxFuture, stream::BoxStream};
 
-use crate::{Bytes, Error, ErrorKind, ObjectRef, RecordBatch, Result, SchemaRef};
+use crate::{Bytes, Capability, Error, ErrorKind, ObjectRef, RecordBatch, Result, SchemaRef};
 
 /// A pull-based asynchronous reader. Metadata is available before the first item.
 ///
@@ -16,6 +16,12 @@ pub trait Reader: Send {
     type Item: Send + 'static;
     /// Typed description of the reader's output representation.
     type Metadata: Send + Sync + 'static;
+
+    /// Report operations on this opened representation without I/O.
+    ///
+    /// Wrappers must report their effective abilities rather than blindly retain
+    /// upstream flags. Reader capabilities never advertise accessor-only listing.
+    fn capability(&self) -> Capability;
 
     /// Borrow output metadata without starting another I/O operation.
     ///
@@ -38,12 +44,6 @@ pub trait Reader: Send {
     fn next(&mut self) -> BoxFuture<'_, Result<Option<Self::Item>>>;
 }
 
-/// Abilities of this exact reader, after all input wrappers have been applied.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ReaderCapabilities {
-    pub range_read: bool,
-}
-
 /// Metadata about the bytes currently exposed by a reader.
 #[derive(Clone, Debug, Default)]
 pub struct ByteMetadata {
@@ -59,19 +59,12 @@ pub struct ByteMetadata {
 /// Sequential chunks must be nonempty; use None for EOF.
 #[deny(missing_docs)]
 pub trait ByteReader: Reader<Item = Bytes, Metadata = ByteMetadata> {
-    /// Report the abilities of this reader after all wrapping or decoding.
-    ///
-    /// The default advertises no range access. Wrappers must report what they
-    /// actually expose instead of blindly inheriting upstream capabilities.
-    fn capabilities(&self) -> ReaderCapabilities {
-        ReaderCapabilities::default()
-    }
-
     /// Read exactly the half-open `range` in the current byte representation.
     ///
     /// Range reads leave the sequential cursor unchanged. Valid empty ranges
     /// return empty Bytes. A wrapper must delegate or explicitly remove range
     /// support; it must not advertise it by repeatedly decoding from byte zero.
+    /// [`Capability::read_with_range`] must match the implementation's support.
     ///
     /// # Errors
     ///

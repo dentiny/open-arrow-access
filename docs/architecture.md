@@ -12,7 +12,7 @@ flowchart TD
     Bytes --> Format[file-format/: ParquetAccessor]
     Format --> Records[RecordReader: fixed schema / ordered batches]
     Records --> Stream[Arrow RecordBatch stream]
-    Core[core/: Accessor / Reader / Layer] -. common contracts .-> Storage
+    Core[core/: Accessor / Reader / Layer / Capability] -. common contracts .-> Storage
     Core -. common contracts .-> Format
     Future[Future layers / decompression / datasets / services] -. use the same contracts .-> Core
 ```
@@ -37,6 +37,36 @@ need bounded materialization or another valid random-access mechanism.
 `RecordReader` specializes the same reader protocol with `RecordMetadata`.
 `into_stream` owns the reader and stops polling it after EOF or the first error.
 No background execution is created by these contracts.
+
+## Capability
+
+Both `Accessor::capability()` and `Reader::capability()` return the same public
+`Capability` value, following [OpenDAL's reporting pattern](https://opendal.apache.org/docs/rust/opendal/struct.Capability.html).
+The initial flags cover only operations implemented by this framework:
+
+| Flag | Meaning |
+| --- | --- |
+| `read` | Open/consume the interface's item type |
+| `read_with_range` | Exact byte ranges without changing the sequential cursor; implies `read` |
+| `list` | Object discovery through `ByteAccessor::list`; accessor-only |
+
+Flags describe the **effective interface after composition**, without I/O.
+Transparent layers forward them; wrappers that remove an operation clear its
+flag on both accessor and reader. A future sequential gzip wrapper normally
+clears `read_with_range`. The Fs adapter reports read/ranges but no listing,
+even though OpenDAL itself supports filesystem listing. The Parquet accessor
+reports record reading only when its input supports ranges; neither its output
+reader nor its accessor exposes byte-range operations.
+
+Accessor flags describe operation support before opening. Reader flags describe
+the opened representation; readers always report `list = false`. A supported
+operation may still fail for a request due to permissions, missing input,
+invalid options, or unavailable metadata. Parquet also checks the opened byte
+reader's range flag and known length. Capabilities are not authorization or
+snapshot guarantees, and new operation flags are added alongside their APIs.
+Cargo features control which implementations are compiled; runtime capabilities
+describe which operations a particular composed object exposes. No parallelism
+or emission-policy flags are introduced before their contracts exist.
 
 ## Accessor
 

@@ -4,7 +4,7 @@ use std::{
 };
 
 use open_arrow_access_core::{
-    Accessor, BoxFuture, ByteAccessor, ByteReader, Error, ErrorKind, ObjectRef, Result,
+    Accessor, BoxFuture, ByteAccessor, ByteReader, Capability, Error, ErrorKind, ObjectRef, Result,
 };
 use opendal::{Operator, services::Fs};
 
@@ -53,6 +53,11 @@ impl FsAccessor {
 impl Accessor for FsAccessor {
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
+
+    /// Report only operations exposed by the shared OpenDAL adapter.
+    fn capability(&self) -> Capability {
+        self.inner.capability()
+    }
 
     /// Validate a root-relative file locator, then open it through the OpenDAL adapter.
     fn open(&self, object: ObjectRef) -> BoxFuture<'_, Result<Box<dyn ByteReader>>> {

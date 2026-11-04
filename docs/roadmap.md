@@ -6,7 +6,7 @@ parallel against the shared contracts once PR-0 lands.
 
 | PR | Scope | Review/acceptance boundary |
 | --- | --- | --- |
-| PR-0 | Async OpenDAL Fs, Parquet, shared reader/accessor/layer contracts | Single local file → ordered Arrow; test-only wrappers prove extension/delegation |
+| PR-0 | Async OpenDAL Fs, Parquet, shared reader/accessor/layer and capability contracts | Single local file → ordered Arrow; test-only wrappers prove extension/delegation and capability updates |
 | PR-1 | S3 storage | Reuse shared OpenDAL reads; add S3 configuration/auth and feature; reuse Parquet tests |
 | PR-2 | JSON | Add a format feature consuming ByteReader; explicit record selection/schema policy; define JSONL separately if included |
 | PR-3 | Directory dataset | Add discovery and Dataset/Table composition, fixed schema, sequential ordered file reads |

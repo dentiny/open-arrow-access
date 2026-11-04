@@ -44,7 +44,7 @@ batch size and top-level field projection in the requested field order.
 
 | Component | Implemented |
 | --- | --- |
-| `core/` | Shared `Reader`, `Accessor`, `Layer`, byte/record specializations, errors, options |
+| `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
 | `storage/` | OpenDAL Fs, bounded sequential chunks and exact range reads |
 | `file-format/` | Parquet schema inspection and streaming Arrow decoding |
 | `dataset/` | Reserved; no directory or multi-file scan yet |
@@ -61,6 +61,8 @@ decompression. Parallel reads and unordered emission are not implemented.
 
 ```text
 Accessor::open(request) -> Reader
+Accessor::capability() -> effective operation support
+Reader::capability()   -> opened representation's operation support
 Reader::metadata()      -> stable typed metadata
 Reader::next().await    -> next Bytes or RecordBatch
 Layer::layer(accessor)  -> accessor with the same request/reader contract
@@ -70,9 +72,12 @@ OpenDAL Fs -> ByteReader -> ParquetAccessor -> RecordReader -> Arrow stream
 
 The same generic accessor/layer protocol applies to bytes and records. Their
 associated types keep compressed bytes distinct from decoded Arrow batches.
-`ByteReader::read_range` is optional and advertises its actual capability;
-sequential-only inputs do not have to emulate seeking. The initial Parquet
-adapter requires range reads and a known length.
+`capability()` follows OpenDAL's reporting pattern, with `read`,
+`read_with_range`, and accessor-only `list` flags. Layers forward or update
+them to match the operations they actually expose. `ByteReader::read_range`
+is optional; sequential-only inputs do not have to emulate seeking. The initial
+Parquet adapter requires range reads and a known length. Runtime capabilities
+describe a composed instance; Cargo features make implementations available.
 
 Third-party crates can implement these public contracts directly. A format
 does not receive an OpenDAL operator or switch on storage schemes. Shared
