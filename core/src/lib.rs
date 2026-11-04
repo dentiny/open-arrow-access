@@ -13,7 +13,7 @@ pub use reader::{
     ByteMetadata, ByteReader, Reader, ReaderCapabilities, RecordMetadata, RecordReader,
     RecordStream, into_stream,
 };
-pub use request::{ObjectRef, ReadOptions, ReadRequest};
+pub use request::{ObjectRef, ReadOptions, ReadOptionsProvider, ReadRequest};
 
 pub use arrow_array::RecordBatch;
 pub use arrow_schema::{Schema, SchemaRef};

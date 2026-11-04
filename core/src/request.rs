@@ -49,6 +49,24 @@ impl Default for ReadOptions {
     }
 }
 
+/// Access to common read settings on a provider-specific record request.
+///
+/// Record layers can use this contract with file, dataset, and service requests
+/// instead of depending on one concrete request type. A layer that changes an
+/// inner projection remains responsible for its own declared output selection.
+#[deny(missing_docs)]
+pub trait ReadOptionsProvider: Send {
+    /// Borrow the batch target and projection without performing I/O.
+    fn read_options(&self) -> &ReadOptions;
+
+    /// Mutably borrow settings used when the request is subsequently opened.
+    ///
+    /// For example, a generated-column layer can retain its caller's projection
+    /// and widen the inner projection to read expression dependencies. Changes
+    /// to this request do not reconfigure readers that have already been opened.
+    fn read_options_mut(&mut self) -> &mut ReadOptions;
+}
+
 /// Request for a single logical file. Dataset and service accessors can define
 /// different request types while implementing the same `Accessor` trait.
 #[derive(Clone, Debug)]
@@ -68,5 +86,17 @@ impl ReadRequest {
     pub fn with_options(mut self, options: ReadOptions) -> Self {
         self.options = options;
         self
+    }
+}
+
+impl ReadOptionsProvider for ReadRequest {
+    /// Borrow the single-file request's common read settings.
+    fn read_options(&self) -> &ReadOptions {
+        &self.options
+    }
+
+    /// Expose common settings for a layer to adjust before opening the file.
+    fn read_options_mut(&mut self) -> &mut ReadOptions {
+        &mut self.options
     }
 }

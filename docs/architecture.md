@@ -81,6 +81,13 @@ to this framework, not a required method for every byte reader in this PR.
 
 ## Implementation boundaries
 
+Generated columns are a required record-layer extension. The core
+`ReadOptionsProvider` trait lets a layer adjust common projection settings on
+file, dataset or service request types. `ReadRequest` implements it; expression
+evaluation and DataFusion integration remain a separate PR. See
+[generated-column design](generated-columns.md) for dependency/projection,
+schema and optional reader-context contracts.
+
 - `core/` depends on common types and Arrow, never concrete backends or formats.
 - `storage/` builds OpenDAL operators; shared reads are independent of the Fs
   constructor. Production file reads and metadata access go through OpenDAL.

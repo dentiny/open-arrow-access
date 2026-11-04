@@ -12,7 +12,7 @@ parallel against the shared contracts once PR-0 lands.
 | PR-3 | Directory dataset | Add discovery and Dataset/Table composition, fixed schema, sequential ordered file reads |
 | PR-4 | Hugging Face | Resolve repository revision/config/split into object references; provide single-file access via shared contracts |
 | PR-5 | Gzip decompression | ByteReader/Accessor wrapper, multi-member support, decoded byte coordinates, accurate capabilities |
-| PR-6 | Initial production layer | Implement MetricsLayer on the common protocol; verify byte/record scope and transparent delegation |
+| PR-6 | Generated-column layer | Implement the required GeneratedColumnsLayer, expression planning, fixed augmented schema, and dependency-safe projection |
 
 ## Initial framework
 
@@ -34,7 +34,7 @@ flowchart LR
     Base --> Dataset[PR-3: directory]
     Base --> HF[PR-4: Hugging Face]
     Base --> Gzip[PR-5: gzip]
-    Base --> Metrics[PR-6: metrics layer]
+    Base --> Generated[PR-6: generated columns]
     HF -. combined dataset entry point .-> Integration[Cross-feature integration]
     Dataset -. combine after merge .-> Integration
     JSON -. compressed JSON .-> Integration
@@ -55,7 +55,13 @@ flowchart LR
 
 ## Layer candidates
 
-Start PR-6 with **MetricsLayer**: count opens, operations, failures and latency;
+Use PR-6 for the required **GeneratedColumnsLayer**, with a separate default-off
+feature. The framework provides `ReadOptionsProvider` for generic request options;
+expression evaluation remains outside the initial framework PR. The
+[feature design](generated-columns.md) defines expression dependencies, final
+projection, schema/metadata behavior and optional source-context fields.
+
+**MetricsLayer** can follow separately: count opens, operations, failures and latency;
 at byte scope measure bytes read, and at record scope count batches/rows. Keep
 these distinct to avoid equating I/O bytes with emitted record bytes. It should
 observe operations without changing values, metadata or order.

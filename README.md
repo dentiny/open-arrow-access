@@ -80,6 +80,12 @@ OpenDAL reading code is separate from the filesystem constructor so the S3
 adapter can reuse it. See [architecture](docs/architecture.md) for the contracts
 and [roadmap](docs/roadmap.md) for the independent follow-up PRs.
 
+`ReadOptionsProvider` lets record layers inspect or adjust projection settings
+on file, dataset or service request types. Generated-column evaluation is a
+required follow-up feature; its [design](docs/generated-columns.md) specifies
+expression dependencies and augmented output schema without adding an expression
+engine to the initial framework.
+
 ## Runtime behavior
 
 - Read and emit in input order. There are no detached producer tasks or
