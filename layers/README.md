@@ -10,3 +10,8 @@ MetricsLayer can follow separately. Later execution and emission
 layers remain independent: ParallelReadLayer controls concurrency and
 UnorderedEmissionLayer relaxes output ordering. Both stay default-off and use
 the common accessor/reader protocol with optional planning extensions.
+
+The [source-attribute proposal](../docs/source-attributes.md) defines policy
+admission: ATIF requires global order and rejects UnorderedEmissionLayer.
+Planning-aware layers also wrap the partition accessor returned by the planner
+so that partition execution retains generated columns, observation and budgets.

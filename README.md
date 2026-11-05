@@ -129,6 +129,10 @@ required follow-up feature; its [design](docs/generated-columns.md) specifies
 expression dependencies and augmented output schema without adding an expression
 engine to the initial framework.
 
+The [source-attribute design](docs/source-attributes.md) describes future
+partition planning and ordering constraints across formats, datasets and provider
+services, including globally ordered ATIF inputs and conditional WARC indexing.
+
 ## Runtime behavior
 
 - Read and emit in input order. Storage I/O concurrency is opt-in and defaults

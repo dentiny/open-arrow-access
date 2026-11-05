@@ -91,6 +91,15 @@ or emission-policy flags are introduced before their contracts exist.
 
 ## Accessor
 
+Future record-side introspection separates declared `SourceAttributes` from
+resolved `ScanProperties`. Formats, datasets and provider services contribute
+ordering requirements and partition strategies; byte storage keeps its existing
+capability contract. Our ATIF adapter requires global order, so unordered
+emission must be rejected for the entire composed ATIF scan. See
+[source attributes and planning](source-attributes.md) for conditional indexed
+WARC support, dataset/service composition and the optional planner design.
+These are proposed contracts, not new runtime capabilities in this PR.
+
 `Accessor` is a Send + Sync factory. Associated `Request` and `Reader` types
 allow storage, formats and future datasets/services to use the same `open`
 contract without a closed enum of every source or format.
