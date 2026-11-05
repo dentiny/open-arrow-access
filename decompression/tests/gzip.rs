@@ -1,133 +1,20 @@
 #![cfg(feature = "gzip")]
 
-use std::{
-    collections::VecDeque,
-    io::Write,
-    num::NonZeroUsize,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
-    },
-};
+mod common;
 
+use common::{MemoryAccessor, collect};
 use flate2::{Compression, write::GzEncoder};
 use futures::StreamExt;
 use open_arrow_access_core::{
-    Accessor, AccessorExt, ByteAccessor, ByteMetadata, ByteReadOptions, ByteReadRequest,
-    ByteReader, Bytes, Capability, Error, ErrorKind, ObjectRef, ObjectStream, Reader, Result,
-    async_trait,
+    Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, Error, ErrorKind,
 };
 use open_arrow_access_decompression::{DecompressionLayer, Gzip};
-
-#[derive(Clone)]
-struct MemoryAccessor {
-    chunks: Vec<Bytes>,
-    error: Option<ErrorKind>,
-    polls: Arc<AtomicUsize>,
-    requests: Arc<Mutex<Vec<ByteReadRequest>>>,
-}
-
-impl MemoryAccessor {
-    fn new(bytes: &[u8], chunk_size: usize) -> Self {
-        Self {
-            chunks: bytes
-                .chunks(chunk_size)
-                .map(Bytes::copy_from_slice)
-                .collect(),
-            error: None,
-            polls: Arc::default(),
-            requests: Arc::default(),
-        }
-    }
-}
-
-#[async_trait]
-impl Accessor for MemoryAccessor {
-    type Request = ByteReadRequest;
-    type Reader = dyn ByteReader;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: true,
-            list: true,
-        }
-    }
-
-    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        self.requests.lock().unwrap().push(request.clone());
-        Ok(Box::new(MemoryReader {
-            metadata: ByteMetadata {
-                source: Some(request.object),
-                content_length: Some(self.chunks.iter().map(|chunk| chunk.len() as u64).sum()),
-                version: Some("source-version".into()),
-            },
-            chunks: self.chunks.clone().into(),
-            error: self.error,
-            polls: self.polls.clone(),
-        }))
-    }
-}
-
-#[async_trait]
-impl ByteAccessor for MemoryAccessor {
-    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
-        Ok(Box::pin(futures::stream::iter([Ok(prefix)])))
-    }
-}
-
-struct MemoryReader {
-    metadata: ByteMetadata,
-    chunks: VecDeque<Bytes>,
-    error: Option<ErrorKind>,
-    polls: Arc<AtomicUsize>,
-}
-
-#[async_trait]
-impl Reader for MemoryReader {
-    type Item = Bytes;
-    type Metadata = ByteMetadata;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: true,
-            ..Capability::default()
-        }
-    }
-
-    fn metadata(&self) -> &ByteMetadata {
-        &self.metadata
-    }
-
-    async fn next(&mut self) -> Result<Option<Bytes>> {
-        self.polls.fetch_add(1, Ordering::SeqCst);
-        if let Some(chunk) = self.chunks.pop_front() {
-            return Ok(Some(chunk));
-        }
-        if let Some(kind) = self.error.take() {
-            return Err(Error::new(kind, "upstream", "injected source failure"));
-        }
-        Ok(None)
-    }
-}
-
-#[async_trait]
-impl ByteReader for MemoryReader {}
+use std::{io::Write, num::NonZeroUsize, sync::atomic::Ordering};
 
 fn compress(bytes: &[u8]) -> Vec<u8> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(bytes).unwrap();
     encoder.finish().unwrap()
-}
-
-async fn collect(reader: &mut dyn ByteReader) -> Result<Vec<u8>> {
-    let mut output = Vec::new();
-    while let Some(chunk) = reader.next().await? {
-        assert!(!chunk.is_empty());
-        output.extend_from_slice(&chunk);
-    }
-    Ok(output)
 }
 
 #[tokio::test]
