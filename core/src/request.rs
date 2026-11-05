@@ -30,6 +30,64 @@ impl From<String> for ObjectRef {
 /// Default row-count target for [`ReadOptions`].
 pub const DEFAULT_BATCH_SIZE: NonZeroUsize = NonZeroUsize::new(8192).unwrap();
 
+/// Per-reader storage I/O settings, independent of Arrow batch size and ordering.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ByteReadOptions {
+    /// Maximum in-flight I/O chunks within a read operation; defaults to one.
+    pub io_concurrency: NonZeroUsize,
+    /// I/O splitting size. None keeps the backend default; concurrency alone
+    /// does not guarantee that a read is split into multiple tasks.
+    pub io_chunk_size: Option<NonZeroUsize>,
+}
+
+impl Default for ByteReadOptions {
+    fn default() -> Self {
+        Self {
+            io_concurrency: NonZeroUsize::MIN,
+            io_chunk_size: None,
+        }
+    }
+}
+
+/// A byte input together with the I/O settings for this open operation.
+#[derive(Clone, Debug)]
+pub struct ByteReadRequest {
+    pub object: ObjectRef,
+    pub options: ByteReadOptions,
+}
+
+impl ByteReadRequest {
+    pub fn new(object: impl Into<ObjectRef>) -> Self {
+        Self {
+            object: object.into(),
+            options: ByteReadOptions::default(),
+        }
+    }
+
+    pub fn with_options(mut self, options: ByteReadOptions) -> Self {
+        self.options = options;
+        self
+    }
+}
+
+impl From<ObjectRef> for ByteReadRequest {
+    fn from(object: ObjectRef) -> Self {
+        Self::new(object)
+    }
+}
+
+impl From<&str> for ByteReadRequest {
+    fn from(object: &str) -> Self {
+        Self::new(object)
+    }
+}
+
+impl From<String> for ByteReadRequest {
+    fn from(object: String) -> Self {
+        Self::new(object)
+    }
+}
+
 /// Common record-reading settings. Providers can expose their own typed settings.
 #[derive(Clone, Debug)]
 pub struct ReadOptions {
@@ -72,6 +130,7 @@ pub trait ReadOptionsProvider: Send {
 pub struct ReadRequest {
     pub object: ObjectRef,
     pub options: ReadOptions,
+    pub byte_options: ByteReadOptions,
 }
 
 impl ReadRequest {
@@ -79,11 +138,17 @@ impl ReadRequest {
         Self {
             object: object.into(),
             options: ReadOptions::default(),
+            byte_options: ByteReadOptions::default(),
         }
     }
 
     pub fn with_options(mut self, options: ReadOptions) -> Self {
         self.options = options;
+        self
+    }
+
+    pub fn with_byte_options(mut self, options: ByteReadOptions) -> Self {
+        self.byte_options = options;
         self
     }
 }

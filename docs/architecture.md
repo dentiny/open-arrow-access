@@ -6,7 +6,7 @@ layer implementations follow in independent PRs.
 
 ```mermaid
 flowchart TD
-    Request[ObjectRef / ReadRequest] --> Storage[storage/: FsAccessor]
+    Request[ByteReadRequest / ReadRequest] --> Storage[storage/: FsAccessor]
     Storage --> OpenDAL[Shared OpenDAL adapter]
     OpenDAL --> Bytes[ByteReader: chunks / optional ranges]
     Bytes --> Format[file-format/: ParquetAccessor]
@@ -29,6 +29,11 @@ range reads. `read_range(start..end)` uses the current representation's byte
 coordinates and leaves the sequential cursor unchanged. Unsupported ranged
 access is explicit, not emulated by decoding repeatedly from zero.
 
+`read_ranges` returns results in request order, including duplicate, overlapping
+and empty ranges. Its default calls `read_range` sequentially; OpenDAL implements
+it through `Reader::fetch` for range coalescing and bounded concurrency. Parquet's
+`get_byte_ranges` uses this operation rather than upstream's sequential fallback.
+
 A future gzip reader wraps another byte reader, reports decoded rather than
 compressed length (or unknown), and normally removes range capability. It can
 use this contract without changing a format reader. Compressed Parquet will
@@ -38,7 +43,7 @@ need bounded materialization or another valid random-access mechanism.
 `into_stream` owns the reader and stops polling it after EOF or the first error.
 No background execution is created by these contracts.
 
-Project-owned I/O methods (`open`, `list`, `next`, `read_range`) are declared as
+Project-owned I/O methods (`open`, `list`, `next`, `read_range`, `read_ranges`) are declared as
 `async fn` on traits and implementations. Apply the re-exported `#[async_trait]`
 attribute to those traits/impls: it retains Send futures and `dyn` compatibility.
 Capability queries and already-loaded metadata stay synchronous and perform no I/O.
@@ -83,7 +88,7 @@ contract without a closed enum of every source or format.
 
 | Adapter | Request | Reader |
 | --- | --- | --- |
-| Fs storage | `ObjectRef` | `dyn ByteReader` |
+| Fs storage | `ByteReadRequest` | `dyn ByteReader` |
 | Parquet format | `ReadRequest` | `dyn RecordReader` |
 | Future JSON format | Typed file request | Record reader |
 | Future directory dataset | Directory selection and options | Record reader |
@@ -93,6 +98,15 @@ contract without a closed enum of every source or format.
 `ByteAccessor::list` defaults to Unsupported and is not implemented by the
 initial Fs adapter. The directory PR can add discovery without redesigning
 the opening/reading contract. Input locators remain backend-owned.
+
+`ByteReadRequest` carries an `ObjectRef` and `ByteReadOptions`. `io_concurrency`
+defaults to one and `io_chunk_size` defaults to the backend's choice. Record-file
+`ReadRequest::with_byte_options` forwards these settings through the format
+adapter and layers into storage. Arrow batch/projection options stay separate.
+`FsAccessor::with_chunk_size` controls output chunk size, not I/O splitting.
+Configured concurrency is per open reader, so several readers multiply the total
+possible in-flight I/O. This does not change logical record order or implement
+file/partition parallelism.
 
 ## Layer
 
@@ -108,7 +122,9 @@ adapter: its input and output item types differ.
 
 Each layer declares its supported specialization and operation scope. It must
 delegate optional operations or accurately remove their advertised abilities.
-Wrapping only `next` does not intercept a Parquet reader's range I/O.
+Wrapping only `next` does not intercept a Parquet reader's range I/O. Byte
+wrappers must also handle `read_ranges`: delegate it for transparent observation
+or keep its sequential fallback to route each range through the wrapper.
 
 Future `ParallelReadLayer` and `UnorderedEmissionLayer` remain independent,
 default-off enhancements. Parallel execution alone preserves ordering; unordered
@@ -145,6 +161,10 @@ schema and optional reader-context contracts.
 The project output boundary is Arrow records. Internal temporary inputs may be
 introduced for materialization in a later decompression PR; downstream writes,
 commit protocols and sink integrations are outside the project.
+
+Parquet errors preserve an upstream shared error's category and source chain.
+An I/O failure during decoding remains an I/O error; invalid Parquet data is
+reported as `Decode`. Identity column projections skip per-batch reordering.
 
 Arrow, Parquet, OpenDAL, and the future DataFusion layer follow one recorded
 latest upstream Lance revision. Exact workspace pins and the committed lockfile

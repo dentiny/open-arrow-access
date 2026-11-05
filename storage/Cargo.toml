@@ -15,5 +15,8 @@ open-arrow-access-core.workspace = true
 opendal = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

@@ -4,7 +4,7 @@ use std::{
 };
 
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReader, Capability, Error, ErrorKind, ObjectRef, Result,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, Result,
     async_trait,
 };
 use opendal::{Operator, services::Fs};
@@ -62,6 +62,7 @@ impl FsAccessor {
         })
     }
 
+    /// Limit bytes emitted by `next()`, independently of storage I/O splitting.
     pub fn with_chunk_size(mut self, chunk_size: NonZeroUsize) -> Self {
         self.inner = self.inner.with_chunk_size(chunk_size);
         self
@@ -70,15 +71,15 @@ impl FsAccessor {
 
 #[async_trait]
 impl Accessor for FsAccessor {
-    type Request = ObjectRef;
+    type Request = ByteReadRequest;
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
         self.inner.capability()
     }
 
-    async fn open(&self, object: ObjectRef) -> Result<Box<dyn ByteReader>> {
-        let path = object.locator();
+    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        let path = request.object.locator();
         if path.is_empty()
             || Path::new(path)
                 .components()
@@ -90,7 +91,7 @@ impl Accessor for FsAccessor {
                 "expected a nonempty root-relative object path",
             ));
         }
-        self.inner.open(object).await
+        self.inner.open(request).await
     }
 }
 

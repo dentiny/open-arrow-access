@@ -14,7 +14,10 @@ pub use layer::{AccessorExt, Layer};
 pub use reader::{
     ByteMetadata, ByteReader, Reader, RecordMetadata, RecordReader, RecordStream, into_stream,
 };
-pub use request::{DEFAULT_BATCH_SIZE, ObjectRef, ReadOptions, ReadOptionsProvider, ReadRequest};
+pub use request::{
+    ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ObjectRef, ReadOptions,
+    ReadOptionsProvider, ReadRequest,
+};
 
 pub use arrow_array::RecordBatch;
 pub use arrow_schema::{Schema, SchemaRef};

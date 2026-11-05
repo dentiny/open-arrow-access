@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use futures::stream::BoxStream;
 
-use crate::{ByteReader, Capability, Error, ErrorKind, ObjectRef, Reader, Result, async_trait};
+use crate::{
+    ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ObjectRef, Reader, Result,
+    async_trait,
+};
 
 /// Factory for readers. The request and reader types keep bytes and Arrow records
 /// statically distinct while sharing the same opening and layering contract.
@@ -56,7 +59,7 @@ pub type ObjectStream = BoxStream<'static, Result<ObjectRef>>;
 /// Optional byte-accessor discovery boundary, reserved for directory/source PRs.
 /// The initial filesystem adapter does not expose directory scans.
 #[async_trait]
-pub trait ByteAccessor: Accessor<Request = ObjectRef, Reader = dyn ByteReader> {
+pub trait ByteAccessor: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> {
     /// Discover object references under an accessor-defined `prefix`.
     ///
     /// The accessor defines prefix interpretation, recursion and listing order.

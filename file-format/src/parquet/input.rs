@@ -25,6 +25,13 @@ impl ParquetInput {
             .map_err(|e| ParquetError::External(Box::new(e)))
     }
 
+    async fn read_byte_ranges(&mut self, ranges: Vec<Range<u64>>) -> ParquetResult<Vec<Bytes>> {
+        self.inner
+            .read_ranges(ranges)
+            .await
+            .map_err(|e| ParquetError::External(Box::new(e)))
+    }
+
     async fn read_metadata(
         &mut self,
         options: Option<&ArrowReaderOptions>,
@@ -52,6 +59,13 @@ impl ParquetInput {
 impl AsyncFileReader for ParquetInput {
     fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, ParquetResult<Bytes>> {
         Box::pin(self.read_bytes(range))
+    }
+
+    fn get_byte_ranges(
+        &mut self,
+        ranges: Vec<Range<u64>>,
+    ) -> BoxFuture<'_, ParquetResult<Vec<Bytes>>> {
+        Box::pin(self.read_byte_ranges(ranges))
     }
 
     fn get_metadata<'a>(

@@ -11,9 +11,9 @@ use std::{
 use arrow_array::{Int64Array, StringArray};
 use futures::TryStreamExt;
 use open_arrow_access::{
-    Accessor, AccessorExt, ByteAccessor, Capability, ErrorKind, Layer, ObjectRef, ObjectStream,
-    ReadOptions, ReadRequest, Result, async_trait, file_format::ParquetAccessor, into_stream,
-    storage::FsAccessor,
+    Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, Capability, ErrorKind,
+    Layer, ObjectRef, ObjectStream, ReadOptions, ReadRequest, Result, async_trait,
+    file_format::ParquetAccessor, into_stream, storage::FsAccessor,
 };
 use parquet::basic::Compression;
 use support::{ByteObserverLayer, MemoryAccessor, Observations, SequentialLayer, fixture, ids};
@@ -274,7 +274,7 @@ async fn dropping_reader_does_not_start_background_reads_and_errors_are_terminal
         .fail_reads
         .store(true, std::sync::atomic::Ordering::SeqCst);
     let error = reader.next().await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert_eq!(error.kind(), ErrorKind::Io);
     assert!(reader.next().await.unwrap().is_none());
     drop(reader);
     assert_eq!(
@@ -401,7 +401,7 @@ struct ListingAccessor(MemoryAccessor);
 
 #[async_trait]
 impl Accessor for ListingAccessor {
-    type Request = ObjectRef;
+    type Request = ByteReadRequest;
     type Reader = dyn open_arrow_access::ByteReader;
 
     fn capability(&self) -> Capability {
@@ -411,7 +411,7 @@ impl Accessor for ListingAccessor {
         }
     }
 
-    async fn open(&self, request: ObjectRef) -> Result<Box<Self::Reader>> {
+    async fn open(&self, request: ByteReadRequest) -> Result<Box<Self::Reader>> {
         self.0.open(request).await
     }
 }
@@ -444,9 +444,139 @@ async fn listing_capability_survives_transparent_layer_and_shared_accessor() {
     assert_eq!(objects.len(), 1);
     assert_eq!(objects[0].locator(), "entry");
     let reader = accessor
-        .open(objects.into_iter().next().unwrap())
+        .open(objects.into_iter().next().unwrap().into())
         .await
         .unwrap();
     assert!(reader.capability().read_with_range);
     assert!(!reader.capability().list);
+}
+
+#[tokio::test]
+async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("data.bin"), b"abcdefghij").unwrap();
+    let fs = FsAccessor::new(dir.path())
+        .await
+        .unwrap()
+        .with_chunk_size(NonZeroUsize::new(3).unwrap());
+    for concurrency in [1, 4] {
+        let mut reader = fs
+            .open(
+                ByteReadRequest::new("data.bin").with_options(ByteReadOptions {
+                    io_concurrency: NonZeroUsize::new(concurrency).unwrap(),
+                    io_chunk_size: NonZeroUsize::new(2),
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"abc");
+        let buffers = reader
+            .read_ranges(vec![7..10, 0..3, 5..5, 2..6, 7..10])
+            .await
+            .unwrap();
+        let actual = buffers
+            .iter()
+            .map(|buffer| buffer.as_ref())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            vec![
+                &b"hij"[..],
+                &b"abc"[..],
+                &b""[..],
+                &b"cdef"[..],
+                &b"hij"[..]
+            ]
+        );
+        assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"def");
+        assert!(reader.read_ranges(vec![]).await.unwrap().is_empty());
+        assert_eq!(
+            reader
+                .read_ranges(vec![0..2, 0..11])
+                .await
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::InvalidInput
+        );
+        assert_eq!(reader.read_range(4..8).await.unwrap().as_ref(), b"efgh");
+    }
+}
+
+#[tokio::test]
+async fn third_party_byte_reader_uses_the_bulk_range_fallback() {
+    let accessor = MemoryAccessor::new("abcdefghij".into(), true);
+    let mut reader = accessor.open("memory".into()).await.unwrap();
+    let actual = reader.read_ranges(vec![7..10, 0..3, 4..4]).await.unwrap();
+    assert_eq!(
+        actual.iter().map(|v| v.as_ref()).collect::<Vec<_>>(),
+        vec![&b"hij"[..], &b"abc"[..], &b""[..]]
+    );
+    assert_eq!(
+        reader.next().await.unwrap().unwrap().as_ref(),
+        b"abcdefghij"
+    );
+}
+
+#[tokio::test]
+async fn parquet_forwards_per_open_io_options_and_uses_bulk_ranges_through_layers() {
+    let fixture = fixture(Compression::UNCOMPRESSED);
+    let observations = Arc::new(Observations::default());
+    let bytes = FsAccessor::new(fixture.dir.path())
+        .await
+        .unwrap()
+        .layer(ByteObserverLayer(observations.clone()));
+    let records = ParquetAccessor::new(bytes);
+    for concurrency in [1, 3] {
+        let options = ByteReadOptions {
+            io_concurrency: NonZeroUsize::new(concurrency).unwrap(),
+            io_chunk_size: NonZeroUsize::new(64),
+        };
+        let reader = records
+            .open(ReadRequest::new("data.parquet").with_byte_options(options))
+            .await
+            .unwrap();
+        let batches = into_stream(reader).try_collect::<Vec<_>>().await.unwrap();
+        assert_eq!(
+            batches.iter().flat_map(ids).collect::<Vec<_>>(),
+            (0..7).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            *observations.byte_options.lock().unwrap().last().unwrap(),
+            options
+        );
+    }
+    assert!(
+        observations
+            .batch_reads
+            .load(std::sync::atomic::Ordering::SeqCst)
+            > 0
+    );
+    assert!(
+        observations
+            .max_batch_ranges
+            .load(std::sync::atomic::Ordering::SeqCst)
+            > 1
+    );
+}
+
+#[tokio::test]
+async fn parquet_preserves_io_error_kind_during_metadata_inspection() {
+    let fixture = fixture(Compression::UNCOMPRESSED);
+    let observations = Arc::new(Observations::default());
+    observations
+        .fail_reads
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let bytes = FsAccessor::new(fixture.dir.path())
+        .await
+        .unwrap()
+        .layer(ByteObserverLayer(observations));
+    let error = ParquetAccessor::new(bytes)
+        .open(ReadRequest::new("data.parquet"))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Io);
+    assert_eq!(error.operation(), "inspect_parquet");
+    assert!(error.source().is_some());
 }

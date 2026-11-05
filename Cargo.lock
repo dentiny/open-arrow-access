@@ -833,6 +833,7 @@ version = "0.1.0"
 dependencies = [
  "open-arrow-access-core",
  "opendal",
+ "tempfile",
  "tokio",
 ]
 

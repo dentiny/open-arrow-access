@@ -6,3 +6,6 @@ mod backend;
 mod fs;
 #[cfg(feature = "fs")]
 pub use fs::FsAccessor;
+
+#[cfg(all(test, feature = "fs"))]
+mod tests;

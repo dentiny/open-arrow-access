@@ -1,7 +1,7 @@
 use std::{
     ops::Range,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
@@ -9,8 +9,9 @@ use std::{
 use arrow_array::{ArrayRef, Int64Array, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access::{
-    Accessor, ByteAccessor, ByteMetadata, ByteReader, Bytes, Capability, Error, ErrorKind, Layer,
-    ObjectRef, ObjectStream, Reader, RecordBatch, Result, SchemaRef, async_trait,
+    Accessor, ByteAccessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes,
+    Capability, Error, ErrorKind, Layer, ObjectRef, ObjectStream, Reader, RecordBatch, Result,
+    SchemaRef, async_trait,
 };
 use parquet::{arrow::ArrowWriter, basic::Compression, file::properties::WriterProperties};
 
@@ -76,7 +77,7 @@ impl MemoryAccessor {
 
 #[async_trait]
 impl Accessor for MemoryAccessor {
-    type Request = ObjectRef;
+    type Request = ByteReadRequest;
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
@@ -87,10 +88,10 @@ impl Accessor for MemoryAccessor {
         }
     }
 
-    async fn open(&self, source: ObjectRef) -> Result<Box<dyn ByteReader>> {
+    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         Ok(Box::new(MemoryReader {
             metadata: ByteMetadata {
-                source: Some(source),
+                source: Some(request.object),
                 content_length: Some(self.bytes.len() as u64),
                 version: None,
             },
@@ -157,6 +158,9 @@ impl ByteReader for MemoryReader {
 
 #[derive(Default)]
 pub struct Observations {
+    pub byte_options: Mutex<Vec<ByteReadOptions>>,
+    pub batch_reads: AtomicUsize,
+    pub max_batch_ranges: AtomicUsize,
     pub range_reads: AtomicUsize,
     pub fail_reads: AtomicBool,
     pub drops: AtomicUsize,
@@ -170,7 +174,9 @@ pub struct ByteObserverAccessor<A> {
     observations: Arc<Observations>,
 }
 
-impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Layer<A> for ByteObserverLayer {
+impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Layer<A>
+    for ByteObserverLayer
+{
     type Layered = ByteObserverAccessor<A>;
 
     fn layer(&self, inner: A) -> Self::Layered {
@@ -182,17 +188,22 @@ impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Layer<A> for Byt
 }
 
 #[async_trait]
-impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Accessor
+impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
     for ByteObserverAccessor<A>
 {
-    type Request = ObjectRef;
+    type Request = ByteReadRequest;
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
         self.inner.capability()
     }
 
-    async fn open(&self, request: ObjectRef) -> Result<Box<dyn ByteReader>> {
+    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        self.observations
+            .byte_options
+            .lock()
+            .unwrap()
+            .push(request.options);
         Ok(Box::new(ByteObserverReader {
             inner: self.inner.open(request).await?,
             observations: self.observations.clone(),
@@ -238,6 +249,24 @@ impl Reader for ByteObserverReader {
 
 #[async_trait]
 impl ByteReader for ByteObserverReader {
+    async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+        self.observations.batch_reads.fetch_add(1, Ordering::SeqCst);
+        self.observations
+            .max_batch_ranges
+            .fetch_max(ranges.len(), Ordering::SeqCst);
+        self.observations
+            .range_reads
+            .fetch_add(ranges.len(), Ordering::SeqCst);
+        if self.observations.fail_reads.load(Ordering::SeqCst) {
+            return Err(Error::new(
+                ErrorKind::Io,
+                "read_ranges",
+                "injected read failure",
+            ));
+        }
+        self.inner.read_ranges(ranges).await
+    }
+
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         self.observations.range_reads.fetch_add(1, Ordering::SeqCst);
         if self.observations.fail_reads.load(Ordering::SeqCst) {
@@ -256,7 +285,7 @@ pub struct SequentialLayer;
 
 pub struct SequentialAccessor<A>(A);
 
-impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Layer<A> for SequentialLayer {
+impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Layer<A> for SequentialLayer {
     type Layered = SequentialAccessor<A>;
 
     fn layer(&self, inner: A) -> Self::Layered {
@@ -265,8 +294,10 @@ impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Layer<A> for Seq
 }
 
 #[async_trait]
-impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Accessor for SequentialAccessor<A> {
-    type Request = ObjectRef;
+impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
+    for SequentialAccessor<A>
+{
+    type Request = ByteReadRequest;
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
@@ -276,7 +307,7 @@ impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Accessor for Seq
         }
     }
 
-    async fn open(&self, request: ObjectRef) -> Result<Box<dyn ByteReader>> {
+    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         Ok(Box::new(SequentialReader(self.0.open(request).await?)) as Box<dyn ByteReader>)
     }
 }

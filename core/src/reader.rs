@@ -8,7 +8,7 @@ use crate::{
 
 /// A pull-based asynchronous reader. Metadata is available before the first item.
 ///
-/// `Ok(None)` is EOF; EOF and errors are terminal. Dropping a reader stops this
+/// `next()` returning `Ok(None)` is EOF; its EOF and errors are terminal. Dropping a reader stops this
 /// library's work: implementations must not leave detached producer tasks running.
 /// A future returned by `next` is Send. Cancelling a pending call need not make a
 /// stateful decoder resumable; drop the reader after cancelling such a call.
@@ -81,6 +81,19 @@ pub trait ByteReader: Reader<Item = Bytes, Metadata = ByteMetadata> {
             "read_range",
             "reader is sequential only",
         ))
+    }
+
+    /// Read exact ranges in request order without moving the sequential cursor.
+    /// Empty ranges yield empty Bytes; an empty request yields an empty vector.
+    /// The default calls `read_range` sequentially. Backends may coalesce or
+    /// concurrently fetch ranges within the configured I/O limit. Wrappers must
+    /// delegate this operation or retain the fallback to intercept every range.
+    async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+        let mut output = Vec::with_capacity(ranges.len());
+        for range in ranges {
+            output.push(self.read_range(range).await?);
+        }
+        Ok(output)
     }
 }
 

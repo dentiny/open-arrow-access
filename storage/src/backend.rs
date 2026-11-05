@@ -3,10 +3,12 @@
 use std::{num::NonZeroUsize, ops::Range};
 
 use open_arrow_access_core::{
-    Accessor, ByteMetadata, ByteReader, Bytes, Capability, Error, ErrorKind, ObjectRef, Reader,
-    Result, async_trait,
+    Accessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error, ErrorKind,
+    Reader, Result, async_trait,
 };
 use opendal::Operator;
+
+const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpenDalAccessor {
@@ -18,7 +20,7 @@ impl OpenDalAccessor {
     pub(crate) fn new(operator: Operator) -> Self {
         Self {
             operator,
-            chunk_size: NonZeroUsize::new(64 * 1024).unwrap(),
+            chunk_size: DEFAULT_OUTPUT_CHUNK_SIZE,
         }
     }
 
@@ -30,7 +32,7 @@ impl OpenDalAccessor {
 
 #[async_trait]
 impl Accessor for OpenDalAccessor {
-    type Request = ObjectRef;
+    type Request = ByteReadRequest;
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
@@ -45,7 +47,8 @@ impl Accessor for OpenDalAccessor {
         }
     }
 
-    async fn open(&self, object: ObjectRef) -> Result<Box<dyn ByteReader>> {
+    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        let ByteReadRequest { object, options } = request;
         let path = object.locator();
         let metadata = self
             .operator
@@ -59,13 +62,16 @@ impl Accessor for OpenDalAccessor {
                 "object is not a regular file",
             ));
         }
-        let inner = self
+        let len = metadata.content_length();
+        let mut builder = self
             .operator
             .reader_with(path)
-            .concurrent(1)
-            .await
-            .map_err(|e| map_error("open", path, e))?;
-        let len = metadata.content_length();
+            .content_length_hint(len)
+            .concurrent(options.io_concurrency.get());
+        if let Some(chunk_size) = options.io_chunk_size {
+            builder = builder.chunk(chunk_size.get());
+        }
+        let inner = builder.await.map_err(|e| map_error("open", path, e))?;
         Ok(Box::new(OpenDalReader {
             inner,
             metadata: ByteMetadata {
@@ -91,7 +97,7 @@ struct OpenDalReader {
 }
 
 impl OpenDalReader {
-    async fn read_exact_range(&self, range: Range<u64>) -> Result<Bytes> {
+    fn validate_range(&self, range: &Range<u64>) -> Result<()> {
         if range.start > range.end || range.end > self.len {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -102,6 +108,11 @@ impl OpenDalReader {
                 ),
             ));
         }
+        Ok(())
+    }
+
+    async fn read_exact_range(&self, range: Range<u64>) -> Result<Bytes> {
+        self.validate_range(&range)?;
         if range.is_empty() {
             return Ok(Bytes::new());
         }
@@ -164,6 +175,37 @@ impl Reader for OpenDalReader {
 impl ByteReader for OpenDalReader {
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         self.read_exact_range(range).await
+    }
+
+    async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+        let lengths = ranges
+            .iter()
+            .map(|range| {
+                self.validate_range(range)?;
+                Ok(range.end - range.start)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let buffers = self.inner.fetch(ranges).await.map_err(|e| {
+            map_error(
+                "read_ranges",
+                self.metadata.source.as_ref().unwrap().locator(),
+                e,
+            )
+        })?;
+        buffers
+            .into_iter()
+            .zip(lengths)
+            .map(|(buffer, expected)| {
+                if buffer.len() as u64 != expected {
+                    return Err(Error::new(
+                        ErrorKind::Io,
+                        "read_ranges",
+                        "unexpected short read; input may have changed",
+                    ));
+                }
+                Ok(buffer.to_bytes())
+            })
+            .collect()
     }
 }
 

@@ -1,8 +1,8 @@
 use std::{collections::HashSet, sync::Arc};
 
 use open_arrow_access_core::{
-    Accessor, ByteReader, Capability, Error, ErrorKind, ObjectRef, ReadRequest, RecordMetadata,
-    RecordReader, Result, async_trait,
+    Accessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ReadRequest,
+    RecordMetadata, RecordReader, Result, async_trait,
 };
 use parquet::arrow::{ProjectionMask, async_reader::ParquetRecordBatchStreamBuilder};
 
@@ -24,7 +24,7 @@ impl<A> ParquetAccessor<A> {
 #[async_trait]
 impl<A> Accessor for ParquetAccessor<A>
 where
-    A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>,
+    A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
@@ -38,7 +38,10 @@ where
     }
 
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        let input = self.inner.open(request.object.clone()).await?;
+        let input = self
+            .inner
+            .open(ByteReadRequest::new(request.object.clone()).with_options(request.byte_options))
+            .await?;
         if !input.capability().read_with_range || input.metadata().content_length.is_none() {
             return Err(Error::new(
                 ErrorKind::Unsupported,
@@ -97,7 +100,8 @@ where
                     .collect::<std::result::Result<Vec<_>, _>>()
             })
             .transpose()
-            .map_err(|e| decode_error("project", e))?;
+            .map_err(|e| decode_error("project", e))?
+            .filter(|indices| indices.iter().copied().ne(0..indices.len()));
         Ok(Box::new(ParquetReader::new(
             stream,
             RecordMetadata {

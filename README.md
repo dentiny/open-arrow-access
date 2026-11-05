@@ -40,6 +40,24 @@ async fn read() -> Result<()> {
 `Stream<Item = Result<RecordBatch>>`. `ReadOptions` supports a nonzero target
 batch size and top-level field projection in the requested field order.
 
+Storage I/O settings are per open operation:
+
+```rust
+use std::num::NonZeroUsize;
+use open_arrow_access::{ByteReadOptions, ReadRequest};
+
+let request = ReadRequest::new("part.parquet").with_byte_options(ByteReadOptions {
+    io_concurrency: NonZeroUsize::new(4).unwrap(),
+    io_chunk_size: NonZeroUsize::new(4 * 1024 * 1024),
+});
+```
+
+The default I/O concurrency is one; the default I/O splitting size is backend
+defined. These settings preserve byte/record ordering and do not enable the
+future file/partition `ParallelReadLayer`. Each opened reader has its own limit.
+`FsAccessor::with_chunk_size` controls sequential output chunk size, while
+`ReadOptions::batch_size` controls Arrow rows per batch.
+
 ## Initial scope
 
 | Component | Implemented |
@@ -72,7 +90,7 @@ OpenDAL Fs -> ByteReader -> ParquetAccessor -> RecordReader -> Arrow stream
 
 The same generic accessor/layer protocol applies to bytes and records. Their
 associated types keep compressed bytes distinct from decoded Arrow batches.
-I/O methods (`open`, `list`, `next`, `read_range`) use `async fn`; implementations
+I/O methods (`open`, `list`, `next`, `read_range`, `read_ranges`) use `async fn`; implementations
 apply the re-exported `#[async_trait]` attribute to preserve `dyn` compatibility
 and Send futures. Capability, metadata and configuration-only methods remain
 synchronous. Fs initialization is also asynchronous:
@@ -85,6 +103,12 @@ them to match the operations they actually expose. `ByteReader::read_range`
 is optional; sequential-only inputs do not have to emulate seeking. The initial
 Parquet adapter requires range reads and a known length. Runtime capabilities
 describe a composed instance; Cargo features make implementations available.
+
+Byte accessors accept `ByteReadRequest`, which carries an `ObjectRef` and
+`ByteReadOptions`. Existing string locators can still use `open("path".into())`.
+`read_ranges` preserves request order and has a sequential fallback for custom
+readers; the OpenDAL backend uses batched fetches. Byte layers can delegate the
+bulk method or use its fallback to intercept each individual range.
 
 Third-party crates can implement these public contracts directly. A format
 does not receive an OpenDAL operator or switch on storage schemes. Shared
@@ -100,12 +124,12 @@ engine to the initial framework.
 
 ## Runtime behavior
 
-- Read and emit in input order. There are no detached producer tasks or
-  library-managed concurrent reads.
+- Read and emit in input order. Storage I/O concurrency is opt-in and defaults
+  to one. There is no library-managed file/partition concurrency.
 - Schema, including schema metadata, is available before the first batch and
   matches every returned batch. Batch boundaries may differ from row groups.
-- Errors and EOF terminate record reading. Errors retain the original source
-  chain; transparent replay of already delivered records is not performed.
+- Errors and EOF terminate record reading. Input error categories and source
+  chains survive the Parquet bridge; transparent replay is not performed.
 - Drop the reader to stop work. After cancelling an in-flight decoder call,
   drop that reader rather than assuming it can resume.
 - Filesystem objects must remain unchanged during a read. This version does
@@ -130,5 +154,6 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
 Tests generate their own small Parquet fixtures. They verify ordered rows and
 nulls across row groups, schema metadata, projection, storage-independent
-reading, wrapper composition, exact ranges, and terminal error/drop behavior.
+reading, wrapper composition, exact/batched ranges, per-open I/O options,
+bounded backend concurrency, and terminal error/drop behavior.
 Fixture generation is test-only; the library exposes no writer or sink API.
