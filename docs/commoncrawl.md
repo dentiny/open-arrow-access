@@ -28,7 +28,11 @@ Both accessors interpret `crawl-data/...` locators from the same origin root.
 `create_http_accessor(request.origin())` configures OpenDAL HTTP without reading
 any objects. The `storage-opendal` feature also exposes `OpenDalAccessor::new`
 and the OpenDAL SDK for callers supplying their own configured operator,
-transport, retry or concurrency policies. This read interface exposes no writes.
+transport, retry or concurrency policies. Generic operator listing uses prefix
+semantics and supports virtual directories without directory-marker objects;
+listing does not require `stat`. Filesystem-specific directory validation remains
+on `FsAccessor`. Opening byte readers still requires `read` and `stat`. This
+read interface exposes no writes.
 HTTP does not advertise directory listing; the inventory supplies discovery.
 
 After the separate gzip and WARC PRs are merged, the complete composition is:

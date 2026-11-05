@@ -453,3 +453,63 @@ async fn public_opendal_adapter_reads_manifest_from_origin_root_through_injected
         ["HEAD", "GET"]
     );
 }
+
+#[tokio::test]
+async fn public_opendal_listing_accepts_implicit_directory_prefixes() {
+    let operator = Operator::new(opendal::services::Memory::default()).unwrap();
+    operator
+        .write("train/a.warc", Bytes::from_static(b"data"))
+        .await
+        .unwrap();
+    assert_eq!(
+        operator
+            .list_with("train/")
+            .recursive(true)
+            .await
+            .unwrap()
+            .iter()
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>(),
+        ["train/a.warc"]
+    );
+    assert_eq!(
+        operator.stat("train").await.unwrap_err().kind(),
+        opendal::ErrorKind::NotFound
+    );
+    let bytes = OpenDalAccessor::new(operator);
+    assert!(bytes.capability().list);
+    for prefix in ["train", "train/"] {
+        let files = bytes
+            .list(prefix.into())
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+        assert_eq!(
+            files,
+            vec![open_arrow_access::ObjectRef::new("train/a.warc")]
+        );
+    }
+    #[cfg(feature = "dataset-directory")]
+    {
+        use open_arrow_access::dataset::{DirectoryAccessor, DirectoryRequest};
+        let dataset = DirectoryAccessor::new(bytes, Records::default());
+        for prefix in ["train", "train/"] {
+            let batches = into_stream(dataset.open(DirectoryRequest::new(prefix)).await.unwrap())
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap();
+            assert_eq!(batches.len(), 1);
+            assert_eq!(
+                batches[0]
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+                    .value(0),
+                "train/a.warc"
+            );
+        }
+    }
+}

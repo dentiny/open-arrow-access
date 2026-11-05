@@ -34,6 +34,24 @@ impl OpenDalAccessor {
         }
     }
 
+    #[cfg(feature = "fs")]
+    pub(crate) async fn validate_directory(&self, prefix: &ObjectRef) -> Result<()> {
+        let path = prefix.locator();
+        let metadata = self
+            .operator
+            .stat(path)
+            .await
+            .map_err(|e| map_error("list", path, e))?;
+        if !metadata.is_dir() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "list",
+                "prefix is not a directory",
+            ));
+        }
+        Ok(())
+    }
+
     /// Set the maximum sequential output chunk, independently of I/O splitting.
     pub fn with_chunk_size(mut self, chunk_size: NonZeroUsize) -> Self {
         self.chunk_size = chunk_size;
@@ -53,7 +71,7 @@ impl Accessor for OpenDalAccessor {
         Capability {
             read,
             read_with_range: read,
-            list: upstream.list && upstream.stat,
+            list: upstream.list,
         }
     }
 
@@ -115,18 +133,6 @@ impl ByteAccessor for OpenDalAccessor {
         }
         let path = prefix.locator();
         validate_locator(path, true, "list")?;
-        let metadata = self
-            .operator
-            .stat(path)
-            .await
-            .map_err(|e| map_error("list", path, e))?;
-        if !metadata.is_dir() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "list",
-                "prefix is not a directory",
-            ));
-        }
         let path = if path.is_empty() {
             String::new()
         } else {

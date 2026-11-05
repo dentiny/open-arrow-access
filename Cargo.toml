@@ -68,6 +68,7 @@ open-arrow-access-storage = { workspace = true, optional = true }
 open-arrow-access-file-format = { workspace = true, optional = true }
 
 [dev-dependencies]
+opendal = { workspace = true, features = ["services-memory"] }
 http = "1"
 arrow-array.workspace = true
 arrow-schema.workspace = true
