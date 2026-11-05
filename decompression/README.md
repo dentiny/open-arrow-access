@@ -1,7 +1,12 @@
 # Streaming decompression
 
-Enable `decompression-gzip` on the facade, or `gzip` on this crate. Features are
-default-off. Apply a codec explicitly; file extensions do not select a decoder.
+Enable a codec feature on the facade or this crate. All features are default-off.
+Apply a codec explicitly; file extensions do not select a decoder.
+
+| Facade feature | Crate feature | Codec |
+| --- | --- | --- |
+| `decompression-gzip` | `gzip` | `Gzip` |
+| `decompression-lz4` | `lz4` | `Lz4` |
 
 ```rust,no_run
 use open_arrow_access::{
@@ -55,3 +60,17 @@ own module and enable its dependency feature. `DecompressionLayer` and its
 accessor/reader adapters remain shared. The `CompressedInput`/`DecodedInput`
 aliases expose the futures I/O boundary without coupling a codec to storage,
 Arrow or a closed core compression enumeration.
+
+## LZ4 frames
+
+`Lz4` uses `async-compression`'s futures decoder backed by liblz4. It supports
+standard LZ4 frames, concatenated frames, and skippable frames. Raw LZ4 blocks
+and legacy frames are rejected; there is no external-dictionary configuration.
+Checksums are validated when present. Truncated frames, corrupt checksums and
+non-frame trailing bytes are errors. An empty or skippable frame produces no
+bytes; an empty compressed object is invalid. Read through EOF to validate all
+frames. The shared layer's metadata, error and memory contracts above apply.
+
+Use `DecompressionLayer::new(Lz4)` in the example above. This follows the existing
+ml-infra approach of adapting upstream asynchronous compression decoders, adding
+LZ4 to the same generic wrapper rather than implementing another codec.

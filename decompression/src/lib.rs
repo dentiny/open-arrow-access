@@ -14,3 +14,8 @@ pub use layer::DecompressionLayer;
 
 #[cfg(feature = "gzip")]
 pub use gzip::Gzip;
+
+#[cfg(feature = "lz4")]
+mod lz4;
+#[cfg(feature = "lz4")]
+pub use lz4::Lz4;
