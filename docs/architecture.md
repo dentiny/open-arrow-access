@@ -177,7 +177,8 @@ schema and optional reader-context contracts.
   ordering or silently attach layers.
 - `dataset/` provides sequential `FileSetAccessor` and `DirectoryAccessor` behind
   the default-off `dataset-directory` feature, without depending on a format.
-- `service/`, `decompression/`, and `layers/` remain extension points.
+- `service/` provides optional Common Crawl segment discovery through FileSet.
+- `decompression/` and `layers/` remain extension points in this PR.
 
 The project output boundary is Arrow records. Internal temporary inputs may be
 introduced for materialization in a later decompression PR; downstream writes,
@@ -197,3 +198,12 @@ the committed lockfile preserves resolved versions, including transitive family 
 - [OpenDAL Operator](https://opendal.apache.org/docs/rust/opendal/struct.Operator.html)
 - [OpenDAL Reader](https://opendal.apache.org/docs/rust/opendal/struct.Reader.html)
 - [Arrow Rust async Parquet reading](https://docs.rs/parquet/59.3.0/parquet/arrow/async_reader/index.html)
+
+## Common Crawl provider
+
+The optional service delegates origin-root-relative `warc.paths.gz` discovery to
+an explicitly decoded byte accessor, then reads the selected segment through
+FileSet and a supplied format accessor. It preserves manifest file order and
+canonical path spelling; HTTP access uses OpenDAL. See
+[Common Crawl segments](commoncrawl.md). The generic storage operator adapter
+also accepts caller-configured OpenDAL operators behind `storage-opendal`.

@@ -1,0 +1,22 @@
+[package]
+name = "open-arrow-access-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Dataset source providers for Open Arrow Access"
+
+[features]
+default = []
+commoncrawl = ["dep:open-arrow-access-dataset", "dep:open-arrow-access-storage", "dep:opendal", "dep:opendal-service-http", "dep:url"]
+
+[dependencies]
+open-arrow-access-core.workspace = true
+open-arrow-access-dataset = { workspace = true, features = ["directory"], optional = true }
+open-arrow-access-storage = { workspace = true, features = ["operator"], optional = true }
+opendal = { workspace = true, features = ["services-http", "http-transport-reqwest"], optional = true }
+opendal-service-http = { version = "=0.59.2", optional = true }
+url = { version = "2", optional = true }
+
+[lints]
+workspace = true

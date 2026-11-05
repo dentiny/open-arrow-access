@@ -13,21 +13,29 @@ const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unw
 const DEFAULT_IO_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 const MAX_FETCH_BATCH_SIZE: u64 = 2 * 1024 * 1024;
 
+/// Read bytes through a caller-configured OpenDAL operator.
+///
+/// Locators are relative to the operator's namespace. Unlike the filesystem adapter
+/// this adapter does not constrain host filesystem components. Locators must be
+/// canonical root-relative paths without surrounding whitespace, empty or dot
+/// components. It exposes no write operations.
 #[derive(Clone, Debug)]
-pub(crate) struct OpenDalAccessor {
+pub struct OpenDalAccessor {
     operator: Operator,
     chunk_size: NonZeroUsize,
 }
 
 impl OpenDalAccessor {
-    pub(crate) fn new(operator: Operator) -> Self {
+    /// Wrap an already configured operator without performing I/O.
+    pub fn new(operator: Operator) -> Self {
         Self {
             operator,
             chunk_size: DEFAULT_OUTPUT_CHUNK_SIZE,
         }
     }
 
-    pub(crate) fn with_chunk_size(mut self, chunk_size: NonZeroUsize) -> Self {
+    /// Set the maximum sequential output chunk, independently of I/O splitting.
+    pub fn with_chunk_size(mut self, chunk_size: NonZeroUsize) -> Self {
         self.chunk_size = chunk_size;
         self
     }
@@ -52,6 +60,7 @@ impl Accessor for OpenDalAccessor {
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let ByteReadRequest { object, options } = request;
         let path = object.locator();
+        validate_locator(path, false, "open")?;
         let metadata = self
             .operator
             .stat(path)
@@ -97,7 +106,15 @@ impl Accessor for OpenDalAccessor {
 #[async_trait]
 impl ByteAccessor for OpenDalAccessor {
     async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
+        if !self.capability().list {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "list",
+                "operator does not support listing",
+            ));
+        }
         let path = prefix.locator();
+        validate_locator(path, true, "list")?;
         let metadata = self
             .operator
             .stat(path)
@@ -310,4 +327,27 @@ pub(crate) fn map_error(operation: &'static str, path: &str, error: opendal::Err
         _ => ErrorKind::Io,
     };
     Error::new(kind, operation, format!("object {path:?}")).with_source(error)
+}
+
+fn validate_locator(path: &str, prefix: bool, operation: &'static str) -> Result<()> {
+    let base = if prefix {
+        path.strip_suffix('/').unwrap_or(path)
+    } else {
+        path
+    };
+    if path.trim() != path
+        || path.starts_with('/')
+        || (!prefix && path.is_empty())
+        || (!base.is_empty()
+            && base
+                .split('/')
+                .any(|part| part.is_empty() || matches!(part, "." | "..")))
+    {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            operation,
+            "expected a canonical root-relative locator",
+        ));
+    }
+    Ok(())
 }

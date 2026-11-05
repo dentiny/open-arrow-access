@@ -5,9 +5,12 @@
 
 pub use open_arrow_access_core::*;
 
-#[cfg(feature = "storage-fs")]
+#[cfg(any(feature = "storage-fs", feature = "storage-opendal"))]
 pub mod storage {
+    #[cfg(feature = "storage-fs")]
     pub use open_arrow_access_storage::FsAccessor;
+    #[cfg(feature = "storage-opendal")]
+    pub use open_arrow_access_storage::{OpenDalAccessor, opendal};
 }
 
 #[cfg(any(feature = "format-parquet", feature = "format-csv"))]
@@ -22,5 +25,12 @@ pub mod file_format {
 pub mod dataset {
     pub use open_arrow_access_dataset::{
         DirectoryAccessor, DirectoryRequest, FileSetAccessor, FileSetRequest,
+    };
+}
+
+#[cfg(feature = "service-commoncrawl")]
+pub mod service {
+    pub use open_arrow_access_service::{
+        CommonCrawlSegmentAccessor, CommonCrawlSegmentRequest, create_http_accessor,
     };
 }

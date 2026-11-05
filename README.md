@@ -71,7 +71,7 @@ for TSV.
 | `storage/` | OpenDAL Fs, recursive file discovery, bounded chunks and exact range reads |
 | `file-format/` | Parquet schema inspection; CSV/TSV with an explicit schema and incremental Arrow decoding |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Reserved; no Hugging Face or other source adapter yet |
+| `service/` | Optional Common Crawl segment discovery over a decoded manifest and supplied format accessor |
 | `decompression/` | Reserved; no external decompression or archive support yet |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
 
@@ -179,3 +179,8 @@ reading, wrapper composition, exact/batched ranges, per-open I/O options,
 bounded backend concurrency, and terminal error/drop behavior.
 Tests may copy fixtures into temporary roots to exercise storage behavior.
 The library exposes no writer or sink API.
+
+Enable `service-commoncrawl` for Common Crawl segment membership and sequential
+FileSet reading. It preserves official manifest order and canonical
+`crawl-data/...` paths, using an explicitly decoded manifest byte accessor and
+an existing format accessor.  No conversion sink is included.
