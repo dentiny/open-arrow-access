@@ -14,7 +14,6 @@ use crate::{
 /// stateful decoder resumable; drop the reader after cancelling such a call.
 /// Implementations use the re-exported `#[async_trait]` attribute for their
 /// asynchronous methods while retaining support for `dyn` readers.
-#[deny(missing_docs)]
 #[async_trait]
 pub trait Reader: Send {
     /// Unit emitted by a successful read, such as Bytes or RecordBatch.
@@ -62,7 +61,6 @@ pub struct ByteMetadata {
 
 /// Byte specialization used by storage, byte layers, and decompression wrappers.
 /// Sequential chunks must be nonempty; use None for EOF.
-#[deny(missing_docs)]
 #[async_trait]
 pub trait ByteReader: Reader<Item = Bytes, Metadata = ByteMetadata> {
     /// Read exactly the half-open `range` in the current byte representation.
@@ -93,7 +91,6 @@ pub struct RecordMetadata {
 }
 
 /// Record specialization used by formats and future datasets, services and layers.
-#[deny(missing_docs)]
 pub trait RecordReader: Reader<Item = RecordBatch, Metadata = RecordMetadata> {}
 
 impl<T> RecordReader for T where T: Reader<Item = RecordBatch, Metadata = RecordMetadata> + ?Sized {}

@@ -15,7 +15,6 @@ pub(super) struct ParquetReader {
 }
 
 impl ParquetReader {
-    /// Initialize record consumption with the inspected schema and requested field order.
     pub(super) fn new(
         stream: ParquetRecordBatchStream<ParquetInput>,
         metadata: RecordMetadata,
@@ -35,7 +34,6 @@ impl Reader for ParquetReader {
     type Item = RecordBatch;
     type Metadata = RecordMetadata;
 
-    /// Report record consumption without exposing the decoder's internal byte ranges.
     fn capability(&self) -> Capability {
         Capability {
             read: true,
@@ -43,13 +41,10 @@ impl Reader for ParquetReader {
         }
     }
 
-    /// Borrow the fixed output schema and source selected during opening.
     fn metadata(&self) -> &RecordMetadata {
         &self.metadata
     }
 
-    /// Decode the next ordered batch, apply field order and restore schema metadata.
-    /// Stop reading permanently after EOF or the first decoding/projection failure.
     async fn next(&mut self) -> Result<Option<RecordBatch>> {
         if self.finished {
             return Ok(None);

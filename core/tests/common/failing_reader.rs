@@ -11,7 +11,6 @@ pub(crate) struct FailingReader {
 }
 
 impl FailingReader {
-    /// Keep the caller's counter observable after a stream takes ownership of the reader.
     pub(crate) fn new(calls: Arc<AtomicUsize>) -> Self {
         Self { calls }
     }
@@ -22,7 +21,6 @@ impl Reader for FailingReader {
     type Item = u8;
     type Metadata = ();
 
-    /// Advertise consumption even though the fixture injects a runtime I/O failure.
     fn capability(&self) -> Capability {
         Capability {
             read: true,
@@ -30,12 +28,10 @@ impl Reader for FailingReader {
         }
     }
 
-    /// Expose unit metadata for a reader used only to test failure handling.
     fn metadata(&self) -> &() {
         &()
     }
 
-    /// Record a poll and fail so tests can detect consumers polling after an error.
     async fn next(&mut self) -> Result<Option<u8>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Err(Error::new(ErrorKind::Io, "test_read", "injected failure"))

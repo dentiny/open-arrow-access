@@ -7,7 +7,6 @@ use crate::Accessor;
 /// changed capabilities. Decoding Bytes into RecordBatch is an adapter, not a
 /// type-preserving layer. Execution/emission layers can later specialize this
 /// contract with optional planning extensions before opening readers.
-#[deny(missing_docs)]
 pub trait Layer<A: Accessor> {
     /// Decorated accessor retaining the inner accessor's public request/reader types.
     type Layered: Accessor<Request = A::Request, Reader = A::Reader>;
@@ -22,7 +21,6 @@ pub trait Layer<A: Accessor> {
 }
 
 /// Convenience methods for composing layers around an owned accessor.
-#[deny(missing_docs)]
 pub trait AccessorExt: Accessor + Sized {
     /// Consume this accessor and install `layer` around it.
     ///

@@ -16,14 +16,12 @@ impl ObjectRef {
 }
 
 impl From<&str> for ObjectRef {
-    /// Copy a borrowed locator into an owned object reference.
     fn from(value: &str) -> Self {
         Self::new(value)
     }
 }
 
 impl From<String> for ObjectRef {
-    /// Take ownership of a locator without interpreting its backend-specific syntax.
     fn from(value: String) -> Self {
         Self::new(value)
     }
@@ -56,7 +54,6 @@ impl Default for ReadOptions {
 /// Record layers can use this contract with file, dataset, and service requests
 /// instead of depending on one concrete request type. A layer that changes an
 /// inner projection remains responsible for its own declared output selection.
-#[deny(missing_docs)]
 pub trait ReadOptionsProvider: Send {
     /// Borrow the batch target and projection without performing I/O.
     fn read_options(&self) -> &ReadOptions;
@@ -92,12 +89,10 @@ impl ReadRequest {
 }
 
 impl ReadOptionsProvider for ReadRequest {
-    /// Borrow the single-file request's common read settings.
     fn read_options(&self) -> &ReadOptions {
         &self.options
     }
 
-    /// Expose common settings for a layer to adjust before opening the file.
     fn read_options_mut(&mut self) -> &mut ReadOptions {
         &mut self.options
     }

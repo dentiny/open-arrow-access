@@ -14,12 +14,10 @@ pub(super) struct ParquetInput {
 }
 
 impl ParquetInput {
-    /// Wrap an opened byte reader whose exact ranges and length were validated.
     pub(super) fn new(inner: Box<dyn ByteReader>) -> Self {
         Self { inner }
     }
 
-    /// Fetch an exact range through the backend-independent async byte reader.
     async fn read_bytes(&mut self, range: Range<u64>) -> ParquetResult<Bytes> {
         self.inner
             .read_range(range)
@@ -27,7 +25,6 @@ impl ParquetInput {
             .map_err(|e| ParquetError::External(Box::new(e)))
     }
 
-    /// Fetch footer/schema metadata through range reads, honoring metadata/index options.
     async fn read_metadata(
         &mut self,
         options: Option<&ArrowReaderOptions>,
@@ -51,13 +48,12 @@ impl ParquetInput {
     }
 }
 
+// Parquet requires boxed futures; I/O is implemented by the async helpers above.
 impl AsyncFileReader for ParquetInput {
-    /// Adapt async range reads to the boxed-future signature required by Parquet.
     fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, ParquetResult<Bytes>> {
         Box::pin(self.read_bytes(range))
     }
 
-    /// Adapt async inspection to the boxed-future signature required by Parquet.
     fn get_metadata<'a>(
         &'a mut self,
         options: Option<&'a ArrowReaderOptions>,

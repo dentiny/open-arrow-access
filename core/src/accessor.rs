@@ -8,7 +8,6 @@ use crate::{ByteReader, Capability, Error, ErrorKind, ObjectRef, Reader, Result,
 /// statically distinct while sharing the same opening and layering contract.
 /// Implementations use the re-exported `#[async_trait]` attribute so asynchronous
 /// opening remains usable through `dyn` accessors with Send futures.
-#[deny(missing_docs)]
 #[async_trait]
 pub trait Accessor: Send + Sync {
     /// Selection and options needed to open one reader, interpreted by the accessor.
@@ -43,12 +42,10 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
     type Request = A::Request;
     type Reader = A::Reader;
 
-    /// Forward the shared accessor's effective operation support.
     fn capability(&self) -> Capability {
         (**self).capability()
     }
 
-    /// Delegate opening to the shared accessor without sharing the returned reader.
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
         (**self).open(request).await
     }
@@ -58,7 +55,6 @@ pub type ObjectStream = BoxStream<'static, Result<ObjectRef>>;
 
 /// Optional byte-accessor discovery boundary, reserved for directory/source PRs.
 /// The initial filesystem adapter does not expose directory scans.
-#[deny(missing_docs)]
 #[async_trait]
 pub trait ByteAccessor: Accessor<Request = ObjectRef, Reader = dyn ByteReader> {
     /// Discover object references under an accessor-defined `prefix`.
@@ -83,7 +79,6 @@ pub trait ByteAccessor: Accessor<Request = ObjectRef, Reader = dyn ByteReader> {
 
 #[async_trait]
 impl<A: ByteAccessor + ?Sized> ByteAccessor for Arc<A> {
-    /// Forward discovery while preserving its lazy stream and errors.
     async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
         (**self).list(prefix).await
     }

@@ -46,7 +46,6 @@ pub fn fixture(compression: Compression) -> Fixture {
         .set_compression(compression)
         .build();
     let file = std::fs::File::create(dir.path().join("data.parquet")).unwrap();
-    // Writer use is limited to generating test fixtures, not part of the library API.
     let mut writer = ArrowWriter::try_new(file, schema.clone(), Some(properties)).unwrap();
     writer.write(&batch).unwrap();
     writer.close().unwrap();
@@ -80,7 +79,6 @@ impl Accessor for MemoryAccessor {
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
 
-    /// Report sequential reads and the range support configured for this fixture.
     fn capability(&self) -> Capability {
         Capability {
             read: true,
@@ -89,7 +87,6 @@ impl Accessor for MemoryAccessor {
         }
     }
 
-    /// Return an application-owned in-memory reader for the requested opaque locator.
     async fn open(&self, source: ObjectRef) -> Result<Box<dyn ByteReader>> {
         Ok(Box::new(MemoryReader {
             metadata: ByteMetadata {
@@ -116,7 +113,6 @@ impl Reader for MemoryReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
 
-    /// Report sequential reads and the range support configured for this fixture.
     fn capability(&self) -> Capability {
         Capability {
             read: true,
@@ -125,12 +121,10 @@ impl Reader for MemoryReader {
         }
     }
 
-    /// Describe the in-memory byte representation exposed by this fixture reader.
     fn metadata(&self) -> &ByteMetadata {
         &self.metadata
     }
 
-    /// Emit the fixture bytes once, then report EOF without producing empty chunks.
     async fn next(&mut self) -> Result<Option<Bytes>> {
         if self.emitted || self.bytes.is_empty() {
             return Ok(None);
@@ -142,7 +136,6 @@ impl Reader for MemoryReader {
 
 #[async_trait]
 impl ByteReader for MemoryReader {
-    /// Return the exact requested slice or reject unsupported/invalid ranges.
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         if !self.ranged {
             return Err(Error::new(
@@ -180,7 +173,6 @@ pub struct ByteObserverAccessor<A> {
 impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Layer<A> for ByteObserverLayer {
     type Layered = ByteObserverAccessor<A>;
 
-    /// Attach shared observations while preserving the byte accessor contract.
     fn layer(&self, inner: A) -> Self::Layered {
         ByteObserverAccessor {
             inner,
@@ -196,12 +188,10 @@ impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Accessor
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
 
-    /// Forward effective capabilities because observation preserves supported operations.
     fn capability(&self) -> Capability {
         self.inner.capability()
     }
 
-    /// Open the inner input and wrap its reader with range/drop observations.
     async fn open(&self, request: ObjectRef) -> Result<Box<dyn ByteReader>> {
         Ok(Box::new(ByteObserverReader {
             inner: self.inner.open(request).await?,
@@ -217,14 +207,12 @@ struct ByteObserverReader {
 
 #[async_trait]
 impl<A: ByteAccessor> ByteAccessor for ByteObserverAccessor<A> {
-    /// Preserve discovery whenever the observed byte accessor exposes it.
     async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
         self.inner.list(prefix).await
     }
 }
 
 impl Drop for ByteObserverReader {
-    /// Record reader destruction to verify that stopping consumption releases input.
     fn drop(&mut self) {
         self.observations.drops.fetch_add(1, Ordering::SeqCst);
     }
@@ -235,17 +223,14 @@ impl Reader for ByteObserverReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
 
-    /// Forward effective capabilities because observation preserves supported operations.
     fn capability(&self) -> Capability {
         self.inner.capability()
     }
 
-    /// Forward metadata without altering the input representation.
     fn metadata(&self) -> &ByteMetadata {
         self.inner.metadata()
     }
 
-    /// Delegate sequential consumption without changing chunks, EOF or errors.
     async fn next(&mut self) -> Result<Option<Bytes>> {
         self.inner.next().await
     }
@@ -253,7 +238,6 @@ impl Reader for ByteObserverReader {
 
 #[async_trait]
 impl ByteReader for ByteObserverReader {
-    /// Count each range request, inject a requested failure, or delegate unchanged.
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         self.observations.range_reads.fetch_add(1, Ordering::SeqCst);
         if self.observations.fail_reads.load(Ordering::SeqCst) {
@@ -275,7 +259,6 @@ pub struct SequentialAccessor<A>(A);
 impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Layer<A> for SequentialLayer {
     type Layered = SequentialAccessor<A>;
 
-    /// Wrap a byte accessor while preserving its request and reader types.
     fn layer(&self, inner: A) -> Self::Layered {
         SequentialAccessor(inner)
     }
@@ -286,7 +269,6 @@ impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Accessor for Seq
     type Request = ObjectRef;
     type Reader = dyn ByteReader;
 
-    /// Remove range access and discovery, which this wrapper does not implement.
     fn capability(&self) -> Capability {
         Capability {
             read: self.0.capability().read,
@@ -294,7 +276,6 @@ impl<A: Accessor<Request = ObjectRef, Reader = dyn ByteReader>> Accessor for Seq
         }
     }
 
-    /// Open the wrapped input behind a sequential-only reader interface.
     async fn open(&self, request: ObjectRef) -> Result<Box<dyn ByteReader>> {
         Ok(Box::new(SequentialReader(self.0.open(request).await?)) as Box<dyn ByteReader>)
     }
@@ -307,7 +288,6 @@ impl Reader for SequentialReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
 
-    /// Advertise only the sequential consumption exposed by this wrapper.
     fn capability(&self) -> Capability {
         Capability {
             read: self.0.capability().read,
@@ -315,12 +295,10 @@ impl Reader for SequentialReader {
         }
     }
 
-    /// Preserve metadata because this test wrapper does not transform the bytes.
     fn metadata(&self) -> &ByteMetadata {
         self.0.metadata()
     }
 
-    /// Forward sequential chunks without exposing upstream range access.
     async fn next(&mut self) -> Result<Option<Bytes>> {
         self.0.next().await
     }

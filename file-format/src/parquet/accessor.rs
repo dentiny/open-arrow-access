@@ -16,7 +16,6 @@ pub struct ParquetAccessor<A> {
 }
 
 impl<A> ParquetAccessor<A> {
-    /// Build a single-file Parquet adapter over the provided byte accessor.
     pub fn new(inner: A) -> Self {
         Self { inner }
     }
@@ -30,7 +29,6 @@ where
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
 
-    /// Expose record reading when the wrapped byte accessor supports exact ranges.
     fn capability(&self) -> Capability {
         let input = self.inner.capability();
         Capability {
@@ -39,8 +37,6 @@ where
         }
     }
 
-    /// Open ranged byte input, inspect Parquet metadata and construct an ordered reader.
-    /// Validate projection and retain the output schema before returning any batches.
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         let input = self.inner.open(request.object.clone()).await?;
         if !input.capability().read_with_range || input.metadata().content_length.is_none() {

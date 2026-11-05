@@ -23,8 +23,6 @@ async fn filesystem_initialization_is_lazy_and_send() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("new-root");
     let initialize = FsAccessor::new(root.clone());
-    // OpenDAL's builder may create the root, but construction of an unpolled
-    // future must not start that filesystem work.
     assert!(!root.exists());
     // Spawning also verifies that initialization can move between Tokio workers.
     let fs = tokio::spawn(initialize).await.unwrap().unwrap();
@@ -285,7 +283,6 @@ async fn dropping_reader_does_not_start_background_reads_and_errors_are_terminal
     );
 }
 
-// The same generic layer implementation applies to byte AND record accessors.
 struct OpenObserverLayer {
     label: &'static str,
     events: Arc<Mutex<Vec<&'static str>>>,
@@ -300,7 +297,6 @@ struct OpenObserverAccessor<A> {
 impl<A: Accessor> Layer<A> for OpenObserverLayer {
     type Layered = OpenObserverAccessor<A>;
 
-    /// Capture the event label while wrapping either a byte or a record accessor.
     fn layer(&self, inner: A) -> Self::Layered {
         OpenObserverAccessor {
             inner,
@@ -315,12 +311,10 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
     type Request = A::Request;
     type Reader = A::Reader;
 
-    /// Forward effective capabilities because observation preserves supported operations.
     fn capability(&self) -> Capability {
         self.inner.capability()
     }
 
-    /// Record wrapper call order and forward the request and returned reader unchanged.
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
         self.events.lock().unwrap().push(self.label);
         self.inner.open(request).await
@@ -329,7 +323,6 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
 
 #[async_trait]
 impl<A: ByteAccessor> ByteAccessor for OpenObserverAccessor<A> {
-    /// Delegate discovery so wrapping does not introduce or hide unsupported behavior.
     async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
         self.inner.list(prefix).await
     }
@@ -353,7 +346,6 @@ async fn one_layer_contract_composes_at_byte_and_record_boundaries_in_known_orde
         bytes.list("".into()).await.err().unwrap().kind(),
         ErrorKind::Unsupported
     );
-    // Also verify object-safe injection through an Arc, as third-party adapters use.
     let bytes: Arc<dyn ByteAccessor> = Arc::new(bytes);
     assert!(bytes.capability().read_with_range);
     let records = ParquetAccessor::new(bytes).layer(layer("record"));
@@ -412,7 +404,6 @@ impl Accessor for ListingAccessor {
     type Request = ObjectRef;
     type Reader = dyn open_arrow_access::ByteReader;
 
-    /// Add implemented object discovery to the underlying fixture's read abilities.
     fn capability(&self) -> Capability {
         Capability {
             list: true,
@@ -420,7 +411,6 @@ impl Accessor for ListingAccessor {
         }
     }
 
-    /// Delegate opening; reader capabilities intentionally do not include listing.
     async fn open(&self, request: ObjectRef) -> Result<Box<Self::Reader>> {
         self.0.open(request).await
     }
@@ -428,7 +418,6 @@ impl Accessor for ListingAccessor {
 
 #[async_trait]
 impl ByteAccessor for ListingAccessor {
-    /// Return one discovered object matching the fixture's sole namespace.
     async fn list(&self, _prefix: ObjectRef) -> Result<ObjectStream> {
         Ok(Box::pin(futures::stream::iter([Ok("entry".into())])) as ObjectStream)
     }

@@ -14,7 +14,6 @@
 /// because of permissions, missing input, invalid options or unknown length.
 /// Capabilities perform no I/O and provide no authorization or snapshot guarantee.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[deny(missing_docs)]
 pub struct Capability {
     /// Can open/read the interface's item type through [`crate::Reader::next`].
     pub read: bool,
