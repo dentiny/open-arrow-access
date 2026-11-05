@@ -260,7 +260,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -896,6 +898,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fafa6961cabd9c63bcd77a45d7e3b7f3b552b70417831fb0f56db717e72407e"
 
 [[package]]
+name = "nom"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -974,10 +985,12 @@ name = "open-arrow-access-file-format"
 version = "0.1.0"
 dependencies = [
  "arrow-csv",
+ "arrow-array",
  "arrow-schema",
  "futures",
  "open-arrow-access-core",
  "parquet",
+ "warc-rs",
 ]
 
 [[package]]
@@ -1461,6 +1474,17 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "warc-rs"
+version = "0.2.0"
+source = "git+https://github.com/dentiny/warc-rs?rev=0d52d5f84a1d58d551f2613556b58ea125ecb29b#0d52d5f84a1d58d551f2613556b58ea125ecb29b"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "nom",
+ "uuid",
+]
 
 [[package]]
 name = "wasi"

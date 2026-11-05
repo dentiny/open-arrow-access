@@ -69,7 +69,7 @@ for TSV.
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
 | `storage/` | OpenDAL Fs, bounded sequential chunks and exact range reads |
-| `file-format/` | Parquet schema inspection; CSV/TSV with an explicit schema and incremental Arrow decoding |
+| `file-format/` | Parquet schema inspection; CSV/TSV with an explicit schema and incremental Arrow decoding; WARC physical records as Arrow batches |
 | `dataset/` | Reserved; no directory or multi-file scan yet |
 | `service/` | Reserved; no Hugging Face or other source adapter yet |
 | `decompression/` | Reserved; no external decompression or archive support yet |
@@ -173,3 +173,8 @@ reading, wrapper composition, exact/batched ranges, per-open I/O options,
 bounded backend concurrency, and terminal error/drop behavior.
 Tests may copy fixtures into temporary roots to exercise storage behavior.
 The library exposes no writer or sink API.
+
+Enable `format-warc` for ordered physical WARC records using the existing
+[warc-rs](https://github.com/dentiny/warc-rs) parser and the fixed 20-column
+ml-infra schema. See [WARC](docs/warc.md) for projection, compression and memory
+semantics.

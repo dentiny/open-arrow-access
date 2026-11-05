@@ -34,6 +34,7 @@ arrow-array = "59.3.0"
 arrow-csv = "59.3.0"
 arrow-schema = "59.3.0"
 async-trait = "0.1.91"
+warc = { package = "warc-rs", git = "https://github.com/dentiny/warc-rs", rev = "0d52d5f84a1d58d551f2613556b58ea125ecb29b", default-features = false }
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
 datafusion = { version = "55.2.0", default-features = false }
 bytes = "1"
@@ -51,6 +52,7 @@ open-arrow-access-file-format = { path = "file-format", version = "0.1.0", defau
 [features]
 default = []
 storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
+format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
 
