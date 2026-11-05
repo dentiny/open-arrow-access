@@ -45,7 +45,7 @@ impl Accessor for OpenDalAccessor {
         let upstream = self.operator.info().capability();
         let read = upstream.read && upstream.stat;
         // This adapter requires stat for length and uses OpenDAL's range-read contract.
-        // OpenDAL's listing support is not exposed by this adapter yet.
+        // Concrete backend wrappers decide whether to expose discovery.
         Capability {
             read,
             read_with_range: read,
