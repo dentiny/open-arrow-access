@@ -29,6 +29,9 @@ impl From<String> for ObjectRef {
     }
 }
 
+/// Default row-count target for [`ReadOptions`].
+pub const DEFAULT_BATCH_SIZE: NonZeroUsize = NonZeroUsize::new(8192).unwrap();
+
 /// Common record-reading settings. Providers can expose their own typed settings.
 #[derive(Clone, Debug)]
 pub struct ReadOptions {
@@ -40,10 +43,9 @@ pub struct ReadOptions {
 }
 
 impl Default for ReadOptions {
-    /// Select all fields with a target batch size of 8192 rows.
     fn default() -> Self {
         Self {
-            batch_size: NonZeroUsize::new(8192).unwrap(),
+            batch_size: DEFAULT_BATCH_SIZE,
             projection: None,
         }
     }
