@@ -50,6 +50,7 @@ open-arrow-access-file-format = { path = "file-format", version = "0.1.0", defau
 
 [features]
 default = []
+storage-huggingface = ["dep:open-arrow-access-storage", "open-arrow-access-storage/huggingface"]
 storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]

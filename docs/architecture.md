@@ -106,7 +106,7 @@ contract without a closed enum of every source or format.
 
 | Adapter | Request | Reader |
 | --- | --- | --- |
-| Fs storage | `ByteReadRequest` | `dyn ByteReader` |
+| Fs / Hugging Face storage | `ByteReadRequest` | `dyn ByteReader` |
 | Parquet format | `ReadRequest` | `dyn RecordReader` |
 | Future JSON format | Typed file request | Record reader |
 | Future directory dataset | Directory selection and options | Record reader |
@@ -125,6 +125,12 @@ adapter and layers into storage. Arrow batch/projection options stay separate.
 Configured concurrency is per open reader, so several readers multiply the total
 possible in-flight I/O. This does not change logical record order or implement
 file/partition parallelism.
+
+The optional `storage-huggingface` backend uses OpenDAL's existing Hugging Face
+service and the same byte-reading implementation as Fs. It also exposes
+recursive file discovery. Its SDK builder owns repository/revision/root,
+authentication, endpoint and HTTP/Xet options. Dataset viewer config/split
+resolution remains in the service boundary; see [Hugging Face storage](huggingface.md).
 
 ## Layer
 
@@ -170,7 +176,7 @@ schema and optional reader-context contracts.
   directory under `src/`. In `src/parquet/`, `accessor.rs`, `input.rs` and
   `reader.rs` own their respective structs and implementations; `mod.rs` declares
   the modules, exports the accessor and provides common error conversion.
-- The facade forwards independent, additive `storage-fs` / `format-parquet`
+- The facade forwards independent, additive `storage-fs`, `storage-huggingface` and `format-parquet`
   features. Features make implementations available; they do not change runtime
   ordering or silently attach layers.
 - `dataset/`, `service/`, `decompression/`, and `layers/` currently contain only

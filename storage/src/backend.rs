@@ -2,10 +2,14 @@
 
 use std::{num::NonZeroUsize, ops::Range};
 
+#[cfg(feature = "huggingface")]
+use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error, ErrorKind,
     Reader, Result, async_trait,
 };
+#[cfg(feature = "huggingface")]
+use open_arrow_access_core::{ByteAccessor, ObjectRef, ObjectStream};
 use opendal::Operator;
 
 const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
@@ -91,6 +95,43 @@ impl Accessor for OpenDalAccessor {
             chunk_size: self.chunk_size.get(),
             finished: false,
         }) as Box<dyn ByteReader>)
+    }
+}
+
+#[cfg(feature = "huggingface")]
+#[async_trait]
+impl ByteAccessor for OpenDalAccessor {
+    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
+        let path = prefix.locator();
+        let path = if path.is_empty() {
+            String::new()
+        } else {
+            format!("{}/", path.trim_end_matches('/'))
+        };
+        let metadata = self
+            .operator
+            .stat(prefix.locator())
+            .await
+            .map_err(|e| map_error("list", &path, e))?;
+        if !metadata.is_dir() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "list",
+                "prefix is not a directory",
+            ));
+        }
+        let lister = self
+            .operator
+            .lister_with(&path)
+            .recursive(true)
+            .await
+            .map_err(|e| map_error("list", &path, e))?;
+        Ok(Box::pin(
+            lister
+                .try_filter(|entry| futures::future::ready(entry.metadata().is_file()))
+                .map_ok(|entry| ObjectRef::new(entry.path()))
+                .map_err(move |e| map_error("list", &path, e)),
+        ))
     }
 }
 

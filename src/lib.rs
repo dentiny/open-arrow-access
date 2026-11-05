@@ -5,9 +5,12 @@
 
 pub use open_arrow_access_core::*;
 
-#[cfg(feature = "storage-fs")]
+#[cfg(any(feature = "storage-fs", feature = "storage-huggingface"))]
 pub mod storage {
+    #[cfg(feature = "storage-fs")]
     pub use open_arrow_access_storage::FsAccessor;
+    #[cfg(feature = "storage-huggingface")]
+    pub use open_arrow_access_storage::{HuggingFaceAccessor, HuggingFaceBuilder};
 }
 
 #[cfg(any(feature = "format-parquet", feature = "format-csv"))]

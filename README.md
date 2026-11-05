@@ -3,9 +3,9 @@
 Composable dataset access for Apache Arrow. Read diverse formats and storage
 backends into Arrow streams.
 
-Read a local Parquet or CSV/TSV file asynchronously through **OpenDAL's filesystem
-service**. Output is an ordered stream of Arrow record batches. The project ends
-at that read interface.
+Read local or Hugging Face repository files asynchronously through OpenDAL.
+The Parquet and CSV/TSV adapters return ordered streams of Arrow record batches.
+The project ends at that read interface.
 
 ## Quick start
 
@@ -58,6 +58,9 @@ future file/partition `ParallelReadLayer`. Each opened reader has its own limit.
 `FsAccessor::with_chunk_size` controls sequential output chunk size, while
 `ReadOptions::batch_size` controls Arrow rows per batch.
 
+Enable `storage-huggingface` for repository-relative file access and recursive
+discovery through OpenDAL's Hugging Face service.
+
 Enable `format-csv` for CSV/TSV with an explicit schema. `CsvAccessor` consumes
 sequential byte readers and reuses Arrow CSV's incremental decoder. Configure
 `CsvFormat::default().with_header(true)` for headers or `.with_delimiter(b'\t')`
@@ -68,10 +71,10 @@ for TSV.
 | Component | Implemented |
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
-| `storage/` | OpenDAL Fs, bounded sequential chunks and exact range reads |
+| `storage/` | OpenDAL Fs and optional Hugging Face, bounded chunks and exact ranges; HF file discovery |
 | `file-format/` | Parquet schema inspection; CSV/TSV with an explicit schema and incremental Arrow decoding |
 | `dataset/` | Reserved; no directory or multi-file scan yet |
-| `service/` | Reserved; no Hugging Face or other source adapter yet |
+| `service/` | Reserved for dataset/provider semantics, including HF config/split resolution |
 | `decompression/` | Reserved; no external decompression or archive support yet |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
 
