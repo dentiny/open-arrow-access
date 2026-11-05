@@ -1,0 +1,23 @@
+[package]
+name = "open-arrow-access-decompression"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Streaming byte decompression layers for Open Arrow Access"
+
+[features]
+default = []
+gzip = ["dep:async-compression", "async-compression/gzip"]
+
+[dependencies]
+open-arrow-access-core.workspace = true
+futures.workspace = true
+async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"], optional = true }
+
+[dev-dependencies]
+flate2 = "1"
+tokio.workspace = true
+
+[lints]
+workspace = true
