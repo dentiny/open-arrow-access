@@ -109,7 +109,13 @@ Byte accessors accept `ByteReadRequest`, which carries an `ObjectRef` and
 `read_ranges` preserves request order and has a sequential fallback for custom
 readers; the OpenDAL backend uses batched fetches. Byte layers can delegate the
 bulk method or use its fallback to intercept each individual range.
-Adjacent and overlapping ranges are coalesced; unrequested gaps are not read.
+Small ranges are fetched in batches totaling at most 2 MiB, with adjacent and
+overlapping ranges coalesced within each batch; unrequested gaps are not read.
+Larger ranges stream into their final contiguous allocation. The adapter uses
+2 MiB I/O chunks unless overridden, avoiding a full fragmented copy of every
+requested range alongside its contiguous output. Returned bytes and decoder
+memory are still proportional to the requested data; see the
+[memory benchmark](docs/performance.md) for measurements and limits.
 
 Third-party crates can implement these public contracts directly. A format
 does not receive an OpenDAL operator or switch on storage schemes. Shared

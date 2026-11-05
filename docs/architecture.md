@@ -33,8 +33,15 @@ access is explicit, not emulated by decoding repeatedly from zero.
 and empty ranges. Its default calls `read_range` sequentially; OpenDAL implements
 it through `Reader::fetch` for range coalescing and bounded concurrency. Parquet's
 `get_byte_ranges` uses this operation rather than upstream's sequential fallback.
-The adapter sets the coalescing gap to zero: adjacent and overlapping ranges
-still merge, but separated ranges do not fetch excluded column data between them.
+The adapter sets the coalescing gap to zero. It fetches small ranges in batches
+totaling at most 2 MiB, coalescing adjacent and overlapping ranges within each
+batch without reading gaps. Larger ranges stream into a preallocated contiguous
+output using `Reader::read_into`, releasing input fragments as they are copied.
+This avoids staging every fragmented range before allocating contiguous outputs.
+Large ranges and ranges in separate batches are not coalesced with each other.
+The default I/O chunk is 2 MiB; explicit chunk/concurrency options control staging
+size and parallel reads. The final requested bytes and decoder memory remain
+unbounded by these staging limits. See [performance measurements](performance.md).
 
 A future gzip reader wraps another byte reader, reports decoded rather than
 compressed length (or unknown), and normally removes range capability. It can

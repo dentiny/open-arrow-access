@@ -53,6 +53,72 @@ struct TaskCounts {
     peak: AtomicUsize,
 }
 
+#[tokio::test]
+async fn large_single_and_bulk_ranges_preserve_values_and_cursor() {
+    let dir = tempfile::tempdir().unwrap();
+    let mib = 1024 * 1024;
+    let contents = (0..5 * mib + 7)
+        .map(|i| (i % 251) as u8)
+        .collect::<Vec<_>>();
+    std::fs::write(dir.path().join("large.bin"), &contents).unwrap();
+    let accessor = FsAccessor::new(dir.path()).await.unwrap();
+    for (concurrency, chunk_size) in [
+        (1, None),
+        (4, None),
+        (1, std::num::NonZeroUsize::new(256 * 1024)),
+        (4, std::num::NonZeroUsize::new(256 * 1024)),
+        (4, std::num::NonZeroUsize::new(4 * mib)),
+    ] {
+        let mut reader = accessor
+            .open(
+                ByteReadRequest::new("large.bin").with_options(ByteReadOptions {
+                    io_concurrency: std::num::NonZeroUsize::new(concurrency).unwrap(),
+                    io_chunk_size: chunk_size,
+                }),
+            )
+            .await
+            .unwrap();
+        let large = 17..(4 * mib + 3) as u64;
+        assert_eq!(
+            reader.read_range(large.clone()).await.unwrap().as_ref(),
+            &contents[17..4 * mib + 3]
+        );
+        let ranges = vec![
+            0..mib as u64,
+            mib as u64..(2 * mib + 1) as u64,
+            large.clone(),
+            large,
+            contents.len() as u64..contents.len() as u64,
+            5..23,
+        ];
+        let output = reader.read_ranges(ranges.clone()).await.unwrap();
+        assert_eq!(output.len(), ranges.len());
+        for (bytes, range) in output.iter().zip(ranges) {
+            assert_eq!(
+                bytes.as_ref(),
+                &contents[range.start as usize..range.end as usize]
+            );
+        }
+        assert_eq!(
+            reader.next().await.unwrap().unwrap().as_ref(),
+            &contents[..64 * 1024]
+        );
+    }
+}
+
+#[tokio::test]
+async fn large_range_reports_short_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("large.bin");
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(3 * 1024 * 1024).unwrap();
+    let accessor = FsAccessor::new(dir.path()).await.unwrap();
+    let mut reader = accessor.open("large.bin".into()).await.unwrap();
+    file.set_len(1024 * 1024).unwrap();
+    let error = reader.read_range(0..3 * 1024 * 1024).await.err().unwrap();
+    assert_eq!(error.kind(), ErrorKind::Io);
+}
+
 struct ActiveTask(Arc<TaskCounts>);
 
 impl Drop for ActiveTask {
