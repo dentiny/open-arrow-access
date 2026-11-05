@@ -23,6 +23,7 @@ async fn filesystem_rejects_surrounding_whitespace_without_aliasing_files() {
         "\tdata.bin\n",
         "\u{a0}data.bin\u{a0}",
     ];
+    #[cfg(unix)]
     for locator in locators {
         std::fs::write(dir.path().join(locator), b"requested file").unwrap();
     }
