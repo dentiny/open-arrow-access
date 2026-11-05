@@ -69,11 +69,6 @@ tokio.workspace = true
 name = "read_parquet"
 required-features = ["storage-fs", "format-parquet"]
 
-[[bench]]
-name = "parquet_memory"
-harness = false
-required-features = ["storage-fs", "format-parquet"]
-
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

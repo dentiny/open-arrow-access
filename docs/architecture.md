@@ -41,7 +41,7 @@ This avoids staging every fragmented range before allocating contiguous outputs.
 Large ranges and ranges in separate batches are not coalesced with each other.
 The default I/O chunk is 2 MiB; explicit chunk/concurrency options control staging
 size and parallel reads. The final requested bytes and decoder memory remain
-unbounded by these staging limits. See [performance measurements](performance.md).
+unbounded by these staging limits.
 
 A future gzip reader wraps another byte reader, reports decoded rather than
 compressed length (or unknown), and normally removes range capability. It can

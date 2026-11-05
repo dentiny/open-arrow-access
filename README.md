@@ -114,8 +114,7 @@ overlapping ranges coalesced within each batch; unrequested gaps are not read.
 Larger ranges stream into their final contiguous allocation. The adapter uses
 2 MiB I/O chunks unless overridden, avoiding a full fragmented copy of every
 requested range alongside its contiguous output. Returned bytes and decoder
-memory are still proportional to the requested data; see the
-[memory benchmark](docs/performance.md) for measurements and limits.
+memory are still proportional to the requested data.
 
 Third-party crates can implement these public contracts directly. A format
 does not receive an OpenDAL operator or switch on storage schemes. Shared
