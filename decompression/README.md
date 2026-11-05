@@ -1,7 +1,12 @@
 # Streaming decompression
 
-Enable `decompression-gzip` on the facade, or `gzip` on this crate. Features are
-default-off. Apply a codec explicitly; file extensions do not select a decoder.
+Each codec is an independent, default-off Cargo feature. Apply a codec
+explicitly; file extensions do not select a decoder.
+
+| Facade feature | Crate feature | Codec |
+| --- | --- | --- |
+| `decompression-gzip` | `gzip` | `Gzip` |
+| `decompression-zstd` | `zstd` | `Zstd` |
 
 ```rust,no_run
 use open_arrow_access::{
@@ -34,6 +39,18 @@ checksums and non-gzip trailing bytes are errors. A valid empty gzip member is
 EOF; an empty compressed object is invalid. Validation finishes only when the
 consumer reads through EOF, so a later member/checksum can fail after earlier
 decoded bytes were delivered.
+
+For Zstandard, enable `decompression-zstd` and replace `Gzip` with `Zstd` in
+the example. The adapter uses `async-compression`'s futures `ZstdDecoder` with
+multi-frame decoding, as in ml-infra's compression helper. Standard frames,
+concatenated frames, empty frames and skippable frames are supported. Invalid
+checksums, truncated frames and trailing non-frame bytes are decode errors.
+An empty frame or a skippable-only input is valid EOF; an empty compressed object
+is invalid. Validation completes only when the consumer reads through EOF.
+Raw blocks, legacy format and custom dictionary/decoder-parameter configuration
+are outside this adapter. A stream requiring an unavailable dictionary fails
+with a decode error. Codec state, including its frame window, is additional to
+the emitted chunk limit.
 
 Decoded `content_length` is unknown. The source locator and version still
 identify the original compressed object; the version is not a decoded-content

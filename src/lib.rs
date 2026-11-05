@@ -5,10 +5,14 @@
 
 pub use open_arrow_access_core::*;
 
-#[cfg(feature = "decompression-gzip")]
+#[cfg(any(feature = "decompression-gzip", feature = "decompression-zstd"))]
 pub mod decompression {
+    #[cfg(feature = "decompression-gzip")]
+    pub use open_arrow_access_decompression::Gzip;
+    #[cfg(feature = "decompression-zstd")]
+    pub use open_arrow_access_decompression::Zstd;
     pub use open_arrow_access_decompression::{
-        Codec, CompressedInput, DecodedInput, DecompressionAccessor, DecompressionLayer, Gzip,
+        Codec, CompressedInput, DecodedInput, DecompressionAccessor, DecompressionLayer,
     };
 }
 
