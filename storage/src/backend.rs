@@ -2,7 +2,6 @@
 
 use std::{num::NonZeroUsize, ops::Range};
 
-#[cfg(feature = "huggingface")]
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error, ErrorKind,
@@ -91,6 +90,8 @@ impl Accessor for OpenDalAccessor {
                 version: None,
             },
             offset: 0,
+            sequential: None,
+            pending: opendal::Buffer::new(),
             len,
             chunk_size: self.chunk_size.get(),
             finished: false,
@@ -137,6 +138,8 @@ impl ByteAccessor for OpenDalAccessor {
 
 struct OpenDalReader {
     inner: opendal::Reader,
+    sequential: Option<opendal::BufferStream>,
+    pending: opendal::Buffer,
     metadata: ByteMetadata,
     offset: u64,
     len: u64,
@@ -145,6 +148,49 @@ struct OpenDalReader {
 }
 
 impl OpenDalReader {
+    async fn read_next_chunk(&mut self) -> Result<Bytes> {
+        let path = self.metadata.source.as_ref().unwrap().locator();
+        if self.sequential.is_none() {
+            self.sequential = Some(
+                self.inner
+                    .clone()
+                    .into_stream(0..self.len)
+                    .await
+                    .map_err(|error| map_error("read", path, error))?,
+            );
+        }
+        let target = (self.len - self.offset).min(self.chunk_size as u64) as usize;
+        let mut output = Vec::new();
+        let mut written = 0;
+        while written < target {
+            while self.pending.is_empty() {
+                let Some(buffer) = self
+                    .sequential
+                    .as_mut()
+                    .unwrap()
+                    .try_next()
+                    .await
+                    .map_err(|error| map_error("read", path, error))?
+                else {
+                    return Err(short_read("read"));
+                };
+                if buffer.len() as u64 > self.len - self.offset {
+                    return Err(Error::new(
+                        ErrorKind::Io,
+                        "read",
+                        "input exceeded its declared length",
+                    ));
+                }
+                self.pending = buffer;
+            }
+            let count = (target - written).min(self.pending.len());
+            output.extend(self.pending.split_to(count));
+            self.offset += count as u64;
+            written += count;
+        }
+        Ok(opendal::Buffer::from(output).to_bytes())
+    }
+
     fn validate_range(&self, range: &Range<u64>) -> Result<()> {
         if range.start > range.end || range.end > self.len {
             return Err(Error::new(
@@ -159,7 +205,7 @@ impl OpenDalReader {
         Ok(())
     }
 
-    async fn read_exact_range(&self, range: Range<u64>) -> Result<Bytes> {
+    async fn read_exact_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         self.validate_range(&range)?;
         if range.is_empty() {
             return Ok(Bytes::new());
@@ -198,7 +244,7 @@ impl OpenDalReader {
         Ok(buffer.to_bytes())
     }
 
-    async fn fetch_ranges(&self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+    async fn fetch_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
         let lengths = ranges
             .iter()
             .map(|range| range.end - range.start)
@@ -243,19 +289,16 @@ impl Reader for OpenDalReader {
     async fn next(&mut self) -> Result<Option<Bytes>> {
         if self.finished || self.offset == self.len {
             self.finished = true;
+            self.sequential = None;
+            self.pending = opendal::Buffer::new();
             return Ok(None);
         }
-        let end = self
-            .offset
-            .saturating_add(self.chunk_size as u64)
-            .min(self.len);
-        match self.read_exact_range(self.offset..end).await {
-            Ok(bytes) => {
-                self.offset = end;
-                Ok(Some(bytes))
-            }
+        match self.read_next_chunk().await {
+            Ok(bytes) => Ok(Some(bytes)),
             Err(error) => {
                 self.finished = true;
+                self.sequential = None;
+                self.pending = opendal::Buffer::new();
                 Err(error)
             }
         }

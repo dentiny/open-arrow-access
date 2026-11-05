@@ -274,6 +274,72 @@ async fn ranges_preserve_order_options_metadata_and_sequential_cursor() {
 }
 
 #[tokio::test]
+async fn sequential_output_chunks_reuse_io_requests_and_leave_ranges_independent() {
+    let bytes = Bytes::from_static(b"abcdefghijklmnop");
+    let hub = MockHub::with_files([("data/bytes.bin".to_owned(), bytes.clone())]);
+    let accessor = hub.accessor().with_chunk_size(NonZeroUsize::MIN);
+    let mut reader = accessor
+        .open(
+            ByteReadRequest::new("bytes.bin").with_options(ByteReadOptions {
+                io_chunk_size: NonZeroUsize::new(4),
+                ..ByteReadOptions::default()
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"a");
+    assert_eq!(reader.read_range(12..14).await.unwrap().as_ref(), b"mn");
+    let mut output = b"a".to_vec();
+    while let Some(chunk) = reader.next().await.unwrap() {
+        assert_eq!(chunk.len(), 1);
+        output.extend_from_slice(&chunk);
+    }
+    assert_eq!(output, bytes);
+    let requests = hub.captured();
+    let ranges: Vec<_> = requests.iter().filter_map(|r| r.range.as_deref()).collect();
+    assert_eq!(
+        ranges.len(),
+        5,
+        "four sequential requests plus the independent range"
+    );
+    for range in [
+        "bytes=0-3",
+        "bytes=4-7",
+        "bytes=8-11",
+        "bytes=12-15",
+        "bytes=12-13",
+    ] {
+        assert!(ranges.contains(&range));
+    }
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(hub.captured().len(), requests.len());
+}
+
+#[tokio::test]
+async fn dropping_a_sequential_stream_stops_prefetch() {
+    let hub = MockHub::with_files([("data/bytes.bin".to_owned(), Bytes::from(vec![b'a'; 128]))]);
+    let accessor = hub.accessor().with_chunk_size(NonZeroUsize::MIN);
+    let mut reader = accessor
+        .open(
+            ByteReadRequest::new("bytes.bin").with_options(ByteReadOptions {
+                io_chunk_size: NonZeroUsize::new(4),
+                io_concurrency: NonZeroUsize::new(4).unwrap(),
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hub.captured().len(), 1, "opening only inspects metadata");
+    assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"a");
+    let before = hub.captured().len();
+    assert!(before < 32);
+    drop(reader);
+    for _ in 0..4 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(hub.captured().len(), before);
+}
+
+#[tokio::test]
 async fn listing_recurses_and_follows_hub_pagination_without_exposing_directories() {
     let hub = MockHub::with_files([
         ("data/a.bin".to_owned(), Bytes::from_static(b"a")),
@@ -360,7 +426,15 @@ async fn missing_denied_and_transport_errors_retain_kind_and_terminate() {
             .kind(),
         ErrorKind::PermissionDenied
     );
-    let mut reader = accessor.open("fail.bin".into()).await.unwrap();
+    let mut reader = accessor
+        .open(
+            ByteReadRequest::new("fail.bin").with_options(ByteReadOptions {
+                io_chunk_size: NonZeroUsize::new(4),
+                ..ByteReadOptions::default()
+            }),
+        )
+        .await
+        .unwrap();
     assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"abcd");
     let error = reader.next().await.err().unwrap();
     assert_eq!(error.kind(), ErrorKind::Io);

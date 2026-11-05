@@ -48,7 +48,10 @@ prefix fails during its metadata check; a file prefix is invalid input.
 `ByteReadOptions` retains per-open I/O concurrency and chunk splitting. Sequential
 output chunk size is independently configurable with `with_chunk_size`. Ranges
 use the existing bounded/coalesced adapter and do not change the sequential
-cursor. Reader lengths refer to stored files; reader capabilities do not claim
+cursor. Sequential reads retain one OpenDAL stream across output chunks, so
+emitting smaller chunks does not create one remote request per output chunk.
+Storage I/O chunk size and concurrency control that stream's reads and staging.
+Reader lengths refer to stored files; reader capabilities do not claim
 listing. Inputs must remain unchanged during a read. Pin a repository commit for
 stable selection; a floating branch such as `main` is not an atomic snapshot,
 and the adapter does not invent an object version.

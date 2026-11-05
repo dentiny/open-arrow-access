@@ -48,6 +48,25 @@ async fn filesystem_rejects_surrounding_whitespace_without_aliasing_files() {
     );
 }
 
+#[tokio::test]
+async fn sequential_reads_report_short_input_and_terminate() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("short.bin");
+    std::fs::write(&path, b"abcdefgh").unwrap();
+    let accessor = FsAccessor::new(dir.path()).await.unwrap();
+    let mut reader = accessor.open("short.bin".into()).await.unwrap();
+    std::fs::write(&path, b"abcd").unwrap();
+    let error = loop {
+        match reader.next().await {
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("short input was accepted as complete"),
+            Err(error) => break error,
+        }
+    };
+    assert_eq!(error.kind(), ErrorKind::Io);
+    assert!(reader.next().await.unwrap().is_none());
+}
+
 #[derive(Debug, Default)]
 struct TaskCounts {
     started: AtomicUsize,
