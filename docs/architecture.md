@@ -1,8 +1,9 @@
 # Framework contracts
 
 The first PR implements the common framework and a single concrete pipeline:
-OpenDAL Fs → Parquet → Arrow. Dataset, service, decompression and production
-layer implementations follow in independent PRs.
+OpenDAL Fs → Parquet → Arrow. The default-off directory dataset adds sequential
+file composition. Services, decompression and production layers follow in
+independent PRs.
 
 ```mermaid
 flowchart TD
@@ -74,8 +75,8 @@ The initial flags cover only operations implemented by this framework:
 Flags describe the **effective interface after composition**, without I/O.
 Transparent layers forward them; wrappers that remove an operation clear its
 flag on both accessor and reader. A future sequential gzip wrapper normally
-clears `read_with_range`. The Fs adapter reports read/ranges but no listing,
-even though OpenDAL itself supports filesystem listing. The Parquet accessor
+clears `read_with_range`. The Fs adapter reports read/ranges and recursive
+file listing through OpenDAL. The Parquet accessor
 reports record reading only when its input supports ranges; neither its output
 reader nor its accessor exposes byte-range operations.
 
@@ -109,13 +110,14 @@ contract without a closed enum of every source or format.
 | Fs storage | `ByteReadRequest` | `dyn ByteReader` |
 | Parquet format | `ReadRequest` | `dyn RecordReader` |
 | Future JSON format | Typed file request | Record reader |
-| Future directory dataset | Directory selection and options | Record reader |
+| Directory/file-set dataset | Directory or explicit ordered file selection and options | Record reader |
 | Future Hugging Face service | Repository/revision/config/split selection | Record reader or resolved object discovery |
 
 `Arc<dyn ByteAccessor>` supports application-owned backend injection. Optional
-`ByteAccessor::list` defaults to Unsupported and is not implemented by the
-initial Fs adapter. The directory PR can add discovery without redesigning
-the opening/reading contract. Input locators remain backend-owned.
+`ByteAccessor::list` defaults to Unsupported. Fs exposes recursive file discovery;
+other byte accessors can supply their own listing implementation. Input locators
+remain backend-owned. [Directory datasets](directory.md) consume those file
+references and compose any shared single-file record accessor.
 
 `ByteReadRequest` carries an `ObjectRef` and `ByteReadOptions`. `io_concurrency`
 defaults to one and `io_chunk_size` defaults to the backend's choice. Record-file
@@ -173,8 +175,9 @@ schema and optional reader-context contracts.
 - The facade forwards independent, additive `storage-fs` / `format-parquet`
   features. Features make implementations available; they do not change runtime
   ordering or silently attach layers.
-- `dataset/`, `service/`, `decompression/`, and `layers/` currently contain only
-  scope/extension documentation; unimplemented capabilities are not registered.
+- `dataset/` provides sequential `FileSetAccessor` and `DirectoryAccessor` behind
+  the default-off `dataset-directory` feature, without depending on a format.
+- `service/`, `decompression/`, and `layers/` remain extension points.
 
 The project output boundary is Arrow records. Internal temporary inputs may be
 introduced for materialization in a later decompression PR; downstream writes,

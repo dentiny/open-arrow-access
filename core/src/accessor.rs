@@ -56,8 +56,7 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
 
 pub type ObjectStream = BoxStream<'static, Result<ObjectRef>>;
 
-/// Optional byte-accessor discovery boundary, reserved for directory/source PRs.
-/// The initial filesystem adapter does not expose directory scans.
+/// Optional byte-accessor discovery boundary for directory and source adapters.
 #[async_trait]
 pub trait ByteAccessor: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> {
     /// Discover object references under an accessor-defined `prefix`.

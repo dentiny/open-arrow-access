@@ -1,0 +1,18 @@
+[package]
+name = "open-arrow-access-dataset"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Sequential file-set and directory datasets for Open Arrow Access"
+
+[features]
+default = []
+directory = []
+
+[dependencies]
+open-arrow-access-core.workspace = true
+futures.workspace = true
+
+[lints]
+workspace = true

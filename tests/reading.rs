@@ -179,10 +179,15 @@ async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
         fs.open("subdir/".into()).await.err().unwrap().kind(),
         ErrorKind::InvalidInput
     );
-    assert!(!fs.capability().list);
-    assert_eq!(
-        fs.list("".into()).await.err().unwrap().kind(),
-        ErrorKind::Unsupported
+    assert!(fs.capability().list);
+    assert!(
+        fs.list("".into())
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap()
+            .is_empty()
     );
     assert!(FsAccessor::new("relative/root").await.is_err());
 }
@@ -340,10 +345,16 @@ async fn one_layer_contract_composes_at_byte_and_record_boundaries_in_known_orde
         .unwrap()
         .layer(layer("inner-byte"))
         .layer(layer("outer-byte"));
-    assert!(!bytes.capability().list);
+    assert!(bytes.capability().list);
     assert_eq!(
-        bytes.list("".into()).await.err().unwrap().kind(),
-        ErrorKind::Unsupported
+        bytes
+            .list("".into())
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap(),
+        vec![ObjectRef::new("data.parquet")]
     );
     let bytes: Arc<dyn ByteAccessor> = Arc::new(bytes);
     assert!(bytes.capability().read_with_range);

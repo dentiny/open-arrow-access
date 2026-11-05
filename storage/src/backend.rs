@@ -2,9 +2,10 @@
 
 use std::{num::NonZeroUsize, ops::Range};
 
+use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error, ErrorKind,
-    Reader, Result, async_trait,
+    Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error,
+    ErrorKind, ObjectRef, ObjectStream, Reader, Result, async_trait,
 };
 use opendal::Operator;
 
@@ -41,11 +42,10 @@ impl Accessor for OpenDalAccessor {
         let upstream = self.operator.info().capability();
         let read = upstream.read && upstream.stat;
         // This adapter requires stat for length and uses OpenDAL's range-read contract.
-        // OpenDAL's listing support is not exposed by this adapter yet.
         Capability {
             read,
             read_with_range: read,
-            ..Capability::default()
+            list: upstream.list && upstream.stat,
         }
     }
 
@@ -91,6 +91,42 @@ impl Accessor for OpenDalAccessor {
             chunk_size: self.chunk_size.get(),
             finished: false,
         }) as Box<dyn ByteReader>)
+    }
+}
+
+#[async_trait]
+impl ByteAccessor for OpenDalAccessor {
+    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
+        let path = prefix.locator();
+        let metadata = self
+            .operator
+            .stat(path)
+            .await
+            .map_err(|e| map_error("list", path, e))?;
+        if !metadata.is_dir() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "list",
+                "prefix is not a directory",
+            ));
+        }
+        let path = if path.is_empty() {
+            String::new()
+        } else {
+            format!("{}/", path.trim_end_matches('/'))
+        };
+        let lister = self
+            .operator
+            .lister_with(&path)
+            .recursive(true)
+            .await
+            .map_err(|e| map_error("list", &path, e))?;
+        Ok(Box::pin(
+            lister
+                .try_filter(|entry| futures::future::ready(entry.metadata().is_file()))
+                .map_ok(|entry| ObjectRef::new(entry.path()))
+                .map_err(move |e| map_error("list", &path, e)),
+        ))
     }
 }
 

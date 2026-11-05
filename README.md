@@ -3,9 +3,9 @@
 Composable dataset access for Apache Arrow. Read diverse formats and storage
 backends into Arrow streams.
 
-Read a local Parquet or CSV/TSV file asynchronously through **OpenDAL's filesystem
-service**. Output is an ordered stream of Arrow record batches. The project ends
-at that read interface.
+Read local Parquet or CSV/TSV files asynchronously through **OpenDAL's filesystem
+service**, individually or as a sequential directory/file-set dataset. Output is
+an ordered stream of Arrow record batches. The project ends at that read interface.
 
 ## Quick start
 
@@ -63,14 +63,14 @@ sequential byte readers and reuses Arrow CSV's incremental decoder. Configure
 `CsvFormat::default().with_header(true)` for headers or `.with_delimiter(b'\t')`
 for TSV.
 
-## Initial scope
+## Supported components
 
 | Component | Implemented |
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
-| `storage/` | OpenDAL Fs, bounded sequential chunks and exact range reads |
+| `storage/` | OpenDAL Fs, recursive file discovery, bounded chunks and exact range reads |
 | `file-format/` | Parquet schema inspection; CSV/TSV with an explicit schema and incremental Arrow decoding |
-| `dataset/` | Reserved; no directory or multi-file scan yet |
+| `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
 | `service/` | Reserved; no Hugging Face or other source adapter yet |
 | `decompression/` | Reserved; no external decompression or archive support yet |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
@@ -79,6 +79,12 @@ Default features are empty. Only implemented capabilities have Cargo feature
 names. Parquet page compression currently supports uncompressed and Snappy
 pages through the Parquet dependency; this does not enable external `.gz`
 decompression. Parallel reads and unordered emission are not implemented.
+
+Enable `dataset-directory` for `DirectoryAccessor` and `FileSetAccessor`. Directory
+selection uses a supplied byte accessor for discovery and a supplied format
+accessor for records. Files are sorted lexicographically; explicit file sets
+retain caller order. Readers open files sequentially and require identical
+projected schemas, including metadata.
 
 ## Extension contracts
 

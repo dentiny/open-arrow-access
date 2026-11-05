@@ -4,8 +4,8 @@ use std::{
 };
 
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, Result,
-    async_trait,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ObjectRef,
+    ObjectStream, Result, async_trait,
 };
 use opendal::{Operator, services::Fs};
 
@@ -17,7 +17,8 @@ use crate::backend::{OpenDalAccessor, map_error};
 /// unchanged while a reader is open. The root is a namespace, not a security
 /// boundary: filesystem symlinks still follow the host's filesystem semantics.
 /// Locators with leading or trailing whitespace are rejected because OpenDAL
-/// trims it, which could select a different file.
+/// trims it, which could select a different file. Listing recursively yields
+/// files in backend order; an empty prefix selects the configured root.
 #[derive(Clone, Debug)]
 pub struct FsAccessor {
     inner: OpenDalAccessor,
@@ -99,4 +100,20 @@ impl Accessor for FsAccessor {
 }
 
 #[async_trait]
-impl ByteAccessor for FsAccessor {}
+impl ByteAccessor for FsAccessor {
+    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
+        let path = prefix.locator();
+        if path.trim() != path
+            || Path::new(path)
+                .components()
+                .any(|c| !matches!(c, Component::Normal(_)))
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "list",
+                "expected a root-relative directory path without surrounding whitespace",
+            ));
+        }
+        self.inner.list(prefix).await
+    }
+}

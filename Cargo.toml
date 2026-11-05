@@ -7,7 +7,7 @@ description = "Composable read access to Apache Arrow streams"
 repository.workspace = true
 
 [workspace]
-members = ["core", "storage", "file-format"]
+members = ["core", "storage", "file-format", "dataset"]
 resolver = "3"
 
 [workspace.package]
@@ -48,13 +48,17 @@ open-arrow-access-core = { path = "core", version = "0.1.0" }
 open-arrow-access-storage = { path = "storage", version = "0.1.0", default-features = false }
 open-arrow-access-file-format = { path = "file-format", version = "0.1.0", default-features = false }
 
+open-arrow-access-dataset = { path = "dataset", version = "0.1.0", default-features = false }
+
 [features]
 default = []
+dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
 
 [dependencies]
+open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 open-arrow-access-storage = { workspace = true, optional = true }
 open-arrow-access-file-format = { workspace = true, optional = true }

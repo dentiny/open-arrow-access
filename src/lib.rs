@@ -17,3 +17,10 @@ pub mod file_format {
     #[cfg(feature = "format-csv")]
     pub use open_arrow_access_file_format::{CsvAccessor, CsvFormat};
 }
+
+#[cfg(feature = "dataset-directory")]
+pub mod dataset {
+    pub use open_arrow_access_dataset::{
+        DirectoryAccessor, DirectoryRequest, FileSetAccessor, FileSetRequest,
+    };
+}
