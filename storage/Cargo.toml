@@ -1,0 +1,22 @@
+[package]
+name = "open-arrow-access-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Storage adapters for Open Arrow Access"
+
+[features]
+default = []
+fs = ["dep:opendal", "dep:tokio", "opendal/services-fs", "opendal/executors-tokio"]
+
+[dependencies]
+open-arrow-access-core.workspace = true
+opendal = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
