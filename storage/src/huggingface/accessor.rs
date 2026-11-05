@@ -83,6 +83,7 @@ impl ByteAccessor for HuggingFaceAccessor {
     /// Discovery follows Hub pagination order, which is not a stable dataset order.
     async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
         validate_path(prefix.locator(), true)?;
+        self.inner.validate_directory(&prefix).await?;
         self.inner.list(prefix).await
     }
 }

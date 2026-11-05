@@ -33,6 +33,24 @@ impl OpenDalAccessor {
         self.chunk_size = chunk_size;
         self
     }
+
+    #[cfg(feature = "huggingface")]
+    pub(crate) async fn validate_directory(&self, prefix: &ObjectRef) -> Result<()> {
+        let path = prefix.locator();
+        let metadata = self
+            .operator
+            .stat(path)
+            .await
+            .map_err(|error| map_error("list", path, error))?;
+        if !metadata.is_dir() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "list",
+                "prefix is not a directory",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -109,18 +127,6 @@ impl ByteAccessor for OpenDalAccessor {
         } else {
             format!("{}/", path.trim_end_matches('/'))
         };
-        let metadata = self
-            .operator
-            .stat(prefix.locator())
-            .await
-            .map_err(|e| map_error("list", &path, e))?;
-        if !metadata.is_dir() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "list",
-                "prefix is not a directory",
-            ));
-        }
         let lister = self
             .operator
             .lister_with(&path)
