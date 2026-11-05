@@ -31,6 +31,7 @@ opendal = "0.59.2"
 # Match the resolved Cargo.lock versions at the Lance revision above.
 # See docs/dependencies.md when updating this baseline.
 arrow-array = "=59.3.0"
+arrow-csv = "=59.3.0"
 arrow-schema = "=59.3.0"
 async-trait = "=0.1.91"
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
@@ -50,6 +51,7 @@ open-arrow-access-file-format = { path = "file-format", version = "0.1.0", defau
 default = []
 storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
+format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
 
 [dependencies]
 open-arrow-access-core.workspace = true

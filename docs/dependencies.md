@@ -23,6 +23,8 @@ Direct workspace dependencies use exact `=` requirements. The committed
 `Cargo.lock` also aligns transitive Arrow and OpenDAL components. For our Fs-only
 OpenDAL service, absent from upstream's selected services, use the same OpenDAL
 release (`0.59.2`). Feature selection remains specific to this project's scope.
+The CSV feature pins `arrow-csv` to the same Arrow release (`59.3.0`), including
+the transitive Arrow Cast and Arrow Ord components in the committed lockfile.
 
 DataFusion is only an unused workspace dependency pin for the later generated
 column layer. It is not built or present in the resolved graph yet. The layer
