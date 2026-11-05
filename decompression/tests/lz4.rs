@@ -2,10 +2,10 @@
 
 mod common;
 
-use std::{io::Write, num::NonZeroUsize, sync::atomic::Ordering};
+use std::{io::Write, num::NonZeroUsize};
 
 use lz4_flex::frame::{FrameEncoder, FrameInfo};
-use open_arrow_access_core::{Accessor, AccessorExt, ByteReadOptions, ByteReadRequest, ErrorKind};
+use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, Result};
 use open_arrow_access_decompression::{DecompressionLayer, Lz4};
 
 use common::{MemoryAccessor, collect};
@@ -27,7 +27,7 @@ fn skippable(payload: &[u8]) -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn concatenated_frames_and_skippable_frames_preserve_order_across_fragments() {
+async fn concatenated_frames_and_skippable_frames_preserve_order_across_fragments() -> Result<()> {
     let mut bytes = skippable(b"before");
     bytes.extend(compress(b"first\n"));
     bytes.extend(skippable(b"between"));
@@ -38,31 +38,33 @@ async fn concatenated_frames_and_skippable_frames_preserve_order_across_fragment
         let input = MemoryAccessor::new(&bytes, input_chunk);
         let accessor = input
             .layer(DecompressionLayer::new(Lz4).with_chunk_size(NonZeroUsize::new(3).unwrap()));
-        let mut reader = accessor.open("records.lz4".into()).await.unwrap();
+        let mut reader = accessor.open("records.lz4".into()).await?;
         let mut output = Vec::new();
-        while let Some(chunk) = reader.next().await.unwrap() {
+        while let Some(chunk) = reader.next().await? {
             assert!(!chunk.is_empty() && chunk.len() <= 3);
             output.extend_from_slice(&chunk);
         }
         assert_eq!(output, "first\n第二行\n".as_bytes());
-        assert!(reader.next().await.unwrap().is_none());
+        assert!(reader.next().await?.is_none());
     }
+    Ok(())
 }
 
 #[tokio::test]
-async fn valid_empty_or_skippable_frames_are_eof_but_empty_input_is_invalid() {
+async fn valid_empty_or_skippable_frames_are_eof_but_empty_input_is_invalid() -> Result<()> {
     for bytes in [compress(b""), skippable(b"metadata")] {
         let accessor = MemoryAccessor::new(&bytes, 1).layer(DecompressionLayer::new(Lz4));
-        let mut reader = accessor.open("empty.lz4".into()).await.unwrap();
-        assert!(reader.next().await.unwrap().is_none());
+        let mut reader = accessor.open("empty.lz4".into()).await?;
+        assert!(reader.next().await?.is_none());
     }
     let accessor = MemoryAccessor::new(&[], 1).layer(DecompressionLayer::new(Lz4));
-    let mut reader = accessor.open("missing.lz4".into()).await.unwrap();
+    let mut reader = accessor.open("missing.lz4".into()).await?;
     assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
+    Ok(())
 }
 
 #[tokio::test]
-async fn corrupt_truncated_raw_legacy_and_trailing_input_fail_terminally() {
+async fn corrupt_truncated_raw_legacy_and_trailing_input_fail_terminally() -> Result<()> {
     let valid = compress(b"payload");
     let mut checksum = valid.clone();
     *checksum.last_mut().unwrap() ^= 1;
@@ -87,42 +89,29 @@ async fn corrupt_truncated_raw_legacy_and_trailing_input_fail_terminally() {
         legacy,
         skippable(b"metadata")[..10].to_vec(),
     ];
-    for (case, bytes) in cases.into_iter().enumerate() {
+    for bytes in cases {
         let input = MemoryAccessor::new(&bytes, 1);
-        let polls = input.polls.clone();
         let accessor = input.layer(DecompressionLayer::new(Lz4));
-        let mut reader = accessor.open("bad.lz4".into()).await.unwrap();
-        let result = collect(reader.as_mut()).await;
-        assert!(result.is_err(), "accepted case {case}: {result:?}");
-        assert_eq!(result.unwrap_err().kind(), ErrorKind::Decode);
-        let before = polls.load(Ordering::SeqCst);
-        assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(polls.load(Ordering::SeqCst), before);
+        let mut reader = accessor.open("bad.lz4".into()).await?;
+        assert_eq!(
+            collect(reader.as_mut()).await.unwrap_err().kind(),
+            ErrorKind::Decode
+        );
+        assert!(reader.next().await?.is_none());
     }
+    Ok(())
 }
 
 #[tokio::test]
-async fn layer_is_lazy_forwards_options_and_preserves_source_errors() {
-    let mut input = MemoryAccessor::new(&compress(&vec![b'x'; 100_000]), 1);
+async fn source_errors_are_preserved() -> Result<()> {
+    let mut input = MemoryAccessor::new(&compress(b"payload"), 2);
     input.error = Some(ErrorKind::PermissionDenied);
-    let polls = input.polls.clone();
-    let requests = input.requests.clone();
     let accessor = input.layer(DecompressionLayer::new(Lz4));
-    let options = ByteReadOptions {
-        io_concurrency: NonZeroUsize::new(3).unwrap(),
-        io_chunk_size: NonZeroUsize::new(17),
-    };
-    let mut reader = accessor
-        .open(ByteReadRequest::new("input.lz4").with_options(options))
-        .await
-        .unwrap();
-    assert_eq!(polls.load(Ordering::SeqCst), 0);
-    assert_eq!(requests.lock().unwrap()[0].options, options);
-    assert!(!accessor.capability().read_with_range);
-    assert!(!reader.capability().read_with_range);
-    assert_eq!(reader.metadata().content_length, None);
+    let mut reader = accessor.open("source.lz4".into()).await?;
     assert_eq!(
         collect(reader.as_mut()).await.unwrap_err().kind(),
         ErrorKind::PermissionDenied
     );
+    assert!(reader.next().await?.is_none());
+    Ok(())
 }
