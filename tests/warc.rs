@@ -227,6 +227,8 @@ async fn byte_budget_cuts_batches_without_splitting_records() {
         record("resource", "a", b"12", ""),
         record("resource", "b", b"34", ""),
         record("resource", "c", b"1234567890", ""),
+        record("resource", "d", b"56", ""),
+        record("resource", "e", b"78", ""),
     ]
     .concat();
     let accessor = WarcAccessor::new(Memory::new(input, 7))
@@ -234,6 +236,7 @@ async fn byte_budget_cuts_batches_without_splitting_records() {
     let mut reader = accessor.open(ReadRequest::new("a.warc")).await.unwrap();
     assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 2);
     assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
+    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 2);
     assert!(reader.next().await.unwrap().is_none());
 }
 

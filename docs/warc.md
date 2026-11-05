@@ -43,7 +43,10 @@ parsing records. Pulling a batch reads physical records through the upstream
 async iterator, validates bodies and terminators, and stops at the requested row
 target or the body-byte target. `with_batch_body_bytes` defaults to 16 MiB; one
 larger record can exceed it. EOF and errors are terminal, and dropping the reader
-leaves no detached producer running.
+leaves no detached producer running. Metadata builders for the next batch use
+the previous completed batch's row count as their initial capacity, instead of
+retaining the full row target in every batch cut short by body bytes. Builders
+can grow again when subsequent records are smaller.
 
 Each record body is buffered once by the parser and transferred into Arrow's
 BinaryView buffers without copying into another body buffer. BinaryView values

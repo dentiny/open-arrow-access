@@ -16,6 +16,7 @@ pub(super) struct WarcReader {
     metadata: RecordMetadata,
     indices: Vec<usize>,
     batch_size: usize,
+    batch_capacity: usize,
     batch_body_bytes: usize,
     finished: bool,
 }
@@ -49,14 +50,18 @@ impl WarcReader {
             metadata,
             indices,
             batch_size,
+            batch_capacity: batch_size,
             batch_body_bytes,
             finished: false,
         }
     }
 
     async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
-        let mut batch =
-            WarcBatch::new(self.metadata.schema.clone(), &self.indices, self.batch_size);
+        let mut batch = WarcBatch::new(
+            self.metadata.schema.clone(),
+            &self.indices,
+            self.batch_capacity,
+        );
         while batch.len < self.batch_size && batch.body_bytes < self.batch_body_bytes {
             match self.records.next().await {
                 Some(Ok((headers, body))) => {
@@ -73,6 +78,7 @@ impl WarcReader {
         if batch.len == 0 {
             return Ok(None);
         }
+        self.batch_capacity = batch.len;
         batch.finish().map(Some)
     }
 }
