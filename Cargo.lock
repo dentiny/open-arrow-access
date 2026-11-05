@@ -1477,8 +1477,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "warc-rs"
-version = "0.2.0"
-source = "git+https://github.com/dentiny/warc-rs?rev=0d52d5f84a1d58d551f2613556b58ea125ecb29b#0d52d5f84a1d58d551f2613556b58ea125ecb29b"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6203d2cb086b0a3882fc2a0d064305f279cea792cec0fb28f558bc86e044fc03"
 dependencies = [
  "chrono",
  "futures-util",

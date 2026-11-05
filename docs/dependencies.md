@@ -43,7 +43,7 @@ must inherit it through `workspace = true`; do not import types through Lance.
 The recorded SHA is a version reference, not a Git dependency on Lance. Builds
 do not query upstream or automatically change dependency versions.
 
-The optional WARC format reuses `dentiny/warc-rs` at immutable revision
-`0d52d5f84a1d58d551f2613556b58ea125ecb29b`, with its storage and gzip defaults
-disabled. This revision makes OpenDAL optional for parser-only consumers; the
-framework retains its single aligned OpenDAL `0.59.2` dependency family.
+The optional WARC format reuses the published `warc-rs =0.3.0` crate from
+`dentiny/warc-rs`, with default features disabled. Its optional storage and GZIP
+dependencies are not enabled for parser-only use; the framework retains its
+single aligned OpenDAL `0.59.2` dependency family. No Git dependency is required.

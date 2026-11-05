@@ -8,11 +8,11 @@ per-open byte I/O options use the existing request fields.
 
 The adapter reuses the asynchronous parser from
 [dentiny/warc-rs](https://github.com/dentiny/warc-rs), with no custom framing or
-parser task. The immutable Git dependency includes
-[the optional-storage change](https://github.com/dentiny/warc-rs/pull/28), which
-lets callers use their own asynchronous streams without introducing a second
-OpenDAL version. The existing Lance-aligned Arrow/Parquet/OpenDAL pins stay
-unchanged. Replace the Git pin with a compatible published release once available.
+parser task. The published `warc-rs =0.3.0` dependency has default features
+disabled, using its parser without the optional storage or GZIP dependencies.
+This lets callers supply their own asynchronous streams without introducing a
+second OpenDAL version. The existing Lance-aligned Arrow/Parquet/OpenDAL pins
+stay unchanged. See [warc-rs 0.3.0](https://crates.io/crates/warc-rs/0.3.0).
 
 ## Representation
 
