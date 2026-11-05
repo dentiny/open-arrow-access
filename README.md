@@ -109,6 +109,7 @@ Byte accessors accept `ByteReadRequest`, which carries an `ObjectRef` and
 `read_ranges` preserves request order and has a sequential fallback for custom
 readers; the OpenDAL backend uses batched fetches. Byte layers can delegate the
 bulk method or use its fallback to intercept each individual range.
+Adjacent and overlapping ranges are coalesced; unrequested gaps are not read.
 
 Third-party crates can implement these public contracts directly. A format
 does not receive an OpenDAL operator or switch on storage schemes. Shared

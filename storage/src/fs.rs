@@ -16,6 +16,8 @@ use crate::backend::{OpenDalAccessor, map_error};
 /// Object locators are relative to an absolute root. Files are expected to remain
 /// unchanged while a reader is open. The root is a namespace, not a security
 /// boundary: filesystem symlinks still follow the host's filesystem semantics.
+/// Locators with leading or trailing whitespace are rejected because OpenDAL
+/// trims it, which could select a different file.
 #[derive(Clone, Debug)]
 pub struct FsAccessor {
     inner: OpenDalAccessor,
@@ -81,6 +83,7 @@ impl Accessor for FsAccessor {
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let path = request.object.locator();
         if path.is_empty()
+            || path.trim() != path
             || Path::new(path)
                 .components()
                 .any(|c| !matches!(c, Component::Normal(_)))
@@ -88,7 +91,7 @@ impl Accessor for FsAccessor {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "open",
-                "expected a nonempty root-relative object path",
+                "expected a nonempty root-relative object path without leading or trailing whitespace",
             ));
         }
         self.inner.open(request).await

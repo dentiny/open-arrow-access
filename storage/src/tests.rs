@@ -3,17 +3,52 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest};
+use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest, ErrorKind};
 use opendal::{
     Execute, Executor, OperationContext, Operator,
     raw::{BoxedStaticFuture, Layer, Servicer},
     services::Fs,
 };
 
-use crate::backend::OpenDalAccessor;
+use crate::{FsAccessor, backend::OpenDalAccessor};
+
+#[tokio::test]
+async fn filesystem_rejects_surrounding_whitespace_without_aliasing_files() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("data.bin"), b"other file").unwrap();
+    let locators = [
+        " data.bin",
+        "data.bin ",
+        " data.bin ",
+        "\tdata.bin\n",
+        "\u{a0}data.bin\u{a0}",
+    ];
+    for locator in locators {
+        std::fs::write(dir.path().join(locator), b"requested file").unwrap();
+    }
+    std::fs::write(dir.path().join("data file.bin"), b"internal space").unwrap();
+    let accessor = FsAccessor::new(dir.path()).await.unwrap();
+
+    for locator in locators {
+        let error = accessor.open(locator.into()).await.err().unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput, "{locator:?}");
+        assert_eq!(error.operation(), "open");
+    }
+    let mut reader = accessor.open("data.bin".into()).await.unwrap();
+    assert_eq!(
+        reader.next().await.unwrap().unwrap().as_ref(),
+        b"other file"
+    );
+    let mut reader = accessor.open("data file.bin".into()).await.unwrap();
+    assert_eq!(
+        reader.next().await.unwrap().unwrap().as_ref(),
+        b"internal space"
+    );
+}
 
 #[derive(Debug, Default)]
 struct TaskCounts {
+    started: AtomicUsize,
     active: AtomicUsize,
     peak: AtomicUsize,
 }
@@ -33,6 +68,7 @@ struct CountingExecutor {
 
 impl Execute for CountingExecutor {
     fn execute(&self, future: BoxedStaticFuture<()>) {
+        self.counts.started.fetch_add(1, Ordering::SeqCst);
         let counts = self.counts.clone();
         self.inner.execute(Box::pin(async move {
             let active = counts.active.fetch_add(1, Ordering::SeqCst) + 1;
@@ -55,6 +91,60 @@ impl Layer for CountTasksLayer {
             counts: self.0.clone(),
         }))
     }
+}
+
+#[tokio::test]
+async fn filesystem_bulk_reads_do_not_merge_across_unrequested_gaps() {
+    let dir = tempfile::tempdir().unwrap();
+    let middle = 512 * 1024;
+    let end = 1024 * 1024;
+    let mut contents = vec![b'.'; end + 2];
+    contents[..2].copy_from_slice(b"ab");
+    contents[middle..middle + 2].copy_from_slice(b"cd");
+    contents[end..end + 2].copy_from_slice(b"ef");
+    std::fs::write(dir.path().join("data.bin"), &contents).unwrap();
+    let counts = Arc::new(TaskCounts::default());
+    let operator = Operator::new(Fs::default().root(dir.path().to_str().unwrap()))
+        .unwrap()
+        .layer(CountTasksLayer(counts.clone()));
+    let accessor = OpenDalAccessor::new(operator);
+    let mut reader = accessor
+        .open(
+            ByteReadRequest::new("data.bin").with_options(ByteReadOptions {
+                io_concurrency: std::num::NonZeroUsize::new(4).unwrap(),
+                ..ByteReadOptions::default()
+            }),
+        )
+        .await
+        .unwrap();
+    let buffers = reader
+        .read_ranges(vec![
+            middle as u64..middle as u64 + 2,
+            0..1,
+            end as u64..end as u64 + 2,
+            1..2,
+            0..2,
+            0..0,
+        ])
+        .await
+        .unwrap();
+    assert_eq!(
+        buffers
+            .iter()
+            .map(|buffer| buffer.as_ref())
+            .collect::<Vec<_>>(),
+        vec![
+            &b"cd"[..],
+            &b"a"[..],
+            &b"ef"[..],
+            &b"b"[..],
+            &b"ab"[..],
+            &b""[..]
+        ]
+    );
+    // With no I/O splitting, each disjoint range uses one backend task. Nearby
+    // ranges must stay separate while adjacent/overlapping ranges still merge.
+    assert_eq!(counts.started.load(Ordering::SeqCst), 3);
 }
 
 #[tokio::test]

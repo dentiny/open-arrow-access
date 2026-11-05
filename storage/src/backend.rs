@@ -63,11 +63,14 @@ impl Accessor for OpenDalAccessor {
             ));
         }
         let len = metadata.content_length();
+        // Preserve projection savings: coalesce adjacent/overlapping ranges,
+        // without reading unrequested bytes between separated ranges.
         let mut builder = self
             .operator
             .reader_with(path)
             .content_length_hint(len)
-            .concurrent(options.io_concurrency.get());
+            .concurrent(options.io_concurrency.get())
+            .gap(0);
         if let Some(chunk_size) = options.io_chunk_size {
             builder = builder.chunk(chunk_size.get());
         }
