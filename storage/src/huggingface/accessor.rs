@@ -65,9 +65,11 @@ impl Accessor for HuggingFaceAccessor {
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
+        let inner = self.inner.capability();
         Capability {
+            read: inner.read,
+            read_with_range: inner.read_with_range,
             list: true,
-            ..self.inner.capability()
         }
     }
 
