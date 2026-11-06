@@ -12,7 +12,6 @@ pub(super) struct FileSetReader<A> {
     options: ReadOptions,
     byte_options: ByteReadOptions,
     metadata: RecordMetadata,
-    finished: bool,
 }
 
 impl<A> FileSetReader<A> {
@@ -31,7 +30,6 @@ impl<A> FileSetReader<A> {
             options,
             byte_options,
             metadata,
-            finished: false,
         }
     }
 }
@@ -88,12 +86,11 @@ where
     }
 
     async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.finished {
+        if self.current.is_none() {
             return Ok(None);
         }
         let result = self.read_batch().await;
         if !matches!(result, Ok(Some(_))) {
-            self.finished = true;
             self.current = None;
         }
         result
