@@ -19,3 +19,8 @@ pub use csv::{CsvAccessor, CsvFormat};
 mod xml;
 #[cfg(feature = "xml")]
 pub use xml::{NamespaceBinding, XmlAccessor, XmlField, XmlInferenceOptions, XmlLimits, XmlSchema};
+
+#[cfg(feature = "atif")]
+mod atif;
+#[cfg(feature = "atif")]
+pub use atif::{AtifAccessor, AtifFormat};

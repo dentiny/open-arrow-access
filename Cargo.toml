@@ -35,6 +35,7 @@ arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
 xml-arrow = "0.2.0"
+atif-arrow = { git = "https://github.com/dentiny/atif-arrow", rev = "06261086691e10578f12138cebc0d873d0857f3a" }
 async-trait = "0.1.91"
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
 datafusion = { version = "55.2.0", default-features = false }
@@ -60,6 +61,7 @@ dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset
 storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
+format-atif = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/atif"]
 format-xml = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/xml"]
 format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
 decompression-gzip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip"]
@@ -106,3 +108,11 @@ workspace = true
 [[example]]
 name = "read_xml"
 required-features = ["storage-fs", "format-xml"]
+
+[[example]]
+name = "read_atif"
+required-features = ["storage-fs", "format-atif"]
+
+[[test]]
+name = "atif"
+required-features = ["format-atif", "storage-fs", "dataset-directory", "decompression-gzip"]

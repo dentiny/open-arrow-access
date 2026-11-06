@@ -1,6 +1,7 @@
 //! Composable, asynchronous read access to Arrow record batches.
 //!
-//! Enable a storage feature and a `format-parquet`, `format-json`, `format-csv`, or `format-xml` reader.
+//! Enable a storage feature and a `format-parquet`, `format-json`, `format-csv`,
+//! `format-xml`, or `format-atif` reader.
 //! The default build exposes only the shared extension contracts.
 
 pub use open_arrow_access_core::*;
@@ -34,13 +35,16 @@ pub mod storage {
     feature = "format-parquet",
     feature = "format-json",
     feature = "format-csv",
-    feature = "format-xml"
+    feature = "format-xml",
+    feature = "format-atif"
 ))]
 pub mod file_format {
     #[cfg(feature = "format-json")]
     pub use open_arrow_access_file_format::JsonAccessor;
     #[cfg(feature = "format-parquet")]
     pub use open_arrow_access_file_format::ParquetAccessor;
+    #[cfg(feature = "format-atif")]
+    pub use open_arrow_access_file_format::{AtifAccessor, AtifFormat};
     #[cfg(feature = "format-csv")]
     pub use open_arrow_access_file_format::{CsvAccessor, CsvFormat};
     #[cfg(feature = "format-xml")]

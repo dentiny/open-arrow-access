@@ -1,0 +1,5 @@
+*.json -text
+*.jsonl -text
+# Intentional CRLF and whitespace-only lines exercise JSONL framing.
+trajectories.jsonl -whitespace
+*.gz binary
