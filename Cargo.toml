@@ -58,6 +58,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 [features]
 default = []
 service-commoncrawl = ["dep:open-arrow-access-service", "open-arrow-access-service/commoncrawl", "storage-opendal"]
+service-commoncrawl-segment = ["service-commoncrawl-warc", "open-arrow-access-service/commoncrawl-segment"]
 service-commoncrawl-warc = ["service-commoncrawl", "open-arrow-access-service/commoncrawl-warc"]
 storage-opendal = ["dep:open-arrow-access-storage"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
@@ -98,6 +99,10 @@ required-features = ["service-commoncrawl"]
 [[test]]
 name = "commoncrawl_warc"
 required-features = ["service-commoncrawl-warc"]
+
+[[test]]
+name = "commoncrawl_segment"
+required-features = ["service-commoncrawl-segment"]
 
 [[test]]
 name = "directory"

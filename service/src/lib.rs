@@ -7,3 +7,6 @@ pub use commoncrawl::{CommonCrawl, create_http_accessor};
 
 #[cfg(feature = "commoncrawl-warc")]
 pub use commoncrawl::{CommonCrawlWarcAccessor, CommonCrawlWarcRequest};
+
+#[cfg(feature = "commoncrawl-segment")]
+pub use commoncrawl::{CommonCrawlSegmentAccessor, CommonCrawlSegmentRequest};

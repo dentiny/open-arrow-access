@@ -11,6 +11,7 @@ default = []
 commoncrawl = ["dep:open-arrow-access-storage", "dep:opendal", "dep:opendal-service-http", "dep:url"]
 
 commoncrawl-warc = ["commoncrawl", "dep:open-arrow-access-dataset"]
+commoncrawl-segment = ["commoncrawl-warc"]
 
 [dependencies]
 open-arrow-access-core.workspace = true

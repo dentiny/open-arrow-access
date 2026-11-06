@@ -9,3 +9,8 @@ pub use source::CommonCrawl;
 mod warc;
 #[cfg(feature = "commoncrawl-warc")]
 pub use warc::{CommonCrawlWarcAccessor, CommonCrawlWarcRequest};
+
+#[cfg(feature = "commoncrawl-segment")]
+mod segment;
+#[cfg(feature = "commoncrawl-segment")]
+pub use segment::{CommonCrawlSegmentAccessor, CommonCrawlSegmentRequest};
