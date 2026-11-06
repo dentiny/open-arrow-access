@@ -7,8 +7,6 @@ mod reader;
 
 #[cfg(feature = "gzip")]
 mod gzip;
-#[cfg(feature = "zstd")]
-mod zstd;
 
 pub use accessor::DecompressionAccessor;
 pub use codec::{Codec, CompressedInput, DecodedInput};
@@ -16,5 +14,18 @@ pub use layer::DecompressionLayer;
 
 #[cfg(feature = "gzip")]
 pub use gzip::Gzip;
+
+#[cfg(feature = "bz2")]
+mod bz2;
+#[cfg(feature = "bz2")]
+pub use bz2::Bzip2;
+
+#[cfg(feature = "lz4")]
+mod lz4;
+#[cfg(feature = "lz4")]
+pub use lz4::Lz4;
+
+#[cfg(feature = "zstd")]
+mod zstd;
 #[cfg(feature = "zstd")]
 pub use zstd::Zstd;

@@ -5,10 +5,19 @@
 
 pub use open_arrow_access_core::*;
 
-#[cfg(any(feature = "decompression-gzip", feature = "decompression-zstd"))]
+#[cfg(any(
+    feature = "decompression-gzip",
+    feature = "decompression-bz2",
+    feature = "decompression-lz4",
+    feature = "decompression-zstd"
+))]
 pub mod decompression {
+    #[cfg(feature = "decompression-bz2")]
+    pub use open_arrow_access_decompression::Bzip2;
     #[cfg(feature = "decompression-gzip")]
     pub use open_arrow_access_decompression::Gzip;
+    #[cfg(feature = "decompression-lz4")]
+    pub use open_arrow_access_decompression::Lz4;
     #[cfg(feature = "decompression-zstd")]
     pub use open_arrow_access_decompression::Zstd;
     pub use open_arrow_access_decompression::{

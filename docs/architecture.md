@@ -174,7 +174,8 @@ schema and optional reader-context contracts.
   features. Features make implementations available; they do not change runtime
   ordering or silently attach layers.
 - `decompression/` shares streaming byte adapters across codec modules. Its
-  independent gzip/zstd features use upstream decoders with concatenated members;
+  independent gzip/LZ4/bzip2/Zstandard features use upstream decoders with
+  concatenated frames or members;
   source versions remain upstream identities and decoded lengths are unknown.
 - `format-json` adds an Arrow JSON decoder with a caller-supplied fixed schema.
   It reads whitespace-separated objects, including JSONL, from sequential bytes
