@@ -17,10 +17,11 @@ fs = ["dep:opendal", "dep:tokio", "dep:futures", "opendal/services-fs", "opendal
 [dependencies]
 open-arrow-access-core.workspace = true
 opendal = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["sync"] }
 futures = { workspace = true, optional = true }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["time"] }
 http = "1"
 serde_json = "1"
 arrow-array.workspace = true

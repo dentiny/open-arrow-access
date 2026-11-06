@@ -1,6 +1,6 @@
 //! Shared OpenDAL byte access. New backend constructors reuse this implementation.
 
-use std::{num::NonZeroUsize, ops::Range};
+use std::{num::NonZeroUsize, ops::Range, sync::Arc};
 
 use futures::TryStreamExt;
 use open_arrow_access_core::{
@@ -9,7 +9,11 @@ use open_arrow_access_core::{
 };
 #[cfg(feature = "huggingface")]
 use open_arrow_access_core::{ByteAccessor, ObjectRef, ObjectStream};
-use opendal::Operator;
+use opendal::{
+    Execute, Executor, OperationContext, Operator,
+    raw::{BoxedStaticFuture, Layer, Servicer},
+};
+use tokio::sync::Semaphore;
 
 const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
 const DEFAULT_IO_CHUNK_SIZE: usize = 2 * 1024 * 1024;
@@ -86,10 +90,16 @@ impl Accessor for OpenDalAccessor {
             ));
         }
         let len = metadata.content_length();
+        // OpenDAL gives each stream/fetch its own task queue. Share a budget
+        // across those queues so retained sequential prefetch cannot multiply
+        // the reader's I/O concurrency when a range read is interleaved.
+        let mut operator = self.operator.clone();
+        if options.io_concurrency.get() > 1 {
+            operator = operator.layer(ReaderBudget(options.io_concurrency.get()));
+        }
         // Preserve projection savings: coalesce adjacent/overlapping ranges,
         // without reading unrequested bytes between separated ranges.
-        let builder = self
-            .operator
+        let builder = operator
             .reader_with(path)
             .content_length_hint(len)
             .concurrent(options.io_concurrency.get())
@@ -142,6 +152,41 @@ impl ByteAccessor for OpenDalAccessor {
     }
 }
 
+#[derive(Debug)]
+struct ReaderBudget(usize);
+
+impl Layer for ReaderBudget {
+    fn apply_context(&self, _: Servicer, context: OperationContext) -> OperationContext {
+        let executor = Executor::with(ReaderExecutor {
+            inner: context.executor().clone().into_inner(),
+            permits: Arc::new(Semaphore::new(self.0)),
+        });
+        context.with_executor(executor)
+    }
+}
+
+struct ReaderExecutor {
+    inner: Arc<dyn Execute>,
+    permits: Arc<Semaphore>,
+}
+
+impl Execute for ReaderExecutor {
+    fn execute(&self, future: BoxedStaticFuture<()>) {
+        let permits = self.permits.clone();
+        self.inner.execute(Box::pin(async move {
+            let _permit = permits
+                .acquire()
+                .await
+                .expect("reader budget is never closed");
+            future.await;
+        }));
+    }
+
+    fn timeout(&self) -> Option<BoxedStaticFuture<()>> {
+        self.inner.timeout()
+    }
+}
+
 struct OpenDalReader {
     inner: opendal::Reader,
     sequential: Option<opendal::BufferStream>,
@@ -188,6 +233,12 @@ impl OpenDalReader {
                     ));
                 }
                 self.pending = buffer;
+            }
+            // Most output chunks fit in one storage buffer. Keep that path
+            // zero-copy without allocating a vector of fragments.
+            if written == 0 && self.pending.current().len() >= target {
+                self.offset += target as u64;
+                return Ok(self.pending.split_to(target).next().unwrap());
             }
             let count = (target - written).min(self.pending.len());
             output.extend(self.pending.split_to(count));
