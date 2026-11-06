@@ -42,3 +42,12 @@ must inherit it through `workspace = true`; do not import types through Lance.
 
 The recorded SHA is a version reference, not a Git dependency on Lance. Builds
 do not query upstream or automatically change dependency versions.
+
+## XML parser
+
+`format-xml` uses the published [`xml-arrow 0.2.0`](https://crates.io/crates/xml-arrow/0.2.0)
+parser for Arrow 59 compatibility and configuration validation before I/O.
+Its companion `xml-io` storage crate is not used, so storage remains on this
+workspace's OpenDAL 0.59.2 baseline. Arrow family versions remain 59.3.0 in the
+lockfile. The parser uses a normal registry dependency, with the resolved version
+and checksum recorded in Cargo.lock.

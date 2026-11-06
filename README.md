@@ -127,7 +127,7 @@ for TSV.
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
 | `storage/` | OpenDAL Fs, recursive file discovery and reusable generic byte I/O, bounded chunks and exact ranges |
-| `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas and incremental Arrow decoding |
+| `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
 | `service/` | Reserved; no Hugging Face or other source adapter yet |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
@@ -255,3 +255,61 @@ reading, wrapper composition, exact/batched ranges, per-open I/O options,
 bounded backend concurrency, and terminal error/drop behavior.
 Tests may copy fixtures into temporary roots to exercise storage behavior.
 The library exposes no writer or sink API.
+
+## XML
+
+Enable `format-xml` and supply the input accessor and absolute record element path.
+The output schema is inferred automatically:
+
+```rust,no_run
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+use open_arrow_access::{Accessor, ReadRequest, file_format::XmlAccessor, storage::FsAccessor};
+
+let xml = XmlAccessor::new(FsAccessor::new(std::env::current_dir()?.join("testdata/xml")).await?, "/inventory/warehouse");
+let mut reader = xml.open(ReadRequest::new("inventory.xml")).await?;
+while let Some(batch) = reader.next().await? { /* consume batch */ }
+# Ok(())
+# }
+```
+
+Each `open` samples at most 128 records and 8 MiB of serialized XML by default,
+fixes the schema, then replays sampled records before continuing the same stream.
+Configure these bounds with `with_inference_options(XmlInferenceOptions { .. })`.
+Opening an inferred reader performs input I/O; sampling errors are returned by
+`open`. Attributes become `@name` columns, repeated elements become lists, and
+nested elements become structs. Fields absent from the sample are not added
+later; later values incompatible with inferred types produce a terminal error.
+Schemas are inferred independently for each opened file.
+
+Explicit mappings remain available through `.with_schema(schema)` when column
+names or types must be fixed by the caller. For inference with namespace-prefixed
+record paths, use `.with_namespaces(&[NamespaceBinding { prefix, uri }])`;
+explicit schemas carry their own namespace bindings. Namespace URIs in inferred
+fields use the supplied prefixes, with generated prefixes for other namespaces.
+
+`XmlField::structure`, `XmlField::list`, and URI-based `NamespaceBinding` mappings
+support nested records and namespaces. Paths select direct children, terminal
+attributes (`@id`), or direct scalar text (`.`); they are not XPath. Unprefixed
+paths select elements with no namespace. Types are Utf8, Boolean, Int64, finite
+Float64, Struct and List. Missing nullable elements and `xsi:nil` map to null;
+empty strings and empty lists remain distinct. Mixed text and child elements
+cannot be mapped to scalar/struct/list fields as rich text.
+
+The shared `ReadRequest` controls row targets, projection in caller order
+(including zero columns), and byte I/O options. The schema is fixed across batches.
+`XmlLimits` defaults to 8 MiB per record/event, 64 MiB of serialized records per
+batch, and depth 128. These are XML limits, not a bound on total Arrow memory;
+one lookahead record and an upstream byte chunk may also remain buffered.
+Skipped content is only tokenized by quick-xml and remains subject to event/depth
+limits; attribute/entity errors outside selected records may go unreported. Inputs
+must be UTF-8; DTDs and custom entities are rejected. Errors are terminal.
+
+External compression remains independent: compose `XmlAccessor` over an accessor
+with `DecompressionLayer::new(Gzip)` for `.xml.gz`. FileSet and directory reading
+reuse the same format accessor and preserve file/record order. No format
+auto-detection, index or parallel scheduler is added by this adapter.
+With explicit mappings, projection avoids conversion of omitted fields. In
+inference mode, projection names are resolved after sampling and output columns
+are selected after conversion. Selected records are read and parsed in full in
+both modes. Run the example on the project-authored inventory fixture with
+`cargo run --features storage-fs,format-xml --example read_xml`.
