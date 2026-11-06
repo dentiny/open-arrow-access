@@ -233,9 +233,11 @@ pub fn fixture_path(manifest_dir: impl AsRef<Path>, format: &str, name: &str) ->
 }
 
 /// Read a committed fixture, reporting its full path if reading fails.
-pub fn read_fixture(manifest_dir: impl AsRef<Path>, format: &str, name: &str) -> Vec<u8> {
+pub async fn read_fixture(manifest_dir: impl AsRef<Path>, format: &str, name: &str) -> Vec<u8> {
     let path = fixture_path(manifest_dir, format, name);
-    std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+    tokio::fs::read(&path)
+        .await
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
 /// Read `testdata/<format>/<name>` from the calling crate's workspace.

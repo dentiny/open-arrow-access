@@ -17,7 +17,7 @@ async fn members_preserve_order_and_output_chunk_limit() -> Result<()> {
         ("good_multi_member.gz", "first第二行".as_bytes()),
         ("empty_member.gz", &b""[..]),
     ] {
-        let input = fixture!("gzip", name);
+        let input = fixture!("gzip", name).await;
         let accessor = MemoryAccessor::new(&input, 1)
             .layer(DecompressionLayer::new(Gzip).with_chunk_size(NonZeroUsize::new(3).unwrap()));
         let mut reader = accessor.open("data.gz".into()).await?;
@@ -39,7 +39,7 @@ async fn layer_preserves_metadata_options_and_listing_but_removes_ranges() -> Re
         io_concurrency: NonZeroUsize::new(4).unwrap(),
         io_chunk_size: NonZeroUsize::new(17),
     };
-    let input = MemoryAccessor::new(&fixture!("gzip", "payload.gz"), 2)
+    let input = MemoryAccessor::new(&fixture!("gzip", "payload.gz").await, 2)
         .with_ranges()
         .with_listing()
         .with_version("source-version");
@@ -84,7 +84,7 @@ async fn invalid_gzip_is_terminal() -> Result<()> {
         "bad_trailing.gz",
         "bad_truncated_member.gz",
     ] {
-        let bytes = fixture!("gzip", name);
+        let bytes = fixture!("gzip", name).await;
         let input = MemoryAccessor::new(&bytes, 2);
         let observed = input.observations.clone();
         let accessor = input.layer(DecompressionLayer::new(Gzip));
@@ -120,7 +120,7 @@ async fn source_errors_are_lazy_and_preserved() -> Result<()> {
 
 #[tokio::test]
 async fn reading_does_not_decode_the_whole_input() -> Result<()> {
-    let bytes = fixture!("gzip", "bad_late_member.gz");
+    let bytes = fixture!("gzip", "bad_late_member.gz").await;
     let accessor = MemoryAccessor::new(&bytes, 1)
         .layer(DecompressionLayer::new(Gzip).with_chunk_size(NonZeroUsize::MIN));
     let mut reader = accessor.open("partial.gz".into()).await?;
@@ -134,7 +134,7 @@ async fn reading_does_not_decode_the_whole_input() -> Result<()> {
 
 #[tokio::test]
 async fn nested_layers_and_readers_have_independent_state() -> Result<()> {
-    let accessor = MemoryAccessor::new(&fixture!("gzip", "nested.gz.gz"), 2)
+    let accessor = MemoryAccessor::new(&fixture!("gzip", "nested.gz.gz").await, 2)
         .layer(DecompressionLayer::new(Gzip))
         .layer(DecompressionLayer::new(Gzip));
     let mut first = accessor.open("nested.gz.gz".into()).await?;
@@ -148,7 +148,7 @@ async fn nested_layers_and_readers_have_independent_state() -> Result<()> {
 async fn error_codes_sources_and_terminal_state_follow_the_byte_contract() -> Result<()> {
     byte_layer::assert_error_contract(
         |input| input.layer(DecompressionLayer::new(Gzip)),
-        &fixture!("gzip", "payload.gz"),
+        &fixture!("gzip", "payload.gz").await,
         b"payload",
         "decompress",
     )

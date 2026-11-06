@@ -34,7 +34,7 @@ async fn filesystem_initialization_is_lazy_and_send() {
 #[tokio::test]
 async fn local_parquet_preserves_values_nulls_and_order_across_row_groups() {
     for compression in [Compression::UNCOMPRESSED, Compression::SNAPPY] {
-        let fixture = fixture(compression);
+        let fixture = fixture(compression).await;
         let accessor = ParquetAccessor::new(FsAccessor::new(fixture.dir.path()).await.unwrap());
         let mut reader = accessor
             .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
@@ -79,7 +79,7 @@ async fn local_parquet_preserves_values_nulls_and_order_across_row_groups() {
 
 #[tokio::test]
 async fn projection_honors_requested_field_order_and_schema() {
-    let fixture = fixture(Compression::UNCOMPRESSED);
+    let fixture = fixture(Compression::UNCOMPRESSED).await;
     let accessor = ParquetAccessor::new(FsAccessor::new(fixture.dir.path()).await.unwrap());
     let reader = accessor
         .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
@@ -108,7 +108,7 @@ async fn projection_honors_requested_field_order_and_schema() {
 
 #[tokio::test]
 async fn zero_column_projection_preserves_row_count() {
-    let fixture = fixture(Compression::UNCOMPRESSED);
+    let fixture = fixture(Compression::UNCOMPRESSED).await;
     let accessor = ParquetAccessor::new(FsAccessor::new(fixture.dir.path()).await.unwrap());
     let reader = accessor
         .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
@@ -125,7 +125,7 @@ async fn zero_column_projection_preserves_row_count() {
 
 #[tokio::test]
 async fn projection_rejects_unknown_and_duplicate_fields() {
-    let fixture = fixture(Compression::UNCOMPRESSED);
+    let fixture = fixture(Compression::UNCOMPRESSED).await;
     let accessor = ParquetAccessor::new(FsAccessor::new(fixture.dir.path()).await.unwrap());
     for columns in [vec!["missing".into()], vec!["id".into(), "id".into()]] {
         let result = accessor
@@ -141,7 +141,9 @@ async fn projection_rejects_unknown_and_duplicate_fields() {
 #[tokio::test]
 async fn byte_reader_has_bounded_chunks_and_independent_range_cursor() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("data.bin"), b"abcdefghij").unwrap();
+    tokio::fs::write(dir.path().join("data.bin"), b"abcdefghij")
+        .await
+        .unwrap();
     let fs = FsAccessor::new(dir.path())
         .await
         .unwrap()
@@ -174,7 +176,9 @@ async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
         let error = fs.open(locator.into()).await.err().unwrap();
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
     }
-    std::fs::create_dir(dir.path().join("subdir")).unwrap();
+    tokio::fs::create_dir(dir.path().join("subdir"))
+        .await
+        .unwrap();
     assert_eq!(
         fs.open("subdir/".into()).await.err().unwrap().kind(),
         ErrorKind::InvalidInput
@@ -192,7 +196,9 @@ async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
 #[tokio::test]
 async fn empty_file_and_invalid_ranges_have_explicit_behavior() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("empty"), []).unwrap();
+    tokio::fs::write(dir.path().join("empty"), [])
+        .await
+        .unwrap();
     let fs = FsAccessor::new(dir.path()).await.unwrap();
     let mut reader = fs.open("empty".into()).await.unwrap();
     assert!(reader.next().await.unwrap().is_none());
@@ -222,8 +228,10 @@ async fn malformed_parquet_returns_contextual_decode_error() {
 
 #[tokio::test]
 async fn parquet_accepts_third_party_accessor_and_rejects_sequential_only_input() {
-    let fixture = fixture(Compression::UNCOMPRESSED);
-    let bytes = std::fs::read(fixture.dir.path().join("data.parquet")).unwrap();
+    let fixture = fixture(Compression::UNCOMPRESSED).await;
+    let bytes = tokio::fs::read(fixture.dir.path().join("data.parquet"))
+        .await
+        .unwrap();
     let accessor = ParquetAccessor::new(MemoryAccessor::new(&bytes, usize::MAX).with_ranges());
     let reader = accessor
         .open(ReadRequest::new("opaque:fixture"))
@@ -248,7 +256,7 @@ async fn parquet_accepts_third_party_accessor_and_rejects_sequential_only_input(
 
 #[tokio::test]
 async fn dropping_reader_does_not_start_background_reads_and_errors_are_terminal() {
-    let fixture = fixture(Compression::UNCOMPRESSED);
+    let fixture = fixture(Compression::UNCOMPRESSED).await;
     let observations = Arc::new(Observations::default());
     let byte_accessor = FsAccessor::new(fixture.dir.path())
         .await
@@ -334,7 +342,7 @@ impl<A: ByteAccessor> ByteAccessor for OpenObserverAccessor<A> {
 
 #[tokio::test]
 async fn one_layer_contract_composes_at_byte_and_record_boundaries_in_known_order() {
-    let fixture = fixture(Compression::UNCOMPRESSED);
+    let fixture = fixture(Compression::UNCOMPRESSED).await;
     let events = Arc::new(Mutex::new(Vec::new()));
     let layer = |label| OpenObserverLayer {
         label,
@@ -374,7 +382,7 @@ async fn one_layer_contract_composes_at_byte_and_record_boundaries_in_known_orde
 
 #[tokio::test]
 async fn capability_downgrade_matches_operations_and_blocks_parquet() {
-    let fixture = fixture(Compression::UNCOMPRESSED);
+    let fixture = fixture(Compression::UNCOMPRESSED).await;
     let fs = FsAccessor::new(fixture.dir.path()).await.unwrap();
     assert!(fs.capability().read_with_range);
     let bytes = fs.layer(SequentialLayer);
@@ -460,7 +468,9 @@ async fn listing_capability_survives_transparent_layer_and_shared_accessor() {
 #[tokio::test]
 async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("data.bin"), b"abcdefghij").unwrap();
+    tokio::fs::write(dir.path().join("data.bin"), b"abcdefghij")
+        .await
+        .unwrap();
     let fs = FsAccessor::new(dir.path())
         .await
         .unwrap()
@@ -526,7 +536,7 @@ async fn third_party_byte_reader_uses_the_bulk_range_fallback() {
 
 #[tokio::test]
 async fn parquet_forwards_per_open_io_options_and_uses_bulk_ranges_through_layers() {
-    let fixture = fixture(Compression::UNCOMPRESSED);
+    let fixture = fixture(Compression::UNCOMPRESSED).await;
     let observations = Arc::new(Observations::default());
     let bytes = FsAccessor::new(fixture.dir.path())
         .await
@@ -577,7 +587,7 @@ async fn parquet_preserves_source_error_categories_during_inspection_and_decodin
         ErrorKind::Decode,
     ] {
         for inspect in [true, false] {
-            let fixture = fixture(Compression::UNCOMPRESSED);
+            let fixture = fixture(Compression::UNCOMPRESSED).await;
             let observations = Arc::new(Observations::default());
             *observations.failure_kind.lock().unwrap() = Some(kind);
             observations.fail_reads.store(inspect, Ordering::SeqCst);
