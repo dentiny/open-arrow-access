@@ -61,7 +61,7 @@ future file/partition `ParallelReadLayer`. Each opened reader has its own limit.
 Enable `format-csv` for CSV/TSV with an explicit schema. `CsvAccessor` consumes
 sequential byte readers and reuses Arrow CSV's incremental decoder. Configure
 `CsvFormat::default().with_header(true)` for headers or `.with_delimiter(b'\t')`
-for TSV. See [CSV/TSV reading](docs/csv.md) for examples and parsing semantics.
+for TSV.
 
 ## Initial scope
 
