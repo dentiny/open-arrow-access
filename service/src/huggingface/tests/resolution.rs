@@ -1,16 +1,15 @@
-use std::{
-    error::Error as _,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use futures::stream;
 use http::{Request, Response, StatusCode};
-use open_arrow_access_core::{Accessor, Bytes, ErrorKind, ObjectRef, ReadRequest};
+use open_arrow_access_core::{Accessor, Bytes, ErrorKind, ObjectRef, ReadRequest, Result};
 use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext};
-use serde_json::json;
+use serde_json::{Value, json};
 
-use super::support::{MockHub, TOKEN, response};
-use crate::huggingface::{HuggingFaceOptions, HuggingFaceSelection, HuggingFaceService};
+use super::support::{HTTP_ERRORS, MockHub, TOKEN, assert_upstream_error, response};
+use crate::huggingface::{
+    HuggingFaceDataset, HuggingFaceOptions, HuggingFaceSelection, HuggingFaceService,
+};
 
 const COMMIT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -23,16 +22,24 @@ struct MetadataHub {
 }
 
 impl MetadataHub {
-    fn new(info: serde_json::Value) -> Self {
+    fn new(info: Value) -> Self {
+        Self::reply(StatusCode::OK, Bytes::from(info.to_string()))
+    }
+
+    fn reply(status: StatusCode, metadata: Bytes) -> Self {
         Self {
-            metadata: Bytes::from(info.to_string()),
-            status: StatusCode::OK,
+            metadata,
+            status,
             files: MockHub::default(),
             requests: Arc::default(),
         }
     }
 
-    async fn service(&self) -> HuggingFaceService {
+    fn request_count(&self) -> usize {
+        self.requests.lock().unwrap().len()
+    }
+
+    async fn service_with(transport: impl HttpTransport) -> HuggingFaceService {
         let mut service = HuggingFaceService::new(
             HuggingFaceOptions::default()
                 .with_endpoint("https://hub.invalid")
@@ -42,13 +49,21 @@ impl MetadataHub {
         .await
         .unwrap();
         service.context =
-            OperationContext::new().with_http_transport(HttpTransporter::new(self.clone()));
+            OperationContext::new().with_http_transport(HttpTransporter::new(transport));
         service
+    }
+
+    async fn service(&self) -> HuggingFaceService {
+        Self::service_with(self.clone()).await
+    }
+
+    async fn resolve(&self, config: &str, split: &str) -> Result<HuggingFaceDataset> {
+        self.service().await.resolve(selection(config, split)).await
     }
 }
 
 impl HttpTransport for MetadataHub {
-    async fn fetch(&self, mut request: Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
+    async fn fetch(&self, request: Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
         let uri = request.uri().to_string();
         self.requests.lock().unwrap().push(uri.clone());
         assert_eq!(
@@ -60,17 +75,17 @@ impl HttpTransport for MetadataHub {
         }
         assert!(
             uri.contains(COMMIT),
-            "resolved file I/O must use the pinned commit: {uri}"
+            "file I/O must use the resolved commit: {uri}"
         );
-        *request.uri_mut() = uri
-            .replace(COMMIT, "refs%2Fconvert%2Fparquet")
-            .parse()
-            .unwrap();
         self.files.fetch(request).await
     }
 }
 
-fn info(data_files: serde_json::Value) -> serde_json::Value {
+fn selection(config: &str, split: &str) -> HuggingFaceSelection {
+    HuggingFaceSelection::new("owner/example", config, split)
+}
+
+fn info(data_files: Value) -> Value {
     json!({
         "sha": COMMIT,
         "cardData": {"configs": [{"config_name": "subset", "data_dir": "data", "data_files": data_files}]},
@@ -86,28 +101,25 @@ async fn resolves_revision_config_split_globs_and_reads_pinned_parquet() {
     ])));
     let fixture =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/parquet/ids.parquet");
-    hub.files = MockHub::with_files([(
-        "data/b.parquet".into(),
-        Bytes::from(std::fs::read(fixture).unwrap()),
-    )]);
-    let selection = HuggingFaceSelection::new("owner/example", "subset", "train")
-        .with_revision("refs/heads/topic");
-    let dataset = hub.service().await.resolve(selection).await.unwrap();
+    hub.files = MockHub::file("b.parquet", Bytes::from(std::fs::read(fixture).unwrap()));
+    let dataset = hub
+        .service()
+        .await
+        .resolve(selection("subset", "train").with_revision("refs/heads/topic"))
+        .await
+        .unwrap();
     assert_eq!(dataset.commit, COMMIT);
     assert_eq!(
-        dataset
-            .objects
-            .iter()
-            .map(ObjectRef::locator)
-            .collect::<Vec<_>>(),
-        ["data/b.parquet", "data/a.parquet"]
+        dataset.objects,
+        ["data/b.parquet", "data/a.parquet"].map(ObjectRef::from)
     );
     assert!(hub.requests.lock().unwrap()[0].ends_with("/revision/refs%2Fheads%2Ftopic"));
     assert_eq!(
-        hub.requests.lock().unwrap().len(),
+        hub.request_count(),
         1,
         "discovery must not download data files"
     );
+
     let format = open_arrow_access_file_format::ParquetAccessor::new(dataset.accessor);
     let mut reader = format
         .open(ReadRequest::new(dataset.objects[0].clone()))
@@ -130,7 +142,13 @@ async fn resolves_revision_config_split_globs_and_reads_pinned_parquet() {
 
 #[tokio::test]
 async fn string_and_path_list_declarations_select_train_without_guessing() {
-    for declaration in [json!("a.parquet"), json!(["b.parquet", "a.parquet"])] {
+    for (declaration, expected) in [
+        (json!("a.parquet"), vec!["data/a.parquet"]),
+        (
+            json!(["b.parquet", "a.parquet"]),
+            vec!["data/b.parquet", "data/a.parquet"],
+        ),
+    ] {
         let mut metadata = info(declaration);
         metadata["cardData"]["configs"]
             .as_array_mut()
@@ -139,31 +157,26 @@ async fn string_and_path_list_declarations_select_train_without_guessing() {
                 "config_name": "unselected", "data_files": {"custom": "layout"}
             }));
         let hub = MetadataHub::new(metadata);
-        let service = hub.service().await;
-        let dataset = service
-            .resolve(HuggingFaceSelection::new(
-                "owner/example",
-                "subset",
-                "train",
-            ))
-            .await
-            .unwrap();
-        assert!(!dataset.objects.is_empty());
-        let error = service
-            .resolve(HuggingFaceSelection::new("owner/example", "subset", "test"))
-            .await
-            .unwrap_err();
+        let dataset = hub.resolve("subset", "train").await.unwrap();
+        assert_eq!(
+            dataset.objects,
+            expected
+                .into_iter()
+                .map(ObjectRef::from)
+                .collect::<Vec<_>>()
+        );
+        let error = hub.resolve("subset", "test").await.unwrap_err();
         assert_eq!(error.kind(), ErrorKind::NotFound);
     }
 }
 
 #[tokio::test]
 async fn resolves_the_checked_in_official_hub_metadata_fixture() {
-    let fixture = include_str!(concat!(
+    let fixture = Bytes::from_static(include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../testdata/huggingface/doc-yaml-3.json"
-    ));
-    let hub = MetadataHub::new(serde_json::from_str(fixture).unwrap());
+    )));
+    let hub = MetadataHub::reply(StatusCode::OK, fixture);
     let dataset = hub
         .service()
         .await
@@ -176,86 +189,50 @@ async fn resolves_the_checked_in_official_hub_metadata_fixture() {
         .unwrap();
     assert_eq!(dataset.commit, "2bb86c4a45b9e98af9e95d8c1ce76e3b7578218f");
     assert_eq!(
-        dataset
-            .objects
-            .iter()
-            .map(ObjectRef::locator)
-            .collect::<Vec<_>>(),
-        ["data/abc.csv", "data/edf.csv"]
+        dataset.objects,
+        ["data/abc.csv", "data/edf.csv"].map(ObjectRef::from)
     );
 }
 
 #[tokio::test]
 async fn rejects_missing_partial_unsupported_and_malformed_selections() {
-    for (metadata, config, split, expected) in [
-        (
-            info(json!("a.parquet")),
-            "missing",
-            "train",
-            ErrorKind::NotFound,
-        ),
-        (
-            info(json!("a.parquet")),
-            "subset",
-            "test",
-            ErrorKind::NotFound,
-        ),
+    for (config, split) in [("missing", "train"), ("subset", "test")] {
+        let hub = MetadataHub::new(info(json!("a.parquet")));
+        assert_eq!(
+            hub.resolve(config, split).await.unwrap_err().kind(),
+            ErrorKind::NotFound
+        );
+        assert_eq!(hub.request_count(), 1);
+    }
+    for (metadata, expected) in [
         (
             info(json!(["a.parquet", "missing.parquet"])),
-            "subset",
-            "train",
             ErrorKind::NotFound,
         ),
-        (
-            info(json!("../outside.parquet")),
-            "subset",
-            "train",
-            ErrorKind::InvalidInput,
-        ),
-        (info(json!("[bad")), "subset", "train", ErrorKind::Decode),
+        (info(json!("../outside.parquet")), ErrorKind::InvalidInput),
+        (info(json!("[bad")), ErrorKind::Decode),
         (
             info(json!("https://external.invalid/data.parquet")),
-            "subset",
-            "train",
             ErrorKind::Unsupported,
         ),
         (
             json!({"sha":COMMIT,"siblings":[],"cardData":{"configs":[{"config_name":"subset"},{"config_name":"subset"}]}}),
-            "subset",
-            "train",
             ErrorKind::Decode,
         ),
-        (
-            json!({"sha":COMMIT,"siblings":[]}),
-            "subset",
-            "train",
-            ErrorKind::Unsupported,
-        ),
+        (json!({"sha":COMMIT,"siblings":[]}), ErrorKind::Unsupported),
         (
             json!({"sha":COMMIT,"siblings":[],"cardData":{"configs":[{"config_name":"subset","data_dir":"data"}]}}),
-            "subset",
-            "train",
             ErrorKind::Unsupported,
         ),
-        (
-            json!({"sha":"main","siblings":[]}),
-            "subset",
-            "train",
-            ErrorKind::Decode,
-        ),
+        (json!({"sha":"main","siblings":[]}), ErrorKind::Decode),
     ] {
         let hub = MetadataHub::new(metadata);
-        let error = hub
-            .service()
-            .await
-            .resolve(HuggingFaceSelection::new("owner/example", config, split))
-            .await
-            .unwrap_err();
+        let error = hub.resolve("subset", "train").await.unwrap_err();
         assert_eq!(error.kind(), expected, "{error:?}");
         assert_eq!(
-            hub.requests.lock().unwrap().len(),
+            hub.request_count(),
             1,
-            "failed discovery must not read repository files"
+            "failed discovery must not read files"
         );
         assert!(!format!("{error:?}").contains(TOKEN));
     }
@@ -263,48 +240,16 @@ async fn rejects_missing_partial_unsupported_and_malformed_selections() {
 
 #[tokio::test]
 async fn metadata_errors_preserve_categories_and_credentials_are_redacted() {
-    for (status, expected) in [
-        (StatusCode::NOT_FOUND, ErrorKind::NotFound),
-        (StatusCode::UNAUTHORIZED, ErrorKind::PermissionDenied),
-        (StatusCode::FORBIDDEN, ErrorKind::PermissionDenied),
-        (StatusCode::TOO_MANY_REQUESTS, ErrorKind::Io),
-        (StatusCode::INTERNAL_SERVER_ERROR, ErrorKind::Io),
-    ] {
-        let mut hub = MetadataHub::new(json!({}));
-        hub.status = status;
-        let error = hub
-            .service()
-            .await
-            .resolve(HuggingFaceSelection::new(
-                "owner/example",
-                "subset",
-                "train",
-            ))
-            .await
-            .unwrap_err();
-        assert_eq!(error.kind(), expected);
-        assert!(
-            error
-                .source()
-                .unwrap()
-                .downcast_ref::<opendal::Error>()
-                .is_some()
-        );
-        assert!(!format!("{error:?}").contains(TOKEN));
+    for (status, expected, upstream) in HTTP_ERRORS {
+        let hub = MetadataHub::reply(status, Bytes::new());
+        let error = hub.resolve("subset", "train").await.unwrap_err();
+        assert_upstream_error(&error, expected, upstream, "resolve_huggingface");
     }
-    let mut hub = MetadataHub::new(json!({}));
-    hub.metadata = Bytes::from_static(b"{truncated");
-    let error = hub
-        .service()
-        .await
-        .resolve(HuggingFaceSelection::new(
-            "owner/example",
-            "subset",
-            "train",
-        ))
-        .await
-        .unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::Decode);
+    let hub = MetadataHub::reply(StatusCode::OK, Bytes::from_static(b"{truncated"));
+    assert_eq!(
+        hub.resolve("subset", "train").await.unwrap_err().kind(),
+        ErrorKind::Decode
+    );
 }
 
 #[tokio::test]
@@ -324,38 +269,30 @@ async fn invalid_service_configuration_fails_before_network_io() {
     let service = hub.service().await;
     for selection in [
         HuggingFaceSelection::new("../repo", "subset", "train"),
-        HuggingFaceSelection::new("owner/example", "", "train"),
-        HuggingFaceSelection::new("owner/example", "subset", "train").with_revision(".."),
+        selection("", "train"),
+        selection("subset", "train").with_revision(".."),
     ] {
         assert_eq!(
             service.resolve(selection).await.unwrap_err().kind(),
             ErrorKind::InvalidInput
         );
     }
-    assert!(hub.requests.lock().unwrap().is_empty());
+    assert_eq!(hub.request_count(), 0);
 }
 
 #[tokio::test]
 async fn oversized_metadata_is_rejected_before_parsing_or_reading_files() {
-    #[derive(Clone)]
     struct Oversized;
     impl HttpTransport for Oversized {
         async fn fetch(&self, _: Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
-            let bytes = Bytes::from(vec![b' '; 32 * 1024 * 1024 + 1]);
-            Ok(Response::new(HttpBody::new(
-                stream::iter([Ok(Buffer::from(bytes))]),
-                None,
-            )))
+            let chunk = Buffer::from(vec![b' '; 1024 * 1024]);
+            let chunks = std::iter::repeat_n(chunk, 33).map(Ok);
+            Ok(Response::new(HttpBody::new(stream::iter(chunks), None)))
         }
     }
-    let mut service = MetadataHub::new(json!({})).service().await;
-    service.context = OperationContext::new().with_http_transport(HttpTransporter::new(Oversized));
+    let service = MetadataHub::service_with(Oversized).await;
     let error = service
-        .resolve(HuggingFaceSelection::new(
-            "owner/example",
-            "subset",
-            "train",
-        ))
+        .resolve(selection("subset", "train"))
         .await
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Unsupported);

@@ -1,13 +1,13 @@
-use std::{error::Error as _, num::NonZeroUsize};
+use std::num::NonZeroUsize;
 
 use futures::TryStreamExt;
 use http::StatusCode as Status;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, Error, ErrorKind,
+    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, ErrorKind,
 };
 use opendal::ErrorKind as Upstream;
 
-use super::support::{HubFailure, MockHub, TOKEN};
+use super::support::{HTTP_ERRORS, HubFailure, MockHub, assert_upstream_error};
 
 #[tokio::test]
 async fn missing_denied_and_transport_errors_retain_kind_and_terminate() {
@@ -40,45 +40,6 @@ async fn missing_denied_and_transport_errors_retain_kind_and_terminate() {
     assert!(reader.next().await.unwrap().is_none());
     assert_eq!(hub.request_count(), before);
 }
-
-fn assert_upstream_error(error: &Error, expected: ErrorKind, upstream: Upstream, operation: &str) {
-    assert_eq!(error.kind(), expected);
-    assert_eq!(error.operation(), operation);
-    assert_eq!(
-        error
-            .source()
-            .unwrap()
-            .downcast_ref::<opendal::Error>()
-            .unwrap()
-            .kind(),
-        upstream,
-    );
-    assert!(!format!("{error:?}").contains(TOKEN));
-}
-
-const HTTP_ERRORS: [(Status, ErrorKind, Upstream); 5] = [
-    (Status::NOT_FOUND, ErrorKind::NotFound, Upstream::NotFound),
-    (
-        Status::UNAUTHORIZED,
-        ErrorKind::PermissionDenied,
-        Upstream::PermissionDenied,
-    ),
-    (
-        Status::FORBIDDEN,
-        ErrorKind::PermissionDenied,
-        Upstream::PermissionDenied,
-    ),
-    (
-        Status::TOO_MANY_REQUESTS,
-        ErrorKind::Io,
-        Upstream::RateLimited,
-    ),
-    (
-        Status::INTERNAL_SERVER_ERROR,
-        ErrorKind::Io,
-        Upstream::Unexpected,
-    ),
-];
 
 #[tokio::test]
 async fn metadata_http_status_codes_preserve_classification_and_source() {

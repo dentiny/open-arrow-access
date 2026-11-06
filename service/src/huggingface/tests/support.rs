@@ -1,13 +1,15 @@
 use std::{
     collections::BTreeMap,
+    error::Error as _,
     ops::Range,
     sync::{Arc, Mutex},
 };
 
 use futures::stream;
 use http::{Request, Response, StatusCode};
-use open_arrow_access_core::Bytes;
+use open_arrow_access_core::{Bytes, Error, ErrorKind};
 use open_arrow_access_storage::OpenDalAccessor;
+use opendal::ErrorKind as Upstream;
 use opendal::{
     Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext, Operator, services::Hf,
 };
@@ -165,7 +167,10 @@ impl HttpTransport for MockHub {
             }
             return Ok(output);
         }
-        if let Some((_, path)) = uri.split_once("/resolve/refs%2Fconvert%2Fparquet/") {
+        if let Some((_, path)) = uri
+            .split_once("/resolve/")
+            .and_then(|(_, rest)| rest.split_once('/'))
+        {
             let bytes = self.files.get(path).unwrap();
             let selected = range
                 .as_deref()
@@ -220,3 +225,51 @@ pub(super) fn assert_ranges(requests: &[Captured], expected: &[&str]) {
     expected.sort_unstable();
     assert_eq!(actual, expected);
 }
+
+pub(super) fn assert_upstream_error(
+    error: &Error,
+    expected: ErrorKind,
+    upstream: Upstream,
+    operation: &str,
+) {
+    assert_eq!(error.kind(), expected);
+    assert_eq!(error.operation(), operation);
+    assert_eq!(
+        error
+            .source()
+            .unwrap()
+            .downcast_ref::<opendal::Error>()
+            .unwrap()
+            .kind(),
+        upstream,
+    );
+    assert!(!format!("{error:?}").contains(TOKEN));
+}
+
+pub(super) const HTTP_ERRORS: [(StatusCode, ErrorKind, Upstream); 5] = [
+    (
+        StatusCode::NOT_FOUND,
+        ErrorKind::NotFound,
+        Upstream::NotFound,
+    ),
+    (
+        StatusCode::UNAUTHORIZED,
+        ErrorKind::PermissionDenied,
+        Upstream::PermissionDenied,
+    ),
+    (
+        StatusCode::FORBIDDEN,
+        ErrorKind::PermissionDenied,
+        Upstream::PermissionDenied,
+    ),
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        ErrorKind::Io,
+        Upstream::RateLimited,
+    ),
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        ErrorKind::Io,
+        Upstream::Unexpected,
+    ),
+];
