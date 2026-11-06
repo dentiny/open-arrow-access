@@ -93,7 +93,7 @@ where
             }
             objects.push(object);
         }
-        objects.sort_by(|a, b| a.locator().cmp(b.locator()));
+        objects.sort_unstable_by(|a, b| a.locator().cmp(b.locator()));
         objects.dedup();
         self.files
             .open(FileSetRequest {
