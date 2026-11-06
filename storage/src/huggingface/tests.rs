@@ -6,6 +6,7 @@ use std::{
 
 use futures::{TryStreamExt, stream};
 use http::{Request, Response, StatusCode};
+use more_asserts::assert_lt;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, ErrorKind, ReadOptions,
     ReadRequest,
@@ -331,7 +332,7 @@ async fn dropping_a_sequential_stream_stops_prefetch() {
     assert_eq!(hub.captured().len(), 1, "opening only inspects metadata");
     assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"a");
     let before = hub.captured().len();
-    assert!(before < 32);
+    assert_lt!(before, 32);
     drop(reader);
     for _ in 0..4 {
         tokio::task::yield_now().await;
@@ -446,19 +447,12 @@ async fn missing_denied_and_transport_errors_retain_kind_and_terminate() {
 
 #[tokio::test]
 async fn parquet_reads_through_the_hub_sdk_and_shared_range_adapter() {
-    use arrow_array::{ArrayRef, Int64Array, RecordBatch};
-    use arrow_schema::{DataType, Field, Schema};
+    use arrow_array::Int64Array;
     use open_arrow_access_file_format::ParquetAccessor;
-    use parquet::arrow::ArrowWriter;
-    let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
-    let batch = RecordBatch::try_new(
-        schema.clone(),
-        vec![Arc::new(Int64Array::from(vec![1, 2, 3])) as ArrayRef],
-    )
-    .unwrap();
-    let mut writer = ArrowWriter::try_new(Vec::new(), schema, None).unwrap();
-    writer.write(&batch).unwrap();
-    let bytes = Bytes::from(writer.into_inner().unwrap());
+
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/parquet/ids.parquet");
+    let bytes = Bytes::from(std::fs::read(path).unwrap());
     let hub = MockHub::with_files([("data/part.parquet".to_owned(), bytes)]);
     let accessor = ParquetAccessor::new(hub.accessor());
     let mut reader = accessor
