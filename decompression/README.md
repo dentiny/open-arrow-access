@@ -7,6 +7,7 @@ select a decoder.
 | --- | --- | --- | --- |
 | Gzip | `decompression-gzip` | `gzip` | `Gzip` |
 | Bzip2 | `decompression-bz2` | `bz2` | `Bzip2` |
+| LZ4 | `decompression-lz4` | `lz4` | `Lz4` |
 
 ```rust,no_run
 use open_arrow_access::{
@@ -61,6 +62,8 @@ accessor/reader adapters remain shared. The `CompressedInput`/`DecodedInput`
 aliases expose the futures I/O boundary without coupling a codec to storage,
 Arrow or a closed core compression enumeration.
 
+## Bzip2 members
+
 Bzip2 uses `async-compression`'s `BzDecoder` with multi-member decoding, matching
 ml-infra's existing compression adapter. Concatenated members, including empty
 members, are decoded in order. Invalid headers, truncated members, checksum
@@ -73,3 +76,17 @@ state includes a compression block, so bounded output chunks do not bound total
 memory or guarantee that compressed input consumption stops within one output
 chunk. The decoder is pull-based and does not collect whole objects or create
 background tasks.
+
+## LZ4 frames
+
+`Lz4` uses `async-compression`'s futures decoder backed by liblz4. It supports
+standard LZ4 frames, concatenated frames, and skippable frames. Raw LZ4 blocks
+and legacy frames are rejected; there is no external-dictionary configuration.
+Checksums are validated when present. Truncated frames, corrupt checksums and
+non-frame trailing bytes are errors. An empty or skippable frame produces no
+bytes; an empty compressed object is invalid. Read through EOF to validate all
+frames. The shared layer's metadata, error and memory contracts above apply.
+
+Use `DecompressionLayer::new(Lz4)` in the example above. This follows the existing
+ml-infra approach of adapting upstream asynchronous compression decoders, adding
+LZ4 to the same generic wrapper rather than implementing another codec.

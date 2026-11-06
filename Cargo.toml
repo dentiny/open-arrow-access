@@ -59,6 +59,7 @@ format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-form
 format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
 decompression-gzip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip"]
 decompression-bz2 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
+decompression-lz4 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/lz4"]
 
 [dependencies]
 open-arrow-access-core.workspace = true

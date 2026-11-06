@@ -19,3 +19,8 @@ pub use gzip::Gzip;
 mod bz2;
 #[cfg(feature = "bz2")]
 pub use bz2::Bzip2;
+
+#[cfg(feature = "lz4")]
+mod lz4;
+#[cfg(feature = "lz4")]
+pub use lz4::Lz4;
