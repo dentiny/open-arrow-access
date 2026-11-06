@@ -195,7 +195,11 @@ cargo test --workspace --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```
 
-Tests read checked-in Parquet and CSV/TSV files from `testdata/`. They verify ordered rows and
+Format-specific integration tests live in `file-format/tests/`; the root
+`tests/reading.rs` exercises composition through the facade across crates.
+Cargo test targets use `required-features` to select their format.
+
+Tests read checked-in Parquet, CSV/TSV, and JSON/JSONL files from `testdata/`. They verify ordered rows and
 nulls across row groups, schema metadata, projection, storage-independent
 reading, wrapper composition, exact/batched ranges, per-open I/O options,
 bounded backend concurrency, and terminal error/drop behavior.

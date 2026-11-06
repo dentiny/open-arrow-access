@@ -11,12 +11,12 @@ use std::{
 use arrow_array::{Array, Int64Array, StringArray};
 use arrow_schema::{ArrowError, DataType, Field, IntervalUnit, Schema, TimeUnit};
 use more_asserts::assert_lt;
-use open_arrow_access::{
+use open_arrow_access_core::{
     Accessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, Error,
     ErrorKind, ReadOptions, ReadRequest, Reader, RecordBatch, Result, SchemaRef, async_trait,
-    file_format::JsonAccessor,
 };
 
+use open_arrow_access_file_format::JsonAccessor;
 use open_arrow_access_test_support::{MemoryAccessor, Observations};
 
 fn schema() -> SchemaRef {
@@ -31,7 +31,7 @@ fn schema() -> SchemaRef {
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("testdata/json")
+        .join("../testdata/json")
         .join(name)
 }
 
@@ -239,10 +239,9 @@ async fn empty_and_whitespace_only_inputs_have_no_rows() {
     }
 }
 
-#[cfg(feature = "storage-fs")]
 #[tokio::test]
 async fn local_jsonl_reads_through_opendal() {
-    let storage = open_arrow_access::storage::FsAccessor::new(fixture_path(""))
+    let storage = open_arrow_access_storage::FsAccessor::new(fixture_path(""))
         .await
         .unwrap();
     let accessor = JsonAccessor::new(

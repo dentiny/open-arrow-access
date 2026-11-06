@@ -20,5 +20,21 @@ arrow-json = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 
+[dev-dependencies]
+arrow-array.workspace = true
+arrow-schema.workspace = true
+more-asserts.workspace = true
+open-arrow-access-test-support.workspace = true
+open-arrow-access-storage = { workspace = true, features = ["fs"] }
+tokio.workspace = true
+
+[[test]]
+name = "json"
+required-features = ["json"]
+
+[[test]]
+name = "csv"
+required-features = ["csv"]
+
 [lints]
 workspace = true
