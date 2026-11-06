@@ -11,8 +11,8 @@ use arrow_array::{ArrayRef, Int64Array};
 use arrow_schema::{DataType, Field};
 use futures::{TryStreamExt, stream};
 use open_arrow_access::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ObjectRef,
-    ObjectStream, ReadOptionsProvider, ReadRequest, Reader, RecordBatch, RecordMetadata,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ListRequest,
+    ObjectRef, ObjectStream, ReadOptionsProvider, ReadRequest, Reader, RecordBatch, RecordMetadata,
     RecordReader, Result, Schema, SchemaRef, async_trait,
     dataset::{DirectoryAccessor, DirectoryRequest, FileSetAccessor, FileSetRequest},
     into_stream,
@@ -301,10 +301,20 @@ impl Accessor for Listing {
 
 #[async_trait]
 impl ByteAccessor for Listing {
-    async fn list(&self, _: ObjectRef) -> Result<ObjectStream> {
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        let mut prefix = request.prefix.locator().to_owned();
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
         let mut items = self
             .objects
             .iter()
+            .filter(|path| {
+                request.recursive
+                    || path
+                        .strip_prefix(&prefix)
+                        .is_none_or(|relative| !relative.contains('/'))
+            })
             .map(|s| Ok(ObjectRef::new(*s)))
             .collect::<Vec<_>>();
         if self.fail {
@@ -438,6 +448,15 @@ mod filesystem {
         paths.sort_by(|a, b| a.locator().cmp(b.locator()));
         assert_eq!(paths, vec![ObjectRef::new("a"), ObjectRef::new("sub/b")]);
         assert_eq!(
+            fs.list(ListRequest::new("").with_recursive(false))
+                .await
+                .unwrap()
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap(),
+            vec![ObjectRef::new("a")]
+        );
+        assert_eq!(
             fs.list("sub".into())
                 .await
                 .unwrap()
@@ -460,6 +479,54 @@ mod filesystem {
             fs.list("a".into()).await.err().unwrap().kind(),
             ErrorKind::InvalidInput
         );
+    }
+
+    #[tokio::test]
+    async fn directory_normalizes_prefix_before_listing_and_matching() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("data/sub")).unwrap();
+        copy_fixture("a.parquet", &dir.path().join("data/sub/a.parquet"));
+        let fs = FsAccessor::new(dir.path()).await.unwrap();
+        let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
+        for prefix in ["data/sub", "data//sub", "data///sub//"] {
+            let request = DirectoryRequest::new(prefix);
+            assert_eq!(values(accessor.open(request).await.unwrap()).await, [1, 2]);
+        }
+        for prefix in ["/data/sub", "data//./sub", "data//../sub"] {
+            assert_eq!(
+                accessor
+                    .open(DirectoryRequest::new(prefix))
+                    .await
+                    .err()
+                    .unwrap()
+                    .kind(),
+                ErrorKind::InvalidInput
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn nonrecursive_directory_does_not_enter_unreadable_subdirectories() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        copy_fixture("a.parquet", &dir.path().join("a.parquet"));
+        let excluded = dir.path().join("excluded");
+        std::fs::create_dir(&excluded).unwrap();
+        copy_fixture("b.parquet", &excluded.join("b.parquet"));
+        let permissions = std::fs::metadata(&excluded).unwrap().permissions();
+        let fs = FsAccessor::new(dir.path()).await.unwrap();
+        let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
+        let mut request = DirectoryRequest::new("");
+        request.recursive = false;
+        request.suffix = Some(".parquet".into());
+        std::fs::set_permissions(&excluded, std::fs::Permissions::from_mode(0o0)).unwrap();
+        let result = accessor.open(request).await;
+        // Restore permissions before assertions so failed reads still clean up.
+        std::fs::set_permissions(&excluded, permissions).unwrap();
+        // This also checks selection when tests run as root and bypass permissions.
+        assert_eq!(values(result.unwrap()).await, [1, 2]);
     }
 
     #[tokio::test]

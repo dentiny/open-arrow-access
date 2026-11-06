@@ -12,7 +12,7 @@ use std::{
 use more_asserts::assert_gt;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error,
-    ErrorKind, ObjectRef, ObjectStream, Reader, Result, async_trait,
+    ErrorKind, ListRequest, ObjectStream, Reader, Result, async_trait,
 };
 
 /// Calls observed across accessor clones and all readers opened from them.
@@ -126,7 +126,7 @@ impl Accessor for MemoryAccessor {
 
 #[async_trait]
 impl ByteAccessor for MemoryAccessor {
-    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
         if !self.listing {
             return Err(Error::new(
                 ErrorKind::Unsupported,
@@ -134,7 +134,7 @@ impl ByteAccessor for MemoryAccessor {
                 "listing is disabled",
             ));
         }
-        Ok(Box::pin(futures::stream::iter([Ok(prefix)])))
+        Ok(Box::pin(futures::stream::iter([Ok(request.prefix)])))
     }
 }
 

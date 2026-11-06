@@ -118,10 +118,13 @@ contract without a closed enum of every source or format.
 | Future Hugging Face service | Repository/revision/config/split selection | Record reader or resolved object discovery |
 
 `Arc<dyn ByteAccessor>` supports application-owned backend injection. Optional
-`ByteAccessor::list` defaults to Unsupported. Fs exposes recursive file discovery;
-other byte accessors can supply their own listing implementation. Input locators
+`ByteAccessor::list` accepts `ListRequest` and defaults to Unsupported. Recursive
+discovery is enabled by default; nonrecursive requests must not descend into child
+directories. Fs passes that policy to OpenDAL, and transparent wrappers forward the
+complete request. Other byte accessors can supply their own implementation. Input locators
 remain backend-owned. Directory datasets consume those file
-references and compose any shared single-file record accessor.
+references and compose any shared single-file record accessor. Directory prefixes
+normalize repeated and trailing slash separators before discovery and matching.
 
 `ByteReadRequest` carries an `ObjectRef` and `ByteReadOptions`. `io_concurrency`
 defaults to one and `io_chunk_size` defaults to the backend's choice. Record-file

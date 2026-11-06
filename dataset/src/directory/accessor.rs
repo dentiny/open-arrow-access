@@ -1,10 +1,13 @@
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, Capability, Error, ErrorKind, ReadRequest, RecordReader, Result,
-    async_trait,
+    Accessor, ByteAccessor, Capability, Error, ErrorKind, ListRequest, ReadRequest, RecordReader,
+    Result, async_trait,
 };
 
-use super::{DirectoryRequest, path::is_root_relative};
+use super::{
+    DirectoryRequest,
+    path::{is_root_relative, normalize_prefix},
+};
 use crate::{FileSetAccessor, FileSetRequest};
 
 /// Discover files through a byte accessor and read them through a supplied format.
@@ -46,20 +49,20 @@ where
     }
 
     async fn open(&self, request: DirectoryRequest) -> Result<Box<dyn RecordReader>> {
-        let prefix = request.prefix.locator();
-        if !is_root_relative(prefix) {
-            return Err(Error::new(
+        let mut prefix = normalize_prefix(request.prefix.locator()).ok_or_else(|| {
+            Error::new(
                 ErrorKind::InvalidInput,
                 "open_directory",
                 "expected a root-relative directory prefix without dot components",
-            ));
+            )
+        })?;
+        let mut listing = self
+            .discovery
+            .list(ListRequest::new(prefix.as_str()).with_recursive(request.recursive))
+            .await?;
+        if !prefix.is_empty() {
+            prefix.push('/');
         }
-        let prefix = if prefix.is_empty() {
-            String::new()
-        } else {
-            format!("{}/", prefix.trim_end_matches('/'))
-        };
-        let mut listing = self.discovery.list(request.prefix).await?;
         let mut objects = Vec::new();
         while let Some(object) = listing.try_next().await? {
             let Some(relative) = object.locator().strip_prefix(&prefix) else {
@@ -77,9 +80,6 @@ where
                 ));
             }
             if relative.is_empty() || relative.ends_with('/') {
-                continue;
-            }
-            if !request.recursive && relative.contains('/') {
                 continue;
             }
             if request

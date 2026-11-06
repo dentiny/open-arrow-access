@@ -4,9 +4,12 @@ use open_arrow_access_core::{ByteReadOptions, ObjectRef, ReadOptions, ReadOption
 ///
 /// Selected locators are sorted lexicographically and duplicates removed. This
 /// is a declared scan order, not an atomic snapshot of a mutable directory.
+/// Prefixes are root-relative slash-separated paths; repeated and trailing
+/// separators are normalized before discovery.
 #[derive(Clone, Debug)]
 pub struct DirectoryRequest {
     pub prefix: ObjectRef,
+    /// Traverse child directories during discovery. Defaults to true.
     pub recursive: bool,
     /// Case-sensitive locator suffix, for example `.parquet`. None selects all files.
     pub suffix: Option<String>,

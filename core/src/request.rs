@@ -29,6 +29,46 @@ impl From<String> for ObjectRef {
     }
 }
 
+/// Object discovery settings. Recursive discovery is enabled by default.
+#[derive(Clone, Debug)]
+pub struct ListRequest {
+    pub prefix: ObjectRef,
+    /// Traverse descendant directories. False selects only immediate files.
+    pub recursive: bool,
+}
+
+impl ListRequest {
+    pub fn new(prefix: impl Into<ObjectRef>) -> Self {
+        Self {
+            prefix: prefix.into(),
+            recursive: true,
+        }
+    }
+
+    pub fn with_recursive(mut self, recursive: bool) -> Self {
+        self.recursive = recursive;
+        self
+    }
+}
+
+impl From<ObjectRef> for ListRequest {
+    fn from(prefix: ObjectRef) -> Self {
+        Self::new(prefix)
+    }
+}
+
+impl From<&str> for ListRequest {
+    fn from(prefix: &str) -> Self {
+        Self::new(prefix)
+    }
+}
+
+impl From<String> for ListRequest {
+    fn from(prefix: String) -> Self {
+        Self::new(prefix)
+    }
+}
+
 /// Default row-count target for [`ReadOptions`].
 pub const DEFAULT_BATCH_SIZE: NonZeroUsize = NonZeroUsize::new(8192).unwrap();
 

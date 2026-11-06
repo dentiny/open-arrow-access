@@ -11,7 +11,7 @@ use futures::TryStreamExt;
 use more_asserts::{assert_gt, assert_le};
 use open_arrow_access::{
     Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, Capability, ErrorKind,
-    Layer, ObjectRef, ObjectStream, ReadOptions, ReadRequest, Result, async_trait,
+    Layer, ListRequest, ObjectRef, ObjectStream, ReadOptions, ReadRequest, Result, async_trait,
     file_format::ParquetAccessor, into_stream, storage::FsAccessor,
 };
 use parquet::basic::Compression;
@@ -341,8 +341,8 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
 
 #[async_trait]
 impl<A: ByteAccessor> ByteAccessor for OpenObserverAccessor<A> {
-    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
-        self.inner.list(prefix).await
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        self.inner.list(request).await
     }
 }
 
@@ -445,8 +445,12 @@ impl Accessor for ListingAccessor {
 
 #[async_trait]
 impl ByteAccessor for ListingAccessor {
-    async fn list(&self, _prefix: ObjectRef) -> Result<ObjectStream> {
-        Ok(Box::pin(futures::stream::iter([Ok("entry".into())])) as ObjectStream)
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        let mut objects = vec![Ok("entry".into())];
+        if request.recursive {
+            objects.push(Ok("sub/entry".into()));
+        }
+        Ok(Box::pin(futures::stream::iter(objects)) as ObjectStream)
     }
 }
 
@@ -462,7 +466,7 @@ async fn listing_capability_survives_transparent_layer_and_shared_accessor() {
     );
     assert!(accessor.capability().list);
     let objects = accessor
-        .list("".into())
+        .list(ListRequest::new("").with_recursive(false))
         .await
         .unwrap()
         .try_collect::<Vec<_>>()

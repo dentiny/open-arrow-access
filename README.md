@@ -147,6 +147,11 @@ accessor for records. Files are sorted lexicographically; explicit file sets
 retain caller order. Readers open files sequentially and require identical
 projected schemas, including metadata.
 
+Discovery accepts `ListRequest`, with recursion enabled by default. Setting
+`DirectoryRequest::recursive` to `false` prevents descending into child directories.
+Repeated and trailing separators in directory prefixes are normalized before
+discovery and result matching.
+
 ## Extension contracts
 
 ```text
