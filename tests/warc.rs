@@ -49,7 +49,8 @@ impl Accessor for Memory {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {

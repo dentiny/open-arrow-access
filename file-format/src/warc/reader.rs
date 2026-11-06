@@ -91,7 +91,8 @@ impl Reader for WarcReader {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 
