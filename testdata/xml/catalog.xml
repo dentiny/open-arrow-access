@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<c:catalog xmlns:c="urn:catalog" xmlns:m="urn:meta" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <c:book m:id="1"><c:title>Rust &amp; 箭头</c:title><c:tags><c:tag>async</c:tag><c:tag><![CDATA[<XML>]]></c:tag></c:tags></c:book>
-  <c:book m:id="2"><c:title xsi:nil="true"/><c:tags/></c:book>
-  <c:book m:id="3"><c:title/><c:tags><c:tag>Arrow</c:tag></c:tags></c:book>
-</c:catalog>
