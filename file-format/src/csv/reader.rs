@@ -10,8 +10,11 @@ pub(super) struct CsvReader {
     input: Box<dyn ByteReader>,
     decoder: Decoder,
     metadata: RecordMetadata,
+    /// Bytes read from the input but not yet consumed by the decoder.
     pending: Bytes,
+    /// The input has ended; the decoder may still have a final batch to emit.
     eof: bool,
+    /// Reading has terminated after exhaustion or an error; subsequent calls return `Ok(None)`.
     finished: bool,
 }
 
