@@ -76,7 +76,7 @@ impl Accessor for MemoryAccessor {
         Capability {
             read: true,
             read_with_range: self.ranged,
-            ..Capability::default()
+            list: false,
         }
     }
 
@@ -110,7 +110,7 @@ impl Reader for MemoryReader {
         Capability {
             read: true,
             read_with_range: self.ranged,
-            ..Capability::default()
+            list: false,
         }
     }
 
@@ -295,7 +295,8 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
     fn capability(&self) -> Capability {
         Capability {
             read: self.0.capability().read,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 
@@ -314,7 +315,8 @@ impl Reader for SequentialReader {
     fn capability(&self) -> Capability {
         Capability {
             read: self.0.capability().read,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 

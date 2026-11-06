@@ -42,7 +42,8 @@ where
     fn capability(&self) -> Capability {
         Capability {
             read: self.inner.capability().read,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 

@@ -404,9 +404,11 @@ impl Accessor for ListingAccessor {
     type Reader = dyn open_arrow_access::ByteReader;
 
     fn capability(&self) -> Capability {
+        let inner = self.0.capability();
         Capability {
+            read: inner.read,
+            read_with_range: inner.read_with_range,
             list: true,
-            ..self.0.capability()
         }
     }
 

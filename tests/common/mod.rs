@@ -43,7 +43,8 @@ impl Accessor for MemoryAccessor {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 
@@ -84,7 +85,8 @@ impl Reader for MemoryReader {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 
