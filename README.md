@@ -150,6 +150,30 @@ current batch; batch size does not bound the size of a single record.
 
 ## CSV and TSV
 
+## JSON and JSONL
+
+Enable `format-json` and construct `file_format::JsonAccessor::new(bytes, schema)`
+with a fixed `SchemaRef`, then open it with the same `ReadRequest` used for
+Parquet. `bytes` can be any sequential byte accessor; range reads and a known
+length are unnecessary. Use `storage-fs,format-json` for local files.
+
+The reader uses Arrow JSON's incremental decoder for whitespace-separated JSON
+objects, including JSONL and pretty-printed object streams. Top-level arrays
+are not flattened into rows; arrays, null and scalar records are rejected.
+Empty or whitespace-only input emits no rows. Schema inference is not performed.
+Missing nullable fields become null and unknown fields are ignored; projected
+fields are decoded in the requested order. An empty projection retains row counts.
+The supplied schema, including metadata, is fixed before reading any bytes.
+
+Rows are decoded incrementally up to the requested batch size. Parsing follows
+Arrow JSON 59.3.0's permissive semantics; this adapter does not
+add a strict JSON validator. Errors reported by the decoder, including truncated
+records, terminate the reader with a decode error. Input I/O failures retain
+their original category. Memory includes one upstream chunk and the decoder's
+current batch; batch size does not bound the size of a single record.
+
+## CSV and TSV
+
 Enable `format-csv` for CSV/TSV with an explicit schema. `CsvAccessor` consumes
 sequential byte readers and reuses Arrow CSV's incremental decoder. Configure
 `CsvFormat::default().with_header(true)` for headers or `.with_delimiter(b'\t')`
