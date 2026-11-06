@@ -3,9 +3,9 @@
 Composable dataset access for Apache Arrow. Read diverse formats and storage
 backends into Arrow streams.
 
-Read Parquet, CSV/TSV, or JSON/JSONL asynchronously through a byte accessor such
-as **OpenDAL's filesystem service**. Output is an ordered stream of Arrow record
-batches. The project ends at that read interface.
+Read Parquet, CSV/TSV, or JSON/JSONL asynchronously from local storage or files
+resolved by the Hugging Face service. OpenDAL handles file I/O. Output is an ordered stream of
+Arrow record batches. The project ends at that read interface.
 
 ## Quick start
 
@@ -61,29 +61,16 @@ requests.
 `FsAccessor::with_chunk_size` controls sequential output chunk size, while
 `ReadOptions::batch_size` controls Arrow rows per batch.
 
-## JSON and JSONL
+Enable `service-huggingface` for dataset repository file access. The provider
+owns repository ID, revision, root, authentication and HTTP/Xet settings through
+`HuggingFaceService`, `HuggingFaceOptions` and `HuggingFaceRepository`.
+`service.repository(HuggingFaceRepository::new(id).with_revision(revision))`
+returns a byte accessor with single-file and recursive directory access.
+Branch-based reads are not snapshots. The OpenDAL builder stays internal.
 
-Enable `format-json` and construct `file_format::JsonAccessor::new(bytes, schema)`
-with a fixed `SchemaRef`, then open it with the same `ReadRequest` used for
-Parquet. `bytes` can be any sequential byte accessor; range reads and a known
-length are unnecessary. Use `storage-fs,format-json` for local files.
-
-The reader uses Arrow JSON's incremental decoder for whitespace-separated JSON
-objects, including JSONL and pretty-printed object streams. Top-level arrays
-are not flattened into rows; arrays, null and scalar records are rejected.
-Empty or whitespace-only input emits no rows. Schema inference is not performed.
-Missing nullable fields become null and unknown fields are ignored; projected
-fields are decoded in the requested order. An empty projection retains row counts.
-The supplied schema, including metadata, is fixed before reading any bytes.
-
-Rows are decoded incrementally up to the requested batch size. Parsing follows
-Arrow JSON 59.3.0's permissive semantics; this adapter does not
-add a strict JSON validator. Errors reported by the decoder, including truncated
-records, terminate the reader with a decode error. Input I/O failures retain
-their original category. Memory includes one upstream chunk and the decoder's
-current batch; batch size does not bound the size of a single record.
-
-## CSV and TSV
+Enable `format-parquet` and wrap the returned byte accessor in our
+`ParquetAccessor` to interpret Parquet and produce Arrow batches. Config/split
+resolution is implemented in the dependent dataset-discovery PR.
 
 Enable `format-csv` for CSV/TSV with an explicit schema. `CsvAccessor` consumes
 sequential byte readers and reuses Arrow CSV's incremental decoder. Configure
@@ -98,7 +85,7 @@ for TSV.
 | `storage/` | OpenDAL Fs and reusable generic byte I/O, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas and incremental Arrow decoding |
 | `dataset/` | Reserved; no directory or multi-file scan yet |
-| `service/` | Reserved; no Hugging Face or other source adapter yet |
+| `service/` | Hugging Face repository file access; dataset discovery follows separately |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |

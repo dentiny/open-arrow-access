@@ -1,6 +1,6 @@
 //! Composable, asynchronous read access to Arrow record batches.
 //!
-//! Enable a storage feature and a `format-parquet`, `format-json`, or `format-csv` reader.
+//! Enable a storage or service feature and a format reader.
 //! The default build exposes only the shared extension contracts.
 
 pub use open_arrow_access_core::*;
@@ -28,6 +28,11 @@ pub mod decompression {
 #[cfg(feature = "storage-fs")]
 pub mod storage {
     pub use open_arrow_access_storage::FsAccessor;
+}
+
+#[cfg(feature = "service-huggingface")]
+pub mod service {
+    pub use open_arrow_access_service::huggingface::*;
 }
 
 #[cfg(any(

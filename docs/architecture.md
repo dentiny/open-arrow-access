@@ -106,11 +106,11 @@ contract without a closed enum of every source or format.
 
 | Adapter | Request | Reader |
 | --- | --- | --- |
-| Fs storage | `ByteReadRequest` | `dyn ByteReader` |
+| Fs / generic OpenDAL storage | `ByteReadRequest` | `dyn ByteReader` |
 | Parquet format | `ReadRequest` | `dyn RecordReader` |
 | JSON object stream | `ReadRequest`; schema configured on accessor | Record reader |
 | Future directory dataset | Directory selection and options | Record reader |
-| Future Hugging Face service | Repository/revision/config/split selection | Record reader or resolved object discovery |
+| Hugging Face file access | `ByteReadRequest` | `dyn ByteReader` |
 
 `Arc<dyn ByteAccessor>` supports application-owned backend injection. Optional
 `ByteAccessor::list` defaults to Unsupported and is not implemented by the
@@ -130,6 +130,14 @@ Sequential byte output reuses one OpenDAL stream. Retained prefetch and range
 reads share an executor budget allocated per opened reader, so interleaving the
 two paths does not multiply in-flight I/O. Contiguous output fragments are sliced
 without copying; fragmented output is assembled only when needed.
+
+The optional `service-huggingface` provider owns repository, revision, root,
+authentication and connection settings. `HuggingFaceService::repository` creates
+an OpenDAL HF operator internally and reuses `storage::OpenDalAccessor` for stat,
+recursive file discovery and byte reads. Existing format accessors consume those
+shared byte contracts. The OpenDAL builder is not part of the provider API.
+Floating revisions do not imply snapshots. Config/split discovery is added in
+the dependent dataset-resolution PR.
 
 ## Layer
 
@@ -175,7 +183,7 @@ schema and optional reader-context contracts.
   directory under `src/`. In `src/parquet/`, `accessor.rs`, `input.rs` and
   `reader.rs` own their respective structs and implementations; `mod.rs` declares
   the modules, exports the accessor and provides common error conversion.
-- The facade forwards independent, additive `storage-fs` / `format-parquet`
+- The facade forwards independent, additive `storage-fs`, `service-huggingface` and `format-parquet`
   features. Features make implementations available; they do not change runtime
   ordering or silently attach layers.
 - `decompression/` shares streaming byte adapters across codec modules. Its
@@ -187,7 +195,7 @@ schema and optional reader-context contracts.
   without materializing the input. Top-level arrays/null/scalars are rejected;
   projection selects the decoder schema before opening input. Byte options pass
   through the same `ReadRequest` contract as Parquet.
-- `dataset/`, `service/`, and `layers/` currently contain only
+- `dataset/` and `layers/` currently contain only
   scope/extension documentation; unimplemented capabilities are not registered.
 
 The project output boundary is Arrow records. Internal temporary inputs may be

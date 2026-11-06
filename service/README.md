@@ -1,12 +1,18 @@
 # Dataset services
 
-Reserved for provider-specific discovery and schema conventions, starting with
-Hugging Face. No service implementation or feature exists in the initial PR.
-Use the shared object/reader contracts and existing format accessors; keep
-repository revision, config and split semantics in the service adapter.
+The default-off `huggingface` feature (`service-huggingface` on the facade)
+provides `HuggingFaceService::repository` for explicit dataset repository files.
+Provider-owned types select repository ID, revision, root and connection options.
 
-The [source-attribute proposal](../docs/source-attributes.md) defines provider
-constraints and conditional planning. Sequential cursor-based file discovery
-can coexist with independent file reads; dependent API page requests require
-a different plan. Services retain their own ordering requirements while
-delegating discovered representations to dataset and format accessors.
+The internal OpenDAL HF constructor delegates stat, recursive file listing,
+exact ranges and bounded sequential reads to `storage::OpenDalAccessor`.
+Wrap its byte accessor with our `ParquetAccessor` or another existing format
+accessor to interpret records. Provider code does not decode file formats.
+
+Metadata/options and I/O error categories are preserved, credentials are
+redacted, and cached-token lookup runs on the blocking pool. HTTP/Xet transfer
+protocols remain delegated to OpenDAL. Floating revisions are not snapshots.
+
+Config/split selection and commit-pinned dataset discovery are implemented in
+the dependent dataset-resolution PR. Multi-file Arrow/schema composition
+remains in `dataset/`.
