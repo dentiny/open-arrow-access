@@ -1101,7 +1101,6 @@ dependencies = [
  "open-arrow-access-core",
  "open-arrow-access-test-support",
  "tokio",
- "zstd",
 ]
 
 [[package]]
