@@ -10,23 +10,23 @@ Both its [manifest](https://github.com/lance-format/lance/blob/343aa21c460c5e17c
 and [lockfile](https://github.com/lance-format/lance/blob/343aa21c460c5e17c67185c4b57bd3365a1735a1/Cargo.lock)
 were inspected.
 
-| Family | Upstream manifest requirement | Upstream resolved version / our pin |
+| Family | Upstream manifest requirement | Upstream resolved version / our baseline |
 | --- | --- | --- |
 | Arrow | `59.2.0` | `59.3.0` |
 | Parquet | `59.2.0` | `59.3.0` |
 | DataFusion | `55.0.0` | `55.2.0` |
 | OpenDAL | `0.59.2` | `0.59.2` |
 
-Use upstream's **resolved lockfile versions**, including patch versions, rather
-than copying its semver requirements and allowing Cargo to select newer releases.
-Direct workspace dependencies use exact `=` requirements. The committed
-`Cargo.lock` also aligns transitive Arrow and OpenDAL components. For our Fs-only
+Use upstream's **resolved lockfile versions**, including patch versions, as the
+workspace baseline. Direct workspace dependencies use normal Cargo semver
+requirements without an `=` prefix. The committed `Cargo.lock` records the
+resolved versions and aligns transitive Arrow and OpenDAL components. For our Fs-only
 OpenDAL service, absent from upstream's selected services, use the same OpenDAL
 release (`0.59.2`). Feature selection remains specific to this project's scope.
-The CSV feature pins `arrow-csv` to the same Arrow release (`59.3.0`), including
+The CSV feature uses the same Arrow baseline (`59.3.0`) for `arrow-csv`, including
 the transitive Arrow Cast and Arrow Ord components in the committed lockfile.
 
-DataFusion is only an unused workspace dependency pin for the later generated
+DataFusion is only an unused workspace dependency declaration for the later generated
 column layer. It is not built or present in the resolved graph yet. The layer
 must inherit it through `workspace = true`; do not import types through Lance.
 
@@ -34,7 +34,7 @@ must inherit it through `workspace = true`; do not import types through Lance.
 
 1. Resolve the latest default-branch SHA of `lance-format/lance` and inspect
    `Cargo.toml` and `Cargo.lock` at that exact SHA, including any source patches.
-2. Update the workspace pins, baseline metadata, this document, and lockfile
+2. Update the workspace requirements, baseline metadata, this document, and lockfile
    together. New backend/format/layer crates inherit workspace dependencies.
    Add new family components to the same version baseline.
 3. Compare resolved dependency-family versions with the upstream lockfile, then

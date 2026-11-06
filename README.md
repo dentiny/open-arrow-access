@@ -157,7 +157,7 @@ services, including globally ordered ATIF inputs and conditional WARC indexing.
 
 Dependency versions track a recorded latest upstream Lance commit, including
 resolved patch versions. See [dependency alignment](docs/dependencies.md) for
-the baseline and update procedure. DataFusion is pinned for the future layer
+the baseline and update procedure. DataFusion is declared for the future layer
 but is not part of the current dependency graph.
 
 ```sh
