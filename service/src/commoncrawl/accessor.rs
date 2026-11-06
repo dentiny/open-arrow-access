@@ -57,7 +57,8 @@ where
     fn capability(&self) -> Capability {
         Capability {
             read: self.manifests.capability().read && self.files.capability().read,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 

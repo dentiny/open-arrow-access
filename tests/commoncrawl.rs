@@ -60,7 +60,8 @@ impl Accessor for Manifest {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
@@ -92,7 +93,8 @@ impl Reader for ManifestReader {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
     fn metadata(&self) -> &ByteMetadata {
@@ -127,7 +129,8 @@ impl Accessor for Records {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
@@ -171,7 +174,8 @@ impl Reader for Batches {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
     fn metadata(&self) -> &RecordMetadata {
