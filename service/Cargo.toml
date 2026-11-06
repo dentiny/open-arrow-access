@@ -26,7 +26,7 @@ url = { version = "2", optional = true }
 glob = { version = "0.3", optional = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["sync", "time"] }
+tokio = { workspace = true, features = ["fs", "sync", "time"] }
 futures.workspace = true
 arrow-array.workspace = true
 open-arrow-access-file-format = { workspace = true, features = ["parquet"] }

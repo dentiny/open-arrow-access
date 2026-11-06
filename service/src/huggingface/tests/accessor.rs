@@ -209,7 +209,7 @@ async fn parquet_reads_through_the_hub_sdk_and_shared_range_adapter() {
 
     let path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/parquet/ids.parquet");
-    let bytes = Bytes::from(std::fs::read(path).unwrap());
+    let bytes = Bytes::from(tokio::fs::read(path).await.unwrap());
     let hub = MockHub::file("part.parquet", bytes);
     let accessor = ParquetAccessor::new(hub.accessor());
     let mut reader = accessor
