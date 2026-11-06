@@ -2,6 +2,7 @@
 
 use std::{
     num::NonZeroUsize,
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -104,11 +105,11 @@ impl Reader for Input {
 #[async_trait]
 impl ByteReader for Input {}
 
-fn record(kind: &str, id: &str, body: &[u8], extra: &str) -> Vec<u8> {
-    let mut output = format!("WARC/1.1\r\nWARC-Type: {kind}\r\nWARC-Record-ID: <urn:test:{id}>\r\nWARC-Date: 2020-07-08T02:52:55Z\r\nContent-Length: {}\r\n{extra}\r\n", body.len()).into_bytes();
-    output.extend_from_slice(body);
-    output.extend_from_slice(b"\r\n\r\n");
-    output
+fn fixture(name: &str) -> Vec<u8> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata/warc")
+        .join(name);
+    std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
 fn rows(batch: &open_arrow_access::RecordBatch) -> Vec<&str> {
@@ -123,18 +124,17 @@ fn rows(batch: &open_arrow_access::RecordBatch) -> Vec<&str> {
 
 #[tokio::test]
 async fn physical_record_types_preserve_binary_bodies_schema_nulls_and_order() {
-    let input = [
-        record("warcinfo", "first", b"", ""),
-        record("resource", "second", &[0, 255, 13, 10], "Content-Type: application/octet-stream\r\nWARC-Target-URI: https://example.com/\r\nWARC-Truncated: length\r\n"),
-        record("continuation", "third", b"end", "WARC-Segment-Number: 2\r\nWARC-Segment-Origin-ID: <urn:test:second>\r\nWARC-Segment-Total-Length: 7\r\n"),
-    ].concat();
+    let input = fixture("good_physical_records.warc");
     let accessor = WarcAccessor::new(Memory::new(input, 1));
-    let mut reader = accessor.open(ReadRequest::new("a.warc")).await.unwrap();
+    let mut reader = accessor
+        .open(ReadRequest::new("good_physical_records.warc"))
+        .await
+        .unwrap();
     assert_eq!(reader.metadata().schema, warc_schema());
     assert_eq!(reader.metadata().schema.fields().len(), 20);
     assert_eq!(
         reader.metadata().source.as_ref().unwrap().locator(),
-        "a.warc"
+        "good_physical_records.warc"
     );
     assert!(!reader.capability().read_with_range);
     let batch = reader.next().await.unwrap().unwrap();
@@ -177,11 +177,7 @@ async fn physical_record_types_preserve_binary_bodies_schema_nulls_and_order() {
 
 #[tokio::test]
 async fn projection_preserves_requested_order_and_zero_column_row_count() {
-    let input = [
-        record("response", "a", b"x", ""),
-        record("request", "b", b"y", ""),
-    ]
-    .concat();
+    let input = fixture("good_request_response.warc");
     let accessor = WarcAccessor::new(Memory::new(input, 3));
     for columns in [vec!["body".to_owned(), "id".to_owned()], vec![]] {
         let mut reader = accessor
@@ -206,7 +202,7 @@ async fn projection_preserves_requested_order_and_zero_column_row_count() {
 
 #[tokio::test]
 async fn invalid_projection_is_rejected_before_io() {
-    let input = Memory::new(vec![], 1);
+    let input = Memory::new(fixture("empty.warc"), 1);
     let options = input.options.clone();
     let accessor = WarcAccessor::new(input);
     for names in [vec!["id", "id"], vec!["unknown"]] {
@@ -223,14 +219,7 @@ async fn invalid_projection_is_rejected_before_io() {
 
 #[tokio::test]
 async fn byte_budget_cuts_batches_without_splitting_records() {
-    let input = [
-        record("resource", "a", b"12", ""),
-        record("resource", "b", b"34", ""),
-        record("resource", "c", b"1234567890", ""),
-        record("resource", "d", b"56", ""),
-        record("resource", "e", b"78", ""),
-    ]
-    .concat();
+    let input = fixture("good_batch_budget.warc");
     let accessor = WarcAccessor::new(Memory::new(input, 7))
         .with_batch_body_bytes(NonZeroUsize::new(3).unwrap());
     let mut reader = accessor.open(ReadRequest::new("a.warc")).await.unwrap();
@@ -242,39 +231,28 @@ async fn byte_budget_cuts_batches_without_splitting_records() {
 
 #[tokio::test]
 async fn malformed_truncated_and_invalid_numeric_inputs_fail_terminally() {
-    let valid = record("resource", "a", b"12345", "");
-    let mut bad_terminator = valid.clone();
-    let len = bad_terminator.len();
-    bad_terminator[len - 1] = b'x';
-    let missing_header = String::from_utf8(valid.clone())
-        .unwrap()
-        .replace("WARC-Date: 2020-07-08T02:52:55Z\r\n", "")
-        .into_bytes();
-    let invalid_numeric = record(
-        "continuation",
-        "a",
-        b"body",
-        "WARC-Segment-Number: nope\r\n",
-    );
-    let inputs = vec![
-        b"WARC/1.1\r\nContent-Length: ".to_vec(),
-        valid[..valid.len() - 5].to_vec(),
-        bad_terminator,
-        missing_header,
-        invalid_numeric,
-    ];
-    for bytes in inputs {
-        let accessor = WarcAccessor::new(Memory::new(bytes, 1));
-        let mut reader = accessor.open(ReadRequest::new("a.warc")).await.unwrap();
-        assert_eq!(reader.next().await.err().unwrap().kind(), ErrorKind::Decode);
+    for name in [
+        "bad_incomplete_header.warc",
+        "bad_truncated_body.warc",
+        "bad_terminator.warc",
+        "bad_missing_date.warc",
+        "bad_segment_number.warc",
+    ] {
+        let accessor = WarcAccessor::new(Memory::new(fixture(name), 1));
+        let mut reader = accessor.open(ReadRequest::new(name)).await.unwrap();
+        assert_eq!(
+            reader.next().await.err().unwrap().kind(),
+            ErrorKind::Decode,
+            "{name}"
+        );
         assert!(reader.next().await.unwrap().is_none());
     }
 }
 
 #[tokio::test]
 async fn upstream_errors_retain_kind_after_a_delivered_batch() {
-    let first = record("resource", "a", b"123", "");
-    let bytes = [first.clone(), record("resource", "b", b"456", "")].concat();
+    let first = fixture("good_resource.warc");
+    let bytes = fixture("good_resources.warc");
     let mut input = Memory::new(bytes, 1);
     input.fail_at = Some(first.len());
     let accessor = WarcAccessor::new(input);
@@ -296,11 +274,8 @@ async fn upstream_errors_retain_kind_after_a_delivered_batch() {
 
 #[tokio::test]
 async fn reading_is_lazy_forwards_byte_options_and_stops_on_drop() {
-    let first = record("resource", "a", b"123", "");
-    let input = Memory::new(
-        [first.clone(), record("resource", "b", b"456", "")].concat(),
-        1,
-    );
+    let first = fixture("good_resource.warc");
+    let input = Memory::new(fixture("good_resources.warc"), 1);
     let polls = input.polls.clone();
     let observed = input.options.clone();
     let options = ByteReadOptions {
@@ -329,10 +304,10 @@ async fn reading_is_lazy_forwards_byte_options_and_stops_on_drop() {
 
 #[tokio::test]
 async fn empty_input_and_independent_opens_have_explicit_behavior() {
-    let empty = WarcAccessor::new(Memory::new(vec![], 1));
+    let empty = WarcAccessor::new(Memory::new(fixture("empty.warc"), 1));
     let mut reader = empty.open(ReadRequest::new("empty.warc")).await.unwrap();
     assert!(reader.next().await.unwrap().is_none());
-    let accessor = WarcAccessor::new(Memory::new(record("metadata", "one", b"test", ""), 2));
+    let accessor = WarcAccessor::new(Memory::new(fixture("good_metadata.warc"), 2));
     let mut left = accessor.open(ReadRequest::new("a.warc")).await.unwrap();
     let mut right = accessor.open(ReadRequest::new("a.warc")).await.unwrap();
     assert_eq!(
