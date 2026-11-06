@@ -218,7 +218,9 @@ fn segment_selection_accepts_example_and_rejects_url_aliases() {
         ("CC-MAIN-2022-40", "../1.2"),
         ("CC-MAIN-2022-40", "1.2.3"),
     ] {
-        assert!(CommonCrawlSegmentRequest::new(crawl, segment).is_err());
+        let error = CommonCrawlSegmentRequest::new(crawl, segment).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(error.operation(), "select_commoncrawl_segment");
     }
 }
 
@@ -350,6 +352,19 @@ async fn empty_no_match_raw_gzip_and_upstream_errors_are_explicit() {
     );
 }
 
+#[tokio::test]
+async fn empty_manifest_chunks_are_io_errors_before_opening_records() {
+    let records = Records::default();
+    let opens = records.opens.clone();
+    let mut manifests = Manifest::fragmented(fixture("one.paths"), 1);
+    manifests.chunks.insert(0, Bytes::new());
+    let accessor = CommonCrawlSegmentAccessor::new(manifests, records);
+    let error = accessor.resolve(request()).await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Io);
+    assert_eq!(error.operation(), "read_commoncrawl_manifest");
+    assert!(opens.lock().unwrap().is_empty());
+}
+
 #[test]
 fn http_configuration_is_lazy_and_has_truthful_capabilities() {
     let bytes = create_http_accessor("https://data.commoncrawl.org/").unwrap();
@@ -364,7 +379,9 @@ fn http_configuration_is_lazy_and_has_truthful_capabilities() {
         "https://host/%2f",
         "https://host/?x=1",
     ] {
-        assert!(create_http_accessor(origin).is_err(), "{origin}");
+        let error = create_http_accessor(origin).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput, "{origin}");
+        assert_eq!(error.operation(), "configure_commoncrawl_http");
     }
 }
 
