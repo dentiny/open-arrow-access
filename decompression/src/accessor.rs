@@ -31,9 +31,11 @@ impl<A: ByteAccessor, C: Codec> Accessor for DecompressionAccessor<A, C> {
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
+        let capability = self.inner.capability();
         Capability {
+            read: capability.read,
             read_with_range: false,
-            ..self.inner.capability()
+            list: capability.list,
         }
     }
 

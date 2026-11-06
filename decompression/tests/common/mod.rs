@@ -106,7 +106,7 @@ impl Reader for MemoryReader {
         Capability {
             read: true,
             read_with_range: true,
-            ..Capability::default()
+            list: false,
         }
     }
 
