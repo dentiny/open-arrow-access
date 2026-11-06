@@ -63,7 +63,8 @@ impl Accessor for Files {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 
@@ -105,7 +106,8 @@ impl Reader for Batches {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
     fn metadata(&self) -> &RecordMetadata {
@@ -215,10 +217,9 @@ async fn later_schema_metadata_mismatch_and_open_failure_are_terminal() {
         .await
         .unwrap();
     assert!(reader.next().await.unwrap().is_some());
-    assert_eq!(
-        reader.next().await.err().unwrap().kind(),
-        ErrorKind::InvalidInput
-    );
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert_eq!(error.operation(), "read_file_set");
     assert!(reader.next().await.unwrap().is_none());
     assert_eq!(opens.lock().unwrap().len(), 2);
     let mut reader = accessor
@@ -226,11 +227,13 @@ async fn later_schema_metadata_mismatch_and_open_failure_are_terminal() {
         .await
         .unwrap();
     assert!(reader.next().await.unwrap().is_some());
-    assert_eq!(
-        reader.next().await.err().unwrap().kind(),
-        ErrorKind::NotFound
-    );
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::NotFound);
+    assert_eq!(error.operation(), "open_fixture");
+    let calls = opens.lock().unwrap().len();
     assert!(reader.next().await.unwrap().is_none());
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(opens.lock().unwrap().len(), calls);
 }
 
 #[tokio::test]
@@ -242,10 +245,9 @@ async fn batch_schema_is_checked_against_the_opened_schema() {
         .open(FileSetRequest::new(["bad"]))
         .await
         .unwrap();
-    assert_eq!(
-        reader.next().await.err().unwrap().kind(),
-        ErrorKind::InvalidInput
-    );
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert_eq!(error.operation(), "read_file_set");
     assert!(reader.next().await.unwrap().is_none());
 }
 
@@ -261,7 +263,8 @@ impl Accessor for Listing {
     fn capability(&self) -> Capability {
         Capability {
             list: true,
-            ..Capability::default()
+            read: false,
+            read_with_range: false,
         }
     }
     async fn open(&self, _: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
