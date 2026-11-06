@@ -10,6 +10,11 @@ mod warc;
 #[cfg(feature = "warc")]
 pub use warc::{WarcAccessor, warc_schema};
 
+#[cfg(feature = "json")]
+mod json;
+#[cfg(feature = "json")]
+pub use json::JsonAccessor;
+
 #[cfg(feature = "csv")]
 mod csv;
 #[cfg(feature = "csv")]
