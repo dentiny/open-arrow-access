@@ -227,8 +227,6 @@ impl OpenDalReader {
                 }
                 self.pending = buffer;
             }
-            // Most output chunks fit in one storage buffer. Keep that path
-            // zero-copy without allocating a vector of fragments.
             if written == 0 && self.pending.current().len() >= target {
                 self.offset += target as u64;
                 return Ok(self.pending.split_to(target).next().unwrap());
