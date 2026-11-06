@@ -2,8 +2,8 @@
 
 The first PR implements the common framework and a single concrete pipeline:
 OpenDAL Fs → Parquet → Arrow. The default-off directory dataset adds sequential
-file composition. Services, decompression and production layers follow in
-independent PRs.
+file composition. Streaming decompression layers compose with byte readers;
+services and production record layers follow in independent PRs.
 
 ```mermaid
 flowchart TD
@@ -44,10 +44,10 @@ The default I/O chunk is 2 MiB; explicit chunk/concurrency options control stagi
 size and parallel reads. The final requested bytes and decoder memory remain
 unbounded by these staging limits.
 
-A future gzip reader wraps another byte reader, reports decoded rather than
-compressed length (or unknown), and normally removes range capability. It can
-use this contract without changing a format reader. Compressed Parquet will
-need bounded materialization or another valid random-access mechanism.
+The optional gzip layer wraps another byte reader, reports unknown decoded
+length, and removes range capability. It uses this contract without changing
+a format reader. Compressed Parquet still needs bounded materialization or
+another valid random-access mechanism. See [decompression](../decompression/README.md).
 
 `RecordReader` specializes the same reader protocol with `RecordMetadata`.
 `into_stream` owns the reader and stops polling it after EOF or the first error.
@@ -74,8 +74,8 @@ The initial flags cover only operations implemented by this framework:
 
 Flags describe the **effective interface after composition**, without I/O.
 Transparent layers forward them; wrappers that remove an operation clear its
-flag on both accessor and reader. A future sequential gzip wrapper normally
-clears `read_with_range`. The Fs adapter reports read/ranges and recursive
+flag on both accessor and reader. The sequential gzip wrapper clears
+`read_with_range`. The Fs adapter reports read/ranges and recursive
 file listing through OpenDAL. The Parquet accessor
 reports record reading only when its input supports ranges; neither its output
 reader nor its accessor exposes byte-range operations.
@@ -128,6 +128,11 @@ Configured concurrency is per open reader, so several readers multiply the total
 possible in-flight I/O. This does not change logical record order or implement
 file/partition parallelism.
 
+Sequential byte output reuses one OpenDAL stream. Retained prefetch and range
+reads share an executor budget allocated per opened reader, so interleaving the
+two paths does not multiply in-flight I/O. Contiguous output fragments are sliced
+without copying; fragmented output is assembled only when needed.
+
 ## Layer
 
 `Layer<A>` wraps an accessor while preserving its request and reader types.
@@ -175,6 +180,10 @@ schema and optional reader-context contracts.
 - The facade forwards independent, additive `storage-fs` / `format-parquet`
   features. Features make implementations available; they do not change runtime
   ordering or silently attach layers.
+- `decompression/` shares streaming byte adapters across codec modules. Its
+  independent gzip/LZ4/bzip2/Zstandard features use upstream decoders with
+  concatenated frames or members;
+  source versions remain upstream identities and decoded lengths are unknown.
 - `format-json` adds an Arrow JSON decoder with a caller-supplied fixed schema.
   It reads whitespace-separated objects, including JSONL, from sequential bytes
   without materializing the input. Top-level arrays/null/scalars are rejected;
@@ -182,7 +191,7 @@ schema and optional reader-context contracts.
   through the same `ReadRequest` contract as Parquet.
 - `dataset/` provides sequential `FileSetAccessor` and `DirectoryAccessor` behind
   the default-off `dataset-directory` feature, without depending on a format.
-- `service/`, `decompression/`, and `layers/` remain extension points.
+- `service/` and `layers/` remain extension points.
 
 The project output boundary is Arrow records. Internal temporary inputs may be
 introduced for materialization in a later decompression PR; downstream writes,

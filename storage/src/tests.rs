@@ -54,7 +54,9 @@ fn backend_error_categories_keep_the_upstream_cause() {
 #[tokio::test]
 async fn filesystem_rejects_surrounding_whitespace_without_aliasing_files() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("data.bin"), b"other file").unwrap();
+    tokio::fs::write(dir.path().join("data.bin"), b"other file")
+        .await
+        .unwrap();
     let locators = [
         " data.bin",
         "data.bin ",
@@ -64,9 +66,13 @@ async fn filesystem_rejects_surrounding_whitespace_without_aliasing_files() {
     ];
     #[cfg(unix)]
     for locator in locators {
-        std::fs::write(dir.path().join(locator), b"requested file").unwrap();
+        tokio::fs::write(dir.path().join(locator), b"requested file")
+            .await
+            .unwrap();
     }
-    std::fs::write(dir.path().join("data file.bin"), b"internal space").unwrap();
+    tokio::fs::write(dir.path().join("data file.bin"), b"internal space")
+        .await
+        .unwrap();
     let accessor = FsAccessor::new(dir.path()).await.unwrap();
 
     for locator in locators {
@@ -86,11 +92,66 @@ async fn filesystem_rejects_surrounding_whitespace_without_aliasing_files() {
     );
 }
 
+#[tokio::test]
+async fn sequential_reads_report_short_input_and_terminate() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("short.bin");
+    tokio::fs::write(&path, b"abcdefgh").await.unwrap();
+    let accessor = FsAccessor::new(dir.path()).await.unwrap();
+    let mut reader = accessor.open("short.bin".into()).await.unwrap();
+    tokio::fs::write(&path, b"abcd").await.unwrap();
+    let error = loop {
+        match reader.next().await {
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("short input was accepted as complete"),
+            Err(error) => break error,
+        }
+    };
+    assert_eq!(error.kind(), ErrorKind::Io);
+    assert!(reader.next().await.unwrap().is_none());
+}
+
 #[derive(Debug, Default)]
 struct TaskCounts {
     started: AtomicUsize,
     active: AtomicUsize,
     peak: AtomicUsize,
+}
+
+#[tokio::test]
+async fn sequential_output_chunks_reuse_storage_requests_when_ranges_are_interleaved() {
+    let dir = tempfile::tempdir().unwrap();
+    let contents: Vec<u8> = (0..64).collect();
+    tokio::fs::write(dir.path().join("data.bin"), &contents)
+        .await
+        .unwrap();
+    let counts = Arc::new(TaskCounts::default());
+    let operator = Operator::new(Fs::default().root(dir.path().to_str().unwrap()))
+        .unwrap()
+        .layer(CountTasksLayer(counts.clone()));
+    let accessor = OpenDalAccessor::new(operator).with_chunk_size(std::num::NonZeroUsize::MIN);
+    let mut reader = accessor
+        .open(
+            ByteReadRequest::new("data.bin").with_options(ByteReadOptions {
+                io_chunk_size: std::num::NonZeroUsize::new(4),
+                io_concurrency: std::num::NonZeroUsize::new(4).unwrap(),
+            }),
+        )
+        .await
+        .unwrap();
+    let mut output = reader.next().await.unwrap().unwrap().to_vec();
+    assert_eq!(reader.read_range(12..14).await.unwrap().as_ref(), &[12, 13]);
+    while let Some(chunk) = reader.next().await.unwrap() {
+        assert_eq!(chunk.len(), 1);
+        output.extend_from_slice(&chunk);
+    }
+    assert_eq!(output, contents);
+    assert_eq!(
+        counts.started.load(Ordering::SeqCst),
+        17,
+        "sixteen sequential I/O chunks plus one independent range"
+    );
+    assert_le!(counts.peak.load(Ordering::SeqCst), 4);
 }
 
 #[tokio::test]
@@ -100,7 +161,9 @@ async fn large_single_and_bulk_ranges_preserve_values_and_cursor() {
     let contents = (0..5 * mib + 7)
         .map(|i| (i % 251) as u8)
         .collect::<Vec<_>>();
-    std::fs::write(dir.path().join("large.bin"), &contents).unwrap();
+    tokio::fs::write(dir.path().join("large.bin"), &contents)
+        .await
+        .unwrap();
     let accessor = FsAccessor::new(dir.path()).await.unwrap();
     for (concurrency, chunk_size) in [
         (1, None),
@@ -150,11 +213,11 @@ async fn large_single_and_bulk_ranges_preserve_values_and_cursor() {
 async fn large_range_reports_short_reads() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("large.bin");
-    let file = std::fs::File::create(&path).unwrap();
-    file.set_len(3 * 1024 * 1024).unwrap();
+    let file = tokio::fs::File::create(&path).await.unwrap();
+    file.set_len(3 * 1024 * 1024).await.unwrap();
     let accessor = FsAccessor::new(dir.path()).await.unwrap();
     let mut reader = accessor.open("large.bin".into()).await.unwrap();
-    file.set_len(1024 * 1024).unwrap();
+    file.set_len(1024 * 1024).await.unwrap();
     let error = reader.read_range(0..3 * 1024 * 1024).await.err().unwrap();
     assert_eq!(error.kind(), ErrorKind::Io);
 }
@@ -208,7 +271,9 @@ async fn filesystem_bulk_reads_do_not_merge_across_unrequested_gaps() {
     contents[..2].copy_from_slice(b"ab");
     contents[middle..middle + 2].copy_from_slice(b"cd");
     contents[end..end + 2].copy_from_slice(b"ef");
-    std::fs::write(dir.path().join("data.bin"), &contents).unwrap();
+    tokio::fs::write(dir.path().join("data.bin"), &contents)
+        .await
+        .unwrap();
     let counts = Arc::new(TaskCounts::default());
     let operator = Operator::new(Fs::default().root(dir.path().to_str().unwrap()))
         .unwrap()
@@ -257,7 +322,9 @@ async fn filesystem_bulk_reads_do_not_merge_across_unrequested_gaps() {
 async fn io_options_enable_bounded_backend_concurrency_for_single_and_bulk_reads() {
     let dir = tempfile::tempdir().unwrap();
     let contents = (0..64).collect::<Vec<u8>>();
-    std::fs::write(dir.path().join("data.bin"), &contents).unwrap();
+    tokio::fs::write(dir.path().join("data.bin"), &contents)
+        .await
+        .unwrap();
     for concurrency in [1, 4] {
         let counts = Arc::new(TaskCounts::default());
         let operator = Operator::new(Fs::default().root(dir.path().to_str().unwrap()))

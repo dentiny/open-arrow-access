@@ -11,15 +11,13 @@ use std::{
 use arrow_array::{Array, Int64Array, StringArray};
 use arrow_schema::{ArrowError, DataType, Field, IntervalUnit, Schema, TimeUnit};
 use more_asserts::assert_lt;
-use open_arrow_access::{
+use open_arrow_access_core::{
     Accessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, Error,
     ErrorKind, ReadOptions, ReadRequest, Reader, RecordBatch, Result, SchemaRef, async_trait,
-    file_format::JsonAccessor,
 };
 
-mod common;
-
-use common::{MemoryAccessor, Observations};
+use open_arrow_access_file_format::JsonAccessor;
+use open_arrow_access_test_support::{MemoryAccessor, Observations};
 
 fn schema() -> SchemaRef {
     Arc::new(Schema::new_with_metadata(
@@ -33,17 +31,19 @@ fn schema() -> SchemaRef {
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("testdata/json")
+        .join("../testdata/json")
         .join(name)
 }
 
-fn fixture_data(name: &str) -> Vec<u8> {
+async fn fixture_data(name: &str) -> Vec<u8> {
     let path = fixture_path(name);
-    std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+    tokio::fs::read(&path)
+        .await
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
-fn fixture(name: &str, chunk_size: usize) -> (MemoryAccessor, Arc<Observations>) {
-    let input = MemoryAccessor::new(&fixture_data(name), chunk_size);
+async fn fixture(name: &str, chunk_size: usize) -> (MemoryAccessor, Arc<Observations>) {
+    let input = MemoryAccessor::new(&fixture_data(name).await, chunk_size);
     let observations = input.observations.clone();
     (input, observations)
 }
@@ -67,7 +67,7 @@ fn ids(batch: &RecordBatch) -> &[i64] {
 #[tokio::test]
 async fn fragmented_json_objects_preserve_values_schema_and_batch_order() {
     for chunk_size in [1, 7, 4096] {
-        let (input, _) = fixture("good.json", chunk_size);
+        let (input, _) = fixture("good.json", chunk_size).await;
         let accessor = JsonAccessor::new(input, schema());
         let mut reader = accessor.open(request(2, None)).await.unwrap();
         assert_eq!(reader.metadata().schema, schema());
@@ -96,7 +96,7 @@ async fn fragmented_json_objects_preserve_values_schema_and_batch_order() {
 #[tokio::test]
 async fn projection_preserves_requested_order_metadata_and_zero_column_row_counts() {
     for projection in [vec!["title", "id"], vec![]] {
-        let (input, _) = fixture("projection.jsonl", 3);
+        let (input, _) = fixture("projection.jsonl", 3).await;
         let accessor = JsonAccessor::new(input, schema());
         let mut reader = accessor
             .open(request(1, Some(projection.clone())))
@@ -127,7 +127,7 @@ async fn projection_preserves_requested_order_metadata_and_zero_column_row_count
 
 #[tokio::test]
 async fn invalid_projection_fails_before_opening_bytes() {
-    let (input, observed) = fixture("empty.json", 1);
+    let (input, observed) = fixture("empty.json", 1).await;
     let accessor = JsonAccessor::new(input, schema());
     for projection in [vec!["missing"], vec!["id", "id"]] {
         let error = accessor
@@ -161,7 +161,7 @@ async fn malformed_truncated_and_non_object_inputs_fail_terminally() {
             if matches!(name, "bad-type.json" | "bad-utf8.json") && projection.is_some() {
                 continue;
             }
-            let (input, observed) = fixture(name, 1);
+            let (input, observed) = fixture(name, 1).await;
             let accessor = JsonAccessor::new(input, schema());
             let mut reader = accessor.open(request(10, projection)).await.unwrap();
             let error = reader
@@ -181,8 +181,8 @@ async fn malformed_truncated_and_non_object_inputs_fail_terminally() {
 
 #[tokio::test]
 async fn io_errors_keep_their_category_after_a_successful_batch() {
-    let (mut input, observed) = fixture("io-failure.jsonl", 9);
-    input.fail_after = Some(9);
+    let (input, observed) = fixture("io-failure.jsonl", 9).await;
+    let input = input.with_failure(9, ErrorKind::Io);
     let accessor = JsonAccessor::new(input, schema());
     let mut reader = accessor.open(request(1, None)).await.unwrap();
     assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
@@ -196,7 +196,7 @@ async fn io_errors_keep_their_category_after_a_successful_batch() {
 
 #[tokio::test]
 async fn per_open_options_are_forwarded_and_sequential_bytes_are_sufficient() {
-    let (input, observed) = fixture("single.json", 1);
+    let (input, observed) = fixture("single.json", 1).await;
     let accessor = JsonAccessor::new(input, schema());
     assert!(accessor.capability().read);
     assert!(!accessor.capability().read_with_range);
@@ -215,7 +215,7 @@ async fn per_open_options_are_forwarded_and_sequential_bytes_are_sufficient() {
 
 #[tokio::test]
 async fn reading_a_batch_does_not_collect_the_entire_input() {
-    let data = fixture_data("many.jsonl");
+    let data = fixture_data("many.jsonl").await;
     let input = MemoryAccessor::new(&data, 1);
     let observed = input.observations.clone();
     let accessor = JsonAccessor::new(input, schema());
@@ -231,7 +231,7 @@ async fn reading_a_batch_does_not_collect_the_entire_input() {
 #[tokio::test]
 async fn empty_and_whitespace_only_inputs_have_no_rows() {
     for name in ["empty.json", "whitespace.json"] {
-        let (input, observed) = fixture(name, 1);
+        let (input, observed) = fixture(name, 1).await;
         let accessor = JsonAccessor::new(input, schema());
         let mut reader = accessor.open(request(1, None)).await.unwrap();
         assert!(reader.next().await.unwrap().is_none());
@@ -241,10 +241,9 @@ async fn empty_and_whitespace_only_inputs_have_no_rows() {
     }
 }
 
-#[cfg(feature = "storage-fs")]
 #[tokio::test]
 async fn local_jsonl_reads_through_opendal() {
-    let storage = open_arrow_access::storage::FsAccessor::new(fixture_path(""))
+    let storage = open_arrow_access_storage::FsAccessor::new(fixture_path(""))
         .await
         .unwrap();
     let accessor = JsonAccessor::new(
@@ -268,7 +267,7 @@ async fn decoder_configuration_errors_are_classified_before_opening_bytes() {
             ErrorKind::InvalidInput,
         ),
     ] {
-        let (input, observed) = fixture("empty.json", 1);
+        let (input, observed) = fixture("empty.json", 1).await;
         let schema = Arc::new(Schema::new(vec![Field::new("value", data_type, true)]));
         let accessor = JsonAccessor::new(input, schema);
         let error = accessor.open(request(1, None)).await.err().unwrap();
@@ -397,7 +396,7 @@ async fn source_errors_preserve_category_and_cause_at_open_and_mid_record() {
         ErrorKind::Decode,
     ] {
         for fault in [Fault::Open(kind), Fault::Read { after: 5, kind }] {
-            let (input, _) = fixture("good.json", 1);
+            let (input, _) = fixture("good.json", 1).await;
             let polls = Arc::new(AtomicUsize::new(0));
             let accessor = JsonAccessor::new(
                 FaultyAccessor {
@@ -426,7 +425,7 @@ async fn source_errors_preserve_category_and_cause_at_open_and_mid_record() {
 
 #[tokio::test]
 async fn empty_source_chunks_are_io_errors_and_terminal() {
-    let (input, _) = fixture("single.json", 1);
+    let (input, _) = fixture("single.json", 1).await;
     let polls = Arc::new(AtomicUsize::new(0));
     let accessor = JsonAccessor::new(
         FaultyAccessor {

@@ -1,33 +1,40 @@
 //! Shared OpenDAL byte access. New backend constructors reuse this implementation.
 
-use std::{num::NonZeroUsize, ops::Range};
+use std::{num::NonZeroUsize, ops::Range, sync::Arc};
 
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error,
     ErrorKind, ObjectRef, ObjectStream, Reader, Result, async_trait,
 };
-use opendal::Operator;
+use opendal::{
+    Execute, Executor, OperationContext, Operator,
+    raw::{BoxedStaticFuture, Layer, Servicer},
+};
+use tokio::sync::Semaphore;
 
 const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
 const DEFAULT_IO_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 const MAX_FETCH_BATCH_SIZE: u64 = 2 * 1024 * 1024;
 
+/// Generic OpenDAL byte adapter, shared by storage and provider services.
 #[derive(Clone, Debug)]
-pub(crate) struct OpenDalAccessor {
+pub struct OpenDalAccessor {
     operator: Operator,
     chunk_size: NonZeroUsize,
 }
 
 impl OpenDalAccessor {
-    pub(crate) fn new(operator: Operator) -> Self {
+    /// Wrap an operator without changing its backend configuration.
+    pub fn new(operator: Operator) -> Self {
         Self {
             operator,
             chunk_size: DEFAULT_OUTPUT_CHUNK_SIZE,
         }
     }
 
-    pub(crate) fn with_chunk_size(mut self, chunk_size: NonZeroUsize) -> Self {
+    /// Bound emitted chunks independently of storage I/O splitting.
+    pub fn with_chunk_size(mut self, chunk_size: NonZeroUsize) -> Self {
         self.chunk_size = chunk_size;
         self
     }
@@ -45,7 +52,8 @@ impl Accessor for OpenDalAccessor {
         Capability {
             read,
             read_with_range: read,
-            list: upstream.list && upstream.stat,
+            // OpenDAL can walk nonrecursive backend listings.
+            list: upstream.stat && upstream.list,
         }
     }
 
@@ -65,10 +73,16 @@ impl Accessor for OpenDalAccessor {
             ));
         }
         let len = metadata.content_length();
+        // OpenDAL gives each stream/fetch its own task queue. Share a budget
+        // across those queues so retained sequential prefetch cannot multiply
+        // the reader's I/O concurrency when a range read is interleaved.
+        let mut operator = self.operator.clone();
+        if options.io_concurrency.get() > 1 {
+            operator = operator.layer(ReaderBudget(options.io_concurrency.get()));
+        }
         // Preserve projection savings: coalesce adjacent/overlapping ranges,
         // without reading unrequested bytes between separated ranges.
-        let builder = self
-            .operator
+        let builder = operator
             .reader_with(path)
             .content_length_hint(len)
             .concurrent(options.io_concurrency.get())
@@ -87,6 +101,8 @@ impl Accessor for OpenDalAccessor {
                 version: None,
             },
             offset: 0,
+            sequential: None,
+            pending: opendal::Buffer::new(),
             len,
             chunk_size: self.chunk_size.get(),
             finished: false,
@@ -130,8 +146,45 @@ impl ByteAccessor for OpenDalAccessor {
     }
 }
 
+#[derive(Debug)]
+struct ReaderBudget(usize);
+
+impl Layer for ReaderBudget {
+    fn apply_context(&self, _: Servicer, context: OperationContext) -> OperationContext {
+        let executor = Executor::with(ReaderExecutor {
+            inner: context.executor().clone().into_inner(),
+            permits: Arc::new(Semaphore::new(self.0)),
+        });
+        context.with_executor(executor)
+    }
+}
+
+struct ReaderExecutor {
+    inner: Arc<dyn Execute>,
+    permits: Arc<Semaphore>,
+}
+
+impl Execute for ReaderExecutor {
+    fn execute(&self, future: BoxedStaticFuture<()>) {
+        let permits = self.permits.clone();
+        self.inner.execute(Box::pin(async move {
+            let _permit = permits
+                .acquire()
+                .await
+                .expect("reader budget is never closed");
+            future.await;
+        }));
+    }
+
+    fn timeout(&self) -> Option<BoxedStaticFuture<()>> {
+        self.inner.timeout()
+    }
+}
+
 struct OpenDalReader {
     inner: opendal::Reader,
+    sequential: Option<opendal::BufferStream>,
+    pending: opendal::Buffer,
     metadata: ByteMetadata,
     offset: u64,
     len: u64,
@@ -140,6 +193,53 @@ struct OpenDalReader {
 }
 
 impl OpenDalReader {
+    async fn read_next_chunk(&mut self) -> Result<Bytes> {
+        let path = self.metadata.source.as_ref().unwrap().locator();
+        if self.sequential.is_none() {
+            self.sequential = Some(
+                self.inner
+                    .clone()
+                    .into_stream(0..self.len)
+                    .await
+                    .map_err(|error| map_error("read", path, error))?,
+            );
+        }
+        let target = (self.len - self.offset).min(self.chunk_size as u64) as usize;
+        let mut output = Vec::new();
+        let mut written = 0;
+        while written < target {
+            while self.pending.is_empty() {
+                let Some(buffer) = self
+                    .sequential
+                    .as_mut()
+                    .unwrap()
+                    .try_next()
+                    .await
+                    .map_err(|error| map_error("read", path, error))?
+                else {
+                    return Err(short_read("read"));
+                };
+                if buffer.len() as u64 > self.len - self.offset {
+                    return Err(Error::new(
+                        ErrorKind::Io,
+                        "read",
+                        "input exceeded its declared length",
+                    ));
+                }
+                self.pending = buffer;
+            }
+            if written == 0 && self.pending.current().len() >= target {
+                self.offset += target as u64;
+                return Ok(self.pending.split_to(target).next().unwrap());
+            }
+            let count = (target - written).min(self.pending.len());
+            output.extend(self.pending.split_to(count));
+            self.offset += count as u64;
+            written += count;
+        }
+        Ok(opendal::Buffer::from(output).to_bytes())
+    }
+
     fn validate_range(&self, range: &Range<u64>) -> Result<()> {
         if range.start > range.end || range.end > self.len {
             return Err(Error::new(
@@ -154,7 +254,7 @@ impl OpenDalReader {
         Ok(())
     }
 
-    async fn read_exact_range(&self, range: Range<u64>) -> Result<Bytes> {
+    async fn read_exact_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         self.validate_range(&range)?;
         if range.is_empty() {
             return Ok(Bytes::new());
@@ -193,7 +293,7 @@ impl OpenDalReader {
         Ok(buffer.to_bytes())
     }
 
-    async fn fetch_ranges(&self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+    async fn fetch_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
         let lengths = ranges
             .iter()
             .map(|range| range.end - range.start)
@@ -238,19 +338,16 @@ impl Reader for OpenDalReader {
     async fn next(&mut self) -> Result<Option<Bytes>> {
         if self.finished || self.offset == self.len {
             self.finished = true;
+            self.sequential = None;
+            self.pending = opendal::Buffer::new();
             return Ok(None);
         }
-        let end = self
-            .offset
-            .saturating_add(self.chunk_size as u64)
-            .min(self.len);
-        match self.read_exact_range(self.offset..end).await {
-            Ok(bytes) => {
-                self.offset = end;
-                Ok(Some(bytes))
-            }
+        match self.read_next_chunk().await {
+            Ok(bytes) => Ok(Some(bytes)),
             Err(error) => {
                 self.finished = true;
+                self.sequential = None;
+                self.pending = opendal::Buffer::new();
                 Err(error)
             }
         }
