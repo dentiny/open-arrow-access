@@ -9,12 +9,14 @@ description = "Arrow file-format readers for Open Arrow Access"
 [features]
 default = []
 parquet = ["dep:parquet", "dep:arrow-schema", "dep:futures"]
+json = ["dep:arrow-json", "dep:arrow-schema"]
 csv = ["dep:arrow-csv", "dep:arrow-schema"]
 
 [dependencies]
 open-arrow-access-core.workspace = true
 arrow-csv = { workspace = true, optional = true }
 parquet = { workspace = true, optional = true }
+arrow-json = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 
