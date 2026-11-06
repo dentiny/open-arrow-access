@@ -63,7 +63,8 @@ impl Accessor for Files {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 
@@ -105,7 +106,8 @@ impl Reader for Batches {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
     fn metadata(&self) -> &RecordMetadata {
@@ -261,7 +263,8 @@ impl Accessor for Listing {
     fn capability(&self) -> Capability {
         Capability {
             list: true,
-            ..Capability::default()
+            read: false,
+            read_with_range: false,
         }
     }
     async fn open(&self, _: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
