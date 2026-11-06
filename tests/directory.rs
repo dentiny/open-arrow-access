@@ -1,5 +1,3 @@
-#![cfg(feature = "dataset-directory")]
-
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
@@ -379,17 +377,13 @@ async fn directory_rejects_traversal_entries_even_when_hidden_files_are_enabled(
 #[cfg(all(feature = "storage-fs", feature = "format-parquet"))]
 mod filesystem {
     use super::*;
+    use more_asserts::assert_le;
     use open_arrow_access::{file_format::ParquetAccessor, storage::FsAccessor};
-    use parquet::arrow::ArrowWriter;
-
-    fn write(path: &std::path::Path, schema: SchemaRef, ids: &[i64]) {
-        let mut writer =
-            ArrowWriter::try_new(std::fs::File::create(path).unwrap(), schema.clone(), None)
-                .unwrap();
-        if !ids.is_empty() {
-            writer.write(&batch(schema, ids)).unwrap();
-        }
-        writer.close().unwrap();
+    fn copy_fixture(name: &str, destination: &std::path::Path) {
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/parquet/directory")
+            .join(name);
+        std::fs::copy(source, destination).unwrap();
     }
 
     #[tokio::test]
@@ -439,10 +433,10 @@ mod filesystem {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
         let schema = schema("same");
-        write(&dir.path().join("b.parquet"), schema.clone(), &[3]);
-        write(&dir.path().join("a.parquet"), schema.clone(), &[1, 2]);
-        write(&dir.path().join("sub/c.parquet"), schema.clone(), &[4]);
-        write(&dir.path().join(".hidden.parquet"), schema.clone(), &[99]);
+        copy_fixture("b.parquet", &dir.path().join("b.parquet"));
+        copy_fixture("a.parquet", &dir.path().join("a.parquet"));
+        copy_fixture("c.parquet", &dir.path().join("sub/c.parquet"));
+        copy_fixture("hidden.parquet", &dir.path().join(".hidden.parquet"));
         std::fs::write(dir.path().join("readme"), b"not parquet").unwrap();
         let fs = FsAccessor::new(dir.path()).await.unwrap();
         let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
@@ -460,11 +454,10 @@ mod filesystem {
             .await
             .unwrap();
         assert_eq!(batches.iter().map(|b| b.num_rows()).sum::<usize>(), 4);
-        assert!(
-            batches
-                .iter()
-                .all(|b| b.num_columns() == 0 && b.num_rows() <= 1)
-        );
+        for batch in &batches {
+            assert_eq!(batch.num_columns(), 0);
+            assert_le!(batch.num_rows(), 1);
+        }
         request.include_hidden = true;
         request.recursive = false;
         request.options.projection = None;

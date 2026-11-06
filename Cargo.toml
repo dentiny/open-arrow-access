@@ -74,6 +74,10 @@ tempfile.workspace = true
 tokio.workspace = true
 
 [[test]]
+name = "directory"
+required-features = ["dataset-directory"]
+
+[[test]]
 name = "csv"
 required-features = ["format-csv"]
 
