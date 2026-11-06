@@ -1,4 +1,5 @@
 mod accessor;
+mod path;
 mod request;
 
 pub use accessor::DirectoryAccessor;

@@ -4,7 +4,7 @@ use open_arrow_access_core::{
     async_trait,
 };
 
-use super::DirectoryRequest;
+use super::{DirectoryRequest, path::is_root_relative};
 use crate::{FileSetAccessor, FileSetRequest};
 
 /// Discover files through a byte accessor and read them through a supplied format.
@@ -46,7 +46,7 @@ where
 
     async fn open(&self, request: DirectoryRequest) -> Result<Box<dyn RecordReader>> {
         let prefix = request.prefix.locator();
-        if prefix.starts_with('/') || prefix.split('/').any(|part| part == "." || part == "..") {
+        if !is_root_relative(prefix) {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "open_directory",
@@ -68,9 +68,7 @@ where
                     "listing returned an object outside its directory prefix",
                 ));
             };
-            if relative.starts_with('/')
-                || relative.split('/').any(|part| part == "." || part == "..")
-            {
+            if !is_root_relative(relative) {
                 return Err(Error::new(
                     ErrorKind::InvalidInput,
                     "open_directory",
