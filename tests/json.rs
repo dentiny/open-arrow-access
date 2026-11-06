@@ -1,14 +1,19 @@
 use std::{
+    error::Error as _,
     num::NonZeroUsize,
     path::PathBuf,
-    sync::{Arc, atomic::Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use arrow_array::{Array, Int64Array, StringArray};
-use arrow_schema::{DataType, Field, Schema};
+use arrow_schema::{ArrowError, DataType, Field, IntervalUnit, Schema, TimeUnit};
 use more_asserts::assert_lt;
 use open_arrow_access::{
-    Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
+    Accessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, Error,
+    ErrorKind, ReadOptions, ReadRequest, Reader, RecordBatch, Result, SchemaRef, async_trait,
     file_format::JsonAccessor,
 };
 
@@ -131,6 +136,7 @@ async fn invalid_projection_fails_before_opening_bytes() {
             .err()
             .unwrap();
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(error.operation(), "project");
     }
     assert!(observed.requests.lock().unwrap().is_empty());
 }
@@ -164,6 +170,8 @@ async fn malformed_truncated_and_non_object_inputs_fail_terminally() {
                 .err()
                 .unwrap_or_else(|| panic!("accepted {name}"));
             assert_eq!(error.kind(), ErrorKind::Decode, "{name}");
+            assert_eq!(error.operation(), "decode_json", "{name}");
+            assert!(error.source().unwrap().is::<ArrowError>(), "{name}");
             let reads = observed.reads.load(Ordering::SeqCst);
             assert!(reader.next().await.unwrap().is_none());
             assert_eq!(observed.reads.load(Ordering::SeqCst), reads);
@@ -246,4 +254,193 @@ async fn local_jsonl_reads_through_opendal() {
     let mut reader = accessor.open(ReadRequest::new("good.jsonl")).await.unwrap();
     assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1, 2]);
     assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn decoder_configuration_errors_are_classified_before_opening_bytes() {
+    for (data_type, expected) in [
+        (
+            DataType::Interval(IntervalUnit::DayTime),
+            ErrorKind::Unsupported,
+        ),
+        (
+            DataType::Timestamp(TimeUnit::Millisecond, Some("invalid/timezone".into())),
+            ErrorKind::InvalidInput,
+        ),
+    ] {
+        let (input, observed) = fixture("empty.json", 1);
+        let schema = Arc::new(Schema::new(vec![Field::new("value", data_type, true)]));
+        let accessor = JsonAccessor::new(input, schema);
+        let error = accessor.open(request(1, None)).await.err().unwrap();
+        assert_eq!(error.kind(), expected);
+        assert_eq!(error.operation(), "open_json");
+        assert!(error.source().unwrap().is::<ArrowError>());
+        assert!(observed.requests.lock().unwrap().is_empty());
+        assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Fault {
+    Open(ErrorKind),
+    Read { after: usize, kind: ErrorKind },
+    EmptyChunk,
+}
+
+struct FaultyAccessor {
+    inner: MemoryAccessor,
+    fault: Fault,
+    polls: Arc<AtomicUsize>,
+}
+
+fn source_error(kind: ErrorKind) -> Error {
+    Error::new(kind, "fixture_source", "injected source failure").with_source(std::io::Error::new(
+        std::io::ErrorKind::ConnectionReset,
+        "connection closed",
+    ))
+}
+
+fn assert_source_error(error: &Error, kind: ErrorKind) {
+    assert_eq!(error.kind(), kind);
+    assert_eq!(error.operation(), "fixture_source");
+    assert_eq!(
+        error
+            .source()
+            .unwrap()
+            .downcast_ref::<std::io::Error>()
+            .unwrap()
+            .kind(),
+        std::io::ErrorKind::ConnectionReset,
+    );
+}
+
+#[async_trait]
+impl Accessor for FaultyAccessor {
+    type Request = ByteReadRequest;
+    type Reader = dyn ByteReader;
+
+    fn capability(&self) -> Capability {
+        let inner = self.inner.capability();
+        Capability {
+            read: inner.read,
+            read_with_range: inner.read_with_range,
+            list: inner.list,
+        }
+    }
+
+    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        if let Fault::Open(kind) = self.fault {
+            return Err(source_error(kind));
+        }
+        Ok(Box::new(FaultyReader {
+            inner: self.inner.open(request).await?,
+            fault: self.fault,
+            polls: self.polls.clone(),
+            consumed: 0,
+        }))
+    }
+}
+
+struct FaultyReader {
+    inner: Box<dyn ByteReader>,
+    fault: Fault,
+    polls: Arc<AtomicUsize>,
+    consumed: usize,
+}
+
+#[async_trait]
+impl Reader for FaultyReader {
+    type Item = Bytes;
+    type Metadata = ByteMetadata;
+
+    fn capability(&self) -> Capability {
+        let inner = self.inner.capability();
+        Capability {
+            read: inner.read,
+            read_with_range: inner.read_with_range,
+            list: inner.list,
+        }
+    }
+
+    fn metadata(&self) -> &ByteMetadata {
+        self.inner.metadata()
+    }
+
+    async fn next(&mut self) -> Result<Option<Bytes>> {
+        self.polls.fetch_add(1, Ordering::SeqCst);
+        match self.fault {
+            Fault::Read { after, kind } if self.consumed >= after => {
+                return Err(source_error(kind));
+            }
+            Fault::EmptyChunk => return Ok(Some(Bytes::new())),
+            _ => {}
+        }
+        let bytes = self.inner.next().await?;
+        if let Some(bytes) = &bytes {
+            self.consumed += bytes.len();
+        }
+        Ok(bytes)
+    }
+}
+
+#[async_trait]
+impl ByteReader for FaultyReader {}
+
+#[tokio::test]
+async fn source_errors_preserve_category_and_cause_at_open_and_mid_record() {
+    for kind in [
+        ErrorKind::NotFound,
+        ErrorKind::PermissionDenied,
+        ErrorKind::Io,
+        ErrorKind::Unsupported,
+        ErrorKind::InvalidInput,
+        ErrorKind::Decode,
+    ] {
+        for fault in [Fault::Open(kind), Fault::Read { after: 5, kind }] {
+            let (input, _) = fixture("good.json", 1);
+            let polls = Arc::new(AtomicUsize::new(0));
+            let accessor = JsonAccessor::new(
+                FaultyAccessor {
+                    inner: input,
+                    fault,
+                    polls: polls.clone(),
+                },
+                schema(),
+            );
+            if let Fault::Open(_) = fault {
+                let error = accessor.open(request(1, None)).await.err().unwrap();
+                assert_source_error(&error, kind);
+                assert_eq!(polls.load(Ordering::SeqCst), 0);
+            } else {
+                let mut reader = accessor.open(request(1, None)).await.unwrap();
+                let error = reader.next().await.err().unwrap();
+                assert_source_error(&error, kind);
+                let calls = polls.load(Ordering::SeqCst);
+                assert!(reader.next().await.unwrap().is_none());
+                assert!(reader.next().await.unwrap().is_none());
+                assert_eq!(polls.load(Ordering::SeqCst), calls);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn empty_source_chunks_are_io_errors_and_terminal() {
+    let (input, _) = fixture("single.json", 1);
+    let polls = Arc::new(AtomicUsize::new(0));
+    let accessor = JsonAccessor::new(
+        FaultyAccessor {
+            inner: input,
+            fault: Fault::EmptyChunk,
+            polls: polls.clone(),
+        },
+        schema(),
+    );
+    let mut reader = accessor.open(request(1, None)).await.unwrap();
+    let error = reader.next().await.err().unwrap();
+    assert_eq!(error.kind(), ErrorKind::Io);
+    assert_eq!(error.operation(), "read_json");
+    assert_eq!(polls.load(Ordering::SeqCst), 1);
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(polls.load(Ordering::SeqCst), 1);
 }
