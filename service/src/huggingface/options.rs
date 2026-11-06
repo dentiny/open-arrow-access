@@ -2,24 +2,14 @@ use std::{fmt, path::PathBuf};
 
 use open_arrow_access_core::{Error, ErrorKind, Result};
 
+const DEFAULT_ENDPOINT: &str = "https://huggingface.co";
+
 /// Connection settings shared by metadata discovery and repository file reads.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct HuggingFaceOptions {
-    pub(super) endpoint: String,
-    endpoint_explicit: bool,
+    endpoint: Option<String>,
     pub(super) token: Option<String>,
     pub(super) http_only: bool,
-}
-
-impl Default for HuggingFaceOptions {
-    fn default() -> Self {
-        Self {
-            endpoint: "https://huggingface.co".into(),
-            endpoint_explicit: false,
-            token: None,
-            http_only: false,
-        }
-    }
 }
 
 impl fmt::Debug for HuggingFaceOptions {
@@ -33,9 +23,12 @@ impl fmt::Debug for HuggingFaceOptions {
 
 impl HuggingFaceOptions {
     pub fn with_endpoint(mut self, endpoint: impl Into<String>) -> Self {
-        self.endpoint = endpoint.into();
-        self.endpoint_explicit = true;
+        self.endpoint = Some(endpoint.into());
         self
+    }
+
+    pub(super) fn endpoint(&self) -> &str {
+        self.endpoint.as_deref().unwrap_or(DEFAULT_ENDPOINT)
     }
 
     pub fn with_token(mut self, token: impl Into<String>) -> Self {
@@ -52,9 +45,9 @@ impl HuggingFaceOptions {
     // Called on the blocking pool. Match OpenDAL's HF credential precedence so
     // Hub metadata requests and file requests use the same effective identity.
     pub(super) fn resolve_environment(&mut self) {
-        if !self.endpoint_explicit {
-            self.endpoint = std::env::var("HF_ENDPOINT").unwrap_or_else(|_| self.endpoint.clone());
-        }
+        self.endpoint.get_or_insert_with(|| {
+            std::env::var("HF_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.into())
+        });
         if self.token.is_some()
             || std::env::var("HF_HUB_DISABLE_IMPLICIT_TOKEN").is_ok_and(|v| !v.is_empty())
         {

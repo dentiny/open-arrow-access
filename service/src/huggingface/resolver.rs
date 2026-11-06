@@ -70,7 +70,7 @@ impl HuggingFaceService {
     pub async fn new(mut options: HuggingFaceOptions) -> Result<Self> {
         tokio::task::spawn_blocking(move || {
             options.resolve_environment();
-            endpoint(&options.endpoint)?;
+            endpoint(options.endpoint())?;
             if let Some(token) = &options.token
                 && (token.is_empty()
                     || http::HeaderValue::from_str(&format!("Bearer {token}")).is_err())
@@ -110,7 +110,7 @@ impl HuggingFaceService {
             .repo_id(&repository.repository)
             .revision(&repository.revision)
             .root(&repository.root)
-            .endpoint(&self.options.endpoint);
+            .endpoint(self.options.endpoint());
         if let Some(token) = &self.options.token {
             builder = builder.token(token);
         }
@@ -177,7 +177,7 @@ impl HuggingFaceService {
     }
 
     async fn info(&self, repository: &HuggingFaceRepository) -> Result<Vec<u8>> {
-        let mut url = endpoint(&self.options.endpoint)?;
+        let mut url = endpoint(self.options.endpoint())?;
         {
             let mut path = url.path_segments_mut().map_err(|_| {
                 Error::new(

@@ -12,6 +12,7 @@ use super::support::{MockHub, TOKEN, assert_ranges};
 #[tokio::test]
 async fn constructor_is_lazy_send_and_redacts_token() {
     let options = HuggingFaceOptions::default()
+        .with_endpoint("https://huggingface.co")
         .with_token(TOKEN)
         .with_http_downloads();
     assert!(!format!("{options:?}").contains(TOKEN));
@@ -19,6 +20,7 @@ async fn constructor_is_lazy_send_and_redacts_token() {
         .await
         .unwrap()
         .unwrap();
+    assert_eq!(service.options.endpoint(), "https://huggingface.co");
     let accessor = service
         .repository(HuggingFaceRepository::new("owner/example"))
         .await
