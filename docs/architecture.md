@@ -116,7 +116,7 @@ contract without a closed enum of every source or format.
 `Arc<dyn ByteAccessor>` supports application-owned backend injection. Optional
 `ByteAccessor::list` defaults to Unsupported. Fs exposes recursive file discovery;
 other byte accessors can supply their own listing implementation. Input locators
-remain backend-owned. [Directory datasets](directory.md) consume those file
+remain backend-owned. Directory datasets consume those file
 references and compose any shared single-file record accessor.
 
 `ByteReadRequest` carries an `ObjectRef` and `ByteReadOptions`. `io_concurrency`
