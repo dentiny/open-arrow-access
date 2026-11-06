@@ -1,4 +1,5 @@
 use std::{
+    error::Error as _,
     num::NonZeroUsize,
     path::PathBuf,
     sync::{
@@ -21,6 +22,9 @@ struct Memory {
     polls: Arc<AtomicUsize>,
     options: Arc<Mutex<Vec<ByteReadOptions>>>,
     fail_at: Option<usize>,
+    failure_kind: ErrorKind,
+    fail_open: bool,
+    empty_at: Option<usize>,
 }
 
 impl Memory {
@@ -31,6 +35,9 @@ impl Memory {
             polls: Arc::default(),
             options: Arc::default(),
             fail_at: None,
+            failure_kind: ErrorKind::PermissionDenied,
+            fail_open: false,
+            empty_at: None,
         }
     }
 }
@@ -47,6 +54,9 @@ impl Accessor for Memory {
     }
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         self.options.lock().unwrap().push(request.options);
+        if self.fail_open {
+            return Err(source_error(self.failure_kind));
+        }
         Ok(Box::new(Input {
             inner: self.clone(),
             offset: 0,
@@ -82,11 +92,14 @@ impl Reader for Input {
             .fail_at
             .is_some_and(|offset| self.offset >= offset)
         {
-            return Err(Error::new(
-                ErrorKind::PermissionDenied,
-                "fixture",
-                "upstream denied",
-            ));
+            return Err(source_error(self.inner.failure_kind));
+        }
+        if self
+            .inner
+            .empty_at
+            .is_some_and(|offset| self.offset >= offset)
+        {
+            return Ok(Some(Bytes::new()));
         }
         if self.offset == self.inner.bytes.len() {
             return Ok(None);
@@ -200,8 +213,10 @@ async fn projection_preserves_requested_order_and_zero_column_row_count() {
 
 #[tokio::test]
 async fn invalid_projection_is_rejected_before_io() {
-    let input = Memory::new(fixture("empty.warc"), 1);
+    let mut input = Memory::new(fixture("empty.warc"), 1);
+    input.fail_open = true;
     let options = input.options.clone();
+    let polls = input.polls.clone();
     let accessor = WarcAccessor::new(input);
     for names in [vec!["id", "id"], vec!["unknown"]] {
         let result = accessor
@@ -210,9 +225,12 @@ async fn invalid_projection_is_rejected_before_io() {
                 ..ReadOptions::default()
             }))
             .await;
-        assert_eq!(result.err().unwrap().kind(), ErrorKind::InvalidInput);
+        let error = result.err().unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(error.operation(), "project");
     }
     assert!(options.lock().unwrap().is_empty());
+    assert_eq!(polls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
@@ -236,14 +254,18 @@ async fn malformed_truncated_and_invalid_numeric_inputs_fail_terminally() {
         "bad_missing_date.warc",
         "bad_segment_number.warc",
     ] {
-        let accessor = WarcAccessor::new(Memory::new(fixture(name), 1));
+        let input = Memory::new(fixture(name), 1);
+        let polls = input.polls.clone();
+        let accessor = WarcAccessor::new(input);
         let mut reader = accessor.open(ReadRequest::new(name)).await.unwrap();
-        assert_eq!(
-            reader.next().await.err().unwrap().kind(),
-            ErrorKind::Decode,
-            "{name}"
-        );
+        let error = reader.next().await.err().unwrap();
+        assert_eq!(error.kind(), ErrorKind::Decode, "{name}");
+        assert_eq!(error.operation(), "decode_warc", "{name}");
+        assert!(error.source().is_some(), "{name}");
+        let calls = polls.load(Ordering::SeqCst);
         assert!(reader.next().await.unwrap().is_none());
+        assert!(reader.next().await.unwrap().is_none());
+        assert_eq!(polls.load(Ordering::SeqCst), calls, "{name}");
     }
 }
 
@@ -253,6 +275,7 @@ async fn upstream_errors_retain_kind_after_a_delivered_batch() {
     let bytes = fixture("good_resources.warc");
     let mut input = Memory::new(bytes, 1);
     input.fail_at = Some(first.len());
+    let polls = input.polls.clone();
     let accessor = WarcAccessor::new(input);
     let mut reader = accessor
         .open(ReadRequest::new("a.warc").with_options(ReadOptions {
@@ -266,8 +289,10 @@ async fn upstream_errors_retain_kind_after_a_delivered_batch() {
         ["<urn:test:a>"]
     );
     let error = reader.next().await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+    assert_wrapped_source_error(&error, ErrorKind::PermissionDenied);
+    let calls = polls.load(Ordering::SeqCst);
     assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(polls.load(Ordering::SeqCst), calls);
 }
 
 #[tokio::test]
@@ -312,4 +337,110 @@ async fn empty_input_and_independent_opens_have_explicit_behavior() {
         rows(&left.next().await.unwrap().unwrap()),
         rows(&right.next().await.unwrap().unwrap())
     );
+}
+
+fn source_error(kind: ErrorKind) -> Error {
+    Error::new(kind, "fixture_source", "injected source failure").with_source(std::io::Error::new(
+        std::io::ErrorKind::ConnectionReset,
+        "connection closed",
+    ))
+}
+
+fn assert_original_source_error(error: &Error, kind: ErrorKind) {
+    assert_eq!(error.kind(), kind);
+    assert_eq!(error.operation(), "fixture_source");
+    assert_eq!(
+        error
+            .source()
+            .unwrap()
+            .downcast_ref::<std::io::Error>()
+            .unwrap()
+            .kind(),
+        std::io::ErrorKind::ConnectionReset,
+    );
+}
+
+fn assert_wrapped_source_error(error: &Error, kind: ErrorKind) {
+    assert_eq!(error.kind(), kind);
+    assert_eq!(error.operation(), "decode_warc");
+    let parser_error = error.source().unwrap();
+    assert_eq!(ErrorKind::from_source(parser_error), Some(kind));
+    let io_error = parser_error
+        .source()
+        .unwrap()
+        .downcast_ref::<std::io::Error>()
+        .unwrap();
+    let original = io_error.get_ref().unwrap().downcast_ref::<Error>().unwrap();
+    assert_original_source_error(original, kind);
+}
+
+#[tokio::test]
+async fn source_errors_retain_category_and_cause_at_open_and_parser_boundaries() {
+    let bytes = fixture("good_resource.warc");
+    let body_start = bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .unwrap()
+        + 4;
+    for kind in [
+        ErrorKind::NotFound,
+        ErrorKind::PermissionDenied,
+        ErrorKind::Io,
+        ErrorKind::Unsupported,
+        ErrorKind::InvalidInput,
+        ErrorKind::Decode,
+    ] {
+        let mut input = Memory::new(bytes.clone(), 1);
+        input.failure_kind = kind;
+        input.fail_open = true;
+        let polls = input.polls.clone();
+        let accessor = WarcAccessor::new(input);
+        let error = accessor
+            .open(ReadRequest::new("good_resource.warc"))
+            .await
+            .err()
+            .unwrap();
+        assert_original_source_error(&error, kind);
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
+
+        // Faults while reading a header, body, and terminator must remain source
+        // errors. Unlike malformed-file EOF, they are not decoder failures.
+        for offset in [0, body_start + 1, bytes.len() - 3] {
+            let mut input = Memory::new(bytes.clone(), 1);
+            input.failure_kind = kind;
+            input.fail_at = Some(offset);
+            let polls = input.polls.clone();
+            let accessor = WarcAccessor::new(input);
+            let mut reader = accessor
+                .open(ReadRequest::new("good_resource.warc"))
+                .await
+                .unwrap();
+            let error = reader.next().await.err().unwrap();
+            assert_wrapped_source_error(&error, kind);
+            let calls = polls.load(Ordering::SeqCst);
+            assert!(reader.next().await.unwrap().is_none());
+            assert!(reader.next().await.unwrap().is_none());
+            assert_eq!(polls.load(Ordering::SeqCst), calls);
+        }
+    }
+}
+
+#[tokio::test]
+async fn empty_source_chunks_are_io_errors_and_terminal() {
+    let mut input = Memory::new(fixture("good_resource.warc"), 1);
+    input.empty_at = Some(0);
+    let polls = input.polls.clone();
+    let accessor = WarcAccessor::new(input);
+    let mut reader = accessor
+        .open(ReadRequest::new("good_resource.warc"))
+        .await
+        .unwrap();
+    let error = reader.next().await.err().unwrap();
+    assert_eq!(error.kind(), ErrorKind::Io);
+    assert_eq!(error.operation(), "decode_warc");
+    let source = error.source().unwrap();
+    assert_eq!(ErrorKind::from_source(source), Some(ErrorKind::Io));
+    assert_eq!(polls.load(Ordering::SeqCst), 1);
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(polls.load(Ordering::SeqCst), 1);
 }
