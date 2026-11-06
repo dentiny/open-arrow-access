@@ -5,7 +5,7 @@ use std::{
 };
 
 use arrow_array::{Array, Int64Array, StringArray};
-use arrow_schema::{DataType, Field, Schema};
+use arrow_schema::{DataType, Field, IntervalUnit, Schema, TimeUnit};
 use more_asserts::assert_gt;
 use open_arrow_access::{
     Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
@@ -188,6 +188,44 @@ async fn projection_and_input_schema_errors_are_rejected_before_opening() {
 }
 
 #[tokio::test]
+async fn unsupported_csv_fields_are_configuration_errors_only_when_projected() {
+    for data_type in [
+        DataType::Binary,
+        DataType::LargeUtf8,
+        DataType::Duration(TimeUnit::Second),
+        DataType::Interval(IntervalUnit::YearMonth),
+        DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+    ] {
+        let bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 1);
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("title", data_type.clone(), true),
+        ]));
+        let accessor = CsvAccessor::new(bytes.clone(), schema);
+        let error = accessor
+            .open(ReadRequest::new("good_no_header.csv"))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::Unsupported, "{data_type:?}");
+        assert_eq!(error.operation(), "open_csv");
+        assert!(bytes.observations.requests.lock().unwrap().is_empty());
+        let batches = collect(
+            &accessor,
+            ReadRequest::new("good_no_header.csv").with_options(options(2, Some(vec!["id"]))),
+        )
+        .await;
+        assert_eq!(ids(&batches, 0), [1, 2, 3]);
+        let batches = collect(
+            &accessor,
+            ReadRequest::new("good_no_header.csv").with_options(options(2, Some(vec![]))),
+        )
+        .await;
+        assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 3);
+    }
+}
+
+#[tokio::test]
 async fn empty_and_header_only_inputs_emit_no_batches() {
     for (name, header) in [
         ("empty.csv", false),
@@ -216,11 +254,68 @@ async fn invalid_data_errors_are_terminal() {
         let mut reader = accessor.open(ReadRequest::new(name)).await.unwrap();
         let error = reader.next().await.unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Decode);
+        assert_eq!(error.operation(), "decode_csv");
         assert!(std::error::Error::source(&error).is_some());
         let calls = bytes.observations.reads.load(Ordering::SeqCst);
         assert!(reader.next().await.unwrap().is_none());
+        assert!(reader.next().await.unwrap().is_none());
         assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), calls);
     }
+}
+
+#[tokio::test]
+async fn csv_preserves_source_error_categories_and_stops_polling() {
+    for kind in [
+        ErrorKind::InvalidInput,
+        ErrorKind::Unsupported,
+        ErrorKind::NotFound,
+        ErrorKind::PermissionDenied,
+        ErrorKind::Io,
+        ErrorKind::Decode,
+    ] {
+        for offset in [0, 6] {
+            let mut bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 6);
+            bytes.fail_after = Some(offset);
+            bytes.failure_kind = kind;
+            let accessor = CsvAccessor::new(bytes.clone(), schema());
+            let mut reader = accessor
+                .open(ReadRequest::new("good_no_header.csv").with_options(options(1, None)))
+                .await
+                .unwrap();
+            if offset != 0 {
+                assert_eq!(ids(&[reader.next().await.unwrap().unwrap()], 0), [1]);
+            }
+            let error = reader.next().await.unwrap_err();
+            assert_eq!(error.kind(), kind, "offset {offset}");
+            assert_eq!(error.operation(), "memory_read");
+            assert_eq!(
+                std::error::Error::source(&error).unwrap().to_string(),
+                "injected source failure"
+            );
+            let calls = bytes.observations.reads.load(Ordering::SeqCst);
+            assert!(reader.next().await.unwrap().is_none());
+            assert!(reader.next().await.unwrap().is_none());
+            assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), calls);
+        }
+    }
+}
+
+#[tokio::test]
+async fn csv_rejects_empty_source_chunks_as_terminal_io_errors() {
+    let mut bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 1);
+    bytes.emit_empty_chunk = true;
+    let accessor = CsvAccessor::new(bytes.clone(), schema());
+    let mut reader = accessor
+        .open(ReadRequest::new("good_no_header.csv"))
+        .await
+        .unwrap();
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Io);
+    assert_eq!(error.operation(), "read_csv");
+    let calls = bytes.observations.reads.load(Ordering::SeqCst);
+    assert!(reader.next().await.unwrap().is_none());
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), calls);
 }
 
 #[tokio::test]

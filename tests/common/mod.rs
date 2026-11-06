@@ -20,6 +20,8 @@ pub struct MemoryAccessor {
     data: Bytes,
     chunk_size: usize,
     pub fail_after: Option<usize>,
+    pub failure_kind: ErrorKind,
+    pub emit_empty_chunk: bool,
     pub observations: Arc<Observations>,
 }
 
@@ -30,6 +32,8 @@ impl MemoryAccessor {
             data: Bytes::copy_from_slice(data),
             chunk_size,
             fail_after: None,
+            failure_kind: ErrorKind::Io,
+            emit_empty_chunk: false,
             observations: Arc::default(),
         }
     }
@@ -43,7 +47,8 @@ impl Accessor for MemoryAccessor {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 
@@ -58,6 +63,8 @@ impl Accessor for MemoryAccessor {
             chunk_size: self.chunk_size,
             offset: 0,
             fail_after: self.fail_after,
+            failure_kind: self.failure_kind,
+            emit_empty_chunk: self.emit_empty_chunk,
             observations: self.observations.clone(),
             metadata: ByteMetadata {
                 source: Some(request.object),
@@ -72,6 +79,8 @@ struct MemoryReader {
     chunk_size: usize,
     offset: usize,
     fail_after: Option<usize>,
+    failure_kind: ErrorKind,
+    emit_empty_chunk: bool,
     observations: Arc<Observations>,
     metadata: ByteMetadata,
 }
@@ -84,7 +93,8 @@ impl Reader for MemoryReader {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 
@@ -95,7 +105,13 @@ impl Reader for MemoryReader {
     async fn next(&mut self) -> Result<Option<Bytes>> {
         self.observations.reads.fetch_add(1, Ordering::SeqCst);
         if self.fail_after.is_some_and(|offset| self.offset >= offset) {
-            return Err(Error::new(ErrorKind::Io, "memory_read", "injected failure"));
+            return Err(
+                Error::new(self.failure_kind, "memory_read", "injected failure")
+                    .with_source(std::io::Error::other("injected source failure")),
+            );
+        }
+        if self.emit_empty_chunk {
+            return Ok(Some(Bytes::new()));
         }
         if self.offset == self.data.len() {
             return Ok(None);
