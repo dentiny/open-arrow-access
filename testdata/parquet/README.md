@@ -11,7 +11,7 @@ into a temporary storage root, but never write or encode Parquet records.
 | `directory/a.parquet` | Non-nullable `id: Int64` values `1, 2`; schema metadata `label=same`. |
 | `directory/b.parquet` | The same schema with value `3`. |
 | `directory/c.parquet` | The same schema with value `4`. |
-| `directory/hidden.parquet` | The same schema with value `99`, for filtered directory entries. |
+| `directory/hidden.parquet` | The same schema with value `99`, for dot-prefixed directory entries. |
 | `ids.parquet` | Non-nullable `id: Int64` values `1, 2, 3`, with no schema metadata, for storage adapter tests. |
 
 Both `ordered-*` files have schema `id: Int64` (non-nullable), `title: Utf8`

@@ -3,9 +3,9 @@
 Composable dataset access for Apache Arrow. Read diverse formats and storage
 backends into Arrow streams.
 
-Read Parquet, CSV/TSV, or JSON/JSONL asynchronously through a byte accessor such
-as **OpenDAL's filesystem service**. Output is an ordered stream of Arrow record
-batches. The project ends at that read interface.
+Read local Parquet, CSV/TSV, or JSON/JSONL files asynchronously through **OpenDAL's filesystem
+service**, individually or as a sequential directory/file-set dataset. Output is
+an ordered stream of Arrow record batches. The project ends at that read interface.
 
 ## Quick start
 
@@ -121,14 +121,14 @@ sequential byte readers and reuses Arrow CSV's incremental decoder. Configure
 `CsvFormat::default().with_header(true)` for headers or `.with_delimiter(b'\t')`
 for TSV.
 
-## Initial scope
+## Supported components
 
 | Component | Implemented |
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
-| `storage/` | OpenDAL Fs and reusable generic byte I/O, bounded chunks and exact ranges |
+| `storage/` | OpenDAL Fs, recursive file discovery and reusable generic byte I/O, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas and incremental Arrow decoding |
-| `dataset/` | Reserved; no directory or multi-file scan yet |
+| `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
 | `service/` | Reserved; no Hugging Face or other source adapter yet |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
@@ -140,6 +140,17 @@ pages through the Parquet dependency. External gzip, LZ4, bzip2, and Zstandard d
 enabled by `decompression-gzip`, `decompression-lz4`, `decompression-bz2`, and `decompression-zstd`; see [streaming decompression](decompression/README.md).
 It produces sequential bytes and cannot directly satisfy Parquet's range reads.
 Parallel reads and unordered emission are not implemented.
+
+Enable `dataset-directory` for `DirectoryAccessor` and `FileSetAccessor`. Directory
+selection uses a supplied byte accessor for discovery and a supplied format
+accessor for records. Files are sorted lexicographically; explicit file sets
+retain caller order. Readers open files sequentially and require identical
+projected schemas, including metadata.
+
+Discovery accepts `ListRequest`, with recursion enabled by default. Setting
+`DirectoryRequest::recursive` to `false` prevents descending into child directories.
+Repeated and trailing separators in directory prefixes are normalized before
+discovery and result matching.
 
 ## Extension contracts
 

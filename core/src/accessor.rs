@@ -3,8 +3,8 @@ use std::sync::Arc;
 use futures::stream::BoxStream;
 
 use crate::{
-    ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ObjectRef, Reader, Result,
-    async_trait,
+    ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ListRequest, ObjectRef, Reader,
+    Result, async_trait,
 };
 
 /// Factory for readers. The request and reader types keep bytes and Arrow records
@@ -62,13 +62,14 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
 
 pub type ObjectStream = BoxStream<'static, Result<ObjectRef>>;
 
-/// Optional byte-accessor discovery boundary, reserved for directory/source PRs.
-/// The initial filesystem adapter does not expose directory scans.
+/// Optional byte-accessor discovery boundary for directory and source adapters.
 #[async_trait]
 pub trait ByteAccessor: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> {
-    /// Discover object references under an accessor-defined `prefix`.
+    /// Discover object references beneath the requested directory prefix.
     ///
-    /// The accessor defines prefix interpretation, recursion and listing order.
+    /// The accessor defines prefix interpretation and listing order. Apply the
+    /// requested recursion policy during discovery; nonrecursive requests must
+    /// not descend into child directories and filter their results afterwards.
     /// Objects are returned as a stream so discovery need not collect all results
     /// in memory. Additional I/O errors may occur while consuming that stream.
     /// Implementations must set [`Capability::list`] to match their support.
@@ -77,7 +78,7 @@ pub trait ByteAccessor: Accessor<Request = ByteReadRequest, Reader = dyn ByteRea
     ///
     /// The default returns [`ErrorKind::Unsupported`]. Implementations also report
     /// invalid selections, access failures and failures starting discovery.
-    async fn list(&self, _prefix: ObjectRef) -> Result<ObjectStream> {
+    async fn list(&self, _request: ListRequest) -> Result<ObjectStream> {
         Err(Error::new(
             ErrorKind::Unsupported,
             "list",
@@ -88,7 +89,7 @@ pub trait ByteAccessor: Accessor<Request = ByteReadRequest, Reader = dyn ByteRea
 
 #[async_trait]
 impl<A: ByteAccessor + ?Sized> ByteAccessor for Arc<A> {
-    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
-        (**self).list(prefix).await
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        (**self).list(request).await
     }
 }

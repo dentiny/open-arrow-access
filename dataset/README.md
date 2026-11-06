@@ -1,11 +1,11 @@
-# Dataset extension point
+# Dataset composition
 
-Reserved for the directory/FileSet PR. There is no dataset implementation or
-Cargo feature yet. Compose existing record accessors behind the shared
-`Accessor` / `Reader` contracts; add optional object discovery via `ByteAccessor`.
-Default to fixed schema and sequential, ordered emission. See `docs/roadmap.md`.
+The default-off `directory` crate feature supplies `DirectoryAccessor` and
+`FileSetAccessor`. Both use the shared async accessor/reader contracts and
+emit sequential, ordered batches with a fixed projected schema. They accept
+any file format implementing the common single-file `ReadRequest` contract.
 
-The [source-attribute proposal](../docs/source-attributes.md) separates file
-independence from emission order. Resolve dataset-wide ordering constraints
-before admitting unordered emission; an ATIF child requires global order for
-the composed scan. Undefined listing order is not an authoritative file sequence.
+
+The [source-attribute proposal](../docs/source-attributes.md) remains a future
+planning extension; this implementation does not enable partition parallelism
+or unordered emission.

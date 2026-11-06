@@ -1105,6 +1105,7 @@ dependencies = [
  "futures",
  "more-asserts",
  "open-arrow-access-core",
+ "open-arrow-access-dataset",
  "open-arrow-access-decompression",
  "open-arrow-access-file-format",
  "open-arrow-access-storage",
@@ -1125,6 +1126,14 @@ dependencies = [
  "futures",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "open-arrow-access-dataset"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "open-arrow-access-core",
 ]
 
 [[package]]

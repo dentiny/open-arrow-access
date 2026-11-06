@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ObjectRef, ObjectStream,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectStream,
     Result, async_trait,
 };
 
@@ -52,7 +52,7 @@ impl<A: ByteAccessor, C: Codec> Accessor for DecompressionAccessor<A, C> {
 
 #[async_trait]
 impl<A: ByteAccessor, C: Codec> ByteAccessor for DecompressionAccessor<A, C> {
-    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
-        self.inner.list(prefix).await
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        self.inner.list(request).await
     }
 }

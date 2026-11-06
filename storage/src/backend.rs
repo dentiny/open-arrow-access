@@ -5,7 +5,7 @@ use std::{num::NonZeroUsize, ops::Range, sync::Arc};
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error,
-    ErrorKind, ObjectRef, ObjectStream, Reader, Result, async_trait,
+    ErrorKind, ListRequest, ObjectRef, ObjectStream, Reader, Result, async_trait,
 };
 use opendal::{
     Execute, Executor, OperationContext, Operator,
@@ -53,7 +53,8 @@ impl Accessor for OpenDalAccessor {
             read,
             read_with_range: read,
             read_parallel: false,
-            list: upstream.stat && upstream.list && upstream.list_with_recursive,
+            // OpenDAL can walk nonrecursive backend listings.
+            list: upstream.stat && upstream.list,
         }
     }
 
@@ -112,8 +113,8 @@ impl Accessor for OpenDalAccessor {
 
 #[async_trait]
 impl ByteAccessor for OpenDalAccessor {
-    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
-        let path = prefix.locator();
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        let path = request.prefix.locator();
         let metadata = self
             .operator
             .stat(path)
@@ -134,7 +135,7 @@ impl ByteAccessor for OpenDalAccessor {
         let lister = self
             .operator
             .lister_with(&path)
-            .recursive(true)
+            .recursive(request.recursive)
             .await
             .map_err(|e| map_error("list", &path, e))?;
         Ok(Box::pin(

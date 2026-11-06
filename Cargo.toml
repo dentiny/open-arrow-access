@@ -7,7 +7,7 @@ description = "Composable read access to Apache Arrow streams"
 repository.workspace = true
 
 [workspace]
-members = ["core", "storage", "file-format", "decompression", "test-support"]
+members = ["core", "storage", "file-format", "dataset", "decompression", "test-support"]
 resolver = "3"
 
 [workspace.package]
@@ -51,8 +51,11 @@ open-arrow-access-file-format = { path = "file-format", version = "0.1.0", defau
 open-arrow-access-decompression = { path = "decompression", version = "0.1.0", default-features = false }
 open-arrow-access-test-support = { path = "test-support" }
 
+open-arrow-access-dataset = { path = "dataset", version = "0.1.0", default-features = false }
+
 [features]
 default = []
+dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
@@ -63,6 +66,7 @@ decompression-lz4 = ["dep:open-arrow-access-decompression", "open-arrow-access-d
 decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zstd"]
 
 [dependencies]
+open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 open-arrow-access-storage = { workspace = true, optional = true }
 open-arrow-access-file-format = { workspace = true, optional = true }
@@ -78,6 +82,10 @@ more-asserts.workspace = true
 parquet.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
+
+[[test]]
+name = "directory"
+required-features = ["dataset-directory"]
 
 [[test]]
 name = "reading"

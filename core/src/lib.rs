@@ -15,7 +15,7 @@ pub use reader::{
     ByteMetadata, ByteReader, Reader, RecordMetadata, RecordReader, RecordStream, into_stream,
 };
 pub use request::{
-    ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ObjectRef, ReadOptions,
+    ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ListRequest, ObjectRef, ReadOptions,
     ReadOptionsProvider, ReadRequest,
 };
 
