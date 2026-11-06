@@ -2,6 +2,7 @@
 
 use std::{
     ops::Range,
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -217,4 +218,31 @@ impl ByteReader for MemoryReader {
         }
         Ok(self.data.slice(range.start as usize..range.end as usize))
     }
+}
+
+/// Shared assertions for sequential byte layers.
+pub mod byte_layer;
+
+/// Resolve a committed fixture from the workspace's `testdata/<format>/` directory.
+pub fn fixture_path(format: &str, name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../testdata")
+        .join(format)
+        .join(name)
+}
+
+/// Read a committed fixture, reporting its full path if reading fails.
+pub fn fixture(format: &str, name: &str) -> Vec<u8> {
+    let path = fixture_path(format, name);
+    std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+}
+
+/// Collect a byte reader, asserting its nonempty-chunk contract.
+pub async fn collect_bytes(reader: &mut dyn ByteReader) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    while let Some(bytes) = reader.next().await? {
+        assert!(!bytes.is_empty());
+        output.extend_from_slice(&bytes);
+    }
+    Ok(output)
 }

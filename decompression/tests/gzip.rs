@@ -1,8 +1,5 @@
-mod common;
-
 use std::{error::Error as _, num::NonZeroUsize};
 
-use common::{collect, fixture};
 use futures::TryStreamExt;
 use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{
@@ -10,7 +7,9 @@ use open_arrow_access_core::{
     Result,
 };
 use open_arrow_access_decompression::{DecompressionLayer, Gzip};
-use open_arrow_access_test_support::MemoryAccessor;
+use open_arrow_access_test_support::{
+    MemoryAccessor, byte_layer, collect_bytes as collect, fixture,
+};
 
 #[tokio::test]
 async fn members_preserve_order_and_output_chunk_limit() -> Result<()> {
@@ -90,7 +89,13 @@ async fn invalid_gzip_is_terminal() -> Result<()> {
         let observed = input.observations.clone();
         let accessor = input.layer(DecompressionLayer::new(Gzip));
         let mut reader = accessor.open("bad.gz".into()).await?;
-        common::assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Decode).await;
+        byte_layer::assert_terminal_error(
+            reader.as_mut(),
+            &observed.reads,
+            ErrorKind::Decode,
+            "decompress",
+        )
+        .await;
     }
     Ok(())
 }
@@ -141,5 +146,11 @@ async fn nested_layers_and_readers_have_independent_state() -> Result<()> {
 
 #[tokio::test]
 async fn error_codes_sources_and_terminal_state_follow_the_byte_contract() -> Result<()> {
-    common::error_contract(Gzip, "gzip", "payload.gz").await
+    byte_layer::assert_error_contract(
+        |input| input.layer(DecompressionLayer::new(Gzip)),
+        &fixture("gzip", "payload.gz"),
+        b"payload",
+        "decompress",
+    )
+    .await
 }
