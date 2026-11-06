@@ -9,7 +9,7 @@ description = "Provider-specific dataset discovery for Open Arrow Access"
 [features]
 default = []
 huggingface = [
-    "dep:open-arrow-access-storage", "open-arrow-access-storage/opendal",
+    "dep:open-arrow-access-storage",
     "dep:opendal", "opendal/services-hf", "opendal/http-transport-reqwest",
     "dep:tokio", "dep:http", "dep:serde", "dep:serde_json", "dep:url", "dep:glob",
 ]
