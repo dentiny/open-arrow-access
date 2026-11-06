@@ -113,6 +113,7 @@ impl ReadOptions {
         };
         let mut seen = HashSet::new();
         let mut indices = Vec::with_capacity(columns.len());
+        // TODO: Index schema field names once to avoid repeated linear lookups for wide schemas.
         for name in columns {
             if !seen.insert(name) {
                 return Err(Error::new(
