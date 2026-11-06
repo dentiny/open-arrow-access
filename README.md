@@ -96,13 +96,16 @@ for TSV.
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas and incremental Arrow decoding |
 | `dataset/` | Reserved; no directory or multi-file scan yet |
 | `service/` | Reserved; no Hugging Face or other source adapter yet |
-| `decompression/` | Reserved; no external decompression or archive support yet |
+| `decompression/` | Streaming gzip byte layer with concatenated-member support |
+| `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
 
 Default features are empty. Only implemented capabilities have Cargo feature
 names. Parquet page compression currently supports uncompressed and Snappy
-pages through the Parquet dependency; this does not enable external `.gz`
-decompression. Parallel reads and unordered emission are not implemented.
+pages through the Parquet dependency. External gzip decoding is separately
+enabled by `decompression-gzip`; see [streaming decompression](decompression/README.md).
+It produces sequential bytes and cannot directly satisfy Parquet's range reads.
+Parallel reads and unordered emission are not implemented.
 
 ## Extension contracts
 
@@ -191,7 +194,11 @@ cargo test --workspace --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```
 
-Tests read checked-in Parquet and CSV/TSV files from `testdata/`. They verify ordered rows and
+Format-specific integration tests live in `file-format/tests/`; the root
+`tests/reading.rs` exercises composition through the facade across crates.
+Cargo test targets use `required-features` to select their format.
+
+Tests read checked-in Parquet, CSV/TSV, and JSON/JSONL files from `testdata/`. They verify ordered rows and
 nulls across row groups, schema metadata, projection, storage-independent
 reading, wrapper composition, exact/batched ranges, per-open I/O options,
 bounded backend concurrency, and terminal error/drop behavior.

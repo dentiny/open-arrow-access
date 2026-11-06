@@ -55,98 +55,7 @@ pub fn ids(batch: &RecordBatch) -> Vec<i64> {
         .to_vec()
 }
 
-/// An application-owned test backend; no dependency on a production storage crate.
-pub struct MemoryAccessor {
-    bytes: Bytes,
-    ranged: bool,
-}
-
-impl MemoryAccessor {
-    pub fn new(bytes: Bytes, ranged: bool) -> Self {
-        Self { bytes, ranged }
-    }
-}
-
-#[async_trait]
-impl Accessor for MemoryAccessor {
-    type Request = ByteReadRequest;
-    type Reader = dyn ByteReader;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: self.ranged,
-            ..Capability::default()
-        }
-    }
-
-    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        Ok(Box::new(MemoryReader {
-            metadata: ByteMetadata {
-                source: Some(request.object),
-                content_length: Some(self.bytes.len() as u64),
-                version: None,
-            },
-            bytes: self.bytes.clone(),
-            ranged: self.ranged,
-            emitted: false,
-        }) as Box<dyn ByteReader>)
-    }
-}
-
-struct MemoryReader {
-    bytes: Bytes,
-    metadata: ByteMetadata,
-    ranged: bool,
-    emitted: bool,
-}
-
-#[async_trait]
-impl Reader for MemoryReader {
-    type Item = Bytes;
-    type Metadata = ByteMetadata;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: self.ranged,
-            ..Capability::default()
-        }
-    }
-
-    fn metadata(&self) -> &ByteMetadata {
-        &self.metadata
-    }
-
-    async fn next(&mut self) -> Result<Option<Bytes>> {
-        if self.emitted || self.bytes.is_empty() {
-            return Ok(None);
-        }
-        self.emitted = true;
-        Ok(Some(self.bytes.clone()))
-    }
-}
-
-#[async_trait]
-impl ByteReader for MemoryReader {
-    async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
-        if !self.ranged {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "read_range",
-                "sequential only",
-            ));
-        }
-        if range.start > range.end || range.end > self.bytes.len() as u64 {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "read_range",
-                "invalid range",
-            ));
-        }
-        Ok(self.bytes.slice(range.start as usize..range.end as usize))
-    }
-}
+pub use open_arrow_access_test_support::MemoryAccessor;
 
 #[derive(Default)]
 pub struct Observations {
@@ -155,6 +64,7 @@ pub struct Observations {
     pub max_batch_ranges: AtomicUsize,
     pub range_reads: AtomicUsize,
     pub fail_reads: AtomicBool,
+    pub failure_kind: Mutex<Option<ErrorKind>>,
     pub drops: AtomicUsize,
 }
 
@@ -187,7 +97,12 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
-        self.inner.capability()
+        let inner = self.inner.capability();
+        Capability {
+            read: inner.read,
+            read_with_range: inner.read_with_range,
+            list: inner.list,
+        }
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
@@ -227,7 +142,12 @@ impl Reader for ByteObserverReader {
     type Metadata = ByteMetadata;
 
     fn capability(&self) -> Capability {
-        self.inner.capability()
+        let inner = self.inner.capability();
+        Capability {
+            read: inner.read,
+            read_with_range: inner.read_with_range,
+            list: inner.list,
+        }
     }
 
     fn metadata(&self) -> &ByteMetadata {
@@ -251,10 +171,15 @@ impl ByteReader for ByteObserverReader {
             .fetch_add(ranges.len(), Ordering::SeqCst);
         if self.observations.fail_reads.load(Ordering::SeqCst) {
             return Err(Error::new(
-                ErrorKind::Io,
+                self.observations
+                    .failure_kind
+                    .lock()
+                    .unwrap()
+                    .unwrap_or(ErrorKind::Io),
                 "read_ranges",
                 "injected read failure",
-            ));
+            )
+            .with_source(std::io::Error::other("injected source failure")));
         }
         self.inner.read_ranges(ranges).await
     }
@@ -263,10 +188,15 @@ impl ByteReader for ByteObserverReader {
         self.observations.range_reads.fetch_add(1, Ordering::SeqCst);
         if self.observations.fail_reads.load(Ordering::SeqCst) {
             return Err(Error::new(
-                ErrorKind::Io,
+                self.observations
+                    .failure_kind
+                    .lock()
+                    .unwrap()
+                    .unwrap_or(ErrorKind::Io),
                 "read_range",
                 "injected read failure",
-            ));
+            )
+            .with_source(std::io::Error::other("injected source failure")));
         }
         self.inner.read_range(range).await
     }
@@ -295,7 +225,8 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
     fn capability(&self) -> Capability {
         Capability {
             read: self.0.capability().read,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 
@@ -314,7 +245,8 @@ impl Reader for SequentialReader {
     fn capability(&self) -> Capability {
         Capability {
             read: self.0.capability().read,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 

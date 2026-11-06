@@ -5,6 +5,13 @@
 
 pub use open_arrow_access_core::*;
 
+#[cfg(feature = "decompression-gzip")]
+pub mod decompression {
+    pub use open_arrow_access_decompression::{
+        Codec, CompressedInput, DecodedInput, DecompressionAccessor, DecompressionLayer, Gzip,
+    };
+}
+
 #[cfg(feature = "storage-fs")]
 pub mod storage {
     pub use open_arrow_access_storage::FsAccessor;

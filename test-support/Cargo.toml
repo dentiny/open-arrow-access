@@ -1,0 +1,17 @@
+[package]
+name = "open-arrow-access-test-support"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+open-arrow-access-core.workspace = true
+futures.workspace = true
+more-asserts.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true
