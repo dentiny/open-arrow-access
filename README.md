@@ -55,6 +55,9 @@ let request = ReadRequest::new("part.parquet").with_byte_options(ByteReadOptions
 The default I/O concurrency is one; the default I/O splitting size is backend
 defined. These settings preserve byte/record ordering and do not enable the
 future file/partition `ParallelReadLayer`. Each opened reader has its own limit.
+Sequential output reuses one OpenDAL stream; retained prefetch and range reads
+share that reader's I/O budget. Output chunk size does not create extra storage
+requests.
 `FsAccessor::with_chunk_size` controls sequential output chunk size, while
 `ReadOptions::batch_size` controls Arrow rows per batch.
 

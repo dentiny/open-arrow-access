@@ -4,12 +4,14 @@
 //! file transport; format accessors consume the resolved byte accessor unchanged.
 
 mod accessor;
+mod client;
 mod options;
 mod resolver;
 
 pub use accessor::HuggingFaceAccessor;
+pub use client::HuggingFaceService;
 pub use options::{HuggingFaceOptions, HuggingFaceRepository};
-pub use resolver::{HuggingFaceDataset, HuggingFaceSelection, HuggingFaceService};
+pub use resolver::{HuggingFaceDataset, HuggingFaceSelection};
 
 use open_arrow_access_core::{Error, ErrorKind};
 

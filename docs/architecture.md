@@ -126,6 +126,11 @@ Configured concurrency is per open reader, so several readers multiply the total
 possible in-flight I/O. This does not change logical record order or implement
 file/partition parallelism.
 
+Sequential byte output reuses one OpenDAL stream. Retained prefetch and range
+reads share an executor budget allocated per opened reader, so interleaving the
+two paths does not multiply in-flight I/O. Contiguous output fragments are sliced
+without copying; fragmented output is assembled only when needed.
+
 The optional `service-huggingface` provider owns repository, revision, config
 and split selection. It reads the selected revision's Hub metadata, expands
 explicit dataset-card `data_files` patterns against the returned manifest, and
