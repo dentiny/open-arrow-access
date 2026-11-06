@@ -81,9 +81,6 @@ where
             if !request.recursive && relative.contains('/') {
                 continue;
             }
-            if !request.include_hidden && relative.split('/').any(|part| part.starts_with('.')) {
-                continue;
-            }
             if request
                 .suffix
                 .as_ref()

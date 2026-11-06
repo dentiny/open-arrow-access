@@ -8,8 +8,6 @@ use open_arrow_access_core::{ByteReadOptions, ObjectRef, ReadOptions, ReadOption
 pub struct DirectoryRequest {
     pub prefix: ObjectRef,
     pub recursive: bool,
-    /// Include files beneath dot-prefixed path components. Defaults to false.
-    pub include_hidden: bool,
     /// Case-sensitive locator suffix, for example `.parquet`. None selects all files.
     pub suffix: Option<String>,
     pub options: ReadOptions,
@@ -21,7 +19,6 @@ impl DirectoryRequest {
         Self {
             prefix: prefix.into(),
             recursive: true,
-            include_hidden: false,
             suffix: None,
             options: ReadOptions::default(),
             byte_options: ByteReadOptions::default(),

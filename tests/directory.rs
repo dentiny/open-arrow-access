@@ -292,6 +292,11 @@ async fn generic_listing_is_sorted_filtered_and_fails_before_opening_on_listing_
     let schema = schema("same");
     let files = Files::new([
         (
+            "data/.hidden.parquet",
+            schema.clone(),
+            vec![batch(schema.clone(), &[99])],
+        ),
+        (
             "data/a.parquet",
             schema.clone(),
             vec![batch(schema.clone(), &[1])],
@@ -318,8 +323,11 @@ async fn generic_listing_is_sorted_filtered_and_fails_before_opening_on_listing_
     let mut request = DirectoryRequest::new("data");
     request.recursive = false;
     request.suffix = Some(".parquet".into());
-    assert_eq!(values(accessor.open(request).await.unwrap()).await, [1, 2]);
-    assert_eq!(opens.lock().unwrap().len(), 2);
+    assert_eq!(
+        values(accessor.open(request).await.unwrap()).await,
+        [99, 1, 2]
+    );
+    assert_eq!(opens.lock().unwrap().len(), 3);
     opens.lock().unwrap().clear();
     let accessor = DirectoryAccessor::new(
         Listing {
@@ -357,7 +365,7 @@ async fn generic_listing_is_sorted_filtered_and_fails_before_opening_on_listing_
 }
 
 #[tokio::test]
-async fn directory_rejects_traversal_entries_even_when_hidden_files_are_enabled() {
+async fn directory_rejects_traversal_entries() {
     let files = Files::new([]);
     for path in ["data/../outside", "data/./a", "data//absolute"] {
         let accessor = DirectoryAccessor::new(
@@ -367,8 +375,7 @@ async fn directory_rejects_traversal_entries_even_when_hidden_files_are_enabled(
             },
             files.clone(),
         );
-        let mut request = DirectoryRequest::new("data");
-        request.include_hidden = true;
+        let request = DirectoryRequest::new("data");
         assert_eq!(
             accessor.open(request).await.err().unwrap().kind(),
             ErrorKind::InvalidInput
@@ -434,11 +441,11 @@ mod filesystem {
     #[tokio::test]
     async fn directory_reads_local_parquet_in_sorted_order_with_projection_and_byte_options() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::create_dir(dir.path().join(".sub")).unwrap();
         let schema = schema("same");
         copy_fixture("b.parquet", &dir.path().join("b.parquet"));
         copy_fixture("a.parquet", &dir.path().join("a.parquet"));
-        copy_fixture("c.parquet", &dir.path().join("sub/c.parquet"));
+        copy_fixture("c.parquet", &dir.path().join(".sub/c.parquet"));
         copy_fixture("hidden.parquet", &dir.path().join(".hidden.parquet"));
         std::fs::write(dir.path().join("readme"), b"not parquet").unwrap();
         let fs = FsAccessor::new(dir.path()).await.unwrap();
@@ -450,18 +457,17 @@ mod filesystem {
         request.byte_options.io_chunk_size = NonZeroUsize::new(8);
         let reader = accessor.open(request.clone()).await.unwrap();
         assert_eq!(reader.metadata().schema, schema);
-        assert_eq!(values(reader).await, [1, 2, 3, 4]);
+        assert_eq!(values(reader).await, [99, 4, 1, 2, 3]);
         request.options.projection = Some(vec![]);
         let batches = into_stream(accessor.open(request.clone()).await.unwrap())
             .try_collect::<Vec<_>>()
             .await
             .unwrap();
-        assert_eq!(batches.iter().map(|b| b.num_rows()).sum::<usize>(), 4);
+        assert_eq!(batches.iter().map(|b| b.num_rows()).sum::<usize>(), 5);
         for batch in &batches {
             assert_eq!(batch.num_columns(), 0);
             assert_le!(batch.num_rows(), 1);
         }
-        request.include_hidden = true;
         request.recursive = false;
         request.options.projection = None;
         assert_eq!(
