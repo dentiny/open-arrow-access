@@ -1433,6 +1433,7 @@ name = "open-arrow-access-service"
 version = "0.1.0"
 dependencies = [
  "open-arrow-access-core",
+ "open-arrow-access-dataset",
  "open-arrow-access-storage",
  "opendal",
  "opendal-service-http",

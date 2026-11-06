@@ -57,4 +57,6 @@ pub mod dataset {
 #[cfg(feature = "service-commoncrawl")]
 pub mod service {
     pub use open_arrow_access_service::{CommonCrawl, create_http_accessor};
+    #[cfg(feature = "service-commoncrawl-warc")]
+    pub use open_arrow_access_service::{CommonCrawlWarcAccessor, CommonCrawlWarcRequest};
 }

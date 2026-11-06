@@ -58,6 +58,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 [features]
 default = []
 service-commoncrawl = ["dep:open-arrow-access-service", "open-arrow-access-service/commoncrawl", "storage-opendal"]
+service-commoncrawl-warc = ["service-commoncrawl", "open-arrow-access-service/commoncrawl-warc"]
 storage-opendal = ["dep:open-arrow-access-storage"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
@@ -93,6 +94,10 @@ tokio = { workspace = true, features = ["fs"] }
 [[test]]
 name = "commoncrawl_common"
 required-features = ["service-commoncrawl"]
+
+[[test]]
+name = "commoncrawl_warc"
+required-features = ["service-commoncrawl-warc"]
 
 [[test]]
 name = "directory"

@@ -10,8 +10,11 @@ description = "Dataset source providers for Open Arrow Access"
 default = []
 commoncrawl = ["dep:open-arrow-access-storage", "dep:opendal", "dep:opendal-service-http", "dep:url"]
 
+commoncrawl-warc = ["commoncrawl", "dep:open-arrow-access-dataset"]
+
 [dependencies]
 open-arrow-access-core.workspace = true
+open-arrow-access-dataset = { workspace = true, features = ["directory"], optional = true }
 open-arrow-access-storage = { workspace = true, optional = true }
 opendal = { workspace = true, features = ["services-http", "http-transport-reqwest"], optional = true }
 opendal-service-http = { version = "=0.59.2", optional = true }
