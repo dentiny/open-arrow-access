@@ -170,11 +170,17 @@ synchronous. Fs initialization is also asynchronous:
 blocking pool. Call it within a Tokio runtime.
 
 `capability()` follows OpenDAL's reporting pattern, with `read`,
-`read_with_range`, and accessor-only `list` flags. Layers forward or update
+`read_with_range`, `read_parallel`, and accessor-only `list` flags. Layers forward or update
 them to match the operations they actually expose. `ByteReader::read_range`
 is optional; sequential-only inputs do not have to emulate seeking. The initial
 Parquet adapter requires range reads and a known length. Runtime capabilities
 describe a composed instance; Cargo features make implementations available.
+
+`read_parallel` declares support for reading multiple files or partitions
+concurrently within an interface, independently of range access and output
+ordering. Existing concrete implementations report `false`; transparent
+wrappers forward the flag. This declaration does not schedule work or change
+per-reader byte I/O concurrency.
 
 Byte accessors accept `ByteReadRequest`, which carries an `ObjectRef` and
 `ByteReadOptions`. Existing string locators can still use `open("path".into())`.

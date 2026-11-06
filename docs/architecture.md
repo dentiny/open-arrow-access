@@ -64,12 +64,13 @@ signatures; its wrappers only box calls to the private `async fn` read helpers.
 
 Both `Accessor::capability()` and `Reader::capability()` return the same public
 `Capability` value, following [OpenDAL's reporting pattern](https://opendal.apache.org/docs/rust/opendal/struct.Capability.html).
-The initial flags cover only operations implemented by this framework:
+The flags describe operation support, including a declaration for future parallel reads:
 
 | Flag | Meaning |
 | --- | --- |
 | `read` | Open/consume the interface's item type |
 | `read_with_range` | Exact byte ranges without changing the sequential cursor; implies `read` |
+| `read_parallel` | Parallel file/partition reads within the interface; implies `read`, independent of range access and output ordering |
 | `list` | Object discovery through `ByteAccessor::list`; accessor-only |
 
 Flags describe the **effective interface after composition**, without I/O.
@@ -87,8 +88,11 @@ invalid options, or unavailable metadata. Parquet also checks the opened byte
 reader's range flag and known length. Capabilities are not authorization or
 snapshot guarantees, and new operation flags are added alongside their APIs.
 Cargo features control which implementations are compiled; runtime capabilities
-describe which operations a particular composed object exposes. No parallelism
-or emission-policy flags are introduced before their contracts exist.
+describe which operations a particular composed object exposes. `read_parallel`
+is a declaration only: existing concrete implementations report `false`, and
+transparent wrappers forward it. It does not enable execution, describe
+per-reader byte I/O concurrency, or describe caller-managed concurrency across
+separate readers. No parallel scheduler or emission-policy flag is introduced.
 
 ## Accessor
 

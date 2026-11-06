@@ -76,6 +76,7 @@ impl Accessor for Files {
         Capability {
             read: true,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }
@@ -119,6 +120,7 @@ impl Reader for Batches {
         Capability {
             read: true,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }
@@ -289,6 +291,7 @@ impl Accessor for Listing {
             list: true,
             read: false,
             read_with_range: false,
+            read_parallel: false,
         }
     }
     async fn open(&self, _: ByteReadRequest) -> Result<Box<dyn ByteReader>> {

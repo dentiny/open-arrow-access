@@ -60,6 +60,7 @@ impl Reader for DecompressionReader {
         Capability {
             read: true,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }

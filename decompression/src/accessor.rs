@@ -35,6 +35,7 @@ impl<A: ByteAccessor, C: Codec> Accessor for DecompressionAccessor<A, C> {
         Capability {
             read: capability.read,
             read_with_range: false,
+            read_parallel: false,
             list: capability.list,
         }
     }

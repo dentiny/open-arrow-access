@@ -45,6 +45,7 @@ where
         Capability {
             read: self.inner.capability().read,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }

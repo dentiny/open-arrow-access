@@ -50,6 +50,7 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: inner.list,
         }
     }

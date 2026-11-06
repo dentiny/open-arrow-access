@@ -6,6 +6,8 @@ use open_arrow_access_core::{
 
 use super::decode_error;
 
+// TODO: Decode JSONL chunks in parallel at complete line boundaries, preserving
+// input order and retaining sequential decoding for general JSON object streams.
 pub(super) struct JsonReader {
     input: Box<dyn ByteReader>,
     decoder: Decoder,
@@ -68,6 +70,7 @@ impl Reader for JsonReader {
         Capability {
             read: true,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }
