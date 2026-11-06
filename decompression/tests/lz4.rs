@@ -36,10 +36,11 @@ async fn valid_empty_or_skippable_frames_are_eof_but_empty_input_is_invalid() ->
         let mut reader = accessor.open("empty.lz4".into()).await?;
         assert!(reader.next().await?.is_none());
     }
-    let accessor = MemoryAccessor::new(&fixture("lz4", "bad_empty.lz4"), 1)
-        .layer(DecompressionLayer::new(Lz4));
+    let input = MemoryAccessor::new(&fixture("lz4", "bad_empty.lz4"), 1);
+    let reads = input.reads.clone();
+    let accessor = input.layer(DecompressionLayer::new(Lz4));
     let mut reader = accessor.open("missing.lz4".into()).await?;
-    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
+    common::assert_terminal_error(reader.as_mut(), &reads, ErrorKind::Decode).await;
     Ok(())
 }
 
@@ -58,13 +59,10 @@ async fn corrupt_truncated_raw_legacy_and_trailing_input_fail_terminally() -> Re
     ] {
         let bytes = fixture("lz4", name);
         let input = MemoryAccessor::new(&bytes, 1);
+        let reads = input.reads.clone();
         let accessor = input.layer(DecompressionLayer::new(Lz4));
         let mut reader = accessor.open("bad.lz4".into()).await?;
-        assert_eq!(
-            collect(reader.as_mut()).await.unwrap_err().kind(),
-            ErrorKind::Decode
-        );
-        assert!(reader.next().await?.is_none());
+        common::assert_terminal_error(reader.as_mut(), &reads, ErrorKind::Decode).await;
     }
     Ok(())
 }
@@ -81,4 +79,9 @@ async fn source_errors_are_preserved() -> Result<()> {
     );
     assert!(reader.next().await?.is_none());
     Ok(())
+}
+
+#[tokio::test]
+async fn error_codes_sources_and_terminal_state_follow_the_byte_contract() -> Result<()> {
+    common::error_contract(Lz4, "lz4", "payload.lz4").await
 }
