@@ -45,9 +45,9 @@ do not query upstream or automatically change dependency versions.
 
 ## XML parser
 
-`format-xml` uses only `xml-arrow` from `dentiny/xml-arrow-rs`, pinned to immutable
-revision `8a7f44e532e8928c48e115a034fb369aed2e6b6e` for Arrow 59 compatibility and
-configuration validation before I/O. Its optional `xml-io` storage crate is not
-used, so storage remains on this workspace's OpenDAL 0.59.2 baseline. Arrow family
-versions remain 59.3.0 in the lockfile. Replace the Git dependency with a compatible
-registry release when available; the revision is fixed rather than tracking main.
+`format-xml` uses the published [`xml-arrow 0.2.0`](https://crates.io/crates/xml-arrow/0.2.0)
+parser for Arrow 59 compatibility and configuration validation before I/O.
+Its companion `xml-io` storage crate is not used, so storage remains on this
+workspace's OpenDAL 0.59.2 baseline. Arrow family versions remain 59.3.0 in the
+lockfile. The parser uses a normal registry dependency, with the resolved version
+and checksum recorded in Cargo.lock.
