@@ -28,6 +28,7 @@ async fn readers_have_independent_cursors_and_ranges_do_not_advance_them() {
         Capability {
             read: true,
             read_with_range: true,
+            read_parallel: false,
             list: true
         }
     );
@@ -36,6 +37,7 @@ async fn readers_have_independent_cursors_and_ranges_do_not_advance_them() {
         Capability {
             read: true,
             read_with_range: true,
+            read_parallel: false,
             list: false
         }
     );
@@ -83,6 +85,7 @@ async fn sequential_defaults_and_eof_follow_the_contract() {
         Capability {
             read: true,
             read_with_range: false,
+            read_parallel: false,
             list: false
         }
     );

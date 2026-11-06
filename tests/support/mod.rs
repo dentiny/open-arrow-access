@@ -103,6 +103,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: inner.list,
         }
     }
@@ -148,6 +149,7 @@ impl Reader for ByteObserverReader {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: inner.list,
         }
     }
@@ -228,6 +230,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
         Capability {
             read: self.0.capability().read,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }
@@ -248,6 +251,7 @@ impl Reader for SequentialReader {
         Capability {
             read: self.0.capability().read,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }

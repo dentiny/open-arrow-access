@@ -96,6 +96,7 @@ impl Accessor for MemoryAccessor {
         Capability {
             read: true,
             read_with_range: self.ranged,
+            read_parallel: false,
             list: self.listing,
         }
     }
@@ -157,6 +158,7 @@ impl Reader for MemoryReader {
         Capability {
             read: true,
             read_with_range: self.ranged,
+            read_parallel: false,
             list: false,
         }
     }

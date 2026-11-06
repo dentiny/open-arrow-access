@@ -323,6 +323,7 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: inner.list,
         }
     }
@@ -421,6 +422,7 @@ impl Accessor for ListingAccessor {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: true,
         }
     }

@@ -52,6 +52,7 @@ impl Accessor for OpenDalAccessor {
         Capability {
             read,
             read_with_range: read,
+            read_parallel: false,
             list: upstream.stat && upstream.list && upstream.list_with_recursive,
         }
     }
@@ -326,6 +327,7 @@ impl Reader for OpenDalReader {
         Capability {
             read: true,
             read_with_range: true,
+            read_parallel: false,
             list: false,
         }
     }

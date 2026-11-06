@@ -25,6 +25,7 @@ impl Reader for FailingReader {
         Capability {
             read: true,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }
