@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    error::Error as _,
     num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
@@ -8,7 +9,7 @@ use futures::{TryStreamExt, stream};
 use http::{Request, Response, StatusCode};
 use more_asserts::assert_lt;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, ErrorKind, ReadOptions,
+    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, Error, ErrorKind, ReadOptions,
     ReadRequest,
 };
 use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext, Operator};
@@ -26,10 +27,17 @@ struct Captured {
     form: String,
 }
 
+#[derive(Clone)]
+enum HubFailure {
+    Status(StatusCode),
+    Transport(opendal::ErrorKind),
+}
+
 #[derive(Clone, Default)]
 struct MockHub {
     files: Arc<BTreeMap<String, Bytes>>,
     requests: Arc<Mutex<Vec<Captured>>>,
+    failure: Option<(&'static str, HubFailure)>,
 }
 
 impl MockHub {
@@ -38,6 +46,11 @@ impl MockHub {
             files: Arc::new(files.into_iter().collect()),
             ..Self::default()
         }
+    }
+
+    fn with_failure(mut self, route: &'static str, failure: HubFailure) -> Self {
+        self.failure = Some((route, failure));
+        self
     }
 
     fn accessor(&self) -> HuggingFaceAccessor {
@@ -90,6 +103,16 @@ impl HttpTransport for MockHub {
             range: range.clone(),
             form: form.clone(),
         });
+        if let Some((route, failure)) = &self.failure
+            && uri.contains(route)
+        {
+            return match failure {
+                HubFailure::Status(status) => Ok(response(*status, Bytes::new())),
+                HubFailure::Transport(kind) => {
+                    Err(opendal::Error::new(*kind, "fixture transport failed"))
+                }
+            };
+        }
         if uri.contains("/paths-info/") {
             let path = form
                 .strip_prefix("paths=")
@@ -198,8 +221,12 @@ async fn constructor_is_lazy_send_and_redacts_token() {
         .await
         .err()
         .unwrap();
-    assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    assert!(!format!("{error:?}").contains(TOKEN));
+    assert_upstream_error(
+        &error,
+        ErrorKind::InvalidInput,
+        opendal::ErrorKind::ConfigInvalid,
+        "configure_huggingface",
+    );
 }
 
 #[tokio::test]
@@ -261,10 +288,15 @@ async fn ranges_preserve_order_options_metadata_and_sequential_cursor() {
     assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"abc");
     let before = hub.captured().len();
     assert_eq!(reader.read_range(16..16).await.unwrap().len(), 0);
-    assert_eq!(
-        reader.read_range(16..17).await.err().unwrap().kind(),
-        ErrorKind::InvalidInput
-    );
+    for range in [16..17, std::ops::Range { start: 2, end: 1 }] {
+        let error = reader.read_range(range).await.unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(error.operation(), "read_range");
+        assert!(error.source().is_none());
+    }
+    let error = reader.read_ranges(vec![0..2, 16..17]).await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert!(error.source().is_none());
     assert_eq!(hub.captured().len(), before);
     let chunks = open_arrow_access_core::into_stream(reader)
         .try_collect::<Vec<_>>()
@@ -382,18 +414,16 @@ async fn invalid_paths_fail_before_requests_and_empty_files_are_readable() {
         "a\0b",
         "a/",
     ] {
-        assert_eq!(
-            accessor.open(path.into()).await.err().unwrap().kind(),
-            ErrorKind::InvalidInput,
-            "{path:?}"
-        );
+        let error = accessor.open(path.into()).await.err().unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput, "{path:?}");
+        assert_eq!(error.operation(), "open");
+        assert!(error.source().is_none());
     }
     for path in ["/", "/a", "a//", "./", "../", " a/"] {
-        assert_eq!(
-            accessor.list(path.into()).await.err().unwrap().kind(),
-            ErrorKind::InvalidInput,
-            "{path:?}"
-        );
+        let error = accessor.list(path.into()).await.err().unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput, "{path:?}");
+        assert_eq!(error.operation(), "list");
+        assert!(error.source().is_none());
     }
     assert!(hub.captured().is_empty());
     let mut reader = accessor.open("empty.bin".into()).await.unwrap();
@@ -409,23 +439,19 @@ async fn missing_denied_and_transport_errors_retain_kind_and_terminate() {
     let accessor = hub
         .accessor()
         .with_chunk_size(NonZeroUsize::new(4).unwrap());
-    assert_eq!(
-        accessor
-            .open("missing.bin".into())
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::NotFound
+    let error = accessor.open("missing.bin".into()).await.err().unwrap();
+    assert_upstream_error(
+        &error,
+        ErrorKind::NotFound,
+        opendal::ErrorKind::NotFound,
+        "stat",
     );
-    assert_eq!(
-        accessor
-            .open("denied.bin".into())
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::PermissionDenied
+    let error = accessor.open("denied.bin".into()).await.err().unwrap();
+    assert_upstream_error(
+        &error,
+        ErrorKind::PermissionDenied,
+        opendal::ErrorKind::PermissionDenied,
+        "stat",
     );
     let mut reader = accessor
         .open(
@@ -438,8 +464,12 @@ async fn missing_denied_and_transport_errors_retain_kind_and_terminate() {
         .unwrap();
     assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"abcd");
     let error = reader.next().await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::Io);
-    assert!(!format!("{error:?}").contains(TOKEN));
+    assert_upstream_error(
+        &error,
+        ErrorKind::Io,
+        opendal::ErrorKind::Unexpected,
+        "read",
+    );
     let before = hub.captured().len();
     assert!(reader.next().await.unwrap().is_none());
     assert_eq!(hub.captured().len(), before);
@@ -475,4 +505,149 @@ async fn parquet_reads_through_the_hub_sdk_and_shared_range_adapter() {
     }
     assert_eq!(values, [1, 2, 3]);
     assert!(hub.captured().iter().any(|r| r.range.is_some()));
+}
+
+fn assert_upstream_error(
+    error: &Error,
+    expected: ErrorKind,
+    upstream: opendal::ErrorKind,
+    operation: &str,
+) {
+    assert_eq!(error.kind(), expected);
+    assert_eq!(error.operation(), operation);
+    assert_eq!(ErrorKind::from_source(error), Some(expected));
+    assert_eq!(
+        error
+            .source()
+            .unwrap()
+            .downcast_ref::<opendal::Error>()
+            .unwrap()
+            .kind(),
+        upstream,
+    );
+    assert!(!format!("{error:?}").contains(TOKEN));
+}
+
+#[tokio::test]
+async fn metadata_http_status_codes_preserve_classification_and_source() {
+    for (status, expected, upstream) in [
+        (
+            StatusCode::NOT_FOUND,
+            ErrorKind::NotFound,
+            opendal::ErrorKind::NotFound,
+        ),
+        (
+            StatusCode::UNAUTHORIZED,
+            ErrorKind::PermissionDenied,
+            opendal::ErrorKind::PermissionDenied,
+        ),
+        (
+            StatusCode::FORBIDDEN,
+            ErrorKind::PermissionDenied,
+            opendal::ErrorKind::PermissionDenied,
+        ),
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            ErrorKind::Io,
+            opendal::ErrorKind::RateLimited,
+        ),
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorKind::Io,
+            opendal::ErrorKind::Unexpected,
+        ),
+    ] {
+        let hub = MockHub::default().with_failure("/paths-info/", HubFailure::Status(status));
+        let accessor = hub.accessor();
+        let error = accessor.open("file.bin".into()).await.err().unwrap();
+        assert_upstream_error(&error, expected, upstream, "stat");
+        let error = accessor.list("nested".into()).await.err().unwrap();
+        assert_upstream_error(&error, expected, upstream, "list");
+        assert!(
+            hub.captured()
+                .iter()
+                .all(|request| request.uri.contains("/paths-info/"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn read_http_status_codes_preserve_source_and_stop_sequential_reads() {
+    for (status, expected, upstream) in [
+        (
+            StatusCode::NOT_FOUND,
+            ErrorKind::NotFound,
+            opendal::ErrorKind::NotFound,
+        ),
+        (
+            StatusCode::UNAUTHORIZED,
+            ErrorKind::PermissionDenied,
+            opendal::ErrorKind::PermissionDenied,
+        ),
+        (
+            StatusCode::FORBIDDEN,
+            ErrorKind::PermissionDenied,
+            opendal::ErrorKind::PermissionDenied,
+        ),
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorKind::Io,
+            opendal::ErrorKind::Unexpected,
+        ),
+    ] {
+        let hub = MockHub::with_files([("data/file.bin".into(), Bytes::from_static(b"abcdefgh"))])
+            .with_failure("/resolve/", HubFailure::Status(status));
+        let accessor = hub.accessor();
+        let mut reader = accessor.open("file.bin".into()).await.unwrap();
+        let error = reader.read_range(0..2).await.unwrap_err();
+        assert_upstream_error(&error, expected, upstream, "read");
+        let error = reader.read_ranges(vec![0..1, 4..5]).await.unwrap_err();
+        assert_upstream_error(&error, expected, upstream, "read_ranges");
+        let error = reader.next().await.unwrap_err();
+        assert_upstream_error(&error, expected, upstream, "read");
+        let calls = hub.captured().len();
+        assert!(reader.next().await.unwrap().is_none());
+        assert_eq!(hub.captured().len(), calls);
+    }
+}
+
+#[tokio::test]
+async fn transport_and_unsupported_failures_retain_original_categories() {
+    for (upstream, expected) in [
+        (opendal::ErrorKind::Unexpected, ErrorKind::Io),
+        (opendal::ErrorKind::Unsupported, ErrorKind::Unsupported),
+    ] {
+        let hub = MockHub::with_files([("data/file.bin".into(), Bytes::from_static(b"payload"))])
+            .with_failure("/resolve/", HubFailure::Transport(upstream));
+        let mut reader = hub.accessor().open("file.bin".into()).await.unwrap();
+        let error = reader.next().await.unwrap_err();
+        assert_upstream_error(&error, expected, upstream, "read");
+        let calls = hub.captured().len();
+        assert!(reader.next().await.unwrap().is_none());
+        assert_eq!(hub.captured().len(), calls);
+    }
+}
+
+#[tokio::test]
+async fn listing_http_failures_preserve_categories_and_sources() {
+    for (status, expected, upstream) in [
+        (
+            StatusCode::FORBIDDEN,
+            ErrorKind::PermissionDenied,
+            opendal::ErrorKind::PermissionDenied,
+        ),
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorKind::Io,
+            opendal::ErrorKind::Unexpected,
+        ),
+    ] {
+        let hub = MockHub::default().with_failure("/tree/", HubFailure::Status(status));
+        let mut objects = hub.accessor().list("".into()).await.unwrap();
+        let error = objects.try_next().await.unwrap_err();
+        assert_upstream_error(&error, expected, upstream, "list");
+        let calls = hub.captured().len();
+        assert!(objects.try_next().await.unwrap().is_none());
+        assert_eq!(hub.captured().len(), calls);
+    }
 }
