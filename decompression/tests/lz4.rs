@@ -6,7 +6,8 @@ use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, Result};
 use open_arrow_access_decompression::{DecompressionLayer, Lz4};
 
-use common::{MemoryAccessor, collect, fixture};
+use common::{collect, fixture};
+use open_arrow_access_test_support::MemoryAccessor;
 
 #[tokio::test]
 async fn concatenated_frames_and_skippable_frames_preserve_order_across_fragments() -> Result<()> {
@@ -37,10 +38,10 @@ async fn valid_empty_or_skippable_frames_are_eof_but_empty_input_is_invalid() ->
         assert!(reader.next().await?.is_none());
     }
     let input = MemoryAccessor::new(&fixture("lz4", "bad_empty.lz4"), 1);
-    let reads = input.reads.clone();
+    let observed = input.observations.clone();
     let accessor = input.layer(DecompressionLayer::new(Lz4));
     let mut reader = accessor.open("missing.lz4".into()).await?;
-    common::assert_terminal_error(reader.as_mut(), &reads, ErrorKind::Decode).await;
+    common::assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Decode).await;
     Ok(())
 }
 
@@ -59,18 +60,19 @@ async fn corrupt_truncated_raw_legacy_and_trailing_input_fail_terminally() -> Re
     ] {
         let bytes = fixture("lz4", name);
         let input = MemoryAccessor::new(&bytes, 1);
-        let reads = input.reads.clone();
+        let observed = input.observations.clone();
         let accessor = input.layer(DecompressionLayer::new(Lz4));
         let mut reader = accessor.open("bad.lz4".into()).await?;
-        common::assert_terminal_error(reader.as_mut(), &reads, ErrorKind::Decode).await;
+        common::assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Decode).await;
     }
     Ok(())
 }
 
 #[tokio::test]
 async fn source_errors_are_preserved() -> Result<()> {
-    let mut input = MemoryAccessor::new(&fixture("lz4", "payload.lz4"), 2);
-    input.error = Some(ErrorKind::PermissionDenied);
+    let bytes = fixture("lz4", "payload.lz4");
+    let input =
+        MemoryAccessor::new(&bytes, 2).with_failure(bytes.len(), ErrorKind::PermissionDenied);
     let accessor = input.layer(DecompressionLayer::new(Lz4));
     let mut reader = accessor.open("source.lz4".into()).await?;
     assert_eq!(
