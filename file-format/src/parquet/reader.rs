@@ -38,6 +38,7 @@ impl Reader for ParquetReader {
         Capability {
             read: true,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }

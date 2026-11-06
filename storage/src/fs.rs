@@ -81,6 +81,7 @@ impl Accessor for FsAccessor {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: false,
         }
     }

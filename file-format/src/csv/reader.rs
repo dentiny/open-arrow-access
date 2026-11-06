@@ -70,6 +70,7 @@ impl Reader for CsvReader {
         Capability {
             read: true,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }
