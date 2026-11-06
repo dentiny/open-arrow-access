@@ -1,4 +1,5 @@
 use arrow_json::ReaderBuilder;
+use arrow_schema::ArrowError;
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ReadRequest,
     RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
@@ -44,8 +45,11 @@ where
             .with_batch_size(request.options.batch_size.get())
             .build_decoder()
             .map_err(|error| {
-                Error::new(ErrorKind::InvalidInput, "open_json", error.to_string())
-                    .with_source(error)
+                let kind = match &error {
+                    ArrowError::NotYetImplemented(_) => ErrorKind::Unsupported,
+                    _ => ErrorKind::InvalidInput,
+                };
+                Error::new(kind, "open_json", error.to_string()).with_source(error)
             })?;
         let input = self
             .inner
