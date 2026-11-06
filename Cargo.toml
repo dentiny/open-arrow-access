@@ -79,10 +79,6 @@ name = "json"
 required-features = ["format-json"]
 
 [[test]]
-name = "csv"
-required-features = ["format-csv"]
-
-[[test]]
 name = "reading"
 required-features = ["storage-fs", "format-parquet"]
 

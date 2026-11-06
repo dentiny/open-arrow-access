@@ -1704,12 +1704,16 @@ dependencies = [
 name = "open-arrow-access-file-format"
 version = "0.1.0"
 dependencies = [
+ "arrow-array",
  "arrow-csv",
  "arrow-json",
  "arrow-schema",
  "futures",
+ "more-asserts",
  "open-arrow-access-core",
+ "open-arrow-access-storage",
  "parquet",
+ "tokio",
 ]
 
 [[package]]

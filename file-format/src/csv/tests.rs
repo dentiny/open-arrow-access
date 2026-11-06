@@ -7,11 +7,13 @@ use std::{
 use arrow_array::{Array, Int64Array, StringArray};
 use arrow_schema::{DataType, Field, IntervalUnit, Schema, TimeUnit};
 use more_asserts::assert_gt;
-use open_arrow_access::{
+use open_arrow_access_core::{
     Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
-    file_format::{CsvAccessor, CsvFormat},
 };
 
+use super::{CsvAccessor, CsvFormat};
+
+#[path = "../../../tests/common/mod.rs"]
 mod common;
 
 use common::MemoryAccessor;
@@ -24,7 +26,7 @@ const BAD_FILES: [&str; 4] = [
 ];
 
 fn fixture_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/csv")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/csv")
 }
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -50,7 +52,7 @@ fn options(batch_size: usize, projection: Option<Vec<&str>>) -> ReadOptions {
 }
 
 async fn collect(
-    accessor: &impl Accessor<Request = ReadRequest, Reader = dyn open_arrow_access::RecordReader>,
+    accessor: &impl Accessor<Request = ReadRequest, Reader = dyn open_arrow_access_core::RecordReader>,
     request: ReadRequest,
 ) -> Vec<RecordBatch> {
     let mut reader = accessor.open(request).await.unwrap();
@@ -368,10 +370,9 @@ async fn header_validation_and_truncated_row_policy_are_explicit() {
     assert!(batches[0].column(1).is_null(0));
 }
 
-#[cfg(feature = "storage-fs")]
 #[tokio::test]
 async fn filesystem_csv_preserves_values_across_chunks_and_batches() {
-    use open_arrow_access::storage::FsAccessor;
+    use open_arrow_access_storage::FsAccessor;
 
     for chunk_size in [1, 7, 4096] {
         let bytes = FsAccessor::new(fixture_root())
@@ -421,10 +422,9 @@ async fn filesystem_csv_preserves_values_across_chunks_and_batches() {
     }
 }
 
-#[cfg(feature = "storage-fs")]
 #[tokio::test]
 async fn filesystem_invalid_csv_errors_are_terminal() {
-    use open_arrow_access::storage::FsAccessor;
+    use open_arrow_access_storage::FsAccessor;
 
     for chunk_size in [1, 4096] {
         let bytes = FsAccessor::new(fixture_root())

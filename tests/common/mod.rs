@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use more_asserts::assert_gt;
-use open_arrow_access::{
+use open_arrow_access_core::{
     Accessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error, ErrorKind,
     Reader, Result, async_trait,
 };
