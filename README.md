@@ -167,8 +167,9 @@ cargo test --workspace --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```
 
-Tests generate their own small Parquet fixtures. They verify ordered rows and
+Tests read checked-in Parquet and CSV/TSV files from `testdata/`. They verify ordered rows and
 nulls across row groups, schema metadata, projection, storage-independent
 reading, wrapper composition, exact/batched ranges, per-open I/O options,
 bounded backend concurrency, and terminal error/drop behavior.
-Fixture generation is test-only; the library exposes no writer or sink API.
+Tests may copy fixtures into temporary roots to exercise storage behavior.
+The library exposes no writer or sink API.
