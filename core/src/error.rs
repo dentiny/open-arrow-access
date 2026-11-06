@@ -1,4 +1,4 @@
-use std::{error::Error as StdError, io};
+use std::{error::Error as StdError, io, sync::Arc};
 
 /// The result type shared by all components.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -16,11 +16,15 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
-    /// Find the first shared error category in a source chain, including boxed I/O errors.
+    /// Find the first shared error category in a source chain, including boxed and shared I/O errors.
     pub fn from_source(mut source: &(dyn StdError + 'static)) -> Option<Self> {
         loop {
             if let Some(error) = source.downcast_ref::<Error>() {
                 return Some(error.kind());
+            }
+            if let Some(shared) = source.downcast_ref::<Arc<io::Error>>() {
+                source = shared.as_ref();
+                continue;
             }
             source = match source
                 .downcast_ref::<io::Error>()

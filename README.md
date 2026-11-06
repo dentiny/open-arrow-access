@@ -255,3 +255,47 @@ reading, wrapper composition, exact/batched ranges, per-open I/O options,
 bounded backend concurrency, and terminal error/drop behavior.
 Tests may copy fixtures into temporary roots to exercise storage behavior.
 The library exposes no writer or sink API.
+
+## XML
+
+Enable `format-xml` and supply an explicit schema and absolute record element path:
+
+```rust,no_run
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+use arrow_schema::DataType::{Int64, Utf8};
+use open_arrow_access::{Accessor, ReadRequest, file_format::{XmlAccessor, XmlField, XmlSchema}, storage::FsAccessor};
+
+let schema = XmlSchema::new(vec![
+    XmlField::new("id", "@id", Int64, false),
+    XmlField::new("title", "title", Utf8, true),
+])?;
+let xml = XmlAccessor::new(FsAccessor::new("/data").await?, schema, "/catalog/book");
+let mut reader = xml.open(ReadRequest::new("books.xml")).await?;
+while let Some(batch) = reader.next().await? { /* consume batch */ }
+# Ok(())
+# }
+```
+
+`XmlField::structure`, `XmlField::list`, and URI-based `NamespaceBinding` mappings
+support nested records and namespaces. Paths select direct children, terminal
+attributes (`@id`), or direct scalar text (`.`); they are not XPath. Unprefixed
+paths select elements with no namespace. Types are Utf8, Boolean, Int64, finite
+Float64, Struct and List. Missing nullable elements and `xsi:nil` map to null;
+empty strings and empty lists remain distinct. Mixed text and child elements
+cannot be mapped to scalar/struct/list fields as rich text.
+
+The shared `ReadRequest` controls row targets, projection in caller order
+(including zero columns), and byte I/O options. The schema is fixed across batches.
+`XmlLimits` defaults to 8 MiB per record/event, 64 MiB of serialized records per
+batch, and depth 128. These are XML limits, not a bound on total Arrow memory;
+one lookahead record and an upstream byte chunk may also remain buffered.
+Skipped content is still validated and subject to event/depth limits. Inputs must
+be UTF-8; DTDs and custom entities are rejected. Errors are terminal.
+
+External compression remains independent: compose `XmlAccessor` over an accessor
+with `DecompressionLayer::new(Gzip)` for `.xml.gz`. FileSet and directory reading
+reuse the same format accessor and preserve file/record order. No schema inference,
+format auto-detection, index or parallel scheduler is added by this adapter.
+Projection avoids conversion of omitted fields, while selected records are still
+read and parsed in full. Run the local example with
+`cargo run --features storage-fs,format-xml --example read_xml -- books.xml`.

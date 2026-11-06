@@ -14,3 +14,8 @@ pub use json::JsonAccessor;
 mod csv;
 #[cfg(feature = "csv")]
 pub use csv::{CsvAccessor, CsvFormat};
+
+#[cfg(feature = "xml")]
+mod xml;
+#[cfg(feature = "xml")]
+pub use xml::{NamespaceBinding, XmlAccessor, XmlField, XmlLimits, XmlSchema};

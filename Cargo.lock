@@ -1163,6 +1163,7 @@ dependencies = [
  "open-arrow-access-test-support",
  "parquet",
  "tokio",
+ "xml-arrow",
 ]
 
 [[package]]
@@ -1323,6 +1324,7 @@ checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "memchr",
  "serde",
+ "tokio",
 ]
 
 [[package]]
@@ -1374,6 +1376,15 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "roxmltree"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9da7f59328b09405b181fee1018925fad50f157afb43c0c0f5c522c256dd5907"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "rustc_version"
@@ -1614,6 +1625,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-util"
+version = "0.7.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e464cf451ba96ebfc6f9b6542f17ee8b8956e33f1e40d9690624e59d7a7f8a4b"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-io",
+ "futures-sink",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "twox-hash"
 version = "2.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1833,6 +1858,20 @@ checksum = "963d6fab92d5504b971dc8bd90ca743c2575e590bc8071ea5bc571598667ae08"
 dependencies = [
  "libc",
  "rustix",
+]
+
+[[package]]
+name = "xml-arrow"
+version = "0.2.0"
+source = "git+https://github.com/dentiny/xml-arrow-rs?rev=80a97faa607a2f1a8e9dab936f668dc4a7b904b6#80a97faa607a2f1a8e9dab936f668dc4a7b904b6"
+dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "futures-util",
+ "quick-xml",
+ "roxmltree",
+ "thiserror",
+ "tokio-util",
 ]
 
 [[package]]
