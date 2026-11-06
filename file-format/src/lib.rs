@@ -5,6 +5,11 @@ mod parquet;
 #[cfg(feature = "parquet")]
 pub use parquet::ParquetAccessor;
 
+#[cfg(feature = "json")]
+mod json;
+#[cfg(feature = "json")]
+pub use json::JsonAccessor;
+
 #[cfg(feature = "csv")]
 mod csv;
 #[cfg(feature = "csv")]

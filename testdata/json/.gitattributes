@@ -1,0 +1,4 @@
+*.json -text
+*.jsonl -text
+good.json whitespace=cr-at-eol
+whitespace.json -whitespace
