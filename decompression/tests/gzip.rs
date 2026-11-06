@@ -81,13 +81,11 @@ async fn invalid_gzip_is_terminal() -> Result<()> {
         "bad_truncated_member.gz",
     ] {
         let bytes = fixture("gzip", name);
-        let accessor = MemoryAccessor::new(&bytes, 2).layer(DecompressionLayer::new(Gzip));
+        let input = MemoryAccessor::new(&bytes, 2);
+        let reads = input.reads.clone();
+        let accessor = input.layer(DecompressionLayer::new(Gzip));
         let mut reader = accessor.open("bad.gz".into()).await?;
-        assert_eq!(
-            collect(reader.as_mut()).await.unwrap_err().kind(),
-            ErrorKind::Decode
-        );
-        assert!(reader.next().await?.is_none());
+        common::assert_terminal_error(reader.as_mut(), &reads, ErrorKind::Decode).await;
     }
     Ok(())
 }
@@ -135,4 +133,9 @@ async fn nested_layers_and_readers_have_independent_state() -> Result<()> {
     assert_eq!(collect(first.as_mut()).await?, b"nested");
     assert_eq!(collect(second.as_mut()).await?, b"nested");
     Ok(())
+}
+
+#[tokio::test]
+async fn error_codes_sources_and_terminal_state_follow_the_byte_contract() -> Result<()> {
+    common::error_contract(Gzip, "gzip", "payload.gz").await
 }
