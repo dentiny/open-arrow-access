@@ -1,4 +1,5 @@
 mod accessor;
+mod error;
 mod reader;
 mod request;
 

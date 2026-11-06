@@ -1,9 +1,11 @@
 use std::{sync::Arc, vec::IntoIter};
 
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, Capability, Error, ErrorKind, ObjectRef, ReadOptions, ReadRequest,
-    Reader, RecordBatch, RecordMetadata, RecordReader, Result, async_trait,
+    Accessor, ByteReadOptions, Capability, ObjectRef, ReadOptions, ReadRequest, Reader,
+    RecordBatch, RecordMetadata, RecordReader, Result, async_trait,
 };
+
+use super::error::schema_mismatch;
 
 pub(super) struct FileSetReader<A> {
     accessor: Arc<A>,
@@ -97,12 +99,4 @@ where
         }
         result
     }
-}
-
-fn schema_mismatch() -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "read_file_set",
-        "file or batch schema differs from the fixed dataset schema",
-    )
 }
