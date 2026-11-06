@@ -3,7 +3,7 @@ mod support;
 use std::{
     error::Error as _,
     num::NonZeroUsize,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::Ordering},
 };
 
 use arrow_array::{Int64Array, StringArray};
@@ -189,7 +189,9 @@ async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
             .unwrap()
             .is_empty()
     );
-    assert!(FsAccessor::new("relative/root").await.is_err());
+    let error = FsAccessor::new("relative/root").await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert_eq!(error.operation(), "configure_fs");
 }
 
 #[tokio::test]
@@ -316,7 +318,12 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
     type Reader = A::Reader;
 
     fn capability(&self) -> Capability {
-        self.inner.capability()
+        let inner = self.inner.capability();
+        Capability {
+            read: inner.read,
+            read_with_range: inner.read_with_range,
+            list: inner.list,
+        }
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
@@ -415,9 +422,11 @@ impl Accessor for ListingAccessor {
     type Reader = dyn open_arrow_access::ByteReader;
 
     fn capability(&self) -> Capability {
+        let inner = self.0.capability();
         Capability {
+            read: inner.read,
+            read_with_range: inner.read_with_range,
             list: true,
-            ..self.0.capability()
         }
     }
 
@@ -571,22 +580,54 @@ async fn parquet_forwards_per_open_io_options_and_uses_bulk_ranges_through_layer
 }
 
 #[tokio::test]
-async fn parquet_preserves_io_error_kind_during_metadata_inspection() {
-    let fixture = fixture(Compression::UNCOMPRESSED);
-    let observations = Arc::new(Observations::default());
-    observations
-        .fail_reads
-        .store(true, std::sync::atomic::Ordering::SeqCst);
-    let bytes = FsAccessor::new(fixture.dir.path())
-        .await
-        .unwrap()
-        .layer(ByteObserverLayer(observations));
-    let error = ParquetAccessor::new(bytes)
-        .open(ReadRequest::new("data.parquet"))
-        .await
-        .err()
-        .unwrap();
-    assert_eq!(error.kind(), ErrorKind::Io);
-    assert_eq!(error.operation(), "inspect_parquet");
-    assert!(error.source().is_some());
+async fn parquet_preserves_source_error_categories_during_inspection_and_decoding() {
+    for kind in [
+        ErrorKind::InvalidInput,
+        ErrorKind::Unsupported,
+        ErrorKind::NotFound,
+        ErrorKind::PermissionDenied,
+        ErrorKind::Io,
+        ErrorKind::Decode,
+    ] {
+        for inspect in [true, false] {
+            let fixture = fixture(Compression::UNCOMPRESSED);
+            let observations = Arc::new(Observations::default());
+            *observations.failure_kind.lock().unwrap() = Some(kind);
+            observations.fail_reads.store(inspect, Ordering::SeqCst);
+            let bytes = FsAccessor::new(fixture.dir.path())
+                .await
+                .unwrap()
+                .layer(ByteObserverLayer(observations.clone()));
+            let accessor = ParquetAccessor::new(bytes);
+            let error = if inspect {
+                accessor
+                    .open(ReadRequest::new("data.parquet"))
+                    .await
+                    .err()
+                    .unwrap()
+            } else {
+                let mut reader = accessor
+                    .open(ReadRequest::new("data.parquet"))
+                    .await
+                    .unwrap();
+                observations.fail_reads.store(true, Ordering::SeqCst);
+                let error = reader.next().await.unwrap_err();
+                let calls = observations.range_reads.load(Ordering::SeqCst);
+                assert!(reader.next().await.unwrap().is_none());
+                assert!(reader.next().await.unwrap().is_none());
+                assert_eq!(observations.range_reads.load(Ordering::SeqCst), calls);
+                error
+            };
+            assert_eq!(error.kind(), kind, "inspect={inspect}");
+            assert_eq!(
+                error.operation(),
+                if inspect {
+                    "inspect_parquet"
+                } else {
+                    "decode_parquet"
+                }
+            );
+            assert_eq!(ErrorKind::from_source(error.source().unwrap()), Some(kind));
+        }
+    }
 }
