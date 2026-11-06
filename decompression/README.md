@@ -8,6 +8,7 @@ select a decoder.
 | Gzip | `decompression-gzip` | `gzip` | `Gzip` |
 | Bzip2 | `decompression-bz2` | `bz2` | `Bzip2` |
 | LZ4 | `decompression-lz4` | `lz4` | `Lz4` |
+| Zstandard | `decompression-zstd` | `zstd` | `Zstd` |
 
 ```rust,no_run
 use open_arrow_access::{
@@ -90,3 +91,17 @@ frames. The shared layer's metadata, error and memory contracts above apply.
 Use `DecompressionLayer::new(Lz4)` in the example above. This follows the existing
 ml-infra approach of adapting upstream asynchronous compression decoders, adding
 LZ4 to the same generic wrapper rather than implementing another codec.
+
+## Zstandard frames
+
+For Zstandard, enable `decompression-zstd` and replace `Gzip` with `Zstd` in
+the example. The adapter uses `async-compression`'s futures `ZstdDecoder` with
+multi-frame decoding, as in ml-infra's compression helper. Standard frames,
+concatenated frames, empty frames and skippable frames are supported. Invalid
+checksums, truncated frames and trailing non-frame bytes are decode errors.
+An empty frame or a skippable-only input is valid EOF; an empty compressed object
+is invalid. Validation completes only when the consumer reads through EOF.
+Raw blocks, legacy format and custom dictionary/decoder-parameter configuration
+are outside this adapter. A stream requiring an unavailable dictionary fails
+with a decode error. Codec state, including its frame window, is additional to
+the emitted chunk limit.

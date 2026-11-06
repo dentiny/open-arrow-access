@@ -11,6 +11,7 @@ default = []
 gzip = ["dep:async-compression", "async-compression/gzip"]
 bz2 = ["dep:async-compression", "async-compression/bzip2"]
 lz4 = ["dep:async-compression", "async-compression/lz4"]
+zstd = ["dep:async-compression", "async-compression/zstd"]
 
 [dependencies]
 open-arrow-access-core.workspace = true
@@ -33,6 +34,10 @@ required-features = ["gzip"]
 [[test]]
 name = "lz4"
 required-features = ["lz4"]
+
+[[test]]
+name = "zstd"
+required-features = ["zstd"]
 
 [lints]
 workspace = true

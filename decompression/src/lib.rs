@@ -24,3 +24,8 @@ pub use bz2::Bzip2;
 mod lz4;
 #[cfg(feature = "lz4")]
 pub use lz4::Lz4;
+
+#[cfg(feature = "zstd")]
+mod zstd;
+#[cfg(feature = "zstd")]
+pub use zstd::Zstd;
