@@ -1,13 +1,12 @@
-mod common;
-
 use std::num::NonZeroUsize;
 
 use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, Result};
 use open_arrow_access_decompression::{DecompressionLayer, Lz4};
 
-use common::{collect, fixture};
-use open_arrow_access_test_support::MemoryAccessor;
+use open_arrow_access_test_support::{
+    MemoryAccessor, byte_layer, collect_bytes as collect, fixture,
+};
 
 #[tokio::test]
 async fn concatenated_frames_and_skippable_frames_preserve_order_across_fragments() -> Result<()> {
@@ -41,7 +40,13 @@ async fn valid_empty_or_skippable_frames_are_eof_but_empty_input_is_invalid() ->
     let observed = input.observations.clone();
     let accessor = input.layer(DecompressionLayer::new(Lz4));
     let mut reader = accessor.open("missing.lz4".into()).await?;
-    common::assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Decode).await;
+    byte_layer::assert_terminal_error(
+        reader.as_mut(),
+        &observed.reads,
+        ErrorKind::Decode,
+        "decompress",
+    )
+    .await;
     Ok(())
 }
 
@@ -63,7 +68,13 @@ async fn corrupt_truncated_raw_legacy_and_trailing_input_fail_terminally() -> Re
         let observed = input.observations.clone();
         let accessor = input.layer(DecompressionLayer::new(Lz4));
         let mut reader = accessor.open("bad.lz4".into()).await?;
-        common::assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Decode).await;
+        byte_layer::assert_terminal_error(
+            reader.as_mut(),
+            &observed.reads,
+            ErrorKind::Decode,
+            "decompress",
+        )
+        .await;
     }
     Ok(())
 }
@@ -85,5 +96,11 @@ async fn source_errors_are_preserved() -> Result<()> {
 
 #[tokio::test]
 async fn error_codes_sources_and_terminal_state_follow_the_byte_contract() -> Result<()> {
-    common::error_contract(Lz4, "lz4", "payload.lz4").await
+    byte_layer::assert_error_contract(
+        |input| input.layer(DecompressionLayer::new(Lz4)),
+        &fixture("lz4", "payload.lz4"),
+        b"payload",
+        "decompress",
+    )
+    .await
 }
