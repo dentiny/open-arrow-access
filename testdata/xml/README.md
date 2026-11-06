@@ -40,3 +40,15 @@ not additional real datasets: replace the first `numaid="0"` with `invalid` or
 `&unknown;`, remove the closing system tag, or prepend `<!DOCTYPE system>`.
 These exercise terminal conversion, syntax, and unsupported-DTD errors.
 Tests read committed local files and make no network requests.
+
+## Test fixture policy
+
+Use committed, real XML files for XML adapter tests, including configuration,
+projection, batching and limit tests. Prefer reusing these snapshots; when adding
+a new source, record its pinned revision, SHA-256 hash and license here.
+
+For malformed XML that cannot occur in an unmodified valid snapshot, make the
+smallest corruption of a real fixture and document the exact change. Keep the
+original snapshot unmodified. Reserve synthetic input for a narrowly targeted
+case that cannot be covered by real files or their documented corruptions, and
+explain why the exception is needed in the test.

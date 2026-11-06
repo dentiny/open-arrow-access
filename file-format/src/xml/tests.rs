@@ -208,7 +208,8 @@ async fn real_pom_projection_skips_conversion_and_counts_zero_columns() {
 
 #[tokio::test]
 async fn invalid_configuration_fails_before_opening_input() {
-    let bytes = MemoryAccessor::new(b"", 1);
+    let input = open_arrow_access_test_support::fixture!("xml", "lancedb-pom.xml").await;
+    let bytes = MemoryAccessor::new(&input, 1);
     let observations = bytes.observations.clone();
     for (path, limits) in [
         ("relative/path", XmlLimits::default()),
