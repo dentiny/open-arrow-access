@@ -1,4 +1,4 @@
-use std::{error::Error as StdError, io, num::NonZeroUsize};
+use std::{io, num::NonZeroUsize};
 
 use futures::{TryStreamExt, io::AsyncReadExt};
 use open_arrow_access_core::{
@@ -70,7 +70,7 @@ impl Reader for DecompressionReader {
             Err(error) => {
                 self.finished = true;
                 Err(Error::new(
-                    find_source_kind(&error).unwrap_or(ErrorKind::Decode),
+                    ErrorKind::from_source(&error).unwrap_or(ErrorKind::Decode),
                     "decompress",
                     format!("{} decoding failed", self.codec),
                 )
@@ -82,18 +82,3 @@ impl Reader for DecompressionReader {
 
 #[async_trait]
 impl ByteReader for DecompressionReader {}
-
-fn find_source_kind(error: &(dyn StdError + 'static)) -> Option<ErrorKind> {
-    if let Some(error) = error.downcast_ref::<Error>() {
-        return Some(error.kind());
-    }
-    // io::Error::source can skip the boxed error itself; inspect get_ref as well.
-    if let Some(inner) = error
-        .downcast_ref::<io::Error>()
-        .and_then(io::Error::get_ref)
-        && let Some(kind) = find_source_kind(inner)
-    {
-        return Some(kind);
-    }
-    error.source().and_then(find_source_kind)
-}
