@@ -7,8 +7,6 @@ use parquet::arrow::async_reader::ParquetRecordBatchStream;
 use super::{decode_error, input::ParquetInput};
 
 /// Decode ordered Arrow batches while preserving the inspected output schema.
-// TODO: Read and decode row groups concurrently with bounded concurrency,
-// preserving row order and the fixed output schema.
 pub(super) struct ParquetReader {
     stream: ParquetRecordBatchStream<ParquetInput>,
     metadata: RecordMetadata,
