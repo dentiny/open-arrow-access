@@ -21,7 +21,9 @@ and a counter of every `next` call. Assert request forwarding in the calling tes
 and compare read counts before and after terminal calls to catch unwanted polling.
 Range reads leave sequential cursors unchanged and do not trigger sequential faults.
 
-Use `fixture_path` / `fixture` to access committed fixtures and `collect_bytes` to
+Use `fixture!(format, name)` to read committed fixtures relative to the calling
+crate. `fixture_path` and `read_fixture` also accept an explicit manifest directory.
+Use `collect_bytes` to
 consume a reader while asserting nonempty chunks. `byte_layer::assert_error_contract`
 accepts a layer factory, encoded input, expected output, and error operation. It
 checks source categories/causes, terminal reads, and removal of range support

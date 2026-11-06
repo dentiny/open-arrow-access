@@ -2,7 +2,7 @@
 
 use std::{
     ops::Range,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -223,18 +223,29 @@ impl ByteReader for MemoryReader {
 /// Shared assertions for sequential byte layers.
 pub mod byte_layer;
 
-/// Resolve a committed fixture from the workspace's `testdata/<format>/` directory.
-pub fn fixture_path(format: &str, name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+/// Resolve a committed fixture relative to the calling crate's manifest directory.
+pub fn fixture_path(manifest_dir: impl AsRef<Path>, format: &str, name: &str) -> PathBuf {
+    manifest_dir
+        .as_ref()
         .join("../testdata")
         .join(format)
         .join(name)
 }
 
 /// Read a committed fixture, reporting its full path if reading fails.
-pub fn fixture(format: &str, name: &str) -> Vec<u8> {
-    let path = fixture_path(format, name);
+pub fn read_fixture(manifest_dir: impl AsRef<Path>, format: &str, name: &str) -> Vec<u8> {
+    let path = fixture_path(manifest_dir, format, name);
     std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+}
+
+/// Read `testdata/<format>/<name>` from the calling crate's workspace.
+/// Resolve the manifest directory at the call site so shared build caches cannot
+/// bind fixtures to a different checkout's test-support compilation directory.
+#[macro_export]
+macro_rules! fixture {
+    ($format:expr, $name:expr) => {
+        $crate::read_fixture(env!("CARGO_MANIFEST_DIR"), $format, $name)
+    };
 }
 
 /// Collect a byte reader, asserting its nonempty-chunk contract.
