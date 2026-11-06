@@ -1,36 +1,30 @@
-#![cfg(feature = "gzip")]
-
 mod common;
 
-use std::{error::Error as _, io::Write, num::NonZeroUsize};
+use std::{error::Error as _, num::NonZeroUsize};
 
-use common::{MemoryAccessor, collect};
-use flate2::{Compression, write::GzEncoder};
+use common::{MemoryAccessor, collect, fixture};
 use futures::TryStreamExt;
+use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, ErrorKind, ObjectRef,
     Result,
 };
 use open_arrow_access_decompression::{DecompressionLayer, Gzip};
 
-fn compress(bytes: &[u8]) -> Vec<u8> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(bytes).unwrap();
-    encoder.finish().unwrap()
-}
-
 #[tokio::test]
 async fn members_preserve_order_and_output_chunk_limit() -> Result<()> {
-    let mut members = compress(b"first");
-    members.extend(compress(b""));
-    members.extend(compress("第二行".as_bytes()));
-    for (input, expected) in [(members, "first第二行".as_bytes()), (compress(b""), b"")] {
+    for (name, expected) in [
+        ("good_multi_member.gz", "first第二行".as_bytes()),
+        ("empty_member.gz", &b""[..]),
+    ] {
+        let input = fixture("gzip", name);
         let accessor = MemoryAccessor::new(&input, 1)
             .layer(DecompressionLayer::new(Gzip).with_chunk_size(NonZeroUsize::new(3).unwrap()));
         let mut reader = accessor.open("data.gz".into()).await?;
         let mut output = Vec::new();
         while let Some(bytes) = reader.next().await? {
-            assert!(!bytes.is_empty() && bytes.len() <= 3);
+            assert_gt!(bytes.len(), 0);
+            assert_le!(bytes.len(), 3);
             output.extend_from_slice(&bytes);
         }
         assert_eq!(output, expected);
@@ -45,7 +39,7 @@ async fn layer_preserves_metadata_options_and_listing_but_removes_ranges() -> Re
         io_concurrency: NonZeroUsize::new(4).unwrap(),
         io_chunk_size: NonZeroUsize::new(17),
     };
-    let mut input = MemoryAccessor::new(&compress(b"payload"), 2);
+    let mut input = MemoryAccessor::new(&fixture("gzip", "payload.gz"), 2);
     input.expected_options = Some(options);
     let accessor = input.layer(DecompressionLayer::new(Gzip));
     let mut reader = accessor
@@ -77,23 +71,16 @@ async fn layer_preserves_metadata_options_and_listing_but_removes_ranges() -> Re
 
 #[tokio::test]
 async fn invalid_gzip_is_terminal() -> Result<()> {
-    let valid = compress(b"payload");
-    let mut corrupt = valid.clone();
-    let crc = corrupt.len() - 8;
-    corrupt[crc] ^= 1;
-    let mut trailing = valid.clone();
-    trailing.extend_from_slice(b"junk");
-    let mut truncated_member = valid.clone();
-    truncated_member.extend_from_slice(&valid[..valid.len() - 1]);
-    for bytes in [
-        vec![],
-        b"not gzip".to_vec(),
-        valid[..3].to_vec(),
-        valid[..valid.len() - 1].to_vec(),
-        corrupt,
-        trailing,
-        truncated_member,
+    for name in [
+        "bad_empty.gz",
+        "bad_magic.gz",
+        "bad_header.gz",
+        "bad_truncated.gz",
+        "bad_checksum.gz",
+        "bad_trailing.gz",
+        "bad_truncated_member.gz",
     ] {
+        let bytes = fixture("gzip", name);
         let accessor = MemoryAccessor::new(&bytes, 2).layer(DecompressionLayer::new(Gzip));
         let mut reader = accessor.open("bad.gz".into()).await?;
         assert_eq!(
@@ -126,8 +113,7 @@ async fn source_errors_are_lazy_and_preserved() -> Result<()> {
 
 #[tokio::test]
 async fn reading_does_not_decode_the_whole_input() -> Result<()> {
-    let mut bytes = compress(b"ab");
-    bytes.extend_from_slice(b"not another member");
+    let bytes = fixture("gzip", "bad_late_member.gz");
     let accessor = MemoryAccessor::new(&bytes, 1)
         .layer(DecompressionLayer::new(Gzip).with_chunk_size(NonZeroUsize::MIN));
     let mut reader = accessor.open("partial.gz".into()).await?;
@@ -141,7 +127,7 @@ async fn reading_does_not_decode_the_whole_input() -> Result<()> {
 
 #[tokio::test]
 async fn nested_layers_and_readers_have_independent_state() -> Result<()> {
-    let accessor = MemoryAccessor::new(&compress(&compress(b"nested")), 2)
+    let accessor = MemoryAccessor::new(&fixture("gzip", "nested.gz.gz"), 2)
         .layer(DecompressionLayer::new(Gzip))
         .layer(DecompressionLayer::new(Gzip));
     let mut first = accessor.open("nested.gz.gz".into()).await?;

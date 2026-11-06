@@ -1,3 +1,12 @@
+pub fn fixture(format: &str, name: &str) -> Vec<u8> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("testdata")
+        .join(format)
+        .join(name);
+    std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+}
+
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes,
     Capability, Error, ErrorKind, ObjectRef, ObjectStream, Reader, Result, async_trait,
