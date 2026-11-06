@@ -108,7 +108,7 @@ contract without a closed enum of every source or format.
 | --- | --- | --- |
 | Fs storage | `ByteReadRequest` | `dyn ByteReader` |
 | Parquet format | `ReadRequest` | `dyn RecordReader` |
-| Future JSON format | Typed file request | Record reader |
+| JSON object stream | `ReadRequest`; schema configured on accessor | Record reader |
 | Future directory dataset | Directory selection and options | Record reader |
 | Future Hugging Face service | Repository/revision/config/split selection | Record reader or resolved object discovery |
 
@@ -176,6 +176,11 @@ schema and optional reader-context contracts.
 - `decompression/` shares streaming byte adapters across codec modules. Its
   optional gzip feature uses an upstream decoder with concatenated members;
   source versions remain upstream identities and decoded lengths are unknown.
+- `format-json` adds an Arrow JSON decoder with a caller-supplied fixed schema.
+  It reads whitespace-separated objects, including JSONL, from sequential bytes
+  without materializing the input. Top-level arrays/null/scalars are rejected;
+  projection selects the decoder schema before opening input. Byte options pass
+  through the same `ReadRequest` contract as Parquet.
 - `dataset/`, `service/`, and `layers/` currently contain only
   scope/extension documentation; unimplemented capabilities are not registered.
 
