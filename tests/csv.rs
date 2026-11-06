@@ -2,106 +2,19 @@
 
 use std::{
     num::NonZeroUsize,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::{Arc, atomic::Ordering},
 };
 
 use arrow_array::{Array, Int64Array, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access::{
-    Accessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, Error,
-    ErrorKind, ReadOptions, ReadRequest, Reader, RecordBatch, Result, SchemaRef, async_trait,
+    Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
     file_format::{CsvAccessor, CsvFormat},
 };
 
-#[derive(Clone)]
-struct MemoryAccessor {
-    chunks: Vec<Bytes>,
-    calls: Arc<AtomicUsize>,
-    options: Arc<Mutex<Vec<ByteReadOptions>>>,
-    fail_at: Option<usize>,
-}
+mod common;
 
-impl MemoryAccessor {
-    fn new(input: &[u8], chunk_size: usize) -> Self {
-        Self {
-            chunks: input
-                .chunks(chunk_size)
-                .map(Bytes::copy_from_slice)
-                .collect(),
-            calls: Arc::default(),
-            options: Arc::default(),
-            fail_at: None,
-        }
-    }
-}
-
-#[async_trait]
-impl Accessor for MemoryAccessor {
-    type Request = ByteReadRequest;
-    type Reader = dyn ByteReader;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            ..Capability::default()
-        }
-    }
-
-    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        self.options.lock().unwrap().push(request.options);
-        Ok(Box::new(MemoryReader {
-            chunks: self.chunks.clone().into_iter(),
-            metadata: ByteMetadata {
-                source: Some(request.object),
-                ..ByteMetadata::default()
-            },
-            calls: self.calls.clone(),
-            fail_at: self.fail_at,
-            position: 0,
-        }))
-    }
-}
-
-struct MemoryReader {
-    chunks: std::vec::IntoIter<Bytes>,
-    metadata: ByteMetadata,
-    calls: Arc<AtomicUsize>,
-    fail_at: Option<usize>,
-    position: usize,
-}
-
-#[async_trait]
-impl Reader for MemoryReader {
-    type Item = Bytes;
-    type Metadata = ByteMetadata;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            ..Capability::default()
-        }
-    }
-
-    fn metadata(&self) -> &ByteMetadata {
-        &self.metadata
-    }
-
-    async fn next(&mut self) -> Result<Option<Bytes>> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        let position = self.position;
-        self.position += 1;
-        if self.fail_at == Some(position) {
-            return Err(Error::new(ErrorKind::Io, "memory_read", "injected failure"));
-        }
-        Ok(self.chunks.next())
-    }
-}
-
-#[async_trait]
-impl ByteReader for MemoryReader {}
+use common::MemoryAccessor;
 
 fn schema() -> SchemaRef {
     Arc::new(Schema::new_with_metadata(
@@ -255,7 +168,7 @@ async fn projection_and_input_schema_errors_are_rejected_before_opening() {
             .kind(),
         ErrorKind::InvalidInput
     );
-    assert!(bytes.options.lock().unwrap().is_empty());
+    assert!(bytes.observations.requests.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -289,16 +202,16 @@ async fn invalid_data_errors_are_terminal() {
         let error = reader.next().await.unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Decode);
         assert!(std::error::Error::source(&error).is_some());
-        let calls = bytes.calls.load(Ordering::SeqCst);
+        let calls = bytes.observations.reads.load(Ordering::SeqCst);
         assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(bytes.calls.load(Ordering::SeqCst), calls);
+        assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), calls);
     }
 }
 
 #[tokio::test]
 async fn byte_options_are_forwarded_and_io_failures_preserve_kind_without_read_ahead() {
     let mut bytes = MemoryAccessor::new(b"1,one\n2,two\n", 6);
-    bytes.fail_at = Some(1);
+    bytes.fail_after = Some(6);
     let accessor = CsvAccessor::new(bytes.clone(), schema());
     let byte_options = ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
@@ -312,14 +225,17 @@ async fn byte_options_are_forwarded_and_io_failures_preserve_kind_without_read_a
         )
         .await
         .unwrap();
-    assert_eq!(*bytes.options.lock().unwrap(), vec![byte_options]);
-    assert_eq!(bytes.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        bytes.observations.requests.lock().unwrap()[0].options,
+        byte_options
+    );
+    assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 0);
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(ids(&[batch], 0), [1]);
-    assert_eq!(bytes.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 1);
     assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Io);
     assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(bytes.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]
