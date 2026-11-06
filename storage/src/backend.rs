@@ -250,7 +250,7 @@ impl Reader for OpenDalReader {
         Capability {
             read: true,
             read_with_range: true,
-            ..Capability::default()
+            list: false,
         }
     }
 
