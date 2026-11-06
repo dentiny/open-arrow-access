@@ -140,7 +140,7 @@ async fn projection_reorders_skips_conversion_and_counts_zero_columns() {
         XmlField::new("id", "@id", Int64, false),
     ])
     .unwrap();
-    let bytes = MemoryAccessor::new(b"<root><row name='a' id='1'><bad>invalid</bad></row><row name='b' id='2'/><row name='c' id='3'/></root>", 3);
+    let bytes = MemoryAccessor::new(b"<root><skip a='1' a='2'>&unknown;</skip><row name='a' id='1'><bad>invalid</bad></row><row name='b' id='2'/><row name='c' id='3'/></root>", 3);
     let accessor = XmlAccessor::new(bytes, schema, "/root/row");
     let mut reader = accessor
         .open(ReadRequest::new("rows.xml").with_options(options(Some(vec!["id", "name"]))))
@@ -212,7 +212,7 @@ async fn malformed_input_limits_and_source_failures_are_terminal() {
     for input in [
         b"<root><row id='oops'/></root>".as_slice(),
         b"<root><row id='1'/>",
-        b"<root><skip>&unknown;</skip></root>",
+        b"<root><row id='1'>&unknown;</row></root>",
         b"<!DOCTYPE root><root/>",
     ] {
         let accessor =

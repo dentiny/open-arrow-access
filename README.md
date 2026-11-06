@@ -289,8 +289,9 @@ The shared `ReadRequest` controls row targets, projection in caller order
 `XmlLimits` defaults to 8 MiB per record/event, 64 MiB of serialized records per
 batch, and depth 128. These are XML limits, not a bound on total Arrow memory;
 one lookahead record and an upstream byte chunk may also remain buffered.
-Skipped content is still validated and subject to event/depth limits. Inputs must
-be UTF-8; DTDs and custom entities are rejected. Errors are terminal.
+Skipped content is only tokenized by quick-xml and remains subject to event/depth
+limits; attribute/entity errors outside selected records may go unreported. Inputs
+must be UTF-8; DTDs and custom entities are rejected. Errors are terminal.
 
 External compression remains independent: compose `XmlAccessor` over an accessor
 with `DecompressionLayer::new(Gzip)` for `.xml.gz`. FileSet and directory reading

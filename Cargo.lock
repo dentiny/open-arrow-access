@@ -1863,7 +1863,7 @@ dependencies = [
 [[package]]
 name = "xml-arrow"
 version = "0.2.0"
-source = "git+https://github.com/dentiny/xml-arrow-rs?rev=8e24e5ad1fa80c1df81f919a30a94bc2f866b6e9#8e24e5ad1fa80c1df81f919a30a94bc2f866b6e9"
+source = "git+https://github.com/dentiny/xml-arrow-rs?rev=8a7f44e532e8928c48e115a034fb369aed2e6b6e#8a7f44e532e8928c48e115a034fb369aed2e6b6e"
 dependencies = [
  "arrow-array",
  "arrow-schema",
