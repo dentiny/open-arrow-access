@@ -311,7 +311,12 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
     type Reader = A::Reader;
 
     fn capability(&self) -> Capability {
-        self.inner.capability()
+        let inner = self.inner.capability();
+        Capability {
+            read: inner.read,
+            read_with_range: inner.read_with_range,
+            list: inner.list,
+        }
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {

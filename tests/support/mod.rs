@@ -187,7 +187,12 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
-        self.inner.capability()
+        let inner = self.inner.capability();
+        Capability {
+            read: inner.read,
+            read_with_range: inner.read_with_range,
+            list: inner.list,
+        }
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
@@ -227,7 +232,12 @@ impl Reader for ByteObserverReader {
     type Metadata = ByteMetadata;
 
     fn capability(&self) -> Capability {
-        self.inner.capability()
+        let inner = self.inner.capability();
+        Capability {
+            read: inner.read,
+            read_with_range: inner.read_with_range,
+            list: inner.list,
+        }
     }
 
     fn metadata(&self) -> &ByteMetadata {

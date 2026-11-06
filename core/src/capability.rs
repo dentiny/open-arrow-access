@@ -4,6 +4,8 @@
 /// current interface, not every operation supported by its underlying backend.
 /// Transparent layers forward them; transforming layers must update them to
 /// match the operations they actually expose. Unset flags mean unsupported.
+/// Construct values by explicitly assigning every flag instead of using defaults
+/// or struct update syntax.
 ///
 /// Accessors report supported operations before opening. Readers report the
 /// abilities of the opened representation, which can be more specific. `read`
