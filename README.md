@@ -3,9 +3,9 @@
 Composable dataset access for Apache Arrow. Read diverse formats and storage
 backends into Arrow streams.
 
-The initial framework supports **one local Parquet file**, read asynchronously
-through **OpenDAL's filesystem service**. Output is an ordered stream of Arrow
-record batches. The project ends at that read interface.
+Read a local Parquet or CSV/TSV file asynchronously through **OpenDAL's filesystem
+service**. Output is an ordered stream of Arrow record batches. The project ends
+at that read interface.
 
 ## Quick start
 
@@ -58,13 +58,18 @@ future file/partition `ParallelReadLayer`. Each opened reader has its own limit.
 `FsAccessor::with_chunk_size` controls sequential output chunk size, while
 `ReadOptions::batch_size` controls Arrow rows per batch.
 
+Enable `format-csv` for CSV/TSV with an explicit schema. `CsvAccessor` consumes
+sequential byte readers and reuses Arrow CSV's incremental decoder. Configure
+`CsvFormat::default().with_header(true)` for headers or `.with_delimiter(b'\t')`
+for TSV.
+
 ## Initial scope
 
 | Component | Implemented |
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
 | `storage/` | OpenDAL Fs, bounded sequential chunks and exact range reads |
-| `file-format/` | Parquet schema inspection and streaming Arrow decoding |
+| `file-format/` | Parquet schema inspection; CSV/TSV with an explicit schema and incremental Arrow decoding |
 | `dataset/` | Reserved; no directory or multi-file scan yet |
 | `service/` | Reserved; no Hugging Face or other source adapter yet |
 | `decompression/` | Reserved; no external decompression or archive support yet |
@@ -152,7 +157,7 @@ services, including globally ordered ATIF inputs and conditional WARC indexing.
 
 Dependency versions track a recorded latest upstream Lance commit, including
 resolved patch versions. See [dependency alignment](docs/dependencies.md) for
-the baseline and update procedure. DataFusion is pinned for the future layer
+the baseline and update procedure. DataFusion is declared for the future layer
 but is not part of the current dependency graph.
 
 ```sh

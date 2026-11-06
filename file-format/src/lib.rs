@@ -4,3 +4,8 @@
 mod parquet;
 #[cfg(feature = "parquet")]
 pub use parquet::ParquetAccessor;
+
+#[cfg(feature = "csv")]
+mod csv;
+#[cfg(feature = "csv")]
+pub use csv::{CsvAccessor, CsvFormat};

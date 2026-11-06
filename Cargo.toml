@@ -30,16 +30,18 @@ opendal = "0.59.2"
 [workspace.dependencies]
 # Match the resolved Cargo.lock versions at the Lance revision above.
 # See docs/dependencies.md when updating this baseline.
-arrow-array = "=59.3.0"
-arrow-schema = "=59.3.0"
-async-trait = "=0.1.91"
+arrow-array = "59.3.0"
+arrow-csv = "59.3.0"
+arrow-schema = "59.3.0"
+async-trait = "0.1.91"
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
-datafusion = { version = "=55.2.0", default-features = false }
+datafusion = { version = "55.2.0", default-features = false }
 bytes = "1"
 futures = "0.3"
+more-asserts = "0.3.1"
 thiserror = "2"
-opendal = { version = "=0.59.2", default-features = false }
-parquet = { version = "=59.3.0", default-features = false, features = ["arrow", "async", "snap"] }
+opendal = { version = "0.59.2", default-features = false }
+parquet = { version = "59.3.0", default-features = false, features = ["arrow", "async", "snap"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tempfile = "3"
 open-arrow-access-core = { path = "core", version = "0.1.0" }
@@ -50,6 +52,7 @@ open-arrow-access-file-format = { path = "file-format", version = "0.1.0", defau
 default = []
 storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
+format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
 
 [dependencies]
 open-arrow-access-core.workspace = true
@@ -61,9 +64,18 @@ arrow-array.workspace = true
 arrow-schema.workspace = true
 bytes.workspace = true
 futures.workspace = true
+more-asserts.workspace = true
 parquet.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
+
+[[test]]
+name = "csv"
+required-features = ["format-csv"]
+
+[[test]]
+name = "reading"
+required-features = ["storage-fs", "format-parquet"]
 
 [[example]]
 name = "read_parquet"

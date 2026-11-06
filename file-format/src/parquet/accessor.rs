@@ -1,5 +1,3 @@
-use std::{collections::HashSet, sync::Arc};
-
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ReadRequest,
     RecordMetadata, RecordReader, Result, async_trait,
@@ -56,32 +54,8 @@ where
         // The native projection mask selects fields in file order. Reorder
         // decoded top-level fields separately to honor the caller's order.
         // The native stream drops schema metadata; retain it from inspection.
-        let mut schema = builder.schema().clone();
-        if let Some(columns) = request.options.projection.as_ref() {
-            let mut seen = HashSet::new();
-            let mut indices = Vec::with_capacity(columns.len());
-            for name in columns {
-                if !seen.insert(name) {
-                    return Err(Error::new(
-                        ErrorKind::InvalidInput,
-                        "project",
-                        format!("duplicate field {name:?}"),
-                    ));
-                }
-                indices.push(builder.schema().index_of(name).map_err(|e| {
-                    Error::new(
-                        ErrorKind::InvalidInput,
-                        "project",
-                        format!("unknown field {name:?}"),
-                    )
-                    .with_source(e)
-                })?);
-            }
-            schema = Arc::new(
-                schema
-                    .project(&indices)
-                    .map_err(|e| decode_error("project", e))?,
-            );
+        let (schema, projection) = request.options.resolve_projection(builder.schema())?;
+        if let Some(indices) = projection {
             let mask = ProjectionMask::roots(builder.parquet_schema(), indices);
             builder = builder.with_projection(mask);
         }

@@ -1,5 +1,3 @@
-#![cfg(all(feature = "storage-fs", feature = "format-parquet"))]
-
 mod support;
 
 use std::{
@@ -10,6 +8,7 @@ use std::{
 
 use arrow_array::{Int64Array, StringArray};
 use futures::TryStreamExt;
+use more_asserts::{assert_gt, assert_le};
 use open_arrow_access::{
     Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, Capability, ErrorKind,
     Layer, ObjectRef, ObjectStream, ReadOptions, ReadRequest, Result, async_trait,
@@ -46,7 +45,7 @@ async fn local_parquet_preserves_values_nulls_and_order_across_row_groups() {
         let mut actual_ids = Vec::new();
         let mut titles = Vec::new();
         while let Some(batch) = reader.next().await.unwrap() {
-            assert!(batch.num_rows() <= 2);
+            assert_le!(batch.num_rows(), 2);
             assert_eq!(batch.schema(), reader.metadata().schema);
             actual_ids.extend(ids(&batch));
             titles.extend(
@@ -546,17 +545,17 @@ async fn parquet_forwards_per_open_io_options_and_uses_bulk_ranges_through_layer
             options
         );
     }
-    assert!(
+    assert_gt!(
         observations
             .batch_reads
-            .load(std::sync::atomic::Ordering::SeqCst)
-            > 0
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
     );
-    assert!(
+    assert_gt!(
         observations
             .max_batch_ranges
-            .load(std::sync::atomic::Ordering::SeqCst)
-            > 1
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1
     );
 }
 
