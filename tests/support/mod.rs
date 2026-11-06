@@ -1,19 +1,20 @@
 use std::{
     ops::Range,
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 
-use arrow_array::{ArrayRef, Int64Array, StringArray};
+use arrow_array::Int64Array;
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes,
     Capability, Error, ErrorKind, Layer, ObjectRef, ObjectStream, Reader, RecordBatch, Result,
     SchemaRef, async_trait,
 };
-use parquet::{arrow::ArrowWriter, basic::Compression, file::properties::WriterProperties};
+use parquet::basic::Compression;
 
 pub struct Fixture {
     pub dir: tempfile::TempDir,
@@ -29,28 +30,19 @@ pub fn fixture(compression: Compression) -> Fixture {
         ],
         [("fixture".into(), "ordered".into())].into(),
     ));
-    let columns: Vec<ArrayRef> = vec![
-        Arc::new(Int64Array::from_iter_values(0..7)),
-        Arc::new(StringArray::from(vec![
-            Some("zero"),
-            None,
-            Some("two"),
-            Some("three"),
-            None,
-            Some("five"),
-            Some("six"),
-        ])),
-    ];
-    let batch = RecordBatch::try_new(schema.clone(), columns).unwrap();
-    let properties = WriterProperties::builder()
-        .set_max_row_group_row_count(Some(2))
-        .set_compression(compression)
-        .build();
-    let file = std::fs::File::create(dir.path().join("data.parquet")).unwrap();
-    let mut writer = ArrowWriter::try_new(file, schema.clone(), Some(properties)).unwrap();
-    writer.write(&batch).unwrap();
-    writer.close().unwrap();
+    let name = match compression {
+        Compression::UNCOMPRESSED => "ordered-uncompressed.parquet",
+        Compression::SNAPPY => "ordered-snappy.parquet",
+        other => panic!("no checked-in Parquet fixture for {other:?}"),
+    };
+    std::fs::copy(fixture_path(name), dir.path().join("data.parquet")).unwrap();
     Fixture { dir, schema }
+}
+
+pub fn fixture_path(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata/parquet")
+        .join(name)
 }
 
 pub fn ids(batch: &RecordBatch) -> Vec<i64> {

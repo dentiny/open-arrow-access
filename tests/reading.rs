@@ -15,7 +15,9 @@ use open_arrow_access::{
     file_format::ParquetAccessor, into_stream, storage::FsAccessor,
 };
 use parquet::basic::Compression;
-use support::{ByteObserverLayer, MemoryAccessor, Observations, SequentialLayer, fixture, ids};
+use support::{
+    ByteObserverLayer, MemoryAccessor, Observations, SequentialLayer, fixture, fixture_path, ids,
+};
 
 #[tokio::test]
 async fn filesystem_initialization_is_lazy_and_send() {
@@ -205,11 +207,9 @@ async fn empty_file_and_invalid_ranges_have_explicit_behavior() {
 
 #[tokio::test]
 async fn malformed_parquet_returns_contextual_decode_error() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("broken.parquet"), b"not a parquet file").unwrap();
-    let accessor = ParquetAccessor::new(FsAccessor::new(dir.path()).await.unwrap());
+    let accessor = ParquetAccessor::new(FsAccessor::new(fixture_path("")).await.unwrap());
     let error = accessor
-        .open(ReadRequest::new("broken.parquet"))
+        .open(ReadRequest::new("bad-magic.parquet"))
         .await
         .err()
         .unwrap();
