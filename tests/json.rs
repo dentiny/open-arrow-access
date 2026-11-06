@@ -2,107 +2,19 @@
 
 use std::{
     num::NonZeroUsize,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::{Arc, atomic::Ordering},
 };
 
 use arrow_array::{Array, Int64Array, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access::{
-    Accessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, Error,
-    ErrorKind, ReadOptions, ReadRequest, Reader, RecordBatch, Result, SchemaRef, async_trait,
+    Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
     file_format::JsonAccessor,
 };
 
-#[derive(Default)]
-struct Observations {
-    requests: Mutex<Vec<ByteReadRequest>>,
-    reads: AtomicUsize,
-}
+mod common;
 
-struct MemoryAccessor {
-    data: Bytes,
-    chunk_size: usize,
-    fail_after: Option<usize>,
-    observations: Arc<Observations>,
-}
-
-#[async_trait]
-impl Accessor for MemoryAccessor {
-    type Request = ByteReadRequest;
-    type Reader = dyn ByteReader;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            ..Capability::default()
-        }
-    }
-
-    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        self.observations
-            .requests
-            .lock()
-            .unwrap()
-            .push(request.clone());
-        Ok(Box::new(MemoryReader {
-            data: self.data.clone(),
-            chunk_size: self.chunk_size,
-            offset: 0,
-            fail_after: self.fail_after,
-            observations: self.observations.clone(),
-            metadata: ByteMetadata {
-                source: Some(request.object),
-                ..ByteMetadata::default()
-            },
-        }))
-    }
-}
-
-struct MemoryReader {
-    data: Bytes,
-    chunk_size: usize,
-    offset: usize,
-    fail_after: Option<usize>,
-    observations: Arc<Observations>,
-    metadata: ByteMetadata,
-}
-
-#[async_trait]
-impl Reader for MemoryReader {
-    type Item = Bytes;
-    type Metadata = ByteMetadata;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            ..Capability::default()
-        }
-    }
-
-    fn metadata(&self) -> &ByteMetadata {
-        &self.metadata
-    }
-
-    async fn next(&mut self) -> Result<Option<Bytes>> {
-        self.observations.reads.fetch_add(1, Ordering::SeqCst);
-        if self.fail_after.is_some_and(|offset| self.offset >= offset) {
-            return Err(Error::new(ErrorKind::Io, "memory_read", "injected failure"));
-        }
-        if self.offset == self.data.len() {
-            return Ok(None);
-        }
-        let end = (self.offset + self.chunk_size).min(self.data.len());
-        let bytes = self.data.slice(self.offset..end);
-        self.offset = end;
-        Ok(Some(bytes))
-    }
-}
-
-#[async_trait]
-impl ByteReader for MemoryReader {}
+use common::{MemoryAccessor, Observations};
 
 fn schema() -> SchemaRef {
     Arc::new(Schema::new_with_metadata(
@@ -115,16 +27,9 @@ fn schema() -> SchemaRef {
 }
 
 fn fixture(data: &str, chunk_size: usize) -> (MemoryAccessor, Arc<Observations>) {
-    let observations = Arc::new(Observations::default());
-    (
-        MemoryAccessor {
-            data: Bytes::copy_from_slice(data.as_bytes()),
-            chunk_size,
-            fail_after: None,
-            observations: observations.clone(),
-        },
-        observations,
-    )
+    let input = MemoryAccessor::new(data.as_bytes(), chunk_size);
+    let observations = input.observations.clone();
+    (input, observations)
 }
 
 fn request(batch_size: usize, projection: Option<Vec<&str>>) -> ReadRequest {
