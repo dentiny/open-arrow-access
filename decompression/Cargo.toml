@@ -16,6 +16,7 @@ futures.workspace = true
 async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"], optional = true }
 
 [dev-dependencies]
+open-arrow-access-test-support.workspace = true
 more-asserts.workspace = true
 tokio.workspace = true
 

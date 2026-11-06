@@ -1058,6 +1058,7 @@ dependencies = [
  "open-arrow-access-decompression",
  "open-arrow-access-file-format",
  "open-arrow-access-storage",
+ "open-arrow-access-test-support",
  "parquet",
  "tempfile",
  "tokio",
@@ -1084,6 +1085,7 @@ dependencies = [
  "futures",
  "more-asserts",
  "open-arrow-access-core",
+ "open-arrow-access-test-support",
  "tokio",
 ]
 
@@ -1107,6 +1109,16 @@ dependencies = [
  "open-arrow-access-core",
  "opendal",
  "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "open-arrow-access-test-support"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "more-asserts",
+ "open-arrow-access-core",
  "tokio",
 ]
 

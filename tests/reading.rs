@@ -223,10 +223,8 @@ async fn malformed_parquet_returns_contextual_decode_error() {
 #[tokio::test]
 async fn parquet_accepts_third_party_accessor_and_rejects_sequential_only_input() {
     let fixture = fixture(Compression::UNCOMPRESSED);
-    let bytes = std::fs::read(fixture.dir.path().join("data.parquet"))
-        .unwrap()
-        .into();
-    let accessor = ParquetAccessor::new(MemoryAccessor::new(bytes, true));
+    let bytes = std::fs::read(fixture.dir.path().join("data.parquet")).unwrap();
+    let accessor = ParquetAccessor::new(MemoryAccessor::new(&bytes, usize::MAX).with_ranges());
     let reader = accessor
         .open(ReadRequest::new("opaque:fixture"))
         .await
@@ -236,7 +234,7 @@ async fn parquet_accepts_third_party_accessor_and_rejects_sequential_only_input(
         batches.iter().flat_map(ids).collect::<Vec<_>>(),
         (0..7).collect::<Vec<_>>()
     );
-    let accessor = ParquetAccessor::new(MemoryAccessor::new("sequential bytes".into(), false));
+    let accessor = ParquetAccessor::new(MemoryAccessor::new(b"sequential bytes", usize::MAX));
     assert_eq!(
         accessor
             .open(ReadRequest::new("anything"))
@@ -434,7 +432,7 @@ impl ByteAccessor for ListingAccessor {
 #[tokio::test]
 async fn listing_capability_survives_transparent_layer_and_shared_accessor() {
     let accessor: Arc<dyn ByteAccessor> = Arc::new(
-        ListingAccessor(MemoryAccessor::new("data".into(), true))
+        ListingAccessor(MemoryAccessor::new(b"data", usize::MAX).with_ranges())
             .layer(ByteObserverLayer(Arc::new(Observations::default())))
             .layer(OpenObserverLayer {
                 label: "list-observer",
@@ -513,7 +511,7 @@ async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor
 
 #[tokio::test]
 async fn third_party_byte_reader_uses_the_bulk_range_fallback() {
-    let accessor = MemoryAccessor::new("abcdefghij".into(), true);
+    let accessor = MemoryAccessor::new(b"abcdefghij", usize::MAX).with_ranges();
     let mut reader = accessor.open("memory".into()).await.unwrap();
     let actual = reader.read_ranges(vec![7..10, 0..3, 4..4]).await.unwrap();
     assert_eq!(
