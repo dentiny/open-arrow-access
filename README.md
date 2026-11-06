@@ -129,7 +129,7 @@ for TSV.
 | `storage/` | OpenDAL Fs, recursive file discovery and reusable generic byte I/O, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas and incremental Arrow decoding |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Reserved; no Hugging Face or other source adapter yet |
+| `service/` | Common Crawl source identity, mirror origin and HTTP configuration |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
@@ -255,3 +255,11 @@ reading, wrapper composition, exact/batched ranges, per-open I/O options,
 bounded backend concurrency, and terminal error/drop behavior.
 Tests may copy fixtures into temporary roots to exercise storage behavior.
 The library exposes no writer or sink API.
+
+## Common Crawl configuration
+
+Enable `service-commoncrawl` for `service::CommonCrawl` and
+`service::create_http_accessor`. A source identifies a crawl release and optional
+mirror origin. HTTP configuration is lazy; gzip and record decoding are composed
+explicitly by the caller. Enable `storage-opendal` to wrap a caller-configured
+SDK operator through the facade.

@@ -25,9 +25,12 @@ pub mod decompression {
     };
 }
 
-#[cfg(feature = "storage-fs")]
+#[cfg(any(feature = "storage-fs", feature = "storage-opendal"))]
 pub mod storage {
+    #[cfg(feature = "storage-fs")]
     pub use open_arrow_access_storage::FsAccessor;
+    pub use open_arrow_access_storage::OpenDalAccessor;
+    pub use open_arrow_access_storage::opendal;
 }
 
 #[cfg(any(
@@ -49,4 +52,9 @@ pub mod dataset {
     pub use open_arrow_access_dataset::{
         DirectoryAccessor, DirectoryRequest, FileSetAccessor, FileSetRequest,
     };
+}
+
+#[cfg(feature = "service-commoncrawl")]
+pub mod service {
+    pub use open_arrow_access_service::{CommonCrawl, create_http_accessor};
 }

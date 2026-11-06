@@ -42,3 +42,7 @@ must inherit it through `workspace = true`; do not import types through Lance.
 
 The recorded SHA is a version reference, not a Git dependency on Lance. Builds
 do not query upstream or automatically change dependency versions.
+
+Common Crawl HTTP configuration pins `opendal-service-http` to `0.59.2`, matching
+the recorded OpenDAL baseline. The optional HTTP transport uses the SDK
+implementation; service configuration adds no separate HTTP client.
