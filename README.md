@@ -61,6 +61,37 @@ requests.
 `FsAccessor::with_chunk_size` controls sequential output chunk size, while
 `ReadOptions::batch_size` controls Arrow rows per batch.
 
+For other OpenDAL backends, depend on `open-arrow-access-storage` and the same
+OpenDAL version directly. Enable upstream features on that dependency; Cargo
+unifies them with storage's OpenDAL dependency. The generic `OpenDalAccessor`
+is always available in the storage crate. For example, a downstream crate can
+expose an `s3` feature:
+
+```toml
+[dependencies]
+open-arrow-access-storage = "0.1.0"
+opendal = { version = "0.59.2", default-features = false, features = ["http-transport-reqwest"] }
+
+[features]
+s3 = ["opendal/services-s3"]
+```
+
+Build that crate with `cargo build --features s3`, then wrap its configured
+operator:
+
+```rust
+use open_arrow_access_storage::OpenDalAccessor;
+
+let operator = opendal::Operator::new(
+    opendal::services::S3::default().bucket("my-bucket").region("us-east-1"),
+)?;
+let accessor = OpenDalAccessor::new(operator);
+```
+
+The same approach supports OpenDAL's other service, layer and transport
+features without adding matching features to this project. OpenDAL 0.59.2
+names its S3 feature `services-s3`.
+
 Enable `service-huggingface` for dataset repository file access. The provider
 owns repository ID, revision, root, authentication and HTTP/Xet settings through
 `HuggingFaceService`, `HuggingFaceOptions` and `HuggingFaceRepository`.
