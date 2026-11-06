@@ -7,14 +7,12 @@ use std::{
 use arrow_array::{Array, Int64Array, StringArray};
 use arrow_schema::{DataType, Field, IntervalUnit, Schema, TimeUnit};
 use more_asserts::assert_gt;
-use open_arrow_access::{
+use open_arrow_access_core::{
     Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
-    file_format::{CsvAccessor, CsvFormat},
 };
 
-mod common;
-
-use common::MemoryAccessor;
+use open_arrow_access_file_format::{CsvAccessor, CsvFormat};
+use open_arrow_access_test_support::MemoryAccessor;
 
 const BAD_FILES: [&str; 4] = [
     "bad_missing_column.csv",
@@ -24,7 +22,7 @@ const BAD_FILES: [&str; 4] = [
 ];
 
 fn fixture_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/csv")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/csv")
 }
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -50,7 +48,7 @@ fn options(batch_size: usize, projection: Option<Vec<&str>>) -> ReadOptions {
 }
 
 async fn collect(
-    accessor: &impl Accessor<Request = ReadRequest, Reader = dyn open_arrow_access::RecordReader>,
+    accessor: &impl Accessor<Request = ReadRequest, Reader = dyn open_arrow_access_core::RecordReader>,
     request: ReadRequest,
 ) -> Vec<RecordBatch> {
     let mut reader = accessor.open(request).await.unwrap();
@@ -274,9 +272,8 @@ async fn csv_preserves_source_error_categories_and_stops_polling() {
         ErrorKind::Decode,
     ] {
         for offset in [0, 6] {
-            let mut bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 6);
-            bytes.fail_after = Some(offset);
-            bytes.failure_kind = kind;
+            let bytes =
+                MemoryAccessor::new(&fixture("good_no_header.csv"), 6).with_failure(offset, kind);
             let accessor = CsvAccessor::new(bytes.clone(), schema());
             let mut reader = accessor
                 .open(ReadRequest::new("good_no_header.csv").with_options(options(1, None)))
@@ -302,8 +299,7 @@ async fn csv_preserves_source_error_categories_and_stops_polling() {
 
 #[tokio::test]
 async fn csv_rejects_empty_source_chunks_as_terminal_io_errors() {
-    let mut bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 1);
-    bytes.emit_empty_chunk = true;
+    let bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 1).with_empty_chunk(0);
     let accessor = CsvAccessor::new(bytes.clone(), schema());
     let mut reader = accessor
         .open(ReadRequest::new("good_no_header.csv"))
@@ -320,8 +316,8 @@ async fn csv_rejects_empty_source_chunks_as_terminal_io_errors() {
 
 #[tokio::test]
 async fn byte_options_are_forwarded_and_io_failures_preserve_kind_without_read_ahead() {
-    let mut bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 6);
-    bytes.fail_after = Some(6);
+    let bytes =
+        MemoryAccessor::new(&fixture("good_no_header.csv"), 6).with_failure(6, ErrorKind::Io);
     let accessor = CsvAccessor::new(bytes.clone(), schema());
     let byte_options = ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
@@ -368,10 +364,9 @@ async fn header_validation_and_truncated_row_policy_are_explicit() {
     assert!(batches[0].column(1).is_null(0));
 }
 
-#[cfg(feature = "storage-fs")]
 #[tokio::test]
 async fn filesystem_csv_preserves_values_across_chunks_and_batches() {
-    use open_arrow_access::storage::FsAccessor;
+    use open_arrow_access_storage::FsAccessor;
 
     for chunk_size in [1, 7, 4096] {
         let bytes = FsAccessor::new(fixture_root())
@@ -421,10 +416,9 @@ async fn filesystem_csv_preserves_values_across_chunks_and_batches() {
     }
 }
 
-#[cfg(feature = "storage-fs")]
 #[tokio::test]
 async fn filesystem_invalid_csv_errors_are_terminal() {
-    use open_arrow_access::storage::FsAccessor;
+    use open_arrow_access_storage::FsAccessor;
 
     for chunk_size in [1, 4096] {
         let bytes = FsAccessor::new(fixture_root())
