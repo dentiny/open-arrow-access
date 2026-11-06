@@ -86,11 +86,64 @@ async fn filesystem_rejects_surrounding_whitespace_without_aliasing_files() {
     );
 }
 
+#[tokio::test]
+async fn sequential_reads_report_short_input_and_terminate() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("short.bin");
+    std::fs::write(&path, b"abcdefgh").unwrap();
+    let accessor = FsAccessor::new(dir.path()).await.unwrap();
+    let mut reader = accessor.open("short.bin".into()).await.unwrap();
+    std::fs::write(&path, b"abcd").unwrap();
+    let error = loop {
+        match reader.next().await {
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("short input was accepted as complete"),
+            Err(error) => break error,
+        }
+    };
+    assert_eq!(error.kind(), ErrorKind::Io);
+    assert!(reader.next().await.unwrap().is_none());
+}
+
 #[derive(Debug, Default)]
 struct TaskCounts {
     started: AtomicUsize,
     active: AtomicUsize,
     peak: AtomicUsize,
+}
+
+#[tokio::test]
+async fn sequential_output_chunks_reuse_storage_requests_when_ranges_are_interleaved() {
+    let dir = tempfile::tempdir().unwrap();
+    let contents: Vec<u8> = (0..64).collect();
+    std::fs::write(dir.path().join("data.bin"), &contents).unwrap();
+    let counts = Arc::new(TaskCounts::default());
+    let operator = Operator::new(Fs::default().root(dir.path().to_str().unwrap()))
+        .unwrap()
+        .layer(CountTasksLayer(counts.clone()));
+    let accessor = OpenDalAccessor::new(operator).with_chunk_size(std::num::NonZeroUsize::MIN);
+    let mut reader = accessor
+        .open(
+            ByteReadRequest::new("data.bin").with_options(ByteReadOptions {
+                io_chunk_size: std::num::NonZeroUsize::new(4),
+                io_concurrency: std::num::NonZeroUsize::new(4).unwrap(),
+            }),
+        )
+        .await
+        .unwrap();
+    let mut output = reader.next().await.unwrap().unwrap().to_vec();
+    assert_eq!(reader.read_range(12..14).await.unwrap().as_ref(), &[12, 13]);
+    while let Some(chunk) = reader.next().await.unwrap() {
+        assert_eq!(chunk.len(), 1);
+        output.extend_from_slice(&chunk);
+    }
+    assert_eq!(output, contents);
+    assert_eq!(
+        counts.started.load(Ordering::SeqCst),
+        17,
+        "sixteen sequential I/O chunks plus one independent range"
+    );
+    assert_le!(counts.peak.load(Ordering::SeqCst), 4);
 }
 
 #[tokio::test]

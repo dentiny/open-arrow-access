@@ -1160,6 +1160,7 @@ dependencies = [
 name = "open-arrow-access-storage"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "more-asserts",
  "open-arrow-access-core",
  "opendal",

@@ -8,12 +8,14 @@ description = "Storage adapters for Open Arrow Access"
 
 [features]
 default = []
-fs = ["dep:opendal", "dep:tokio", "opendal/services-fs", "opendal/executors-tokio"]
+opendal = ["dep:opendal", "dep:tokio", "dep:futures", "opendal/executors-tokio"]
+fs = ["opendal", "opendal/services-fs"]
 
 [dependencies]
 open-arrow-access-core.workspace = true
 opendal = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["sync"] }
+futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 more-asserts.workspace = true
