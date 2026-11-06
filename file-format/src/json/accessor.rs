@@ -1,12 +1,10 @@
-use std::{collections::HashSet, sync::Arc};
-
 use arrow_json::ReaderBuilder;
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ReadRequest,
     RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
 };
 
-use super::{decode_error, reader::JsonReader};
+use super::reader::JsonReader;
 
 /// Read whitespace-separated JSON objects, including JSONL, with a fixed schema.
 ///
@@ -41,33 +39,7 @@ where
     }
 
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        let schema = match request.options.projection.as_ref() {
-            None => self.schema.clone(),
-            Some(columns) => {
-                let mut seen = HashSet::new();
-                let indices = columns
-                    .iter()
-                    .map(|name| {
-                        if !seen.insert(name) {
-                            return Err(Error::new(
-                                ErrorKind::InvalidInput,
-                                "project",
-                                format!("duplicate field {name:?}"),
-                            ));
-                        }
-                        self.schema.index_of(name).map_err(|error| {
-                            Error::new(
-                                ErrorKind::InvalidInput,
-                                "project",
-                                format!("unknown field {name:?}"),
-                            )
-                            .with_source(error)
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                Arc::new(self.schema.project(&indices).map_err(decode_error)?)
-            }
-        };
+        let (schema, _) = request.options.resolve_projection(&self.schema)?;
         let decoder = ReaderBuilder::new(schema.clone())
             .with_batch_size(request.options.batch_size.get())
             .build_decoder()
