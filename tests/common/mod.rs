@@ -3,6 +3,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+use more_asserts::assert_gt;
 use open_arrow_access::{
     Accessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error, ErrorKind,
     Reader, Result, async_trait,
@@ -24,7 +25,7 @@ pub struct MemoryAccessor {
 
 impl MemoryAccessor {
     pub fn new(data: &[u8], chunk_size: usize) -> Self {
-        assert!(chunk_size > 0);
+        assert_gt!(chunk_size, 0);
         Self {
             data: Bytes::copy_from_slice(data),
             chunk_size,

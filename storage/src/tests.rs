@@ -3,6 +3,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest, ErrorKind};
 use opendal::{
     Execute, Executor, OperationContext, Operator,
@@ -239,12 +240,9 @@ async fn io_options_enable_bounded_backend_concurrency_for_single_and_bulk_reads
         assert_eq!(ranges[0].as_ref(), &contents[32..64]);
         assert_eq!(ranges[1].as_ref(), &contents[..16]);
         let peak = counts.peak.load(Ordering::SeqCst);
-        assert!(
-            peak <= concurrency,
-            "peak {peak} exceeds limit {concurrency}"
-        );
+        assert_le!(peak, concurrency, "peak {peak} exceeds limit {concurrency}");
         if concurrency > 1 {
-            assert!(peak > 1, "configured reads did not execute concurrently");
+            assert_gt!(peak, 1, "configured reads did not execute concurrently");
         }
     }
 }

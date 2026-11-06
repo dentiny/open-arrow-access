@@ -6,6 +6,7 @@ use std::{
 
 use arrow_array::{Array, Int64Array, StringArray};
 use arrow_schema::{DataType, Field, Schema};
+use more_asserts::assert_gt;
 use open_arrow_access::{
     Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
     file_format::{CsvAccessor, CsvFormat},
@@ -55,7 +56,7 @@ async fn collect(
     let mut reader = accessor.open(request).await.unwrap();
     let mut batches = Vec::new();
     while let Some(batch) = reader.next().await.unwrap() {
-        assert!(batch.num_rows() > 0);
+        assert_gt!(batch.num_rows(), 0);
         assert_eq!(batch.schema(), reader.metadata().schema);
         batches.push(batch);
     }
