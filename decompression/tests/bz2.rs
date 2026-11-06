@@ -46,16 +46,13 @@ async fn invalid_truncated_checksum_and_trailing_input_fail_terminally() -> Resu
     ] {
         let bytes = fixture("bz2", name);
         let input = MemoryAccessor::new(&bytes, 1);
+        let reads = input.reads.clone();
         let mut reader = input
             .layer(DecompressionLayer::new(Bzip2))
             .open("bad.bz2".into())
             .await
             .unwrap();
-        assert_eq!(
-            collect(reader.as_mut()).await.unwrap_err().kind(),
-            ErrorKind::Decode
-        );
-        assert!(reader.next().await?.is_none());
+        common::assert_terminal_error(reader.as_mut(), &reads, ErrorKind::Decode).await;
     }
     Ok(())
 }
@@ -72,4 +69,9 @@ async fn source_errors_are_preserved() -> Result<()> {
     );
     assert!(reader.next().await?.is_none());
     Ok(())
+}
+
+#[tokio::test]
+async fn error_codes_sources_and_terminal_state_follow_the_byte_contract() -> Result<()> {
+    common::error_contract(Bzip2, "bz2", "payload.bz2").await
 }
