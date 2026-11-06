@@ -34,19 +34,31 @@ fn batch(schema: SchemaRef, ids: &[i64]) -> RecordBatch {
 }
 
 #[derive(Clone)]
+struct FileData {
+    schema: SchemaRef,
+    batches: Vec<RecordBatch>,
+}
+
+impl FileData {
+    fn new(schema: SchemaRef, batches: Vec<RecordBatch>) -> Self {
+        Self { schema, batches }
+    }
+}
+
+#[derive(Clone)]
 struct Files {
-    files: HashMap<String, (SchemaRef, Vec<RecordBatch>)>,
+    files: HashMap<String, FileData>,
     opens: Arc<Mutex<Vec<ReadRequest>>>,
     active: Arc<AtomicUsize>,
     max_active: Arc<AtomicUsize>,
 }
 
 impl Files {
-    fn new(files: impl IntoIterator<Item = (&'static str, SchemaRef, Vec<RecordBatch>)>) -> Self {
+    fn new(files: impl IntoIterator<Item = (&'static str, FileData)>) -> Self {
         Self {
             files: files
                 .into_iter()
-                .map(|(name, schema, batches)| (name.into(), (schema, batches)))
+                .map(|(name, file)| (name.into(), file))
                 .collect(),
             opens: Arc::default(),
             active: Arc::default(),
@@ -70,7 +82,7 @@ impl Accessor for Files {
 
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         self.opens.lock().unwrap().push(request.clone());
-        let (schema, batches) = self
+        let file = self
             .files
             .get(request.object.locator())
             .ok_or_else(|| Error::new(ErrorKind::NotFound, "open_fixture", "missing"))?;
@@ -79,10 +91,10 @@ impl Accessor for Files {
         Ok(Box::new(Batches {
             active: self.active.clone(),
             metadata: RecordMetadata {
-                schema: schema.clone(),
+                schema: file.schema.clone(),
                 source: Some(request.object),
             },
-            batches: batches.clone().into_iter(),
+            batches: file.batches.clone().into_iter(),
         }))
     }
 }
@@ -139,8 +151,14 @@ async fn values(reader: Box<dyn RecordReader>) -> Vec<i64> {
 async fn file_set_keeps_explicit_order_duplicates_and_opens_lazily() {
     let schema = schema("same");
     let files = Files::new([
-        ("a", schema.clone(), vec![batch(schema.clone(), &[1, 2])]),
-        ("b", schema.clone(), vec![batch(schema.clone(), &[3])]),
+        (
+            "a",
+            FileData::new(schema.clone(), vec![batch(schema.clone(), &[1, 2])]),
+        ),
+        (
+            "b",
+            FileData::new(schema.clone(), vec![batch(schema.clone(), &[3])]),
+        ),
     ]);
     let opens = files.opens.clone();
     let active = files.active.clone();
@@ -174,8 +192,11 @@ async fn file_set_keeps_explicit_order_duplicates_and_opens_lazily() {
 async fn file_set_rejects_empty_selection_and_skips_empty_files() {
     let schema = schema("same");
     let files = Files::new([
-        ("empty", schema.clone(), vec![]),
-        ("data", schema.clone(), vec![batch(schema.clone(), &[7])]),
+        ("empty", FileData::new(schema.clone(), vec![])),
+        (
+            "data",
+            FileData::new(schema.clone(), vec![batch(schema.clone(), &[7])]),
+        ),
     ]);
     let accessor = FileSetAccessor::new(files);
     assert_eq!(
@@ -207,8 +228,11 @@ async fn later_schema_metadata_mismatch_and_open_failure_are_terminal() {
     let first = schema("first");
     let other = schema("other");
     let files = Files::new([
-        ("first", first.clone(), vec![batch(first.clone(), &[1])]),
-        ("mismatch", other, vec![]),
+        (
+            "first",
+            FileData::new(first.clone(), vec![batch(first.clone(), &[1])]),
+        ),
+        ("mismatch", FileData::new(other, vec![])),
     ]);
     let opens = files.opens.clone();
     let accessor = FileSetAccessor::new(files);
@@ -240,7 +264,7 @@ async fn later_schema_metadata_mismatch_and_open_failure_are_terminal() {
 async fn batch_schema_is_checked_against_the_opened_schema() {
     let declared = schema("declared");
     let other = schema("other");
-    let files = Files::new([("bad", declared, vec![batch(other, &[1])])]);
+    let files = Files::new([("bad", FileData::new(declared, vec![batch(other, &[1])]))]);
     let mut reader = FileSetAccessor::new(files)
         .open(FileSetRequest::new(["bad"]))
         .await
@@ -293,18 +317,15 @@ async fn generic_listing_is_sorted_filtered_and_fails_before_opening_on_listing_
     let files = Files::new([
         (
             "data/.hidden.parquet",
-            schema.clone(),
-            vec![batch(schema.clone(), &[99])],
+            FileData::new(schema.clone(), vec![batch(schema.clone(), &[99])]),
         ),
         (
             "data/a.parquet",
-            schema.clone(),
-            vec![batch(schema.clone(), &[1])],
+            FileData::new(schema.clone(), vec![batch(schema.clone(), &[1])]),
         ),
         (
             "data/b.parquet",
-            schema.clone(),
-            vec![batch(schema.clone(), &[2])],
+            FileData::new(schema.clone(), vec![batch(schema.clone(), &[2])]),
         ),
     ]);
     let opens = files.opens.clone();
