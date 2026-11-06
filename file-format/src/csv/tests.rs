@@ -25,9 +25,11 @@ fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/csv")
 }
 
-fn fixture(name: &str) -> Vec<u8> {
+async fn fixture(name: &str) -> Vec<u8> {
     let path = fixture_root().join(name);
-    std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+    tokio::fs::read(&path)
+        .await
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
 fn schema() -> SchemaRef {
@@ -79,7 +81,7 @@ fn ids(batches: &[RecordBatch], column: usize) -> Vec<i64> {
 
 #[tokio::test]
 async fn fragmented_csv_preserves_values_nulls_order_schema_and_source() {
-    let input = fixture("good.csv");
+    let input = fixture("good.csv").await;
     let bytes = MemoryAccessor::new(&input, 1);
     let accessor = CsvAccessor::new(bytes, schema()).with_format(
         CsvFormat::default()
@@ -124,7 +126,7 @@ async fn fragmented_csv_preserves_values_nulls_order_schema_and_source() {
 
 #[tokio::test]
 async fn tsv_handles_utf8_and_configured_header_without_a_final_newline() {
-    let accessor = CsvAccessor::new(MemoryAccessor::new(&fixture("good.tsv"), 1), schema())
+    let accessor = CsvAccessor::new(MemoryAccessor::new(&fixture("good.tsv").await, 1), schema())
         .with_format(CsvFormat::default().with_delimiter(b'\t').with_header(true));
     let batches = collect(&accessor, ReadRequest::new("data.tsv")).await;
     assert_eq!(ids(&batches, 0), [1, 2]);
@@ -140,7 +142,7 @@ async fn tsv_handles_utf8_and_configured_header_without_a_final_newline() {
 #[tokio::test]
 async fn projection_preserves_requested_order_metadata_and_zero_column_rows() {
     let accessor = CsvAccessor::new(
-        MemoryAccessor::new(&fixture("good_no_header.csv"), 4),
+        MemoryAccessor::new(&fixture("good_no_header.csv").await, 4),
         schema(),
     );
     let batches = collect(
@@ -162,7 +164,7 @@ async fn projection_preserves_requested_order_metadata_and_zero_column_rows() {
 
 #[tokio::test]
 async fn projection_and_input_schema_errors_are_rejected_before_opening() {
-    let bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 10);
+    let bytes = MemoryAccessor::new(&fixture("good_no_header.csv").await, 10);
     let accessor = CsvAccessor::new(bytes.clone(), schema());
     for columns in [vec!["missing"], vec!["id", "id"]] {
         let error = accessor
@@ -194,7 +196,7 @@ async fn unsupported_csv_fields_are_configuration_errors_only_when_projected() {
         DataType::Interval(IntervalUnit::YearMonth),
         DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
     ] {
-        let bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 1);
+        let bytes = MemoryAccessor::new(&fixture("good_no_header.csv").await, 1);
         let schema = Arc::new(Schema::new(vec![
             Field::new("id", DataType::Int64, false),
             Field::new("title", data_type.clone(), true),
@@ -230,7 +232,7 @@ async fn empty_and_header_only_inputs_emit_no_batches() {
         ("header_only_no_newline.csv", true),
         ("header_only.csv", true),
     ] {
-        let accessor = CsvAccessor::new(MemoryAccessor::new(&fixture(name), 1), schema())
+        let accessor = CsvAccessor::new(MemoryAccessor::new(&fixture(name).await, 1), schema())
             .with_format(
                 CsvFormat::default()
                     .with_header(header)
@@ -247,7 +249,7 @@ async fn empty_and_header_only_inputs_emit_no_batches() {
 #[tokio::test]
 async fn invalid_data_errors_are_terminal() {
     for name in BAD_FILES {
-        let bytes = MemoryAccessor::new(&fixture(name), 1);
+        let bytes = MemoryAccessor::new(&fixture(name).await, 1);
         let accessor = CsvAccessor::new(bytes.clone(), schema());
         let mut reader = accessor.open(ReadRequest::new(name)).await.unwrap();
         let error = reader.next().await.unwrap_err();
@@ -272,8 +274,8 @@ async fn csv_preserves_source_error_categories_and_stops_polling() {
         ErrorKind::Decode,
     ] {
         for offset in [0, 6] {
-            let bytes =
-                MemoryAccessor::new(&fixture("good_no_header.csv"), 6).with_failure(offset, kind);
+            let bytes = MemoryAccessor::new(&fixture("good_no_header.csv").await, 6)
+                .with_failure(offset, kind);
             let accessor = CsvAccessor::new(bytes.clone(), schema());
             let mut reader = accessor
                 .open(ReadRequest::new("good_no_header.csv").with_options(options(1, None)))
@@ -299,7 +301,7 @@ async fn csv_preserves_source_error_categories_and_stops_polling() {
 
 #[tokio::test]
 async fn csv_rejects_empty_source_chunks_as_terminal_io_errors() {
-    let bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 1).with_empty_chunk(0);
+    let bytes = MemoryAccessor::new(&fixture("good_no_header.csv").await, 1).with_empty_chunk(0);
     let accessor = CsvAccessor::new(bytes.clone(), schema());
     let mut reader = accessor
         .open(ReadRequest::new("good_no_header.csv"))
@@ -317,7 +319,7 @@ async fn csv_rejects_empty_source_chunks_as_terminal_io_errors() {
 #[tokio::test]
 async fn byte_options_are_forwarded_and_io_failures_preserve_kind_without_read_ahead() {
     let bytes =
-        MemoryAccessor::new(&fixture("good_no_header.csv"), 6).with_failure(6, ErrorKind::Io);
+        MemoryAccessor::new(&fixture("good_no_header.csv").await, 6).with_failure(6, ErrorKind::Io);
     let accessor = CsvAccessor::new(bytes.clone(), schema());
     let byte_options = ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
@@ -346,16 +348,19 @@ async fn byte_options_are_forwarded_and_io_failures_preserve_kind_without_read_a
 
 #[tokio::test]
 async fn header_validation_and_truncated_row_policy_are_explicit() {
-    let accessor = CsvAccessor::new(MemoryAccessor::new(&fixture("bad_header.csv"), 1), schema())
-        .with_format(
-            CsvFormat::default()
-                .with_header(true)
-                .with_header_validation(true),
-        );
+    let accessor = CsvAccessor::new(
+        MemoryAccessor::new(&fixture("bad_header.csv").await, 1),
+        schema(),
+    )
+    .with_format(
+        CsvFormat::default()
+            .with_header(true)
+            .with_header_validation(true),
+    );
     let mut reader = accessor.open(ReadRequest::new("header.csv")).await.unwrap();
     assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
     let accessor = CsvAccessor::new(
-        MemoryAccessor::new(&fixture("good_truncated_rows.csv"), 1),
+        MemoryAccessor::new(&fixture("good_truncated_rows.csv").await, 1),
         schema(),
     )
     .with_format(CsvFormat::default().with_truncated_rows(true));

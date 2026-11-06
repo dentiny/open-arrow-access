@@ -10,8 +10,7 @@ open-arrow-access-core.workspace = true
 futures.workspace = true
 more-asserts.workspace = true
 
-[dev-dependencies]
-tokio.workspace = true
+tokio = { workspace = true, features = ["fs"] }
 
 [lints]
 workspace = true
