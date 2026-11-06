@@ -130,13 +130,16 @@ for TSV.
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas and incremental Arrow decoding |
 | `dataset/` | Reserved; no directory or multi-file scan yet |
 | `service/` | Hugging Face repository/revision/config/split resolution and file access |
-| `decompression/` | Reserved; no external decompression or archive support yet |
+| `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
+| `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
 
 Default features are empty. Only implemented capabilities have Cargo feature
 names. Parquet page compression currently supports uncompressed and Snappy
-pages through the Parquet dependency; this does not enable external `.gz`
-decompression. Parallel reads and unordered emission are not implemented.
+pages through the Parquet dependency. External gzip, LZ4, bzip2, and Zstandard decoding are separately
+enabled by `decompression-gzip`, `decompression-lz4`, `decompression-bz2`, and `decompression-zstd`; see [streaming decompression](decompression/README.md).
+It produces sequential bytes and cannot directly satisfy Parquet's range reads.
+Parallel reads and unordered emission are not implemented.
 
 ## Extension contracts
 
@@ -225,7 +228,11 @@ cargo test --workspace --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```
 
-Tests read checked-in Parquet and CSV/TSV files from `testdata/`. They verify ordered rows and
+Format-specific integration tests live in `file-format/tests/`; the root
+`tests/reading.rs` exercises composition through the facade across crates.
+Cargo test targets use `required-features` to select their format.
+
+Tests read checked-in Parquet, CSV/TSV, and JSON/JSONL files from `testdata/`. They verify ordered rows and
 nulls across row groups, schema metadata, projection, storage-independent
 reading, wrapper composition, exact/batched ranges, per-open I/O options,
 bounded backend concurrency, and terminal error/drop behavior.

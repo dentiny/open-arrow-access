@@ -11,15 +11,13 @@ use std::{
 use arrow_array::{Array, Int64Array, StringArray};
 use arrow_schema::{ArrowError, DataType, Field, IntervalUnit, Schema, TimeUnit};
 use more_asserts::assert_lt;
-use open_arrow_access::{
+use open_arrow_access_core::{
     Accessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, Error,
     ErrorKind, ReadOptions, ReadRequest, Reader, RecordBatch, Result, SchemaRef, async_trait,
-    file_format::JsonAccessor,
 };
 
-mod common;
-
-use common::{MemoryAccessor, Observations};
+use open_arrow_access_file_format::JsonAccessor;
+use open_arrow_access_test_support::{MemoryAccessor, Observations};
 
 fn schema() -> SchemaRef {
     Arc::new(Schema::new_with_metadata(
@@ -33,7 +31,7 @@ fn schema() -> SchemaRef {
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("testdata/json")
+        .join("../testdata/json")
         .join(name)
 }
 
@@ -181,8 +179,8 @@ async fn malformed_truncated_and_non_object_inputs_fail_terminally() {
 
 #[tokio::test]
 async fn io_errors_keep_their_category_after_a_successful_batch() {
-    let (mut input, observed) = fixture("io-failure.jsonl", 9);
-    input.fail_after = Some(9);
+    let (input, observed) = fixture("io-failure.jsonl", 9);
+    let input = input.with_failure(9, ErrorKind::Io);
     let accessor = JsonAccessor::new(input, schema());
     let mut reader = accessor.open(request(1, None)).await.unwrap();
     assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
@@ -241,10 +239,9 @@ async fn empty_and_whitespace_only_inputs_have_no_rows() {
     }
 }
 
-#[cfg(feature = "storage-fs")]
 #[tokio::test]
 async fn local_jsonl_reads_through_opendal() {
-    let storage = open_arrow_access::storage::FsAccessor::new(fixture_path(""))
+    let storage = open_arrow_access_storage::FsAccessor::new(fixture_path(""))
         .await
         .unwrap();
     let accessor = JsonAccessor::new(

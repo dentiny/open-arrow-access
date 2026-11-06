@@ -12,11 +12,7 @@ use open_arrow_access_core::{
 };
 
 use super::{CsvAccessor, CsvFormat};
-
-#[path = "../../../tests/common/mod.rs"]
-mod common;
-
-use common::MemoryAccessor;
+use open_arrow_access_test_support::MemoryAccessor;
 
 const BAD_FILES: [&str; 4] = [
     "bad_missing_column.csv",
@@ -276,9 +272,8 @@ async fn csv_preserves_source_error_categories_and_stops_polling() {
         ErrorKind::Decode,
     ] {
         for offset in [0, 6] {
-            let mut bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 6);
-            bytes.fail_after = Some(offset);
-            bytes.failure_kind = kind;
+            let bytes =
+                MemoryAccessor::new(&fixture("good_no_header.csv"), 6).with_failure(offset, kind);
             let accessor = CsvAccessor::new(bytes.clone(), schema());
             let mut reader = accessor
                 .open(ReadRequest::new("good_no_header.csv").with_options(options(1, None)))
@@ -304,8 +299,7 @@ async fn csv_preserves_source_error_categories_and_stops_polling() {
 
 #[tokio::test]
 async fn csv_rejects_empty_source_chunks_as_terminal_io_errors() {
-    let mut bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 1);
-    bytes.emit_empty_chunk = true;
+    let bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 1).with_empty_chunk(0);
     let accessor = CsvAccessor::new(bytes.clone(), schema());
     let mut reader = accessor
         .open(ReadRequest::new("good_no_header.csv"))
@@ -322,8 +316,8 @@ async fn csv_rejects_empty_source_chunks_as_terminal_io_errors() {
 
 #[tokio::test]
 async fn byte_options_are_forwarded_and_io_failures_preserve_kind_without_read_ahead() {
-    let mut bytes = MemoryAccessor::new(&fixture("good_no_header.csv"), 6);
-    bytes.fail_after = Some(6);
+    let bytes =
+        MemoryAccessor::new(&fixture("good_no_header.csv"), 6).with_failure(6, ErrorKind::Io);
     let accessor = CsvAccessor::new(bytes.clone(), schema());
     let byte_options = ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),

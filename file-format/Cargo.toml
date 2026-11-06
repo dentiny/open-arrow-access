@@ -22,9 +22,15 @@ futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 arrow-array.workspace = true
+arrow-schema.workspace = true
 more-asserts.workspace = true
-tokio.workspace = true
+open-arrow-access-test-support.workspace = true
 open-arrow-access-storage = { workspace = true, features = ["fs"] }
+tokio.workspace = true
+
+[[test]]
+name = "json"
+required-features = ["json"]
 
 [lints]
 workspace = true

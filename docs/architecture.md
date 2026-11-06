@@ -43,10 +43,10 @@ The default I/O chunk is 2 MiB; explicit chunk/concurrency options control stagi
 size and parallel reads. The final requested bytes and decoder memory remain
 unbounded by these staging limits.
 
-A future gzip reader wraps another byte reader, reports decoded rather than
-compressed length (or unknown), and normally removes range capability. It can
-use this contract without changing a format reader. Compressed Parquet will
-need bounded materialization or another valid random-access mechanism.
+The optional gzip layer wraps another byte reader, reports unknown decoded
+length, and removes range capability. It uses this contract without changing
+a format reader. Compressed Parquet still needs bounded materialization or
+another valid random-access mechanism. See [decompression](../decompression/README.md).
 
 `RecordReader` specializes the same reader protocol with `RecordMetadata`.
 `into_stream` owns the reader and stops polling it after EOF or the first error.
@@ -73,8 +73,8 @@ The initial flags cover only operations implemented by this framework:
 
 Flags describe the **effective interface after composition**, without I/O.
 Transparent layers forward them; wrappers that remove an operation clear its
-flag on both accessor and reader. A future sequential gzip wrapper normally
-clears `read_with_range`. The Fs adapter reports read/ranges but no listing,
+flag on both accessor and reader. The sequential gzip wrapper clears
+`read_with_range`. The Fs adapter reports read/ranges but no listing,
 even though OpenDAL itself supports filesystem listing. The Parquet accessor
 reports record reading only when its input supports ranges; neither its output
 reader nor its accessor exposes byte-range operations.
@@ -188,12 +188,16 @@ schema and optional reader-context contracts.
 - The facade forwards independent, additive `storage-fs`, `service-huggingface` and `format-parquet`
   features. Features make implementations available; they do not change runtime
   ordering or silently attach layers.
+- `decompression/` shares streaming byte adapters across codec modules. Its
+  independent gzip/LZ4/bzip2/Zstandard features use upstream decoders with
+  concatenated frames or members;
+  source versions remain upstream identities and decoded lengths are unknown.
 - `format-json` adds an Arrow JSON decoder with a caller-supplied fixed schema.
   It reads whitespace-separated objects, including JSONL, from sequential bytes
   without materializing the input. Top-level arrays/null/scalars are rejected;
   projection selects the decoder schema before opening input. Byte options pass
   through the same `ReadRequest` contract as Parquet.
-- `dataset/`, `decompression/`, and `layers/` currently contain only
+- `dataset/` and `layers/` currently contain only
   scope/extension documentation; unimplemented capabilities are not registered.
 
 The project output boundary is Arrow records. Internal temporary inputs may be
