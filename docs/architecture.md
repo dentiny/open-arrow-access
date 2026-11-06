@@ -106,11 +106,11 @@ contract without a closed enum of every source or format.
 
 | Adapter | Request | Reader |
 | --- | --- | --- |
-| Fs / Hugging Face storage | `ByteReadRequest` | `dyn ByteReader` |
+| Fs / generic OpenDAL storage | `ByteReadRequest` | `dyn ByteReader` |
 | Parquet format | `ReadRequest` | `dyn RecordReader` |
 | JSON object stream | `ReadRequest`; schema configured on accessor | Record reader |
 | Future directory dataset | Directory selection and options | Record reader |
-| Future Hugging Face service | Repository/revision/config/split selection | Record reader or resolved object discovery |
+| Hugging Face service | Repository/revision/config/split selection | Commit-pinned object discovery and byte accessor |
 
 `Arc<dyn ByteAccessor>` supports application-owned backend injection. Optional
 `ByteAccessor::list` defaults to Unsupported and is not implemented by the
@@ -126,11 +126,20 @@ Configured concurrency is per open reader, so several readers multiply the total
 possible in-flight I/O. This does not change logical record order or implement
 file/partition parallelism.
 
-The optional `storage-huggingface` backend uses OpenDAL's existing Hugging Face
-service and the same byte-reading implementation as Fs. It also exposes
-recursive file discovery. Its SDK builder owns repository/revision/root,
-authentication, endpoint and HTTP/Xet options. Dataset viewer config/split
-resolution remains in the service boundary.
+The optional `service-huggingface` provider owns repository, revision, config
+and split selection. It reads the selected revision's Hub metadata, expands
+explicit dataset-card `data_files` patterns against the returned manifest, and
+binds file reads to that response's commit SHA. Pattern order is retained,
+matches within patterns are sorted, and duplicates are removed. Missing patterns
+fail instead of silently returning partial data. Explicit repository file access
+is also available, without claiming snapshots for floating revisions.
+
+The service constructs OpenDAL HF operators internally and reuses
+`storage::OpenDalAccessor` for stat, recursive listing and byte reads. The generic
+storage crate contains no Hugging Face semantics or feature. OpenDAL's builder
+is not exported by the service. Native declared files are supported; scripts,
+inferred layouts and Viewer conversions are not substituted for a requested
+revision. Multi-file record composition remains in the dataset workstream.
 
 ## Layer
 
@@ -176,7 +185,7 @@ schema and optional reader-context contracts.
   directory under `src/`. In `src/parquet/`, `accessor.rs`, `input.rs` and
   `reader.rs` own their respective structs and implementations; `mod.rs` declares
   the modules, exports the accessor and provides common error conversion.
-- The facade forwards independent, additive `storage-fs`, `storage-huggingface` and `format-parquet`
+- The facade forwards independent, additive `storage-fs`, `service-huggingface` and `format-parquet`
   features. Features make implementations available; they do not change runtime
   ordering or silently attach layers.
 - `format-json` adds an Arrow JSON decoder with a caller-supplied fixed schema.
@@ -184,7 +193,7 @@ schema and optional reader-context contracts.
   without materializing the input. Top-level arrays/null/scalars are rejected;
   projection selects the decoder schema before opening input. Byte options pass
   through the same `ReadRequest` contract as Parquet.
-- `dataset/`, `service/`, `decompression/`, and `layers/` currently contain only
+- `dataset/`, `decompression/`, and `layers/` currently contain only
   scope/extension documentation; unimplemented capabilities are not registered.
 
 The project output boundary is Arrow records. Internal temporary inputs may be

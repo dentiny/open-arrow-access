@@ -888,6 +888,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1674,6 +1680,7 @@ dependencies = [
  "more-asserts",
  "open-arrow-access-core",
  "open-arrow-access-file-format",
+ "open-arrow-access-service",
  "open-arrow-access-storage",
  "parquet",
  "tempfile",
@@ -1706,19 +1713,31 @@ dependencies = [
 ]
 
 [[package]]
-name = "open-arrow-access-storage"
+name = "open-arrow-access-service"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
- "arrow-schema",
  "futures",
+ "glob",
  "http",
- "more-asserts",
  "open-arrow-access-core",
  "open-arrow-access-file-format",
+ "open-arrow-access-storage",
  "opendal",
- "parquet",
+ "serde",
  "serde_json",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "open-arrow-access-storage"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "more-asserts",
+ "open-arrow-access-core",
+ "opendal",
  "tempfile",
  "tokio",
 ]

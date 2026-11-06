@@ -3,8 +3,8 @@
 Composable dataset access for Apache Arrow. Read diverse formats and storage
 backends into Arrow streams.
 
-Read Parquet, CSV/TSV, or JSON/JSONL asynchronously through local or Hugging Face
-repository byte accessors backed by OpenDAL. Output is an ordered stream of
+Read Parquet, CSV/TSV, or JSON/JSONL asynchronously from local storage or files
+resolved by the Hugging Face service. OpenDAL handles file I/O. Output is an ordered stream of
 Arrow record batches. The project ends at that read interface.
 
 ## Quick start
@@ -58,8 +58,39 @@ future file/partition `ParallelReadLayer`. Each opened reader has its own limit.
 `FsAccessor::with_chunk_size` controls sequential output chunk size, while
 `ReadOptions::batch_size` controls Arrow rows per batch.
 
-Enable `storage-huggingface` for repository-relative file access and recursive
-discovery through OpenDAL's Hugging Face service.
+Enable `service-huggingface` for repository access and revision/config/split
+resolution. The service reads explicitly declared dataset-card `data_files`
+(paths, lists and globs, with optional `data_dir`) and pins the selected revision
+to a commit. It returns ordered, deduplicated `ObjectRef`s plus a byte accessor
+that composes with existing format readers:
+
+```rust
+use open_arrow_access::service::{HuggingFaceOptions, HuggingFaceSelection, HuggingFaceService};
+
+let service = HuggingFaceService::new(HuggingFaceOptions::default()).await?;
+let dataset = service.resolve(HuggingFaceSelection::new(
+    "datasets-examples/doc-yaml-3", "default", "train",
+)).await?;
+// dataset.commit pins both discovery and subsequent file reads.
+// dataset.objects contains data/abc.csv and data/edf.csv.
+// Pass dataset.accessor and an object to an existing format accessor.
+```
+
+`service.repository(HuggingFaceRepository::new(id).with_revision(revision))`
+provides explicit single-file reads and recursive directory listing without
+config/split resolution. Branch-based direct reads are not snapshots.
+Authentication accepts an explicit token or the HF environment/cache conventions.
+Metadata and file requests use the same connection settings; HTTP/Xet downloads
+remain delegated to OpenDAL. No OpenDAL builder is part of the service API.
+
+The resolver supports native repository file declarations. It returns Unsupported
+for inferred/script-based layouts and does not substitute Dataset Viewer exports
+for a requested revision. Missing declared files fail rather than returning a
+partial selection. Metadata discovery is limited to 32 MiB; multi-file Arrow
+scans remain in the separate dataset workstream.
+
+Run the public-Hub example with
+`cargo run --example resolve_huggingface --features service-huggingface`.
 
 ## JSON and JSONL
 
@@ -95,10 +126,10 @@ for TSV.
 | Component | Implemented |
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
-| `storage/` | OpenDAL Fs and optional Hugging Face, bounded chunks and exact ranges; HF file discovery |
+| `storage/` | OpenDAL Fs and reusable generic byte I/O, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas and incremental Arrow decoding |
 | `dataset/` | Reserved; no directory or multi-file scan yet |
-| `service/` | Reserved for dataset/provider semantics, including HF config/split resolution |
+| `service/` | Hugging Face repository/revision/config/split resolution and file access |
 | `decompression/` | Reserved; no external decompression or archive support yet |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
 

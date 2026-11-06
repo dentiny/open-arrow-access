@@ -20,10 +20,13 @@ use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext
 use serde_json::json;
 use tokio::sync::{Notify, Semaphore};
 
-use super::{HuggingFaceAccessor, HuggingFaceBuilder};
-use crate::backend::OpenDalAccessor;
+use super::{HuggingFaceAccessor, HuggingFaceOptions, HuggingFaceRepository, HuggingFaceService};
+use open_arrow_access_storage::OpenDalAccessor;
+use opendal::services::Hf as HuggingFaceBuilder;
 
 const TOKEN: &str = "fixture-only-token";
+
+mod resolution;
 
 #[derive(Clone, Debug)]
 struct Captured {
@@ -311,27 +314,28 @@ impl HttpTransport for MockHub {
 
 #[tokio::test]
 async fn constructor_is_lazy_send_and_redacts_token() {
-    let builder = HuggingFaceBuilder::default()
-        .repo_type("dataset")
-        .repo_id("owner/example")
-        .token(TOKEN)
-        .download_mode("http");
-    assert!(!format!("{builder:?}").contains(TOKEN));
-    let initialize = HuggingFaceAccessor::new(builder);
-    let accessor = tokio::spawn(initialize).await.unwrap().unwrap();
+    let options = HuggingFaceOptions::default()
+        .with_token(TOKEN)
+        .with_http_downloads();
+    assert!(!format!("{options:?}").contains(TOKEN));
+    let service = tokio::spawn(HuggingFaceService::new(options))
+        .await
+        .unwrap()
+        .unwrap();
+    let accessor = service
+        .repository(HuggingFaceRepository::new("owner/example"))
+        .await
+        .unwrap();
     assert!(!format!("{accessor:?}").contains(TOKEN));
+    assert!(!format!("{service:?}").contains(TOKEN));
     assert!(accessor.capability().read_with_range);
     assert!(accessor.capability().list);
-    let error = HuggingFaceAccessor::new(HuggingFaceBuilder::default().token(TOKEN))
+    let error = service
+        .repository(HuggingFaceRepository::new(""))
         .await
-        .err()
-        .unwrap();
-    assert_upstream_error(
-        &error,
-        ErrorKind::InvalidInput,
-        opendal::ErrorKind::ConfigInvalid,
-        "configure_huggingface",
-    );
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert!(error.source().is_none());
 }
 
 #[tokio::test]

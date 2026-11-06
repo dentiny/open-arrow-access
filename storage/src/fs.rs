@@ -81,7 +81,7 @@ impl Accessor for FsAccessor {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
-            list: inner.list,
+            list: false,
         }
     }
 

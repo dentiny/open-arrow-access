@@ -7,7 +7,7 @@ description = "Composable read access to Apache Arrow streams"
 repository.workspace = true
 
 [workspace]
-members = ["core", "storage", "file-format"]
+members = ["core", "storage", "file-format", "service"]
 resolver = "3"
 
 [workspace.package]
@@ -48,10 +48,11 @@ tempfile = "3"
 open-arrow-access-core = { path = "core", version = "0.1.0" }
 open-arrow-access-storage = { path = "storage", version = "0.1.0", default-features = false }
 open-arrow-access-file-format = { path = "file-format", version = "0.1.0", default-features = false }
+open-arrow-access-service = { path = "service", version = "0.1.0", default-features = false }
 
 [features]
 default = []
-storage-huggingface = ["dep:open-arrow-access-storage", "open-arrow-access-storage/huggingface"]
+service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
 storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
@@ -60,6 +61,7 @@ format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-forma
 [dependencies]
 open-arrow-access-core.workspace = true
 open-arrow-access-storage = { workspace = true, optional = true }
+open-arrow-access-service = { workspace = true, optional = true }
 open-arrow-access-file-format = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -83,6 +85,10 @@ required-features = ["format-csv"]
 [[test]]
 name = "reading"
 required-features = ["storage-fs", "format-parquet"]
+
+[[example]]
+name = "resolve_huggingface"
+required-features = ["service-huggingface"]
 
 [[example]]
 name = "read_parquet"

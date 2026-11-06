@@ -4,16 +4,16 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ObjectRef,
     ObjectStream, Result, async_trait,
 };
-use opendal::Operator;
+use open_arrow_access_storage::OpenDalAccessor;
+use opendal::{OperationContext, Operator};
 
-use super::HuggingFaceBuilder;
-use crate::backend::{OpenDalAccessor, map_error};
+use super::map_error;
 
 /// Read repository-relative files through OpenDAL's Hugging Face service.
 ///
-/// The builder selects repository type, ID, revision, root, authentication and
-/// HTTP/Xet mode. Floating revisions are not snapshots. This adapter exposes
-/// files rather than interpreting dataset scripts, configurations or splits.
+/// Obtain this from `HuggingFaceService::repository` for explicit files or
+/// `HuggingFaceService::resolve` for a pinned config/split selection.
+/// Direct branch reads are not snapshots.
 #[derive(Clone, Debug)]
 pub struct HuggingFaceAccessor {
     pub(super) inner: OpenDalAccessor,
@@ -22,7 +22,10 @@ pub struct HuggingFaceAccessor {
 impl HuggingFaceAccessor {
     /// Build the service without blocking a Tokio worker on implicit token-file I/O.
     /// OpenDAL retains its authentication and endpoint environment conventions.
-    pub async fn new(builder: HuggingFaceBuilder) -> Result<Self> {
+    pub(super) async fn new(
+        builder: opendal::services::Hf,
+        context: OperationContext,
+    ) -> Result<Self> {
         let operator = tokio::task::spawn_blocking(move || {
             opendal::install_default();
             Operator::new(builder).map_err(|error| {
@@ -48,7 +51,7 @@ impl HuggingFaceAccessor {
             .with_source(error)
         })??;
         Ok(Self {
-            inner: OpenDalAccessor::new(operator),
+            inner: OpenDalAccessor::new(operator.with_context(context)),
         })
     }
 
@@ -85,12 +88,11 @@ impl ByteAccessor for HuggingFaceAccessor {
     /// Discovery follows Hub pagination order, which is not a stable dataset order.
     async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
         validate_path(prefix.locator(), true)?;
-        self.inner.validate_directory(&prefix).await?;
         self.inner.list(prefix).await
     }
 }
 
-fn validate_path(path: &str, directory: bool) -> Result<()> {
+pub(super) fn validate_path(path: &str, directory: bool) -> Result<()> {
     let components = if directory {
         path.strip_suffix('/').unwrap_or(path)
     } else {

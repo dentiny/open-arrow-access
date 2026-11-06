@@ -8,11 +8,8 @@ description = "Storage adapters for Open Arrow Access"
 
 [features]
 default = []
-huggingface = [
-    "dep:opendal", "dep:tokio", "dep:futures",
-    "opendal/services-hf", "opendal/executors-tokio", "opendal/http-transport-reqwest",
-]
-fs = ["dep:opendal", "dep:tokio", "dep:futures", "opendal/services-fs", "opendal/executors-tokio"]
+opendal = ["dep:opendal", "dep:tokio", "dep:futures", "opendal/executors-tokio"]
+fs = ["opendal", "opendal/services-fs"]
 
 [dependencies]
 open-arrow-access-core.workspace = true
@@ -21,13 +18,6 @@ tokio = { workspace = true, optional = true, features = ["sync"] }
 futures = { workspace = true, optional = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["time"] }
-http = "1"
-serde_json = "1"
-arrow-array.workspace = true
-arrow-schema.workspace = true
-parquet.workspace = true
-open-arrow-access-file-format = { workspace = true, features = ["parquet"] }
 more-asserts.workspace = true
 tempfile.workspace = true
 

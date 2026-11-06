@@ -4,11 +4,9 @@ use std::{num::NonZeroUsize, ops::Range, sync::Arc};
 
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error, ErrorKind,
-    Reader, Result, async_trait,
+    Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error,
+    ErrorKind, ObjectRef, ObjectStream, Reader, Result, async_trait,
 };
-#[cfg(feature = "huggingface")]
-use open_arrow_access_core::{ByteAccessor, ObjectRef, ObjectStream};
 use opendal::{
     Execute, Executor, OperationContext, Operator,
     raw::{BoxedStaticFuture, Layer, Servicer},
@@ -19,41 +17,26 @@ const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unw
 const DEFAULT_IO_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 const MAX_FETCH_BATCH_SIZE: u64 = 2 * 1024 * 1024;
 
+/// Generic OpenDAL byte adapter, shared by storage and provider services.
 #[derive(Clone, Debug)]
-pub(crate) struct OpenDalAccessor {
+pub struct OpenDalAccessor {
     operator: Operator,
     chunk_size: NonZeroUsize,
 }
 
 impl OpenDalAccessor {
-    pub(crate) fn new(operator: Operator) -> Self {
+    /// Wrap an operator without changing its backend configuration.
+    pub fn new(operator: Operator) -> Self {
         Self {
             operator,
             chunk_size: DEFAULT_OUTPUT_CHUNK_SIZE,
         }
     }
 
-    pub(crate) fn with_chunk_size(mut self, chunk_size: NonZeroUsize) -> Self {
+    /// Bound emitted chunks independently of storage I/O splitting.
+    pub fn with_chunk_size(mut self, chunk_size: NonZeroUsize) -> Self {
         self.chunk_size = chunk_size;
         self
-    }
-
-    #[cfg(feature = "huggingface")]
-    pub(crate) async fn validate_directory(&self, prefix: &ObjectRef) -> Result<()> {
-        let path = prefix.locator();
-        let metadata = self
-            .operator
-            .stat(path)
-            .await
-            .map_err(|error| map_error("list", path, error))?;
-        if !metadata.is_dir() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "list",
-                "prefix is not a directory",
-            ));
-        }
-        Ok(())
     }
 }
 
@@ -66,11 +49,10 @@ impl Accessor for OpenDalAccessor {
         let upstream = self.operator.info().capability();
         let read = upstream.read && upstream.stat;
         // This adapter requires stat for length and uses OpenDAL's range-read contract.
-        // Concrete backend wrappers decide whether to expose discovery.
         Capability {
             read,
             read_with_range: read,
-            list: false,
+            list: upstream.stat && upstream.list && upstream.list_with_recursive,
         }
     }
 
@@ -127,11 +109,22 @@ impl Accessor for OpenDalAccessor {
     }
 }
 
-#[cfg(feature = "huggingface")]
 #[async_trait]
 impl ByteAccessor for OpenDalAccessor {
     async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
         let path = prefix.locator();
+        let metadata = self
+            .operator
+            .stat(path)
+            .await
+            .map_err(|e| map_error("list", path, e))?;
+        if !metadata.is_dir() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "list",
+                "prefix is not a directory",
+            ));
+        }
         let path = if path.is_empty() {
             String::new()
         } else {
