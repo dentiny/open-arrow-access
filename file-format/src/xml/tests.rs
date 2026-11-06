@@ -37,7 +37,7 @@ fn options(projection: Option<Vec<&str>>) -> ReadOptions {
 async fn fragmented_real_pom_preserves_namespaces_values_schema_and_order() {
     let input = open_arrow_access_test_support::fixture!("xml", "lancedb-pom.xml").await;
     let bytes = MemoryAccessor::new(&input, 1);
-    let accessor = XmlAccessor::new(bytes, pom_schema(), POM_PATH);
+    let accessor = XmlAccessor::new(bytes, POM_PATH).with_schema(pom_schema());
     let mut reader = accessor
         .open(ReadRequest::new("lancedb-pom.xml").with_options(options(None)))
         .await
@@ -122,7 +122,8 @@ async fn real_topology_preserves_nested_device_lists() {
         ),
     ])
     .unwrap();
-    let accessor = XmlAccessor::new(MemoryAccessor::new(&input, 1), schema, "/system/cpu");
+    let accessor =
+        XmlAccessor::new(MemoryAccessor::new(&input, 1), "/system/cpu").with_schema(schema);
     let mut reader = accessor
         .open(ReadRequest::new("topology.xml").with_options(ReadOptions {
             batch_size: NonZeroUsize::MIN,
@@ -185,7 +186,7 @@ async fn real_pom_projection_skips_conversion_and_counts_zero_columns() {
         }],
     )
     .unwrap();
-    let accessor = XmlAccessor::new(MemoryAccessor::new(&input, 3), schema, POM_PATH);
+    let accessor = XmlAccessor::new(MemoryAccessor::new(&input, 3), POM_PATH).with_schema(schema);
     let mut reader = accessor
         .open(ReadRequest::new("pom.xml").with_options(options(Some(vec!["scope", "artifact"]))))
         .await
@@ -223,7 +224,9 @@ async fn invalid_configuration_fails_before_opening_input() {
             },
         ),
     ] {
-        let accessor = XmlAccessor::new(bytes.clone(), pom_schema(), path).with_limits(limits);
+        let accessor = XmlAccessor::new(bytes.clone(), path)
+            .with_schema(pom_schema())
+            .with_limits(limits);
         assert_eq!(
             accessor
                 .open(ReadRequest::new("input"))
@@ -234,7 +237,7 @@ async fn invalid_configuration_fails_before_opening_input() {
             ErrorKind::InvalidInput
         );
     }
-    let accessor = XmlAccessor::new(bytes, pom_schema(), POM_PATH);
+    let accessor = XmlAccessor::new(bytes, POM_PATH).with_schema(pom_schema());
     for names in [vec!["missing"], vec!["artifact", "artifact"]] {
         assert_eq!(
             accessor
@@ -258,8 +261,8 @@ async fn malformed_xml_and_limits_are_terminal() {
         "bad_dtd.xml",
     ] {
         let input = open_arrow_access_test_support::fixture!("xml", name).await;
-        let accessor =
-            XmlAccessor::new(MemoryAccessor::new(&input, 1), cpu_schema(), "/system/cpu");
+        let accessor = XmlAccessor::new(MemoryAccessor::new(&input, 1), "/system/cpu")
+            .with_schema(cpu_schema());
         let mut reader = accessor.open(ReadRequest::new(name)).await.unwrap();
         let error = reader.next().await.unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Decode, "{name}");
@@ -285,9 +288,9 @@ async fn malformed_xml_and_limits_are_terminal() {
             "Depth",
         ),
     ] {
-        let accessor =
-            XmlAccessor::new(MemoryAccessor::new(&input, 1), cpu_schema(), "/system/cpu")
-                .with_limits(limits);
+        let accessor = XmlAccessor::new(MemoryAccessor::new(&input, 1), "/system/cpu")
+            .with_schema(cpu_schema())
+            .with_limits(limits);
         let mut reader = accessor
             .open(ReadRequest::new("topology.xml"))
             .await
@@ -302,7 +305,8 @@ async fn malformed_xml_and_limits_are_terminal() {
 #[tokio::test]
 async fn real_topology_batch_byte_limits_preserve_lookahead_order() {
     let input = open_arrow_access_test_support::fixture!("xml", "azure-ndv5-topology.xml").await;
-    let accessor = XmlAccessor::new(MemoryAccessor::new(&input, 1), cpu_schema(), "/system/cpu")
+    let accessor = XmlAccessor::new(MemoryAccessor::new(&input, 1), "/system/cpu")
+        .with_schema(cpu_schema())
         .with_limits(XmlLimits {
             max_record_bytes: 2048,
             max_batch_bytes: 2048,
@@ -318,4 +322,234 @@ async fn real_topology_batch_byte_limits_preserve_lookahead_order() {
         assert_eq!(batch.column(0).as_primitive::<Int64Type>().value(0), numa);
     }
     assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn path_only_infers_real_topology_and_replays_bounded_sample() {
+    use std::sync::atomic::Ordering;
+    let input = open_arrow_access_test_support::fixture!("xml", "azure-ndv5-topology.xml").await;
+    let bytes = MemoryAccessor::new(&input, 1);
+    let observations = bytes.observations.clone();
+    let accessor =
+        XmlAccessor::new(bytes, "/system/cpu").with_inference_options(super::XmlInferenceOptions {
+            max_records: 1,
+            max_bytes: 4096,
+        });
+    let mut reader = accessor
+        .open(ReadRequest::new("topology.xml").with_options(ReadOptions {
+            batch_size: NonZeroUsize::MIN,
+            projection: None,
+        }))
+        .await
+        .unwrap();
+    // One record was sampled without consuming the whole document.
+    assert!(observations.reads.load(Ordering::Relaxed) < input.len());
+    assert_eq!(
+        reader.metadata().source.as_ref().unwrap().locator(),
+        "topology.xml"
+    );
+    let schema = reader.metadata().schema.clone();
+    assert_eq!(
+        schema.field_with_name("@numaid").unwrap().data_type(),
+        &Int64
+    );
+    for numa in 0..2 {
+        let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(batch.schema(), schema);
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(
+            batch
+                .column_by_name("@numaid")
+                .unwrap()
+                .as_primitive::<Int64Type>()
+                .value(0),
+            numa
+        );
+        let bridges = batch.column_by_name("pci").unwrap().as_list::<i32>();
+        assert_eq!(bridges.value_offsets(), &[0, 4]);
+        let bridges = bridges.values().as_struct();
+        let devices = bridges.column_by_name("pci").unwrap().as_list::<i32>();
+        assert_eq!(devices.value_offsets(), &[0, 2, 4, 6, 8]);
+        let devices = devices.values().as_struct();
+        assert_eq!(
+            devices
+                .column_by_name("@busid")
+                .unwrap()
+                .as_string::<i32>()
+                .value(0),
+            if numa == 0 {
+                "0001:00:00.0"
+            } else {
+                "0009:00:00.0"
+            }
+        );
+    }
+    assert!(reader.next().await.unwrap().is_none());
+    assert!(reader.next().await.unwrap().is_none());
+    // Project after inference, preserving caller order and zero-column row counts.
+    for names in [vec!["@vendor", "@numaid"], vec![]] {
+        let mut reader = accessor
+            .open(ReadRequest::new("topology.xml").with_options(options(Some(names.clone()))))
+            .await
+            .unwrap();
+        let mut rows = 0;
+        while let Some(batch) = reader.next().await.unwrap() {
+            assert_eq!(batch.schema(), reader.metadata().schema);
+            assert_eq!(batch.num_columns(), names.len());
+            if !names.is_empty() {
+                assert_eq!(batch.schema().field(0).name(), "@vendor");
+                assert_eq!(batch.column(0).as_string::<i32>().value(0), "GenuineIntel");
+                assert_eq!(batch.column(1).as_primitive::<Int64Type>().value(0), 0);
+            }
+            rows += batch.num_rows();
+        }
+        assert_eq!(rows, 2);
+    }
+    for names in [vec!["missing"], vec!["@numaid", "@numaid"]] {
+        let error = accessor
+            .open(ReadRequest::new("topology.xml").with_options(options(Some(names))))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+}
+
+#[tokio::test]
+async fn real_pom_inference_resolves_namespaces_and_optional_fields() {
+    let input = open_arrow_access_test_support::fixture!("xml", "lancedb-pom.xml").await;
+    let accessor = XmlAccessor::new(MemoryAccessor::new(&input, 1), POM_PATH).with_namespaces(&[
+        NamespaceBinding {
+            prefix: "m",
+            uri: "http://maven.apache.org/POM/4.0.0",
+        },
+    ]);
+    let mut reader = accessor
+        .open(
+            ReadRequest::new("pom.xml")
+                .with_options(options(Some(vec!["m:scope", "m:artifactId"]))),
+        )
+        .await
+        .unwrap();
+    let mut artifacts = Vec::new();
+    let mut scopes = Vec::new();
+    let mut sizes = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        assert_eq!(batch.schema(), reader.metadata().schema);
+        sizes.push(batch.num_rows());
+        artifacts.extend(
+            batch
+                .column(1)
+                .as_string::<i32>()
+                .iter()
+                .map(|s| s.unwrap().to_owned()),
+        );
+        scopes.extend(
+            batch
+                .column(0)
+                .as_string::<i32>()
+                .iter()
+                .map(|s| s.map(String::from)),
+        );
+    }
+    assert_eq!(sizes, [2, 2, 2, 1]);
+    assert_eq!(
+        artifacts,
+        [
+            "jackson-bom",
+            "lance-core",
+            "arrow-vector",
+            "arrow-memory-netty",
+            "arrow-c-data",
+            "arrow-dataset",
+            "junit-jupiter"
+        ]
+    );
+    assert_eq!(scopes[0].as_deref(), Some("import"));
+    assert!(scopes[1..].iter().all(Option::is_none));
+}
+
+#[tokio::test]
+async fn inference_limits_and_input_failures_preserve_error_categories() {
+    let input = open_arrow_access_test_support::fixture!("xml", "azure-ndv5-topology.xml").await;
+    let bytes = MemoryAccessor::new(&input, 1);
+    let observations = bytes.observations.clone();
+    for sampling in [
+        super::XmlInferenceOptions {
+            max_records: 0,
+            max_bytes: 4096,
+        },
+        super::XmlInferenceOptions {
+            max_records: 1,
+            max_bytes: 0,
+        },
+    ] {
+        let error = XmlAccessor::new(bytes.clone(), "/system/cpu")
+            .with_inference_options(sampling)
+            .open(ReadRequest::new("topology.xml"))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+    for path in ["relative/path", "/unbound:cpu"] {
+        let error = XmlAccessor::new(bytes.clone(), path)
+            .open(ReadRequest::new("topology.xml"))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+    assert!(observations.requests.lock().unwrap().is_empty());
+    let error = XmlAccessor::new(bytes, "/system/cpu")
+        .with_inference_options(super::XmlInferenceOptions {
+            max_records: 1,
+            max_bytes: 32,
+        })
+        .open(ReadRequest::new("topology.xml"))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert!(error.to_string().contains("SampleBytes"));
+
+    let error = XmlAccessor::new(
+        MemoryAccessor::new(&input, 1).with_failure(0, ErrorKind::PermissionDenied),
+        "/system/cpu",
+    )
+    .open(ReadRequest::new("topology.xml"))
+    .await
+    .err()
+    .unwrap();
+    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+    let mut reader = XmlAccessor::new(
+        MemoryAccessor::new(&input, 1).with_failure(input.len() - 20, ErrorKind::PermissionDenied),
+        "/system/cpu",
+    )
+    .with_inference_options(super::XmlInferenceOptions {
+        max_records: 1,
+        max_bytes: 4096,
+    })
+    .open(ReadRequest::new("topology.xml").with_options(ReadOptions {
+        batch_size: NonZeroUsize::MIN,
+        projection: None,
+    }))
+    .await
+    .unwrap();
+    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
+    assert_eq!(
+        reader.next().await.unwrap_err().kind(),
+        ErrorKind::PermissionDenied
+    );
+    assert!(reader.next().await.unwrap().is_none());
+
+    for name in ["bad_truncated.xml", "bad_entity.xml", "bad_dtd.xml"] {
+        let input = open_arrow_access_test_support::fixture!("xml", name).await;
+        let error = XmlAccessor::new(MemoryAccessor::new(&input, 1), "/system/cpu")
+            .open(ReadRequest::new(name))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::Decode, "{name}");
+    }
 }

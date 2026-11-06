@@ -2,7 +2,9 @@ mod accessor;
 mod reader;
 
 pub use accessor::{XmlAccessor, XmlLimits};
-pub use xml_arrow::{NamespaceBinding, XmlField, XmlSchema};
+pub use xml_arrow::{
+    InferenceOptions as XmlInferenceOptions, NamespaceBinding, XmlField, XmlSchema,
+};
 
 fn xml_error(error: xml_arrow::ReadError) -> open_arrow_access_core::Error {
     use open_arrow_access_core::{Error, ErrorKind};

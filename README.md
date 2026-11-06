@@ -127,7 +127,7 @@ for TSV.
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
 | `storage/` | OpenDAL Fs, recursive file discovery and reusable generic byte I/O, bounded chunks and exact ranges |
-| `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas and incremental Arrow decoding |
+| `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
 | `service/` | Reserved; no Hugging Face or other source adapter yet |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
@@ -258,23 +258,34 @@ The library exposes no writer or sink API.
 
 ## XML
 
-Enable `format-xml` and supply an explicit schema and absolute record element path:
+Enable `format-xml` and supply the input accessor and absolute record element path.
+The output schema is inferred automatically:
 
 ```rust,no_run
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-use arrow_schema::DataType::{Int64, Utf8};
-use open_arrow_access::{Accessor, ReadRequest, file_format::{XmlAccessor, XmlField, XmlSchema}, storage::FsAccessor};
+use open_arrow_access::{Accessor, ReadRequest, file_format::XmlAccessor, storage::FsAccessor};
 
-let schema = XmlSchema::new(vec![
-    XmlField::new("id", "@id", Int64, false),
-    XmlField::new("title", "title", Utf8, true),
-])?;
-let xml = XmlAccessor::new(FsAccessor::new("/data").await?, schema, "/catalog/book");
-let mut reader = xml.open(ReadRequest::new("books.xml")).await?;
+let xml = XmlAccessor::new(FsAccessor::new(std::env::current_dir()?.join("testdata/xml")).await?, "/system/cpu");
+let mut reader = xml.open(ReadRequest::new("azure-ndv5-topology.xml")).await?;
 while let Some(batch) = reader.next().await? { /* consume batch */ }
 # Ok(())
 # }
 ```
+
+Each `open` samples at most 128 records and 8 MiB of serialized XML by default,
+fixes the schema, then replays sampled records before continuing the same stream.
+Configure these bounds with `with_inference_options(XmlInferenceOptions { .. })`.
+Opening an inferred reader performs input I/O; sampling errors are returned by
+`open`. Attributes become `@name` columns, repeated elements become lists, and
+nested elements become structs. Fields absent from the sample are not added
+later; later values incompatible with inferred types produce a terminal error.
+Schemas are inferred independently for each opened file.
+
+Explicit mappings remain available through `.with_schema(schema)` when column
+names or types must be fixed by the caller. For inference with namespace-prefixed
+record paths, use `.with_namespaces(&[NamespaceBinding { prefix, uri }])`;
+explicit schemas carry their own namespace bindings. Namespace URIs in inferred
+fields use the supplied prefixes, with generated prefixes for other namespaces.
 
 `XmlField::structure`, `XmlField::list`, and URI-based `NamespaceBinding` mappings
 support nested records and namespaces. Paths select direct children, terminal
@@ -295,8 +306,10 @@ must be UTF-8; DTDs and custom entities are rejected. Errors are terminal.
 
 External compression remains independent: compose `XmlAccessor` over an accessor
 with `DecompressionLayer::new(Gzip)` for `.xml.gz`. FileSet and directory reading
-reuse the same format accessor and preserve file/record order. No schema inference,
-format auto-detection, index or parallel scheduler is added by this adapter.
-Projection avoids conversion of omitted fields, while selected records are still
-read and parsed in full. Run the local example with
-`cargo run --features storage-fs,format-xml --example read_xml -- books.xml`.
+reuse the same format accessor and preserve file/record order. No format
+auto-detection, index or parallel scheduler is added by this adapter.
+With explicit mappings, projection avoids conversion of omitted fields. In
+inference mode, projection names are resolved after sampling and output columns
+are selected after conversion. Selected records are read and parsed in full in
+both modes. Run the example on the committed real topology fixture with
+`cargo run --features storage-fs,format-xml --example read_xml`.

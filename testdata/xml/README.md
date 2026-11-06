@@ -33,7 +33,8 @@ when deliberately updating a fixture.
 
 The XML adapter tests use these unmodified snapshots for namespace matching,
 fragmented byte streams, field projection, ordered batches, nested PCI lists,
-fixed schemas, conversion errors and XML byte/depth limits.
+fixed explicit schemas, automatic schema inference, bounded sample replay,
+conversion errors and XML byte/depth limits.
 
 The four `bad_*.xml` files are deliberate corruptions of the topology snapshot,
 not additional real datasets: replace the first `numaid="0"` with `invalid` or
