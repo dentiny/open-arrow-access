@@ -46,7 +46,7 @@ do not query upstream or automatically change dependency versions.
 ## XML parser
 
 `format-xml` uses only `xml-arrow` from `dentiny/xml-arrow-rs`, pinned to immutable
-revision `80a97faa607a2f1a8e9dab936f668dc4a7b904b6` for Arrow 59 compatibility and
+revision `8e24e5ad1fa80c1df81f919a30a94bc2f866b6e9` for Arrow 59 compatibility and
 configuration validation before I/O. Its optional `xml-io` storage crate is not
 used, so storage remains on this workspace's OpenDAL 0.59.2 baseline. Arrow family
 versions remain 59.3.0 in the lockfile. Replace the Git dependency with a compatible

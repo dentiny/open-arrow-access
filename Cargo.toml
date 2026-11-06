@@ -34,7 +34,7 @@ arrow-array = "59.3.0"
 arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
-xml-arrow = { git = "https://github.com/dentiny/xml-arrow-rs", rev = "80a97faa607a2f1a8e9dab936f668dc4a7b904b6" }
+xml-arrow = { git = "https://github.com/dentiny/xml-arrow-rs", rev = "8e24e5ad1fa80c1df81f919a30a94bc2f866b6e9" }
 async-trait = "0.1.91"
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
 datafusion = { version = "55.2.0", default-features = false }
