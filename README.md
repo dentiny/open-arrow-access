@@ -265,8 +265,8 @@ The output schema is inferred automatically:
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 use open_arrow_access::{Accessor, ReadRequest, file_format::XmlAccessor, storage::FsAccessor};
 
-let xml = XmlAccessor::new(FsAccessor::new(std::env::current_dir()?.join("testdata/xml")).await?, "/system/cpu");
-let mut reader = xml.open(ReadRequest::new("azure-ndv5-topology.xml")).await?;
+let xml = XmlAccessor::new(FsAccessor::new(std::env::current_dir()?.join("testdata/xml")).await?, "/inventory/warehouse");
+let mut reader = xml.open(ReadRequest::new("inventory.xml")).await?;
 while let Some(batch) = reader.next().await? { /* consume batch */ }
 # Ok(())
 # }
@@ -311,5 +311,5 @@ auto-detection, index or parallel scheduler is added by this adapter.
 With explicit mappings, projection avoids conversion of omitted fields. In
 inference mode, projection names are resolved after sampling and output columns
 are selected after conversion. Selected records are read and parsed in full in
-both modes. Run the example on the committed real topology fixture with
+both modes. Run the example on the project-authored inventory fixture with
 `cargo run --features storage-fs,format-xml --example read_xml`.
