@@ -58,6 +58,7 @@ format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-f
 format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
 format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
 decompression-gzip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip"]
+decompression-bz2 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 decompression-lz4 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/lz4"]
 
 [dependencies]

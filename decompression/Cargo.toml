@@ -9,6 +9,7 @@ description = "Streaming byte decompression layers for Open Arrow Access"
 [features]
 default = []
 gzip = ["dep:async-compression", "async-compression/gzip"]
+bz2 = ["dep:async-compression", "async-compression/bzip2"]
 lz4 = ["dep:async-compression", "async-compression/lz4"]
 
 [dependencies]
@@ -20,6 +21,10 @@ async-compression = { version = "0.4.50", default-features = false, features = [
 open-arrow-access-test-support.workspace = true
 more-asserts.workspace = true
 tokio.workspace = true
+
+[[test]]
+name = "bz2"
+required-features = ["bz2"]
 
 [[test]]
 name = "gzip"

@@ -1,12 +1,13 @@
 # Streaming decompression
 
-Enable a codec feature on the facade or this crate. All features are default-off.
-Apply a codec explicitly; file extensions do not select a decoder.
+Features are default-off. Apply a codec explicitly; file extensions do not
+select a decoder.
 
-| Facade feature | Crate feature | Codec |
-| --- | --- | --- |
-| `decompression-gzip` | `gzip` | `Gzip` |
-| `decompression-lz4` | `lz4` | `Lz4` |
+| Codec | Facade feature | Crate feature | Marker |
+| --- | --- | --- | --- |
+| Gzip | `decompression-gzip` | `gzip` | `Gzip` |
+| Bzip2 | `decompression-bz2` | `bz2` | `Bzip2` |
+| LZ4 | `decompression-lz4` | `lz4` | `Lz4` |
 
 ```rust,no_run
 use open_arrow_access::{
@@ -60,6 +61,21 @@ own module and enable its dependency feature. `DecompressionLayer` and its
 accessor/reader adapters remain shared. The `CompressedInput`/`DecodedInput`
 aliases expose the futures I/O boundary without coupling a codec to storage,
 Arrow or a closed core compression enumeration.
+
+## Bzip2 members
+
+Bzip2 uses `async-compression`'s `BzDecoder` with multi-member decoding, matching
+ml-infra's existing compression adapter. Concatenated members, including empty
+members, are decoded in order. Invalid headers, truncated members, checksum
+failures and non-bzip2 trailing bytes produce terminal decode errors. Empty
+compressed input is invalid; a valid empty member yields EOF. As with gzip,
+checksum validation completes only when the consumer reads through EOF.
+
+Use `DecompressionLayer::new(Bzip2)` with the same byte-layer API. Bzip2 codec
+state includes a compression block, so bounded output chunks do not bound total
+memory or guarantee that compressed input consumption stops within one output
+chunk. The decoder is pull-based and does not collect whole objects or create
+background tasks.
 
 ## LZ4 frames
 

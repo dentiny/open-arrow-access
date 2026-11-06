@@ -96,14 +96,14 @@ for TSV.
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas and incremental Arrow decoding |
 | `dataset/` | Reserved; no directory or multi-file scan yet |
 | `service/` | Reserved; no Hugging Face or other source adapter yet |
-| `decompression/` | Streaming gzip and LZ4 byte layers with concatenated-frame support |
+| `decompression/` | Streaming gzip, LZ4, and bzip2 byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
 
 Default features are empty. Only implemented capabilities have Cargo feature
 names. Parquet page compression currently supports uncompressed and Snappy
-pages through the Parquet dependency. External gzip and LZ4 decoding are separately
-enabled by `decompression-gzip` and `decompression-lz4`; see [streaming decompression](decompression/README.md).
+pages through the Parquet dependency. External gzip, LZ4, and bzip2 decoding are separately
+enabled by `decompression-gzip`, `decompression-lz4`, and `decompression-bz2`; see [streaming decompression](decompression/README.md).
 It produces sequential bytes and cannot directly satisfy Parquet's range reads.
 Parallel reads and unordered emission are not implemented.
 
