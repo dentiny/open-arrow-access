@@ -97,6 +97,7 @@ for TSV.
 | `dataset/` | Reserved; no directory or multi-file scan yet |
 | `service/` | Reserved; no Hugging Face or other source adapter yet |
 | `decompression/` | Streaming gzip byte layer with concatenated-member support |
+| `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
 
 Default features are empty. Only implemented capabilities have Cargo feature

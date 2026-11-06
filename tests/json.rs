@@ -17,9 +17,7 @@ use open_arrow_access::{
     file_format::JsonAccessor,
 };
 
-mod common;
-
-use common::{MemoryAccessor, Observations};
+use open_arrow_access_test_support::{MemoryAccessor, Observations};
 
 fn schema() -> SchemaRef {
     Arc::new(Schema::new_with_metadata(
@@ -181,8 +179,8 @@ async fn malformed_truncated_and_non_object_inputs_fail_terminally() {
 
 #[tokio::test]
 async fn io_errors_keep_their_category_after_a_successful_batch() {
-    let (mut input, observed) = fixture("io-failure.jsonl", 9);
-    input.fail_after = Some(9);
+    let (input, observed) = fixture("io-failure.jsonl", 9);
+    let input = input.with_failure(9, ErrorKind::Io);
     let accessor = JsonAccessor::new(input, schema());
     let mut reader = accessor.open(request(1, None)).await.unwrap();
     assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);

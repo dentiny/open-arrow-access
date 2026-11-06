@@ -2,7 +2,7 @@ mod common;
 
 use std::{error::Error as _, num::NonZeroUsize};
 
-use common::{MemoryAccessor, collect, fixture};
+use common::{collect, fixture};
 use futures::TryStreamExt;
 use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{
@@ -10,6 +10,7 @@ use open_arrow_access_core::{
     Result,
 };
 use open_arrow_access_decompression::{DecompressionLayer, Gzip};
+use open_arrow_access_test_support::MemoryAccessor;
 
 #[tokio::test]
 async fn members_preserve_order_and_output_chunk_limit() -> Result<()> {
@@ -39,13 +40,17 @@ async fn layer_preserves_metadata_options_and_listing_but_removes_ranges() -> Re
         io_concurrency: NonZeroUsize::new(4).unwrap(),
         io_chunk_size: NonZeroUsize::new(17),
     };
-    let mut input = MemoryAccessor::new(&fixture("gzip", "payload.gz"), 2);
-    input.expected_options = Some(options);
+    let input = MemoryAccessor::new(&fixture("gzip", "payload.gz"), 2)
+        .with_ranges()
+        .with_listing()
+        .with_version("source-version");
+    let observed = input.observations.clone();
     let accessor = input.layer(DecompressionLayer::new(Gzip));
     let mut reader = accessor
         .open(ByteReadRequest::new("data.gz").with_options(options))
         .await
         .unwrap();
+    assert_eq!(observed.requests.lock().unwrap()[0].options, options);
     let capability = accessor.capability();
     assert!(capability.read && capability.list && !capability.read_with_range);
     assert!(!reader.capability().list && !reader.capability().read_with_range);
@@ -82,18 +87,17 @@ async fn invalid_gzip_is_terminal() -> Result<()> {
     ] {
         let bytes = fixture("gzip", name);
         let input = MemoryAccessor::new(&bytes, 2);
-        let reads = input.reads.clone();
+        let observed = input.observations.clone();
         let accessor = input.layer(DecompressionLayer::new(Gzip));
         let mut reader = accessor.open("bad.gz".into()).await?;
-        common::assert_terminal_error(reader.as_mut(), &reads, ErrorKind::Decode).await;
+        common::assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Decode).await;
     }
     Ok(())
 }
 
 #[tokio::test]
 async fn source_errors_are_lazy_and_preserved() -> Result<()> {
-    let mut input = MemoryAccessor::new(&[], 1);
-    input.error = Some(ErrorKind::PermissionDenied);
+    let input = MemoryAccessor::new(&[], 1).with_failure(0, ErrorKind::PermissionDenied);
     let accessor = input.layer(DecompressionLayer::new(Gzip));
     let mut reader = accessor.open("source.gz".into()).await?;
     let error = reader.next().await.unwrap_err();
