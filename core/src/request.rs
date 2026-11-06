@@ -1,4 +1,6 @@
-use std::num::NonZeroUsize;
+use std::{collections::HashSet, num::NonZeroUsize, sync::Arc};
+
+use crate::{Error, ErrorKind, Result, SchemaRef};
 
 /// An opaque object locator interpreted by an accessor, not by a format reader.
 /// Filesystem accessors interpret this as a path relative to their configured root.
@@ -96,6 +98,43 @@ pub struct ReadOptions {
     /// Top-level fields in the requested output order. None selects every field.
     /// An empty projection preserves row counts with zero columns.
     pub projection: Option<Vec<String>>,
+}
+
+impl ReadOptions {
+    /// Resolve the output schema and selected top-level indices in caller order.
+    /// None retains the original schema; an empty projection retains only row counts.
+    /// Unknown or duplicate field names return InvalidInput.
+    pub fn resolve_projection(
+        &self,
+        schema: &SchemaRef,
+    ) -> Result<(SchemaRef, Option<Vec<usize>>)> {
+        let Some(columns) = &self.projection else {
+            return Ok((schema.clone(), None));
+        };
+        let mut seen = HashSet::new();
+        let mut indices = Vec::with_capacity(columns.len());
+        for name in columns {
+            if !seen.insert(name) {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "project",
+                    format!("duplicate field {name:?}"),
+                ));
+            }
+            indices.push(schema.index_of(name).map_err(|error| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    "project",
+                    format!("unknown field {name:?}"),
+                )
+                .with_source(error)
+            })?);
+        }
+        let projected = schema.project(&indices).map_err(|error| {
+            Error::new(ErrorKind::InvalidInput, "project", error.to_string()).with_source(error)
+        })?;
+        Ok((Arc::new(projected), Some(indices)))
+    }
 }
 
 impl Default for ReadOptions {

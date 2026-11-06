@@ -1,5 +1,3 @@
-use std::{collections::HashSet, sync::Arc};
-
 use arrow_csv::ReaderBuilder;
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ReadRequest,
@@ -56,33 +54,11 @@ where
                 "CSV requires an input schema with at least one field",
             ));
         }
-        let mut schema = self.schema.clone();
+        let (schema, projection) = request.options.resolve_projection(&self.schema)?;
         let mut builder = ReaderBuilder::new(self.schema.clone())
             .with_format(self.format.clone())
             .with_batch_size(request.options.batch_size.get());
-        if let Some(columns) = request.options.projection.as_ref() {
-            let mut seen = HashSet::new();
-            let mut indices = Vec::with_capacity(columns.len());
-            for name in columns {
-                if !seen.insert(name) {
-                    return Err(Error::new(
-                        ErrorKind::InvalidInput,
-                        "project",
-                        format!("duplicate field {name:?}"),
-                    ));
-                }
-                indices.push(self.schema.index_of(name).map_err(|error| {
-                    Error::new(
-                        ErrorKind::InvalidInput,
-                        "project",
-                        format!("unknown field {name:?}"),
-                    )
-                    .with_source(error)
-                })?);
-            }
-            schema = Arc::new(self.schema.project(&indices).map_err(|error| {
-                Error::new(ErrorKind::InvalidInput, "project", error.to_string()).with_source(error)
-            })?);
+        if let Some(indices) = projection {
             builder = builder.with_projection(indices);
         }
         let input = self
