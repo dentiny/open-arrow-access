@@ -1,12 +1,12 @@
-#![cfg(feature = "format-json")]
-
 use std::{
     num::NonZeroUsize,
+    path::PathBuf,
     sync::{Arc, atomic::Ordering},
 };
 
 use arrow_array::{Array, Int64Array, StringArray};
 use arrow_schema::{DataType, Field, Schema};
+use more_asserts::assert_lt;
 use open_arrow_access::{
     Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
     file_format::JsonAccessor,
@@ -26,8 +26,19 @@ fn schema() -> SchemaRef {
     ))
 }
 
-fn fixture(data: &str, chunk_size: usize) -> (MemoryAccessor, Arc<Observations>) {
-    let input = MemoryAccessor::new(data.as_bytes(), chunk_size);
+fn fixture_path(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata/json")
+        .join(name)
+}
+
+fn fixture_data(name: &str) -> Vec<u8> {
+    let path = fixture_path(name);
+    std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+}
+
+fn fixture(name: &str, chunk_size: usize) -> (MemoryAccessor, Arc<Observations>) {
+    let input = MemoryAccessor::new(&fixture_data(name), chunk_size);
     let observations = input.observations.clone();
     (input, observations)
 }
@@ -50,9 +61,8 @@ fn ids(batch: &RecordBatch) -> &[i64] {
 
 #[tokio::test]
 async fn fragmented_json_objects_preserve_values_schema_and_batch_order() {
-    let data = "{\"id\":0,\"title\":\"雪\\nline\",\"ignored\":{\"x\":[1,2]}}\r\n\n{\"id\":1,\"title\":null} {\n\"id\":2\n}\n{\"id\":3,\"title\":\"last\"}";
     for chunk_size in [1, 7, 4096] {
-        let (input, _) = fixture(data, chunk_size);
+        let (input, _) = fixture("good.json", chunk_size);
         let accessor = JsonAccessor::new(input, schema());
         let mut reader = accessor.open(request(2, None)).await.unwrap();
         assert_eq!(reader.metadata().schema, schema());
@@ -81,7 +91,7 @@ async fn fragmented_json_objects_preserve_values_schema_and_batch_order() {
 #[tokio::test]
 async fn projection_preserves_requested_order_metadata_and_zero_column_row_counts() {
     for projection in [vec!["title", "id"], vec![]] {
-        let (input, _) = fixture("{\"id\":1,\"title\":\"one\"}\n{\"id\":2}", 3);
+        let (input, _) = fixture("projection.jsonl", 3);
         let accessor = JsonAccessor::new(input, schema());
         let mut reader = accessor
             .open(request(1, Some(projection.clone())))
@@ -112,7 +122,7 @@ async fn projection_preserves_requested_order_metadata_and_zero_column_row_count
 
 #[tokio::test]
 async fn invalid_projection_fails_before_opening_bytes() {
-    let (input, observed) = fixture("", 1);
+    let (input, observed) = fixture("empty.json", 1);
     let accessor = JsonAccessor::new(input, schema());
     for projection in [vec!["missing"], vec!["id", "id"]] {
         let error = accessor
@@ -127,32 +137,33 @@ async fn invalid_projection_fails_before_opening_bytes() {
 
 #[tokio::test]
 async fn malformed_truncated_and_non_object_inputs_fail_terminally() {
-    for data in [
-        "[]",
-        "[{}]",
-        "null",
-        "1",
-        "true",
-        "\"text\"",
-        "{\"id\":",
-        "{\"id\":1",
-        "{\"id\":1} trailing",
-        "{\"id\":\"bad\"}",
+    for name in [
+        "bad-empty-array.json",
+        "bad-object-array.json",
+        "bad-null.json",
+        "bad-number.json",
+        "bad-boolean.json",
+        "bad-string.json",
+        "bad-truncated-value.json",
+        "bad-truncated-object.json",
+        "bad-trailing.json",
+        "bad-type.json",
+        "bad-utf8.json",
     ] {
         for projection in [None, Some(vec![])] {
-            // A projected-away field's value type is deliberately not checked.
-            if data == "{\"id\":\"bad\"}" && projection.is_some() {
+            // A projected-away field's value is deliberately not decoded.
+            if matches!(name, "bad-type.json" | "bad-utf8.json") && projection.is_some() {
                 continue;
             }
-            let (input, observed) = fixture(data, 1);
+            let (input, observed) = fixture(name, 1);
             let accessor = JsonAccessor::new(input, schema());
             let mut reader = accessor.open(request(10, projection)).await.unwrap();
             let error = reader
                 .next()
                 .await
                 .err()
-                .unwrap_or_else(|| panic!("accepted {data:?}"));
-            assert_eq!(error.kind(), ErrorKind::Decode, "{data:?}");
+                .unwrap_or_else(|| panic!("accepted {name}"));
+            assert_eq!(error.kind(), ErrorKind::Decode, "{name}");
             let reads = observed.reads.load(Ordering::SeqCst);
             assert!(reader.next().await.unwrap().is_none());
             assert_eq!(observed.reads.load(Ordering::SeqCst), reads);
@@ -162,8 +173,7 @@ async fn malformed_truncated_and_non_object_inputs_fail_terminally() {
 
 #[tokio::test]
 async fn io_errors_keep_their_category_after_a_successful_batch() {
-    let data = "{\"id\":1}\n{\"id\":2}";
-    let (mut input, observed) = fixture(data, 9);
+    let (mut input, observed) = fixture("io-failure.jsonl", 9);
     input.fail_after = Some(9);
     let accessor = JsonAccessor::new(input, schema());
     let mut reader = accessor.open(request(1, None)).await.unwrap();
@@ -178,7 +188,7 @@ async fn io_errors_keep_their_category_after_a_successful_batch() {
 
 #[tokio::test]
 async fn per_open_options_are_forwarded_and_sequential_bytes_are_sufficient() {
-    let (input, observed) = fixture("{\"id\":1}", 1);
+    let (input, observed) = fixture("single.json", 1);
     let accessor = JsonAccessor::new(input, schema());
     assert!(accessor.capability().read);
     assert!(!accessor.capability().read_with_range);
@@ -197,15 +207,14 @@ async fn per_open_options_are_forwarded_and_sequential_bytes_are_sufficient() {
 
 #[tokio::test]
 async fn reading_a_batch_does_not_collect_the_entire_input() {
-    let data = (0..100)
-        .map(|id| format!("{{\"id\":{id}}}\n"))
-        .collect::<String>();
-    let (input, observed) = fixture(&data, 1);
+    let data = fixture_data("many.jsonl");
+    let input = MemoryAccessor::new(&data, 1);
+    let observed = input.observations.clone();
     let accessor = JsonAccessor::new(input, schema());
     let mut reader = accessor.open(request(2, None)).await.unwrap();
     assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
     assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [0, 1]);
-    assert!(observed.reads.load(Ordering::SeqCst) < data.len());
+    assert_lt!(observed.reads.load(Ordering::SeqCst), data.len());
     let reads = observed.reads.load(Ordering::SeqCst);
     drop(reader);
     assert_eq!(observed.reads.load(Ordering::SeqCst), reads);
@@ -213,8 +222,8 @@ async fn reading_a_batch_does_not_collect_the_entire_input() {
 
 #[tokio::test]
 async fn empty_and_whitespace_only_inputs_have_no_rows() {
-    for data in ["", "\r\n \t"] {
-        let (input, observed) = fixture(data, 1);
+    for name in ["empty.json", "whitespace.json"] {
+        let (input, observed) = fixture(name, 1);
         let accessor = JsonAccessor::new(input, schema());
         let mut reader = accessor.open(request(1, None)).await.unwrap();
         assert!(reader.next().await.unwrap().is_none());
@@ -227,16 +236,14 @@ async fn empty_and_whitespace_only_inputs_have_no_rows() {
 #[cfg(feature = "storage-fs")]
 #[tokio::test]
 async fn local_jsonl_reads_through_opendal() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("data.jsonl"), b"{\"id\":1}\n{\"id\":2}\n").unwrap();
-    let storage = open_arrow_access::storage::FsAccessor::new(dir.path())
+    let storage = open_arrow_access::storage::FsAccessor::new(fixture_path(""))
         .await
         .unwrap();
     let accessor = JsonAccessor::new(
         storage.with_chunk_size(NonZeroUsize::new(2).unwrap()),
         schema(),
     );
-    let mut reader = accessor.open(ReadRequest::new("data.jsonl")).await.unwrap();
+    let mut reader = accessor.open(ReadRequest::new("good.jsonl")).await.unwrap();
     assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1, 2]);
     assert!(reader.next().await.unwrap().is_none());
 }
