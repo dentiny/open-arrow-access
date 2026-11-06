@@ -176,5 +176,4 @@ The library exposes no writer or sink API.
 
 Enable `format-warc` for ordered physical WARC records using the existing
 [warc-rs](https://github.com/dentiny/warc-rs) parser and the fixed 20-column
-ml-infra schema. See [WARC](docs/warc.md) for projection, compression and memory
-semantics.
+ml-infra schema.
