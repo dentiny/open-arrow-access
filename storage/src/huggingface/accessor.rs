@@ -94,18 +94,29 @@ fn validate_path(path: &str, directory: bool) -> Result<()> {
     } else {
         path
     };
-    if (components.is_empty() && !(directory && path.is_empty()))
-        || path.trim() != path
-        || components
-            .split('/')
-            .any(|part| part == "." || part == ".." || (!components.is_empty() && part.is_empty()))
-        || path.contains(['\\', '\0'])
+    let operation = if directory { "list" } else { "open" };
+    let invalid_path = |message| Error::new(ErrorKind::InvalidInput, operation, message);
+
+    if components.is_empty() && !(directory && path.is_empty()) {
+        return Err(invalid_path("path must not be empty"));
+    }
+
+    if path.trim() != path {
+        return Err(invalid_path("path must not have surrounding whitespace"));
+    }
+
+    if components
+        .split('/')
+        .any(|part| part == "." || part == ".." || (!components.is_empty() && part.is_empty()))
     {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            if directory { "list" } else { "open" },
-            "expected a root-relative path without empty/dot components or surrounding whitespace",
+        return Err(invalid_path(
+            "path must not contain empty or dot components",
         ));
     }
+
+    if path.contains(['\\', '\0']) {
+        return Err(invalid_path("path must not contain backslashes or NUL"));
+    }
+
     Ok(())
 }
