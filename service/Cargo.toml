@@ -11,7 +11,7 @@ default = []
 huggingface = [
     "dep:open-arrow-access-storage", "open-arrow-access-storage/opendal",
     "dep:opendal", "opendal/services-hf", "opendal/http-transport-reqwest",
-    "dep:tokio", "dep:http", "dep:url",
+    "dep:tokio", "dep:http", "dep:serde", "dep:serde_json", "dep:url", "dep:glob",
 ]
 
 [dependencies]
@@ -20,10 +20,12 @@ open-arrow-access-storage = { workspace = true, optional = true }
 opendal = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 http = { version = "1", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 url = { version = "2", optional = true }
+glob = { version = "0.3", optional = true }
 
 [dev-dependencies]
-serde_json = "1"
 tokio = { workspace = true, features = ["sync", "time"] }
 futures.workspace = true
 arrow-array.workspace = true

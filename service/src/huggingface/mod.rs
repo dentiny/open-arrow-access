@@ -1,13 +1,17 @@
-//! Hugging Face repository access with provider-owned connection settings.
-//! File reads compose with shared byte and format contracts.
+//! Revision-aware discovery of dataset-card file configurations.
+//!
+//! Services own repository/config/split selection. OpenDAL remains the internal
+//! file transport; format accessors consume the resolved byte accessor unchanged.
 
 mod accessor;
 mod client;
 mod options;
+mod resolver;
 
 pub use accessor::HuggingFaceAccessor;
 pub use client::HuggingFaceService;
 pub use options::{HuggingFaceOptions, HuggingFaceRepository};
+pub use resolver::{HuggingFaceDataset, HuggingFaceSelection};
 
 use open_arrow_access_core::{Error, ErrorKind};
 

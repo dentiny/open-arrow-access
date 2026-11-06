@@ -11,7 +11,8 @@ use super::map_error;
 
 /// Read repository-relative files through OpenDAL's Hugging Face service.
 ///
-/// Obtain this from `HuggingFaceService::repository` for explicit files.
+/// Obtain this from `HuggingFaceService::repository` for explicit files or
+/// `HuggingFaceService::resolve` for a pinned config/split selection.
 /// Direct branch reads are not snapshots.
 #[derive(Clone, Debug)]
 pub struct HuggingFaceAccessor {

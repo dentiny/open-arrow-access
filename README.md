@@ -61,16 +61,63 @@ requests.
 `FsAccessor::with_chunk_size` controls sequential output chunk size, while
 `ReadOptions::batch_size` controls Arrow rows per batch.
 
-Enable `service-huggingface` for dataset repository file access. The provider
-owns repository ID, revision, root, authentication and HTTP/Xet settings through
-`HuggingFaceService`, `HuggingFaceOptions` and `HuggingFaceRepository`.
-`service.repository(HuggingFaceRepository::new(id).with_revision(revision))`
-returns a byte accessor with single-file and recursive directory access.
-Branch-based reads are not snapshots. The OpenDAL builder stays internal.
+Enable `service-huggingface` for repository access and revision/config/split
+resolution. The service reads explicitly declared dataset-card `data_files`
+(paths, lists and globs, with optional `data_dir`) and pins the selected revision
+to a commit. It returns ordered, deduplicated `ObjectRef`s plus a byte accessor
+that composes with existing format readers:
 
-Enable `format-parquet` and wrap the returned byte accessor in our
-`ParquetAccessor` to interpret Parquet and produce Arrow batches. Config/split
-resolution is implemented in the dependent dataset-discovery PR.
+```rust
+use open_arrow_access::service::{HuggingFaceOptions, HuggingFaceSelection, HuggingFaceService};
+
+let service = HuggingFaceService::new(HuggingFaceOptions::default()).await?;
+let dataset = service.resolve(HuggingFaceSelection::new(
+    "datasets-examples/doc-yaml-3", "default", "train",
+)).await?;
+// dataset.commit pins both discovery and subsequent file reads.
+// dataset.objects contains data/abc.csv and data/edf.csv.
+// Pass dataset.accessor and an object to an existing format accessor.
+```
+
+`service.repository(HuggingFaceRepository::new(id).with_revision(revision))`
+provides explicit single-file reads and recursive directory listing without
+config/split resolution. Branch-based direct reads are not snapshots.
+Authentication accepts an explicit token or the HF environment/cache conventions.
+Metadata and file requests use the same connection settings; HTTP/Xet downloads
+remain delegated to OpenDAL. No OpenDAL builder is part of the service API.
+
+The resolver supports native repository file declarations. It returns Unsupported
+for inferred/script-based layouts and does not substitute Dataset Viewer exports
+for a requested revision. Missing declared files fail rather than returning a
+partial selection. Metadata discovery is limited to 32 MiB; multi-file Arrow
+scans remain in the separate dataset workstream.
+
+Run the public-Hub example with
+`cargo run --example resolve_huggingface --features service-huggingface`.
+
+## JSON and JSONL
+
+Enable `format-json` and construct `file_format::JsonAccessor::new(bytes, schema)`
+with a fixed `SchemaRef`, then open it with the same `ReadRequest` used for
+Parquet. `bytes` can be any sequential byte accessor; range reads and a known
+length are unnecessary. Use `storage-fs,format-json` for local files.
+
+The reader uses Arrow JSON's incremental decoder for whitespace-separated JSON
+objects, including JSONL and pretty-printed object streams. Top-level arrays
+are not flattened into rows; arrays, null and scalar records are rejected.
+Empty or whitespace-only input emits no rows. Schema inference is not performed.
+Missing nullable fields become null and unknown fields are ignored; projected
+fields are decoded in the requested order. An empty projection retains row counts.
+The supplied schema, including metadata, is fixed before reading any bytes.
+
+Rows are decoded incrementally up to the requested batch size. Parsing follows
+Arrow JSON 59.3.0's permissive semantics; this adapter does not
+add a strict JSON validator. Errors reported by the decoder, including truncated
+records, terminate the reader with a decode error. Input I/O failures retain
+their original category. Memory includes one upstream chunk and the decoder's
+current batch; batch size does not bound the size of a single record.
+
+## CSV and TSV
 
 Enable `format-csv` for CSV/TSV with an explicit schema. `CsvAccessor` consumes
 sequential byte readers and reuses Arrow CSV's incremental decoder. Configure
@@ -85,7 +132,7 @@ for TSV.
 | `storage/` | OpenDAL Fs and reusable generic byte I/O, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas and incremental Arrow decoding |
 | `dataset/` | Reserved; no directory or multi-file scan yet |
-| `service/` | Hugging Face repository file access; dataset discovery follows separately |
+| `service/` | Hugging Face repository/revision/config/split resolution and file access |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |

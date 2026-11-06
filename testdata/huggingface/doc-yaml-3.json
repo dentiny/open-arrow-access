@@ -1,0 +1,17 @@
+{
+  "sha": "2bb86c4a45b9e98af9e95d8c1ce76e3b7578218f",
+  "cardData": {
+    "configs": [{"config_name": "default", "data_files": [
+      {"split": "train", "path": "data/*.csv"},
+      {"split": "test", "path": "holdout/*.csv"}
+    ]}],
+    "size_categories": ["n<1K"]
+  },
+  "siblings": [
+    {"rfilename": ".gitattributes"},
+    {"rfilename": "README.md"},
+    {"rfilename": "data/abc.csv"},
+    {"rfilename": "data/edf.csv"},
+    {"rfilename": "holdout/ghi.csv"}
+  ]
+}

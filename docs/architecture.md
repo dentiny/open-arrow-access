@@ -110,7 +110,7 @@ contract without a closed enum of every source or format.
 | Parquet format | `ReadRequest` | `dyn RecordReader` |
 | JSON object stream | `ReadRequest`; schema configured on accessor | Record reader |
 | Future directory dataset | Directory selection and options | Record reader |
-| Hugging Face file access | `ByteReadRequest` | `dyn ByteReader` |
+| Hugging Face service | Repository/revision/config/split selection | Commit-pinned object discovery and byte accessor |
 
 `Arc<dyn ByteAccessor>` supports application-owned backend injection. Optional
 `ByteAccessor::list` defaults to Unsupported and is not implemented by the
@@ -131,13 +131,20 @@ reads share an executor budget allocated per opened reader, so interleaving the
 two paths does not multiply in-flight I/O. Contiguous output fragments are sliced
 without copying; fragmented output is assembled only when needed.
 
-The optional `service-huggingface` provider owns repository, revision, root,
-authentication and connection settings. `HuggingFaceService::repository` creates
-an OpenDAL HF operator internally and reuses `storage::OpenDalAccessor` for stat,
-recursive file discovery and byte reads. Existing format accessors consume those
-shared byte contracts. The OpenDAL builder is not part of the provider API.
-Floating revisions do not imply snapshots. Config/split discovery is added in
-the dependent dataset-resolution PR.
+The optional `service-huggingface` provider owns repository, revision, config
+and split selection. It reads the selected revision's Hub metadata, expands
+explicit dataset-card `data_files` patterns against the returned manifest, and
+binds file reads to that response's commit SHA. Pattern order is retained,
+matches within patterns are sorted, and duplicates are removed. Missing patterns
+fail instead of silently returning partial data. Explicit repository file access
+is also available, without claiming snapshots for floating revisions.
+
+The service constructs OpenDAL HF operators internally and reuses
+`storage::OpenDalAccessor` for stat, recursive listing and byte reads. The generic
+storage crate contains no Hugging Face semantics or feature. OpenDAL's builder
+is not exported by the service. Native declared files are supported; scripts,
+inferred layouts and Viewer conversions are not substituted for a requested
+revision. Multi-file record composition remains in the dataset workstream.
 
 ## Layer
 

@@ -87,6 +87,10 @@ name = "reading"
 required-features = ["storage-fs", "format-parquet"]
 
 [[example]]
+name = "resolve_huggingface"
+required-features = ["service-huggingface"]
+
+[[example]]
 name = "read_parquet"
 required-features = ["storage-fs", "format-parquet"]
 
