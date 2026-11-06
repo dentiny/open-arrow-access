@@ -6,7 +6,8 @@ use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, Result};
 use open_arrow_access_decompression::{DecompressionLayer, Zstd};
 
-use common::{MemoryAccessor, collect, fixture};
+use common::{collect, fixture};
+use open_arrow_access_test_support::MemoryAccessor;
 
 #[tokio::test]
 async fn concatenated_empty_and_skippable_frames_preserve_order_with_bounded_output() -> Result<()>
@@ -38,10 +39,10 @@ async fn empty_frames_are_valid_but_empty_input_is_not() -> Result<()> {
         assert!(reader.next().await?.is_none());
     }
     let input = MemoryAccessor::new(&fixture("zstd", "bad_empty.zst"), 1);
-    let reads = input.reads.clone();
+    let observed = input.observations.clone();
     let accessor = input.layer(DecompressionLayer::new(Zstd));
     let mut reader = accessor.open("missing-header.zst".into()).await?;
-    common::assert_terminal_error(reader.as_mut(), &reads, ErrorKind::Decode).await;
+    common::assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Decode).await;
     Ok(())
 }
 
@@ -58,21 +59,22 @@ async fn corruption_truncation_and_trailing_junk_are_terminal_errors() -> Result
     ] {
         let bytes = fixture("zstd", name);
         let memory = MemoryAccessor::new(&bytes, 1);
-        let reads = memory.reads.clone();
+        let observed = memory.observations.clone();
         let mut reader = memory
             .layer(DecompressionLayer::new(Zstd))
             .open("invalid.zst".into())
             .await
             .unwrap();
-        common::assert_terminal_error(reader.as_mut(), &reads, ErrorKind::Decode).await;
+        common::assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Decode).await;
     }
     Ok(())
 }
 
 #[tokio::test]
 async fn source_errors_are_preserved() -> Result<()> {
-    let mut input = MemoryAccessor::new(&fixture("zstd", "payload.zst"), 2);
-    input.error = Some(ErrorKind::PermissionDenied);
+    let bytes = fixture("zstd", "payload.zst");
+    let input =
+        MemoryAccessor::new(&bytes, 2).with_failure(bytes.len(), ErrorKind::PermissionDenied);
     let accessor = input.layer(DecompressionLayer::new(Zstd));
     let mut reader = accessor.open("source.zstd".into()).await?;
     assert_eq!(
