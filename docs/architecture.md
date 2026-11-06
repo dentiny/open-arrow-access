@@ -204,6 +204,5 @@ the committed lockfile preserves resolved versions, including transitive family 
 The optional service delegates origin-root-relative `warc.paths.gz` discovery to
 an explicitly decoded byte accessor, then reads the selected segment through
 FileSet and a supplied format accessor. It preserves manifest file order and
-canonical path spelling; HTTP access uses OpenDAL. See
-[Common Crawl segments](commoncrawl.md). The generic storage operator adapter
+canonical path spelling; HTTP access uses OpenDAL.  The generic storage operator adapter
 also accepts caller-configured OpenDAL operators behind `storage-opendal`.
