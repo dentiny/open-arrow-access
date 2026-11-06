@@ -6,7 +6,8 @@ use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, Result};
 use open_arrow_access_decompression::{Bzip2, DecompressionLayer};
 
-use common::{MemoryAccessor, collect, fixture};
+use common::{collect, fixture};
+use open_arrow_access_test_support::MemoryAccessor;
 
 #[tokio::test]
 async fn concatenated_members_preserve_order_with_fragmented_input_and_bounded_output() -> Result<()>
@@ -46,21 +47,22 @@ async fn invalid_truncated_checksum_and_trailing_input_fail_terminally() -> Resu
     ] {
         let bytes = fixture("bz2", name);
         let input = MemoryAccessor::new(&bytes, 1);
-        let reads = input.reads.clone();
+        let observed = input.observations.clone();
         let mut reader = input
             .layer(DecompressionLayer::new(Bzip2))
             .open("bad.bz2".into())
             .await
             .unwrap();
-        common::assert_terminal_error(reader.as_mut(), &reads, ErrorKind::Decode).await;
+        common::assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Decode).await;
     }
     Ok(())
 }
 
 #[tokio::test]
 async fn source_errors_are_preserved() -> Result<()> {
-    let mut input = MemoryAccessor::new(&fixture("bz2", "payload.bz2"), 2);
-    input.error = Some(ErrorKind::PermissionDenied);
+    let bytes = fixture("bz2", "payload.bz2");
+    let input =
+        MemoryAccessor::new(&bytes, 2).with_failure(bytes.len(), ErrorKind::PermissionDenied);
     let accessor = input.layer(DecompressionLayer::new(Bzip2));
     let mut reader = accessor.open("source.bz2".into()).await?;
     assert_eq!(
