@@ -80,6 +80,10 @@ tempfile.workspace = true
 tokio.workspace = true
 
 [[test]]
+name = "commoncrawl"
+required-features = ["service-commoncrawl"]
+
+[[test]]
 name = "directory"
 required-features = ["dataset-directory"]
 

@@ -1,5 +1,3 @@
-#![cfg(feature = "service-commoncrawl")]
-
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
@@ -21,6 +19,13 @@ use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext
 
 const PREFIX: &str = "crawl-data/CC-MAIN-2022-40/segments/1664030338280.51/warc/";
 const MANIFEST: &str = "crawl-data/CC-MAIN-2022-40/warc.paths.gz";
+
+fn fixture(name: &str) -> Bytes {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata/commoncrawl")
+        .join(name);
+    Bytes::from(std::fs::read(path).unwrap())
+}
 
 fn request() -> CommonCrawlSegmentRequest {
     CommonCrawlSegmentRequest::new("CC-MAIN-2022-40", "1664030338280.51").unwrap()
@@ -215,12 +220,7 @@ fn segment_selection_accepts_example_and_rejects_url_aliases() {
 
 #[tokio::test]
 async fn manifest_resolves_exact_segment_in_original_order_with_forwarded_options() {
-    let text = format!(
-        "{}\r\n\ncrawl-data/CC-MAIN-2022-40/segments/1664030338280.510/warc/other.warc.gz\n{}",
-        entry("z"),
-        entry("a")
-    );
-    let manifests = Manifest::fragmented(text, 1);
+    let manifests = Manifest::fragmented(fixture("good.paths"), 1);
     let records = Records::default();
     let opens = records.opens.clone();
     let manifest_opens = manifests.opens.clone();
@@ -264,10 +264,10 @@ async fn manifest_resolves_exact_segment_in_original_order_with_forwarded_option
 
 #[tokio::test]
 async fn projection_and_final_reader_errors_keep_shared_contracts() {
-    let text = format!("{}\n{}\n{}\n", entry("first"), entry("bad"), entry("last"));
+    let input = fixture("error_sequence.paths");
     let records = Records::default();
     let opens = records.opens.clone();
-    let accessor = CommonCrawlSegmentAccessor::new(Manifest::fragmented(text, 7), records);
+    let accessor = CommonCrawlSegmentAccessor::new(Manifest::fragmented(input, 7), records);
     let mut reader = accessor
         .open(request().with_options(ReadOptions {
             projection: Some(vec![]),
@@ -286,21 +286,21 @@ async fn projection_and_final_reader_errors_keep_shared_contracts() {
 
 #[tokio::test]
 async fn malformed_alias_duplicate_and_oversized_manifest_lines_fail_before_file_opens() {
-    let invalid = [
-        format!("{}\n{}\n", entry("a"), entry("a")),
-        format!("{PREFIX}../warc/a.warc.gz\n"),
-        format!(" {PREFIX}a.warc.gz\n"),
-        format!("/{PREFIX}a.warc.gz\n"),
-        format!("https://evil.invalid/{PREFIX}a.warc.gz\n"),
-        format!("{PREFIX}a.warc.gz?query=1\n"),
-        format!("{PREFIX}%61.warc.gz\n"),
-        format!("{PREFIX}a.txt\n"),
-        "x".repeat(16 * 1024 + 1),
-    ];
-    for text in invalid {
+    for name in [
+        "duplicate.paths",
+        "bad_traversal.paths",
+        "bad_leading_space.paths",
+        "bad_absolute.paths",
+        "bad_origin.paths",
+        "bad_query.paths",
+        "bad_encoding.paths",
+        "bad_suffix.paths",
+        "bad_oversized.paths",
+    ] {
         let records = Records::default();
         let opens = records.opens.clone();
-        let accessor = CommonCrawlSegmentAccessor::new(Manifest::fragmented(text, 19), records);
+        let accessor =
+            CommonCrawlSegmentAccessor::new(Manifest::fragmented(fixture(name), 19), records);
         assert_eq!(
             accessor.open(request()).await.err().unwrap().kind(),
             ErrorKind::Decode
@@ -308,7 +308,7 @@ async fn malformed_alias_duplicate_and_oversized_manifest_lines_fail_before_file
         assert!(opens.lock().unwrap().is_empty());
     }
     let accessor = CommonCrawlSegmentAccessor::new(
-        Manifest::fragmented(Bytes::from_static(b"\xff\n"), 1),
+        Manifest::fragmented(fixture("bad_utf8.paths"), 1),
         Records::default(),
     );
     assert_eq!(
@@ -319,19 +319,17 @@ async fn malformed_alias_duplicate_and_oversized_manifest_lines_fail_before_file
 
 #[tokio::test]
 async fn empty_no_match_raw_gzip_and_upstream_errors_are_explicit() {
-    for text in [
-        String::new(),
-        "\n\r\n".to_owned(),
-        "crawl-data/CC-MAIN-2022-40/segments/1664030338280.510/warc/x.warc.gz\n".to_owned(),
-    ] {
-        let accessor =
-            CommonCrawlSegmentAccessor::new(Manifest::fragmented(text, 2), Records::default());
+    for name in ["empty.paths", "blank.paths", "no_match.paths"] {
+        let accessor = CommonCrawlSegmentAccessor::new(
+            Manifest::fragmented(fixture(name), 2),
+            Records::default(),
+        );
         assert_eq!(
             accessor.resolve(request()).await.unwrap_err().kind(),
             ErrorKind::InvalidInput
         );
     }
-    let mut manifests = Manifest::fragmented(entry("a"), 3);
+    let mut manifests = Manifest::fragmented(fixture("one.paths"), 3);
     manifests.fail_after = Some(1);
     let accessor = CommonCrawlSegmentAccessor::new(manifests, Records::default());
     assert_eq!(
@@ -339,7 +337,7 @@ async fn empty_no_match_raw_gzip_and_upstream_errors_are_explicit() {
         ErrorKind::PermissionDenied
     );
     let accessor = CommonCrawlSegmentAccessor::new(
-        Manifest::fragmented(Bytes::from_static(b"\x1f\x8b\x08\x00"), 1),
+        Manifest::fragmented(fixture("raw_manifest.paths.gz"), 1),
         Records::default(),
     );
     assert_eq!(
@@ -417,7 +415,7 @@ impl HttpTransport for MockHttp {
 #[tokio::test]
 async fn public_opendal_adapter_reads_manifest_from_origin_root_through_injected_http() {
     let transport = MockHttp {
-        manifest: Bytes::from(format!("{}\n", entry("a"))),
+        manifest: fixture("one.paths"),
         requests: Arc::default(),
     };
     let calls = transport.requests.clone();
