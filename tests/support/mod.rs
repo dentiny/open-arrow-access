@@ -155,6 +155,7 @@ pub struct Observations {
     pub max_batch_ranges: AtomicUsize,
     pub range_reads: AtomicUsize,
     pub fail_reads: AtomicBool,
+    pub failure_kind: Mutex<Option<ErrorKind>>,
     pub drops: AtomicUsize,
 }
 
@@ -261,10 +262,15 @@ impl ByteReader for ByteObserverReader {
             .fetch_add(ranges.len(), Ordering::SeqCst);
         if self.observations.fail_reads.load(Ordering::SeqCst) {
             return Err(Error::new(
-                ErrorKind::Io,
+                self.observations
+                    .failure_kind
+                    .lock()
+                    .unwrap()
+                    .unwrap_or(ErrorKind::Io),
                 "read_ranges",
                 "injected read failure",
-            ));
+            )
+            .with_source(std::io::Error::other("injected source failure")));
         }
         self.inner.read_ranges(ranges).await
     }
@@ -273,10 +279,15 @@ impl ByteReader for ByteObserverReader {
         self.observations.range_reads.fetch_add(1, Ordering::SeqCst);
         if self.observations.fail_reads.load(Ordering::SeqCst) {
             return Err(Error::new(
-                ErrorKind::Io,
+                self.observations
+                    .failure_kind
+                    .lock()
+                    .unwrap()
+                    .unwrap_or(ErrorKind::Io),
                 "read_range",
                 "injected read failure",
-            ));
+            )
+            .with_source(std::io::Error::other("injected source failure")));
         }
         self.inner.read_range(range).await
     }
