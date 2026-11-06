@@ -45,7 +45,7 @@ impl Accessor for OpenDalAccessor {
         Capability {
             read,
             read_with_range: read,
-            ..Capability::default()
+            list: false,
         }
     }
 
@@ -191,7 +191,7 @@ impl Reader for OpenDalReader {
         Capability {
             read: true,
             read_with_range: true,
-            ..Capability::default()
+            list: false,
         }
     }
 

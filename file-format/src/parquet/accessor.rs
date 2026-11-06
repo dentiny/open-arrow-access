@@ -31,7 +31,8 @@ where
         let input = self.inner.capability();
         Capability {
             read: input.read && input.read_with_range,
-            ..Capability::default()
+            read_with_range: false,
+            list: false,
         }
     }
 
