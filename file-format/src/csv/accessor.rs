@@ -57,8 +57,6 @@ where
             ));
         }
         let (schema, projection) = request.options.resolve_projection(&self.schema)?;
-        // Arrow CSV reports unsupported field types as parse errors at flush time.
-        // Validate selected fields here so configuration failures are not Decode errors.
         for field in schema.fields() {
             if !supported_type(field.data_type()) {
                 return Err(Error::new(

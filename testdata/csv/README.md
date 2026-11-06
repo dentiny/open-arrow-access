@@ -21,11 +21,11 @@ All fixtures use an `id: Int64, title: Utf8` schema.
 Preserve the exact bytes, including line endings, missing final newlines, and
 invalid UTF-8. The local `.gitattributes` disables line-ending conversion.
 
-`tests/csv.rs` loads these files into the memory accessor to control chunk sizes
-and inject I/O failures. With `storage-fs`, it also reads the valid CSV and strict
-invalid files through `FsAccessor` to test the filesystem-to-decoder path.
+`file-format/src/csv/tests.rs` loads these files into the shared memory accessor
+to control chunk sizes and inject I/O failures. Its filesystem composition tests
+use a dev-dependency on `FsAccessor` to read the valid CSV and strict invalid
+files through the filesystem-to-decoder path.
 
 ```sh
-cargo test --locked --features format-csv --test csv
-cargo test --locked --features format-csv,storage-fs --test csv
+cargo test --locked -p open-arrow-access-file-format --no-default-features --features csv csv::tests::
 ```
