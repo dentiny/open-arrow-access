@@ -109,7 +109,7 @@ contract without a closed enum of every source or format.
 | --- | --- | --- |
 | Fs storage | `ByteReadRequest` | `dyn ByteReader` |
 | Parquet format | `ReadRequest` | `dyn RecordReader` |
-| Future JSON format | Typed file request | Record reader |
+| JSON object stream | `ReadRequest`; schema configured on accessor | Record reader |
 | Directory/file-set dataset | Directory or explicit ordered file selection and options | Record reader |
 | Future Hugging Face service | Repository/revision/config/split selection | Record reader or resolved object discovery |
 
@@ -175,6 +175,11 @@ schema and optional reader-context contracts.
 - The facade forwards independent, additive `storage-fs` / `format-parquet`
   features. Features make implementations available; they do not change runtime
   ordering or silently attach layers.
+- `format-json` adds an Arrow JSON decoder with a caller-supplied fixed schema.
+  It reads whitespace-separated objects, including JSONL, from sequential bytes
+  without materializing the input. Top-level arrays/null/scalars are rejected;
+  projection selects the decoder schema before opening input. Byte options pass
+  through the same `ReadRequest` contract as Parquet.
 - `dataset/` provides sequential `FileSetAccessor` and `DirectoryAccessor` behind
   the default-off `dataset-directory` feature, without depending on a format.
 - `service/` provides optional Common Crawl segment discovery through FileSet.

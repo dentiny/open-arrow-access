@@ -32,6 +32,7 @@ opendal = "0.59.2"
 # See docs/dependencies.md when updating this baseline.
 arrow-array = "59.3.0"
 arrow-csv = "59.3.0"
+arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
 async-trait = "0.1.91"
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
@@ -58,6 +59,7 @@ storage-opendal = ["dep:open-arrow-access-storage", "open-arrow-access-storage/o
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
+format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
 format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
 
 [dependencies]
@@ -86,6 +88,10 @@ required-features = ["service-commoncrawl"]
 [[test]]
 name = "directory"
 required-features = ["dataset-directory"]
+
+[[test]]
+name = "json"
+required-features = ["format-json"]
 
 [[test]]
 name = "csv"
