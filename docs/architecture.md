@@ -130,7 +130,7 @@ The optional `storage-huggingface` backend uses OpenDAL's existing Hugging Face
 service and the same byte-reading implementation as Fs. It also exposes
 recursive file discovery. Its SDK builder owns repository/revision/root,
 authentication, endpoint and HTTP/Xet options. Dataset viewer config/split
-resolution remains in the service boundary; see [Hugging Face storage](huggingface.md).
+resolution remains in the service boundary.
 
 ## Layer
 
