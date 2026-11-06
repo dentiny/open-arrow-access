@@ -55,8 +55,42 @@ let request = ReadRequest::new("part.parquet").with_byte_options(ByteReadOptions
 The default I/O concurrency is one; the default I/O splitting size is backend
 defined. These settings preserve byte/record ordering and do not enable the
 future file/partition `ParallelReadLayer`. Each opened reader has its own limit.
+Sequential output reuses one OpenDAL stream; retained prefetch and range reads
+share that reader's I/O budget. Output chunk size does not create extra storage
+requests.
 `FsAccessor::with_chunk_size` controls sequential output chunk size, while
 `ReadOptions::batch_size` controls Arrow rows per batch.
+
+For other OpenDAL backends, depend on `open-arrow-access-storage` and the same
+OpenDAL version directly. Enable upstream features on that dependency; Cargo
+unifies them with storage's OpenDAL dependency. The generic `OpenDalAccessor`
+is always available in the storage crate. For example, a downstream crate can
+expose an `s3` feature:
+
+```toml
+[dependencies]
+open-arrow-access-storage = "0.1.0"
+opendal = { version = "0.59.2", default-features = false, features = ["http-transport-reqwest"] }
+
+[features]
+s3 = ["opendal/services-s3"]
+```
+
+Build that crate with `cargo build --features s3`, then wrap its configured
+operator:
+
+```rust
+use open_arrow_access_storage::OpenDalAccessor;
+
+let operator = opendal::Operator::new(
+    opendal::services::S3::default().bucket("my-bucket").region("us-east-1"),
+)?;
+let accessor = OpenDalAccessor::new(operator);
+```
+
+The same approach supports OpenDAL's other service, layer and transport
+features without adding matching features to this project. OpenDAL 0.59.2
+names its S3 feature `services-s3`.
 
 ## JSON and JSONL
 
@@ -92,7 +126,7 @@ for TSV.
 | Component | Implemented |
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
-| `storage/` | OpenDAL Fs, bounded sequential chunks and exact range reads |
+| `storage/` | OpenDAL Fs and reusable generic byte I/O, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas and incremental Arrow decoding |
 | `dataset/` | Reserved; no directory or multi-file scan yet |
 | `service/` | Reserved; no Hugging Face or other source adapter yet |

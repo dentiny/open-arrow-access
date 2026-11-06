@@ -21,7 +21,7 @@ pub struct Fixture {
     pub schema: SchemaRef,
 }
 
-pub fn fixture(compression: Compression) -> Fixture {
+pub async fn fixture(compression: Compression) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let schema = Arc::new(Schema::new_with_metadata(
         vec![
@@ -35,7 +35,9 @@ pub fn fixture(compression: Compression) -> Fixture {
         Compression::SNAPPY => "ordered-snappy.parquet",
         other => panic!("no checked-in Parquet fixture for {other:?}"),
     };
-    std::fs::copy(fixture_path(name), dir.path().join("data.parquet")).unwrap();
+    tokio::fs::copy(fixture_path(name), dir.path().join("data.parquet"))
+        .await
+        .unwrap();
     Fixture { dir, schema }
 }
 
