@@ -37,11 +37,11 @@ async fn empty_frames_are_valid_but_empty_input_is_not() -> Result<()> {
         assert!(reader.next().await?.is_none());
         assert!(reader.next().await?.is_none());
     }
-    let accessor = MemoryAccessor::new(&fixture("zstd", "bad_empty.zst"), 1)
-        .layer(DecompressionLayer::new(Zstd));
+    let input = MemoryAccessor::new(&fixture("zstd", "bad_empty.zst"), 1);
+    let reads = input.reads.clone();
+    let accessor = input.layer(DecompressionLayer::new(Zstd));
     let mut reader = accessor.open("missing-header.zst".into()).await?;
-    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
-    assert!(reader.next().await?.is_none());
+    common::assert_terminal_error(reader.as_mut(), &reads, ErrorKind::Decode).await;
     Ok(())
 }
 
@@ -58,16 +58,13 @@ async fn corruption_truncation_and_trailing_junk_are_terminal_errors() -> Result
     ] {
         let bytes = fixture("zstd", name);
         let memory = MemoryAccessor::new(&bytes, 1);
+        let reads = memory.reads.clone();
         let mut reader = memory
             .layer(DecompressionLayer::new(Zstd))
             .open("invalid.zst".into())
             .await
             .unwrap();
-        assert_eq!(
-            collect(reader.as_mut()).await.unwrap_err().kind(),
-            ErrorKind::Decode
-        );
-        assert!(reader.next().await?.is_none());
+        common::assert_terminal_error(reader.as_mut(), &reads, ErrorKind::Decode).await;
     }
     Ok(())
 }
@@ -84,4 +81,9 @@ async fn source_errors_are_preserved() -> Result<()> {
     );
     assert!(reader.next().await?.is_none());
     Ok(())
+}
+
+#[tokio::test]
+async fn error_codes_sources_and_terminal_state_follow_the_byte_contract() -> Result<()> {
+    common::error_contract(Zstd, "zstd", "payload.zst").await
 }
