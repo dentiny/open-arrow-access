@@ -79,6 +79,10 @@ required-features = ["format-csv"]
 name = "reading"
 required-features = ["storage-fs", "format-parquet"]
 
+[[test]]
+name = "warc"
+required-features = ["format-warc"]
+
 [[example]]
 name = "read_parquet"
 required-features = ["storage-fs", "format-parquet"]

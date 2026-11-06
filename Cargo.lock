@@ -984,8 +984,8 @@ dependencies = [
 name = "open-arrow-access-file-format"
 version = "0.1.0"
 dependencies = [
- "arrow-csv",
  "arrow-array",
+ "arrow-csv",
  "arrow-schema",
  "futures",
  "open-arrow-access-core",

@@ -1,5 +1,3 @@
-#![cfg(feature = "format-warc")]
-
 use std::{
     num::NonZeroUsize,
     path::PathBuf,
