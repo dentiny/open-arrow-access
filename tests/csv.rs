@@ -1,5 +1,3 @@
-#![cfg(feature = "format-csv")]
-
 use std::{
     num::NonZeroUsize,
     path::PathBuf,

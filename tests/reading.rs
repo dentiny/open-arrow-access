@@ -1,5 +1,3 @@
-#![cfg(all(feature = "storage-fs", feature = "format-parquet"))]
-
 mod support;
 
 use std::{

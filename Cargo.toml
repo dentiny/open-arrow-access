@@ -67,6 +67,14 @@ parquet.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 
+[[test]]
+name = "csv"
+required-features = ["format-csv"]
+
+[[test]]
+name = "reading"
+required-features = ["storage-fs", "format-parquet"]
+
 [[example]]
 name = "read_parquet"
 required-features = ["storage-fs", "format-parquet"]
