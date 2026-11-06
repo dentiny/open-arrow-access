@@ -45,6 +45,9 @@ opendal = { version = "0.59.2", default-features = false }
 parquet = { version = "59.3.0", default-features = false, features = ["arrow", "async", "snap"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tempfile = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+percent-encoding = "2"
 open-arrow-access-core = { path = "core", version = "0.1.0" }
 open-arrow-access-storage = { path = "storage", version = "0.1.0", default-features = false }
 open-arrow-access-file-format = { path = "file-format", version = "0.1.0", default-features = false }
@@ -57,6 +60,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 
 [features]
 default = []
+service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc", "format-json"]
 service-commoncrawl = ["dep:open-arrow-access-service", "open-arrow-access-service/commoncrawl", "storage-opendal"]
 storage-opendal = ["dep:open-arrow-access-storage"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
@@ -91,6 +95,10 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 
 [[test]]
+name = "pmc"
+required-features = ["service-pmc", "storage-opendal"]
+
+[[test]]
 name = "commoncrawl_common"
 required-features = ["service-commoncrawl"]
 
@@ -101,6 +109,10 @@ required-features = ["dataset-directory"]
 [[test]]
 name = "reading"
 required-features = ["storage-fs", "format-parquet"]
+
+[[example]]
+name = "read_pmc"
+required-features = ["service-pmc", "storage-fs"]
 
 [[example]]
 name = "read_parquet"

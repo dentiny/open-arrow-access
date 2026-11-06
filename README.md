@@ -129,7 +129,7 @@ for TSV.
 | `storage/` | OpenDAL Fs, recursive file discovery and reusable generic byte I/O, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas and incremental Arrow decoding |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Common Crawl source identity, mirror origin and HTTP configuration |
+| `service/` | Common Crawl configuration; PMC metadata discovery and PDF snapshots over supplied byte accessors, reusing JSON → Arrow |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
@@ -140,6 +140,14 @@ pages through the Parquet dependency. External gzip, LZ4, bzip2, and Zstandard d
 enabled by `decompression-gzip`, `decompression-lz4`, `decompression-bz2`, and `decompression-zstd`; see [streaming decompression](decompression/README.md).
 It produces sequential bytes and cannot directly satisfy Parquet's range reads.
 Parallel reads and unordered emission are not implemented.
+
+Enable `service-pmc` for `service::pmc::{PmcAccessor, PmcRequest}`. Read a single
+PMC metadata object, an explicit file list, or stream discovery under `metadata/`;
+each output row combines mapped metadata, original PDF bytes and verbatim source
+JSON. Supply an existing bucket-rooted OpenDAL byte accessor or a local mirror.
+The source reuses our JSON reader, has per-object limits and bounded batch
+payload targets, and reads articles sequentially. See the [PMC source guide](service/README.md)
+and `read_pmc` example for configuration and schema details.
 
 Enable `dataset-directory` for `DirectoryAccessor` and `FileSetAccessor`. Directory
 selection uses a supplied byte accessor for discovery and a supplied format

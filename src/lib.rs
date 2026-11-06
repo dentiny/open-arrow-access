@@ -54,7 +54,10 @@ pub mod dataset {
     };
 }
 
-#[cfg(feature = "service-commoncrawl")]
+#[cfg(any(feature = "service-commoncrawl", feature = "service-pmc"))]
 pub mod service {
+    #[cfg(feature = "service-pmc")]
+    pub use open_arrow_access_service::pmc;
+    #[cfg(feature = "service-commoncrawl")]
     pub use open_arrow_access_service::{CommonCrawl, create_http_accessor};
 }
