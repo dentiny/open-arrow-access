@@ -1,11 +1,11 @@
-use std::{collections::HashSet, num::NonZeroUsize, sync::Arc};
+use std::num::NonZeroUsize;
 
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ReadRequest,
-    RecordMetadata, RecordReader, Result, async_trait,
+    Accessor, ByteReadRequest, ByteReader, Capability, ReadRequest, RecordMetadata, RecordReader,
+    Result, async_trait,
 };
 
-use super::{decode_error, reader::WarcReader, warc_schema};
+use super::{reader::WarcReader, warc_schema};
 
 /// Default body-byte target per batch; one larger record may exceed it.
 pub const DEFAULT_BATCH_BODY_BYTES: NonZeroUsize = NonZeroUsize::new(16 * 1024 * 1024).unwrap();
@@ -51,33 +51,8 @@ where
 
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         let full_schema = warc_schema();
-        let indices = match request.options.projection.as_ref() {
-            None => (0..full_schema.fields().len()).collect(),
-            Some(columns) => {
-                let mut seen = HashSet::new();
-                columns
-                    .iter()
-                    .map(|name| {
-                        if !seen.insert(name) {
-                            return Err(Error::new(
-                                ErrorKind::InvalidInput,
-                                "project",
-                                format!("duplicate field {name:?}"),
-                            ));
-                        }
-                        full_schema.index_of(name).map_err(|error| {
-                            Error::new(
-                                ErrorKind::InvalidInput,
-                                "project",
-                                format!("unknown field {name:?}"),
-                            )
-                            .with_source(error)
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?
-            }
-        };
-        let schema = Arc::new(full_schema.project(&indices).map_err(decode_error)?);
+        let (schema, projection) = request.options.resolve_projection(&full_schema)?;
+        let indices = projection.unwrap_or_else(|| (0..full_schema.fields().len()).collect());
         let input = self
             .inner
             .open(ByteReadRequest::new(request.object.clone()).with_options(request.byte_options))
