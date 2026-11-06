@@ -101,7 +101,10 @@ async fn resolves_revision_config_split_globs_and_reads_pinned_parquet() {
     ])));
     let fixture =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/parquet/ids.parquet");
-    hub.files = MockHub::file("b.parquet", Bytes::from(std::fs::read(fixture).unwrap()));
+    hub.files = MockHub::file(
+        "b.parquet",
+        Bytes::from(tokio::fs::read(fixture).await.unwrap()),
+    );
     let dataset = hub
         .service()
         .await
