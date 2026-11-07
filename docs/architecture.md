@@ -53,6 +53,20 @@ another valid random-access mechanism. See [decompression](../decompression/READ
 `into_stream` owns the reader and stops polling it after EOF or the first error.
 No background execution is created by these contracts.
 
+### Reader lifecycle
+
+`ReadState` in core tracks input EOF separately from output completion. Marking
+input EOF allows a decoder to drain buffered rows. Observing an output error or
+`Ok(None)` finishes the reader permanently; observing `Ok(Some(item))` preserves
+the current state. A reader can also finish explicitly while emitting a known
+final item, as the JSON decoder does when flushing at input EOF.
+
+Readers check `is_finished()` before doing work and call `observe(&result)` on
+their output. State transitions are synchronous and format-independent. Input,
+decoder, pending bytes, metadata and resource cleanup remain owned by each
+reader. For example, OpenDAL releases its sequential stream and pending buffer
+at completion, while exact range reads remain independent of sequential EOF.
+
 Project-owned I/O methods (`open`, `list`, `next`, `read_range`, `read_ranges`) are declared as
 `async fn` on traits and implementations. Apply the re-exported `#[async_trait]`
 attribute to those traits/impls: it retains Send futures and `dyn` compatibility.

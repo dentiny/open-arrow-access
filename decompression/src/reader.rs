@@ -2,8 +2,8 @@ use std::{io, num::NonZeroUsize};
 
 use futures::{StreamExt, TryStreamExt, io::AsyncReadExt};
 use open_arrow_access_core::{
-    ByteMetadata, ByteReader, Bytes, Capability, Error, ErrorKind, Reader, Result, async_trait,
-    into_stream,
+    ByteMetadata, ByteReader, Bytes, Capability, Error, ErrorKind, ReadState, Reader, Result,
+    async_trait, into_stream,
 };
 
 use crate::{Codec, DecodedInput};
@@ -13,7 +13,7 @@ pub(crate) struct DecompressionReader {
     metadata: ByteMetadata,
     codec: &'static str,
     chunk_size: usize,
-    finished: bool,
+    state: ReadState,
 }
 
 impl DecompressionReader {
@@ -46,7 +46,7 @@ impl DecompressionReader {
             metadata,
             codec: codec.name(),
             chunk_size: chunk_size.get(),
-            finished: false,
+            state: ReadState::default(),
         }
     }
 }
@@ -70,29 +70,25 @@ impl Reader for DecompressionReader {
     }
 
     async fn next(&mut self) -> Result<Option<Bytes>> {
-        if self.finished {
+        if self.state.is_finished() {
             return Ok(None);
         }
         let mut output = vec![0; self.chunk_size];
-        match self.decoder.read(&mut output).await {
-            Ok(0) => {
-                self.finished = true;
-                Ok(None)
-            }
+        let result = match self.decoder.read(&mut output).await {
+            Ok(0) => Ok(None),
             Ok(len) => {
                 output.truncate(len);
                 Ok(Some(Bytes::from(output)))
             }
-            Err(error) => {
-                self.finished = true;
-                Err(Error::new(
-                    ErrorKind::from_source(&error).unwrap_or(ErrorKind::Decode),
-                    "decompress",
-                    format!("{} decoding failed", self.codec),
-                )
-                .with_source(error))
-            }
-        }
+            Err(error) => Err(Error::new(
+                ErrorKind::from_source(&error).unwrap_or(ErrorKind::Decode),
+                "decompress",
+                format!("{} decoding failed", self.codec),
+            )
+            .with_source(error)),
+        };
+        self.state.observe(&result);
+        result
     }
 }
 
