@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog xmlns="urn:open-arrow-access:catalog">
+  <product><name>Notebook &amp; Pen</name><price>12.50</price><category>stationery</category></product>
+  <product><name>Desk Lamp</name><price>39.95</price></product>
+  <product><name>Café Mug</name><price>8.00</price></product>
+  <product><name>USB Hub</name><price>24.50</price></product>
+  <product><name>Travel Bag</name><price>45.00</price></product>
+</catalog>

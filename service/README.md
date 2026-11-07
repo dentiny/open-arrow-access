@@ -1,15 +1,19 @@
 # Dataset source providers
 
-Enable `service-commoncrawl` on the facade for `CommonCrawl`, which validates a
-crawl identity and HTTP(S) origin, and `create_http_accessor`, which configures
-an origin-rooted OpenDAL HTTP reader without fetching data. Gzip and record
-format decoding remain explicit caller-supplied layers.
+Provider-specific discovery and schema conventions live in this crate. Each
+provider adds its own default-off feature and facade exports.
 
-Crawl-wide WARC datasets and segment selection are separate additions.
+Providers use the shared object/reader contracts and existing byte, format,
+and decompression accessors. Backend configuration stays caller-controlled:
+`storage-opendal` exposes `storage::{OpenDalAccessor, opendal}` so callers can
+wrap an SDK operator without enabling a provider or the filesystem backend.
+Generic object-store prefix listing lives in `storage`, not in a provider.
 
-Providers reuse the common byte/record accessor contracts and existing format
-readers. Each provider has a default-off feature. The `pmc` crate feature is
-exposed as `service-pmc` by the facade and enables our existing JSON format.
+The [source-attribute proposal](../docs/source-attributes.md) defines provider
+constraints and conditional planning. Sequential cursor-based file discovery
+can coexist with independent file reads; dependent API page requests require
+a different plan. Services retain their own ordering requirements while
+delegating discovered representations to dataset and format accessors.
 
 ## PMC PDF snapshots
 

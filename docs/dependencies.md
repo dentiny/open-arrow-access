@@ -43,6 +43,24 @@ must inherit it through `workspace = true`; do not import types through Lance.
 The recorded SHA is a version reference, not a Git dependency on Lance. Builds
 do not query upstream or automatically change dependency versions.
 
-Common Crawl HTTP configuration pins `opendal-service-http` to `0.59.2`, matching
-the recorded OpenDAL baseline. The optional HTTP transport uses the SDK
-implementation; service configuration adds no separate HTTP client.
+## XML parser
+
+`format-xml` uses the published [`xml-arrow 0.2.0`](https://crates.io/crates/xml-arrow/0.2.0)
+parser for Arrow 59 compatibility and configuration validation before I/O.
+Its companion `xml-io` storage crate is not used, so storage remains on this
+workspace's OpenDAL 0.59.2 baseline. Arrow family versions remain 59.3.0 in the
+lockfile. The parser uses a normal registry dependency, with the resolved version
+and checksum recorded in Cargo.lock.
+
+## ATIF parser
+
+`format-atif` uses the published
+[`atif-arrow 0.3.0`](https://crates.io/crates/atif-arrow/0.3.0) converter for
+Arrow 59 compatibility. It uses a normal registry dependency, with the resolved
+version and checksum recorded in Cargo.lock.
+
+Only the pure parser/schema/converter crate is used. The companion `atif-io`
+and Harbor Hub backend are not dependencies, so ATIF does not bring its own
+storage, transport, runtime or decompression policy. JSON/JSONL framing is handled
+over the shared `ByteReader` contract. Arrow remains 59.3.0 and OpenDAL remains
+0.59.2 in this workspace's lockfile.
