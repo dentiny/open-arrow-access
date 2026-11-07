@@ -1,4 +1,4 @@
-use super::reader::AtifReader;
+use super::reader::create_reader;
 use crate::FileFormat;
 use atif_arrow::trajectory_schema;
 use open_arrow_access_core::{
@@ -29,7 +29,7 @@ impl FileFormat for AtifFormat {
         request: ReadRequest,
         (schema, projection): Self::Prepared,
     ) -> Result<Box<dyn RecordReader>> {
-        Ok(Box::new(AtifReader::new(
+        Ok(Box::new(create_reader(
             input,
             *self,
             request.options.batch_size.get(),

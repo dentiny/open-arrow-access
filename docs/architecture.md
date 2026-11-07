@@ -67,6 +67,8 @@ for pending chunks, consumed-byte slicing and input EOF. Their decoder adapters
 retain batch-ready checks and EOF finalization: CSV decodes an empty slice before
 flushing; JSON flushes once at EOF and checks for partial records before a full
 batch flush. The driver forwards source errors and retains format error context.
+ATIF keeps its document framing and trajectory conversion in a local decoder,
+using `StreamReader` for metadata, capabilities and terminal behavior as well.
 
 `into_async_read` owns a `ByteReader` and exposes futures `AsyncRead` and
 `AsyncBufRead` for streaming parsers. It retains input chunks until consumed,
