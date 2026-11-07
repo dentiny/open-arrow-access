@@ -1,10 +1,12 @@
 use atif_arrow::TrajectoryBatchBuilder;
 use open_arrow_access_core::{
-    ByteReader, Bytes, Capability, Error, ErrorKind, Reader, RecordBatch, RecordMetadata, Result,
-    async_trait,
+    ByteReader, Bytes, Capability, Reader, RecordBatch, RecordMetadata, Result, async_trait,
 };
 
-use super::AtifFormat;
+use super::{
+    AtifFormat,
+    error::{decode_error, empty_chunk_error},
+};
 
 pub(super) struct AtifReader {
     input: Box<dyn ByteReader>,
@@ -41,16 +43,6 @@ impl AtifReader {
         }
     }
 
-    fn decode_error(&self, source: impl std::error::Error + Send + Sync + 'static) -> Error {
-        let locator = self.metadata.source.as_ref().unwrap().locator();
-        Error::new(
-            ErrorKind::Decode,
-            "read_atif",
-            format!("{locator}: record {}: {source}", self.record_index),
-        )
-        .with_source(source)
-    }
-
     async fn read_document(&mut self) -> Result<Option<String>> {
         loop {
             if self.eof && self.document.is_empty() {
@@ -59,11 +51,7 @@ impl AtifReader {
             if self.pending.is_empty() && !self.eof {
                 match self.input.next().await? {
                     Some(bytes) if bytes.is_empty() => {
-                        return Err(Error::new(
-                            ErrorKind::Io,
-                            "read_atif",
-                            "byte reader returned an empty chunk",
-                        ));
+                        return Err(empty_chunk_error());
                     }
                     Some(bytes) => self.pending = bytes,
                     None => self.eof = true,
@@ -77,8 +65,10 @@ impl AtifReader {
             self.document.extend_from_slice(&self.pending[..consumed]);
             self.pending = self.pending.slice(consumed..);
             if newline.is_some() || self.eof {
-                let document = String::from_utf8(std::mem::take(&mut self.document))
-                    .map_err(|error| self.decode_error(error))?;
+                let document =
+                    String::from_utf8(std::mem::take(&mut self.document)).map_err(|error| {
+                        decode_error(self.metadata.source.as_ref(), self.record_index, error)
+                    })?;
                 if self.format == AtifFormat::JsonLines && document.trim().is_empty() {
                     continue;
                 }
@@ -88,8 +78,9 @@ impl AtifReader {
     }
 
     async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
-        let mut builder = TrajectoryBatchBuilder::new(self.batch_size)
-            .map_err(|error| self.decode_error(error))?;
+        let mut builder = TrajectoryBatchBuilder::new(self.batch_size).map_err(|error| {
+            decode_error(self.metadata.source.as_ref(), self.record_index, error)
+        })?;
         for _ in 0..self.batch_size {
             let Some(document) = self.read_document().await? else {
                 break;
@@ -100,17 +91,19 @@ impl AtifReader {
                     self.metadata.source.as_ref().map(|source| source.locator()),
                     self.record_index,
                 )
-                .map_err(|error| self.decode_error(error))?;
+                .map_err(|error| {
+                    decode_error(self.metadata.source.as_ref(), self.record_index, error)
+                })?;
             self.record_index += 1;
         }
         builder
             .flush()
-            .map_err(|error| self.decode_error(error))?
+            .map_err(|error| decode_error(self.metadata.source.as_ref(), self.record_index, error))?
             .map(|batch| match &self.projection {
                 None => Ok(batch),
-                Some(indices) => batch
-                    .project(indices)
-                    .map_err(|error| self.decode_error(error)),
+                Some(indices) => batch.project(indices).map_err(|error| {
+                    decode_error(self.metadata.source.as_ref(), self.record_index, error)
+                }),
             })
             .transpose()
     }
