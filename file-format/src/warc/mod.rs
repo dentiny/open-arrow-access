@@ -1,7 +1,8 @@
 mod accessor;
-mod reader;
+mod format;
 
 pub use accessor::WarcAccessor;
+pub use format::WarcFormat;
 pub use warc::WarcHeader;
 
 /// An owned record from the upstream parser, with a buffered, unmodified body.

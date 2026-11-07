@@ -492,6 +492,11 @@ published `warc-rs` parser. It accepts `ByteReadRequest` and returns one owned
 `WarcRecord` per `next()` call, preserving physical record order, record types,
 headers and binary bodies. Reader metadata is the input `ObjectRef`.
 
+`WarcAccessor<B>` aliases `FileAccessor<B, WarcFormat>`. `WarcFormat` implements
+the same core `ReaderFactory` contract as Arrow formats, using byte requests and
+native WARC records. Shared opening handles request forwarding and preparation;
+the parser retains its own record conversion and errors.
+
 This stage provides parser records, without an Arrow schema, Arrow batches,
 projection, or batch-size controls. Arrow conversion, record locators and generated
 columns are deferred. Supply external decompression separately. The parser buffers

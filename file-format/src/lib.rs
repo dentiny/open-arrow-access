@@ -16,7 +16,7 @@ pub use parquet::{ParquetAccessor, ParquetFormat};
 #[cfg(feature = "warc")]
 mod warc;
 #[cfg(feature = "warc")]
-pub use warc::{WarcAccessor, WarcHeader, WarcRecord};
+pub use warc::{WarcAccessor, WarcFormat, WarcHeader, WarcRecord};
 
 #[cfg(feature = "json")]
 mod json;
