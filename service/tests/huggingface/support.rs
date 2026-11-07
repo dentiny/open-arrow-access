@@ -1,19 +1,64 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     ops::Range,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, LazyLock, Mutex, Once,
+        atomic::{AtomicUsize, Ordering::Relaxed},
+    },
 };
 
 use futures::stream;
 use http::{Request, Response, StatusCode};
 use open_arrow_access_core::Bytes;
-use open_arrow_access_storage::OpenDalAccessor;
-use opendal::{
-    Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext, Operator, services::Hf,
-};
+use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter};
 use serde_json::json;
 
-use super::super::HuggingFaceAccessor;
+use super::super::{
+    HuggingFaceAccessor, HuggingFaceOptions, HuggingFaceRepository, HuggingFaceService,
+};
+
+// This integration-test binary has one default transport. Each fixture gets
+// its own host/handler, so parallel tests never share request state or use the
+// public network. Install it before constructing any service in this binary.
+static TRANSPORTS: LazyLock<Mutex<HashMap<String, HttpTransporter>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+struct FixtureTransport;
+
+impl HttpTransport for FixtureTransport {
+    async fn fetch(&self, request: Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
+        let handler = TRANSPORTS
+            .lock()
+            .unwrap()
+            .get(request.uri().host().unwrap())
+            .expect("unexpected network request")
+            .clone();
+        handler.fetch(request).await
+    }
+}
+
+pub(super) fn install_mock_transport() {
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| HttpTransporter::install_default(FixtureTransport));
+}
+
+pub(super) async fn service_with(transport: impl HttpTransport) -> HuggingFaceService {
+    install_mock_transport();
+    static NEXT_HOST: AtomicUsize = AtomicUsize::new(0);
+    let host = format!("fixture-{}.invalid", NEXT_HOST.fetch_add(1, Relaxed));
+    TRANSPORTS
+        .lock()
+        .unwrap()
+        .insert(host.clone(), HttpTransporter::new(transport));
+    HuggingFaceService::new(
+        HuggingFaceOptions::default()
+            .with_endpoint(format!("https://{host}"))
+            .with_token(TOKEN)
+            .with_http_downloads(),
+    )
+    .await
+    .unwrap()
+}
 
 pub(super) const TOKEN: &str = "fixture-only-token";
 
@@ -46,24 +91,22 @@ impl MockHub {
         self.requests.lock().unwrap().len()
     }
 
-    pub(super) fn accessor(&self) -> HuggingFaceAccessor {
-        Self::accessor_with_transport(self.clone())
+    pub(super) async fn accessor(&self) -> HuggingFaceAccessor {
+        Self::accessor_with_transport(self.clone()).await
     }
 
-    pub(super) fn accessor_with_transport(transport: impl HttpTransport) -> HuggingFaceAccessor {
-        let builder = Hf::default()
-            .repo_type("dataset")
-            .repo_id("owner/example")
-            .revision("refs/convert/parquet")
-            .root("data")
-            .endpoint("https://hub.invalid")
-            .token(TOKEN)
-            .download_mode("http");
-        let context = OperationContext::new().with_http_transport(HttpTransporter::new(transport));
-        let operator = Operator::new(builder).unwrap().with_context(context);
-        HuggingFaceAccessor {
-            inner: OpenDalAccessor::new(operator),
-        }
+    pub(super) async fn accessor_with_transport(
+        transport: impl HttpTransport,
+    ) -> HuggingFaceAccessor {
+        service_with(transport)
+            .await
+            .repository(
+                HuggingFaceRepository::new("owner/example")
+                    .with_revision("refs/convert/parquet")
+                    .with_root("data"),
+            )
+            .await
+            .unwrap()
     }
 
     pub(super) fn captured(&self) -> Vec<Captured> {

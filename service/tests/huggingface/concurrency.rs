@@ -74,8 +74,10 @@ impl GatedHub {
         }
     }
 
-    fn accessor(&self) -> HuggingFaceAccessor {
-        MockHub::accessor_with_transport(self.clone()).with_chunk_size(NonZeroUsize::MIN)
+    async fn accessor(&self) -> HuggingFaceAccessor {
+        MockHub::accessor_with_transport(self.clone())
+            .await
+            .with_chunk_size(NonZeroUsize::MIN)
     }
 }
 
@@ -116,7 +118,7 @@ async fn open_reader(accessor: &HuggingFaceAccessor) -> Box<dyn ByteReader> {
 #[tokio::test]
 async fn dropping_a_sequential_stream_cancels_in_flight_requests() {
     let hub = GatedHub::new(4..16);
-    let accessor = hub.accessor();
+    let accessor = hub.accessor().await;
     let mut reader = open_reader(&accessor).await;
     assert_eq!(hub.hub.request_count(), 1, "opening only inspects metadata");
     assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), &[0]);
@@ -133,7 +135,7 @@ async fn dropping_a_sequential_stream_cancels_in_flight_requests() {
 #[tokio::test]
 async fn cancelling_interleaved_reads_releases_the_shared_budget() {
     let hub = GatedHub::new(4..32);
-    let accessor = hub.accessor();
+    let accessor = hub.accessor().await;
     let mut reader = open_reader(&accessor).await;
     reader.next().await.unwrap();
     hub.state
@@ -157,7 +159,7 @@ async fn cancelling_interleaved_reads_releases_the_shared_budget() {
 async fn interleaved_ranges_share_the_reader_budget_and_preserve_the_cursor() {
     for bulk in [false, true] {
         let hub = GatedHub::new(4..16);
-        let accessor = hub.accessor();
+        let accessor = hub.accessor().await;
         let mut reader = open_reader(&accessor).await;
         assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), &[0]);
         hub.state

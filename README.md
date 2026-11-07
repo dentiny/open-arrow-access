@@ -261,9 +261,13 @@ cargo test --workspace --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```
 
-Format-specific integration tests live in `file-format/tests/`; the root
-`tests/reading.rs` exercises composition through the facade across crates.
-Cargo test targets use `required-features` to select their format.
+Public behavior tests belong in the owning crate's `tests/` directory.
+Format-specific integration tests live in `file-format/tests/`; provider tests
+live in `service/tests/` (HF uses the `huggingface` target, with helpers/modules
+under `service/tests/huggingface/`). The root `tests/` directory exercises
+composition through the facade across crates. Tests that need private
+implementation details can remain as unit-test modules under `src/`.
+Cargo integration-test targets use `required-features` for their implementation.
 
 Tests read checked-in Parquet, CSV/TSV, and JSON/JSONL files from `testdata/`. They verify ordered rows and
 nulls across row groups, schema metadata, projection, storage-independent
