@@ -17,9 +17,7 @@ pub enum PmcInput {
 pub struct PmcLimits {
     /// Hard metadata-object limit; default 4 MiB.
     pub metadata_bytes: NonZeroUsize,
-    /// Hard PDF-object limit; default 256 MiB.
-    pub pdf_bytes: NonZeroUsize,
-    /// Soft batch payload target (PDF + raw/normalized metadata); default 64 MiB.
+    /// Soft batch payload target (raw + normalized metadata); default 64 MiB.
     /// Checked after each row. A batch can exceed it by one bounded article.
     /// This is not a process-memory limit: input chunks and Arrow conversion
     /// buffers require additional memory.
@@ -30,7 +28,6 @@ impl Default for PmcLimits {
     fn default() -> Self {
         Self {
             metadata_bytes: NonZeroUsize::new(4 * 1024 * 1024).unwrap(),
-            pdf_bytes: NonZeroUsize::new(256 * 1024 * 1024).unwrap(),
             batch_bytes: NonZeroUsize::new(64 * 1024 * 1024).unwrap(),
         }
     }

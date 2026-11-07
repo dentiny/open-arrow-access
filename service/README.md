@@ -14,13 +14,14 @@ can coexist with independent file reads; dependent API page requests require
 a different plan. Services retain their own ordering requirements while
 delegating discovered representations to dataset and format accessors.
 
-## PMC PDF snapshots
+## PMC article metadata
 
-`pmc::PmcAccessor` reads the [PMC Article Datasets](https://pmc-oa-opendata.s3.amazonaws.com/README.txt)
-from a supplied byte accessor rooted at `pmc-oa-opendata`, or a mirror preserving
-its object paths. It follows the PDF-snapshot behavior of
-[`dentiny/pub-medical-arrow-rs`](https://github.com/dentiny/pub-medical-arrow-rs)
-without depending on `pmc-io` or `pmc-arrow`.
+`pmc::PmcAccessor` reads metadata JSON from the
+[PMC Article Datasets](https://pmc-oa-opendata.s3.amazonaws.com/README.txt), using
+a byte accessor rooted at `pmc-oa-opendata` or a mirror preserving its metadata
+paths. Each row contains mapped article metadata, the original PDF URL, and
+verbatim source JSON. It never opens a PDF object, checks PDF availability, or
+reads PDF contents.
 
 ```rust,no_run
 use open_arrow_access::{
@@ -36,8 +37,8 @@ async fn read() -> Result<(), Box<dyn std::error::Error>> {
     let source = PmcAccessor::new(OpenDalAccessor::new(operator));
     let mut reader = source.open(PmcRequest::new("metadata/PMC123.2.json")).await?;
     while let Some(batch) = reader.next().await? {
-        // Each row contains one metadata object and its original PDF.
-        assert_eq!(batch.num_columns(), 9);
+        assert_eq!(batch.num_columns(), 8);
+        // source_uri contains the PDF URL; PDF bytes are not downloaded.
     }
     Ok(())
 }
@@ -50,19 +51,17 @@ your OpenDAL dependency. Within this repository, enable `service-pmc` and run:
 cargo run --example read_pmc --features service-pmc -- /data/pmc-mirror metadata/PMC123.2.json
 ```
 
-`PmcRequest::files([...])` reads explicit objects in caller order and retains
-duplicates. `PmcRequest::prefix("metadata/")` streams recursive `.json` discovery
-in backend order; it does not collect or sort all paths. For nonrecursive
-listing, set `recursive = false` on the request's `PmcInput::Prefix(ListRequest)`.
-An empty selection or a selection containing no PDFs emits no batches and
-still exposes the fixed schema at open. `open` validates options and starts
-listing if requested; metadata/PDF contents are fetched lazily by `next`.
-Dropping the reader stops discovery and reading; there are no producer tasks.
+`PmcRequest::files([...])` reads explicit metadata objects in caller order and
+retains duplicates. `PmcRequest::prefix("metadata/")` streams recursive `.json`
+discovery in backend order, without collecting or sorting all paths. For
+nonrecursive listing, set `recursive = false` on the request's
+`PmcInput::Prefix(ListRequest)`. Empty selections expose the schema but emit no
+batches. `open` validates options and starts listing if requested; `next` reads
+metadata lazily. Dropping the reader stops discovery and reading.
 
-For the public S3 bucket, use the existing generic OpenDAL storage adapter.
-Depend directly on `open-arrow-access-storage` and the same OpenDAL version
-with `services-s3` and `http-transport-reqwest` enabled, as described in the
-[storage example](../README.md#quick-start):
+For the public S3 bucket, wrap a caller-configured OpenDAL SDK operator. Enable
+upstream `services-s3` and `http-transport-reqwest` features on your OpenDAL
+dependency, as described in the [storage example](../README.md#quick-start):
 
 ```rust,ignore
 opendal::install_default();
@@ -76,16 +75,14 @@ let source = PmcAccessor::new(open_arrow_access_storage::OpenDalAccessor::new(op
 let reader = source.open(PmcRequest::prefix("metadata/")).await?;
 ```
 
-The provider adds no S3 transport or second OpenDAL dependency. Byte options
-are forwarded to both metadata and attachment opens. Byte layers, including
-the existing decompression layers, can wrap the supplied accessor; apply them
-explicitly to a compatible mirror, rather than assuming public PMC objects are
-compressed. Limits apply to the bytes exposed by that accessor.
+The provider adds no transport. Byte options are forwarded to metadata opens.
+Byte layers, including decompression, can wrap the supplied accessor; apply them
+explicitly to compatible metadata mirrors. Limits apply to decoded bytes.
 
 ### Schema and mapping
 
-`pmc::schema()` returns these columns, in order. Schema metadata contains
-`pmc_arrow.row_kind = pdf_snapshot` for reference-schema compatibility.
+`pmc::schema()` returns these eight columns in order, with schema metadata
+`pmc_arrow.row_kind = article_metadata`:
 
 | Column | Arrow type | Nullable | Mapping |
 | --- | --- | --- | --- |
@@ -96,50 +93,43 @@ compressed. Limits apply to the bytes exposed by that accessor.
 | `title` | LargeUtf8 | Yes | `title` |
 | `license` | Utf8 | Yes | `license_code` |
 | `source_uri` | Utf8 | No | Original `pdf_url`, including query/fragment |
-| `pdf_bytes` | LargeBinary | No | Original, unmodified PDF bytes |
 | `raw_metadata_json` | LargeUtf8 | Yes | Complete original JSON, including whitespace and unknown fields |
 
 Metadata must be exactly one valid UTF-8 JSON object. Missing/null `pdf_url`
-skips the article without reading a PDF. Other failures are terminal errors,
-including malformed mapped fields and missing PDFs. Empty strings in optional
-fields stay empty; duplicate JSON keys use the last value. Unknown fields,
-including numbers outside the f64 range, remain in the raw JSON. The provider
-normalizes these mapped fields into bounded JSONL batches and delegates their
-Arrow conversion to `file_format::JsonAccessor`; only PDF bytes and raw JSON
-use dedicated Arrow array builders.
+continues to skip the article. Malformed mapped fields are terminal errors.
+Empty optional strings stay empty; duplicate JSON keys use the last value.
+Unknown fields, including numbers outside the f64 range, remain in raw JSON.
+Scalar fields are normalized into bounded JSONL batches and converted to Arrow
+by `file_format::JsonAccessor`; only raw JSON uses a dedicated array builder.
 
-PDF locators must refer to `s3://pmc-oa-opendata/`. Query/fragment components are
-retained in provenance and removed for object lookup. Object keys are
-percent-decoded once (`+` is literal); rooted, dot-component, control-character,
-backslash and ambiguous separator paths are rejected. A mirror must preserve
-the decoded bucket-relative paths. PDF validation checks `%PDF-x.y` followed
-by CR/LF at byte zero; it does not parse the PDF or prove completeness.
+PDF URLs are checked locally against `s3://pmc-oa-opendata/` and canonical path
+rules. The URL is preserved verbatim. Percent decoding is used only for syntax
+validation; it does not select or open another object. PDF existence, contents,
+headers, and MD5 query parameters are not checked. A mirror only needs metadata
+JSON objects; PDFs do not need to be present.
 
 ### Options, limits and errors
 
 `PmcRequest` implements `ReadOptionsProvider`. Projection addresses the final
-nine-column schema, keeps caller field order and schema metadata, and preserves
+eight-column schema, keeps caller field order and schema metadata, and preserves
 row counts for an empty projection. It is validated before listing or reads.
-Projection currently runs after complete article validation: omitting
-`pdf_bytes` still fetches and validates PDFs.
+All selections, including zero-column projections, read only metadata JSON.
 
-The common nonzero batch row target is an upper bound. `PmcLimits` adds hard
-per-object limits (4 MiB metadata, 256 MiB PDF by default) and a soft 64 MiB
-batch payload target. The payload count includes PDF, raw JSON and normalized
-metadata bytes, checked after each appended row; it may exceed the target by
-one bounded article. This is not an RSS limit: upstream chunks, decoder state,
-temporary objects and Arrow conversion allocations also consume memory.
-Limits are checked from known lengths before reading and incrementally for
-unknown or inaccurate lengths; exceeding them is a terminal decode error.
+The common nonzero batch row target is an upper bound. `PmcLimits` adds a hard
+metadata-object limit (4 MiB by default) and a soft 64 MiB batch payload target.
+The payload count includes raw and normalized metadata bytes, checked after each
+row; it may exceed the target by one bounded metadata object. This is not an RSS
+limit: upstream chunks, decoder state, temporary objects, and Arrow allocations
+also consume memory. Known lengths are checked before reading; streamed bytes
+are checked incrementally. Exceeding a limit is a terminal decode error.
 
 Files and records remain sequential and ordered. Batches may be smaller than
 the row target. A failure discards the current unreturned batch, terminates the
 reader, and retains underlying I/O error categories and source chains. Previously
 returned batches remain delivered; no file is transparently replayed. Discovery
-order is not a stable snapshot, and metadata/PDF reads are not atomic. The MD5
-query parameter is preserved as provenance but is not verified here.
+order is not a stable snapshot.
 
-XML/text/media retrieval, OCR, extraction, source inventory snapshots, parallel
-scans, indexes and output writers are separate capabilities. The
+PDF/XML/text/media retrieval, OCR, extraction, source inventory snapshots,
+parallel scans, indexes, and writers are separate capabilities. The
 [source-attribute proposal](../docs/source-attributes.md) remains a future
 planning extension.

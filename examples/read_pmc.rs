@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut reader = source.open(request).await?;
     println!("{:?}", reader.metadata().schema);
     while let Some(batch) = reader.next().await? {
-        println!("{} PMC PDF snapshots", batch.num_rows());
+        println!("{} PMC metadata rows", batch.num_rows());
     }
     Ok(())
 }

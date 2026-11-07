@@ -63,7 +63,7 @@ pub(super) fn validate_article_version(version: Option<u32>, path: &str) -> Resu
     Ok(())
 }
 
-pub(super) fn validate_pdf_url(uri: &str) -> Result<String> {
+pub(super) fn validate_pdf_url(uri: &str) -> Result<()> {
     let invalid = || decode(format!("invalid PMC PDF URL: {uri}"));
     let path = uri
         .strip_prefix("s3://pmc-oa-opendata/")
@@ -75,20 +75,6 @@ pub(super) fn validate_pdf_url(uri: &str) -> Result<String> {
         .map_err(|_| invalid())?;
     if !valid_path(&path) {
         return Err(invalid());
-    }
-    Ok(path.into_owned())
-}
-
-pub(super) fn validate_pdf(bytes: &[u8], path: &str) -> Result<()> {
-    // Header validation only, not a PDF parser or completeness check.
-    if bytes.len() < 9
-        || !bytes.starts_with(b"%PDF-")
-        || !bytes[5].is_ascii_digit()
-        || bytes[6] != b'.'
-        || !bytes[7].is_ascii_digit()
-        || !matches!(bytes[8], b'\r' | b'\n')
-    {
-        return Err(decode(format!("{path}: invalid PDF header")));
     }
     Ok(())
 }

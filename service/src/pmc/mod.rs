@@ -1,8 +1,9 @@
-//! PMC article metadata and original PDF snapshots from a bucket or local mirror.
+//! PMC article metadata and original PDF URLs from a bucket or local mirror.
 //!
 //! The byte accessor must be rooted at `pmc-oa-opendata` (or a mirror preserving
-//! its object paths). Metadata without a PDF produces no row. Discovery and
-//! article reads are sequential; listing order and explicit duplicates survive.
+//! its object paths). Metadata without a PDF URL produces no row. PDF contents
+//! are never read. Discovery and metadata reads are sequential; listing order
+//! and explicit duplicates survive.
 
 mod accessor;
 mod input;
@@ -21,7 +22,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-/// Fixed PDF-snapshot schema, compatible with the reference PMC source.
+/// Fixed article-metadata schema with the original PDF URL and source JSON.
 pub fn schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
@@ -35,10 +36,9 @@ pub fn schema() -> SchemaRef {
                     Field::new("title", DataType::LargeUtf8, true),
                     Field::new("license", DataType::Utf8, true),
                     Field::new("source_uri", DataType::Utf8, false),
-                    Field::new("pdf_bytes", DataType::LargeBinary, false),
                     Field::new("raw_metadata_json", DataType::LargeUtf8, true),
                 ],
-                HashMap::from([("pmc_arrow.row_kind".into(), "pdf_snapshot".into())]),
+                HashMap::from([("pmc_arrow.row_kind".into(), "article_metadata".into())]),
             ))
         })
         .clone()

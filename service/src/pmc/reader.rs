@@ -3,15 +3,12 @@ use super::{
     input::{JsonInput, read_bounded},
     metadata, schema, validation,
 };
-use arrow_array::{
-    ArrayRef,
-    builder::{LargeBinaryBuilder, LargeStringBuilder},
-};
+use arrow_array::{ArrayRef, builder::LargeStringBuilder};
 use arrow_schema::Schema;
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadOptions, Capability, ObjectRef, ObjectStream, ReadOptions,
-    ReadRequest, Reader, RecordBatch, RecordMetadata, Result, async_trait,
+    Accessor, ByteAccessor, ByteReadOptions, Capability, ObjectStream, ReadOptions, ReadRequest,
+    Reader, RecordBatch, RecordMetadata, Result, async_trait,
 };
 use open_arrow_access_file_format::JsonAccessor;
 use std::{num::NonZeroUsize, sync::Arc};
@@ -31,9 +28,7 @@ impl<A: ByteAccessor> PmcReader<A> {
         let mut rows = 0;
         let mut payload_bytes = 0usize;
         let mut normalized = Vec::new();
-        // Do not preallocate for the potentially large row target: PDF bytes
-        // normally reach the soft payload target first.
-        let mut pdfs = LargeBinaryBuilder::new();
+        // Metadata objects can reach the payload target before the row target.
         let mut raw_json = LargeStringBuilder::new();
         while rows < self.options.batch_size.get() && payload_bytes < self.limits.batch_bytes.get()
         {
@@ -51,24 +46,14 @@ impl<A: ByteAccessor> PmcReader<A> {
             let Some(mapped) = metadata::parse(&raw, object.locator())? else {
                 continue;
             };
-            let path = validation::validate_pdf_url(&mapped.source_uri)?;
-            let pdf = read_bounded(
-                self.accessor.as_ref(),
-                ObjectRef::new(path.clone()),
-                self.byte_options,
-                self.limits.pdf_bytes.get(),
-            )
-            .await?;
-            validation::validate_pdf(&pdf, &path)?;
+            validation::validate_pdf_url(&mapped.source_uri)?;
             let before = normalized.len();
             serde_json::to_writer(&mut normalized, &mapped)
                 .map_err(|error| decode(error.to_string()).with_source(error))?;
             normalized.push(b'\n');
             payload_bytes = payload_bytes
-                .saturating_add(pdf.len())
                 .saturating_add(raw.len())
                 .saturating_add(normalized.len() - before);
-            pdfs.append_value(&pdf);
             // parse() already validated UTF-8, but preserve the complete original
             // object, including whitespace, unknown fields and duplicate keys.
             raw_json.append_value(
@@ -82,7 +67,7 @@ impl<A: ByteAccessor> PmcReader<A> {
         }
 
         // Reuse our JSON -> Arrow format path for every scalar metadata column.
-        // Only the binary attachment and verbatim JSON need dedicated arrays.
+        // Only verbatim JSON needs a dedicated array.
         let full_schema = schema();
         let json_schema = Arc::new(Schema::new(full_schema.fields()[..7].to_vec()));
         let mut json_reader = JsonAccessor::new(JsonInput(normalized.into()), json_schema)
@@ -98,7 +83,6 @@ impl<A: ByteAccessor> PmcReader<A> {
             .await?
             .ok_or_else(|| decode("missing normalized metadata batch"))?;
         let mut columns = batch.columns().to_vec();
-        columns.push(Arc::new(pdfs.finish()) as ArrayRef);
         columns.push(Arc::new(raw_json.finish()) as ArrayRef);
         let batch = RecordBatch::try_new(full_schema, columns)
             .map_err(|error| decode(error.to_string()).with_source(error))?;

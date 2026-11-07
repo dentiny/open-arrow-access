@@ -1,4 +1,4 @@
-use arrow_array::{Array, LargeBinaryArray, LargeStringArray, StringArray, UInt32Array};
+use arrow_array::{Array, LargeStringArray, StringArray, UInt32Array};
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability,
@@ -21,8 +21,6 @@ use std::{
 };
 
 const RAW: &str = include_str!("../../testdata/pmc/metadata.json");
-const PDF: &[u8] = include_bytes!("../../testdata/pmc/article.pdf");
-const PDF_PATH: &str = "PMC123.2/article +%20.pdf";
 
 #[derive(Clone, Default)]
 struct Objects {
@@ -42,7 +40,6 @@ impl Objects {
     fn fixture() -> Self {
         let mut source = Self::default();
         source.insert("metadata/a.json", RAW.as_bytes());
-        source.insert(PDF_PATH, PDF);
         source
     }
 }
@@ -113,7 +110,7 @@ async fn error(source: Objects, request: PmcRequest) -> Error {
 }
 
 #[tokio::test]
-async fn maps_metadata_and_preserves_verbatim_pdf_json_and_provenance() {
+async fn maps_metadata_and_preserves_url_and_json_without_opening_pdf() {
     let source = Objects::fixture();
     let io = ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
@@ -176,18 +173,11 @@ async fn maps_metadata_and_preserves_verbatim_pdf_json_and_provenance() {
             .value(0),
         "Synthetic 医学 article"
     );
+    assert_eq!(batch.num_columns(), 8);
+    assert!(batch.schema().field_with_name("pdf_bytes").is_err());
     assert_eq!(
         batch
             .column(7)
-            .as_any()
-            .downcast_ref::<LargeBinaryArray>()
-            .unwrap()
-            .value(0),
-        PDF
-    );
-    assert_eq!(
-        batch
-            .column(8)
             .as_any()
             .downcast_ref::<LargeStringArray>()
             .unwrap()
@@ -196,11 +186,11 @@ async fn maps_metadata_and_preserves_verbatim_pdf_json_and_provenance() {
     );
     assert_eq!(
         batch.schema().metadata()["pmc_arrow.row_kind"],
-        "pdf_snapshot"
+        "article_metadata"
     );
     let opened = source.opened.lock().unwrap();
-    assert_eq!(opened.len(), 2);
-    assert_eq!(opened[1].object.locator(), PDF_PATH);
+    assert_eq!(opened.len(), 1);
+    assert_eq!(opened[0].object.locator(), "metadata/a.json");
     assert!(opened.iter().all(|request| request.options == io));
 }
 
@@ -211,7 +201,6 @@ async fn batches_in_input_order_retains_duplicates_and_flushes_partial_batch() {
         "metadata/b.json",
         br#"{"pmcid":"456","pmid":"00042","pdf_url":"s3://pmc-oa-opendata/b.pdf"}"#,
     );
-    source.insert("b.pdf", PDF);
     let request = PmcRequest::files(["metadata/b.json", "metadata/a.json", "metadata/b.json"])
         .with_options(options(2, None));
     let batches = all(PmcAccessor::new(source).open(request).await.unwrap()).await;
@@ -249,7 +238,7 @@ async fn batches_in_input_order_retains_duplicates_and_flushes_partial_batch() {
 }
 
 #[tokio::test]
-async fn missing_pdf_skips_only_that_article_and_empty_inputs_keep_schema() {
+async fn missing_pdf_url_skips_only_that_article_and_empty_inputs_keep_schema() {
     let mut source = Objects::fixture();
     source.insert(
         "metadata/none.json",
@@ -270,21 +259,19 @@ async fn missing_pdf_skips_only_that_article_and_empty_inputs_keep_schema() {
         .unwrap())
     .await;
     assert_eq!(batches[0].num_rows(), 1);
-    assert_eq!(
+    assert!(
         source
             .opened
             .lock()
             .unwrap()
             .iter()
-            .filter(|request| request.object.locator() == PDF_PATH)
-            .count(),
-        1
+            .all(|request| { request.object.locator().starts_with("metadata/") })
     );
 }
 
 #[tokio::test]
 async fn final_projection_preserves_schema_order_and_zero_column_row_counts() {
-    for names in [vec!["pdf_bytes", "pmcid"], vec!["title"], vec![]] {
+    for names in [vec!["source_uri", "pmcid"], vec!["title"], vec![]] {
         let source = PmcAccessor::new(Objects::fixture());
         let request = PmcRequest::files(["metadata/a.json", "metadata/a.json"])
             .with_options(options(2, Some(names.clone())));
@@ -343,7 +330,7 @@ async fn discovery_is_lazy_filters_files_and_stops_on_drop() {
     assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
     assert_eq!(source.listing_polls.load(Ordering::SeqCst), 3);
     drop(reader);
-    assert_eq!(source.opened.lock().unwrap().len(), 2);
+    assert_eq!(source.opened.lock().unwrap().len(), 1);
     assert_eq!(source.listing_polls.load(Ordering::SeqCst), 3);
 }
 
@@ -409,24 +396,20 @@ async fn payload_target_flushes_after_each_bounded_article() {
 }
 
 #[tokio::test]
-async fn hard_object_limits_reject_metadata_and_pdf() {
-    for pdf in [false, true] {
-        let mut limits = PmcLimits::default();
-        if pdf {
-            limits.pdf_bytes = NonZeroUsize::new(PDF.len() - 1).unwrap();
-        } else {
-            limits.metadata_bytes = NonZeroUsize::new(RAW.len() - 1).unwrap();
-        }
-        let source = Objects::fixture();
-        let failure = error(
-            source.clone(),
-            PmcRequest::new("metadata/a.json").with_limits(limits),
-        )
-        .await;
-        assert_eq!(failure.kind(), ErrorKind::Decode);
-        assert!(failure.to_string().contains("object limit"));
-        assert_eq!(source.opened.lock().unwrap().len(), if pdf { 2 } else { 1 });
-    }
+async fn hard_object_limits_reject_oversized_metadata() {
+    let limits = PmcLimits {
+        metadata_bytes: NonZeroUsize::new(RAW.len() - 1).unwrap(),
+        ..PmcLimits::default()
+    };
+    let source = Objects::fixture();
+    let failure = error(
+        source.clone(),
+        PmcRequest::new("metadata/a.json").with_limits(limits),
+    )
+    .await;
+    assert_eq!(failure.kind(), ErrorKind::Decode);
+    assert!(failure.to_string().contains("object limit"));
+    assert_eq!(source.opened.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -470,7 +453,6 @@ async fn malformed_metadata_and_invalid_mapped_values_fail_without_pdf_io() {
 async fn nullable_empty_fields_and_duplicate_keys_follow_source_mapping() {
     let mut source = Objects::fixture();
     source.insert("metadata/a.json", br#"{"pmcid":"PMC1","pmid":1,"pmid":"00001","version":null,"doi":"","title":"","license_code":null,"pdf_url":"s3://pmc-oa-opendata/a.pdf"}"#);
-    source.insert("a.pdf", PDF);
     let batches = all(PmcAccessor::new(source)
         .open(PmcRequest::new("metadata/a.json"))
         .await
@@ -537,45 +519,28 @@ async fn invalid_urls_cannot_escape_or_alias_bucket_objects() {
 }
 
 #[tokio::test]
-async fn invalid_headers_and_storage_failures_are_terminal_without_partial_rows() {
-    for pdf in [
-        b"".as_slice(),
-        b"<html>error</html>",
-        b"%PDF-1.7",
-        b"%PDF-x.y\n",
-    ] {
-        let mut source = Objects::fixture();
-        source.insert(PDF_PATH, pdf);
-        assert_eq!(
-            error(source, PmcRequest::new("metadata/a.json"))
-                .await
-                .kind(),
-            ErrorKind::Decode
-        );
-    }
+async fn metadata_storage_failures_are_terminal_without_partial_rows() {
     let mut source = Objects::fixture();
-    source.files.remove(PDF_PATH);
+    source.files.remove("metadata/a.json");
     assert_eq!(
         error(source, PmcRequest::new("metadata/a.json"))
             .await
             .kind(),
         ErrorKind::NotFound
     );
-    for pdf in [false, true] {
-        let mut source = Objects::fixture();
-        let (path, bytes) = if pdf {
-            (PDF_PATH, PDF)
-        } else {
-            ("metadata/a.json", RAW.as_bytes())
-        };
-        source.files.insert(
-            path.into(),
-            MemoryAccessor::new(bytes, 1).with_failure(bytes.len(), ErrorKind::PermissionDenied),
-        );
-        let failure = error(source, PmcRequest::new("metadata/a.json")).await;
-        assert_eq!(failure.kind(), ErrorKind::PermissionDenied);
-        assert!(failure.source().is_some());
-    }
+    let mut source = Objects::fixture();
+    source.files.insert(
+        "metadata/b.json".into(),
+        MemoryAccessor::new(RAW.as_bytes(), 1).with_failure(RAW.len(), ErrorKind::PermissionDenied),
+    );
+    let failure = error(
+        source.clone(),
+        PmcRequest::files(["metadata/a.json", "metadata/b.json"]),
+    )
+    .await;
+    assert_eq!(failure.kind(), ErrorKind::PermissionDenied);
+    assert!(failure.source().is_some());
+    assert_eq!(source.opened.lock().unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -584,13 +549,7 @@ async fn independent_opens_and_local_mirror_use_existing_fs_reader() {
     tokio::fs::create_dir(root.path().join("metadata"))
         .await
         .unwrap();
-    tokio::fs::create_dir(root.path().join("PMC123.2"))
-        .await
-        .unwrap();
     tokio::fs::write(root.path().join("metadata/a.json"), RAW)
-        .await
-        .unwrap();
-    tokio::fs::write(root.path().join(PDF_PATH), PDF)
         .await
         .unwrap();
     let source = PmcAccessor::new(OpenDalAccessor::new(
@@ -640,14 +599,11 @@ async fn reuses_gzip_layer_and_enforces_limits_in_decoded_byte_coordinates() {
         "metadata/a.json",
         include_bytes!("../../testdata/pmc/metadata.json.gz"),
     );
-    source.insert(
-        PDF_PATH,
-        include_bytes!("../../testdata/pmc/article.pdf.gz"),
-    );
-    let decoded =
-        source.layer(DecompressionLayer::new(Gzip).with_chunk_size(NonZeroUsize::new(3).unwrap()));
-    let source = PmcAccessor::new(decoded);
-    let batches = all(source
+    let decoded = source
+        .clone()
+        .layer(DecompressionLayer::new(Gzip).with_chunk_size(NonZeroUsize::new(3).unwrap()));
+    let accessor = PmcAccessor::new(decoded);
+    let batches = all(accessor
         .open(PmcRequest::new("metadata/a.json"))
         .await
         .unwrap())
@@ -656,58 +612,39 @@ async fn reuses_gzip_layer_and_enforces_limits_in_decoded_byte_coordinates() {
         batches[0]
             .column(7)
             .as_any()
-            .downcast_ref::<LargeBinaryArray>()
-            .unwrap()
-            .value(0),
-        PDF
-    );
-    assert_eq!(
-        batches[0]
-            .column(8)
-            .as_any()
             .downcast_ref::<LargeStringArray>()
             .unwrap()
             .value(0),
         RAW
     );
-    for pdf in [false, true] {
-        let mut limits = PmcLimits::default();
-        if pdf {
-            limits.pdf_bytes = NonZeroUsize::new(PDF.len() - 1).unwrap();
-        } else {
-            limits.metadata_bytes = NonZeroUsize::new(RAW.len() - 1).unwrap();
-        }
-        let mut reader = source
-            .open(PmcRequest::new("metadata/a.json").with_limits(limits))
-            .await
-            .unwrap();
-        let failure = reader.next().await.unwrap_err();
-        assert_eq!(failure.kind(), ErrorKind::Decode);
-        assert!(failure.to_string().contains("object limit"));
-        assert!(reader.next().await.unwrap().is_none());
-    }
+    assert_eq!(source.opened.lock().unwrap().len(), 1);
+    let limits = PmcLimits {
+        metadata_bytes: NonZeroUsize::new(RAW.len() - 1).unwrap(),
+        ..PmcLimits::default()
+    };
+    let mut reader = accessor
+        .open(PmcRequest::new("metadata/a.json").with_limits(limits))
+        .await
+        .unwrap();
+    let failure = reader.next().await.unwrap_err();
+    assert_eq!(failure.kind(), ErrorKind::Decode);
+    assert!(failure.to_string().contains("object limit"));
+    assert!(reader.next().await.unwrap().is_none());
 }
 
 #[tokio::test]
 async fn empty_upstream_chunks_are_errors_instead_of_eof_or_busy_loops() {
-    for pdf in [false, true] {
-        let mut source = Objects::fixture();
-        let (path, bytes) = if pdf {
-            (PDF_PATH, PDF)
-        } else {
-            ("metadata/a.json", RAW.as_bytes())
-        };
-        source.files.insert(
-            path.into(),
-            MemoryAccessor::new(bytes, 1).with_empty_chunk(1),
-        );
-        assert_eq!(
-            error(source, PmcRequest::new("metadata/a.json"))
-                .await
-                .kind(),
-            ErrorKind::Io
-        );
-    }
+    let mut source = Objects::fixture();
+    source.files.insert(
+        "metadata/a.json".into(),
+        MemoryAccessor::new(RAW.as_bytes(), 1).with_empty_chunk(1),
+    );
+    assert_eq!(
+        error(source, PmcRequest::new("metadata/a.json"))
+            .await
+            .kind(),
+        ErrorKind::Io
+    );
 }
 
 struct PendingSource {

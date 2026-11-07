@@ -138,7 +138,7 @@ for TSV.
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | PMC metadata discovery and PDF snapshots over supplied byte accessors, reusing JSON → Arrow |
+| `service/` | PMC metadata discovery and original PDF URLs over supplied byte accessors, reusing JSON → Arrow |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
@@ -152,8 +152,9 @@ Parallel reads and unordered emission are not implemented.
 
 Enable `service-pmc` for `service::pmc::{PmcAccessor, PmcRequest}`. Read a single
 PMC metadata object, an explicit file list, or stream discovery under `metadata/`;
-each output row combines mapped metadata, original PDF bytes and verbatim source
-JSON. Supply an existing bucket-rooted OpenDAL byte accessor or a local mirror.
+each output row combines mapped metadata, the original PDF URL and verbatim
+source JSON. Only metadata objects are read; PDFs are never downloaded. Supply
+an existing bucket-rooted OpenDAL byte accessor or a metadata-only local mirror.
 The source reuses our JSON reader, has per-object limits and bounded batch
 payload targets, and reads articles sequentially. See the [PMC source guide](service/README.md)
 and `read_pmc` example for configuration and schema details.
