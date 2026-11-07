@@ -9,6 +9,7 @@ mod input;
 mod metadata;
 mod reader;
 mod request;
+mod validation;
 
 pub use accessor::PmcAccessor;
 pub use request::{PmcInput, PmcLimits, PmcRequest};
@@ -58,13 +59,4 @@ fn invalid(message: impl Into<String>) -> Error {
 
 fn decode(message: impl Into<String>) -> Error {
     Error::new(ErrorKind::Decode, "read_pmc", message)
-}
-
-fn valid_path(path: &str) -> bool {
-    !path.is_empty()
-        && path.trim() == path
-        && !path.contains(['\\', '?', '#'])
-        && !path.contains("://")
-        && !path.chars().any(char::is_control)
-        && !path.split('/').any(|part| matches!(part, "" | "." | ".."))
 }

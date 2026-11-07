@@ -1,4 +1,4 @@
-use super::{PmcInput, PmcRequest, capability, invalid, reader::PmcReader, schema, valid_path};
+use super::{PmcInput, PmcRequest, capability, reader::PmcReader, schema, validation};
 use futures::{TryStreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteAccessor, Capability, ObjectRef, ObjectStream, RecordMetadata, RecordReader,
@@ -44,29 +44,14 @@ impl<A: ByteAccessor + 'static> Accessor for PmcAccessor<A> {
         let (schema, projection) = request.options.resolve_projection(&schema())?;
         let objects: ObjectStream = match request.input {
             PmcInput::Files(objects) => {
-                if objects.iter().any(|object| !valid_path(object.locator())) {
-                    return Err(invalid(
-                        "metadata objects must be bucket-relative paths without dot components",
-                    ));
-                }
+                validation::validate_metadata_objects(&objects)?;
                 Box::pin(stream::iter(objects.into_iter().map(Ok)))
             }
             PmcInput::Prefix(mut list_request) => {
-                if !self.inner.capability().list {
-                    return Err(open_arrow_access_core::Error::new(
-                        open_arrow_access_core::ErrorKind::Unsupported,
-                        "open_pmc",
-                        "byte accessor does not support listing; use explicit metadata files",
-                    ));
-                }
+                validation::validate_listing_support(self.inner.capability().list)?;
                 let prefix = list_request.prefix.locator();
-                if prefix == "/" {
-                    return Err(invalid("expected a bucket-relative directory prefix"));
-                }
+                validation::validate_prefix(prefix)?;
                 let prefix = prefix.strip_suffix('/').unwrap_or(prefix);
-                if !prefix.is_empty() && !valid_path(prefix) {
-                    return Err(invalid("expected a bucket-relative directory prefix"));
-                }
                 let prefix = if prefix.is_empty() {
                     String::new()
                 } else {
@@ -80,18 +65,14 @@ impl<A: ByteAccessor + 'static> Accessor for PmcAccessor<A> {
                         .await?
                         .try_filter_map(move |object| {
                             let selected = (|| {
-                                let relative =
-                                    object.locator().strip_prefix(&prefix).ok_or_else(|| {
-                                        invalid("PMC listing returned an object outside its prefix")
-                                    })?;
-                                if relative.is_empty() || relative.ends_with('/') {
+                                let Some(relative) = validation::validate_discovered_path(
+                                    object.locator(),
+                                    &prefix,
+                                    recursive,
+                                )?
+                                else {
                                     return Ok(None);
-                                }
-                                if !valid_path(relative) || (!recursive && relative.contains('/')) {
-                                    return Err(invalid(
-                                        "PMC listing returned an invalid object path",
-                                    ));
-                                }
+                                };
                                 Ok(relative.ends_with(".json").then_some(object))
                             })();
                             futures::future::ready(selected)

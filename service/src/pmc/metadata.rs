@@ -1,4 +1,4 @@
-use super::{decode, valid_path};
+use super::{decode, validation};
 use open_arrow_access_core::Result;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::value::RawValue;
@@ -57,16 +57,9 @@ pub(super) fn parse(raw: &[u8], path: &str) -> Result<Option<Metadata>> {
     } else {
         pmcid
     };
-    if digits.is_empty()
-        || !digits.bytes().all(|b| b.is_ascii_digit())
-        || digits.bytes().all(|b| b == b'0')
-    {
-        return Err(decode(format!("{path}: invalid PMCID")));
-    }
+    validation::validate_pmcid_digits(digits, path)?;
     metadata.pmcid = format!("PMC{}", digits.trim_start_matches('0'));
-    if metadata.pmc_version == Some(0) {
-        return Err(decode(format!("{path}: article version must be positive")));
-    }
+    validation::validate_article_version(metadata.pmc_version, path)?;
     Ok(Some(metadata))
 }
 
@@ -75,34 +68,4 @@ fn field<T: DeserializeOwned>(
     name: &str,
 ) -> serde_json::Result<T> {
     serde_json::from_str(fields.get(name).map_or("null", |value| value.get()))
-}
-
-pub(super) fn pdf_path(uri: &str) -> Result<String> {
-    let invalid = || decode(format!("invalid PMC PDF URL: {uri}"));
-    let path = uri
-        .strip_prefix("s3://pmc-oa-opendata/")
-        .ok_or_else(invalid)?;
-    let path = path.split(['?', '#']).next().unwrap_or_default();
-    // Decode exactly once; '+' is a literal filename character.
-    let path = percent_encoding::percent_decode_str(path)
-        .decode_utf8()
-        .map_err(|_| invalid())?;
-    if !valid_path(&path) {
-        return Err(invalid());
-    }
-    Ok(path.into_owned())
-}
-
-pub(super) fn validate_pdf(bytes: &[u8], path: &str) -> Result<()> {
-    // Header validation only, not a PDF parser or completeness check.
-    if bytes.len() < 9
-        || !bytes.starts_with(b"%PDF-")
-        || !bytes[5].is_ascii_digit()
-        || bytes[6] != b'.'
-        || !bytes[7].is_ascii_digit()
-        || !matches!(bytes[8], b'\r' | b'\n')
-    {
-        return Err(decode(format!("{path}: invalid PDF header")));
-    }
-    Ok(())
 }

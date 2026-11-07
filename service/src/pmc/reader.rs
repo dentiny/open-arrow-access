@@ -1,7 +1,7 @@
 use super::{
     PmcLimits, capability, decode,
     input::{JsonInput, read_bounded},
-    metadata, schema,
+    metadata, schema, validation,
 };
 use arrow_array::{
     ArrayRef,
@@ -51,7 +51,7 @@ impl<A: ByteAccessor> PmcReader<A> {
             let Some(mapped) = metadata::parse(&raw, object.locator())? else {
                 continue;
             };
-            let path = metadata::pdf_path(&mapped.source_uri)?;
+            let path = validation::validate_pdf_url(&mapped.source_uri)?;
             let pdf = read_bounded(
                 self.accessor.as_ref(),
                 ObjectRef::new(path.clone()),
@@ -59,7 +59,7 @@ impl<A: ByteAccessor> PmcReader<A> {
                 self.limits.pdf_bytes.get(),
             )
             .await?;
-            metadata::validate_pdf(&pdf, &path)?;
+            validation::validate_pdf(&pdf, &path)?;
             let before = normalized.len();
             serde_json::to_writer(&mut normalized, &mapped)
                 .map_err(|error| decode(error.to_string()).with_source(error))?;

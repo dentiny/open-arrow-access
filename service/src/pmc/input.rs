@@ -1,7 +1,7 @@
-use super::{capability, decode};
+use super::{capability, validation};
 use open_arrow_access_core::{
-    Accessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, Error,
-    ErrorKind, ObjectRef, Reader, Result, async_trait,
+    Accessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability,
+    ObjectRef, Reader, Result, async_trait,
 };
 
 pub(super) async fn read_bounded<A>(
@@ -17,30 +17,10 @@ where
     let mut reader = accessor
         .open(ByteReadRequest::new(object).with_options(options))
         .await?;
-    let too_large = || {
-        decode(format!(
-            "{path}: exceeds configured {limit}-byte object limit"
-        ))
-    };
-    if reader
-        .metadata()
-        .content_length
-        .is_some_and(|size| size > limit as u64)
-    {
-        return Err(too_large());
-    }
+    validation::validate_content_length(reader.metadata().content_length, limit, &path)?;
     let mut output = Vec::new();
     while let Some(bytes) = reader.next().await? {
-        if bytes.is_empty() {
-            return Err(Error::new(
-                ErrorKind::Io,
-                "read_pmc",
-                format!("{path}: empty byte chunk"),
-            ));
-        }
-        if bytes.len() > limit - output.len() {
-            return Err(too_large());
-        }
+        validation::validate_chunk(&bytes, limit - output.len(), limit, &path)?;
         output.extend_from_slice(&bytes);
     }
     Ok(output)
