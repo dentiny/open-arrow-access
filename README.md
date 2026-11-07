@@ -44,6 +44,10 @@ async fn read() -> Result<(), Box<dyn std::error::Error>> {
 `Stream<Item = Result<RecordBatch>>`. `ReadOptions` supports a nonzero target
 batch size and top-level field projection in the requested field order.
 
+For small metadata objects, `read_limited(reader, limit, operation).await`
+collects an owned `ByteReader` into a `Vec<u8>`, rejecting advertised or actual
+lengths above the byte limit before copying. Parsing remains with the caller.
+
 Storage I/O settings are per open operation:
 
 ```rust

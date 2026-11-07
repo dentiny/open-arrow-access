@@ -78,6 +78,14 @@ and source chain. Construction performs no I/O, and dropping the adapter drops
 the input. XML and decompression share this bridge; it exposes sequential reads
 only, without retaining range operations.
 
+`read_limited(reader, limit, operation)` collects an owned byte reader into a
+`Vec<u8>` for small metadata objects. It rejects an advertised length above the
+limit before reading, and checks actual bytes before copying each chunk. Unknown
+or understated lengths do not bypass the limit. Limit failures are decode errors;
+empty chunks are I/O errors. Both use the supplied operation, while upstream
+errors pass through unchanged. The limit bounds collected bytes, not allocation
+capacity or upstream buffers. Parsing and provider validation stay with callers.
+
 ### Reader lifecycle
 
 `ReadState` in core tracks input EOF separately from output completion. Marking
