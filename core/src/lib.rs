@@ -3,6 +3,7 @@
 mod accessor;
 mod async_read;
 mod capability;
+mod data_type;
 mod error;
 mod layer;
 mod read_state;
@@ -13,6 +14,7 @@ mod stream_reader;
 pub use accessor::{Accessor, ByteAccessor, ObjectStream};
 pub use async_read::into_async_read;
 pub use capability::Capability;
+pub use data_type::{DataTypeCategory, classify_data_type};
 pub use error::{Error, ErrorKind, Result};
 pub use layer::{AccessorExt, Layer};
 pub use read_state::ReadState;
@@ -26,6 +28,6 @@ pub use request::{
 pub use stream_reader::StreamReader;
 
 pub use arrow_array::RecordBatch;
-pub use arrow_schema::{Schema, SchemaRef};
+pub use arrow_schema::{DataType, Schema, SchemaRef};
 pub use async_trait::async_trait;
 pub use bytes::Bytes;

@@ -1,4 +1,4 @@
-use super::{CsvFormat, csv_supports_type, reader::CsvReader};
+use super::{CsvFormat, reader::CsvReader, types::supported_type};
 use crate::FileFormat;
 use arrow_csv::{ReaderBuilder, reader::Decoder};
 use open_arrow_access_core::{
@@ -45,7 +45,7 @@ impl FileFormat for CsvFileFormat {
         // Arrow CSV reports unsupported field types as parse errors at flush time.
         // Validate selected fields here so configuration failures are not Decode errors.
         for field in schema.fields() {
-            if !csv_supports_type(field.data_type()) {
+            if !supported_type(field.data_type()) {
                 return Err(Error::new(
                     ErrorKind::Unsupported,
                     "open_csv",

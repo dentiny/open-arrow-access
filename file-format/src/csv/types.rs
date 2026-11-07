@@ -1,51 +1,27 @@
-use arrow_schema::{DataType, TimeUnit};
+use arrow_schema::TimeUnit;
+use open_arrow_access_core::{DataType, DataTypeCategory as Category, classify_data_type};
 
-/// Whether the CSV decoder supports this Arrow data type category.
-///
-/// This is the same check used by [`crate::CsvFileFormat`] before opening input.
-/// It includes the supported integer-keyed UTF-8 dictionaries. Type parameters,
-/// parser options and individual CSV values can still cause decoding to fail.
-/// Other file formats have their own type support.
-pub fn csv_supports_type(data_type: &DataType) -> bool {
-    match data_type {
-        DataType::Boolean
-        | DataType::Int8
-        | DataType::Int16
-        | DataType::Int32
-        | DataType::Int64
-        | DataType::UInt8
-        | DataType::UInt16
-        | DataType::UInt32
-        | DataType::UInt64
-        | DataType::Float16
-        | DataType::Float32
-        | DataType::Float64
-        | DataType::Decimal32(_, _)
-        | DataType::Decimal64(_, _)
-        | DataType::Decimal128(_, _)
-        | DataType::Decimal256(_, _)
-        | DataType::Date32
-        | DataType::Date64
-        | DataType::Time32(TimeUnit::Second | TimeUnit::Millisecond)
-        | DataType::Time64(TimeUnit::Microsecond | TimeUnit::Nanosecond)
-        | DataType::Timestamp(_, _)
-        | DataType::Null
-        | DataType::Utf8
-        | DataType::Utf8View => true,
-        DataType::Dictionary(key, value) => {
-            value.as_ref() == &DataType::Utf8
-                && matches!(
-                    key.as_ref(),
-                    DataType::Int8
-                        | DataType::Int16
-                        | DataType::Int32
-                        | DataType::Int64
-                        | DataType::UInt8
-                        | DataType::UInt16
-                        | DataType::UInt32
-                        | DataType::UInt64
-                )
-        }
+// Categories are shared by all formats; these additional constraints belong to CSV.
+pub(super) fn supported_type(data_type: &DataType) -> bool {
+    match classify_data_type(data_type) {
+        Category::Null
+        | Category::Boolean
+        | Category::Integer
+        | Category::Float
+        | Category::Decimal
+        | Category::Date
+        | Category::Timestamp => true,
+        Category::Time => matches!(
+            data_type,
+            DataType::Time32(TimeUnit::Second | TimeUnit::Millisecond)
+                | DataType::Time64(TimeUnit::Microsecond | TimeUnit::Nanosecond)
+        ),
+        Category::String => matches!(data_type, DataType::Utf8 | DataType::Utf8View),
+        Category::Dictionary => matches!(
+            data_type,
+            DataType::Dictionary(key, value)
+                if key.is_dictionary_key_type() && value.as_ref() == &DataType::Utf8
+        ),
         _ => false,
     }
 }

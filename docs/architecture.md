@@ -223,6 +223,10 @@ evaluation and DataFusion integration remain a separate PR. See
 schema and optional reader-context contracts.
 
 - `core/` depends on common types and Arrow, never concrete backends or formats.
+  It exposes `DataType` and its upstream predicates, plus the format-independent
+  `classify_data_type` / `DataTypeCategory` utility covering every Arrow variant.
+  Classification preserves outer container/encoding families; format-specific
+  support and type-parameter validation remain with the decoders.
 - `storage/` exposes one `OpenDalAccessor` over a caller-configured OpenDAL
   operator. Backend features, root validation, credentials, and initialization
   belong to the caller. Production reads and metadata access go through OpenDAL;

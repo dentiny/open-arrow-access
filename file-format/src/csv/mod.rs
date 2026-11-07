@@ -6,7 +6,6 @@ mod types;
 pub use accessor::CsvAccessor;
 pub use arrow_csv::reader::Format as CsvFormat;
 pub use format::CsvFileFormat;
-pub use types::csv_supports_type;
 
 use open_arrow_access_core::{Error, ErrorKind};
 
