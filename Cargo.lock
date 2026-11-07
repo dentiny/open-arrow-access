@@ -229,7 +229,7 @@ checksum = "5d2050892d4691cf110586070786712b504985a4d37ed64a9cd8a402718e1706"
 [[package]]
 name = "atif-arrow"
 version = "0.3.0"
-source = "git+https://github.com/dentiny/atif-arrow?rev=7b66a504dbd4c3c5ea25e500ce5d1899c5382372#7b66a504dbd4c3c5ea25e500ce5d1899c5382372"
+source = "git+https://github.com/dentiny/atif-arrow?rev=da768ec1263e2d6c362384cdf8c13f25b6ab41c4#da768ec1263e2d6c362384cdf8c13f25b6ab41c4"
 dependencies = [
  "arrow-array",
  "arrow-schema",

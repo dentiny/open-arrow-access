@@ -55,7 +55,7 @@ and checksum recorded in Cargo.lock.
 ## ATIF parser
 
 `format-atif` temporarily uses the `atif-arrow` converter at immutable commit
-[`7b66a504dbd4c3c5ea25e500ce5d1899c5382372`](https://github.com/dentiny/atif-arrow/commit/7b66a504dbd4c3c5ea25e500ce5d1899c5382372).
+[`da768ec1263e2d6c362384cdf8c13f25b6ab41c4`](https://github.com/dentiny/atif-arrow/commit/da768ec1263e2d6c362384cdf8c13f25b6ab41c4).
 This adds projection-aware batch builders, which are not available in the
 published [`atif-arrow 0.3.0`](https://crates.io/crates/atif-arrow/0.3.0) release.
 The upstream change is [atif-arrow PR #19](https://github.com/dentiny/atif-arrow/pull/19).

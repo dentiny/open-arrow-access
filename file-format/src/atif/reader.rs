@@ -30,11 +30,8 @@ impl AtifDecoder {
     }
 
     async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
-        let mut builder = match &self.projection {
-            Some(indices) => TrajectoryBatchBuilder::new_with_projection(self.batch_size, indices),
-            None => TrajectoryBatchBuilder::new(self.batch_size),
-        }
-        .map_err(|error| decode_error(self.source.as_ref(), self.record_index, error))?;
+        let mut builder = TrajectoryBatchBuilder::new(self.batch_size, self.projection.as_deref())
+            .map_err(|error| decode_error(self.source.as_ref(), self.record_index, error))?;
         for _ in 0..self.batch_size {
             let Some(document) = self.read_document().await? else {
                 break;
