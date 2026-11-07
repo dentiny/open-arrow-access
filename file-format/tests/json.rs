@@ -1,7 +1,6 @@
 use std::{
     error::Error as _,
     num::NonZeroUsize,
-    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -17,7 +16,7 @@ use open_arrow_access_core::{
 };
 
 use open_arrow_access_file_format::JsonAccessor;
-use open_arrow_access_test_support::{MemoryAccessor, Observations, format};
+use open_arrow_access_test_support::{MemoryAccessor, Observations, fixture, fixture_path, format};
 
 fn schema() -> SchemaRef {
     Arc::new(Schema::new_with_metadata(
@@ -29,21 +28,8 @@ fn schema() -> SchemaRef {
     ))
 }
 
-fn fixture_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../testdata/json")
-        .join(name)
-}
-
-async fn fixture_data(name: &str) -> Vec<u8> {
-    let path = fixture_path(name);
-    tokio::fs::read(&path)
-        .await
-        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
-}
-
 async fn fixture(name: &str, chunk_size: usize) -> (MemoryAccessor, Arc<Observations>) {
-    let input = MemoryAccessor::new(&fixture_data(name).await, chunk_size);
+    let input = MemoryAccessor::new(&fixture!("json", name).await, chunk_size);
     let observations = input.observations.clone();
     (input, observations)
 }
@@ -204,7 +190,7 @@ async fn per_open_options_are_forwarded_and_sequential_bytes_are_sufficient() {
 
 #[tokio::test]
 async fn reading_a_batch_does_not_collect_the_entire_input() {
-    let data = fixture_data("many.jsonl").await;
+    let data = fixture!("json", "many.jsonl").await;
     let input = MemoryAccessor::new(&data, 1);
     let observed = input.observations.clone();
     let accessor = JsonAccessor::new(input, schema());
@@ -231,7 +217,7 @@ async fn empty_and_whitespace_only_inputs_have_no_rows() {
 #[tokio::test]
 async fn local_jsonl_reads_through_opendal() {
     let storage = open_arrow_access_storage::OpenDalAccessor::new(
-        open_arrow_access_test_support::fs_operator(fixture_path("")),
+        open_arrow_access_test_support::fs_operator(fixture_path!("json", "")),
     );
     let accessor = JsonAccessor::new(
         storage.with_chunk_size(NonZeroUsize::new(2).unwrap()),

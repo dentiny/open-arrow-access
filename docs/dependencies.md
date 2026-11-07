@@ -20,9 +20,9 @@ were inspected.
 Use upstream's **resolved lockfile versions**, including patch versions, as the
 workspace baseline. Direct workspace dependencies use normal Cargo semver
 requirements without an `=` prefix. The committed `Cargo.lock` records the
-resolved versions and aligns transitive Arrow and OpenDAL components. For our Fs-only
-OpenDAL service, absent from upstream's selected services, use the same OpenDAL
-release (`0.59.2`). Feature selection remains specific to this project's scope.
+resolved versions and aligns transitive Arrow and OpenDAL components. For
+additional OpenDAL services and HTTP transports, use the same OpenDAL release
+(`0.59.2`). Feature selection remains specific to this project's scope.
 The CSV feature uses the same Arrow baseline (`59.3.0`) for `arrow-csv`, including
 the transitive Arrow Cast and Arrow Ord components in the committed lockfile.
 

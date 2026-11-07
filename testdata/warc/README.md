@@ -17,7 +17,6 @@ serialize WARC records or construct malformed inputs at runtime.
 | `bad_truncated_body.warc` | Five-byte body ends after four bytes. |
 | `bad_terminator.warc` | Invalid final record-terminator byte. |
 | `bad_missing_date.warc` | Missing required WARC-Date header. |
-| `bad_segment_number.warc` | Non-numeric optional WARC-Segment-Number, preserved as a string by the parser. |
 
 Preserve exact bytes, including CRLF framing and the intentionally invalid
 records. The local `.gitattributes` disables line-ending conversion.

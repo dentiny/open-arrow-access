@@ -7,7 +7,7 @@ use std::{
     },
 };
 
-use arrow_array::{ArrayRef, Int64Array};
+use arrow_array::{ArrayRef, Int64Array, types::Int64Type};
 use arrow_schema::{DataType, Field};
 use futures::{TryStreamExt, stream};
 use open_arrow_access::{
@@ -133,20 +133,7 @@ impl Reader for Batches {
 }
 
 async fn values(reader: Box<dyn RecordReader>) -> Vec<i64> {
-    into_stream(reader)
-        .try_collect::<Vec<_>>()
-        .await
-        .unwrap()
-        .iter()
-        .flat_map(|b| {
-            b.column(0)
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .unwrap()
-                .values()
-                .to_vec()
-        })
-        .collect()
+    open_arrow_access_test_support::record::collect_column::<Int64Type>(reader, 0).await
 }
 
 #[tokio::test]
@@ -424,9 +411,7 @@ mod filesystem {
     use more_asserts::assert_le;
     use open_arrow_access::{file_format::ParquetAccessor, storage::OpenDalAccessor};
     fn copy_fixture(name: &str, destination: &std::path::Path) {
-        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("testdata/parquet/directory")
-            .join(name);
+        let source = open_arrow_access_test_support::fixture_path!("parquet/directory", name);
         std::fs::copy(source, destination).unwrap();
     }
 
