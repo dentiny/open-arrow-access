@@ -232,6 +232,27 @@ impl ByteReader for MemoryReader {
 /// Shared assertions for sequential byte layers.
 pub mod byte_layer;
 
+/// Shared assertions for single-file Arrow format accessors.
+pub mod format;
+
+fn memory_read_error(error: &Error) -> &Error {
+    let mut source: &(dyn std::error::Error + 'static) = error;
+    loop {
+        if let Some(shared) = source.downcast_ref::<Error>()
+            && shared.operation() == "memory_read"
+        {
+            return shared;
+        }
+        source = match source
+            .downcast_ref::<std::io::Error>()
+            .and_then(std::io::Error::get_ref)
+        {
+            Some(inner) => inner,
+            None => source.source().expect("missing original upstream error"),
+        };
+    }
+}
+
 /// Resolve a committed fixture relative to the calling crate's manifest directory.
 pub fn fixture_path(manifest_dir: impl AsRef<Path>, format: &str, name: &str) -> PathBuf {
     manifest_dir

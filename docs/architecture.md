@@ -53,16 +53,69 @@ another valid random-access mechanism. See [decompression](../decompression/READ
 `into_stream` owns the reader and stops polling it after EOF or the first error.
 No background execution is created by these contracts.
 
+`StreamReader::new(stream, metadata)` adapts an owned stream of shared results
+back into a sequential `Reader`, including streams that are not `Unpin`.
+Metadata is available without polling. EOF and errors drop the stream and make
+subsequent reads return EOF. The adapter starts no tasks or read-ahead; dropping
+it drops the stream. Callers map errors and ensure items match the declared
+metadata before wrapping. Parquet uses this adapter after its format-specific
+column reordering and schema restoration.
+Byte streams paired with `ByteMetadata` also implement `ByteReader`; callers
+supply nonempty chunks matching the metadata. Range reads remain unsupported.
+XML wraps its native async batch reader in a stream and retains its own projection
+and error mapping, using the same adapter for metadata and terminal behavior.
+CSV and JSON also use `StreamReader`, sharing a private incremental input driver
+for pending chunks, consumed-byte slicing and input EOF. Their decoder adapters
+retain batch-ready checks and EOF finalization: CSV decodes an empty slice before
+flushing; JSON flushes once at EOF and checks for partial records before a full
+batch flush. The driver forwards source errors and retains format error context.
+ATIF keeps its document framing and trajectory conversion in a local decoder,
+using `StreamReader` for metadata, capabilities and terminal behavior as well.
+
+`into_async_read` owns a `ByteReader` and exposes futures `AsyncRead` and
+`AsyncBufRead` for streaming parsers. It retains input chunks until consumed,
+rejects empty chunks as I/O errors, and stops polling after EOF or an error.
+Upstream errors remain wrapped in `std::io::Error` with their original category
+and source chain. Construction performs no I/O, and dropping the adapter drops
+the input. XML and decompression share this bridge; it exposes sequential reads
+only, without retaining range operations.
+
+`read_chunks(input, chunk_size)` adapts an owned futures `AsyncRead` into a stream
+of `std::io::Result<Bytes>`. The nonzero size bounds each emitted chunk; short
+reads yield immediately. The input need not be `Unpin`. Construction performs no
+reads, and EOF or the first error drops the input and terminates the stream.
+I/O errors pass through unchanged. Decompression maps these errors with codec
+context and uses `StreamReader` for metadata, capabilities and terminal behavior.
+
+`read_limited(reader, limit, operation)` collects an owned byte reader into a
+`Vec<u8>` for small metadata objects. It rejects an advertised length above the
+limit before reading, and checks actual bytes before copying each chunk. Unknown
+or understated lengths do not bypass the limit. Limit failures are decode errors;
+empty chunks are I/O errors. Both use the supplied operation, while upstream
+errors pass through unchanged. The limit bounds collected bytes, not allocation
+capacity or upstream buffers. Parsing and provider validation stay with callers.
+
+`read_lines(reader, max_line_bytes, operation)` streams byte lines across chunk
+boundaries, retaining LF/CRLF endings and a final nonempty unterminated line.
+An optional byte limit includes line endings and is checked before copying;
+it does not bound allocation capacity or upstream buffers. EOF and errors drop
+the input, and errors terminate the stream. Empty chunks are I/O errors and
+oversized lines are decode errors using the supplied operation; upstream errors
+pass through unchanged. ATIF JSONL uses this utility without a line limit, keeping
+UTF-8 decoding, blank-line filtering and record context in the format. ATIF JSON
+uses `read_limited` with `usize::MAX` to collect its single document.
+
 ### Reader lifecycle
 
 `ReadState` in core tracks input EOF separately from output completion. Marking
 input EOF allows a decoder to drain buffered rows. Observing an output error or
 `Ok(None)` finishes the reader permanently; observing `Ok(Some(item))` preserves
 the current state. A reader can also finish explicitly while emitting a known
-final item, as the JSON decoder does when flushing at input EOF.
+final item.
 
-Readers check `is_finished()` before doing work and call `observe(&result)` on
-their output. State transitions are synchronous and format-independent. Input,
+Readers using this helper check `is_finished()` before doing work and call
+`observe(&result)` on their output. State transitions are synchronous and
+format-independent. Input,
 decoder, pending bytes, metadata and resource cleanup remain owned by each
 reader. For example, OpenDAL releases its sequential stream and pending buffer
 at completion, while exact range reads remain independent of sequential EOF.
@@ -122,6 +175,27 @@ These are proposed contracts, not new runtime capabilities in this PR.
 `Accessor` is a Send + Sync factory. Associated `Request` and `Reader` types
 allow storage, formats and future datasets/services to use the same `open`
 contract without a closed enum of every source or format.
+
+`FileAccessor<B, F>` implements the single-file record accessor once for every
+`FileFormat`. Its `open` first calls the format's synchronous `prepare` with
+common read options, then opens `B` with the exact object and byte options,
+then transfers the byte reader and prepared state to the format's async `open`.
+The associated `Prepared: Send` type retains per-open decoders and resolved
+schemas without repeating validation or constructing a decoder twice.
+
+Fixed schemas validate projection and configuration before byte I/O. Parquet
+prepares no decoder until its input is available and checks actual range support
+and known length before inspecting the file. XML validates its path, limits and
+explicit projection before opening; inferred projection still resolves after
+bounded sampling. `capability(input)` maps upstream byte capabilities to the
+format's record-accessor capabilities without I/O. The default reports sequential
+record reading; Parquet also requires upstream range support. Both report no
+byte-range, listing or parallel operations on their record output.
+
+Existing built-in accessor types alias the shared accessor and preserve their
+constructors/builders. Custom formats use `FileAccessor::from_format` and need
+no additional `Accessor` implementation. Format configuration and decoding stay
+in `file-format`, with no backend dependencies in the format trait.
 
 | Adapter | Request | Reader |
 | --- | --- | --- |
@@ -192,11 +266,12 @@ schema and optional reader-context contracts.
   operator. Backend features, root validation, credentials, and initialization
   belong to the caller. Production reads and metadata access go through OpenDAL;
   the adapter does not construct backend-specific accessors.
-- `file-format/` consumes shared byte accessors. Its Parquet bridge implements
-  Arrow Rust's `AsyncFileReader` using exact ranges. Each format has its own
-  directory under `src/`. In `src/parquet/`, `accessor.rs`, `input.rs` and
-  `reader.rs` own their respective structs and implementations; `mod.rs` declares
-  the modules, exports the accessor and provides common error conversion.
+- `file-format/` exposes `FileFormat` and `FileAccessor` independently of optional
+  built-in formats. Shared storage opening lives in `src/accessor.rs`. Each
+  format's `accessor.rs` retains its compatibility alias and constructors;
+  `format.rs` owns configuration, preparation and decoder initialization.
+  Parquet's `input.rs` bridges exact ranges to Arrow's `AsyncFileReader`, and
+  `reader.rs` adapts the decoded stream. `mod.rs` declares modules and exports.
 - The facade always exposes OpenDAL storage, including with no default features.
   Format, dataset, and decompression features remain independent and additive;
   they do not change runtime ordering or silently attach layers.

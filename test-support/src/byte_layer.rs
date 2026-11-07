@@ -1,27 +1,8 @@
 //! Reusable error contract for sequential byte layers.
 
-use crate::{MemoryAccessor, collect_bytes};
+use crate::{MemoryAccessor, collect_bytes, memory_read_error};
 use open_arrow_access_core::{Accessor, ByteReadRequest, ByteReader, Error, ErrorKind, Result};
 use std::sync::atomic::{AtomicUsize, Ordering};
-
-fn upstream_error(error: &Error) -> &Error {
-    use std::error::Error as _;
-    let mut source = error.source().expect("missing layer source");
-    loop {
-        if let Some(shared) = source.downcast_ref::<Error>()
-            && shared.operation() == "memory_read"
-        {
-            return shared;
-        }
-        source = match source
-            .downcast_ref::<std::io::Error>()
-            .and_then(std::io::Error::get_ref)
-        {
-            Some(inner) => inner,
-            None => source.source().expect("missing original upstream error"),
-        };
-    }
-}
 
 /// Consume a failing reader and verify that subsequent calls do not poll upstream.
 pub async fn assert_terminal_error(
@@ -71,7 +52,7 @@ where
             assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
             let error =
                 assert_terminal_error(reader.as_mut(), &observed.reads, kind, operation).await;
-            let original = upstream_error(&error);
+            let original = memory_read_error(&error);
             assert_eq!(original.kind(), kind);
             assert_eq!(original.to_string(), "memory_read: injected source failure");
             let cause = original

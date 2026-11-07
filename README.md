@@ -44,6 +44,20 @@ async fn read() -> Result<(), Box<dyn std::error::Error>> {
 `Stream<Item = Result<RecordBatch>>`. `ReadOptions` supports a nonzero target
 batch size and top-level field projection in the requested field order.
 
+For small metadata objects, `read_limited(reader, limit, operation).await`
+collects an owned `ByteReader` into a `Vec<u8>`, rejecting advertised or actual
+lengths above the byte limit before copying. Parsing remains with the caller.
+
+`read_lines(reader, max_line_bytes, operation)` streams raw byte lines, retaining
+LF/CRLF endings and a final unterminated line. The optional per-line byte limit
+includes line endings and is checked before copying. UTF-8 decoding and blank-line
+handling remain with the caller.
+
+`read_chunks(input, chunk_size)` adapts a futures `AsyncRead` into nonempty byte
+chunks bounded by a `NonZeroUsize` size. Map its I/O errors to the shared error
+type, then wrap it in `StreamReader::new(stream, byte_metadata)` for a sequential
+`ByteReader`.
+
 Storage I/O settings are per open operation:
 
 ```rust
@@ -438,6 +452,38 @@ cargo run --example read_atif --features format-atif -- testdata/atif/trajectori
 
 The adapter uses the published `atif-arrow 0.3.0` crate with Arrow 59;
 see [dependency alignment](docs/dependencies.md#atif-parser).
+
+## Adding a file format
+
+`FileAccessor<B, F>` binds any byte accessor to a `FileFormat`. Built-in
+configuration types are `JsonFormat`, `CsvFileFormat`, `ParquetFormat`,
+`XmlFormat` and the existing `AtifFormat` enum. For example,
+`FileAccessor::from_format(bytes, JsonFormat::new(schema))` is equivalent to
+`JsonAccessor::new(bytes, schema)`. Existing accessor constructors and builders
+remain available as type aliases over the shared accessor. `CsvFormat` continues
+to configure Arrow CSV delimiter/header options.
+
+Implement `FileFormat` for a new Arrow format:
+
+1. Define `Prepared` and implement `prepare(&ReadOptions)` to validate fixed
+   schemas/projections and construct per-open decoder state before storage I/O.
+   Formats that inspect their input can use `()` as their prepared state.
+2. Implement async `open(input, request, prepared)` to inspect the owned byte
+   reader and return a reader with its fixed output schema and source identity.
+   Keep format-specific batching, projection pushdown and errors in the format.
+3. Override `capability(input)` to derive record capabilities when the default
+   sequential behavior needs additional input operations, such as exact byte
+   ranges. Check the actual opened reader and metadata during `open`.
+
+The shared accessor forwards the object and byte options and implements the
+record-accessor capability contract. Each open gets independent prepared state.
+Use `StreamReader` for existing batch streams, `into_async_read` for futures I/O
+parsers, and the [shared format assertions](test-support/README.md#format-contracts)
+to test the new format.
+
+The protocol is available directly from `open-arrow-access-file-format` with
+no built-in features enabled. The facade re-exports it under `file_format`
+alongside enabled built-ins.
 
 ## Caller-configured storage
 
