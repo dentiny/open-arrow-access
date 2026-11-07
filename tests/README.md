@@ -15,6 +15,8 @@ directory owns facade wiring and composition across crates.
 | Parquet and byte/record layer composition | [`tests/reading.rs`](reading.rs) |
 | Directory and file-set facade | [`tests/directory.rs`](directory.rs) |
 | ATIF facade and file-set composition | [`tests/atif.rs`](atif.rs) |
+| Common Crawl configuration | [`tests/commoncrawl_common.rs`](commoncrawl_common.rs) |
+| Common Crawl WARC inventory | [`tests/commoncrawl_warc.rs`](commoncrawl_warc.rs) |
 | OpenDAL storage | [`storage/tests/opendal.rs`](../storage/tests/opendal.rs) |
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
