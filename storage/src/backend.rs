@@ -13,6 +13,8 @@ use opendal::{
 };
 use tokio::sync::Semaphore;
 
+use crate::validation::validate_locator;
+
 const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
 const DEFAULT_IO_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 const MAX_FETCH_BATCH_SIZE: u64 = 2 * 1024 * 1024;
@@ -54,13 +56,14 @@ impl Accessor for OpenDalAccessor {
             read_with_range: read,
             read_parallel: false,
             // OpenDAL can walk nonrecursive backend listings.
-            list: upstream.stat && upstream.list,
+            list: upstream.list,
         }
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let ByteReadRequest { object, options } = request;
         let path = object.locator();
+        validate_locator(path, false, "open")?;
         let metadata = self
             .operator
             .stat(path)
@@ -114,19 +117,15 @@ impl Accessor for OpenDalAccessor {
 #[async_trait]
 impl ByteAccessor for OpenDalAccessor {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        let path = request.prefix.locator();
-        let metadata = self
-            .operator
-            .stat(path)
-            .await
-            .map_err(|e| map_error("list", path, e))?;
-        if !metadata.is_dir() {
+        if !self.capability().list {
             return Err(Error::new(
-                ErrorKind::InvalidInput,
+                ErrorKind::Unsupported,
                 "list",
-                "prefix is not a directory",
+                "operator does not support listing",
             ));
         }
+        let path = request.prefix.locator();
+        validate_locator(path, true, "list")?;
         let path = if path.is_empty() {
             String::new()
         } else {
