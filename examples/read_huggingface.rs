@@ -8,8 +8,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let repository = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "lhoestq/demo1".into());
-    let service =
-        HuggingFaceService::new(HuggingFaceOptions::default().with_http_downloads()).await?;
+    let service = HuggingFaceService::new(HuggingFaceOptions::default()).await?;
     let mut reader = service
         .dataset(
             HuggingFaceDatasetRequest::new(repository, "default", "train")
