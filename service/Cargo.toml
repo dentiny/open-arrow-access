@@ -10,17 +10,30 @@ description = "Dataset source providers for Open Arrow Access"
 default = []
 huggingface = [
     "dep:open-arrow-access-storage",
+    "dep:open-arrow-access-dataset", "dep:open-arrow-access-file-format", "dep:futures",
     "dep:opendal", "opendal/services-hf", "opendal/http-transport-reqwest",
-    "dep:tokio", "tokio/fs", "dep:http", "dep:url",
+    "dep:tokio", "tokio/fs", "dep:http", "dep:serde", "dep:serde_json", "dep:url",
 ]
 
 [dependencies]
+open-arrow-access-dataset = { workspace = true, features = ["directory"], optional = true }
+open-arrow-access-file-format = { workspace = true, features = ["parquet"], optional = true }
+futures = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 open-arrow-access-storage = { workspace = true, optional = true }
 opendal = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
+
+[dev-dependencies]
+arrow-array.workspace = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "huggingface"
+required-features = ["huggingface"]

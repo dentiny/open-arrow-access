@@ -15,6 +15,7 @@ directory owns facade wiring and composition across crates.
 | Parquet and byte/record layer composition | [`tests/reading.rs`](reading.rs) |
 | Directory and file-set facade | [`tests/directory.rs`](directory.rs) |
 | ATIF facade and file-set composition | [`tests/atif.rs`](atif.rs) |
+| Hugging Face Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
 | WARC parser | [`tests/warc.rs`](warc.rs) |
 | OpenDAL storage | [`storage/tests/opendal.rs`](../storage/tests/opendal.rs) |
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |
@@ -57,6 +58,12 @@ Run a single format suite:
 ```sh
 cargo test -p open-arrow-access-file-format --features csv --test csv --locked
 cargo test -p open-arrow-access-file-format --features xml --test xml --locked
+```
+
+Run the provider suite:
+
+```sh
+cargo test -p open-arrow-access-service --features huggingface --test huggingface --locked
 ```
 
 Run the storage suite:

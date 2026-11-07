@@ -12,6 +12,7 @@ use super::{map_error, validation::validate_path};
 /// Read repository-relative files through OpenDAL's Hugging Face service.
 ///
 /// Obtain this from `HuggingFaceService::repository` for explicit files.
+/// `HuggingFaceService::dataset` pins Parquet config/split scans automatically.
 /// Direct branch reads are not snapshots.
 #[derive(Clone, Debug)]
 pub struct HuggingFaceAccessor {

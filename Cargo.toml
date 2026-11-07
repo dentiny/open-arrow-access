@@ -28,6 +28,8 @@ datafusion = "55.2.0"
 opendal = "0.59.2"
 
 [workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 http = "1"
 url = "2"
 async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
@@ -103,6 +105,10 @@ required-features = ["dataset-directory"]
 [[test]]
 name = "reading"
 required-features = ["format-parquet"]
+
+[[example]]
+name = "read_huggingface"
+required-features = ["service-huggingface"]
 
 [[example]]
 name = "read_parquet"

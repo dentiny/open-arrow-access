@@ -38,6 +38,7 @@ impl HuggingFaceService {
 
     /// Access explicit files in a dataset repository. A floating revision is
     /// read as supplied.
+    /// `dataset` pins the Parquet export automatically.
     pub async fn repository(
         &self,
         repository: HuggingFaceRepository,

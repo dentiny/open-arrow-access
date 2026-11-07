@@ -321,7 +321,12 @@ schema and optional reader-context contracts.
 - `dataset/` provides sequential `FileSetAccessor` and `DirectoryAccessor` behind
   the default-off `dataset-directory` feature, without depending on a format.
 - `service/` provides default-off Hugging Face repository access over the shared
-  OpenDAL byte adapter. Config/split Parquet dataset access follows separately.
+  OpenDAL byte adapter. The same service implements the record accessor contract
+  for `HuggingFaceDatasetRequest`: pin the Parquet export revision, list/sort shards,
+  then compose `ParquetAccessor` and `FileSetAccessor`. Shared file readers retain
+  ownership of decoding, projection, schema checks and sequential execution.
+  Partial exports require explicit opt-in. Fixed commits enable upstream resolve
+  caching; floating repository reads keep their existing resolution behavior.
 - `layers/` remains an extension point.
 
 The project output boundary is Arrow records. Internal temporary inputs may be
