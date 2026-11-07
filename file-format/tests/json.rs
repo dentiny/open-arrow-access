@@ -17,7 +17,7 @@ use open_arrow_access_core::{
 };
 
 use open_arrow_access_file_format::JsonAccessor;
-use open_arrow_access_test_support::{MemoryAccessor, Observations};
+use open_arrow_access_test_support::{MemoryAccessor, Observations, format};
 
 fn schema() -> SchemaRef {
     Arc::new(Schema::new_with_metadata(
@@ -98,18 +98,16 @@ async fn projection_preserves_requested_order_metadata_and_zero_column_row_count
     for projection in [vec!["title", "id"], vec![]] {
         let (input, _) = fixture("projection.jsonl", 3).await;
         let accessor = JsonAccessor::new(input, schema());
-        let mut reader = accessor
-            .open(request(1, Some(projection.clone())))
-            .await
-            .unwrap();
-        for id in [1, 2] {
-            let batch = reader.next().await.unwrap().unwrap();
+        let batches = format::assert_projection(
+            &accessor,
+            request(1, Some(projection.clone())),
+            &schema(),
+            2,
+        )
+        .await;
+        for (batch, id) in batches.iter().zip([1, 2]) {
             assert_eq!(batch.num_rows(), 1);
-            assert_eq!(batch.num_columns(), projection.len());
-            assert_eq!(batch.schema(), reader.metadata().schema);
-            assert_eq!(batch.schema().metadata(), schema().metadata());
             if !projection.is_empty() {
-                assert_eq!(batch.schema().field(0).name(), "title");
                 assert_eq!(
                     batch
                         .column(1)
@@ -121,7 +119,6 @@ async fn projection_preserves_requested_order_metadata_and_zero_column_row_count
                 );
             }
         }
-        assert!(reader.next().await.unwrap().is_none());
     }
 }
 
@@ -129,16 +126,13 @@ async fn projection_preserves_requested_order_metadata_and_zero_column_row_count
 async fn invalid_projection_fails_before_opening_bytes() {
     let (input, observed) = fixture("empty.json", 1).await;
     let accessor = JsonAccessor::new(input, schema());
-    for projection in [vec!["missing"], vec!["id", "id"]] {
-        let error = accessor
-            .open(request(2, Some(projection)))
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-        assert_eq!(error.operation(), "project");
-    }
-    assert!(observed.requests.lock().unwrap().is_empty());
+    format::assert_invalid_projection_before_open(
+        &accessor,
+        request(2, None),
+        &schema(),
+        &observed,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -172,9 +166,7 @@ async fn malformed_truncated_and_non_object_inputs_fail_terminally() {
             assert_eq!(error.kind(), ErrorKind::Decode, "{name}");
             assert_eq!(error.operation(), "decode_json", "{name}");
             assert!(error.source().unwrap().is::<ArrowError>(), "{name}");
-            let reads = observed.reads.load(Ordering::SeqCst);
-            assert!(reader.next().await.unwrap().is_none());
-            assert_eq!(observed.reads.load(Ordering::SeqCst), reads);
+            format::assert_finished(reader.as_mut(), &observed.reads).await;
         }
     }
 }
@@ -186,12 +178,9 @@ async fn io_errors_keep_their_category_after_a_successful_batch() {
     let accessor = JsonAccessor::new(input, schema());
     let mut reader = accessor.open(request(1, None)).await.unwrap();
     assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
-    let error = reader.next().await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::Io);
+    let error =
+        format::assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Io).await;
     assert_eq!(error.operation(), "memory_read");
-    let reads = observed.reads.load(Ordering::SeqCst);
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(observed.reads.load(Ordering::SeqCst), reads);
 }
 
 #[tokio::test]
@@ -235,9 +224,7 @@ async fn empty_and_whitespace_only_inputs_have_no_rows() {
         let accessor = JsonAccessor::new(input, schema());
         let mut reader = accessor.open(request(1, None)).await.unwrap();
         assert!(reader.next().await.unwrap().is_none());
-        let reads = observed.reads.load(Ordering::SeqCst);
-        assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(observed.reads.load(Ordering::SeqCst), reads);
+        format::assert_finished(reader.as_mut(), &observed.reads).await;
     }
 }
 
@@ -416,10 +403,7 @@ async fn source_errors_preserve_category_and_cause_at_open_and_mid_record() {
                 let mut reader = accessor.open(request(1, None)).await.unwrap();
                 let error = reader.next().await.err().unwrap();
                 assert_source_error(&error, kind);
-                let calls = polls.load(Ordering::SeqCst);
-                assert!(reader.next().await.unwrap().is_none());
-                assert!(reader.next().await.unwrap().is_none());
-                assert_eq!(polls.load(Ordering::SeqCst), calls);
+                format::assert_finished(reader.as_mut(), &polls).await;
             }
         }
     }
@@ -438,10 +422,7 @@ async fn empty_source_chunks_are_io_errors_and_terminal() {
         schema(),
     );
     let mut reader = accessor.open(request(1, None)).await.unwrap();
-    let error = reader.next().await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::Io);
+    let error = format::assert_terminal_error(reader.as_mut(), &polls, ErrorKind::Io).await;
     assert_eq!(error.operation(), "read_json");
-    assert_eq!(polls.load(Ordering::SeqCst), 1);
-    assert!(reader.next().await.unwrap().is_none());
     assert_eq!(polls.load(Ordering::SeqCst), 1);
 }
