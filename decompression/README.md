@@ -12,12 +12,15 @@ select a decoder.
 
 ```rust,no_run
 use open_arrow_access::{
-    Accessor, AccessorExt, ByteReadRequest, Result,
-    decompression::{DecompressionLayer, Gzip}, storage::FsAccessor,
+    Accessor, AccessorExt, ByteReadRequest,
+    decompression::{DecompressionLayer, Gzip}, storage::{OpenDalAccessor, opendal},
 };
 
-async fn read() -> Result<()> {
-    let files = FsAccessor::new("/absolute/data/root").await?;
+async fn read() -> Result<(), Box<dyn std::error::Error>> {
+    let operator = opendal::Operator::new(
+        opendal::services::Fs::default().root("/absolute/data/root"),
+    )?;
+    let files = OpenDalAccessor::new(operator);
     let gzip = files.layer(DecompressionLayer::new(Gzip));
     let mut reader = gzip.open(ByteReadRequest::new("records.jsonl.gz")).await?;
     while let Some(bytes) = reader.next().await? {
@@ -27,7 +30,7 @@ async fn read() -> Result<()> {
 }
 ```
 
-This example also needs `storage-fs`. The layer implements the existing
+This example also needs `storage-opendal`. The layer implements the existing
 `Layer`, `Accessor` and `ByteReader` protocols, so custom storage and nested
 compression wrappers work without format-specific code. Requests and storage
 I/O options pass through unchanged. Discovery delegates to the underlying byte

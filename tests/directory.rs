@@ -418,11 +418,11 @@ async fn directory_rejects_traversal_entries() {
     }
 }
 
-#[cfg(all(feature = "storage-fs", feature = "format-parquet"))]
+#[cfg(all(feature = "storage-opendal", feature = "format-parquet"))]
 mod filesystem {
     use super::*;
     use more_asserts::assert_le;
-    use open_arrow_access::{file_format::ParquetAccessor, storage::FsAccessor};
+    use open_arrow_access::{file_format::ParquetAccessor, storage::OpenDalAccessor};
     fn copy_fixture(name: &str, destination: &std::path::Path) {
         let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("testdata/parquet/directory")
@@ -431,12 +431,13 @@ mod filesystem {
     }
 
     #[tokio::test]
-    async fn filesystem_listing_is_recursive_file_only_and_validates_directory_paths() {
+    async fn filesystem_listing_is_recursive_file_only_and_uses_backend_prefix_semantics() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
         std::fs::write(dir.path().join("a"), b"a").unwrap();
         std::fs::write(dir.path().join("sub/b"), b"b").unwrap();
-        let fs = FsAccessor::new(dir.path()).await.unwrap();
+        let fs =
+            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()).await);
         assert!(fs.capability().list);
         let mut paths = fs
             .list("".into())
@@ -471,14 +472,18 @@ mod filesystem {
                 ErrorKind::InvalidInput
             );
         }
-        assert_eq!(
-            fs.list("missing".into()).await.err().unwrap().kind(),
-            ErrorKind::NotFound
-        );
-        assert_eq!(
-            fs.list("a".into()).await.err().unwrap().kind(),
-            ErrorKind::InvalidInput
-        );
+        // OpenDAL Fs treats nonexistent and non-directory prefixes as empty.
+        for prefix in ["missing", "a"] {
+            assert!(
+                fs.list(prefix.into())
+                    .await
+                    .unwrap()
+                    .try_collect::<Vec<_>>()
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+        }
     }
 
     #[tokio::test]
@@ -486,7 +491,8 @@ mod filesystem {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("data/sub")).unwrap();
         copy_fixture("a.parquet", &dir.path().join("data/sub/a.parquet"));
-        let fs = FsAccessor::new(dir.path()).await.unwrap();
+        let fs =
+            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()).await);
         let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
         for prefix in ["data/sub", "data//sub", "data///sub//"] {
             let request = DirectoryRequest::new(prefix);
@@ -516,7 +522,8 @@ mod filesystem {
         std::fs::create_dir(&excluded).unwrap();
         copy_fixture("b.parquet", &excluded.join("b.parquet"));
         let permissions = std::fs::metadata(&excluded).unwrap().permissions();
-        let fs = FsAccessor::new(dir.path()).await.unwrap();
+        let fs =
+            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()).await);
         let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
         let mut request = DirectoryRequest::new("");
         request.recursive = false;
@@ -539,7 +546,8 @@ mod filesystem {
         copy_fixture("c.parquet", &dir.path().join(".sub/c.parquet"));
         copy_fixture("hidden.parquet", &dir.path().join(".hidden.parquet"));
         std::fs::write(dir.path().join("readme"), b"not parquet").unwrap();
-        let fs = FsAccessor::new(dir.path()).await.unwrap();
+        let fs =
+            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()).await);
         let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
         let mut request = DirectoryRequest::new("");
         request.suffix = Some(".parquet".into());

@@ -26,10 +26,8 @@ pub mod decompression {
     };
 }
 
-#[cfg(any(feature = "storage-fs", feature = "storage-opendal"))]
+#[cfg(feature = "storage-opendal")]
 pub mod storage {
-    #[cfg(feature = "storage-fs")]
-    pub use open_arrow_access_storage::FsAccessor;
     pub use open_arrow_access_storage::OpenDalAccessor;
     pub use open_arrow_access_storage::opendal;
 }

@@ -33,24 +33,6 @@ impl OpenDalAccessor {
         }
     }
 
-    #[cfg(feature = "fs")]
-    pub(crate) async fn validate_directory(&self, prefix: &ObjectRef) -> Result<()> {
-        let path = prefix.locator();
-        let metadata = self
-            .operator
-            .stat(path)
-            .await
-            .map_err(|error| map_error("list", path, error))?;
-        if !metadata.is_dir() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "list",
-                "prefix is not a directory",
-            ));
-        }
-        Ok(())
-    }
-
     /// Bound emitted chunks independently of storage I/O splitting.
     pub fn with_chunk_size(mut self, chunk_size: NonZeroUsize) -> Self {
         self.chunk_size = chunk_size;
