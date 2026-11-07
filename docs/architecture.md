@@ -235,7 +235,7 @@ that entry point.
 | JSON object stream | `ReadRequest`; schema configured on accessor | Record reader |
 | WARC parser | `ByteReadRequest` | `Reader<Item = WarcRecord, Metadata = ObjectRef>`; Arrow conversion deferred |
 | Directory/file-set dataset | Directory or explicit ordered file selection and options | Record reader |
-| Future Hugging Face service | Repository/revision/config/split selection | Record reader or resolved object discovery |
+| Hugging Face repository | `ByteReadRequest` | `dyn ByteReader` |
 
 `Arc<dyn ByteAccessor>` supports application-owned backend injection. Optional
 `ByteAccessor::list` accepts `ListRequest` and defaults to Unsupported. Recursive
@@ -320,7 +320,9 @@ schema and optional reader-context contracts.
   through the same `ReadRequest` contract as Parquet.
 - `dataset/` provides sequential `FileSetAccessor` and `DirectoryAccessor` behind
   the default-off `dataset-directory` feature, without depending on a format.
-- `service/` and `layers/` remain extension points.
+- `service/` provides default-off Hugging Face repository access over the shared
+  OpenDAL byte adapter. Config/split Parquet dataset access follows separately.
+- `layers/` remains an extension point.
 
 The project output boundary is Arrow records. Internal temporary inputs may be
 introduced for materialization in a later decompression PR; downstream writes,

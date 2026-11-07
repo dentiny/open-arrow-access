@@ -28,6 +28,8 @@ datafusion = "55.2.0"
 opendal = "0.59.2"
 
 [workspace.dependencies]
+http = "1"
+url = "2"
 async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
 # Match the resolved Cargo.lock versions at the Lance revision above.
 # See docs/dependencies.md when updating this baseline.
@@ -61,6 +63,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 
 [features]
 default = []
+service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
 format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
@@ -77,6 +80,7 @@ decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-
 open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 open-arrow-access-storage.workspace = true
+open-arrow-access-service = { workspace = true, optional = true }
 open-arrow-access-file-format = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 

@@ -114,6 +114,11 @@ The same approach supports OpenDAL's other service, layer and transport
 features without adding matching features to this project. OpenDAL 0.59.2
 names its S3 feature `services-s3`.
 
+Enable `service-huggingface` for `HuggingFaceService::repository`. Repository ID,
+revision, root, endpoint and authentication are provider-owned. The returned byte
+accessor composes with existing format readers. Floating revisions are not snapshots.
+HF Parquet dataset selection follows in the dependent PR.
+
 ## JSON and JSONL
 
 Enable `format-json` and construct `file_format::JsonAccessor::new(bytes, schema)`
@@ -152,7 +157,7 @@ for TSV.
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema; WARC parser records with Arrow conversion deferred |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Shared provider crate scaffold; provider implementations arrive under separate default-off features |
+| `service/` | Hugging Face repository file access under the default-off `service-huggingface` feature |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |

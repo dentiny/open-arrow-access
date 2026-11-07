@@ -6,6 +6,11 @@
 
 pub use open_arrow_access_core::*;
 
+#[cfg(feature = "service-huggingface")]
+pub mod service {
+    pub use open_arrow_access_service::huggingface::*;
+}
+
 #[cfg(any(
     feature = "decompression-gzip",
     feature = "decompression-bz2",
