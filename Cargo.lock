@@ -1860,6 +1860,8 @@ name = "open-arrow-access-service"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
+ "arrow-schema",
+ "chrono",
  "futures",
  "http",
  "open-arrow-access-core",
@@ -1868,8 +1870,10 @@ dependencies = [
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
  "opendal",
+ "roxmltree",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "url",
 ]

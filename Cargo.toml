@@ -39,6 +39,8 @@ arrow-array = "59.3.0"
 arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+roxmltree = "0.21"
 xml-arrow = "0.2.0"
 atif-arrow = "0.4.0"
 warc = { package = "warc-rs", version = "=0.3.0", default-features = false }
@@ -65,6 +67,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 
 [features]
 default = []
+service-gutenberg = ["dep:open-arrow-access-service", "open-arrow-access-service/gutenberg"]
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
 format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
@@ -109,6 +112,10 @@ required-features = ["format-parquet"]
 [[example]]
 name = "read_huggingface"
 required-features = ["service-huggingface"]
+
+[[example]]
+name = "read_gutenberg"
+required-features = ["service-gutenberg"]
 
 [[example]]
 name = "read_parquet"

@@ -6,8 +6,15 @@
 
 pub use open_arrow_access_core::*;
 
-#[cfg(feature = "service-huggingface")]
+#[cfg(any(feature = "service-huggingface", feature = "service-gutenberg"))]
 pub mod service {
+    #[cfg(feature = "service-gutenberg")]
+    pub use open_arrow_access_service::gutenberg;
+    #[cfg(feature = "service-gutenberg")]
+    pub use open_arrow_access_service::gutenberg::{
+        GutenbergAccessor, GutenbergFile, GutenbergLimits, GutenbergRequest,
+    };
+    #[cfg(feature = "service-huggingface")]
     pub use open_arrow_access_service::huggingface::*;
 }
 

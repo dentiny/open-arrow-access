@@ -180,13 +180,19 @@ for TSV.
 
 ## Supported components
 
+Enable `service-gutenberg` to read a per-book Gutenberg RDF object and selected
+files from caller-configured storage. Each book produces one Arrow row with
+queryable metadata, the original `metadata_rdf`, and a `files` list containing
+original file bytes. See the [Gutenberg guide](service/README.md#gutenberg)
+for file mapping, schema and limits.
+
 | Component | Implemented |
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema; WARC parser records with Arrow conversion deferred |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Hugging Face repository bytes and Parquet datasets under the default-off `service-huggingface` feature |
+| `service/` | Hugging Face repository bytes and Parquet datasets; Gutenberg books with original RDF and file bytes |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |

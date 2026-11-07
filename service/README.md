@@ -32,3 +32,81 @@ fallback to `partial-<split>`; full exports take precedence, and permission or
 transport errors never trigger fallback. `with_revision` refers to the Parquet
 representation, not the original source branch. Native dataset-card parsing and
 Viewer row APIs are outside this entry point.
+
+## Gutenberg
+
+Enable `gutenberg` (`service-gutenberg` on the facade) for one per-book RDF
+object and its selected files as a single Arrow row:
+
+```rust,no_run
+use open_arrow_access::{
+    Accessor, Result,
+    service::{GutenbergAccessor, GutenbergFile, GutenbergRequest},
+    storage::{OpenDalAccessor, opendal},
+};
+
+async fn read() -> Result<()> {
+    let operator = opendal::Operator::new(
+        opendal::services::Fs::default().root("/mirror"),
+    ).expect("configure filesystem");
+    let books = GutenbergAccessor::new(OpenDalAccessor::new(operator));
+    let request = GutenbergRequest::new("cache/epub/11/pg11.rdf", vec![
+        GutenbergFile::new(
+            "https://www.gutenberg.org/ebooks/11.txt.utf-8",
+            "books/11.txt",
+        ),
+    ]);
+    let mut reader = books.open(request).await?;
+    while let Some(batch) = reader.next().await? {
+        println!("{} book", batch.num_rows());
+    }
+    Ok(())
+}
+```
+
+The URI must match a `pgterms:file` entry in the RDF; the object locator points
+to that file in your storage. This explicit mapping supports local or object
+storage mirrors without inferring paths from HTTP download URLs. Files retain
+request order. An empty selection keeps the book with an empty `files` list.
+Unknown or duplicate selections fail. No licence or language filtering occurs.
+
+| Column | Arrow type |
+| --- | --- |
+| `ebook_id` | UInt64 |
+| `title`, `rights` | nullable LargeUtf8 |
+| `creator` | List of struct: nullable `uri`, `name` (Utf8), `alias` (List<Utf8>), nullable `birthdate`, `deathdate` (Int32 years) |
+| `language`, `bookshelf` | List<Utf8> |
+| `subject` | List of struct: nullable `scheme` (Utf8), `value` (Utf8) |
+| `issued` | nullable Date32; Gutenberg release date |
+| `metadata_rdf` | LargeBinary; verbatim RDF, including unexpanded metadata |
+| `files` | LargeList of struct: `uri` (Utf8), `format` (List<Utf8>), nullable `extent` (UInt64), nullable `modified` (Utf8), `data` (LargeBinary) |
+
+`data` is the original file bytes, including compression, encoding and line
+endings. `extent` and `modified` preserve metadata declarations; they do not
+verify that storage and RDF belong to the same snapshot. Preserve source
+manifests and snapshot identity separately. Missing optional metadata becomes
+null or an empty list. Malformed RDF or failed selected-file reads terminate
+the reader rather than dropping the book.
+
+`with_options` supports top-level projection in caller order, including a
+zero-column row. Omitting `files` skips all file I/O; RDF and selected URI
+membership are still validated. `with_byte_options` forwards I/O settings to
+every open. One RDF emits one row, independently of the batch-size target.
+
+`with_limits(GutenbergLimits)` bounds collected RDF bytes (default 4 MiB), each
+selected file (256 MiB), and combined RDF/file bytes per row (1 GiB). These
+limits do not bound parser allocations, upstream chunks or Arrow copies. Reads
+are sequential and pull-driven; dropping a reader stops its work.
+
+This entry point reads caller-selected per-book UTF-8 RDF and files. Catalogue
+discovery, rsync, HTTP downloading, archive expansion and Lance writing remain
+with the caller. It does not use Gutendex or parse arbitrary RDF graphs. See
+Gutenberg's [catalogue](https://www.gutenberg.org/ebooks/offline_catalogs.html)
+and [mirroring guide](https://www.gutenberg.org/help/mirroring.html) for sources.
+
+Run the [example](../examples/read_gutenberg.rs) against the synthetic metadata
+fixture, or supply a mirror root, RDF path and pairs of file URI / local path:
+
+```sh
+cargo run --example read_gutenberg --features service-gutenberg
+```
