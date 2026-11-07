@@ -1,7 +1,6 @@
-use super::{CsvFormat, reader::CsvReader};
+use super::{CsvFormat, csv_supports_type, reader::CsvReader};
 use crate::FileFormat;
 use arrow_csv::{ReaderBuilder, reader::Decoder};
-use arrow_schema::{DataType, TimeUnit};
 use open_arrow_access_core::{
     ByteReader, Error, ErrorKind, ReadOptions, ReadRequest, RecordMetadata, RecordReader, Result,
     SchemaRef, async_trait,
@@ -46,7 +45,7 @@ impl FileFormat for CsvFileFormat {
         // Arrow CSV reports unsupported field types as parse errors at flush time.
         // Validate selected fields here so configuration failures are not Decode errors.
         for field in schema.fields() {
-            if !supported_type(field.data_type()) {
+            if !csv_supports_type(field.data_type()) {
                 return Err(Error::new(
                     ErrorKind::Unsupported,
                     "open_csv",
@@ -81,49 +80,5 @@ impl FileFormat for CsvFileFormat {
                 source: Some(request.object),
             },
         )))
-    }
-}
-
-fn supported_type(data_type: &DataType) -> bool {
-    match data_type {
-        DataType::Boolean
-        | DataType::Int8
-        | DataType::Int16
-        | DataType::Int32
-        | DataType::Int64
-        | DataType::UInt8
-        | DataType::UInt16
-        | DataType::UInt32
-        | DataType::UInt64
-        | DataType::Float16
-        | DataType::Float32
-        | DataType::Float64
-        | DataType::Decimal32(_, _)
-        | DataType::Decimal64(_, _)
-        | DataType::Decimal128(_, _)
-        | DataType::Decimal256(_, _)
-        | DataType::Date32
-        | DataType::Date64
-        | DataType::Time32(TimeUnit::Second | TimeUnit::Millisecond)
-        | DataType::Time64(TimeUnit::Microsecond | TimeUnit::Nanosecond)
-        | DataType::Timestamp(_, _)
-        | DataType::Null
-        | DataType::Utf8
-        | DataType::Utf8View => true,
-        DataType::Dictionary(key, value) => {
-            value.as_ref() == &DataType::Utf8
-                && matches!(
-                    key.as_ref(),
-                    DataType::Int8
-                        | DataType::Int16
-                        | DataType::Int32
-                        | DataType::Int64
-                        | DataType::UInt8
-                        | DataType::UInt16
-                        | DataType::UInt32
-                        | DataType::UInt64
-                )
-        }
-        _ => false,
     }
 }

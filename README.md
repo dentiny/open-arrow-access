@@ -412,6 +412,8 @@ configuration types are `JsonFormat`, `CsvFileFormat`, `ParquetFormat`,
 `JsonAccessor::new(bytes, schema)`. Existing accessor constructors and builders
 remain available as type aliases over the shared accessor. `CsvFormat` continues
 to configure Arrow CSV delimiter/header options.
+`csv_supports_type(&DataType)` exposes the same type-category check used by the
+CSV adapter; parsing still validates type parameters and input values.
 
 Implement `FileFormat` for a new Arrow format:
 

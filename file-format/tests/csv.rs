@@ -10,7 +10,7 @@ use open_arrow_access_core::{
     Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
 };
 
-use open_arrow_access_file_format::{CsvAccessor, CsvFormat};
+use open_arrow_access_file_format::{CsvAccessor, CsvFormat, csv_supports_type};
 use open_arrow_access_test_support::{
     MemoryAccessor,
     format::{self, collect_batches as collect},
@@ -68,6 +68,12 @@ fn ids(batches: &[RecordBatch], column: usize) -> Vec<i64> {
 
 #[tokio::test]
 async fn fragmented_csv_preserves_values_nulls_order_schema_and_source() {
+    assert!(
+        schema()
+            .fields()
+            .iter()
+            .all(|field| csv_supports_type(field.data_type()))
+    );
     let input = fixture("good.csv").await;
     let bytes = MemoryAccessor::new(&input, 1);
     let accessor = CsvAccessor::new(bytes, schema()).with_format(
@@ -182,6 +188,7 @@ async fn unsupported_csv_fields_are_configuration_errors_only_when_projected() {
         DataType::Interval(IntervalUnit::YearMonth),
         DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
     ] {
+        assert!(!csv_supports_type(&data_type), "{data_type:?}");
         let bytes = MemoryAccessor::new(&fixture("good_no_header.csv").await, 1);
         let schema = Arc::new(Schema::new(vec![
             Field::new("id", DataType::Int64, false),

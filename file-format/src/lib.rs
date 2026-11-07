@@ -19,7 +19,7 @@ pub use json::{JsonAccessor, JsonFormat};
 #[cfg(feature = "csv")]
 mod csv;
 #[cfg(feature = "csv")]
-pub use csv::{CsvAccessor, CsvFileFormat, CsvFormat};
+pub use csv::{CsvAccessor, CsvFileFormat, CsvFormat, csv_supports_type};
 
 #[cfg(feature = "xml")]
 mod xml;

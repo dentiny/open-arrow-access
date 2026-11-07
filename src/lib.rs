@@ -42,7 +42,9 @@ pub mod file_format {
     #[cfg(feature = "format-atif")]
     pub use open_arrow_access_file_format::{AtifAccessor, AtifFormat};
     #[cfg(feature = "format-csv")]
-    pub use open_arrow_access_file_format::{CsvAccessor, CsvFileFormat, CsvFormat};
+    pub use open_arrow_access_file_format::{
+        CsvAccessor, CsvFileFormat, CsvFormat, csv_supports_type,
+    };
     pub use open_arrow_access_file_format::{FileAccessor, FileFormat};
     #[cfg(feature = "format-json")]
     pub use open_arrow_access_file_format::{JsonAccessor, JsonFormat};
