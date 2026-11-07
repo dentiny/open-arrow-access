@@ -1,7 +1,9 @@
 mod accessor;
+mod format;
 mod reader;
 
-pub use accessor::{XmlAccessor, XmlLimits};
+pub use accessor::XmlAccessor;
+pub use format::{XmlFormat, XmlLimits};
 pub use xml_arrow::{
     InferenceOptions as XmlInferenceOptions, NamespaceBinding, XmlField, XmlSchema,
 };
@@ -14,6 +16,3 @@ fn xml_error(error: xml_arrow::ReadError) -> open_arrow_access_core::Error {
     });
     Error::new(kind, "read_xml", error.to_string()).with_source(error)
 }
-
-#[cfg(test)]
-mod tests;
