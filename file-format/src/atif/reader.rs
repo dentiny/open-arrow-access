@@ -1,6 +1,7 @@
 use atif_arrow::TrajectoryBatchBuilder;
 use open_arrow_access_core::{
-    ByteReader, Bytes, Capability, Reader, RecordBatch, RecordMetadata, Result, async_trait,
+    ByteReader, Bytes, Capability, ReadState, Reader, RecordBatch, RecordMetadata, Result,
+    async_trait,
 };
 
 use super::{
@@ -17,8 +18,7 @@ pub(super) struct AtifReader {
     pending: Bytes,
     document: Vec<u8>,
     record_index: u64,
-    eof: bool,
-    finished: bool,
+    state: ReadState,
 }
 
 impl AtifReader {
@@ -38,23 +38,22 @@ impl AtifReader {
             pending: Bytes::new(),
             document: Vec::new(),
             record_index: 1,
-            eof: false,
-            finished: false,
+            state: ReadState::default(),
         }
     }
 
     async fn read_document(&mut self) -> Result<Option<String>> {
         loop {
-            if self.eof && self.document.is_empty() {
+            if self.state.input_eof() && self.document.is_empty() {
                 return Ok(None);
             }
-            if self.pending.is_empty() && !self.eof {
+            if self.pending.is_empty() && !self.state.input_eof() {
                 match self.input.next().await? {
                     Some(bytes) if bytes.is_empty() => {
                         return Err(empty_chunk_error());
                     }
                     Some(bytes) => self.pending = bytes,
-                    None => self.eof = true,
+                    None => self.state.mark_input_eof(),
                 }
             }
             let newline = match self.format {
@@ -64,7 +63,7 @@ impl AtifReader {
             let consumed = newline.map_or(self.pending.len(), |index| index + 1);
             self.document.extend_from_slice(&self.pending[..consumed]);
             self.pending = self.pending.slice(consumed..);
-            if newline.is_some() || self.eof {
+            if newline.is_some() || self.state.input_eof() {
                 let document =
                     String::from_utf8(std::mem::take(&mut self.document)).map_err(|error| {
                         decode_error(self.metadata.source.as_ref(), self.record_index, error)
@@ -128,13 +127,11 @@ impl Reader for AtifReader {
     }
 
     async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.finished {
+        if self.state.is_finished() {
             return Ok(None);
         }
         let batch = self.read_batch().await;
-        if !matches!(batch, Ok(Some(_))) {
-            self.finished = true;
-        }
+        self.state.observe(&batch);
         batch
     }
 }
