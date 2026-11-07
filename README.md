@@ -403,6 +403,37 @@ cargo run --example read_atif --features format-atif -- testdata/atif/trajectori
 The adapter uses the published `atif-arrow 0.3.0` crate with Arrow 59;
 see [dependency alignment](docs/dependencies.md#atif-parser).
 
+## Adding a file format
+
+`FileAccessor<B, F>` binds any byte accessor to a `FileFormat`. Built-in
+configuration types are `JsonFormat`, `CsvFileFormat`, `ParquetFormat`,
+`XmlFormat` and the existing `AtifFormat` enum. For example,
+`FileAccessor::from_format(bytes, JsonFormat::new(schema))` is equivalent to
+`JsonAccessor::new(bytes, schema)`. Existing accessor constructors and builders
+remain available as type aliases over the shared accessor. `CsvFormat` continues
+to configure Arrow CSV delimiter/header options.
+
+Implement `FileFormat` for a new Arrow format:
+
+1. Define `Prepared` and implement `prepare(&ReadOptions)` to validate fixed
+   schemas/projections and construct per-open decoder state before storage I/O.
+   Formats that inspect their input can use `()` as their prepared state.
+2. Implement async `open(input, request, prepared)` to inspect the owned byte
+   reader and return a reader with its fixed output schema and source identity.
+   Keep format-specific batching, projection pushdown and errors in the format.
+3. Override `can_read` when capabilities such as exact byte ranges are required,
+   and check the actual opened reader and metadata during `open`.
+
+The shared accessor forwards the object and byte options and implements the
+record-accessor capability contract. Each open gets independent prepared state.
+Use `StreamReader` for existing batch streams, `into_async_read` for futures I/O
+parsers, and the [shared format assertions](test-support/README.md#format-contracts)
+to test the new format.
+
+The protocol is available directly from `open-arrow-access-file-format` with
+no built-in features enabled. The facade re-exports it under `file_format`
+alongside enabled built-ins.
+
 ## Caller-configured storage
 
 `storage::{OpenDalAccessor, opendal}` is always available, including with

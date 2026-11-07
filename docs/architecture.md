@@ -139,6 +139,25 @@ These are proposed contracts, not new runtime capabilities in this PR.
 allow storage, formats and future datasets/services to use the same `open`
 contract without a closed enum of every source or format.
 
+`FileAccessor<B, F>` implements the single-file record accessor once for every
+`FileFormat`. Its `open` first calls the format's synchronous `prepare` with
+common read options, then opens `B` with the exact object and byte options,
+then transfers the byte reader and prepared state to the format's async `open`.
+The associated `Prepared: Send` type retains per-open decoders and resolved
+schemas without repeating validation or constructing a decoder twice.
+
+Fixed schemas validate projection and configuration before byte I/O. Parquet
+prepares no decoder until its input is available and checks actual range support
+and known length before inspecting the file. XML validates its path, limits and
+explicit projection before opening; inferred projection still resolves after
+bounded sampling. `can_read` supplies the input-dependent read flag; the shared
+accessor clears byte-range, listing and parallel flags on record output.
+
+Existing built-in accessor types alias the shared accessor and preserve their
+constructors/builders. Custom formats use `FileAccessor::from_format` and need
+no additional `Accessor` implementation. Format configuration and decoding stay
+in `file-format`, with no backend dependencies in the format trait.
+
 | Adapter | Request | Reader |
 | --- | --- | --- |
 | OpenDAL storage | `ByteReadRequest` | `dyn ByteReader` |
@@ -208,11 +227,12 @@ schema and optional reader-context contracts.
   operator. Backend features, root validation, credentials, and initialization
   belong to the caller. Production reads and metadata access go through OpenDAL;
   the adapter does not construct backend-specific accessors.
-- `file-format/` consumes shared byte accessors. Its Parquet bridge implements
-  Arrow Rust's `AsyncFileReader` using exact ranges. Each format has its own
-  directory under `src/`. In `src/parquet/`, `accessor.rs`, `input.rs` and
-  `reader.rs` own opening, byte bridging and record stream adaptation; `mod.rs`
-  declares the modules, exports the accessor and provides common error conversion.
+- `file-format/` exposes `FileFormat` and `FileAccessor` independently of optional
+  built-in formats. Shared storage opening lives in `src/accessor.rs`. Each
+  format's `accessor.rs` retains its compatibility alias and constructors;
+  `format.rs` owns configuration, preparation and decoder initialization.
+  Parquet's `input.rs` bridges exact ranges to Arrow's `AsyncFileReader`, and
+  `reader.rs` adapts the decoded stream. `mod.rs` declares modules and exports.
 - The facade always exposes OpenDAL storage, including with no default features.
   Format, dataset, and decompression features remain independent and additive;
   they do not change runtime ordering or silently attach layers.

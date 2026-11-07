@@ -1,7 +1,9 @@
 mod accessor;
+mod format;
 mod reader;
 
-pub use accessor::{XmlAccessor, XmlLimits};
+pub use accessor::XmlAccessor;
+pub use format::{XmlFormat, XmlLimits};
 pub use xml_arrow::{
     InferenceOptions as XmlInferenceOptions, NamespaceBinding, XmlField, XmlSchema,
 };
