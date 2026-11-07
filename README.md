@@ -136,7 +136,7 @@ for TSV.
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
-| `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema |
+| `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema; WARC parser records with Arrow conversion deferred |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
 | `service/` | Shared provider crate scaffold; provider implementations arrive under separate default-off features |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
@@ -415,10 +415,14 @@ listing yields no files for a nonexistent or non-directory prefix.
 Object and prefix locators must be canonical root-relative paths; aliases such
 as leading slashes, dot components, and repeated separators are rejected.
 
-### WARC
+### WARC parser
 
-Enable `format-warc` to read physical WARC records with `file_format::WarcAccessor`.
-The fixed 20-column schema includes a `BinaryView` body; all record types remain in input order.
-Supply external decompression separately. Row and body-byte batch targets are soft limits,
-not a maximum record size or total-memory bound. Omitting `body` from projection does not
-skip upstream body reads or materialization. Record locators and generated columns are deferred.
+Enable `format-warc` for `file_format::WarcAccessor`, a thin adapter over the
+published `warc-rs` parser. It accepts `ByteReadRequest` and returns one owned
+`WarcRecord` per `next()` call, preserving physical record order, record types,
+headers and binary bodies. Reader metadata is the input `ObjectRef`.
+
+This stage provides parser records, without an Arrow schema, Arrow batches,
+projection, or batch-size controls. Arrow conversion, record locators and generated
+columns are deferred. Supply external decompression separately. The parser buffers
+one complete body per record, so this is not a maximum-record-size or memory bound.

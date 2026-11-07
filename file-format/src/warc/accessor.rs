@@ -1,36 +1,22 @@
-use std::num::NonZeroUsize;
-
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Capability, ReadRequest, RecordMetadata, RecordReader,
-    Result, async_trait,
+    Accessor, ByteReadRequest, ByteReader, Capability, ObjectRef, Reader, Result, async_trait,
 };
 
-use super::{reader::WarcReader, warc_schema};
+use super::{WarcRecord, reader::WarcReader};
 
-/// Default body-byte target per batch; one larger record may exceed it.
-pub const DEFAULT_BATCH_BODY_BYTES: NonZeroUsize = NonZeroUsize::new(16 * 1024 * 1024).unwrap();
-
-/// Read physical WARC records in input order, using the warc-rs async parser.
-/// Every record type is included; continuation records remain separate rows.
+/// Parse physical WARC records individually, in input order.
+///
+/// Each item is an owned parser record, including its buffered body. Metadata is
+/// the input object locator. Arrow conversion and batching are deferred; this
+/// accessor does not implement the Arrow `RecordReader` interface.
 #[derive(Clone, Debug)]
 pub struct WarcAccessor<A> {
     inner: A,
-    batch_body_bytes: NonZeroUsize,
 }
 
 impl<A> WarcAccessor<A> {
     pub fn new(inner: A) -> Self {
-        Self {
-            inner,
-            batch_body_bytes: DEFAULT_BATCH_BODY_BYTES,
-        }
-    }
-
-    /// End a batch after this many body bytes, independently of its row target.
-    /// This is not a maximum record size or a total-memory limit.
-    pub fn with_batch_body_bytes(mut self, bytes: NonZeroUsize) -> Self {
-        self.batch_body_bytes = bytes;
-        self
+        Self { inner }
     }
 }
 
@@ -39,8 +25,8 @@ impl<A> Accessor for WarcAccessor<A>
 where
     A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
-    type Request = ReadRequest;
-    type Reader = dyn RecordReader;
+    type Request = ByteReadRequest;
+    type Reader = dyn Reader<Item = WarcRecord, Metadata = ObjectRef>;
 
     fn capability(&self) -> Capability {
         Capability {
@@ -51,23 +37,9 @@ where
         }
     }
 
-    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        let full_schema = warc_schema();
-        let (schema, projection) = request.options.resolve_projection(&full_schema)?;
-        let indices = projection.unwrap_or_else(|| (0..full_schema.fields().len()).collect());
-        let input = self
-            .inner
-            .open(ByteReadRequest::new(request.object.clone()).with_options(request.byte_options))
-            .await?;
-        Ok(Box::new(WarcReader::new(
-            input,
-            RecordMetadata {
-                schema,
-                source: Some(request.object),
-            },
-            indices,
-            request.options.batch_size.get(),
-            self.batch_body_bytes.get(),
-        )))
+    async fn open(&self, request: ByteReadRequest) -> Result<Box<Self::Reader>> {
+        let source = request.object.clone();
+        let input = self.inner.open(request).await?;
+        Ok(Box::new(WarcReader::new(input, source)))
     }
 }

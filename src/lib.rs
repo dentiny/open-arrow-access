@@ -53,7 +53,7 @@ pub mod file_format {
         NamespaceBinding, XmlAccessor, XmlField, XmlLimits, XmlSchema,
     };
     #[cfg(feature = "format-warc")]
-    pub use open_arrow_access_file_format::{WarcAccessor, warc_schema};
+    pub use open_arrow_access_file_format::{WarcAccessor, WarcHeader, WarcRecord};
 }
 
 #[cfg(feature = "dataset-directory")]

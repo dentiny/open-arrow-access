@@ -2,33 +2,23 @@ use std::io;
 
 use futures::{StreamExt, TryStreamExt, io::AsyncBufRead};
 use open_arrow_access_core::{
-    ByteReader, Capability, Error, ErrorKind, ReadState, Reader, RecordBatch, RecordMetadata,
-    Result, async_trait, into_stream,
+    ByteReader, Capability, Error, ErrorKind, ObjectRef, ReadState, Reader, Result, async_trait,
+    into_stream,
 };
-use warc::{EmptyBody, RawRecordIter, Record};
+use warc::RecordIter;
 
-use super::{batch::WarcBatch, decode_error};
+use super::{WarcRecord, decode_error};
 
 type Input = Box<dyn AsyncBufRead + Unpin + Send>;
 
 pub(super) struct WarcReader {
-    records: RawRecordIter<Input>,
-    metadata: RecordMetadata,
-    indices: Vec<usize>,
-    batch_size: usize,
-    batch_capacity: usize,
-    batch_body_bytes: usize,
+    records: RecordIter<Input>,
+    source: ObjectRef,
     state: ReadState,
 }
 
 impl WarcReader {
-    pub(super) fn new(
-        input: Box<dyn ByteReader>,
-        metadata: RecordMetadata,
-        indices: Vec<usize>,
-        batch_size: usize,
-        batch_body_bytes: usize,
-    ) -> Self {
+    pub(super) fn new(input: Box<dyn ByteReader>, source: ObjectRef) -> Self {
         let stream = into_stream(input).map(|result| {
             result
                 .and_then(|bytes| {
@@ -46,47 +36,17 @@ impl WarcReader {
         });
         let input: Input = Box::new(stream.into_async_read());
         Self {
-            records: warc::WarcReader::new(input).iter_raw_records(),
-            metadata,
-            indices,
-            batch_size,
-            batch_capacity: batch_size,
-            batch_body_bytes,
+            records: warc::WarcReader::new(input).iter_records(),
+            source,
             state: ReadState::default(),
         }
-    }
-
-    async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
-        let mut batch = WarcBatch::new(
-            self.metadata.schema.clone(),
-            &self.indices,
-            self.batch_capacity,
-        );
-        while batch.len < self.batch_size && batch.body_bytes < self.batch_body_bytes {
-            match self.records.next().await {
-                Some(Ok((headers, body))) => {
-                    let record = Record::<EmptyBody>::try_from(headers).map_err(decode_error)?;
-                    batch.append(record, body)?;
-                }
-                Some(Err(error)) => return Err(decode_error(error)),
-                None => {
-                    self.state.mark_input_eof();
-                    break;
-                }
-            }
-        }
-        if batch.len == 0 {
-            return Ok(None);
-        }
-        self.batch_capacity = batch.len;
-        batch.finish().map(Some)
     }
 }
 
 #[async_trait]
 impl Reader for WarcReader {
-    type Item = RecordBatch;
-    type Metadata = RecordMetadata;
+    type Item = WarcRecord;
+    type Metadata = ObjectRef;
 
     fn capability(&self) -> Capability {
         Capability {
@@ -97,15 +57,18 @@ impl Reader for WarcReader {
         }
     }
 
-    fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
+    fn metadata(&self) -> &ObjectRef {
+        &self.source
     }
 
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
+    async fn next(&mut self) -> Result<Option<WarcRecord>> {
         if self.state.is_finished() {
             return Ok(None);
         }
-        let result = self.read_batch().await;
+        let result = self.records.next().await.transpose().map_err(decode_error);
+        if matches!(result, Ok(None)) {
+            self.state.mark_input_eof();
+        }
         self.state.observe(&result);
         result
     }

@@ -1,10 +1,11 @@
 mod accessor;
-mod batch;
 mod reader;
-mod schema;
 
 pub use accessor::WarcAccessor;
-pub use schema::warc_schema;
+pub use warc::WarcHeader;
+
+/// An owned record from the upstream parser, with a buffered, unmodified body.
+pub type WarcRecord = warc::Record<warc::BufferedBody>;
 
 use std::error::Error as StdError;
 
