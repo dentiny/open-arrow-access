@@ -12,37 +12,26 @@ pub struct HuggingFaceService {
 }
 
 impl HuggingFaceService {
-    /// Resolve connection settings and cached credentials on the blocking pool.
+    /// Resolve connection settings and load cached credentials asynchronously.
     /// Does not contact the Hub until discovery or file reading is requested.
     pub async fn new(mut options: HuggingFaceOptions) -> Result<Self> {
-        tokio::task::spawn_blocking(move || {
-            options.resolve_environment();
-            endpoint(options.endpoint())?;
-            if let Some(token) = &options.token
-                && (token.is_empty()
-                    || http::HeaderValue::from_str(&format!("Bearer {token}")).is_err())
-            {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "configure_huggingface",
-                    "invalid Hub authentication token",
-                ));
-            }
-            opendal::install_default();
-            Ok(Self {
-                options,
-                context: OperationContext::new(),
-            })
-        })
-        .await
-        .map_err(|e| {
-            Error::new(
-                ErrorKind::Io,
+        options.resolve_environment().await;
+        endpoint(options.endpoint())?;
+        if let Some(token) = &options.token
+            && (token.is_empty()
+                || http::HeaderValue::from_str(&format!("Bearer {token}")).is_err())
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
                 "configure_huggingface",
-                "initialization task failed",
-            )
-            .with_source(e)
-        })?
+                "invalid Hub authentication token",
+            ));
+        }
+        opendal::install_default();
+        Ok(Self {
+            options,
+            context: OperationContext::new(),
+        })
     }
 
     /// Access explicit files in a dataset repository. A floating revision is

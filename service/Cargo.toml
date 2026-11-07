@@ -11,7 +11,7 @@ default = []
 huggingface = [
     "dep:open-arrow-access-storage",
     "dep:opendal", "opendal/services-hf", "opendal/http-transport-reqwest",
-    "dep:tokio", "dep:http", "dep:url",
+    "dep:tokio", "tokio/fs", "dep:http", "dep:url",
 ]
 
 [dependencies]

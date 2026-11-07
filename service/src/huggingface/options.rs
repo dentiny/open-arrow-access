@@ -42,9 +42,9 @@ impl HuggingFaceOptions {
         self
     }
 
-    // Called on the blocking pool. Match OpenDAL's HF credential precedence so
+    // Match OpenDAL's HF credential precedence so
     // Hub metadata requests and file requests use the same effective identity.
-    pub(super) fn resolve_environment(&mut self) {
+    pub(super) async fn resolve_environment(&mut self) {
         self.endpoint.get_or_insert_with(|| {
             std::env::var("HF_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.into())
         });
@@ -70,10 +70,13 @@ impl HuggingFaceOptions {
                         })
                         .map(|p| p.join("token"))
                 });
-            self.token = path
-                .and_then(|p| std::fs::read_to_string(p).ok())
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty());
+            if let Some(path) = path {
+                self.token = tokio::fs::read_to_string(path)
+                    .await
+                    .ok()
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty());
+            }
         }
     }
 }
