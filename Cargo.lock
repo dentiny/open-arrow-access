@@ -1632,6 +1632,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fafa6961cabd9c63bcd77a45d7e3b7f3b552b70417831fb0f56db717e72407e"
 
 [[package]]
+name = "nom"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "ntapi"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1842,6 +1851,7 @@ dependencies = [
  "open-arrow-access-test-support",
  "parquet",
  "tokio",
+ "warc-rs",
  "xml-arrow",
 ]
 
@@ -3191,6 +3201,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec4cdd0dd910afe868b7ef477227d8d538b46b3075031afee8a9f2acb0a2ed0b"
 dependencies = [
  "try-lock",
+]
+
+[[package]]
+name = "warc-rs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6203d2cb086b0a3882fc2a0d064305f279cea792cec0fb28f558bc86e044fc03"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "nom",
+ "uuid",
 ]
 
 [[package]]
