@@ -1,6 +1,5 @@
 use open_arrow_access_service::huggingface::{
-    HuggingFaceAccessor, HuggingFaceDatasetRequest, HuggingFaceOptions, HuggingFaceRepository,
-    HuggingFaceService,
+    HuggingFaceDatasetRequest, HuggingFaceOptions, HuggingFaceService,
 };
 
 #[path = "huggingface/mod.rs"]

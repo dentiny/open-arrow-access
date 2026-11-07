@@ -295,8 +295,8 @@ facade wiring and cross-crate composition. CSV/TSV, JSON/JSONL, XML and ATIF sui
 live together in `file-format/tests/`. Private implementation tests, when needed,
 belong in the owning crate's `tests/unit/`, explicitly included by its library.
 Optional test targets declare `required-features` in `Cargo.toml`.
-HF provider tests use `service/tests/huggingface.rs`, with per-topic modules and
-local mock transports under `service/tests/huggingface/`.
+HF dataset tests use `service/tests/huggingface.rs`, with mock transports under
+`service/tests/huggingface/`.
 
 Tests read checked-in Parquet, CSV/TSV, and JSON/JSONL files from `testdata/`. They verify ordered rows and
 nulls across row groups, schema metadata, projection, storage-independent

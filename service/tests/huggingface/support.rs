@@ -13,9 +13,7 @@ use open_arrow_access_core::Bytes;
 use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter};
 use serde_json::json;
 
-use super::super::{
-    HuggingFaceAccessor, HuggingFaceOptions, HuggingFaceRepository, HuggingFaceService,
-};
+use super::super::{HuggingFaceOptions, HuggingFaceService};
 
 // This integration-test binary has one default transport. Each fixture gets
 // its own host/handler, so parallel tests never share request state or use the
@@ -37,7 +35,7 @@ impl HttpTransport for FixtureTransport {
     }
 }
 
-pub(super) fn install_mock_transport() {
+fn install_mock_transport() {
     static INSTALL: Once = Once::new();
     INSTALL.call_once(|| HttpTransporter::install_default(FixtureTransport));
 }
@@ -78,28 +76,6 @@ impl MockHub {
             files: Arc::new(files.into_iter().collect()),
             ..Self::default()
         }
-    }
-
-    pub(super) fn file(path: &str, bytes: impl Into<Bytes>) -> Self {
-        Self::with_files([(format!("data/{path}"), bytes.into())])
-    }
-
-    pub(super) fn request_count(&self) -> usize {
-        self.requests.lock().unwrap().len()
-    }
-
-    pub(super) async fn accessor_with_transport(
-        transport: impl HttpTransport,
-    ) -> HuggingFaceAccessor {
-        service_with(transport)
-            .await
-            .repository(
-                HuggingFaceRepository::new("owner/example")
-                    .with_revision("refs/convert/parquet")
-                    .with_root("data"),
-            )
-            .await
-            .unwrap()
     }
 
     pub(super) fn captured(&self) -> Vec<Captured> {
@@ -221,7 +197,7 @@ impl HttpTransport for MockHub {
     }
 }
 
-pub(super) fn request_range(header: &str, len: usize) -> Range<usize> {
+fn request_range(header: &str, len: usize) -> Range<usize> {
     let (start, end) = header
         .strip_prefix("bytes=")
         .unwrap()

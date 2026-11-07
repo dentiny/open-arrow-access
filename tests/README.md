@@ -15,7 +15,7 @@ directory owns facade wiring and composition across crates.
 | Parquet and byte/record layer composition | [`tests/reading.rs`](reading.rs) |
 | Directory and file-set facade | [`tests/directory.rs`](directory.rs) |
 | ATIF facade and file-set composition | [`tests/atif.rs`](atif.rs) |
-| Hugging Face repository and Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
+| Hugging Face Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
 | OpenDAL storage | [`storage/tests/opendal.rs`](../storage/tests/opendal.rs) |
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |

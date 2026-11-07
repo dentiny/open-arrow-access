@@ -28,7 +28,6 @@ serde_json = { version = "1", optional = true }
 url = { version = "2", optional = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["fs", "sync", "time"] }
 arrow-array.workspace = true
 
 [lints]
