@@ -53,6 +53,11 @@ LF/CRLF endings and a final unterminated line. The optional per-line byte limit
 includes line endings and is checked before copying. UTF-8 decoding and blank-line
 handling remain with the caller.
 
+`read_chunks(input, chunk_size)` adapts a futures `AsyncRead` into nonempty byte
+chunks bounded by a `NonZeroUsize` size. Map its I/O errors to the shared error
+type, then wrap it in `StreamReader::new(stream, byte_metadata)` for a sequential
+`ByteReader`.
+
 Storage I/O settings are per open operation:
 
 ```rust

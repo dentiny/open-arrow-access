@@ -60,6 +60,8 @@ subsequent reads return EOF. The adapter starts no tasks or read-ahead; dropping
 it drops the stream. Callers map errors and ensure items match the declared
 metadata before wrapping. Parquet uses this adapter after its format-specific
 column reordering and schema restoration.
+Byte streams paired with `ByteMetadata` also implement `ByteReader`; callers
+supply nonempty chunks matching the metadata. Range reads remain unsupported.
 XML wraps its native async batch reader in a stream and retains its own projection
 and error mapping, using the same adapter for metadata and terminal behavior.
 CSV and JSON also use `StreamReader`, sharing a private incremental input driver
@@ -77,6 +79,13 @@ Upstream errors remain wrapped in `std::io::Error` with their original category
 and source chain. Construction performs no I/O, and dropping the adapter drops
 the input. XML and decompression share this bridge; it exposes sequential reads
 only, without retaining range operations.
+
+`read_chunks(input, chunk_size)` adapts an owned futures `AsyncRead` into a stream
+of `std::io::Result<Bytes>`. The nonzero size bounds each emitted chunk; short
+reads yield immediately. The input need not be `Unpin`. Construction performs no
+reads, and EOF or the first error drops the input and terminates the stream.
+I/O errors pass through unchanged. Decompression maps these errors with codec
+context and uses `StreamReader` for metadata, capabilities and terminal behavior.
 
 `read_limited(reader, limit, operation)` collects an owned byte reader into a
 `Vec<u8>` for small metadata objects. It rejects an advertised length above the

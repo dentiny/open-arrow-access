@@ -5,7 +5,7 @@ use open_arrow_access_core::{
     Result, async_trait,
 };
 
-use crate::{Codec, reader::DecompressionReader};
+use crate::{Codec, reader::create_reader};
 
 /// Byte accessor decorated by a [`crate::DecompressionLayer`].
 #[derive(Clone, Debug)]
@@ -42,11 +42,7 @@ impl<A: ByteAccessor, C: Codec> Accessor for DecompressionAccessor<A, C> {
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let inner = self.inner.open(request).await?;
-        Ok(Box::new(DecompressionReader::new(
-            inner,
-            &self.codec,
-            self.chunk_size,
-        )))
+        Ok(Box::new(create_reader(inner, &self.codec, self.chunk_size)))
     }
 }
 
