@@ -19,6 +19,7 @@ directory owns facade wiring and composition across crates.
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
 | Shared memory backend | [`test-support/tests/memory.rs`](../test-support/tests/memory.rs) |
+| Shared format contract assertions | [`test-support/src/format.rs`](../test-support/src/format.rs), used by format and Parquet suites |
 
 ## Add a test
 
@@ -32,7 +33,7 @@ directory owns facade wiring and composition across crates.
   and `#[path = "../tests/unit/<name>.rs"]`; Cargo does not discover that nested
   file as a separate integration target. Do not expose production internals just
   for testing, or hide test bodies under `src/`.
-- Keep shared byte sources, fixture loading and byte-layer assertions in
+- Keep shared byte sources, fixture loading, byte-layer and format contract assertions in
   [`test-support/`](../test-support/). Keep helpers used by only one suite alongside
   that suite, or in its `tests/support/` directory.
 - Store committed input fixtures in root `testdata/<format>/`. Reuse deterministic

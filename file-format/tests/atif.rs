@@ -4,7 +4,7 @@ use arrow_array::{RecordBatch, cast::AsArray};
 use atif_arrow::trajectory_schema;
 use open_arrow_access_core::{Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest};
 use open_arrow_access_file_format::{AtifAccessor, AtifFormat};
-use open_arrow_access_test_support::{MemoryAccessor, fixture};
+use open_arrow_access_test_support::{MemoryAccessor, fixture, format};
 
 fn text<'a>(batch: &'a RecordBatch, column: &str, row: usize) -> &'a str {
     batch[column].as_string::<i32>().value(row)
@@ -61,9 +61,7 @@ async fn fixed_schema_nested_content_and_verbatim_source_across_single_byte_chun
         "echo"
     );
     assert!(reader.next().await.unwrap().is_none());
-    let reads = observations.reads.load(Ordering::SeqCst);
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(observations.reads.load(Ordering::SeqCst), reads);
+    format::assert_finished(reader.as_mut(), &observations.reads).await;
 }
 
 #[tokio::test]
@@ -114,29 +112,23 @@ async fn empty_projection_keeps_rows_and_invalid_projection_fails_before_open() 
     let bytes = MemoryAccessor::new(&input, 5);
     let observations = bytes.observations.clone();
     let accessor = AtifAccessor::new(bytes, AtifFormat::Json);
-    for projection in [vec!["missing".into()], vec!["agent".into(), "agent".into()]] {
-        let error = accessor
-            .open(ReadRequest::new("x").with_options(ReadOptions {
-                projection: Some(projection),
-                ..ReadOptions::default()
-            }))
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    }
-    assert!(observations.requests.lock().unwrap().is_empty());
-    let mut reader = accessor
-        .open(ReadRequest::new("x").with_options(ReadOptions {
+    format::assert_invalid_projection_before_open(
+        &accessor,
+        ReadRequest::new("x"),
+        &trajectory_schema(),
+        &observations,
+    )
+    .await;
+    format::assert_projection(
+        &accessor,
+        ReadRequest::new("x").with_options(ReadOptions {
             projection: Some(vec![]),
             ..ReadOptions::default()
-        }))
-        .await
-        .unwrap();
-    let batch = reader.next().await.unwrap().unwrap();
-    assert_eq!(batch.num_columns(), 0);
-    assert_eq!(batch.num_rows(), 1);
-    assert_eq!(batch.schema(), reader.metadata().schema);
+        }),
+        &trajectory_schema(),
+        1,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -163,43 +155,26 @@ async fn malformed_documents_utf8_and_invalid_atif_are_terminal_with_source_cont
             }))
             .await
             .unwrap();
-        let error = reader.next().await.unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Decode);
+        let error =
+            format::assert_terminal_error(reader.as_mut(), &observations.reads, ErrorKind::Decode)
+                .await;
         assert!(
             error.to_string().contains("broken.jsonl: record 2:"),
             "{error}"
         );
         assert!(error.source().is_some());
-        let reads = observations.reads.load(Ordering::SeqCst);
-        assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(observations.reads.load(Ordering::SeqCst), reads);
     }
 }
 
 #[tokio::test]
 async fn input_failures_keep_error_categories_and_never_retry() {
-    let input = fixture!("atif", "trajectory.json").await;
-    for bytes in [
-        MemoryAccessor::new(&input, 4).with_failure(8, ErrorKind::PermissionDenied),
-        MemoryAccessor::new(&input, 4).with_empty_chunk(8),
-    ] {
-        let observations = bytes.observations.clone();
-        let mut reader = AtifAccessor::new(bytes, AtifFormat::Json)
-            .open(ReadRequest::new("x"))
-            .await
-            .unwrap();
-        let error = reader.next().await.unwrap_err();
-        assert!(matches!(
-            error.kind(),
-            ErrorKind::PermissionDenied | ErrorKind::Io
-        ));
-        if error.kind() == ErrorKind::PermissionDenied {
-            assert!(error.source().is_some());
-        }
-        let reads = observations.reads.load(Ordering::SeqCst);
-        assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(observations.reads.load(Ordering::SeqCst), reads);
-    }
+    format::assert_error_contract(
+        |bytes| AtifAccessor::new(bytes, AtifFormat::Json),
+        &fixture!("atif", "trajectory.json").await,
+        ReadRequest::new("x"),
+        &[0, 8],
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -240,9 +215,8 @@ async fn jsonl_pulls_only_the_requested_batch_and_keeps_delivered_rows_on_later_
     let error = reader.next().await.unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Decode);
     assert!(error.to_string().contains("record 2:"));
+    format::assert_finished(reader.as_mut(), &observations.reads).await;
     let reads = observations.reads.load(Ordering::SeqCst);
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(observations.reads.load(Ordering::SeqCst), reads);
     drop(reader);
     assert_eq!(observations.reads.load(Ordering::SeqCst), reads);
     assert_eq!(text(&batch, "trajectory_id", 0), "first");
