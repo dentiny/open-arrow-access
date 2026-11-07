@@ -15,7 +15,7 @@ impl CommonCrawl {
         let parts = crawl
             .strip_prefix("CC-MAIN-")
             .and_then(|value| value.split_once('-'));
-        if !matches!(parts, Some((year, run)) if digits(year, 4) && digits(run, 2)) {
+        if !matches!(parts, Some((year, run)) if is_digits(year, 4) && is_digits(run, 2)) {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "configure_commoncrawl",
@@ -63,6 +63,6 @@ impl CommonCrawl {
     }
 }
 
-fn digits(value: &str, len: usize) -> bool {
+fn is_digits(value: &str, len: usize) -> bool {
     value.len() == len && value.bytes().all(|byte| byte.is_ascii_digit())
 }
