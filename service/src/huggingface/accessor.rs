@@ -1,8 +1,8 @@
 use std::num::NonZeroUsize;
 
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ListRequest,
-    ObjectStream, Result, async_trait,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectStream,
+    Result, async_trait,
 };
 use open_arrow_access_storage::OpenDalAccessor;
 use opendal::{OperationContext, Operator};
@@ -20,25 +20,11 @@ pub struct HuggingFaceAccessor {
 }
 
 impl HuggingFaceAccessor {
-    /// Build the service without blocking a Tokio worker on implicit token-file I/O.
-    /// OpenDAL retains its authentication and endpoint environment conventions.
-    pub(super) async fn new(
-        builder: opendal::services::Hf,
-        context: OperationContext,
-    ) -> Result<Self> {
-        let operator = tokio::task::spawn_blocking(move || {
-            opendal::install_default();
-            Operator::new(builder).map_err(|error| map_error("configure_huggingface", "", error))
-        })
-        .await
-        .map_err(|error| {
-            Error::new(
-                ErrorKind::Io,
-                "configure_huggingface",
-                "Hugging Face initialization task failed",
-            )
-            .with_source(error)
-        })??;
+    /// Build repository byte access using OpenDAL's configuration.
+    pub(super) fn new(builder: opendal::services::Hf, context: OperationContext) -> Result<Self> {
+        opendal::install_default();
+        let operator = Operator::new(builder)
+            .map_err(|error| map_error("configure_huggingface", "", error))?;
         Ok(Self {
             inner: OpenDalAccessor::new(operator.with_context(context)),
         })

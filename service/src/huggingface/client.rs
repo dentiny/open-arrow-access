@@ -53,7 +53,7 @@ impl HuggingFaceService {
         if let Some(token) = &self.options.token {
             builder = builder.token(token);
         }
-        HuggingFaceAccessor::new(builder, self.context.clone()).await
+        HuggingFaceAccessor::new(builder, self.context.clone())
     }
 }
 
