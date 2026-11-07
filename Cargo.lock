@@ -1203,6 +1203,7 @@ dependencies = [
  "arrow-schema",
  "bytes",
  "flate2",
+ "futures",
  "open-arrow-access-core",
  "open-arrow-access-decompression",
  "open-arrow-access-file-format",

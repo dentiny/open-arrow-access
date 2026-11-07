@@ -89,25 +89,6 @@ pub(super) fn validate_row<'a>(bucket: Option<&str>, key: Option<&'a str>) -> Re
     }
     Ok(decoded)
 }
-pub(super) fn validate_manifest_length(length: Option<u64>, limit: usize) -> Result<()> {
-    if length.is_some_and(|length| length > limit as u64) {
-        return Err(decode("manifest exceeds configured byte limit"));
-    }
-    Ok(())
-}
-pub(super) fn validate_manifest_chunk(chunk: &[u8], remaining: usize) -> Result<()> {
-    if chunk.is_empty() {
-        return Err(Error::new(
-            ErrorKind::Io,
-            "read_pmc_inventory",
-            "empty manifest byte chunk",
-        ));
-    }
-    if chunk.len() > remaining {
-        return Err(decode("manifest exceeds configured byte limit"));
-    }
-    Ok(())
-}
 fn valid_path(path: &str) -> bool {
     !path.is_empty()
         && path.trim() == path

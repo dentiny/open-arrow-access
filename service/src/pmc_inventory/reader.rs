@@ -1,14 +1,15 @@
-use super::{capability, decode, validation};
+use super::{decode, validation};
 use arrow_array::{Array, ArrayRef, RecordBatchOptions, StringArray, builder::StringBuilder};
+use futures::stream;
 use open_arrow_access_core::{
-    Accessor, AccessorExt, ByteAccessor, ByteReadOptions, Capability, ObjectRef, ReadOptions,
-    ReadRequest, Reader, RecordBatch, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
+    Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ObjectRef, ReadOptions, ReadRequest,
+    RecordBatch, RecordMetadata, RecordReader, Result, SchemaRef, StreamReader,
 };
 use open_arrow_access_decompression::{DecompressionLayer, Gzip};
 use open_arrow_access_file_format::{CsvAccessor, CsvFormat};
 use std::{collections::VecDeque, sync::Arc};
 
-pub(super) struct InventoryReader<A> {
+pub(super) struct InventoryState<A> {
     pub source: Arc<A>,
     pub files: VecDeque<ObjectRef>,
     pub current: Option<Box<dyn RecordReader>>,
@@ -16,10 +17,9 @@ pub(super) struct InventoryReader<A> {
     pub projection: Vec<usize>,
     pub options: ReadOptions,
     pub byte_options: ByteReadOptions,
-    pub metadata: RecordMetadata,
-    pub done: bool,
+    pub schema: SchemaRef,
 }
-impl<A: ByteAccessor + 'static> InventoryReader<A> {
+impl<A: ByteAccessor + 'static> InventoryState<A> {
     async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
         loop {
             if let Some(reader) = &mut self.current {
@@ -63,7 +63,7 @@ impl<A: ByteAccessor + 'static> InventoryReader<A> {
                         .collect();
                     // Reuse the output schema, including the potentially large raw manifest.
                     return RecordBatch::try_new_with_options(
-                        self.metadata.schema.clone(),
+                        self.schema.clone(),
                         columns,
                         &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
                     )
@@ -92,26 +92,13 @@ impl<A: ByteAccessor + 'static> InventoryReader<A> {
         }
     }
 }
-#[async_trait]
-impl<A: ByteAccessor + 'static> Reader for InventoryReader<A> {
-    type Item = RecordBatch;
-    type Metadata = RecordMetadata;
-    fn capability(&self) -> Capability {
-        capability(true)
-    }
-    fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
-    }
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.done {
-            return Ok(None);
-        }
-        let result = self.read_batch().await;
-        if !matches!(result, Ok(Some(_))) {
-            self.done = true;
-            self.current = None;
-            self.files.clear();
-        }
-        result
-    }
+/// Keep shard iteration local and share reader lifecycle handling.
+pub(super) fn create_reader<A: ByteAccessor + 'static>(
+    state: InventoryState<A>,
+    metadata: RecordMetadata,
+) -> impl RecordReader {
+    let stream = stream::try_unfold(state, |mut state| async move {
+        Ok(state.read_batch().await?.map(|batch| (batch, state)))
+    });
+    StreamReader::new(stream, metadata)
 }

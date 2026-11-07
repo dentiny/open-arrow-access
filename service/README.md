@@ -48,7 +48,7 @@ shard opens. Validation still examines Bucket and Key when projection omits them
 Each batch shares the cached output schema, so projection does not copy the raw
 manifest per batch. Selected CSV arrays are reused; `metadata_key` is built
 directly into an Arrow string builder only when selected.
-All validation functions live in `pmc_inventory/validation.rs`.
+Inventory-specific validation lives in `pmc_inventory/validation.rs`.
 
 Missing shards, invalid rows, malformed/truncated CSV/gzip, invalid manifests,
 and source errors are terminal. Previously delivered batches stay delivered;
@@ -83,3 +83,6 @@ Run `cargo run --example read_pmc_inventory --features service-pmc-inventory --
 /mirror/root <dated-manifest-key>` against a mirror preserving manifest/shard keys.
 See the [PMC dataset README](https://pmc-oa-opendata.s3.amazonaws.com/README.txt)
 and [S3 inventory manifest format](https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-inventory-location.html).
+
+Manifest byte collection uses core `read_limited`. Shard iteration retains its
+provider state and uses `StreamReader` for metadata and terminal handling.

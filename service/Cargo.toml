@@ -8,9 +8,10 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
-pmc-inventory = ["dep:arrow-array", "dep:arrow-schema", "dep:serde", "dep:serde_json", "dep:percent-encoding", "dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip"]
+pmc-inventory = ["dep:futures", "dep:arrow-array", "dep:arrow-schema", "dep:serde", "dep:serde_json", "dep:percent-encoding", "dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip"]
 
 [dependencies]
+futures = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }

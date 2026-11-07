@@ -1,4 +1,8 @@
-use super::{capability, manifest, reader::InventoryReader, validation};
+use super::{
+    capability, manifest,
+    reader::{InventoryState, create_reader},
+    validation,
+};
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, Capability, ReadRequest, RecordMetadata, RecordReader,
@@ -69,7 +73,7 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
         ]);
         let full_schema = Arc::new(Schema::new_with_metadata(fields, metadata));
         let (output_schema, projection) = request.options.resolve_projection(&full_schema)?;
-        Ok(Box::new(InventoryReader {
+        let state = InventoryState {
             source: self.inner.clone(),
             files: manifest
                 .files
@@ -81,11 +85,14 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
             projection: projection.unwrap_or_else(|| (0..full_schema.fields().len()).collect()),
             options: request.options,
             byte_options: request.byte_options,
-            metadata: RecordMetadata {
+            schema: output_schema.clone(),
+        };
+        Ok(Box::new(create_reader(
+            state,
+            RecordMetadata {
                 schema: output_schema,
                 source: Some(request.object),
             },
-            done: false,
-        }))
+        )))
     }
 }
