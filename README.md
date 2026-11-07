@@ -195,8 +195,7 @@ apply the re-exported `#[async_trait]` attribute to preserve `dyn` compatibility
 and Send futures. Capability, metadata and configuration-only methods remain
 synchronous. Construct the OpenDAL operator before wrapping it with
 `OpenDalAccessor::new(operator)`. Backend initialization and configuration belong
-to the caller; a synchronous backend builder can run on a blocking pool when
-configuration happens inside an async task.
+to the caller; complete synchronous backend setup before entering an async task.
 
 `capability()` follows OpenDAL's reporting pattern, with `read`,
 `read_with_range`, `read_parallel`, and accessor-only `list` flags. Layers forward or update
