@@ -1,10 +1,12 @@
 //! Single-file Parquet access over the shared byte-reader contract.
 
 mod accessor;
+mod format;
 mod input;
 mod reader;
 
 pub use accessor::ParquetAccessor;
+pub use format::ParquetFormat;
 
 use open_arrow_access_core::{Error, ErrorKind};
 

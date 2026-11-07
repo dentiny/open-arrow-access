@@ -2,7 +2,7 @@ use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Capability, ObjectRef, Reader, Result, async_trait,
 };
 
-use super::{WarcRecord, reader::WarcReader};
+use super::{WarcRecord, reader::create_reader};
 
 /// Parse physical WARC records individually, in input order.
 ///
@@ -40,6 +40,6 @@ where
     async fn open(&self, request: ByteReadRequest) -> Result<Box<Self::Reader>> {
         let source = request.object.clone();
         let input = self.inner.open(request).await?;
-        Ok(Box::new(WarcReader::new(input, source)))
+        Ok(Box::new(create_reader(input, source)))
     }
 }
