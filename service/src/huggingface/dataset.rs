@@ -43,18 +43,16 @@ impl HuggingFaceService {
         let repository = self.pin_revision(repository).await?;
         let accessor = self.repository(repository).await?;
         let prefix = format!("{}/{}", request.config, request.split);
-        let objects = match parquet_files(&accessor, &prefix).await {
+        let objects = match accessor.list_parquet_files(&prefix).await {
             Ok(objects) => objects,
             Err(error)
                 if error.kind() == ErrorKind::NotFound
                     && request.allow_partial
                     && !request.split.starts_with("partial-") =>
             {
-                parquet_files(
-                    &accessor,
-                    &format!("{}/partial-{}", request.config, request.split),
-                )
-                .await?
+                accessor
+                    .list_parquet_files(&format!("{}/partial-{}", request.config, request.split))
+                    .await?
             }
             Err(error) => return Err(error),
         };
@@ -87,33 +85,35 @@ impl Accessor for HuggingFaceService {
     }
 }
 
-async fn parquet_files(accessor: &HuggingFaceAccessor, prefix: &str) -> Result<Vec<ObjectRef>> {
-    let mut listing = accessor
-        .list(ListRequest::new(prefix).with_recursive(false))
-        .await?;
-    let prefix = format!("{prefix}/");
-    let mut objects = Vec::new();
-    while let Some(object) = listing.try_next().await? {
-        let relative = object.locator().strip_prefix(&prefix).ok_or_else(|| {
-            Error::new(
-                ErrorKind::Decode,
-                "resolve_huggingface",
-                "listing returned a file outside the selected split",
-            )
-        })?;
-        validate_path(relative, false)?;
-        if !relative.contains('/') && relative.ends_with(".parquet") {
-            objects.push(object);
+impl HuggingFaceAccessor {
+    async fn list_parquet_files(&self, prefix: &str) -> Result<Vec<ObjectRef>> {
+        let mut listing = self
+            .list(ListRequest::new(prefix).with_recursive(false))
+            .await?;
+        let prefix = format!("{prefix}/");
+        let mut objects = Vec::new();
+        while let Some(object) = listing.try_next().await? {
+            let relative = object.locator().strip_prefix(&prefix).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Decode,
+                    "resolve_huggingface",
+                    "listing returned a file outside the selected split",
+                )
+            })?;
+            validate_path(relative, false)?;
+            if !relative.contains('/') && relative.ends_with(".parquet") {
+                objects.push(object);
+            }
         }
+        objects.sort_unstable_by(|a, b| a.locator().cmp(b.locator()));
+        objects.dedup();
+        if objects.is_empty() {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                "resolve_huggingface",
+                "selected split contains no Parquet shards",
+            ));
+        }
+        Ok(objects)
     }
-    objects.sort_unstable_by(|a, b| a.locator().cmp(b.locator()));
-    objects.dedup();
-    if objects.is_empty() {
-        return Err(Error::new(
-            ErrorKind::NotFound,
-            "resolve_huggingface",
-            "selected split contains no Parquet shards",
-        ));
-    }
-    Ok(objects)
 }
