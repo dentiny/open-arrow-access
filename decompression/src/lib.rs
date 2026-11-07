@@ -2,14 +2,15 @@
 
 mod accessor;
 mod codec;
+mod factory;
 mod layer;
-mod reader;
 
 #[cfg(feature = "gzip")]
 mod gzip;
 
 pub use accessor::DecompressionAccessor;
 pub use codec::{Codec, CompressedInput, DecodedInput};
+pub use factory::DecompressionFactory;
 pub use layer::DecompressionLayer;
 
 #[cfg(feature = "gzip")]

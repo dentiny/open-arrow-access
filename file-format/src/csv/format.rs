@@ -1,10 +1,9 @@
 use super::{CsvFormat, reader::csv_reader};
-use crate::FileFormat;
 use arrow_csv::{ReaderBuilder, reader::Decoder};
 use arrow_schema::{DataType, TimeUnit};
 use open_arrow_access_core::{
-    ByteReader, Error, ErrorKind, ReadOptions, ReadRequest, RecordMetadata, RecordReader, Result,
-    SchemaRef, async_trait,
+    ByteReader, Error, ErrorKind, FactoryToken, ReadRequest, ReaderFactory, RecordMetadata,
+    RecordReader, Result, SchemaRef, async_trait,
 };
 
 /// Incrementally read CSV or TSV using an explicit positional schema.
@@ -31,10 +30,13 @@ impl CsvFileFormat {
 }
 
 #[async_trait]
-impl FileFormat for CsvFileFormat {
+impl ReaderFactory for CsvFileFormat {
+    type Request = ReadRequest;
+    type Reader = dyn RecordReader;
     type Prepared = (SchemaRef, Decoder);
 
-    fn prepare(&self, options: &ReadOptions) -> Result<Self::Prepared> {
+    fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
+        let options = &request.options;
         if self.schema.fields().is_empty() {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -67,8 +69,9 @@ impl FileFormat for CsvFileFormat {
         Ok((schema, builder.build_decoder()))
     }
 
-    async fn open(
+    async fn create_reader(
         &self,
+        _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
         (schema, decoder): Self::Prepared,
