@@ -31,3 +31,6 @@ Selected locators are held in memory; inventory lines have a 16 KiB limit.
 There is no index, batch planner or parallel execution.
 
 Segment selection is a separate addition.
+
+Manifest byte framing and the 16 KiB per-line bound use core `read_lines`;
+path validation and selected-file duplicate checks remain in the provider.
