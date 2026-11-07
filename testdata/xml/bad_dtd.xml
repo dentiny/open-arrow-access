@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE inventory>
+<inventory>
+  <warehouse id="0" owner="ExampleCo">
+    <rack capacity="16">
+      <device id="north-gpu-1" kind="gpu"/>
+      <device id="north-nic-1" kind="network"/>
+    </rack>
+    <rack capacity="16">
+      <device id="north-gpu-2" kind="gpu"/>
+      <device id="north-nic-2" kind="network"/>
+    </rack>
+  </warehouse>
+  <warehouse id="1" owner="ExampleCo">
+    <rack capacity="16">
+      <device id="south-gpu-1" kind="gpu"/>
+      <device id="south-nic-1" kind="network"/>
+    </rack>
+    <rack capacity="16">
+      <device id="south-gpu-2" kind="gpu"/>
+      <device id="south-nic-2" kind="network"/>
+    </rack>
+  </warehouse>
+</inventory>

@@ -34,6 +34,8 @@ arrow-array = "59.3.0"
 arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
+xml-arrow = "0.2.0"
+atif-arrow = "0.3.0"
 async-trait = "0.1.91"
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
 datafusion = { version = "55.2.0", default-features = false }
@@ -63,6 +65,8 @@ dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset
 storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
+format-atif = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/atif"]
+format-xml = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/xml"]
 format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
 decompression-gzip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip"]
 decompression-bz2 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
@@ -78,8 +82,8 @@ open-arrow-access-file-format = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 
 [dev-dependencies]
-opendal = { workspace = true, features = ["services-memory"] }
 http = "1"
+opendal = { workspace = true, features = ["services-memory"] }
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
@@ -93,6 +97,10 @@ tokio = { workspace = true, features = ["fs"] }
 [[test]]
 name = "commoncrawl_common"
 required-features = ["service-commoncrawl"]
+
+[[test]]
+name = "storage_opendal"
+required-features = ["storage-opendal"]
 
 [[test]]
 name = "directory"
@@ -111,3 +119,15 @@ unsafe_code = "forbid"
 
 [lints]
 workspace = true
+
+[[example]]
+name = "read_xml"
+required-features = ["storage-fs", "format-xml"]
+
+[[example]]
+name = "read_atif"
+required-features = ["storage-fs", "format-atif"]
+
+[[test]]
+name = "atif"
+required-features = ["format-atif", "storage-fs", "dataset-directory"]
