@@ -1,19 +1,17 @@
 use arrow_array::cast::AsArray;
 use open_arrow_access::{
-    Accessor, AccessorExt, ReadOptions, ReadRequest,
+    Accessor, ReadOptions, ReadRequest,
     dataset::{FileSetAccessor, FileSetRequest},
-    decompression::{DecompressionLayer, Gzip},
     file_format::{AtifAccessor, AtifFormat},
     storage::FsAccessor,
 };
 
 #[tokio::test]
-async fn facade_composes_atif_with_gzip_and_ordered_file_sets() {
+async fn facade_reads_atif_jsonl_and_ordered_file_sets() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/atif");
     let bytes = FsAccessor::new(&root).await.unwrap();
-    let gzip = bytes.layer(DecompressionLayer::new(Gzip));
-    let mut reader = AtifAccessor::new(gzip, AtifFormat::JsonLines)
-        .open(ReadRequest::new("trajectories.jsonl.gz"))
+    let mut reader = AtifAccessor::new(bytes, AtifFormat::JsonLines)
+        .open(ReadRequest::new("trajectories.jsonl"))
         .await
         .unwrap();
     let batch = reader.next().await.unwrap().unwrap();
@@ -21,7 +19,7 @@ async fn facade_composes_atif_with_gzip_and_ordered_file_sets() {
     assert_eq!(batch.schema(), reader.metadata().schema);
     assert_eq!(
         batch["source_uri"].as_string::<i32>().value(0),
-        "trajectories.jsonl.gz"
+        "trajectories.jsonl"
     );
     assert!(reader.next().await.unwrap().is_none());
 

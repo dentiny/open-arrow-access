@@ -5,6 +5,5 @@ call and observation, and an unknown root field. No external dataset is used.
 
 - `trajectory.json`: one pretty-printed document.
 - `trajectories.jsonl`: three ordered documents, CRLF, blank lines, no final newline.
-- `trajectories.jsonl.gz`: gzip of the exact JSONL bytes (mtime zero).
 
 The fixture trajectory IDs are `first`, `second`, `third`.

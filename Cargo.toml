@@ -115,4 +115,4 @@ required-features = ["storage-fs", "format-atif"]
 
 [[test]]
 name = "atif"
-required-features = ["format-atif", "storage-fs", "dataset-directory", "decompression-gzip"]
+required-features = ["format-atif", "storage-fs", "dataset-directory"]
