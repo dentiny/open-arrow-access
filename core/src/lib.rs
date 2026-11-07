@@ -8,6 +8,7 @@ mod layer;
 mod read_state;
 mod reader;
 mod request;
+mod stream_reader;
 
 pub use accessor::{Accessor, ByteAccessor, ObjectStream};
 pub use async_read::into_async_read;
@@ -22,6 +23,7 @@ pub use request::{
     ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ListRequest, ObjectRef, ReadOptions,
     ReadOptionsProvider, ReadRequest,
 };
+pub use stream_reader::StreamReader;
 
 pub use arrow_array::RecordBatch;
 pub use arrow_schema::{Schema, SchemaRef};

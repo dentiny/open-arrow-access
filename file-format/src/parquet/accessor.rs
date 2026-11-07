@@ -4,7 +4,7 @@ use open_arrow_access_core::{
 };
 use parquet::arrow::{ProjectionMask, async_reader::ParquetRecordBatchStreamBuilder};
 
-use super::{decode_error, input::ParquetInput, reader::ParquetReader};
+use super::{decode_error, input::ParquetInput, reader::parquet_reader};
 
 /// Adapt any shared byte accessor into a single-file Arrow record accessor.
 /// The input must expose range reads and its current byte length.
@@ -78,7 +78,7 @@ where
             .transpose()
             .map_err(|e| decode_error("project", e))?
             .filter(|indices| indices.iter().copied().ne(0..indices.len()));
-        Ok(Box::new(ParquetReader::new(
+        Ok(Box::new(parquet_reader(
             stream,
             RecordMetadata {
                 schema,
