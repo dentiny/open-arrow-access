@@ -1,6 +1,6 @@
 use futures::{StreamExt, TryStreamExt};
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ReadRequest,
+    Accessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ReadRequest, ReadState,
     RecordMetadata, RecordReader, Result, async_trait, into_stream,
 };
 use xml_arrow::{InferenceOptions, NamespaceBinding, ReaderOptions, XmlReader, XmlSchema};
@@ -194,7 +194,7 @@ where
         Ok(Box::new(XmlRecordReader {
             reader,
             projection,
-            finished: false,
+            state: ReadState::default(),
             metadata: RecordMetadata {
                 schema,
                 source: Some(request.object),

@@ -14,6 +14,7 @@ use crate::{
 /// stateful decoder resumable; drop the reader after cancelling such a call.
 /// Implementations use the re-exported `#[async_trait]` attribute for their
 /// asynchronous methods while retaining support for `dyn` readers.
+/// [`crate::ReadState`] provides shared input-EOF and terminal-result tracking.
 #[async_trait]
 pub trait Reader: Send {
     /// Unit emitted by a successful read, such as Bytes or RecordBatch.

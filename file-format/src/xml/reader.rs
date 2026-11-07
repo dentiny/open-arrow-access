@@ -1,5 +1,6 @@
 use open_arrow_access_core::{
-    Capability, Error, ErrorKind, Reader, RecordBatch, RecordMetadata, Result, async_trait,
+    Capability, Error, ErrorKind, ReadState, Reader, RecordBatch, RecordMetadata, Result,
+    async_trait,
 };
 
 use super::xml_error;
@@ -8,7 +9,7 @@ pub(super) struct XmlRecordReader {
     pub(super) reader: xml_arrow::XmlReader<'static>,
     pub(super) metadata: RecordMetadata,
     pub(super) projection: Option<Vec<usize>>,
-    pub(super) finished: bool,
+    pub(super) state: ReadState,
 }
 
 #[async_trait]
@@ -30,7 +31,7 @@ impl Reader for XmlRecordReader {
     }
 
     async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.finished {
+        if self.state.is_finished() {
             return Ok(None);
         }
         let result = self
@@ -49,9 +50,7 @@ impl Reader for XmlRecordReader {
                     })
                     .transpose()
             });
-        if !matches!(result, Ok(Some(_))) {
-            self.finished = true;
-        }
+        self.state.observe(&result);
         result
     }
 }

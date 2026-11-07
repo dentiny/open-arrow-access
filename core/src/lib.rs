@@ -4,6 +4,7 @@ mod accessor;
 mod capability;
 mod error;
 mod layer;
+mod read_state;
 mod reader;
 mod request;
 
@@ -11,6 +12,7 @@ pub use accessor::{Accessor, ByteAccessor, ObjectStream};
 pub use capability::Capability;
 pub use error::{Error, ErrorKind, Result};
 pub use layer::{AccessorExt, Layer};
+pub use read_state::ReadState;
 pub use reader::{
     ByteMetadata, ByteReader, Reader, RecordMetadata, RecordReader, RecordStream, into_stream,
 };
