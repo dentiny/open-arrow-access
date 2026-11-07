@@ -1,0 +1,7 @@
+WARC/1.1
+WARC-Type: resource
+WARC-Record-ID: <urn:test:a>
+Content-Length: 5
+
+12345
+
