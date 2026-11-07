@@ -63,9 +63,7 @@ pub(super) const TOKEN: &str = "fixture-only-token";
 
 #[derive(Clone, Debug)]
 pub(super) struct Captured {
-    pub(super) uri: String,
     pub(super) range: Option<String>,
-    pub(super) form: String,
 }
 
 #[derive(Clone, Default)]
@@ -88,10 +86,6 @@ impl MockHub {
 
     pub(super) fn request_count(&self) -> usize {
         self.requests.lock().unwrap().len()
-    }
-
-    pub(super) async fn accessor(&self) -> HuggingFaceAccessor {
-        Self::accessor_with_transport(self.clone()).await
     }
 
     pub(super) async fn accessor_with_transport(
@@ -138,9 +132,7 @@ impl HttpTransport for MockHub {
         let form = String::from_utf8(req.body().to_bytes().to_vec()).unwrap();
         assert_eq!(req.headers()["authorization"], format!("Bearer {TOKEN}"));
         self.requests.lock().unwrap().push(Captured {
-            uri: uri.clone(),
             range: range.clone(),
-            form: form.clone(),
         });
         if uri.contains("/paths-info/") {
             let path = form
@@ -241,12 +233,4 @@ pub(super) fn request_range(header: &str, len: usize) -> Range<usize> {
         end.parse::<usize>().unwrap() + 1
     };
     start.parse().unwrap()..end
-}
-
-pub(super) fn assert_ranges(requests: &[Captured], expected: &[&str]) {
-    let mut actual: Vec<_> = requests.iter().filter_map(|r| r.range.as_deref()).collect();
-    let mut expected = expected.to_vec();
-    actual.sort_unstable();
-    expected.sort_unstable();
-    assert_eq!(actual, expected);
 }
