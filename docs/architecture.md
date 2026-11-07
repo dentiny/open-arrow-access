@@ -53,6 +53,14 @@ another valid random-access mechanism. See [decompression](../decompression/READ
 `into_stream` owns the reader and stops polling it after EOF or the first error.
 No background execution is created by these contracts.
 
+`StreamReader::new(stream, metadata)` adapts an owned stream of shared results
+back into a sequential `Reader`, including streams that are not `Unpin`.
+Metadata is available without polling. EOF and errors drop the stream and make
+subsequent reads return EOF. The adapter starts no tasks or read-ahead; dropping
+it drops the stream. Callers map errors and ensure items match the declared
+metadata before wrapping. Parquet uses this adapter after its format-specific
+column reordering and schema restoration.
+
 `into_async_read` owns a `ByteReader` and exposes futures `AsyncRead` and
 `AsyncBufRead` for streaming parsers. It retains input chunks until consumed,
 rejects empty chunks as I/O errors, and stops polling after EOF or an error.
@@ -203,8 +211,8 @@ schema and optional reader-context contracts.
 - `file-format/` consumes shared byte accessors. Its Parquet bridge implements
   Arrow Rust's `AsyncFileReader` using exact ranges. Each format has its own
   directory under `src/`. In `src/parquet/`, `accessor.rs`, `input.rs` and
-  `reader.rs` own their respective structs and implementations; `mod.rs` declares
-  the modules, exports the accessor and provides common error conversion.
+  `reader.rs` own opening, byte bridging and record stream adaptation; `mod.rs`
+  declares the modules, exports the accessor and provides common error conversion.
 - The facade always exposes OpenDAL storage, including with no default features.
   Format, dataset, and decompression features remain independent and additive;
   they do not change runtime ordering or silently attach layers.
