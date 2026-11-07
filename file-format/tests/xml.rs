@@ -1,4 +1,3 @@
-use super::{NamespaceBinding, XmlAccessor, XmlField, XmlInferenceOptions, XmlLimits, XmlSchema};
 use arrow_array::{
     Array, RecordBatch,
     cast::AsArray,
@@ -6,7 +5,13 @@ use arrow_array::{
 };
 use arrow_schema::DataType::{Float64, Int64, Utf8};
 use open_arrow_access_core::{Accessor, ErrorKind, ReadOptions, ReadRequest};
-use open_arrow_access_test_support::MemoryAccessor;
+use open_arrow_access_file_format::{
+    NamespaceBinding, XmlAccessor, XmlField, XmlInferenceOptions, XmlLimits, XmlSchema,
+};
+use open_arrow_access_test_support::{
+    MemoryAccessor,
+    format::{self, collect_batches as batches},
+};
 use std::{num::NonZeroUsize, sync::atomic::Ordering};
 
 const CATALOG_PATH: &str = "/c:catalog/c:product";
@@ -44,21 +49,6 @@ fn request(name: &str, rows: usize, projection: Option<&[&str]>) -> ReadRequest 
         batch_size: NonZeroUsize::new(rows).unwrap(),
         projection: projection.map(|names| names.iter().map(|name| (*name).to_owned()).collect()),
     })
-}
-
-async fn batches(accessor: &XmlAccessor<MemoryAccessor>, request: ReadRequest) -> Vec<RecordBatch> {
-    let object = request.object.clone();
-    let mut reader = accessor.open(request).await.unwrap();
-    assert_eq!(reader.metadata().source.as_ref(), Some(&object));
-    let schema = reader.metadata().schema.clone();
-    let mut result = Vec::new();
-    while let Some(batch) = reader.next().await.unwrap() {
-        assert_eq!(batch.schema(), schema);
-        assert_eq!(reader.metadata().schema, schema);
-        result.push(batch);
-    }
-    assert!(reader.next().await.unwrap().is_none());
-    result
 }
 
 #[tokio::test]
@@ -187,10 +177,16 @@ async fn projection_skips_explicit_conversion_and_preserves_zero_column_rows() {
     let bytes = source("catalog.xml").await;
     let mut fields = catalog_schema().fields().to_vec();
     fields.push(XmlField::new("unused_number", "c:price", Int64, false));
-    let explicit = XmlAccessor::new(bytes.clone(), CATALOG_PATH)
-        .with_schema(XmlSchema::with_namespaces(fields, NAMESPACES).unwrap());
+    let schema = XmlSchema::with_namespaces(fields, NAMESPACES).unwrap();
+    let explicit = XmlAccessor::new(bytes.clone(), CATALOG_PATH).with_schema(schema.clone());
     // Decimal prices cannot convert to Int64, but omitted fields are not converted.
-    let selected = batches(&explicit, request("catalog.xml", 2, Some(&["name"]))).await;
+    let selected = format::assert_projection(
+        &explicit,
+        request("catalog.xml", 2, Some(&["name"])),
+        &schema.arrow_schema(),
+        5,
+    )
+    .await;
     assert_eq!(
         selected[0].column(0).as_string::<i32>().value(0),
         "Notebook & Pen"
@@ -239,14 +235,13 @@ async fn invalid_configuration_fails_before_opening_input() {
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
     }
     let explicit = accessor.with_schema(warehouse_schema());
-    for names in [&["missing"][..], &["warehouse", "warehouse"]] {
-        let error = explicit
-            .open(request("inventory.xml", 2, Some(names)))
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    }
+    format::assert_invalid_projection_before_open(
+        &explicit,
+        request("inventory.xml", 2, None),
+        &warehouse_schema().arrow_schema(),
+        &observations,
+    )
+    .await;
     assert!(observations.requests.lock().unwrap().is_empty());
 }
 
@@ -359,16 +354,20 @@ async fn batch_byte_budget_preserves_lookahead_order() {
 #[tokio::test]
 async fn input_failures_keep_their_category_during_sampling_and_later_reads() {
     let input = open_arrow_access_test_support::fixture!("xml", "inventory.xml").await;
-    let accessor = XmlAccessor::new(
-        MemoryAccessor::new(&input, 1).with_failure(0, ErrorKind::PermissionDenied),
-        INVENTORY_PATH,
-    );
-    let error = accessor
-        .open(request("inventory.xml", 1, None))
-        .await
-        .err()
-        .unwrap();
-    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+    format::assert_error_contract(
+        |bytes| XmlAccessor::new(bytes, INVENTORY_PATH),
+        &input,
+        request("inventory.xml", 1, None),
+        &[0, 1],
+    )
+    .await;
+    format::assert_error_contract(
+        |bytes| XmlAccessor::new(bytes, INVENTORY_PATH).with_schema(warehouse_schema()),
+        &input,
+        request("inventory.xml", 1, None),
+        &[0, 1],
+    )
+    .await;
     let accessor = XmlAccessor::new(
         MemoryAccessor::new(&input, 1).with_failure(input.len() - 20, ErrorKind::PermissionDenied),
         INVENTORY_PATH,
