@@ -30,14 +30,6 @@ DataFusion is only an unused workspace dependency declaration for the later gene
 column layer. It is not built or present in the resolved graph yet. The layer
 must inherit it through `workspace = true`; do not import types through Lance.
 
-## Declaring dependencies
-
-Declare every dependency, including local path dependencies, in the root
-`Cargo.toml` under `[workspace.dependencies]`. All packages inherit dependencies
-with `workspace = true`, including development and build dependencies. Keep
-optional flags and package-specific feature selection at the use site; do not
-repeat versions or sources in package dependency tables.
-
 ## Updating the baseline
 
 1. Resolve the latest default-branch SHA of `lance-format/lance` and inspect
