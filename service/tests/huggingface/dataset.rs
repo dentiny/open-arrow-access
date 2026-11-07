@@ -16,6 +16,11 @@ use super::support::{MockHub, TOKEN, response, service_with};
 
 const COMMIT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
+struct ExportEntry<'a> {
+    repository_path: &'a str,
+    fixture_path: &'a str,
+}
+
 #[derive(Clone)]
 struct ExportHub {
     files: MockHub,
@@ -26,14 +31,14 @@ struct ExportHub {
 }
 
 impl ExportHub {
-    async fn new(entries: &[(&str, &str)]) -> Self {
+    async fn new(entries: &[ExportEntry<'_>]) -> Self {
         let mut files = Vec::new();
-        for (path, fixture) in entries {
+        for entry in entries {
             let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../testdata/parquet")
-                .join(fixture);
+                .join(entry.fixture_path);
             files.push((
-                path.to_string(),
+                entry.repository_path.to_owned(),
                 Bytes::from(tokio::fs::read(fixture).await.unwrap()),
             ));
         }
@@ -132,10 +137,22 @@ async fn collect_ids(mut reader: Box<dyn RecordReader>) -> Vec<i64> {
 #[tokio::test]
 async fn dataset_pins_export_sorts_paginated_shards_and_reads_lazily_with_options() {
     let hub = ExportHub::new(&[
-        ("default/train/0000.parquet", "directory/a.parquet"),
-        ("default/train/0001.parquet", "directory/b.parquet"),
-        ("default/train/README.md", "ids.parquet"),
-        ("default/test/0000.parquet", "directory/hidden.parquet"),
+        ExportEntry {
+            repository_path: "default/train/0000.parquet",
+            fixture_path: "directory/a.parquet",
+        },
+        ExportEntry {
+            repository_path: "default/train/0001.parquet",
+            fixture_path: "directory/b.parquet",
+        },
+        ExportEntry {
+            repository_path: "default/train/README.md",
+            fixture_path: "ids.parquet",
+        },
+        ExportEntry {
+            repository_path: "default/test/0000.parquet",
+            fixture_path: "directory/hidden.parquet",
+        },
     ])
     .await;
     let service = hub.service().await;
@@ -212,7 +229,11 @@ async fn dataset_pins_export_sorts_paginated_shards_and_reads_lazily_with_option
 
 #[tokio::test]
 async fn dataset_preserves_zero_column_row_counts_and_skips_metadata_for_commit_requests() {
-    let hub = ExportHub::new(&[("default/train/0000.parquet", "directory/a.parquet")]).await;
+    let hub = ExportHub::new(&[ExportEntry {
+        repository_path: "default/train/0000.parquet",
+        fixture_path: "directory/a.parquet",
+    }])
+    .await;
     let mut reader = hub
         .service()
         .await
@@ -233,8 +254,11 @@ async fn dataset_preserves_zero_column_row_counts_and_skips_metadata_for_commit_
 
 #[tokio::test]
 async fn partial_exports_require_opt_in_and_do_not_hide_permission_failures() {
-    let mut hub =
-        ExportHub::new(&[("default/partial-train/0000.parquet", "directory/a.parquet")]).await;
+    let mut hub = ExportHub::new(&[ExportEntry {
+        repository_path: "default/partial-train/0000.parquet",
+        fixture_path: "directory/a.parquet",
+    }])
+    .await;
     let service = hub.service().await;
     let error = service.dataset(request()).await.err().unwrap();
     assert_eq!(error.kind(), ErrorKind::NotFound);
@@ -273,11 +297,14 @@ async fn partial_exports_require_opt_in_and_do_not_hide_permission_failures() {
 #[tokio::test]
 async fn complete_exports_take_precedence_over_partial_exports() {
     let hub = ExportHub::new(&[
-        ("default/train/0000.parquet", "directory/a.parquet"),
-        (
-            "default/partial-train/0000.parquet",
-            "directory/hidden.parquet",
-        ),
+        ExportEntry {
+            repository_path: "default/train/0000.parquet",
+            fixture_path: "directory/a.parquet",
+        },
+        ExportEntry {
+            repository_path: "default/partial-train/0000.parquet",
+            fixture_path: "directory/hidden.parquet",
+        },
     ])
     .await;
     assert_eq!(
@@ -338,8 +365,14 @@ async fn invalid_revision_metadata_never_opens_files() {
 #[tokio::test]
 async fn dataset_reuses_file_set_schema_validation_and_terminates_on_mismatch() {
     let hub = ExportHub::new(&[
-        ("default/train/0000.parquet", "directory/a.parquet"),
-        ("default/train/0001.parquet", "ids.parquet"),
+        ExportEntry {
+            repository_path: "default/train/0000.parquet",
+            fixture_path: "directory/a.parquet",
+        },
+        ExportEntry {
+            repository_path: "default/train/0001.parquet",
+            fixture_path: "ids.parquet",
+        },
     ])
     .await;
     let mut reader = hub.service().await.dataset(request()).await.unwrap();
