@@ -1,91 +1,55 @@
 use arrow_json::reader::Decoder;
-use open_arrow_access_core::{
-    ByteReader, Bytes, Capability, Error, ErrorKind, ReadState, Reader, RecordBatch,
-    RecordMetadata, Result, async_trait,
-};
+use open_arrow_access_core::{ByteReader, RecordBatch, RecordMetadata, RecordReader, Result};
 
 use super::decode_error;
+use crate::decode::{BatchDecoder, incremental_reader};
+
+struct JsonDecoder {
+    decoder: Decoder,
+    batch_size: usize,
+    eof_flushed: bool,
+}
+
+impl BatchDecoder for JsonDecoder {
+    const INPUT_OPERATION: &'static str = "read_json";
+    const EMPTY_CHUNK_MESSAGE: &'static str = "byte reader emitted an empty chunk";
+
+    fn is_ready(&self) -> bool {
+        self.decoder.len() == self.batch_size && !self.decoder.has_partial_record()
+    }
+
+    fn decode(&mut self, bytes: &[u8]) -> Result<usize> {
+        self.decoder.decode(bytes).map_err(decode_error)
+    }
+
+    fn flush(&mut self) -> Result<Option<RecordBatch>> {
+        self.decoder.flush().map_err(decode_error)
+    }
+
+    fn finish(&mut self) -> Result<Option<RecordBatch>> {
+        if self.eof_flushed {
+            return Ok(None);
+        }
+        self.eof_flushed = true;
+        self.flush()
+    }
+}
 
 // TODO: Decode JSONL chunks in parallel at complete line boundaries, preserving
 // input order and retaining sequential decoding for general JSON object streams.
-pub(super) struct JsonReader {
+pub(super) fn json_reader(
     input: Box<dyn ByteReader>,
     decoder: Decoder,
-    pending: Bytes,
     metadata: RecordMetadata,
     batch_size: usize,
-    state: ReadState,
-}
-
-impl JsonReader {
-    pub(super) fn new(
-        input: Box<dyn ByteReader>,
-        decoder: Decoder,
-        metadata: RecordMetadata,
-        batch_size: usize,
-    ) -> Self {
-        Self {
-            input,
+) -> impl RecordReader {
+    incremental_reader(
+        input,
+        JsonDecoder {
             decoder,
-            pending: Bytes::new(),
-            metadata,
             batch_size,
-            state: ReadState::default(),
-        }
-    }
-
-    async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
-        loop {
-            if self.decoder.len() == self.batch_size && !self.decoder.has_partial_record() {
-                return self.decoder.flush().map_err(decode_error);
-            }
-            if self.pending.is_empty() {
-                match self.input.next().await? {
-                    Some(bytes) if bytes.is_empty() => {
-                        return Err(Error::new(
-                            ErrorKind::Io,
-                            "read_json",
-                            "byte reader emitted an empty chunk",
-                        ));
-                    }
-                    Some(bytes) => self.pending = bytes,
-                    None => {
-                        self.state.mark_input_eof();
-                        self.state.finish();
-                        return self.decoder.flush().map_err(decode_error);
-                    }
-                }
-            }
-            let consumed = self.decoder.decode(&self.pending).map_err(decode_error)?;
-            self.pending = self.pending.slice(consumed..);
-        }
-    }
-}
-
-#[async_trait]
-impl Reader for JsonReader {
-    type Item = RecordBatch;
-    type Metadata = RecordMetadata;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-    }
-
-    fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
-    }
-
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.state.is_finished() {
-            return Ok(None);
-        }
-        let result = self.read_batch().await;
-        self.state.observe(&result);
-        result
-    }
+            eof_flushed: false,
+        },
+        metadata,
+    )
 }

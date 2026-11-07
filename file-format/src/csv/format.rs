@@ -1,4 +1,4 @@
-use super::{CsvFormat, reader::CsvReader};
+use super::{CsvFormat, reader::csv_reader};
 use crate::FileFormat;
 use arrow_csv::{ReaderBuilder, reader::Decoder};
 use arrow_schema::{DataType, TimeUnit};
@@ -73,7 +73,7 @@ impl FileFormat for CsvFileFormat {
         request: ReadRequest,
         (schema, decoder): Self::Prepared,
     ) -> Result<Box<dyn RecordReader>> {
-        Ok(Box::new(CsvReader::new(
+        Ok(Box::new(csv_reader(
             input,
             decoder,
             RecordMetadata {
