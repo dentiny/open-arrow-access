@@ -150,7 +150,7 @@ for TSV.
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
-| `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema |
+| `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema; WARC parser records with Arrow conversion deferred |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
 | `service/` | PMC inventory snapshots: explicit manifest → ordered gzip CSV records and metadata keys |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
@@ -421,7 +421,7 @@ see [dependency alignment](docs/dependencies.md#atif-parser).
 
 `FileAccessor<B, F>` binds a byte accessor to a core `ReaderFactory`. Built-in
 configuration types are `JsonFormat`, `CsvFileFormat`, `ParquetFormat`,
-`XmlFormat` and the existing `AtifFormat` enum. For example,
+`XmlFormat`, `WarcFormat` and the existing `AtifFormat` enum. For example,
 `FileAccessor::from_format(bytes, JsonFormat::new(schema))` is equivalent to
 `JsonAccessor::new(bytes, schema)`. Existing accessor constructors and builders
 remain available as type aliases over the shared accessor. `CsvFormat` continues
@@ -484,6 +484,23 @@ backend listing errors follow the configured OpenDAL service. In particular, Fs
 listing yields no files for a nonexistent or non-directory prefix.
 Object and prefix locators must be canonical root-relative paths; aliases such
 as leading slashes, dot components, and repeated separators are rejected.
+
+### WARC parser
+
+Enable `format-warc` for `file_format::WarcAccessor`, a thin adapter over the
+published `warc-rs` parser. It accepts `ByteReadRequest` and returns one owned
+`WarcRecord` per `next()` call, preserving physical record order, record types,
+headers and binary bodies. Reader metadata is the input `ObjectRef`.
+
+`WarcAccessor<B>` aliases `FileAccessor<B, WarcFormat>`. `WarcFormat` implements
+the same core `ReaderFactory` contract as Arrow formats, using byte requests and
+native WARC records. Shared opening handles request forwarding and preparation;
+the parser retains its own record conversion and errors.
+
+This stage provides parser records, without an Arrow schema, Arrow batches,
+projection, or batch-size controls. Arrow conversion, record locators and generated
+columns are deferred. Supply external decompression separately. The parser buffers
+one complete body per record, so this is not a maximum-record-size or memory bound.
 
 ## PMC inventory
 

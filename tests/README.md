@@ -16,6 +16,7 @@ directory owns facade wiring and composition across crates.
 | Directory and file-set facade | [`tests/directory.rs`](directory.rs) |
 | ATIF facade and file-set composition | [`tests/atif.rs`](atif.rs) |
 | PMC inventory | [`service/tests/pmc_inventory.rs`](../service/tests/pmc_inventory.rs), [`tests/pmc_inventory.rs`](pmc_inventory.rs) |
+| WARC parser | [`tests/warc.rs`](warc.rs) |
 | OpenDAL storage | [`storage/tests/opendal.rs`](../storage/tests/opendal.rs) |
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
