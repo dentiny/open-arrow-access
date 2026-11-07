@@ -64,3 +64,6 @@ and Harbor Hub backend are not dependencies, so ATIF does not bring its own
 storage, transport, runtime or decompression policy. JSON/JSONL framing is handled
 over the shared `ByteReader` contract. Arrow remains 59.3.0 and OpenDAL remains
 0.59.2 in this workspace's lockfile.
+
+`format-warc` uses published `warc-rs =0.3.0` with default features disabled,
+reusing its async parser without its optional storage dependencies.

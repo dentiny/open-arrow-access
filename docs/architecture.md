@@ -233,6 +233,7 @@ that entry point.
 | OpenDAL storage | `ByteReadRequest` | `dyn ByteReader` |
 | Parquet format | `ReadRequest` | `dyn RecordReader` |
 | JSON object stream | `ReadRequest`; schema configured on accessor | Record reader |
+| WARC parser | `ByteReadRequest` | `Reader<Item = WarcRecord, Metadata = ObjectRef>`; Arrow conversion deferred |
 | Directory/file-set dataset | Directory or explicit ordered file selection and options | Record reader |
 | Hugging Face repository | `ByteReadRequest` | `dyn ByteReader` |
 
