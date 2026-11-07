@@ -16,7 +16,6 @@ directory owns facade wiring and composition across crates.
 | Directory and file-set facade | [`tests/directory.rs`](directory.rs) |
 | ATIF facade and file-set composition | [`tests/atif.rs`](atif.rs) |
 | OpenDAL storage | [`storage/tests/opendal.rs`](../storage/tests/opendal.rs) |
-| Private storage error mapping | [`storage/tests/unit/errors.rs`](../storage/tests/unit/errors.rs) |
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
 | Shared memory backend | [`test-support/tests/memory.rs`](../test-support/tests/memory.rs) |
@@ -57,7 +56,7 @@ cargo test -p open-arrow-access-file-format --features csv --test csv --locked
 cargo test -p open-arrow-access-file-format --features xml --test xml --locked
 ```
 
-Run the storage suites, including its private unit test:
+Run the storage suite:
 
 ```sh
 cargo test -p open-arrow-access-storage --locked
