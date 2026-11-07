@@ -138,7 +138,7 @@ for TSV.
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Shared provider crate scaffold; provider implementations arrive under separate default-off features |
+| `service/` | PMC inventory snapshots: explicit manifest → ordered gzip CSV records and metadata keys |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
@@ -414,3 +414,12 @@ backend listing errors follow the configured OpenDAL service. In particular, Fs
 listing yields no files for a nonexistent or non-directory prefix.
 Object and prefix locators must be canonical root-relative paths; aliases such
 as leading slashes, dot components, and repeated separators are rejected.
+
+## PMC inventory
+
+Enable `service-pmc-inventory` to read a caller-selected inventory manifest with
+`service::pmc_inventory::PmcInventoryAccessor` and a standard `ReadRequest`.
+It streams the declared gzip CSV shards in order, preserves upstream columns
+and snapshot identity, and adds a decoded `metadata_key`. It does not list the
+bucket or open article JSON/content. Article metadata decoding is a separate,
+independently enabled service. See the [service guide](service/README.md).

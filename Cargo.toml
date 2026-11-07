@@ -47,6 +47,10 @@ opendal = { version = "0.59.2", default-features = false }
 parquet = { version = "59.3.0", default-features = false, features = ["arrow", "async", "snap"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tempfile = "3"
+flate2 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+percent-encoding = "2"
 open-arrow-access-core = { path = "core", version = "0.1.0" }
 open-arrow-access-storage = { path = "storage", version = "0.1.0", default-features = false }
 open-arrow-access-file-format = { path = "file-format", version = "0.1.0", default-features = false }
@@ -59,6 +63,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 
 [features]
 default = []
+service-pmc-inventory = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc-inventory"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
@@ -71,6 +76,7 @@ decompression-lz4 = ["dep:open-arrow-access-decompression", "open-arrow-access-d
 decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zstd"]
 
 [dependencies]
+open-arrow-access-service = { workspace = true, optional = true }
 open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 open-arrow-access-storage.workspace = true
@@ -118,3 +124,11 @@ required-features = ["format-atif"]
 [[test]]
 name = "atif"
 required-features = ["format-atif", "dataset-directory"]
+
+[[test]]
+name = "pmc_inventory"
+required-features = ["service-pmc-inventory"]
+
+[[example]]
+name = "read_pmc_inventory"
+required-features = ["service-pmc-inventory"]

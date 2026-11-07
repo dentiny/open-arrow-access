@@ -8,9 +8,28 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
+pmc-inventory = ["dep:arrow-array", "dep:arrow-schema", "dep:serde", "dep:serde_json", "dep:percent-encoding", "dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip"]
 
 [dependencies]
+arrow-array = { workspace = true, optional = true }
+arrow-schema = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+percent-encoding = { workspace = true, optional = true }
+open-arrow-access-file-format = { workspace = true, optional = true }
+open-arrow-access-decompression = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true
+open-arrow-access-test-support.workspace = true
+open-arrow-access-storage.workspace = true
+tokio.workspace = true
+bytes.workspace = true
+
+[[test]]
+name = "pmc_inventory"
+required-features = ["pmc-inventory"]
 
 [lints]
 workspace = true

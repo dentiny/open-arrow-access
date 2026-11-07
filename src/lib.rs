@@ -59,3 +59,8 @@ pub mod dataset {
         DirectoryAccessor, DirectoryRequest, FileSetAccessor, FileSetRequest,
     };
 }
+
+#[cfg(feature = "service-pmc-inventory")]
+pub mod service {
+    pub use open_arrow_access_service::pmc_inventory;
+}

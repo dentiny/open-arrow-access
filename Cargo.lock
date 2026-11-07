@@ -1134,6 +1134,7 @@ dependencies = [
  "open-arrow-access-dataset",
  "open-arrow-access-decompression",
  "open-arrow-access-file-format",
+ "open-arrow-access-service",
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
  "opendal",
@@ -1198,7 +1199,19 @@ dependencies = [
 name = "open-arrow-access-service"
 version = "0.1.0"
 dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "bytes",
+ "flate2",
  "open-arrow-access-core",
+ "open-arrow-access-decompression",
+ "open-arrow-access-file-format",
+ "open-arrow-access-storage",
+ "open-arrow-access-test-support",
+ "percent-encoding",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
