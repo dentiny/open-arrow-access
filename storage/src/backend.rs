@@ -13,6 +13,8 @@ use opendal::{
 };
 use tokio::sync::Semaphore;
 
+use crate::validation::validate_locator;
+
 const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
 const DEFAULT_IO_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 const MAX_FETCH_BATCH_SIZE: u64 = 2 * 1024 * 1024;
@@ -404,27 +406,4 @@ pub(crate) fn map_error(operation: &'static str, path: &str, error: opendal::Err
         _ => ErrorKind::Io,
     };
     Error::new(kind, operation, format!("object {path:?}")).with_source(error)
-}
-
-fn validate_locator(path: &str, prefix: bool, operation: &'static str) -> Result<()> {
-    let base = if prefix {
-        path.strip_suffix('/').unwrap_or(path)
-    } else {
-        path
-    };
-    if path.trim() != path
-        || path.starts_with('/')
-        || (!prefix && path.is_empty())
-        || (!base.is_empty()
-            && base
-                .split('/')
-                .any(|part| part.is_empty() || matches!(part, "." | "..")))
-    {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            operation,
-            "expected a canonical root-relative locator",
-        ));
-    }
-    Ok(())
 }

@@ -3,6 +3,7 @@
 mod backend;
 #[cfg(test)]
 mod tests;
+mod validation;
 
 pub use backend::OpenDalAccessor;
 
