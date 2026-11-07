@@ -1,8 +1,8 @@
-use super::{reader::XmlRecordReader, xml_error};
+use super::{reader::xml_reader, xml_error};
 use crate::FileFormat;
 use open_arrow_access_core::{
-    ByteReader, Error, ErrorKind, ReadOptions, ReadRequest, ReadState, RecordMetadata,
-    RecordReader, Result, SchemaRef, async_trait, into_async_read,
+    ByteReader, Error, ErrorKind, ReadOptions, ReadRequest, RecordMetadata, RecordReader, Result,
+    SchemaRef, async_trait, into_async_read,
 };
 use xml_arrow::{InferenceOptions, NamespaceBinding, ReaderOptions, XmlReader, XmlSchema};
 
@@ -173,14 +173,13 @@ impl FileFormat for XmlFormat {
             let (schema, projection) = request.options.resolve_projection(&reader.schema())?;
             (reader, schema, projection)
         };
-        Ok(Box::new(XmlRecordReader {
+        Ok(Box::new(xml_reader(
             reader,
-            projection,
-            state: ReadState::default(),
-            metadata: RecordMetadata {
+            RecordMetadata {
                 schema,
                 source: Some(request.object),
             },
-        }))
+            projection,
+        )))
     }
 }

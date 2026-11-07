@@ -352,6 +352,35 @@ async fn batch_byte_budget_preserves_lookahead_order() {
 }
 
 #[tokio::test]
+async fn explicit_readers_are_lazy_and_drop_stops_input_work() {
+    let input = open_arrow_access_test_support::fixture!("xml", "inventory.xml").await;
+    for consume in [false, true] {
+        let bytes = MemoryAccessor::new(&input, 1);
+        let observed = bytes.observations.clone();
+        let accessor = XmlAccessor::new(bytes, INVENTORY_PATH).with_schema(warehouse_schema());
+        let mut reader = accessor
+            .open(request("inventory.xml", 1, None))
+            .await
+            .unwrap();
+        assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
+        let batch = if consume {
+            Some(reader.next().await.unwrap().unwrap())
+        } else {
+            None
+        };
+        let reads = observed.reads.load(Ordering::SeqCst);
+        assert!(reads < input.len());
+        drop(reader);
+        tokio::task::yield_now().await;
+        assert_eq!(observed.reads.load(Ordering::SeqCst), reads);
+        if let Some(batch) = batch {
+            assert_eq!(batch.num_rows(), 1);
+            assert_eq!(batch.column(0).as_primitive::<Int64Type>().value(0), 0);
+        }
+    }
+}
+
+#[tokio::test]
 async fn input_failures_keep_their_category_during_sampling_and_later_reads() {
     let input = open_arrow_access_test_support::fixture!("xml", "inventory.xml").await;
     format::assert_error_contract(
