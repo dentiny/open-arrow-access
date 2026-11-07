@@ -413,16 +413,6 @@ configuration types are `JsonFormat`, `CsvFileFormat`, `ParquetFormat`,
 remain available as type aliases over the shared accessor. `CsvFormat` continues
 to configure Arrow CSV delimiter/header options.
 
-Core and the facade expose format-independent `DataType`, `DataTypeCategory`
-and `classify_data_type(&DataType)`. Classification covers all Arrow variants,
-including numeric, string/binary, temporal, nested and encoded types, and is
-available with no format features. For example, both `Int8` and `UInt64` classify
-as `Integer`, while all string widths/views classify as `String`. Containers
-retain their outer category. Arrow's existing `DataType::is_integer`,
-`is_floating`, `is_string` and other predicates are also available directly.
-Formats can combine categories with parameter checks; CSV uses this shared
-classification while retaining its own width, time-unit and dictionary rules.
-
 Implement `FileFormat` for a new Arrow format:
 
 1. Define `Prepared` and implement `prepare(&ReadOptions)` to validate fixed

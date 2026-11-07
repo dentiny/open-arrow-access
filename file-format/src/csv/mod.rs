@@ -1,7 +1,6 @@
 mod accessor;
 mod format;
 mod reader;
-mod types;
 
 pub use accessor::CsvAccessor;
 pub use arrow_csv::reader::Format as CsvFormat;
