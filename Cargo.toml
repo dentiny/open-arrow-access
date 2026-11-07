@@ -28,6 +28,8 @@ datafusion = "55.2.0"
 opendal = "0.59.2"
 
 [workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 http = "1"
 opendal-service-http = "=0.59.2"
 url = "2"
@@ -64,6 +66,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 
 [features]
 default = []
+service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
 service-commoncrawl = ["dep:open-arrow-access-service", "open-arrow-access-service/commoncrawl"]
 service-commoncrawl-warc = ["service-commoncrawl", "open-arrow-access-service/commoncrawl-warc"]
 format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
@@ -114,6 +117,10 @@ required-features = ["dataset-directory"]
 [[test]]
 name = "reading"
 required-features = ["format-parquet"]
+
+[[example]]
+name = "read_huggingface"
+required-features = ["service-huggingface"]
 
 [[example]]
 name = "read_parquet"

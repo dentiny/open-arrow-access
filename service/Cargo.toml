@@ -8,18 +8,59 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
-commoncrawl = ["dep:open-arrow-access-storage", "dep:opendal", "dep:opendal-service-http", "dep:url"]
-
-commoncrawl-warc = ["commoncrawl", "dep:open-arrow-access-dataset", "dep:futures"]
+commoncrawl = [
+    "dep:open-arrow-access-storage",
+    "dep:opendal",
+    "dep:opendal-service-http",
+    "dep:url",
+    "opendal/services-http",
+    "opendal/http-transport-reqwest",
+]
+huggingface = [
+    "dep:open-arrow-access-storage",
+    "dep:open-arrow-access-dataset",
+    "dep:open-arrow-access-file-format",
+    "dep:futures",
+    "dep:opendal",
+    "opendal/services-hf",
+    "opendal/http-transport-reqwest",
+    "dep:tokio",
+    "tokio/fs",
+    "dep:http",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:url",
+    "open-arrow-access-dataset/directory",
+    "open-arrow-access-file-format/parquet",
+]
+commoncrawl-warc = [
+    "commoncrawl",
+    "dep:open-arrow-access-dataset",
+    "dep:futures",
+    "open-arrow-access-dataset/directory",
+]
 
 [dependencies]
+open-arrow-access-dataset = { workspace = true, optional = true }
+open-arrow-access-file-format = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
-open-arrow-access-dataset = { workspace = true, features = ["directory"], optional = true }
 open-arrow-access-storage = { workspace = true, optional = true }
-opendal = { workspace = true, features = ["services-http", "http-transport-reqwest"], optional = true }
+opendal = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 opendal-service-http = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
+
+[dev-dependencies]
+open-arrow-access-test-support.workspace = true
+arrow-array.workspace = true
+
+[[test]]
+name = "huggingface"
+required-features = ["huggingface"]
 
 [lints]
 workspace = true

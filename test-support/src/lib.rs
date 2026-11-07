@@ -235,6 +235,9 @@ pub mod byte_layer;
 /// Shared assertions for single-file Arrow format accessors.
 pub mod format;
 
+/// Shared helpers for record-reader values.
+pub mod record;
+
 fn memory_read_error(error: &Error) -> &Error {
     let mut source: &(dyn std::error::Error + 'static) = error;
     loop {
@@ -253,13 +256,14 @@ fn memory_read_error(error: &Error) -> &Error {
     }
 }
 
-/// Resolve a committed fixture relative to the calling crate's manifest directory.
+/// Resolve a committed fixture from the calling crate's workspace.
 pub fn fixture_path(manifest_dir: impl AsRef<Path>, format: &str, name: &str) -> PathBuf {
-    manifest_dir
-        .as_ref()
-        .join("../testdata")
-        .join(format)
-        .join(name)
+    let manifest_dir = manifest_dir.as_ref();
+    let root = manifest_dir
+        .ancestors()
+        .find(|root| root.join("testdata").is_dir())
+        .unwrap_or_else(|| panic!("no testdata directory above {}", manifest_dir.display()));
+    root.join("testdata").join(format).join(name)
 }
 
 /// Read a committed fixture, reporting its full path if reading fails.
@@ -268,6 +272,14 @@ pub async fn read_fixture(manifest_dir: impl AsRef<Path>, format: &str, name: &s
     tokio::fs::read(&path)
         .await
         .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+}
+
+/// Locate `testdata/<format>/<name>` from the calling crate's workspace.
+#[macro_export]
+macro_rules! fixture_path {
+    ($format:expr, $name:expr) => {
+        $crate::fixture_path(env!("CARGO_MANIFEST_DIR"), $format, $name)
+    };
 }
 
 /// Read `testdata/<format>/<name>` from the calling crate's workspace.
