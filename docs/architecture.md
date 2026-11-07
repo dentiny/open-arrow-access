@@ -60,6 +60,8 @@ subsequent reads return EOF. The adapter starts no tasks or read-ahead; dropping
 it drops the stream. Callers map errors and ensure items match the declared
 metadata before wrapping. Parquet uses this adapter after its format-specific
 column reordering and schema restoration.
+XML wraps its native async batch reader in a stream and retains its own projection
+and error mapping, using the same adapter for metadata and terminal behavior.
 
 `into_async_read` owns a `ByteReader` and exposes futures `AsyncRead` and
 `AsyncBufRead` for streaming parsers. It retains input chunks until consumed,
