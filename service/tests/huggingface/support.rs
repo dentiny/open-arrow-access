@@ -7,17 +7,19 @@ use std::{
     },
 };
 
+use arrow_array::{cast::AsArray, types::Int64Type};
 use futures::stream;
 use http::{Request, Response, StatusCode};
 use open_arrow_access_core::Bytes;
 use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter};
 use serde_json::json;
 
-use super::super::{HuggingFaceOptions, HuggingFaceService};
+use super::super::{HuggingFaceDatasetRequest, HuggingFaceOptions, HuggingFaceService};
 
-// This integration-test binary has one default transport. Each fixture gets
-// its own host/handler, so parallel tests never share request state or use the
-// public network. Install it before constructing any service in this binary.
+pub(super) const COMMIT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const TOKEN: &str = "fixture-only-token";
+
+// Route each fixture to its own host so parallel tests never share request state.
 static TRANSPORTS: LazyLock<Mutex<HashMap<String, HttpTransporter>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -35,136 +37,179 @@ impl HttpTransport for FixtureTransport {
     }
 }
 
-fn install_mock_transport() {
-    static INSTALL: Once = Once::new();
-    INSTALL.call_once(|| HttpTransporter::install_default(FixtureTransport));
+pub(super) struct ExportEntry<'a> {
+    pub(super) repository_path: &'a str,
+    pub(super) fixture_path: &'a str,
 }
 
-pub(super) async fn service_with(transport: impl HttpTransport) -> HuggingFaceService {
-    install_mock_transport();
-    static NEXT_HOST: AtomicUsize = AtomicUsize::new(0);
-    let host = format!("fixture-{}.invalid", NEXT_HOST.fetch_add(1, Relaxed));
-    TRANSPORTS
-        .lock()
-        .unwrap()
-        .insert(host.clone(), HttpTransporter::new(transport));
-    HuggingFaceService::new(
-        HuggingFaceOptions::default()
-            .with_endpoint(format!("https://{host}"))
-            .with_token(TOKEN),
-    )
-    .await
-    .unwrap()
+struct Captured {
+    uri: String,
+    range: Option<String>,
 }
 
-pub(super) const TOKEN: &str = "fixture-only-token";
-
-#[derive(Clone, Debug)]
-pub(super) struct Captured {
-    pub(super) range: Option<String>,
-}
-
-#[derive(Clone, Default)]
-pub(super) struct MockHub {
+#[derive(Clone)]
+pub(super) struct ExportHub {
     files: Arc<BTreeMap<String, Bytes>>,
+    pub(super) metadata: Bytes,
+    pub(super) full_status: StatusCode,
     requests: Arc<Mutex<Vec<Captured>>>,
 }
 
-impl MockHub {
-    pub(super) fn with_files(files: impl IntoIterator<Item = (String, Bytes)>) -> Self {
+impl ExportHub {
+    pub(super) async fn new(entries: &[ExportEntry<'_>]) -> Self {
+        let mut files = BTreeMap::new();
+        for entry in entries {
+            let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../testdata/parquet")
+                .join(entry.fixture_path);
+            files.insert(
+                entry.repository_path.to_owned(),
+                Bytes::from(tokio::fs::read(fixture).await.unwrap()),
+            );
+        }
         Self {
-            files: Arc::new(files.into_iter().collect()),
-            ..Self::default()
+            files: Arc::new(files),
+            metadata: Bytes::from(json!({"sha": COMMIT}).to_string()),
+            full_status: StatusCode::OK,
+            requests: Arc::default(),
         }
     }
 
-    pub(super) fn captured(&self) -> Vec<Captured> {
-        self.requests.lock().unwrap().clone()
+    pub(super) async fn service(&self) -> HuggingFaceService {
+        static INSTALL: Once = Once::new();
+        INSTALL.call_once(|| HttpTransporter::install_default(FixtureTransport));
+        static NEXT_HOST: AtomicUsize = AtomicUsize::new(0);
+        let host = format!("fixture-{}.invalid", NEXT_HOST.fetch_add(1, Relaxed));
+        TRANSPORTS
+            .lock()
+            .unwrap()
+            .insert(host.clone(), HttpTransporter::new(self.clone()));
+        HuggingFaceService::new(
+            HuggingFaceOptions::default()
+                .with_endpoint(format!("https://{host}"))
+                .with_token(TOKEN),
+        )
+        .await
+        .unwrap()
+    }
+
+    pub(super) async fn read_ids(&self, request: HuggingFaceDatasetRequest) -> Vec<i64> {
+        let mut reader = self.service().await.dataset(request).await.unwrap();
+        let mut ids = Vec::new();
+        while let Some(batch) = reader.next().await.unwrap() {
+            ids.extend_from_slice(batch.column(0).as_primitive::<Int64Type>().values());
+        }
+        ids
+    }
+
+    pub(super) fn requests(&self) -> Vec<String> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|r| r.uri.clone())
+            .collect()
+    }
+
+    pub(super) fn requested(&self, fragment: &str) -> bool {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.uri.contains(fragment))
+    }
+
+    pub(super) fn clear_requests(&self) {
+        self.requests.lock().unwrap().clear();
+    }
+
+    pub(super) fn ranges(&self) -> Vec<Range<usize>> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|r| {
+                r.range
+                    .as_deref()
+                    .map(|value| request_range(value, usize::MAX))
+            })
+            .collect()
     }
 }
 
-pub(super) fn response(status: StatusCode, bytes: impl Into<Bytes>) -> Response<HttpBody> {
-    let bytes = bytes.into();
-    let len = bytes.len() as u64;
-    // Exercise fragmented HTTP bodies, including output chunks that span buffers.
-    Response::builder()
-        .status(status)
-        .header("content-length", len)
-        .body(HttpBody::new(
-            stream::iter(Buffer::from(bytes).chunks(3).map(Ok)),
-            Some(len),
-        ))
-        .unwrap()
-}
-
-impl HttpTransport for MockHub {
-    async fn fetch(&self, req: Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
+impl HttpTransport for ExportHub {
+    async fn fetch(&self, request: Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
         tokio::task::yield_now().await;
-        let uri = req.uri().to_string();
-        let range = req
+        assert_eq!(
+            request.headers()["authorization"],
+            format!("Bearer {TOKEN}")
+        );
+        let uri = request.uri().to_string();
+        let range = request
             .headers()
             .get("range")
             .map(|v| v.to_str().unwrap().to_owned());
-        let form = String::from_utf8(req.body().to_bytes().to_vec()).unwrap();
-        assert_eq!(req.headers()["authorization"], format!("Bearer {TOKEN}"));
         self.requests.lock().unwrap().push(Captured {
+            uri: uri.clone(),
             range: range.clone(),
         });
+        if uri.contains("/revision/") {
+            assert!(uri.contains("refs%2Fconvert%2Fparquet"));
+            assert!(uri.ends_with("expand=sha"));
+            return Ok(response(StatusCode::OK, self.metadata.clone()));
+        }
+        assert!(
+            uri.contains(COMMIT),
+            "membership and file I/O must use the pinned commit"
+        );
+        if let Some((_, rest)) = uri.split_once("/tree/") {
+            assert!(!uri.contains("recursive=True"));
+            let prefix = rest.split_once('/').unwrap().1.split('?').next().unwrap();
+            if prefix == "default/train" && self.full_status != StatusCode::OK {
+                return Ok(response(self.full_status, Bytes::new()));
+            }
+            // Reverse path order and paginate to exercise provider ordering.
+            let prefix = format!("{prefix}/");
+            let files: Vec<_> = self.files.iter().rev()
+                .filter(|(path, _)| path.starts_with(&prefix))
+                .map(|(path, bytes)| json!({"type":"file", "path":path, "size":bytes.len(), "oid":"fixture"})).collect();
+            if files.is_empty() {
+                return Ok(response(StatusCode::NOT_FOUND, Bytes::new()));
+            }
+            let page = if uri.contains("cursor=second") {
+                &files[1..]
+            } else {
+                &files[..1]
+            };
+            let mut output = response(
+                StatusCode::OK,
+                Bytes::from(serde_json::to_vec(page).unwrap()),
+            );
+            if !uri.contains("cursor=second") && files.len() > 1 {
+                output.headers_mut().insert(
+                    "link",
+                    format!("<{uri}&cursor=second>; rel=\"next\"")
+                        .parse()
+                        .unwrap(),
+                );
+            }
+            return Ok(output);
+        }
         if uri.contains("/paths-info/") {
+            let form = String::from_utf8(request.body().to_bytes().to_vec()).unwrap();
             let path = form
                 .strip_prefix("paths=")
                 .unwrap()
                 .split('&')
                 .next()
                 .unwrap();
-            let value = if let Some(bytes) = self.files.get(path) {
-                json!([{"type":"file","path":path,"size":bytes.len(),"oid":"fixture"}])
-            } else if self
-                .files
-                .keys()
-                .any(|key| key.starts_with(&format!("{}/", path.trim_end_matches('/'))))
-            {
-                json!([{"type":"directory","path":path.trim_end_matches('/'),"oid":"fixture"}])
-            } else {
-                json!([])
-            };
-            return Ok(response(StatusCode::OK, Bytes::from(value.to_string())));
-        }
-        if uri.contains("/tree/") {
-            let recursive = uri.contains("recursive=True");
-            let values: Vec<_> = self
-                .files
-                .iter()
-                .filter(|(path, _)| {
-                    recursive || !path.strip_prefix("data/").unwrap().contains('/')
-                })
-                .map(|(path, bytes)| {
-                    json!({"type":"file","path":path,"size":bytes.len(),"oid":"fixture"})
-                })
-                .collect();
-            let page2 = uri.contains("cursor=second");
-            let mut page = if page2 {
-                values[values.len().min(1)..].to_vec()
-            } else {
-                values[..values.len().min(1)].to_vec()
-            };
-            if !page2 {
-                page.push(json!({"type":"directory", "path":"data/nested"}));
-            }
-            let mut output = response(
+            let files: Vec<_> = self.files.get(path).map(|bytes|
+                json!({"type":"file", "path":path, "size":bytes.len(), "oid":"fixture"})
+            ).into_iter().collect();
+            return Ok(response(
                 StatusCode::OK,
-                Bytes::from(serde_json::to_string(&page).unwrap()),
-            );
-            if !page2 && values.len() > 1 {
-                let recursive_query = if recursive { "&recursive=True" } else { "" };
-                output.headers_mut().insert(
-                    "link",
-                    format!("<https://hub.invalid/api/datasets/owner/example/tree/refs%2Fconvert%2Fparquet/data?cursor=second{recursive_query}>; rel=\"next\"")
-                        .parse()
-                        .unwrap(),
-                );
-            }
-            return Ok(output);
+                Bytes::from(serde_json::to_vec(&files).unwrap()),
+            ));
         }
         if let Some((_, path)) = uri
             .split_once("/resolve/")
@@ -175,14 +220,12 @@ impl HttpTransport for MockHub {
                 .as_deref()
                 .map_or(0..bytes.len(), |value| request_range(value, bytes.len()));
             let (start, end) = (selected.start, selected.end);
-            let mut output = response(
-                if range.is_some() {
-                    StatusCode::PARTIAL_CONTENT
-                } else {
-                    StatusCode::OK
-                },
-                bytes.slice(start..end),
-            );
+            let status = if range.is_some() {
+                StatusCode::PARTIAL_CONTENT
+            } else {
+                StatusCode::OK
+            };
+            let mut output = response(status, bytes.slice(start..end));
             if range.is_some() {
                 output.headers_mut().insert(
                     "content-range",
@@ -195,6 +238,18 @@ impl HttpTransport for MockHub {
         }
         panic!("unexpected request: {uri}")
     }
+}
+
+fn response(status: StatusCode, bytes: Bytes) -> Response<HttpBody> {
+    let len = bytes.len() as u64;
+    Response::builder()
+        .status(status)
+        .header("content-length", len)
+        .body(HttpBody::new(
+            stream::iter(Buffer::from(bytes).chunks(3).map(Ok)),
+            Some(len),
+        ))
+        .unwrap()
 }
 
 fn request_range(header: &str, len: usize) -> Range<usize> {
