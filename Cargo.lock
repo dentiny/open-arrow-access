@@ -1849,11 +1849,9 @@ dependencies = [
 name = "open-arrow-access-service"
 version = "0.1.0"
 dependencies = [
- "arrow-array",
  "futures",
  "http",
  "open-arrow-access-core",
- "open-arrow-access-file-format",
  "open-arrow-access-storage",
  "opendal",
  "serde_json",
