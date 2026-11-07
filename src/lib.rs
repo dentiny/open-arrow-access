@@ -1,8 +1,8 @@
 //! Composable, asynchronous read access to Arrow record batches.
 //!
-//! Enable a storage feature and a `format-parquet`, `format-json`, `format-csv`,
-//! `format-xml`, or `format-atif` reader.
-//! The default build exposes only the shared extension contracts.
+//! The shared extension contracts and OpenDAL storage adapter are always available.
+//! Enable a `format-parquet`, `format-json`, `format-csv`, `format-xml`, or
+//! `format-atif` reader to decode records.
 
 pub use open_arrow_access_core::*;
 
@@ -26,9 +26,9 @@ pub mod decompression {
     };
 }
 
-#[cfg(feature = "storage-fs")]
 pub mod storage {
-    pub use open_arrow_access_storage::FsAccessor;
+    pub use open_arrow_access_storage::OpenDalAccessor;
+    pub use open_arrow_access_storage::opendal;
 }
 
 #[cfg(any(
