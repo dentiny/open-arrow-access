@@ -7,7 +7,7 @@ description = "Composable read access to Apache Arrow streams"
 repository.workspace = true
 
 [workspace]
-members = ["core", "storage", "file-format", "dataset", "decompression", "test-support"]
+members = ["core", "storage", "file-format", "dataset", "decompression", "test-support", "service"]
 resolver = "3"
 
 [workspace.package]
@@ -54,6 +54,8 @@ open-arrow-access-decompression = { path = "decompression", version = "0.1.0", d
 open-arrow-access-test-support = { path = "test-support" }
 
 open-arrow-access-dataset = { path = "dataset", version = "0.1.0", default-features = false }
+
+open-arrow-access-service = { path = "service", version = "0.1.0", default-features = false }
 
 [features]
 default = []

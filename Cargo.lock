@@ -1195,6 +1195,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "open-arrow-access-service"
+version = "0.1.0"
+dependencies = [
+ "open-arrow-access-core",
+]
+
+[[package]]
 name = "open-arrow-access-storage"
 version = "0.1.0"
 dependencies = [
