@@ -341,7 +341,7 @@ Whole-document JSON requires one valid document; arrays and concatenated documen
 are rejected. Extensions do not select a format or compression.
 
 The converter validates ATIF v1.0–v1.8 and uses the fixed
-[`atif-arrow` schema](https://github.com/dentiny/atif-arrow/blob/06261086691e10578f12138cebc0d873d0857f3a/docs/schema.md).
+[`atif-arrow` schema](https://github.com/dentiny/atif-arrow/blob/v0.3.0/docs/schema.md).
 The schema is available at `open`, before input bytes are read. Each trajectory
 is one row with ordered nested steps, calls, observations and supplied metrics.
 `raw_json` retains the verbatim document (including its JSONL line ending and
@@ -376,6 +376,5 @@ cargo run --example read_atif --features storage-fs,format-atif
 cargo run --example read_atif --features storage-fs,format-atif -- testdata/atif/trajectories.jsonl jsonl
 ```
 
-The published `atif-arrow 0.2.0` uses Arrow 58. Until an Arrow 59 compatible
-registry release is available, this adapter pins the Arrow 59 compatibility
-commit; see [dependency alignment](docs/dependencies.md#atif-parser).
+The adapter uses the published `atif-arrow 0.3.0` crate with Arrow 59;
+see [dependency alignment](docs/dependencies.md#atif-parser).

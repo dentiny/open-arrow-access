@@ -54,14 +54,10 @@ and checksum recorded in Cargo.lock.
 
 ## ATIF parser
 
-`format-atif` uses `atif-arrow` at immutable revision
-[`0626108`](https://github.com/dentiny/atif-arrow/commit/06261086691e10578f12138cebc0d873d0857f3a),
-which changes its Arrow dependency family from 58 to 59. The published 0.2.0
-registry release still exposes Arrow 58 types and cannot supply this adapter's
-Arrow 59 `RecordBatch` directly. Replace the Git pin with a normal registry
-requirement after a compatible release; no release is published by this change.
-The compatibility change is tracked in
-[atif-arrow PR #17](https://github.com/dentiny/atif-arrow/pull/17).
+`format-atif` uses the published
+[`atif-arrow 0.3.0`](https://crates.io/crates/atif-arrow/0.3.0) converter for
+Arrow 59 compatibility. It uses a normal registry dependency, with the resolved
+version and checksum recorded in Cargo.lock.
 
 Only the pure parser/schema/converter crate is used. The companion `atif-io`
 and Harbor Hub backend are not dependencies, so ATIF does not bring its own
