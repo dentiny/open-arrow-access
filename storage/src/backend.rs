@@ -5,7 +5,7 @@ use std::{num::NonZeroUsize, ops::Range, sync::Arc};
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error,
-    ErrorKind, ListRequest, ObjectRef, ObjectStream, Reader, Result, async_trait,
+    ErrorKind, ListRequest, ObjectRef, ObjectStream, ReadState, Reader, Result, async_trait,
 };
 use opendal::{
     Execute, Executor, OperationContext, Operator,
@@ -106,7 +106,7 @@ impl Accessor for OpenDalAccessor {
             pending: opendal::Buffer::new(),
             len,
             chunk_size: self.chunk_size.get(),
-            finished: false,
+            state: ReadState::default(),
         }) as Box<dyn ByteReader>)
     }
 }
@@ -190,7 +190,7 @@ struct OpenDalReader {
     offset: u64,
     len: u64,
     chunk_size: usize,
-    finished: bool,
+    state: ReadState,
 }
 
 impl OpenDalReader {
@@ -338,21 +338,19 @@ impl Reader for OpenDalReader {
     }
 
     async fn next(&mut self) -> Result<Option<Bytes>> {
-        if self.finished || self.offset == self.len {
-            self.finished = true;
+        if self.state.is_finished() || self.offset == self.len {
+            self.state.finish();
             self.sequential = None;
             self.pending = opendal::Buffer::new();
             return Ok(None);
         }
-        match self.read_next_chunk().await {
-            Ok(bytes) => Ok(Some(bytes)),
-            Err(error) => {
-                self.finished = true;
-                self.sequential = None;
-                self.pending = opendal::Buffer::new();
-                Err(error)
-            }
+        let result = self.read_next_chunk().await.map(Some);
+        self.state.observe(&result);
+        if self.state.is_finished() {
+            self.sequential = None;
+            self.pending = opendal::Buffer::new();
         }
+        result
     }
 }
 
