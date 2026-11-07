@@ -1,4 +1,4 @@
-use super::reader::JsonReader;
+use super::reader::json_reader;
 use crate::FileFormat;
 use arrow_json::{ReaderBuilder, reader::Decoder};
 use arrow_schema::ArrowError;
@@ -48,7 +48,7 @@ impl FileFormat for JsonFormat {
         request: ReadRequest,
         (schema, decoder): Self::Prepared,
     ) -> Result<Box<dyn RecordReader>> {
-        Ok(Box::new(JsonReader::new(
+        Ok(Box::new(json_reader(
             input,
             decoder,
             RecordMetadata {

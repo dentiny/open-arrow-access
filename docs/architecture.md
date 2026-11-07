@@ -62,6 +62,11 @@ metadata before wrapping. Parquet uses this adapter after its format-specific
 column reordering and schema restoration.
 XML wraps its native async batch reader in a stream and retains its own projection
 and error mapping, using the same adapter for metadata and terminal behavior.
+CSV and JSON also use `StreamReader`, sharing a private incremental input driver
+for pending chunks, consumed-byte slicing and input EOF. Their decoder adapters
+retain batch-ready checks and EOF finalization: CSV decodes an empty slice before
+flushing; JSON flushes once at EOF and checks for partial records before a full
+batch flush. The driver forwards source errors and retains format error context.
 
 `into_async_read` owns a `ByteReader` and exposes futures `AsyncRead` and
 `AsyncBufRead` for streaming parsers. It retains input chunks until consumed,
@@ -77,10 +82,11 @@ only, without retaining range operations.
 input EOF allows a decoder to drain buffered rows. Observing an output error or
 `Ok(None)` finishes the reader permanently; observing `Ok(Some(item))` preserves
 the current state. A reader can also finish explicitly while emitting a known
-final item, as the JSON decoder does when flushing at input EOF.
+final item.
 
-Readers check `is_finished()` before doing work and call `observe(&result)` on
-their output. State transitions are synchronous and format-independent. Input,
+Readers using this helper check `is_finished()` before doing work and call
+`observe(&result)` on their output. State transitions are synchronous and
+format-independent. Input,
 decoder, pending bytes, metadata and resource cleanup remain owned by each
 reader. For example, OpenDAL releases its sequential stream and pending buffer
 at completion, while exact range reads remain independent of sequential EOF.
