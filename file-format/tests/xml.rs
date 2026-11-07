@@ -1,4 +1,3 @@
-use super::{NamespaceBinding, XmlAccessor, XmlField, XmlInferenceOptions, XmlLimits, XmlSchema};
 use arrow_array::{
     Array, RecordBatch,
     cast::AsArray,
@@ -6,6 +5,9 @@ use arrow_array::{
 };
 use arrow_schema::DataType::{Float64, Int64, Utf8};
 use open_arrow_access_core::{Accessor, ErrorKind, ReadOptions, ReadRequest};
+use open_arrow_access_file_format::{
+    NamespaceBinding, XmlAccessor, XmlField, XmlInferenceOptions, XmlLimits, XmlSchema,
+};
 use open_arrow_access_test_support::MemoryAccessor;
 use std::{num::NonZeroUsize, sync::atomic::Ordering};
 

@@ -42,3 +42,11 @@ workspace = true
 [[test]]
 name = "atif"
 required-features = ["atif"]
+
+[[test]]
+name = "csv"
+required-features = ["csv"]
+
+[[test]]
+name = "xml"
+required-features = ["xml"]

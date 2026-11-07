@@ -2,7 +2,8 @@
 
 mod backend;
 #[cfg(test)]
-mod tests;
+#[path = "../tests/unit/errors.rs"]
+mod error_tests;
 mod validation;
 
 pub use backend::OpenDalAccessor;
