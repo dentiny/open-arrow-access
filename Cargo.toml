@@ -28,6 +28,10 @@ datafusion = "55.2.0"
 opendal = "0.59.2"
 
 [workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+http = "1"
+url = "2"
 async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
 # Match the resolved Cargo.lock versions at the Lance revision above.
 # See docs/dependencies.md when updating this baseline.
@@ -49,8 +53,6 @@ opendal = { version = "0.59.2", default-features = false }
 parquet = { version = "59.3.0", default-features = false, features = ["arrow", "async", "snap"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tempfile = "3"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
 open-arrow-access-core = { path = "core", version = "0.1.0" }
 open-arrow-access-storage = { path = "storage", version = "0.1.0", default-features = false }
 open-arrow-access-file-format = { path = "file-format", version = "0.1.0", default-features = false }
@@ -63,6 +65,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 
 [features]
 default = []
+service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
 service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
 format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
@@ -107,6 +110,10 @@ required-features = ["dataset-directory"]
 [[test]]
 name = "reading"
 required-features = ["format-parquet"]
+
+[[example]]
+name = "read_huggingface"
+required-features = ["service-huggingface"]
 
 [[example]]
 name = "read_pmc"

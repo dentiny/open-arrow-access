@@ -8,23 +8,51 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
+huggingface = [
+    "dep:open-arrow-access-storage",
+    "dep:open-arrow-access-dataset",
+    "dep:open-arrow-access-file-format",
+    "dep:futures",
+    "dep:opendal",
+    "opendal/services-hf",
+    "opendal/http-transport-reqwest",
+    "dep:tokio",
+    "tokio/fs",
+    "dep:http",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:url",
+    "open-arrow-access-dataset/directory",
+    "open-arrow-access-file-format/parquet",
+]
 pmc = ["dep:arrow-array", "dep:arrow-schema", "dep:serde", "dep:serde_json", "dep:futures"]
 
 [dependencies]
+open-arrow-access-dataset = { workspace = true, optional = true }
+open-arrow-access-file-format = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
-arrow-array = { workspace = true, optional = true }
-arrow-schema = { workspace = true, optional = true }
+open-arrow-access-core.workspace = true
+open-arrow-access-storage = { workspace = true, optional = true }
+opendal = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
-
-open-arrow-access-core.workspace = true
+url = { workspace = true, optional = true }
+arrow-array = { workspace = true, optional = true }
+arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
-open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-test-support.workspace = true
+arrow-array.workspace = true
+open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-storage.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
+
+[[test]]
+name = "huggingface"
+required-features = ["huggingface"]
 
 [[test]]
 name = "pmc"

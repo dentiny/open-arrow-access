@@ -6,6 +6,14 @@
 
 pub use open_arrow_access_core::*;
 
+#[cfg(any(feature = "service-huggingface", feature = "service-pmc"))]
+pub mod service {
+    #[cfg(feature = "service-huggingface")]
+    pub use open_arrow_access_service::huggingface::*;
+    #[cfg(feature = "service-pmc")]
+    pub use open_arrow_access_service::pmc;
+}
+
 #[cfg(any(
     feature = "decompression-gzip",
     feature = "decompression-bz2",
@@ -63,9 +71,4 @@ pub mod dataset {
     pub use open_arrow_access_dataset::{
         DirectoryAccessor, DirectoryRequest, FileSetAccessor, FileSetRequest,
     };
-}
-
-#[cfg(feature = "service-pmc")]
-pub mod service {
-    pub use open_arrow_access_service::pmc;
 }

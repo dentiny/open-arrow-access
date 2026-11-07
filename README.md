@@ -114,6 +114,40 @@ The same approach supports OpenDAL's other service, layer and transport
 features without adding matching features to this project. OpenDAL 0.59.2
 names its S3 feature `services-s3`.
 
+Enable `service-huggingface` for `HuggingFaceService::repository`. Repository ID,
+revision, root, endpoint and authentication are provider-owned. The returned byte
+accessor composes with existing format readers. Floating revisions are not snapshots.
+
+Use the same service for a complete Parquet dataset:
+
+```rust,no_run
+use open_arrow_access::{Result, service::{HuggingFaceService, HuggingFaceOptions, HuggingFaceDatasetRequest}};
+
+async fn read() -> Result<()> {
+    let service = HuggingFaceService::new(HuggingFaceOptions::default()).await?;
+    let mut reader = service.dataset(HuggingFaceDatasetRequest::new(
+        "lhoestq/demo1", "default", "train",
+    )).await?;
+    while let Some(batch) = reader.next().await? {
+        println!("{} rows", batch.num_rows());
+    }
+    Ok(())
+}
+```
+
+The dataset entry point pins `refs/convert/parquet` to a commit, lists the selected
+config/split, sorts its Parquet shards, and uses our Parquet/FileSet accessors for
+lazy sequential Arrow reading. `with_options` controls rows/projection and
+`with_byte_options` forwards per-file I/O settings. `with_revision` selects a
+revision of the Parquet export; it does not map an original source revision to
+a conversion. An absent full split fails by default. `with_partial_exports()`
+explicitly permits fallback to `partial-<split>`. The same request also works
+with `Accessor::open` on `HuggingFaceService`.
+
+```sh
+cargo run --example read_huggingface --features service-huggingface -- lhoestq/demo1
+```
+
 ## JSON and JSONL
 
 Enable `format-json` and construct `file_format::JsonAccessor::new(bytes, schema)`
@@ -152,7 +186,7 @@ for TSV.
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema; WARC parser records with Arrow conversion deferred |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Single-object PMC article metadata with upstream field names, nullable content URLs and verbatim JSON |
+| `service/` | Hugging Face repository bytes and Parquet datasets; PMC article metadata with nullable content URLs and verbatim JSON |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
@@ -280,6 +314,8 @@ facade wiring and cross-crate composition. CSV/TSV, JSON/JSONL, XML and ATIF sui
 live together in `file-format/tests/`. Private implementation tests, when needed,
 belong in the owning crate's `tests/unit/`, explicitly included by its library.
 Optional test targets declare `required-features` in `Cargo.toml`.
+HF dataset tests use `service/tests/huggingface.rs`, with mock transports under
+`service/tests/huggingface/`.
 
 Tests read checked-in Parquet, CSV/TSV, and JSON/JSONL files from `testdata/`. They verify ordered rows and
 nulls across row groups, schema metadata, projection, storage-independent
