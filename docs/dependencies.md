@@ -55,9 +55,9 @@ and checksum recorded in Cargo.lock.
 ## ATIF parser
 
 `format-atif` uses the published
-[`atif-arrow 0.3.0`](https://crates.io/crates/atif-arrow/0.3.0) converter for
-Arrow 59 compatibility. It uses a normal registry dependency, with the resolved
-version and checksum recorded in Cargo.lock.
+[`atif-arrow 0.4.0`](https://crates.io/crates/atif-arrow/0.4.0) converter, including
+projection-aware batch builders. The resolved registry version and checksum are
+recorded in Cargo.lock.
 
 Only the pure parser/schema/converter crate is used. The companion `atif-io`
 and Harbor Hub backend are not dependencies, so ATIF does not bring its own
