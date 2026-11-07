@@ -9,14 +9,12 @@ const DEFAULT_ENDPOINT: &str = "https://huggingface.co";
 pub struct HuggingFaceOptions {
     endpoint: Option<String>,
     pub(super) token: Option<String>,
-    pub(super) http_only: bool,
 }
 
 impl fmt::Debug for HuggingFaceOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HuggingFaceOptions")
             .field("endpoint", &self.endpoint)
-            .field("http_only", &self.http_only)
             .finish_non_exhaustive()
     }
 }
@@ -33,12 +31,6 @@ impl HuggingFaceOptions {
 
     pub fn with_token(mut self, token: impl Into<String>) -> Self {
         self.token = Some(token.into());
-        self
-    }
-
-    /// Use HTTP downloads instead of the upstream default HTTP/Xet selection.
-    pub fn with_http_downloads(mut self) -> Self {
-        self.http_only = true;
         self
     }
 

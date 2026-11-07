@@ -53,8 +53,7 @@ pub(super) async fn service_with(transport: impl HttpTransport) -> HuggingFaceSe
     HuggingFaceService::new(
         HuggingFaceOptions::default()
             .with_endpoint(format!("https://{host}"))
-            .with_token(TOKEN)
-            .with_http_downloads(),
+            .with_token(TOKEN),
     )
     .await
     .unwrap()

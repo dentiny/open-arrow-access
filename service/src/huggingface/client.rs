@@ -54,9 +54,6 @@ impl HuggingFaceService {
         if let Some(token) = &self.options.token {
             builder = builder.token(token);
         }
-        if self.options.http_only {
-            builder = builder.download_mode("http");
-        }
         HuggingFaceAccessor::new(builder, self.context.clone()).await
     }
 }
