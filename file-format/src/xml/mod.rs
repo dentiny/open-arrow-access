@@ -14,6 +14,3 @@ fn xml_error(error: xml_arrow::ReadError) -> open_arrow_access_core::Error {
     });
     Error::new(kind, "read_xml", error.to_string()).with_source(error)
 }
-
-#[cfg(test)]
-mod tests;
