@@ -8,7 +8,7 @@ use open_arrow_access_core::{
 use open_arrow_access_core::{ByteMetadata, Bytes, Reader};
 use open_arrow_access_decompression::{DecompressionLayer, Gzip};
 use open_arrow_access_service::pmc::{PmcAccessor, PmcInput, PmcLimits, PmcRequest, schema};
-use open_arrow_access_storage::FsAccessor;
+use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::MemoryAccessor;
 use std::{
     collections::HashMap,
@@ -593,11 +593,9 @@ async fn independent_opens_and_local_mirror_use_existing_fs_reader() {
     tokio::fs::write(root.path().join(PDF_PATH), PDF)
         .await
         .unwrap();
-    let source = PmcAccessor::new(
-        FsAccessor::new(root.path().to_str().unwrap())
-            .await
-            .unwrap(),
-    );
+    let source = PmcAccessor::new(OpenDalAccessor::new(
+        open_arrow_access_test_support::fs_operator(root.path()),
+    ));
     let mut first = source.open(PmcRequest::prefix("metadata/")).await.unwrap();
     let mut second = source
         .open(PmcRequest::new("metadata/a.json"))

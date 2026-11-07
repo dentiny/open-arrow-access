@@ -8,7 +8,6 @@ description = "Storage adapters for Open Arrow Access"
 
 [features]
 default = []
-fs = ["opendal/services-fs"]
 
 [dependencies]
 open-arrow-access-core.workspace = true
@@ -17,6 +16,7 @@ tokio = { workspace = true, features = ["sync"] }
 futures.workspace = true
 
 [dev-dependencies]
+open-arrow-access-test-support.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 more-asserts.workspace = true
 tempfile.workspace = true

@@ -63,9 +63,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 [features]
 default = []
 service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc", "format-json"]
-storage-opendal = ["dep:open-arrow-access-storage"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
-storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
 format-atif = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/atif"]
@@ -80,12 +78,12 @@ decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-
 open-arrow-access-service = { workspace = true, optional = true }
 open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
-open-arrow-access-storage = { workspace = true, optional = true }
+open-arrow-access-storage.workspace = true
 open-arrow-access-file-format = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 
 [dev-dependencies]
-opendal = { workspace = true, features = ["services-memory"] }
+opendal = { workspace = true, features = ["services-fs", "services-memory"] }
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
@@ -98,11 +96,7 @@ tokio = { workspace = true, features = ["fs"] }
 
 [[test]]
 name = "pmc"
-required-features = ["service-pmc", "storage-opendal"]
-
-[[test]]
-name = "storage_opendal"
-required-features = ["storage-opendal"]
+required-features = ["service-pmc"]
 
 [[test]]
 name = "directory"
@@ -110,15 +104,15 @@ required-features = ["dataset-directory"]
 
 [[test]]
 name = "reading"
-required-features = ["storage-fs", "format-parquet"]
+required-features = ["format-parquet"]
 
 [[example]]
 name = "read_pmc"
-required-features = ["service-pmc", "storage-fs"]
+required-features = ["service-pmc"]
 
 [[example]]
 name = "read_parquet"
-required-features = ["storage-fs", "format-parquet"]
+required-features = ["format-parquet"]
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -128,12 +122,12 @@ workspace = true
 
 [[example]]
 name = "read_xml"
-required-features = ["storage-fs", "format-xml"]
+required-features = ["format-xml"]
 
 [[example]]
 name = "read_atif"
-required-features = ["storage-fs", "format-atif"]
+required-features = ["format-atif"]
 
 [[test]]
 name = "atif"
-required-features = ["format-atif", "storage-fs", "dataset-directory"]
+required-features = ["format-atif", "dataset-directory"]

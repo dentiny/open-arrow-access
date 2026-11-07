@@ -24,7 +24,7 @@ open-arrow-access-core.workspace = true
 [dev-dependencies]
 open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-test-support.workspace = true
-open-arrow-access-storage = { workspace = true, features = ["fs"] }
+open-arrow-access-storage.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 

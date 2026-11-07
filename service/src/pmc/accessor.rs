@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 /// Read PMC PDF snapshots using an existing byte accessor.
 ///
-/// Supply a bucket-rooted OpenDAL accessor or an FsAccessor rooted at a mirror.
+/// Supply a bucket-rooted OpenDAL accessor or one configured for a local mirror.
 /// Backend setup, credentials and byte layers remain caller-controlled. No I/O
 /// starts until `open`; article contents are fetched only as `next` is polled.
 pub struct PmcAccessor<A> {
