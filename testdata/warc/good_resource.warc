@@ -1,0 +1,8 @@
+WARC/1.1
+WARC-Type: resource
+WARC-Record-ID: <urn:test:a>
+WARC-Date: 2020-07-08T02:52:55Z
+Content-Length: 3
+
+123
+
