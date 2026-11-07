@@ -1,7 +1,6 @@
-use futures::{StreamExt, TryStreamExt};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ReadRequest, ReadState,
-    RecordMetadata, RecordReader, Result, async_trait, into_stream,
+    RecordMetadata, RecordReader, Result, async_trait, into_async_read,
 };
 use xml_arrow::{InferenceOptions, NamespaceBinding, ReaderOptions, XmlReader, XmlSchema};
 
@@ -157,23 +156,7 @@ where
             .inner
             .open(ByteReadRequest::new(request.object.clone()).with_options(request.byte_options))
             .await?;
-        let input = into_stream(input)
-            .map(|result| {
-                result
-                    .and_then(|bytes| {
-                        if bytes.is_empty() {
-                            Err(Error::new(
-                                ErrorKind::Io,
-                                "read_xml",
-                                "byte reader returned an empty chunk",
-                            ))
-                        } else {
-                            Ok(bytes)
-                        }
-                    })
-                    .map_err(std::io::Error::other)
-            })
-            .into_async_read();
+        let input = into_async_read(input, "read_xml");
         let (reader, schema, projection) = if let Some((schema, _)) = explicit_projection {
             let reader = XmlReader::new(input, validation_schema, &self.record_path, options)
                 .map_err(xml_error)?;
