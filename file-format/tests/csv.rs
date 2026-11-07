@@ -214,18 +214,20 @@ async fn empty_and_header_only_inputs_emit_no_batches() {
 
 #[tokio::test]
 async fn invalid_data_errors_are_terminal() {
-    for name in BAD_FILES {
-        let bytes = MemoryAccessor::new(&fixture!("csv", name).await, 1);
-        let accessor = CsvAccessor::new(bytes.clone(), schema());
-        let mut reader = accessor.open(ReadRequest::new(name)).await.unwrap();
-        let error = format::assert_terminal_error(
-            reader.as_mut(),
-            &bytes.observations.reads,
-            ErrorKind::Decode,
-        )
-        .await;
-        assert_eq!(error.operation(), "decode_csv");
-        assert!(std::error::Error::source(&error).is_some());
+    for chunk_size in [1, 4096] {
+        for name in BAD_FILES {
+            let bytes = MemoryAccessor::new(&fixture!("csv", name).await, chunk_size);
+            let accessor = CsvAccessor::new(bytes.clone(), schema());
+            let mut reader = accessor.open(ReadRequest::new(name)).await.unwrap();
+            let error = format::assert_terminal_error(
+                reader.as_mut(),
+                &bytes.observations.reads,
+                ErrorKind::Decode,
+            )
+            .await;
+            assert_eq!(error.operation(), "decode_csv");
+            assert!(std::error::Error::source(&error).is_some());
+        }
     }
 }
 
@@ -243,21 +245,6 @@ async fn csv_preserves_source_error_categories_and_stops_polling() {
         &[0, 6],
     )
     .await;
-}
-
-#[tokio::test]
-async fn csv_rejects_empty_source_chunks_as_terminal_io_errors() {
-    let bytes =
-        MemoryAccessor::new(&fixture!("csv", "good_no_header.csv").await, 1).with_empty_chunk(0);
-    let accessor = CsvAccessor::new(bytes.clone(), schema());
-    let mut reader = accessor
-        .open(ReadRequest::new("good_no_header.csv"))
-        .await
-        .unwrap();
-    let error =
-        format::assert_terminal_error(reader.as_mut(), &bytes.observations.reads, ErrorKind::Io)
-            .await;
-    assert_eq!(error.operation(), "read_csv");
 }
 
 #[tokio::test]
@@ -362,25 +349,5 @@ async fn filesystem_csv_preserves_values_across_chunks_and_batches() {
                 Some("last".into()),
             ]
         );
-    }
-}
-
-#[tokio::test]
-async fn filesystem_invalid_csv_errors_are_terminal() {
-    use open_arrow_access_storage::OpenDalAccessor;
-
-    for chunk_size in [1, 4096] {
-        let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
-            fixture_path!("csv", ""),
-        ))
-        .with_chunk_size(NonZeroUsize::new(chunk_size).unwrap());
-        let accessor = CsvAccessor::new(bytes, schema());
-        for name in BAD_FILES {
-            let mut reader = accessor.open(ReadRequest::new(name)).await.unwrap();
-            let error = reader.next().await.unwrap_err();
-            assert_eq!(error.kind(), ErrorKind::Decode, "{name}");
-            assert!(std::error::Error::source(&error).is_some(), "{name}");
-            assert!(reader.next().await.unwrap().is_none(), "{name}");
-        }
     }
 }

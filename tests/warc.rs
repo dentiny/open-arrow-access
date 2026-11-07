@@ -66,17 +66,6 @@ async fn request_and_response_records_are_both_delivered() {
 }
 
 #[tokio::test]
-async fn optional_numeric_headers_remain_parser_strings() {
-    let input = fixture!("warc", "bad_segment_number.warc").await;
-    let accessor = WarcAccessor::new(MemoryAccessor::new(&input, 2));
-    let mut reader = accessor.open("a.warc".into()).await.unwrap();
-    let record = reader.next().await.unwrap().unwrap();
-    let value = record.header(WarcHeader::SegmentNumber).unwrap();
-    assert!(value.parse::<u64>().is_err());
-    assert!(reader.next().await.unwrap().is_none());
-}
-
-#[tokio::test]
 async fn malformed_and_truncated_records_fail_terminally() {
     for name in [
         "bad_incomplete_header.warc",

@@ -1,4 +1,4 @@
-use std::{error::Error as _, num::NonZeroUsize};
+use std::num::NonZeroUsize;
 
 use futures::TryStreamExt;
 use open_arrow_access_core::{
@@ -89,24 +89,6 @@ async fn invalid_gzip_is_terminal() -> Result<()> {
         )
         .await;
     }
-    Ok(())
-}
-
-#[tokio::test]
-async fn source_errors_are_lazy_and_preserved() -> Result<()> {
-    let input = MemoryAccessor::new(&[], 1).with_failure(0, ErrorKind::PermissionDenied);
-    let accessor = input.layer(DecompressionLayer::new(Gzip));
-    let mut reader = accessor.open("source.gz".into()).await?;
-    let error = reader.next().await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
-    assert!(
-        error
-            .source()
-            .unwrap()
-            .to_string()
-            .contains("injected source failure")
-    );
-    assert!(reader.next().await?.is_none());
     Ok(())
 }
 

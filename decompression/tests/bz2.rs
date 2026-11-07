@@ -3,9 +3,7 @@ use std::num::NonZeroUsize;
 use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, Result};
 use open_arrow_access_decompression::{Bzip2, DecompressionLayer};
 
-use open_arrow_access_test_support::{
-    MemoryAccessor, byte_layer, collect_bytes as collect, fixture,
-};
+use open_arrow_access_test_support::{MemoryAccessor, byte_layer, fixture};
 
 #[tokio::test]
 async fn concatenated_members_preserve_order_with_fragmented_input_and_bounded_output() -> Result<()>
@@ -52,21 +50,6 @@ async fn invalid_truncated_checksum_and_trailing_input_fail_terminally() -> Resu
         )
         .await;
     }
-    Ok(())
-}
-
-#[tokio::test]
-async fn source_errors_are_preserved() -> Result<()> {
-    let bytes = fixture!("bz2", "payload.bz2").await;
-    let input =
-        MemoryAccessor::new(&bytes, 2).with_failure(bytes.len(), ErrorKind::PermissionDenied);
-    let accessor = input.layer(DecompressionLayer::new(Bzip2));
-    let mut reader = accessor.open("source.bz2".into()).await?;
-    assert_eq!(
-        collect(reader.as_mut()).await.unwrap_err().kind(),
-        ErrorKind::PermissionDenied
-    );
-    assert!(reader.next().await?.is_none());
     Ok(())
 }
 

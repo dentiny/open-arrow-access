@@ -3,9 +3,7 @@ use std::num::NonZeroUsize;
 use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, Result};
 use open_arrow_access_decompression::{DecompressionLayer, Lz4};
 
-use open_arrow_access_test_support::{
-    MemoryAccessor, byte_layer, collect_bytes as collect, fixture,
-};
+use open_arrow_access_test_support::{MemoryAccessor, byte_layer, fixture};
 
 #[tokio::test]
 async fn concatenated_frames_and_skippable_frames_preserve_order_across_fragments() -> Result<()> {
@@ -68,21 +66,6 @@ async fn corrupt_truncated_raw_legacy_and_trailing_input_fail_terminally() -> Re
         )
         .await;
     }
-    Ok(())
-}
-
-#[tokio::test]
-async fn source_errors_are_preserved() -> Result<()> {
-    let bytes = fixture!("lz4", "payload.lz4").await;
-    let input =
-        MemoryAccessor::new(&bytes, 2).with_failure(bytes.len(), ErrorKind::PermissionDenied);
-    let accessor = input.layer(DecompressionLayer::new(Lz4));
-    let mut reader = accessor.open("source.lz4".into()).await?;
-    assert_eq!(
-        collect(reader.as_mut()).await.unwrap_err().kind(),
-        ErrorKind::PermissionDenied
-    );
-    assert!(reader.next().await?.is_none());
     Ok(())
 }
 

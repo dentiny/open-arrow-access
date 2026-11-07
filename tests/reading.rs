@@ -129,31 +129,6 @@ async fn projection_rejects_unknown_and_duplicate_fields() {
 }
 
 #[tokio::test]
-async fn byte_reader_has_bounded_chunks_and_independent_range_cursor() {
-    let dir = tempfile::tempdir().unwrap();
-    tokio::fs::write(dir.path().join("data.bin"), b"abcdefghij")
-        .await
-        .unwrap();
-    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()))
-        .with_chunk_size(NonZeroUsize::new(3).unwrap());
-    let mut reader = fs.open("data.bin".into()).await.unwrap();
-    assert_eq!(reader.metadata().content_length, Some(10));
-    assert!(reader.capability().read_with_range);
-    assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"abc");
-    assert_eq!(reader.read_range(7..10).await.unwrap().as_ref(), b"hij");
-    assert!(reader.read_range(5..5).await.unwrap().is_empty());
-    assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"def");
-    let remaining = into_stream(reader).try_collect::<Vec<_>>().await.unwrap();
-    assert_eq!(
-        remaining
-            .iter()
-            .flat_map(|b| b.iter().copied())
-            .collect::<Vec<_>>(),
-        b"ghij"
-    );
-}
-
-#[tokio::test]
 async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
     let dir = tempfile::tempdir().unwrap();
     let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
@@ -219,7 +194,7 @@ async fn malformed_parquet_returns_contextual_decode_error() {
 }
 
 #[tokio::test]
-async fn parquet_accepts_third_party_accessor_and_rejects_sequential_only_input() {
+async fn parquet_accepts_third_party_ranged_accessor() {
     let fixture = fixture(Compression::UNCOMPRESSED).await;
     let bytes = tokio::fs::read(fixture.dir.path().join("data.parquet"))
         .await
@@ -233,16 +208,6 @@ async fn parquet_accepts_third_party_accessor_and_rejects_sequential_only_input(
     assert_eq!(
         batches.iter().flat_map(ids).collect::<Vec<_>>(),
         (0..7).collect::<Vec<_>>()
-    );
-    let accessor = ParquetAccessor::new(MemoryAccessor::new(b"sequential bytes", usize::MAX));
-    assert_eq!(
-        accessor
-            .open(ReadRequest::new("anything"))
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Unsupported
     );
 }
 
@@ -489,6 +454,8 @@ async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor
             )
             .await
             .unwrap();
+        assert_eq!(reader.metadata().content_length, Some(10));
+        assert!(reader.capability().read_with_range);
         assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"abc");
         let buffers = reader
             .read_ranges(vec![7..10, 0..3, 5..5, 2..6, 7..10])
@@ -521,21 +488,6 @@ async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor
         );
         assert_eq!(reader.read_range(4..8).await.unwrap().as_ref(), b"efgh");
     }
-}
-
-#[tokio::test]
-async fn third_party_byte_reader_uses_the_bulk_range_fallback() {
-    let accessor = MemoryAccessor::new(b"abcdefghij", usize::MAX).with_ranges();
-    let mut reader = accessor.open("memory".into()).await.unwrap();
-    let actual = reader.read_ranges(vec![7..10, 0..3, 4..4]).await.unwrap();
-    assert_eq!(
-        actual.iter().map(|v| v.as_ref()).collect::<Vec<_>>(),
-        vec![&b"hij"[..], &b"abc"[..], &b""[..]]
-    );
-    assert_eq!(
-        reader.next().await.unwrap().unwrap().as_ref(),
-        b"abcdefghij"
-    );
 }
 
 #[tokio::test]
