@@ -4,6 +4,7 @@
 mod accessor;
 mod client;
 mod options;
+mod validation;
 
 pub use accessor::HuggingFaceAccessor;
 pub use client::HuggingFaceService;

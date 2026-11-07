@@ -134,6 +134,6 @@ impl HuggingFaceRepository {
                 "invalid repository revision",
             ));
         }
-        super::accessor::validate_path(&self.root, true)
+        super::validation::validate_path(&self.root, true)
     }
 }
