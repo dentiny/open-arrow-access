@@ -28,6 +28,10 @@ datafusion = "55.2.0"
 opendal = "0.59.2"
 
 [workspace.dependencies]
+http = "1"
+opendal-service-http = "=0.59.2"
+url = "2"
+async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
 # Match the resolved Cargo.lock versions at the Lance revision above.
 # See docs/dependencies.md when updating this baseline.
 arrow-array = "59.3.0"
@@ -84,7 +88,7 @@ open-arrow-access-file-format = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 
 [dev-dependencies]
-http = "1"
+http = { workspace = true }
 opendal = { workspace = true, features = ["services-fs"] }
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
