@@ -421,7 +421,7 @@ see [dependency alignment](docs/dependencies.md#atif-parser).
 
 `FileAccessor<B, F>` binds a byte accessor to a core `ReaderFactory`. Built-in
 configuration types are `JsonFormat`, `CsvFileFormat`, `ParquetFormat`,
-`XmlFormat` and the existing `AtifFormat` enum. For example,
+`XmlFormat`, `WarcFormat` and the existing `AtifFormat` enum. For example,
 `FileAccessor::from_format(bytes, JsonFormat::new(schema))` is equivalent to
 `JsonAccessor::new(bytes, schema)`. Existing accessor constructors and builders
 remain available as type aliases over the shared accessor. `CsvFormat` continues
