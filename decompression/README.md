@@ -61,13 +61,17 @@ chunks and consumer-held outputs are additional memory. Upstream errors retain
 their category and original source; codec corruption uses Decode. Errors and
 EOF are terminal. Drop a decoder after cancelling an in-flight read.
 
-The reader uses core's `read_chunks` for decoded output and `StreamReader` for
-metadata, sequential capabilities and terminal handling. Codec error mapping
-stays in the decompression crate.
+`DecompressionFactory<C>` implements core `ReaderFactory` for byte requests and
+byte output. Both decompression and file accessors use the blanket
+`ReaderFactoryExt::open_reader` implementation to prepare configuration before
+opening storage, then create the output reader.
+The factory uses `read_chunks` for decoded output and `StreamReader` for metadata,
+sequential capabilities and terminal handling. Codec error mapping stays here;
+listing remains delegated by `DecompressionAccessor`.
 
 To add a codec, implement `Codec` using an upstream streaming decoder in its
 own module and enable its dependency feature. `DecompressionLayer` and its
-accessor/reader adapters remain shared. The `CompressedInput`/`DecodedInput`
+accessor/factory adapters remain shared. The `CompressedInput`/`DecodedInput`
 aliases expose the futures I/O boundary without coupling a codec to storage,
 Arrow or a closed core compression enumeration.
 
