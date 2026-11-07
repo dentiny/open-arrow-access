@@ -1,15 +1,13 @@
 use std::{
     collections::BTreeMap,
-    error::Error as _,
     ops::Range,
     sync::{Arc, Mutex},
 };
 
 use futures::stream;
 use http::{Request, Response, StatusCode};
-use open_arrow_access_core::{Bytes, Error, ErrorKind};
+use open_arrow_access_core::Bytes;
 use open_arrow_access_storage::OpenDalAccessor;
-use opendal::ErrorKind as Upstream;
 use opendal::{
     Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext, Operator, services::Hf,
 };
@@ -26,17 +24,10 @@ pub(super) struct Captured {
     pub(super) form: String,
 }
 
-#[derive(Clone)]
-pub(super) enum HubFailure {
-    Status(StatusCode),
-    Transport(opendal::ErrorKind),
-}
-
 #[derive(Clone, Default)]
 pub(super) struct MockHub {
     files: Arc<BTreeMap<String, Bytes>>,
     requests: Arc<Mutex<Vec<Captured>>>,
-    failure: Option<(&'static str, HubFailure)>,
 }
 
 impl MockHub {
@@ -53,11 +44,6 @@ impl MockHub {
 
     pub(super) fn request_count(&self) -> usize {
         self.requests.lock().unwrap().len()
-    }
-
-    pub(super) fn with_failure(mut self, route: &'static str, failure: HubFailure) -> Self {
-        self.failure = Some((route, failure));
-        self
     }
 
     pub(super) fn accessor(&self) -> HuggingFaceAccessor {
@@ -114,16 +100,6 @@ impl HttpTransport for MockHub {
             range: range.clone(),
             form: form.clone(),
         });
-        if let Some((route, failure)) = &self.failure
-            && uri.contains(route)
-        {
-            return match failure {
-                HubFailure::Status(status) => Ok(response(*status, Bytes::new())),
-                HubFailure::Transport(kind) => {
-                    Err(opendal::Error::new(*kind, "fixture transport failed"))
-                }
-            };
-        }
         if uri.contains("/paths-info/") {
             let path = form
                 .strip_prefix("paths=")
@@ -131,9 +107,6 @@ impl HttpTransport for MockHub {
                 .split('&')
                 .next()
                 .unwrap();
-            if path.ends_with("denied.bin") {
-                return Ok(response(StatusCode::FORBIDDEN, Bytes::new()));
-            }
             let value = if let Some(bytes) = self.files.get(path) {
                 json!([{"type":"file","path":path,"size":bytes.len(),"oid":"fixture"}])
             } else if self
@@ -192,12 +165,6 @@ impl HttpTransport for MockHub {
                 .as_deref()
                 .map_or(0..bytes.len(), |value| request_range(value, bytes.len()));
             let (start, end) = (selected.start, selected.end);
-            if path.ends_with("fail.bin") && start >= 4 {
-                return Err(opendal::Error::new(
-                    opendal::ErrorKind::Unexpected,
-                    "fixture transport failed",
-                ));
-            }
             let mut output = response(
                 if range.is_some() {
                     StatusCode::PARTIAL_CONTENT
@@ -241,51 +208,3 @@ pub(super) fn assert_ranges(requests: &[Captured], expected: &[&str]) {
     expected.sort_unstable();
     assert_eq!(actual, expected);
 }
-
-pub(super) fn assert_upstream_error(
-    error: &Error,
-    expected: ErrorKind,
-    upstream: Upstream,
-    operation: &str,
-) {
-    assert_eq!(error.kind(), expected);
-    assert_eq!(error.operation(), operation);
-    assert_eq!(
-        error
-            .source()
-            .unwrap()
-            .downcast_ref::<opendal::Error>()
-            .unwrap()
-            .kind(),
-        upstream,
-    );
-    assert!(!format!("{error:?}").contains(TOKEN));
-}
-
-pub(super) const HTTP_ERRORS: [(StatusCode, ErrorKind, Upstream); 5] = [
-    (
-        StatusCode::NOT_FOUND,
-        ErrorKind::NotFound,
-        Upstream::NotFound,
-    ),
-    (
-        StatusCode::UNAUTHORIZED,
-        ErrorKind::PermissionDenied,
-        Upstream::PermissionDenied,
-    ),
-    (
-        StatusCode::FORBIDDEN,
-        ErrorKind::PermissionDenied,
-        Upstream::PermissionDenied,
-    ),
-    (
-        StatusCode::TOO_MANY_REQUESTS,
-        ErrorKind::Io,
-        Upstream::RateLimited,
-    ),
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        ErrorKind::Io,
-        Upstream::Unexpected,
-    ),
-];
