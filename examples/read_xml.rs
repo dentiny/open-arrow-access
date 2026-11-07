@@ -1,16 +1,8 @@
-use open_arrow_access::{
-    Accessor,
-    file_format::XmlAccessor,
-    storage::{OpenDalAccessor, opendal},
-};
+use open_arrow_access::{Accessor, file_format::XmlAccessor, storage::FsAccessor};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let root = std::env::current_dir()?;
-    let operator = opendal::Operator::new(
-        opendal::services::Fs::default().root(root.to_str().ok_or("root must be valid UTF-8")?),
-    )?;
-    let bytes = OpenDalAccessor::new(operator);
+    let bytes = FsAccessor::new(std::env::current_dir()?).await?;
     let accessor = XmlAccessor::new(bytes, "/inventory/warehouse");
     let path = std::env::args()
         .nth(1)

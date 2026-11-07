@@ -54,14 +54,13 @@ impl Accessor for OpenDalAccessor {
             read_with_range: read,
             read_parallel: false,
             // OpenDAL can walk nonrecursive backend listings.
-            list: upstream.list,
+            list: upstream.stat && upstream.list,
         }
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let ByteReadRequest { object, options } = request;
         let path = object.locator();
-        validate_locator(path, false, "open")?;
         let metadata = self
             .operator
             .stat(path)
@@ -115,15 +114,19 @@ impl Accessor for OpenDalAccessor {
 #[async_trait]
 impl ByteAccessor for OpenDalAccessor {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        if !self.capability().list {
+        let path = request.prefix.locator();
+        let metadata = self
+            .operator
+            .stat(path)
+            .await
+            .map_err(|e| map_error("list", path, e))?;
+        if !metadata.is_dir() {
             return Err(Error::new(
-                ErrorKind::Unsupported,
+                ErrorKind::InvalidInput,
                 "list",
-                "operator does not support listing",
+                "prefix is not a directory",
             ));
         }
-        let path = request.prefix.locator();
-        validate_locator(path, true, "list")?;
         let path = if path.is_empty() {
             String::new()
         } else {
@@ -404,27 +407,4 @@ pub(crate) fn map_error(operation: &'static str, path: &str, error: opendal::Err
         _ => ErrorKind::Io,
     };
     Error::new(kind, operation, format!("object {path:?}")).with_source(error)
-}
-
-fn validate_locator(path: &str, prefix: bool, operation: &'static str) -> Result<()> {
-    let base = if prefix {
-        path.strip_suffix('/').unwrap_or(path)
-    } else {
-        path
-    };
-    if path.trim() != path
-        || path.starts_with('/')
-        || (!prefix && path.is_empty())
-        || (!base.is_empty()
-            && base
-                .split('/')
-                .any(|part| part.is_empty() || matches!(part, "." | "..")))
-    {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            operation,
-            "expected a canonical root-relative locator",
-        ));
-    }
-    Ok(())
 }

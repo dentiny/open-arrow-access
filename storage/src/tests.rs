@@ -11,7 +11,7 @@ use opendal::{
     services::Fs,
 };
 
-use crate::OpenDalAccessor;
+use crate::{FsAccessor, backend::OpenDalAccessor};
 
 #[test]
 fn backend_error_categories_keep_the_upstream_cause() {
@@ -73,7 +73,7 @@ async fn filesystem_rejects_surrounding_whitespace_without_aliasing_files() {
     tokio::fs::write(dir.path().join("data file.bin"), b"internal space")
         .await
         .unwrap();
-    let accessor = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
+    let accessor = FsAccessor::new(dir.path()).await.unwrap();
 
     for locator in locators {
         let error = accessor.open(locator.into()).await.err().unwrap();
@@ -97,7 +97,7 @@ async fn sequential_reads_report_short_input_and_terminate() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("short.bin");
     tokio::fs::write(&path, b"abcdefgh").await.unwrap();
-    let accessor = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
+    let accessor = FsAccessor::new(dir.path()).await.unwrap();
     let mut reader = accessor.open("short.bin".into()).await.unwrap();
     tokio::fs::write(&path, b"abcd").await.unwrap();
     let error = loop {
@@ -164,7 +164,7 @@ async fn large_single_and_bulk_ranges_preserve_values_and_cursor() {
     tokio::fs::write(dir.path().join("large.bin"), &contents)
         .await
         .unwrap();
-    let accessor = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
+    let accessor = FsAccessor::new(dir.path()).await.unwrap();
     for (concurrency, chunk_size) in [
         (1, None),
         (4, None),
@@ -215,7 +215,7 @@ async fn large_range_reports_short_reads() {
     let path = dir.path().join("large.bin");
     let file = tokio::fs::File::create(&path).await.unwrap();
     file.set_len(3 * 1024 * 1024).await.unwrap();
-    let accessor = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
+    let accessor = FsAccessor::new(dir.path()).await.unwrap();
     let mut reader = accessor.open("large.bin".into()).await.unwrap();
     file.set_len(1024 * 1024).await.unwrap();
     let error = reader.read_range(0..3 * 1024 * 1024).await.err().unwrap();

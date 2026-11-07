@@ -3,13 +3,13 @@ use open_arrow_access::{
     Accessor, ReadOptions, ReadRequest,
     dataset::{FileSetAccessor, FileSetRequest},
     file_format::{AtifAccessor, AtifFormat},
-    storage::OpenDalAccessor,
+    storage::FsAccessor,
 };
 
 #[tokio::test]
 async fn facade_reads_atif_jsonl_and_ordered_file_sets() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/atif");
-    let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(&root));
+    let bytes = FsAccessor::new(&root).await.unwrap();
     let mut reader = AtifAccessor::new(bytes, AtifFormat::JsonLines)
         .open(ReadRequest::new("trajectories.jsonl"))
         .await
@@ -23,7 +23,7 @@ async fn facade_reads_atif_jsonl_and_ordered_file_sets() {
     );
     assert!(reader.next().await.unwrap().is_none());
 
-    let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(root));
+    let bytes = FsAccessor::new(root).await.unwrap();
     let files = FileSetAccessor::new(AtifAccessor::new(bytes, AtifFormat::Json));
     let mut reader = files
         .open(

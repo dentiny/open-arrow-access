@@ -6,7 +6,6 @@ license.workspace = true
 publish = false
 
 [dependencies]
-opendal = { workspace = true, features = ["services-fs"] }
 open-arrow-access-core.workspace = true
 futures.workspace = true
 more-asserts.workspace = true

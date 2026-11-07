@@ -35,5 +35,5 @@ including invalid UTF-8, line endings, and missing final newlines. The local
 
 ```sh
 cargo test --locked --features format-json --test json
-cargo test -p open-arrow-access-file-format --locked --features json --test json
+cargo test --locked --features format-json,storage-fs --test json
 ```

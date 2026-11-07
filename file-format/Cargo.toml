@@ -29,7 +29,7 @@ arrow-array.workspace = true
 arrow-schema.workspace = true
 more-asserts.workspace = true
 open-arrow-access-test-support.workspace = true
-open-arrow-access-storage.workspace = true
+open-arrow-access-storage = { workspace = true, features = ["fs"] }
 tokio = { workspace = true, features = ["fs"] }
 
 [[test]]

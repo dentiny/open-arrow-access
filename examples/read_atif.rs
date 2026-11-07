@@ -1,16 +1,12 @@
 use open_arrow_access::{
     Accessor, ReadRequest,
     file_format::{AtifAccessor, AtifFormat},
-    storage::{OpenDalAccessor, opendal},
+    storage::FsAccessor,
 };
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let root = std::env::current_dir()?;
-    let operator = opendal::Operator::new(
-        opendal::services::Fs::default().root(root.to_str().ok_or("root must be valid UTF-8")?),
-    )?;
-    let bytes = OpenDalAccessor::new(operator);
+    let bytes = FsAccessor::new(std::env::current_dir()?).await?;
     let mut args = std::env::args().skip(1);
     let path = args
         .next()

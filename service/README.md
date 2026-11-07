@@ -6,9 +6,8 @@ provider adds its own default-off feature and facade exports.
 
 Providers use the shared object/reader contracts and existing byte, format,
 and decompression accessors. Backend configuration stays caller-controlled.
-The facade always exposes `storage::{OpenDalAccessor, opendal}`, so callers can
-wrap an SDK operator without enabling a provider or a storage feature.
-Generic object-store prefix listing lives in `storage`, not in a provider.
+Generic storage access and object-store prefix listing belong in `storage`,
+not in a provider.
 
 The [source-attribute proposal](../docs/source-attributes.md) defines provider
 constraints and conditional planning. Sequential cursor-based file discovery
