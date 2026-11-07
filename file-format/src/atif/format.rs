@@ -1,8 +1,7 @@
 use super::reader::create_reader;
-use crate::FileFormat;
 use atif_arrow::trajectory_schema;
 use open_arrow_access_core::{
-    ByteReader, ReadOptions, ReadRequest, RecordMetadata, RecordReader, Result, SchemaRef,
+    ByteReader, ReadRequest, ReaderFactory, RecordMetadata, RecordReader, Result, SchemaRef,
     async_trait,
 };
 
@@ -16,14 +15,17 @@ pub enum AtifFormat {
 }
 
 #[async_trait]
-impl FileFormat for AtifFormat {
+impl ReaderFactory for AtifFormat {
+    type Request = ReadRequest;
+    type Reader = dyn RecordReader;
     type Prepared = (SchemaRef, Option<Vec<usize>>);
 
-    fn prepare(&self, options: &ReadOptions) -> Result<Self::Prepared> {
+    fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
+        let options = &request.options;
         options.resolve_projection(&trajectory_schema())
     }
 
-    async fn open(
+    async fn create_reader(
         &self,
         input: Box<dyn ByteReader>,
         request: ReadRequest,

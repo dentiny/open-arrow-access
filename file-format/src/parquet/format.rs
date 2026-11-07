@@ -1,7 +1,6 @@
 use super::{decode_error, input::ParquetInput, reader::parquet_reader};
-use crate::FileFormat;
 use open_arrow_access_core::{
-    ByteReader, Capability, Error, ErrorKind, ReadOptions, ReadRequest, RecordMetadata,
+    ByteReader, Capability, Error, ErrorKind, ReadRequest, ReaderFactory, RecordMetadata,
     RecordReader, Result, async_trait,
 };
 use parquet::arrow::{ProjectionMask, async_reader::ParquetRecordBatchStreamBuilder};
@@ -11,7 +10,9 @@ use parquet::arrow::{ProjectionMask, async_reader::ParquetRecordBatchStreamBuild
 pub struct ParquetFormat;
 
 #[async_trait]
-impl FileFormat for ParquetFormat {
+impl ReaderFactory for ParquetFormat {
+    type Request = ReadRequest;
+    type Reader = dyn RecordReader;
     type Prepared = ();
 
     fn capability(&self, input: Capability) -> Capability {
@@ -23,11 +24,11 @@ impl FileFormat for ParquetFormat {
         }
     }
 
-    fn prepare(&self, _options: &ReadOptions) -> Result<()> {
+    fn prepare(&self, _request: &ReadRequest) -> Result<()> {
         Ok(())
     }
 
-    async fn open(
+    async fn create_reader(
         &self,
         input: Box<dyn ByteReader>,
         request: ReadRequest,

@@ -1,9 +1,8 @@
 use super::{CsvFormat, reader::csv_reader};
-use crate::FileFormat;
 use arrow_csv::{ReaderBuilder, reader::Decoder};
 use arrow_schema::{DataType, TimeUnit};
 use open_arrow_access_core::{
-    ByteReader, Error, ErrorKind, ReadOptions, ReadRequest, RecordMetadata, RecordReader, Result,
+    ByteReader, Error, ErrorKind, ReadRequest, ReaderFactory, RecordMetadata, RecordReader, Result,
     SchemaRef, async_trait,
 };
 
@@ -31,10 +30,13 @@ impl CsvFileFormat {
 }
 
 #[async_trait]
-impl FileFormat for CsvFileFormat {
+impl ReaderFactory for CsvFileFormat {
+    type Request = ReadRequest;
+    type Reader = dyn RecordReader;
     type Prepared = (SchemaRef, Decoder);
 
-    fn prepare(&self, options: &ReadOptions) -> Result<Self::Prepared> {
+    fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
+        let options = &request.options;
         if self.schema.fields().is_empty() {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -67,7 +69,7 @@ impl FileFormat for CsvFileFormat {
         Ok((schema, builder.build_decoder()))
     }
 
-    async fn open(
+    async fn create_reader(
         &self,
         input: Box<dyn ByteReader>,
         request: ReadRequest,

@@ -20,9 +20,12 @@ struct ProbeFormat {
 
 #[async_trait]
 impl FileFormat for ProbeFormat {
+    type Request = ReadRequest;
+    type Reader = dyn RecordReader;
     type Prepared = usize;
 
-    fn prepare(&self, options: &ReadOptions) -> Result<usize> {
+    fn prepare(&self, request: &ReadRequest) -> Result<usize> {
+        let options = &request.options;
         self.events.lock().unwrap().push("prepare");
         if self.fail_prepare {
             return Err(Error::new(
@@ -34,7 +37,7 @@ impl FileFormat for ProbeFormat {
         Ok(options.batch_size.get())
     }
 
-    async fn open(
+    async fn create_reader(
         &self,
         _input: Box<dyn ByteReader>,
         request: ReadRequest,

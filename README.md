@@ -419,7 +419,7 @@ see [dependency alignment](docs/dependencies.md#atif-parser).
 
 ## Adding a file format
 
-`FileAccessor<B, F>` binds any byte accessor to a `FileFormat`. Built-in
+`FileAccessor<B, F>` binds a byte accessor to a core `ReaderFactory`. Built-in
 configuration types are `JsonFormat`, `CsvFileFormat`, `ParquetFormat`,
 `XmlFormat` and the existing `AtifFormat` enum. For example,
 `FileAccessor::from_format(bytes, JsonFormat::new(schema))` is equivalent to
@@ -427,27 +427,37 @@ configuration types are `JsonFormat`, `CsvFileFormat`, `ParquetFormat`,
 remain available as type aliases over the shared accessor. `CsvFormat` continues
 to configure Arrow CSV delimiter/header options.
 
-Implement `FileFormat` for a new Arrow format:
+Implement `ReaderFactory` for a new single-input format:
 
-1. Define `Prepared` and implement `prepare(&ReadOptions)` to validate fixed
-   schemas/projections and construct per-open decoder state before storage I/O.
-   Formats that inspect their input can use `()` as their prepared state.
-2. Implement async `open(input, request, prepared)` to inspect the owned byte
-   reader and return a reader with its fixed output schema and source identity.
-   Keep format-specific batching, projection pushdown and errors in the format.
-3. Override `capability(input)` to derive record capabilities when the default
-   sequential behavior needs additional input operations, such as exact byte
-   ranges. Check the actual opened reader and metadata during `open`.
+1. Set `Request = ReadRequest`, `Reader = dyn RecordReader`, and a typed
+   `Prepared` state for an Arrow format. Other output types can use their own
+   request and reader interfaces.
+2. Implement `prepare(&ReadRequest)` to validate fixed schemas/projections and
+   construct per-open decoder state before storage I/O. Formats that inspect
+   their input can use `()` as their prepared state.
+3. Implement async `create_reader(input, request, prepared)` to inspect owned
+   input and return a reader with metadata available. Keep format-specific
+   batching, projection pushdown and errors in the format.
+4. Override `capability(input)` when the default sequential behavior needs more
+   input operations, such as exact ranges. Validate actual input capabilities
+   and metadata during `create_reader`.
 
-The shared accessor forwards the object and byte options and implements the
-record-accessor capability contract. Each open gets independent prepared state.
-Use `StreamReader` for existing batch streams, `into_async_read` for futures I/O
+Core `open_reader` runs preparation, opens storage, and invokes the factory.
+Both `FileAccessor` and decompression use this flow. Conversion from `&Request`
+to `ByteReadRequest` forwards the exact object and byte options; the built-in
+record and byte requests already support it. A custom single-input request can
+implement `From<&CustomRequest> for ByteReadRequest`.
+
+The protocol lives in `open-arrow-access-core` and is re-exported by the facade.
+`file_format::FileFormat` remains another name for `ReaderFactory`. Existing
+implementations must add the request/reader associated types, change `prepare`
+to accept the full request, and rename factory `open` to `create_reader`.
+Accessor constructors and builders keep their existing API.
+
+Use `StreamReader` for existing streams, `into_async_read` for futures I/O
 parsers, and the [shared format assertions](test-support/README.md#format-contracts)
-to test the new format.
-
-The protocol is available directly from `open-arrow-access-file-format` with
-no built-in features enabled. The facade re-exports it under `file_format`
-alongside enabled built-ins.
+to test a new Arrow format. Decompression implements the same protocol through
+`DecompressionFactory<C>`, while `Codec` supplies the native decoder.
 
 ## Caller-configured storage
 
