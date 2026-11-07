@@ -24,14 +24,15 @@ use crate::{ByteMetadata, ByteReader, Bytes, Capability, Reader, Result, async_t
 /// use futures::stream;
 /// use open_arrow_access_core::{Reader, StreamReader};
 ///
-/// # futures::executor::block_on(async {
+/// # #[tokio::main(flavor = "current_thread")]
+/// # async fn main() {
 /// let stream = stream::iter([Ok(1_u64), Ok(2)]);
 /// let mut reader = StreamReader::new(stream, "example");
 /// assert_eq!(reader.metadata(), &"example");
 /// assert_eq!(reader.next().await.unwrap(), Some(1));
 /// assert_eq!(reader.next().await.unwrap(), Some(2));
 /// assert_eq!(reader.next().await.unwrap(), None);
-/// # });
+/// # }
 /// ```
 pub struct StreamReader<S, M> {
     stream: Option<Pin<Box<S>>>,

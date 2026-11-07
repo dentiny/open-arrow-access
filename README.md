@@ -200,8 +200,7 @@ apply the re-exported `#[async_trait]` attribute to preserve `dyn` compatibility
 and Send futures. Capability, metadata and configuration-only methods remain
 synchronous. Construct the OpenDAL operator before wrapping it with
 `OpenDalAccessor::new(operator)`. Backend initialization and configuration belong
-to the caller; a synchronous backend builder can run on a blocking pool when
-configuration happens inside an async task.
+to the caller; complete synchronous backend setup before entering an async task.
 
 `capability()` follows OpenDAL's reporting pattern, with `read`,
 `read_with_range`, `read_parallel`, and accessor-only `list` flags. Layers forward or update
@@ -384,7 +383,7 @@ Whole-document JSON requires one valid document; arrays and concatenated documen
 are rejected. Extensions do not select a format or compression.
 
 The converter validates ATIF v1.0–v1.8 and uses the fixed
-[`atif-arrow` schema](https://github.com/dentiny/atif-arrow/blob/v0.3.0/docs/schema.md).
+[`atif-arrow` schema](https://github.com/dentiny/atif-arrow/blob/v0.4.0/docs/schema.md).
 The schema is available at `open`, before input bytes are read. Each trajectory
 is one row with ordered nested steps, calls, observations and supplied metrics.
 `raw_json` retains the verbatim document (including its JSONL line ending and
@@ -395,9 +394,10 @@ Content text uses UTF-8 bytes in `LargeBinary`; media paths remain strings.
 Embedded subagents remain JSON, and external references are not fetched.
 
 `ReadOptions` controls rows per batch and top-level projection in caller order,
-including zero-column rows. Projection happens after full ATIF validation and
-conversion; invalid unselected data still fails. Documents are buffered in full,
-and each output row retains raw JSON. The row target does not bound document
+including zero-column rows. All ATIF fields are validated, including unselected
+fields, but only projected columns are built into Arrow arrays. Omitting `steps`
+or `raw_json` avoids accumulating their payloads across the batch. Documents are
+buffered in full, and full-schema output retains raw JSON. The row target does not bound document
 bytes or total memory. A JSONL read buffers the current document, batch and
 one upstream chunk; it does not collect the whole input.
 
@@ -419,8 +419,8 @@ cargo run --example read_atif --features format-atif
 cargo run --example read_atif --features format-atif -- testdata/atif/trajectories.jsonl jsonl
 ```
 
-The adapter uses the published `atif-arrow 0.3.0` crate with Arrow 59;
-see [dependency alignment](docs/dependencies.md#atif-parser).
+The adapter uses published `atif-arrow 0.4.0` with Arrow 59; see
+[dependency alignment](docs/dependencies.md#atif-parser).
 
 ## Adding a file format
 
