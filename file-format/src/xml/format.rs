@@ -1,8 +1,7 @@
 use super::{reader::xml_reader, xml_error};
-use crate::FileFormat;
 use open_arrow_access_core::{
-    ByteReader, Error, ErrorKind, ReadOptions, ReadRequest, RecordMetadata, RecordReader, Result,
-    SchemaRef, async_trait, into_async_read,
+    ByteReader, Error, ErrorKind, FactoryToken, ReadRequest, ReaderFactory, RecordMetadata,
+    RecordReader, Result, SchemaRef, async_trait, into_async_read,
 };
 use xml_arrow::{InferenceOptions, NamespaceBinding, ReaderOptions, XmlReader, XmlSchema};
 
@@ -95,10 +94,13 @@ impl XmlFormat {
 }
 
 #[async_trait]
-impl FileFormat for XmlFormat {
+impl ReaderFactory for XmlFormat {
+    type Request = ReadRequest;
+    type Reader = dyn RecordReader;
     type Prepared = (XmlSchema, ReaderOptions, Option<SchemaRef>);
 
-    fn prepare(&self, options: &ReadOptions) -> Result<Self::Prepared> {
+    fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
+        let options = &request.options;
         let bindings: Vec<_> = self
             .namespaces
             .iter()
@@ -144,8 +146,9 @@ impl FileFormat for XmlFormat {
         ))
     }
 
-    async fn open(
+    async fn create_reader(
         &self,
+        _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
         (validation_schema, options, explicit_schema): Self::Prepared,
