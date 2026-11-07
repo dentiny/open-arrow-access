@@ -12,7 +12,7 @@ huggingface = [
     "dep:open-arrow-access-storage",
     "dep:open-arrow-access-dataset", "dep:open-arrow-access-file-format", "dep:futures",
     "dep:opendal", "opendal/services-hf", "opendal/http-transport-reqwest",
-    "dep:tokio", "dep:http", "dep:serde_json", "dep:url",
+    "dep:tokio", "tokio/fs", "dep:http", "dep:serde_json", "dep:url",
 ]
 
 [dependencies]
