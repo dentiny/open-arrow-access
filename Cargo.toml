@@ -28,6 +28,8 @@ datafusion = "55.2.0"
 opendal = "0.59.2"
 
 [workspace.dependencies]
+http = "1"
+url = "2"
 async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
 # Match the resolved Cargo.lock versions at the Lance revision above.
 # See docs/dependencies.md when updating this baseline.
