@@ -1,7 +1,7 @@
 use arrow_json::reader::Decoder;
 use open_arrow_access_core::{
-    ByteReader, Bytes, Capability, Error, ErrorKind, Reader, RecordBatch, RecordMetadata, Result,
-    async_trait,
+    ByteReader, Bytes, Capability, Error, ErrorKind, ReadState, Reader, RecordBatch,
+    RecordMetadata, Result, async_trait,
 };
 
 use super::decode_error;
@@ -14,7 +14,7 @@ pub(super) struct JsonReader {
     pending: Bytes,
     metadata: RecordMetadata,
     batch_size: usize,
-    finished: bool,
+    state: ReadState,
 }
 
 impl JsonReader {
@@ -30,7 +30,7 @@ impl JsonReader {
             pending: Bytes::new(),
             metadata,
             batch_size,
-            finished: false,
+            state: ReadState::default(),
         }
     }
 
@@ -50,7 +50,8 @@ impl JsonReader {
                     }
                     Some(bytes) => self.pending = bytes,
                     None => {
-                        self.finished = true;
+                        self.state.mark_input_eof();
+                        self.state.finish();
                         return self.decoder.flush().map_err(decode_error);
                     }
                 }
@@ -80,13 +81,11 @@ impl Reader for JsonReader {
     }
 
     async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.finished {
+        if self.state.is_finished() {
             return Ok(None);
         }
         let result = self.read_batch().await;
-        if !matches!(result, Ok(Some(_))) {
-            self.finished = true;
-        }
+        self.state.observe(&result);
         result
     }
 }

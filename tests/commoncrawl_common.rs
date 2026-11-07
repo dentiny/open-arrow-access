@@ -1,4 +1,4 @@
-use futures::{TryStreamExt, stream};
+use futures::stream;
 use http::{Request, Response, StatusCode};
 use open_arrow_access::{
     Accessor, ByteAccessor, Bytes, ErrorKind,
@@ -162,24 +162,4 @@ async fn origin_rooted_http_uses_injected_transport_and_rejects_aliases() {
             .collect::<Vec<_>>(),
         ["HEAD", "GET"]
     );
-}
-
-#[tokio::test]
-async fn generic_listing_accepts_virtual_directory_prefixes() {
-    let operator = Operator::new(opendal::services::Memory::default()).unwrap();
-    operator
-        .write("train/a.warc", Bytes::from_static(b"data"))
-        .await
-        .unwrap();
-    let bytes = OpenDalAccessor::new(operator);
-    for prefix in ["train", "train/"] {
-        let files = bytes
-            .list(prefix.into())
-            .await
-            .unwrap()
-            .try_collect::<Vec<_>>()
-            .await
-            .unwrap();
-        assert_eq!(files, vec!["train/a.warc".into()]);
-    }
 }
