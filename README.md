@@ -102,8 +102,7 @@ names its S3 feature `services-s3`.
 
 Enable `service-huggingface` for `HuggingFaceService::repository`. Repository ID,
 revision, root, endpoint and authentication are provider-owned. The returned byte
-accessor composes with existing format readers. Floating revisions are not snapshots;
-commit-pinned access enables OpenDAL resolve caching.
+accessor composes with existing format readers. Floating revisions are not snapshots.
 
 Use the same service for a complete Parquet dataset:
 

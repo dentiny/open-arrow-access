@@ -17,8 +17,7 @@ The default-off `huggingface` feature (`service-huggingface` on the facade)
 provides `HuggingFaceService::repository` for dataset repository files.
 The service owns repository ID, revision, root, endpoint and authentication.
 Its byte accessor reuses `storage::OpenDalAccessor`; format accessors decode records.
-Floating revisions are not snapshots. Commit-pinned operators cache resolved
-download destinations through OpenDAL; floating revisions resolve every read.
+Floating revisions are not snapshots.
 The same service exposes `dataset(HuggingFaceDatasetRequest)` and implements
 `Accessor` for that request. This opens one config/split as ordered Arrow batches
 from the HF Parquet export. A floating export revision is first pinned with a
