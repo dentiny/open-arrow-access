@@ -118,6 +118,18 @@ impl From<ObjectRef> for ByteReadRequest {
     }
 }
 
+impl From<&ByteReadRequest> for ByteReadRequest {
+    fn from(request: &ByteReadRequest) -> Self {
+        request.clone()
+    }
+}
+
+impl From<&ReadRequest> for ByteReadRequest {
+    fn from(request: &ReadRequest) -> Self {
+        Self::new(request.object.clone()).with_options(request.byte_options)
+    }
+}
+
 impl From<&str> for ByteReadRequest {
     fn from(object: &str) -> Self {
         Self::new(object)

@@ -1,15 +1,13 @@
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Capability, ReadRequest, RecordReader, Result,
+    Accessor, ByteReadRequest, ByteReader, Capability, ReaderFactory, ReaderFactoryExt, Result,
     async_trait,
 };
 
-use crate::FileFormat;
-
-/// Compose byte storage with a [`FileFormat`] using the common read protocol.
+/// Compose byte storage with a [`ReaderFactory`] using the common read protocol.
 ///
 /// Owns storage and format configuration. Each open prepares independent format
 /// state, forwards the object and byte options unchanged, and transfers ownership
-/// of the byte reader to the format. Output exposes record reading only.
+/// of the byte reader to the factory. Request and output types come from the factory.
 /// Built-in accessor names are aliases with their existing constructors;
 /// [`Self::from_format`] also accepts application-defined formats.
 ///
@@ -46,21 +44,17 @@ impl<B, F> FileAccessor<B, F> {
 impl<B, F> Accessor for FileAccessor<B, F>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
-    F: FileFormat,
+    F: ReaderFactory,
+    for<'a> ByteReadRequest: From<&'a F::Request>,
 {
-    type Request = ReadRequest;
-    type Reader = dyn RecordReader;
+    type Request = F::Request;
+    type Reader = F::Reader;
 
     fn capability(&self) -> Capability {
         self.format.capability(self.inner.capability())
     }
 
-    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        let prepared = self.format.prepare(&request.options)?;
-        let input = self
-            .inner
-            .open(ByteReadRequest::new(request.object.clone()).with_options(request.byte_options))
-            .await?;
-        self.format.open(input, request, prepared).await
+    async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
+        ReaderFactoryExt::open_reader(&self.format, &self.inner, request).await
     }
 }
