@@ -36,6 +36,7 @@ pub mod storage {
     feature = "format-parquet",
     feature = "format-json",
     feature = "format-csv",
+    feature = "format-warc",
     feature = "format-xml",
     feature = "format-atif"
 ))]
@@ -53,6 +54,8 @@ pub mod file_format {
     };
     #[cfg(feature = "format-parquet")]
     pub use open_arrow_access_file_format::{ParquetAccessor, ParquetFormat};
+    #[cfg(feature = "format-warc")]
+    pub use open_arrow_access_file_format::{WarcAccessor, WarcFormat, WarcHeader, WarcRecord};
 }
 
 #[cfg(feature = "dataset-directory")]
