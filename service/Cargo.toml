@@ -22,14 +22,5 @@ tokio = { workspace = true, optional = true }
 http = { version = "1", optional = true }
 url = { version = "2", optional = true }
 
-[dev-dependencies]
-serde_json = "1"
-tokio = { workspace = true, features = ["fs", "sync", "time"] }
-futures.workspace = true
-
 [lints]
 workspace = true
-
-[[test]]
-name = "huggingface"
-required-features = ["huggingface"]
