@@ -48,6 +48,11 @@ For small metadata objects, `read_limited(reader, limit, operation).await`
 collects an owned `ByteReader` into a `Vec<u8>`, rejecting advertised or actual
 lengths above the byte limit before copying. Parsing remains with the caller.
 
+`read_lines(reader, max_line_bytes, operation)` streams raw byte lines, retaining
+LF/CRLF endings and a final unterminated line. The optional per-line byte limit
+includes line endings and is checked before copying. UTF-8 decoding and blank-line
+handling remain with the caller.
+
 Storage I/O settings are per open operation:
 
 ```rust

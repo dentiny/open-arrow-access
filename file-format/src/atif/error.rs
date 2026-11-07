@@ -13,11 +13,3 @@ pub(super) fn decode_error(
     )
     .with_source(source)
 }
-
-pub(super) fn empty_chunk_error() -> Error {
-    Error::new(
-        ErrorKind::Io,
-        "read_atif",
-        "byte reader returned an empty chunk",
-    )
-}

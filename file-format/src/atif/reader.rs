@@ -1,59 +1,32 @@
 use atif_arrow::TrajectoryBatchBuilder;
-use futures::stream;
+use futures::{StreamExt, TryStreamExt, stream, stream::BoxStream};
 use open_arrow_access_core::{
     ByteReader, Bytes, ObjectRef, RecordBatch, RecordMetadata, RecordReader, Result, StreamReader,
+    read_limited, read_lines,
 };
 
-use super::{
-    AtifFormat,
-    error::{decode_error, empty_chunk_error},
-};
+use super::{AtifFormat, error::decode_error};
 
 struct AtifDecoder {
-    input: Box<dyn ByteReader>,
+    documents: BoxStream<'static, Result<Bytes>>,
     format: AtifFormat,
     batch_size: usize,
     projection: Option<Vec<usize>>,
     source: Option<ObjectRef>,
-    pending: Bytes,
-    document: Vec<u8>,
     record_index: u64,
-    input_eof: bool,
 }
 
 impl AtifDecoder {
     async fn read_document(&mut self) -> Result<Option<String>> {
-        loop {
-            if self.input_eof && self.document.is_empty() {
-                return Ok(None);
+        while let Some(bytes) = self.documents.try_next().await? {
+            let document = String::from_utf8(bytes.into())
+                .map_err(|error| decode_error(self.source.as_ref(), self.record_index, error))?;
+            if self.format == AtifFormat::JsonLines && document.trim().is_empty() {
+                continue;
             }
-            if self.pending.is_empty() && !self.input_eof {
-                match self.input.next().await? {
-                    Some(bytes) if bytes.is_empty() => {
-                        return Err(empty_chunk_error());
-                    }
-                    Some(bytes) => self.pending = bytes,
-                    None => self.input_eof = true,
-                }
-            }
-            let newline = match self.format {
-                AtifFormat::Json => None,
-                AtifFormat::JsonLines => self.pending.iter().position(|byte| *byte == b'\n'),
-            };
-            let consumed = newline.map_or(self.pending.len(), |index| index + 1);
-            self.document.extend_from_slice(&self.pending[..consumed]);
-            self.pending = self.pending.slice(consumed..);
-            if newline.is_some() || self.input_eof {
-                let document =
-                    String::from_utf8(std::mem::take(&mut self.document)).map_err(|error| {
-                        decode_error(self.source.as_ref(), self.record_index, error)
-                    })?;
-                if self.format == AtifFormat::JsonLines && document.trim().is_empty() {
-                    continue;
-                }
-                return Ok(Some(document));
-            }
+            return Ok(Some(document));
         }
+        Ok(None)
     }
 
     async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
@@ -93,16 +66,22 @@ pub(super) fn create_reader(
     projection: Option<Vec<usize>>,
     metadata: RecordMetadata,
 ) -> impl RecordReader {
+    let documents = match format {
+        AtifFormat::Json => stream::once(async move {
+            read_limited(input, usize::MAX, "read_atif")
+                .await
+                .map(Bytes::from)
+        })
+        .boxed(),
+        AtifFormat::JsonLines => read_lines(input, None, "read_atif").boxed(),
+    };
     let decoder = AtifDecoder {
-        input,
+        documents,
         format,
         batch_size,
         projection,
         source: metadata.source.clone(),
-        pending: Bytes::new(),
-        document: Vec::new(),
         record_index: 1,
-        input_eof: false,
     };
     let stream = stream::try_unfold(decoder, |mut decoder| async move {
         Ok(decoder.read_batch().await?.map(|batch| (batch, decoder)))

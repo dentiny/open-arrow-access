@@ -86,6 +86,16 @@ empty chunks are I/O errors. Both use the supplied operation, while upstream
 errors pass through unchanged. The limit bounds collected bytes, not allocation
 capacity or upstream buffers. Parsing and provider validation stay with callers.
 
+`read_lines(reader, max_line_bytes, operation)` streams byte lines across chunk
+boundaries, retaining LF/CRLF endings and a final nonempty unterminated line.
+An optional byte limit includes line endings and is checked before copying;
+it does not bound allocation capacity or upstream buffers. EOF and errors drop
+the input, and errors terminate the stream. Empty chunks are I/O errors and
+oversized lines are decode errors using the supplied operation; upstream errors
+pass through unchanged. ATIF JSONL uses this utility without a line limit, keeping
+UTF-8 decoding, blank-line filtering and record context in the format. ATIF JSON
+uses `read_limited` with `usize::MAX` to collect its single document.
+
 ### Reader lifecycle
 
 `ReadState` in core tracks input EOF separately from output completion. Marking
