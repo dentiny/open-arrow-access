@@ -1,6 +1,6 @@
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectStream,
-    ReaderFactory, Result, async_trait, open_reader,
+    ReaderFactory, Result, async_trait,
 };
 
 use crate::{Codec, DecompressionFactory};
@@ -31,7 +31,7 @@ impl<A: ByteAccessor, C: Codec> Accessor for DecompressionAccessor<A, C> {
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        open_reader(&self.inner, &self.factory, request).await
+        self.factory.open_reader(&self.inner, request).await
     }
 }
 

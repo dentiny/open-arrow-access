@@ -442,8 +442,8 @@ Implement `ReaderFactory` for a new single-input format:
    input operations, such as exact ranges. Validate actual input capabilities
    and metadata during `create_reader`.
 
-Core `open_reader` runs preparation, opens storage, and invokes the factory.
-Both `FileAccessor` and decompression use this flow. Conversion from `&Request`
+`ReaderFactory::open_reader` runs preparation, opens storage, and invokes
+`create_reader`. Both `FileAccessor` and decompression use this default method. Conversion from `&Request`
 to `ByteReadRequest` forwards the exact object and byte options; the built-in
 record and byte requests already support it. A custom single-input request can
 implement `From<&CustomRequest> for ByteReadRequest`.

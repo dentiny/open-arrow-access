@@ -1,7 +1,7 @@
 use crate::{Accessor, ByteReadRequest, ByteReader, Capability, Reader, Result, async_trait};
 
 /// Create an independently owned reader from one opened byte input.
-/// Storage opening belongs to [`open_reader`]; decoding and inspection belong here.
+/// [`Self::open_reader`] prepares configuration before opening storage.
 #[async_trait]
 pub trait ReaderFactory: Send + Sync {
     /// Typed selection and configuration for one open operation.
@@ -33,23 +33,19 @@ pub trait ReaderFactory: Send + Sync {
         request: Self::Request,
         prepared: Self::Prepared,
     ) -> Result<Box<Self::Reader>>;
-}
 
-/// Prepare, open storage, and create a reader, forwarding errors unchanged.
-/// Request conversion preserves the selected object and per-open byte options.
-/// Dropping this future releases owned preparation/input state without background work.
-pub async fn open_reader<B, F>(
-    storage: &B,
-    factory: &F,
-    request: F::Request,
-) -> Result<Box<F::Reader>>
-where
-    B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + ?Sized,
-    F: ReaderFactory + ?Sized,
-    for<'a> ByteReadRequest: From<&'a F::Request>,
-{
-    let prepared = factory.prepare(&request)?;
-    let byte_request = ByteReadRequest::from(&request);
-    let input = storage.open(byte_request).await?;
-    factory.create_reader(input, request, prepared).await
+    /// Prepare, open storage, and create a reader, forwarding errors unchanged.
+    async fn open_reader(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<Box<Self::Reader>>
+    where
+        for<'a> ByteReadRequest: From<&'a Self::Request>,
+    {
+        let prepared = self.prepare(&request)?;
+        let byte_request = ByteReadRequest::from(&request);
+        let input = storage.open(byte_request).await?;
+        self.create_reader(input, request, prepared).await
+    }
 }

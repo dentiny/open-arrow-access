@@ -180,8 +180,9 @@ Core `ReaderFactory` transforms one opened `ByteReader` into its associated
 reader interface. Associated `Request` and `Reader` types keep Arrow batches,
 bytes and other parsed items distinct. `Prepared: Send` retains per-open decoders
 and resolved schemas without repeating validation or constructing a decoder twice.
-Core `open_reader` first runs synchronous `prepare(&request)`, converts the request
-into `ByteReadRequest`, opens storage, then invokes `create_reader` with the owned
+The default `ReaderFactory::open_reader` runs synchronous `prepare(&request)`,
+converts the request into `ByteReadRequest`, opens storage, then invokes
+`create_reader` with the owned
 input and prepared state. Preparation performs no I/O; reader creation can inspect
 input and must expose metadata when it completes. Errors pass through unchanged.
 
@@ -207,7 +208,7 @@ no additional `Accessor` implementation. Format configuration and decoding stay
 in `file-format`, with no backend dependencies in the factory trait.
 
 Decompression uses `DecompressionFactory<C>` with `ByteReadRequest` and
-`dyn ByteReader`, delegating to the same `open_reader` flow. `Codec` constructs
+`dyn ByteReader`, delegating to the same default `open_reader` method. `Codec` constructs
 the native decoder; the factory adapts its output, maps codec errors, and clears
 decoded content length. Listing stays with `DecompressionAccessor`, which forwards
 the upstream listing capability and requests. Factories describe reader output
@@ -279,7 +280,7 @@ evaluation and DataFusion integration remain a separate PR. See
 schema and optional reader-context contracts.
 
 - `core/` depends on common types and Arrow, never concrete backends or formats.
-  It exposes `ReaderFactory` and the shared `open_reader` orchestration.
+  It exposes `ReaderFactory`, including the default `open_reader` orchestration.
 - `storage/` exposes one `OpenDalAccessor` over a caller-configured OpenDAL
   operator. Backend features, root validation, credentials, and initialization
   belong to the caller. Production reads and metadata access go through OpenDAL;
