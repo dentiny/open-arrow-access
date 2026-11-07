@@ -1787,6 +1787,7 @@ dependencies = [
  "open-arrow-access-service",
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
+ "opendal",
  "parquet",
  "tempfile",
  "tokio",
@@ -1867,6 +1868,7 @@ dependencies = [
  "futures",
  "more-asserts",
  "open-arrow-access-core",
+ "open-arrow-access-test-support",
  "opendal",
  "tempfile",
  "tokio",
@@ -1879,6 +1881,7 @@ dependencies = [
  "futures",
  "more-asserts",
  "open-arrow-access-core",
+ "opendal",
  "tokio",
 ]
 

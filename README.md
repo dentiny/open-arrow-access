@@ -3,28 +3,31 @@
 Composable dataset access for Apache Arrow. Read diverse formats and storage
 backends into Arrow streams.
 
-Read Parquet, CSV/TSV, JSON/JSONL, XML, or ATIF files asynchronously from local
-storage or files resolved by the Hugging Face service, individually or as a
-sequential directory/file-set dataset. OpenDAL handles file I/O. Output is an
-ordered stream of Arrow record batches. The project ends at that read interface.
+Read local Parquet, CSV/TSV, JSON/JSONL, XML, or ATIF files asynchronously through **OpenDAL's filesystem
+service**, individually or as a sequential directory/file-set dataset. Output is
+an ordered stream of Arrow record batches. The project ends at that read interface.
 
 ## Quick start
 
-Enable the two independent features, `storage-fs` and `format-parquet`:
+Enable `format-parquet`; OpenDAL storage is always available. The example
+enables OpenDAL's filesystem backend through its development dependencies:
 
 ```sh
-cargo run --example read_parquet --features storage-fs,format-parquet -- /absolute/data/root part.parquet
+cargo run --example read_parquet --features format-parquet -- /absolute/data/root part.parquet
 ```
 
 ```rust,no_run
 use open_arrow_access::{
-    Accessor, ReadRequest, Result,
+    Accessor, ReadRequest,
     file_format::ParquetAccessor,
-    storage::FsAccessor,
+    storage::{OpenDalAccessor, opendal},
 };
 
-async fn read() -> Result<()> {
-    let files = FsAccessor::new("/absolute/data/root").await?;
+async fn read() -> Result<(), Box<dyn std::error::Error>> {
+    let operator = opendal::Operator::new(
+        opendal::services::Fs::default().root("/absolute/data/root"),
+    )?;
+    let files = OpenDalAccessor::new(operator);
     let parquet = ParquetAccessor::new(files);
     let mut reader = parquet.open(ReadRequest::new("part.parquet")).await?;
     let schema = reader.metadata().schema.clone();
@@ -59,8 +62,12 @@ future file/partition `ParallelReadLayer`. Each opened reader has its own limit.
 Sequential output reuses one OpenDAL stream; retained prefetch and range reads
 share that reader's I/O budget. Output chunk size does not create extra storage
 requests.
-`FsAccessor::with_chunk_size` controls sequential output chunk size, while
+`OpenDalAccessor::with_chunk_size` controls sequential output chunk size, while
 `ReadOptions::batch_size` controls Arrow rows per batch.
+
+`OpenDalAccessor` is the only storage accessor. Enable backend features on your
+own OpenDAL dependency; for the filesystem example above, use
+`opendal = { version = "0.59.2", default-features = false, features = ["services-fs"] }`.
 
 For other OpenDAL backends, depend on `open-arrow-access-storage` and the same
 OpenDAL version directly. Enable upstream features on that dependency; Cargo
@@ -93,23 +100,19 @@ The same approach supports OpenDAL's other service, layer and transport
 features without adding matching features to this project. OpenDAL 0.59.2
 names its S3 feature `services-s3`.
 
-Enable `service-huggingface` for dataset repository file access. The provider
-owns repository ID, revision, root, authentication and HTTP/Xet settings through
-`HuggingFaceService`, `HuggingFaceOptions` and `HuggingFaceRepository`.
-`service.repository(HuggingFaceRepository::new(id).with_revision(revision))`
-returns a byte accessor with single-file and recursive directory access.
-Branch-based reads are not snapshots. The OpenDAL builder stays internal.
-
-Enable `format-parquet` and wrap the returned byte accessor in our
-`ParquetAccessor` to interpret Parquet and produce Arrow batches. Config/split
-resolution is implemented in the dependent dataset-discovery PR.
+Enable `service-huggingface` for `HuggingFaceService::repository`. Repository ID,
+revision, root, endpoint and authentication are provider-owned. The returned byte
+accessor composes with existing format readers. Floating revisions are not snapshots;
+commit-pinned access enables OpenDAL resolve caching. HF Parquet dataset selection
+follows in the dependent PR.
 
 ## JSON and JSONL
 
 Enable `format-json` and construct `file_format::JsonAccessor::new(bytes, schema)`
 with a fixed `SchemaRef`, then open it with the same `ReadRequest` used for
 Parquet. `bytes` can be any sequential byte accessor; range reads and a known
-length are unnecessary. Use `storage-fs,format-json` for local files.
+length are unnecessary. Use `format-json` and enable OpenDAL's
+`services-fs` backend on your OpenDAL dependency for local files.
 
 The reader uses Arrow JSON's incremental decoder for whitespace-separated JSON
 objects, including JSONL and pretty-printed object streams. Top-level arrays
@@ -138,10 +141,10 @@ for TSV.
 | Component | Implemented |
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
-| `storage/` | OpenDAL Fs, recursive file discovery and reusable generic byte I/O, bounded chunks and exact ranges |
+| `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Hugging Face repository file access; dataset discovery follows separately |
+| `service/` | Hugging Face repository file access under the default-off `service-huggingface` feature |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
@@ -182,9 +185,10 @@ associated types keep compressed bytes distinct from decoded Arrow batches.
 I/O methods (`open`, `list`, `next`, `read_range`, `read_ranges`) use `async fn`; implementations
 apply the re-exported `#[async_trait]` attribute to preserve `dyn` compatibility
 and Send futures. Capability, metadata and configuration-only methods remain
-synchronous. Fs initialization is also asynchronous:
-`FsAccessor::new(root).await?` moves OpenDAL's synchronous builder to Tokio's
-blocking pool. Call it within a Tokio runtime.
+synchronous. Construct the OpenDAL operator before wrapping it with
+`OpenDalAccessor::new(operator)`. Backend initialization and configuration belong
+to the caller; a synchronous backend builder can run on a blocking pool when
+configuration happens inside an async task.
 
 `capability()` follows OpenDAL's reporting pattern, with `read`,
 `read_with_range`, `read_parallel`, and accessor-only `list` flags. Layers forward or update
@@ -212,9 +216,9 @@ requested range alongside its contiguous output. Returned bytes and decoder
 memory are still proportional to the requested data.
 
 Third-party crates can implement these public contracts directly. A format
-does not receive an OpenDAL operator or switch on storage schemes. Shared
-OpenDAL reading code is separate from the filesystem constructor so the S3
-adapter can reuse it. See [architecture](docs/architecture.md) for the contracts
+does not receive an OpenDAL operator or switch on storage schemes. One
+`OpenDalAccessor` wraps caller-configured filesystem, S3, and other OpenDAL
+operators. See [architecture](docs/architecture.md) for the contracts
 and [roadmap](docs/roadmap.md) for the independent follow-up PRs.
 
 `ReadOptionsProvider` lets record layers inspect or adjust projection settings
@@ -275,9 +279,16 @@ The output schema is inferred automatically:
 
 ```rust,no_run
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-use open_arrow_access::{Accessor, ReadRequest, file_format::XmlAccessor, storage::FsAccessor};
+use open_arrow_access::{
+    Accessor, ReadRequest, file_format::XmlAccessor,
+    storage::{OpenDalAccessor, opendal},
+};
 
-let xml = XmlAccessor::new(FsAccessor::new(std::env::current_dir()?.join("testdata/xml")).await?, "/inventory/warehouse");
+let root = std::env::current_dir()?.join("testdata/xml");
+let operator = opendal::Operator::new(
+    opendal::services::Fs::default().root(root.to_str().ok_or("root must be valid UTF-8")?),
+)?;
+let xml = XmlAccessor::new(OpenDalAccessor::new(operator), "/inventory/warehouse");
 let mut reader = xml.open(ReadRequest::new("inventory.xml")).await?;
 while let Some(batch) = reader.next().await? { /* consume batch */ }
 # Ok(())
@@ -324,7 +335,7 @@ With explicit mappings, projection avoids conversion of omitted fields. In
 inference mode, projection names are resolved after sampling and output columns
 are selected after conversion. Selected records are read and parsed in full in
 both modes. Run the example on the project-authored inventory fixture with
-`cargo run --features storage-fs,format-xml --example read_xml`.
+`cargo run --features format-xml --example read_xml`.
 
 ## ATIF trajectories
 
@@ -335,10 +346,14 @@ Enable `format-atif` and select the document layout explicitly:
 use open_arrow_access::{
     Accessor, ReadRequest,
     file_format::{AtifAccessor, AtifFormat},
-    storage::FsAccessor,
+    storage::{OpenDalAccessor, opendal},
 };
 
-let bytes = FsAccessor::new(std::env::current_dir()?).await?;
+let root = std::env::current_dir()?;
+let operator = opendal::Operator::new(
+    opendal::services::Fs::default().root(root.to_str().ok_or("root must be valid UTF-8")?),
+)?;
+let bytes = OpenDalAccessor::new(operator);
 let atif = AtifAccessor::new(bytes, AtifFormat::JsonLines);
 let mut reader = atif.open(ReadRequest::new("testdata/atif/trajectories.jsonl")).await?;
 while let Some(batch) = reader.next().await? { /* one trajectory per row */ }
@@ -384,9 +399,24 @@ open OpenDAL operators or implement Harbor Hub discovery. `FileSetAccessor` and
 Run the example with either explicit layout:
 
 ```sh
-cargo run --example read_atif --features storage-fs,format-atif
-cargo run --example read_atif --features storage-fs,format-atif -- testdata/atif/trajectories.jsonl jsonl
+cargo run --example read_atif --features format-atif
+cargo run --example read_atif --features format-atif -- testdata/atif/trajectories.jsonl jsonl
 ```
 
 The adapter uses the published `atif-arrow 0.3.0` crate with Arrow 59;
 see [dependency alignment](docs/dependencies.md#atif-parser).
+
+## Caller-configured storage
+
+`storage::{OpenDalAccessor, opendal}` is always available, including with
+`--no-default-features`. Wrap a caller-configured SDK operator independently of
+any dataset provider. Backend features and credentials stay under the caller's
+control.
+
+Generic listing accepts implicit object-store directory prefixes without first
+requiring a directory object or `stat` support. The empty prefix selects the
+root, and `ListRequest::recursive` controls traversal. Prefix existence and
+backend listing errors follow the configured OpenDAL service. In particular, Fs
+listing yields no files for a nonexistent or non-directory prefix.
+Object and prefix locators must be canonical root-relative paths; aliases such
+as leading slashes, dot components, and repeated separators are rejected.

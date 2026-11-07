@@ -46,7 +46,7 @@ impl HuggingFaceService {
     }
 
     /// Access explicit files in a dataset repository. A floating revision is
-    /// read as supplied; use `resolve` to pin config/split discovery to a commit.
+    /// read as supplied. Commit SHAs enable caching of resolved download addresses.
     pub async fn repository(
         &self,
         repository: HuggingFaceRepository,
@@ -57,7 +57,11 @@ impl HuggingFaceService {
             .repo_id(&repository.repository)
             .revision(&repository.revision)
             .root(&repository.root)
-            .endpoint(self.options.endpoint());
+            .endpoint(self.options.endpoint())
+            .enable_resolve_cache(
+                repository.revision.len() == 40
+                    && repository.revision.bytes().all(|b| b.is_ascii_hexdigit()),
+            );
         if let Some(token) = &self.options.token {
             builder = builder.token(token);
         }

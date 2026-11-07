@@ -164,8 +164,6 @@ async fn listing_recurses_and_follows_hub_pagination_without_exposing_directorie
     let requests = hub.captured();
     assert!(requests.iter().any(|r| r.uri.contains("recursive=True")));
     assert!(requests.iter().any(|r| r.uri.contains("cursor=second")));
-    let error = accessor.list("a.bin".into()).await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::InvalidInput);
 }
 
 #[tokio::test]

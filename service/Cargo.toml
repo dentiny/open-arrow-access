@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Provider-specific dataset discovery for Open Arrow Access"
+description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []

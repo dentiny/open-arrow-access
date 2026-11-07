@@ -7,7 +7,7 @@ services and production record layers follow in independent PRs.
 
 ```mermaid
 flowchart TD
-    Request[ByteReadRequest / ReadRequest] --> Storage[storage/: FsAccessor]
+    Request[ByteReadRequest / ReadRequest] --> Storage[storage/: OpenDalAccessor]
     Storage --> OpenDAL[Shared OpenDAL adapter]
     OpenDAL --> Bytes[ByteReader: chunks / optional ranges]
     Bytes --> Format[file-format/: ParquetAccessor]
@@ -90,8 +90,8 @@ The flags describe operation support, including a declaration for future paralle
 Flags describe the **effective interface after composition**, without I/O.
 Transparent layers forward them; wrappers that remove an operation clear its
 flag on both accessor and reader. The sequential gzip wrapper clears
-`read_with_range`. The Fs adapter reports read/ranges and recursive
-file listing through OpenDAL. The Parquet accessor
+`read_with_range`. `OpenDalAccessor` reports the configured operator's effective read/range and
+listing capabilities. The Parquet accessor
 reports record reading only when its input supports ranges; neither its output
 reader nor its accessor exposes byte-range operations.
 
@@ -125,16 +125,16 @@ contract without a closed enum of every source or format.
 
 | Adapter | Request | Reader |
 | --- | --- | --- |
-| Fs / generic OpenDAL storage | `ByteReadRequest` | `dyn ByteReader` |
+| OpenDAL storage | `ByteReadRequest` | `dyn ByteReader` |
 | Parquet format | `ReadRequest` | `dyn RecordReader` |
 | JSON object stream | `ReadRequest`; schema configured on accessor | Record reader |
 | Directory/file-set dataset | Directory or explicit ordered file selection and options | Record reader |
-| Hugging Face file access | `ByteReadRequest` | `dyn ByteReader` |
+| Hugging Face repository | `ByteReadRequest` | `dyn ByteReader` |
 
 `Arc<dyn ByteAccessor>` supports application-owned backend injection. Optional
 `ByteAccessor::list` accepts `ListRequest` and defaults to Unsupported. Recursive
 discovery is enabled by default; nonrecursive requests must not descend into child
-directories. Fs passes that policy to OpenDAL, and transparent wrappers forward the
+directories. `OpenDalAccessor` passes that policy to OpenDAL, and transparent wrappers forward the
 complete request. Other byte accessors can supply their own implementation. Input locators
 remain backend-owned. Directory datasets consume those file
 references and compose any shared single-file record accessor. Directory prefixes
@@ -144,7 +144,7 @@ normalize repeated and trailing slash separators before discovery and matching.
 defaults to one and `io_chunk_size` defaults to the backend's choice. Record-file
 `ReadRequest::with_byte_options` forwards these settings through the format
 adapter and layers into storage. Arrow batch/projection options stay separate.
-`FsAccessor::with_chunk_size` controls output chunk size, not I/O splitting.
+`OpenDalAccessor::with_chunk_size` controls output chunk size, not I/O splitting.
 Configured concurrency is per open reader, so several readers multiply the total
 possible in-flight I/O. This does not change logical record order or implement
 file/partition parallelism.
@@ -153,14 +153,6 @@ Sequential byte output reuses one OpenDAL stream. Retained prefetch and range
 reads share an executor budget allocated per opened reader, so interleaving the
 two paths does not multiply in-flight I/O. Contiguous output fragments are sliced
 without copying; fragmented output is assembled only when needed.
-
-The optional `service-huggingface` provider owns repository, revision, root,
-authentication and connection settings. `HuggingFaceService::repository` creates
-an OpenDAL HF operator internally and reuses `storage::OpenDalAccessor` for stat,
-recursive file discovery and byte reads. Existing format accessors consume those
-shared byte contracts. The OpenDAL builder is not part of the provider API.
-Floating revisions do not imply snapshots. Config/split discovery is added in
-the dependent dataset-resolution PR.
 
 ## Layer
 
@@ -196,19 +188,18 @@ evaluation and DataFusion integration remain a separate PR. See
 schema and optional reader-context contracts.
 
 - `core/` depends on common types and Arrow, never concrete backends or formats.
-- `storage/` builds OpenDAL operators; shared reads are independent of the Fs
-  constructor. Production file reads and metadata access go through OpenDAL.
-  `FsAccessor::new(root).await` offloads OpenDAL's synchronous root inspection,
-  creation and canonicalization to Tokio's blocking pool; initialization requires
-  a Tokio runtime and starts only when the future is polled.
+- `storage/` exposes one `OpenDalAccessor` over a caller-configured OpenDAL
+  operator. Backend features, root validation, credentials, and initialization
+  belong to the caller. Production reads and metadata access go through OpenDAL;
+  the adapter does not construct backend-specific accessors.
 - `file-format/` consumes shared byte accessors. Its Parquet bridge implements
   Arrow Rust's `AsyncFileReader` using exact ranges. Each format has its own
   directory under `src/`. In `src/parquet/`, `accessor.rs`, `input.rs` and
   `reader.rs` own their respective structs and implementations; `mod.rs` declares
   the modules, exports the accessor and provides common error conversion.
-- The facade forwards independent, additive `storage-fs`, `service-huggingface` and `format-parquet`
-  features. Features make implementations available; they do not change runtime
-  ordering or silently attach layers.
+- The facade always exposes OpenDAL storage, including with no default features.
+  Format, dataset, and decompression features remain independent and additive;
+  they do not change runtime ordering or silently attach layers.
 - `decompression/` shares streaming byte adapters across codec modules. Its
   independent gzip/LZ4/bzip2/Zstandard features use upstream decoders with
   concatenated frames or members;
@@ -220,8 +211,8 @@ schema and optional reader-context contracts.
   through the same `ReadRequest` contract as Parquet.
 - `dataset/` provides sequential `FileSetAccessor` and `DirectoryAccessor` behind
   the default-off `dataset-directory` feature, without depending on a format.
-- `service/` provides Hugging Face repository byte access behind the default-off
-  `huggingface` feature; config/split discovery follows separately.
+- `service/` provides default-off Hugging Face repository access over the shared
+  OpenDAL byte adapter. Config/split Parquet dataset access follows separately.
 - `layers/` remains an extension point.
 
 The project output boundary is Arrow records. Internal temporary inputs may be
