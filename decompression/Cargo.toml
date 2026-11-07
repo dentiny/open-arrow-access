@@ -16,7 +16,7 @@ zstd = ["dep:async-compression", "async-compression/zstd"]
 [dependencies]
 open-arrow-access-core.workspace = true
 futures.workspace = true
-async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"], optional = true }
+async-compression = { workspace = true, optional = true }
 
 [dev-dependencies]
 open-arrow-access-test-support.workspace = true
