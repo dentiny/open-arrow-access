@@ -33,3 +33,7 @@ arrow-array.workspace = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "huggingface"
+required-features = ["huggingface"]

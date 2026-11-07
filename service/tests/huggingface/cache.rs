@@ -6,10 +6,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use http::{Request, Response};
 use open_arrow_access_core::{Accessor, ByteReadRequest, Bytes};
-use opendal::{Buffer, HttpBody, HttpRedirect, HttpTransport, HttpTransporter, OperationContext};
+use opendal::{Buffer, HttpBody, HttpRedirect, HttpTransport};
 
-use super::super::{HuggingFaceOptions, HuggingFaceRepository, HuggingFaceService};
-use super::support::{MockHub, TOKEN};
+use super::super::HuggingFaceRepository;
+use super::support::{MockHub, service_with};
 
 #[derive(Clone)]
 struct RedirectHub {
@@ -49,16 +49,7 @@ async fn pinned_reads_reuse_download_addresses_but_floating_revisions_resolve_ag
             files: MockHub::file("bytes.bin", Bytes::from_static(b"abcd")),
             resolves: Arc::default(),
         };
-        let mut service = HuggingFaceService::new(
-            HuggingFaceOptions::default()
-                .with_endpoint("https://hub.invalid")
-                .with_token(TOKEN)
-                .with_http_downloads(),
-        )
-        .await
-        .unwrap();
-        service.context =
-            OperationContext::new().with_http_transport(HttpTransporter::new(hub.clone()));
+        let service = service_with(hub.clone()).await;
         let accessor = service
             .repository(
                 HuggingFaceRepository::new("owner/example")

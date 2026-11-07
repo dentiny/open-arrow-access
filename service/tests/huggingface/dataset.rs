@@ -8,11 +8,11 @@ use http::{Request, Response, StatusCode};
 use open_arrow_access_core::{
     Accessor, ByteReadOptions, Bytes, ErrorKind, ReadOptions, RecordReader,
 };
-use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext};
+use opendal::{Buffer, HttpBody, HttpTransport};
 use serde_json::json;
 
-use super::super::{HuggingFaceDatasetRequest, HuggingFaceOptions, HuggingFaceService};
-use super::support::{MockHub, TOKEN, response};
+use super::super::{HuggingFaceDatasetRequest, HuggingFaceService};
+use super::support::{MockHub, TOKEN, response, service_with};
 
 const COMMIT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -50,17 +50,7 @@ impl ExportHub {
     }
 
     async fn service(&self) -> HuggingFaceService {
-        let mut service = HuggingFaceService::new(
-            HuggingFaceOptions::default()
-                .with_endpoint("https://hub.invalid")
-                .with_token(TOKEN)
-                .with_http_downloads(),
-        )
-        .await
-        .unwrap();
-        service.context =
-            OperationContext::new().with_http_transport(HttpTransporter::new(self.clone()));
-        service
+        service_with(self.clone()).await
     }
 
     fn requests(&self) -> Vec<String> {

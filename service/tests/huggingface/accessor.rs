@@ -7,10 +7,11 @@ use open_arrow_access_core::{
 };
 
 use super::super::{HuggingFaceOptions, HuggingFaceRepository, HuggingFaceService};
-use super::support::{MockHub, TOKEN, assert_ranges};
+use super::support::{MockHub, TOKEN, assert_ranges, install_mock_transport};
 
 #[tokio::test]
 async fn constructor_is_lazy_send_and_redacts_token() {
+    install_mock_transport();
     let options = HuggingFaceOptions::default()
         .with_endpoint("https://huggingface.co")
         .with_token(TOKEN)
@@ -20,7 +21,6 @@ async fn constructor_is_lazy_send_and_redacts_token() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(service.options.endpoint(), "https://huggingface.co");
     let accessor = service
         .repository(HuggingFaceRepository::new("owner/example"))
         .await
@@ -44,6 +44,7 @@ async fn ranges_preserve_order_options_metadata_and_sequential_cursor() {
     let hub = MockHub::file("bytes.bin", contents.clone());
     let accessor = hub
         .accessor()
+        .await
         .with_chunk_size(NonZeroUsize::new(3).unwrap());
     let mut reader = accessor
         .open(
@@ -109,7 +110,7 @@ async fn ranges_preserve_order_options_metadata_and_sequential_cursor() {
 async fn sequential_output_chunks_reuse_io_requests_and_leave_ranges_independent() {
     let bytes = Bytes::from_static(b"abcdefghijklmnop");
     let hub = MockHub::file("bytes.bin", bytes.clone());
-    let accessor = hub.accessor().with_chunk_size(NonZeroUsize::MIN);
+    let accessor = hub.accessor().await.with_chunk_size(NonZeroUsize::MIN);
     let mut reader = accessor
         .open(
             ByteReadRequest::new("bytes.bin").with_options(ByteReadOptions {
@@ -149,7 +150,7 @@ async fn listing_recurses_and_follows_hub_pagination_without_exposing_directorie
         ("data/a.bin".to_owned(), Bytes::from_static(b"a")),
         ("data/nested/b.bin".to_owned(), Bytes::from_static(b"b")),
     ]);
-    let accessor = hub.accessor();
+    let accessor = hub.accessor().await;
     let objects = accessor
         .list("".into())
         .await
@@ -175,6 +176,7 @@ async fn nonrecursive_listing_preserves_policy_across_hub_pages() {
     ]);
     let objects = hub
         .accessor()
+        .await
         .list(ListRequest::new("").with_recursive(false))
         .await
         .unwrap()
@@ -195,7 +197,7 @@ async fn nonrecursive_listing_preserves_policy_across_hub_pages() {
 #[tokio::test]
 async fn invalid_paths_fail_before_requests_and_empty_files_are_readable() {
     let hub = MockHub::file("empty.bin", Bytes::new());
-    let accessor = hub.accessor();
+    let accessor = hub.accessor().await;
     for path in [
         "",
         " bytes.bin",
@@ -237,7 +239,7 @@ async fn parquet_reads_through_the_hub_sdk_and_shared_range_adapter() {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/parquet/ids.parquet");
     let bytes = Bytes::from(tokio::fs::read(path).await.unwrap());
     let hub = MockHub::file("part.parquet", bytes);
-    let accessor = ParquetAccessor::new(hub.accessor());
+    let accessor = ParquetAccessor::new(hub.accessor().await);
     let mut reader = accessor
         .open(ReadRequest::new("part.parquet").with_options(ReadOptions {
             batch_size: NonZeroUsize::new(2).unwrap(),

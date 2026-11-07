@@ -24,6 +24,3 @@ fn map_error(operation: &'static str, path: &str, error: opendal::Error) -> Erro
     };
     Error::new(kind, operation, format!("Hugging Face object {path:?}")).with_source(error)
 }
-
-#[cfg(test)]
-mod tests;
