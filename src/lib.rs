@@ -27,7 +27,8 @@ pub mod decompression {
     #[cfg(feature = "decompression-zstd")]
     pub use open_arrow_access_decompression::Zstd;
     pub use open_arrow_access_decompression::{
-        Codec, CompressedInput, DecodedInput, DecompressionAccessor, DecompressionLayer,
+        Codec, CompressedInput, DecodedInput, DecompressionAccessor, DecompressionFactory,
+        DecompressionLayer,
     };
 }
 

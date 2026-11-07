@@ -176,12 +176,28 @@ These are proposed contracts, not new runtime capabilities in this PR.
 allow storage, formats and future datasets/services to use the same `open`
 contract without a closed enum of every source or format.
 
-`FileAccessor<B, F>` implements the single-file record accessor once for every
-`FileFormat`. Its `open` first calls the format's synchronous `prepare` with
-common read options, then opens `B` with the exact object and byte options,
-then transfers the byte reader and prepared state to the format's async `open`.
-The associated `Prepared: Send` type retains per-open decoders and resolved
-schemas without repeating validation or constructing a decoder twice.
+Core `ReaderFactory` transforms one opened `ByteReader` into its associated
+reader interface. Associated `Request` and `Reader` types keep Arrow batches,
+bytes and other parsed items distinct. `Prepared: Send` retains per-open decoders
+and resolved schemas without repeating validation or constructing a decoder twice.
+The blanket `ReaderFactoryExt::open_reader` implementation runs `prepare(&request)`,
+converts the request into `ByteReadRequest`, opens storage, then invokes
+`create_reader` with a borrowed `FactoryToken`, the owned input and prepared
+state. Preparation performs no I/O; reader creation can inspect input and must
+expose metadata when it completes. Errors pass through unchanged.
+
+`ReaderFactory` requires each implementation to provide its creation hook.
+`ReaderFactoryExt` is implemented once for all factories, including trait objects,
+so downstream implementations cannot override `open_reader`. Accessors call the
+extension trait explicitly; an inherent method of the same name cannot replace
+the shared orchestration. Direct callers import `ReaderFactoryExt`.
+
+`FileAccessor<B, F>` delegates opening to this shared flow and uses the factory's
+request and reader types. Existing Arrow formats use `ReadRequest` and
+`dyn RecordReader`; `FileFormat` remains a re-export of `ReaderFactory`.
+`ByteReadRequest` implements conversion from borrowed record and byte requests,
+retaining object identity and byte options. Custom single-input requests can
+supply their own conversion without adding another request trait.
 
 Fixed schemas validate projection and configuration before byte I/O. Parquet
 prepares no decoder until its input is available and checks actual range support
@@ -195,7 +211,22 @@ byte-range, listing or parallel operations on their record output.
 Existing built-in accessor types alias the shared accessor and preserve their
 constructors/builders. Custom formats use `FileAccessor::from_format` and need
 no additional `Accessor` implementation. Format configuration and decoding stay
-in `file-format`, with no backend dependencies in the format trait.
+in `file-format`, with no backend dependencies in the factory trait.
+
+Decompression uses `DecompressionFactory<C>` with `ByteReadRequest` and
+`dyn ByteReader`, delegating to the same blanket `open_reader` implementation.
+`Codec` constructs the native decoder; the factory adapts its output, maps codec
+errors, and clears
+decoded content length. Listing stays with `DecompressionAccessor`, which forwards
+the upstream listing capability and requests. Factories describe reader output
+and do not advertise listing. Multi-object discovery and file-set orchestration
+remain accessor responsibilities.
+
+Creation hooks require `&FactoryToken`. The type is public for cross-crate
+implementations, but its field and construction are private to core. It has no
+public constructor, `Default`, or `Clone`. Only the blanket `open_reader`
+implementation supplies a token; ordinary callers without one cannot bypass
+that entry point.
 
 | Adapter | Request | Reader |
 | --- | --- | --- |
@@ -262,12 +293,14 @@ evaluation and DataFusion integration remain a separate PR. See
 schema and optional reader-context contracts.
 
 - `core/` depends on common types and Arrow, never concrete backends or formats.
+  It exposes `ReaderFactory`, with `ReaderFactoryExt` providing shared opening
+  orchestration.
 - `storage/` exposes one `OpenDalAccessor` over a caller-configured OpenDAL
   operator. Backend features, root validation, credentials, and initialization
   belong to the caller. Production reads and metadata access go through OpenDAL;
   the adapter does not construct backend-specific accessors.
-- `file-format/` exposes `FileFormat` and `FileAccessor` independently of optional
-  built-in formats. Shared storage opening lives in `src/accessor.rs`. Each
+- `file-format/` exposes `FileAccessor` and the `FileFormat` compatibility name
+  independently of optional built-ins. Each
   format's `accessor.rs` retains its compatibility alias and constructors;
   `format.rs` owns configuration, preparation and decoder initialization.
   Parquet's `input.rs` bridges exact ranges to Arrow's `AsyncFileReader`, and
