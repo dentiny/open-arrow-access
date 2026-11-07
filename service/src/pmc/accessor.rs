@@ -1,4 +1,4 @@
-use super::{PmcLimits, capability, reader::PmcReader, schema, validation};
+use super::{PmcLimits, capability, reader::PmcReader, schema};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Capability, ReadRequest, RecordMetadata, RecordReader,
     Result, async_trait,
@@ -41,12 +41,10 @@ where
         capability(self.inner.capability().read)
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        let (schema, projection) = request.options.resolve_projection(&schema())?;
-        validation::validate_metadata_locator(request.object.locator())?;
+        let (schema, _) = request.options.resolve_projection(&schema())?;
         Ok(Box::new(PmcReader {
             accessor: self.inner.clone(),
             limits: self.limits,
-            projection,
             metadata: RecordMetadata {
                 schema,
                 source: Some(request.object.clone()),

@@ -146,7 +146,7 @@ async fn projections_keep_order_and_zero_column_row_counts() {
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(batch.num_columns(), names.len());
-        assert_eq!(batch.schema(), reader.metadata().schema);
+        assert!(Arc::ptr_eq(&batch.schema(), &reader.metadata().schema));
     }
     let input = MemoryAccessor::new(RAW.as_bytes(), 1);
     let observed = input.observations.clone();
@@ -162,6 +162,70 @@ async fn projections_keep_order_and_zero_column_row_counts() {
         );
     }
     assert!(observed.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn locators_are_forwarded_unchanged_to_the_byte_accessor() {
+    for locator in [
+        "https://example.com/article.json?version=1#metadata",
+        "s3://pmc-oa-opendata/metadata/PMC1.1.json",
+        "/absolute/path/article.json",
+    ] {
+        let source = MemoryAccessor::new(br#"{"pmcid":"PMC1"}"#, 64);
+        let observed = source.observations.clone();
+        let mut reader = PmcAccessor::new(source)
+            .open(ReadRequest::new(locator))
+            .await
+            .unwrap();
+        assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
+        assert_eq!(
+            reader.metadata().source.as_ref().unwrap().locator(),
+            locator
+        );
+        let requests = observed.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].object.locator(), locator);
+    }
+}
+
+#[tokio::test]
+async fn media_lists_preserve_null_empty_and_populated_values() {
+    for (value, expected) in [("null", None), ("[]", Some(0)), (r#"["a", "b"]"#, Some(2))] {
+        let raw = format!(r#"{{"pmcid":"PMC1","media_urls":{value}}}"#);
+        let mut reader = PmcAccessor::new(MemoryAccessor::new(raw.as_bytes(), 64))
+            .open(ReadRequest::new("a.json"))
+            .await
+            .unwrap();
+        let batch = reader.next().await.unwrap().unwrap();
+        let urls = batch
+            .column_by_name("media_urls")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<ListArray>()
+            .unwrap();
+        assert_eq!(urls.is_null(0), expected.is_none());
+        if let Some(length) = expected {
+            assert_eq!(urls.value_length(0), length);
+        }
+    }
+}
+
+#[tokio::test]
+async fn projection_does_not_skip_validation_of_omitted_fields() {
+    for projection in [vec!["pmcid".into()], vec![]] {
+        let mut reader = PmcAccessor::new(MemoryAccessor::new(
+            br#"{"pmcid":"PMC1","title":false}"#,
+            64,
+        ))
+        .open(ReadRequest::new("a.json").with_options(ReadOptions {
+            projection: Some(projection),
+            ..ReadOptions::default()
+        }))
+        .await
+        .unwrap();
+        assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
+        assert!(reader.next().await.unwrap().is_none());
+    }
 }
 
 #[tokio::test]

@@ -1,16 +1,6 @@
 use super::decode;
 use open_arrow_access_core::{Error, ErrorKind, Result};
 
-pub(super) fn validate_metadata_locator(path: &str) -> Result<()> {
-    if !valid_path(path) {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "open_pmc",
-            "expected a bucket-relative metadata object",
-        ));
-    }
-    Ok(())
-}
 pub(super) fn validate_pmcid(pmcid: &str, path: &str) -> Result<()> {
     let value = pmcid.trim();
     let digits = if value
@@ -66,13 +56,4 @@ fn object_limit(path: &str, limit: usize) -> Error {
     decode(format!(
         "{path}: exceeds configured {limit}-byte object limit"
     ))
-}
-
-fn valid_path(path: &str) -> bool {
-    !path.is_empty()
-        && path.trim() == path
-        && !path.contains(['\\', '?', '#'])
-        && !path.contains("://")
-        && !path.chars().any(char::is_control)
-        && !path.split('/').any(|part| matches!(part, "" | "." | ".."))
 }

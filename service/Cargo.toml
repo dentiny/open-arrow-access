@@ -8,10 +8,9 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
-pmc = ["dep:arrow-array", "dep:arrow-schema", "dep:serde", "dep:serde_json", "dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
+pmc = ["dep:arrow-array", "dep:arrow-schema", "dep:serde", "dep:serde_json"]
 
 [dependencies]
-open-arrow-access-file-format = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }

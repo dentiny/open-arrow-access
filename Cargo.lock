@@ -1204,7 +1204,6 @@ dependencies = [
  "futures",
  "open-arrow-access-core",
  "open-arrow-access-decompression",
- "open-arrow-access-file-format",
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
  "serde",

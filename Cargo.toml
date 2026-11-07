@@ -61,7 +61,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 
 [features]
 default = []
-service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc", "format-json"]
+service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
