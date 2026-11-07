@@ -5,6 +5,9 @@ mod async_read;
 mod capability;
 mod error;
 mod layer;
+mod read_chunks;
+mod read_limited;
+mod read_lines;
 mod read_state;
 mod reader;
 mod request;
@@ -15,6 +18,9 @@ pub use async_read::into_async_read;
 pub use capability::Capability;
 pub use error::{Error, ErrorKind, Result};
 pub use layer::{AccessorExt, Layer};
+pub use read_chunks::read_chunks;
+pub use read_limited::read_limited;
+pub use read_lines::read_lines;
 pub use read_state::ReadState;
 pub use reader::{
     ByteMetadata, ByteReader, Reader, RecordMetadata, RecordReader, RecordStream, into_stream,

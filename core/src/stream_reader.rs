@@ -2,7 +2,7 @@ use std::pin::Pin;
 
 use futures::{Stream, StreamExt};
 
-use crate::{Capability, Reader, Result, async_trait};
+use crate::{ByteMetadata, ByteReader, Bytes, Capability, Reader, Result, async_trait};
 
 /// Adapt an owned stream of shared results into a sequential [`Reader`].
 ///
@@ -16,7 +16,9 @@ use crate::{Capability, Reader, Result, async_trait};
 /// before wrapping the stream. Items must match the supplied metadata: for
 /// example, Arrow batches must have the schema declared by [`crate::RecordMetadata`].
 /// A stream of those batches with that metadata automatically implements
-/// [`crate::RecordReader`]. The adapter exposes sequential reading only.
+/// [`crate::RecordReader`]. A byte stream with [`ByteMetadata`] implements
+/// [`ByteReader`]; supply nonempty chunks as required by that contract.
+/// The adapter exposes sequential reading only.
 ///
 /// ```
 /// use futures::stream;
@@ -80,3 +82,6 @@ where
         result
     }
 }
+
+#[async_trait]
+impl<S> ByteReader for StreamReader<S, ByteMetadata> where S: Stream<Item = Result<Bytes>> + Send {}

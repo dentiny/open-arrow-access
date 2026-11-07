@@ -44,6 +44,20 @@ async fn read() -> Result<(), Box<dyn std::error::Error>> {
 `Stream<Item = Result<RecordBatch>>`. `ReadOptions` supports a nonzero target
 batch size and top-level field projection in the requested field order.
 
+For small metadata objects, `read_limited(reader, limit, operation).await`
+collects an owned `ByteReader` into a `Vec<u8>`, rejecting advertised or actual
+lengths above the byte limit before copying. Parsing remains with the caller.
+
+`read_lines(reader, max_line_bytes, operation)` streams raw byte lines, retaining
+LF/CRLF endings and a final unterminated line. The optional per-line byte limit
+includes line endings and is checked before copying. UTF-8 decoding and blank-line
+handling remain with the caller.
+
+`read_chunks(input, chunk_size)` adapts a futures `AsyncRead` into nonempty byte
+chunks bounded by a `NonZeroUsize` size. Map its I/O errors to the shared error
+type, then wrap it in `StreamReader::new(stream, byte_metadata)` for a sequential
+`ByteReader`.
+
 Storage I/O settings are per open operation:
 
 ```rust
