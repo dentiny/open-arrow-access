@@ -2,7 +2,7 @@ use arrow_csv::reader::Decoder;
 use open_arrow_access_core::{ByteReader, RecordBatch, RecordMetadata, RecordReader, Result};
 
 use super::decode_error;
-use crate::decode::{BatchDecoder, incremental_reader};
+use crate::decode::{BatchDecoder, decode_reader};
 
 impl BatchDecoder for Decoder {
     const INPUT_OPERATION: &'static str = "read_csv";
@@ -31,5 +31,5 @@ pub(super) fn csv_reader(
     decoder: Decoder,
     metadata: RecordMetadata,
 ) -> impl RecordReader {
-    incremental_reader(input, decoder, metadata)
+    decode_reader(input, decoder, metadata)
 }
