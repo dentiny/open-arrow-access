@@ -4,6 +4,23 @@ use crate::{MemoryAccessor, collect_bytes, memory_read_error};
 use open_arrow_access_core::{Accessor, ByteReadRequest, ByteReader, Error, ErrorKind, Result};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// Check exact output, nonempty bounded chunks, and EOF.
+pub async fn assert_output(
+    reader: &mut dyn ByteReader,
+    expected: &[u8],
+    max_chunk_size: usize,
+) -> Result<()> {
+    let mut output = Vec::new();
+    while let Some(chunk) = reader.next().await? {
+        assert!(!chunk.is_empty());
+        assert!(chunk.len() <= max_chunk_size);
+        output.extend_from_slice(&chunk);
+    }
+    assert_eq!(output, expected);
+    assert!(reader.next().await?.is_none());
+    Ok(())
+}
+
 /// Consume a failing reader and verify that subsequent calls do not poll upstream.
 pub async fn assert_terminal_error(
     reader: &mut dyn ByteReader,

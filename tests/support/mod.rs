@@ -7,7 +7,7 @@ use std::{
     },
 };
 
-use arrow_array::Int64Array;
+use arrow_array::types::Int64Type;
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes,
@@ -42,19 +42,14 @@ pub async fn fixture(compression: Compression) -> Fixture {
 }
 
 pub fn fixture_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("testdata/parquet")
-        .join(name)
+    open_arrow_access_test_support::fixture_path!("parquet", name)
 }
 
 pub fn ids(batch: &RecordBatch) -> Vec<i64> {
-    batch
-        .column(0)
-        .as_any()
-        .downcast_ref::<Int64Array>()
-        .unwrap()
-        .values()
-        .to_vec()
+    open_arrow_access_test_support::record::collect_values::<Int64Type>(
+        std::slice::from_ref(batch),
+        0,
+    )
 }
 
 pub use open_arrow_access_test_support::MemoryAccessor;

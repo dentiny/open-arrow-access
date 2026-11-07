@@ -1,22 +1,15 @@
-use std::{error::Error as _, num::NonZeroUsize, path::PathBuf, sync::atomic::Ordering};
+use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
 use open_arrow_access::{
     Accessor, ByteReadOptions, ByteReadRequest, Error, ErrorKind,
     file_format::{WarcAccessor, WarcHeader},
     storage::OpenDalAccessor,
 };
-use open_arrow_access_test_support::{MemoryAccessor, fs_operator};
-
-fn fixture(name: &str) -> Vec<u8> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("testdata/warc")
-        .join(name);
-    std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
-}
+use open_arrow_access_test_support::{MemoryAccessor, fixture, fs_operator};
 
 #[tokio::test]
 async fn parser_preserves_physical_records_order_headers_and_owned_binary_bodies() {
-    let input = fixture("good_physical_records.warc");
+    let input = fixture!("warc", "good_physical_records.warc").await;
     let accessor = WarcAccessor::new(MemoryAccessor::new(&input, 1));
     let mut reader = accessor
         .open(ByteReadRequest::new("good_physical_records.warc"))
@@ -58,7 +51,7 @@ async fn parser_preserves_physical_records_order_headers_and_owned_binary_bodies
 
 #[tokio::test]
 async fn request_and_response_records_are_both_delivered() {
-    let input = MemoryAccessor::new(&fixture("good_request_response.warc"), 1);
+    let input = MemoryAccessor::new(&fixture!("warc", "good_request_response.warc").await, 1);
     let mut reader = WarcAccessor::new(input)
         .open("a.warc".into())
         .await
@@ -74,7 +67,7 @@ async fn request_and_response_records_are_both_delivered() {
 
 #[tokio::test]
 async fn optional_numeric_headers_remain_parser_strings() {
-    let input = fixture("bad_segment_number.warc");
+    let input = fixture!("warc", "bad_segment_number.warc").await;
     let accessor = WarcAccessor::new(MemoryAccessor::new(&input, 2));
     let mut reader = accessor.open("a.warc".into()).await.unwrap();
     let record = reader.next().await.unwrap().unwrap();
@@ -91,7 +84,7 @@ async fn malformed_and_truncated_records_fail_terminally() {
         "bad_terminator.warc",
         "bad_missing_date.warc",
     ] {
-        let input = MemoryAccessor::new(&fixture(name), 1);
+        let input = MemoryAccessor::new(&fixture!("warc", name).await, 1);
         let observed = input.observations.clone();
         let mut reader = WarcAccessor::new(input).open(name.into()).await.unwrap();
         let error = reader.next().await.err().unwrap();
@@ -134,7 +127,7 @@ fn assert_source_error(error: &Error, kind: ErrorKind) {
 
 #[tokio::test]
 async fn source_errors_keep_categories_and_chains_across_parser_boundaries() {
-    let bytes = fixture("good_resource.warc");
+    let bytes = fixture!("warc", "good_resource.warc").await;
     let body_start = bytes.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
     for kind in [
         ErrorKind::NotFound,
@@ -163,8 +156,8 @@ async fn source_errors_keep_categories_and_chains_across_parser_boundaries() {
 
 #[tokio::test]
 async fn earlier_record_remains_delivered_when_the_next_record_fails() {
-    let boundary = fixture("good_resource.warc").len();
-    let input = MemoryAccessor::new(&fixture("good_resources.warc"), 1)
+    let boundary = fixture!("warc", "good_resource.warc").await.len();
+    let input = MemoryAccessor::new(&fixture!("warc", "good_resources.warc").await, 1)
         .with_failure(boundary, ErrorKind::PermissionDenied);
     let mut reader = WarcAccessor::new(input)
         .open("a.warc".into())
@@ -182,8 +175,8 @@ async fn earlier_record_remains_delivered_when_the_next_record_fails() {
 
 #[tokio::test]
 async fn reads_one_record_on_demand_forwards_io_options_and_stops_on_drop() {
-    let boundary = fixture("good_resource.warc").len();
-    let input = MemoryAccessor::new(&fixture("good_resources.warc"), 1);
+    let boundary = fixture!("warc", "good_resource.warc").await.len();
+    let input = MemoryAccessor::new(&fixture!("warc", "good_resources.warc").await, 1);
     let observed = input.observations.clone();
     let options = ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
@@ -204,7 +197,7 @@ async fn reads_one_record_on_demand_forwards_io_options_and_stops_on_drop() {
 
 #[tokio::test]
 async fn empty_input_and_independent_opens_have_terminal_eof() {
-    let empty = MemoryAccessor::new(&fixture("empty.warc"), 1);
+    let empty = MemoryAccessor::new(&fixture!("warc", "empty.warc").await, 1);
     let observed = empty.observations.clone();
     let mut reader = WarcAccessor::new(empty)
         .open("empty.warc".into())
@@ -214,7 +207,7 @@ async fn empty_input_and_independent_opens_have_terminal_eof() {
     let polls = observed.reads.load(Ordering::SeqCst);
     assert!(reader.next().await.unwrap().is_none());
     assert_eq!(observed.reads.load(Ordering::SeqCst), polls);
-    let input = MemoryAccessor::new(&fixture("good_metadata.warc"), 2);
+    let input = MemoryAccessor::new(&fixture!("warc", "good_metadata.warc").await, 2);
     let accessor = WarcAccessor::new(input);
     let mut left = accessor.open("a.warc".into()).await.unwrap();
     let mut right = accessor.open("a.warc".into()).await.unwrap();
@@ -233,7 +226,8 @@ async fn open_errors_are_forwarded_and_empty_chunks_are_terminal_io_errors() {
     let error = accessor.open("missing.warc".into()).await.err().unwrap();
     assert_eq!(error.kind(), ErrorKind::NotFound);
     assert!(error.source().is_some());
-    let input = MemoryAccessor::new(&fixture("good_resource.warc"), 1).with_empty_chunk(0);
+    let input =
+        MemoryAccessor::new(&fixture!("warc", "good_resource.warc").await, 1).with_empty_chunk(0);
     let observed = input.observations.clone();
     let mut reader = WarcAccessor::new(input)
         .open("a.warc".into())

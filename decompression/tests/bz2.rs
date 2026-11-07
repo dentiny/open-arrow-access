@@ -1,6 +1,5 @@
 use std::num::NonZeroUsize;
 
-use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, Result};
 use open_arrow_access_decompression::{Bzip2, DecompressionLayer};
 
@@ -16,14 +15,7 @@ async fn concatenated_members_preserve_order_with_fragmented_input_and_bounded_o
         let accessor = MemoryAccessor::new(&bytes, chunk_size)
             .layer(DecompressionLayer::new(Bzip2).with_chunk_size(NonZeroUsize::new(3).unwrap()));
         let mut reader = accessor.open("records.bz2".into()).await?;
-        let mut output = Vec::new();
-        while let Some(chunk) = reader.next().await? {
-            assert_gt!(chunk.len(), 0);
-            assert_le!(chunk.len(), 3);
-            output.extend_from_slice(&chunk);
-        }
-        assert_eq!(output, "first\n第二行\n".as_bytes());
-        assert!(reader.next().await?.is_none());
+        byte_layer::assert_output(reader.as_mut(), "first\n第二行\n".as_bytes(), 3).await?;
     }
     let accessor = MemoryAccessor::new(&fixture!("bz2", "empty_member.bz2").await, 1)
         .layer(DecompressionLayer::new(Bzip2));

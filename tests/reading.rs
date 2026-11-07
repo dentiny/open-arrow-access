@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex, atomic::Ordering},
 };
 
-use arrow_array::{Int64Array, StringArray};
+use arrow_array::{StringArray, types::Int64Type};
 use futures::TryStreamExt;
 use more_asserts::{assert_gt, assert_le};
 use open_arrow_access::{
@@ -89,17 +89,7 @@ async fn projection_honors_requested_field_order_and_schema() {
         7,
     )
     .await;
-    let values = batches
-        .iter()
-        .flat_map(|b| {
-            b.column(1)
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .unwrap()
-                .values()
-                .to_vec()
-        })
-        .collect::<Vec<_>>();
+    let values = open_arrow_access_test_support::record::collect_values::<Int64Type>(&batches, 1);
     assert_eq!(values, (0..7).collect::<Vec<_>>());
 }
 

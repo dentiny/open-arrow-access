@@ -1,7 +1,6 @@
 use std::{error::Error as _, num::NonZeroUsize};
 
 use futures::TryStreamExt;
-use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, ErrorKind, ObjectRef,
     Result,
@@ -21,14 +20,7 @@ async fn members_preserve_order_and_output_chunk_limit() -> Result<()> {
         let accessor = MemoryAccessor::new(&input, 1)
             .layer(DecompressionLayer::new(Gzip).with_chunk_size(NonZeroUsize::new(3).unwrap()));
         let mut reader = accessor.open("data.gz".into()).await?;
-        let mut output = Vec::new();
-        while let Some(bytes) = reader.next().await? {
-            assert_gt!(bytes.len(), 0);
-            assert_le!(bytes.len(), 3);
-            output.extend_from_slice(&bytes);
-        }
-        assert_eq!(output, expected);
-        assert!(reader.next().await?.is_none());
+        byte_layer::assert_output(reader.as_mut(), expected, 3).await?;
     }
     Ok(())
 }
