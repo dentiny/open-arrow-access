@@ -6,6 +6,7 @@ mod dataset;
 mod metadata;
 mod options;
 mod request;
+mod validation;
 
 pub use accessor::HuggingFaceAccessor;
 pub use client::HuggingFaceService;

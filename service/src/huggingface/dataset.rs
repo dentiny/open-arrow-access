@@ -8,7 +8,7 @@ use open_arrow_access_file_format::ParquetAccessor;
 
 use super::{
     HuggingFaceAccessor, HuggingFaceDatasetRequest, HuggingFaceRepository, HuggingFaceService,
-    accessor::validate_path,
+    validation::validate_path,
 };
 
 impl HuggingFaceService {
