@@ -8,9 +8,10 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
-pmc = ["dep:arrow-array", "dep:arrow-schema", "dep:serde", "dep:serde_json"]
+pmc = ["dep:arrow-array", "dep:arrow-schema", "dep:serde", "dep:serde_json", "dep:futures"]
 
 [dependencies]
+futures = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
@@ -19,7 +20,6 @@ serde_json = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 
 [dev-dependencies]
-futures.workspace = true
 open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-test-support.workspace = true
 open-arrow-access-storage.workspace = true

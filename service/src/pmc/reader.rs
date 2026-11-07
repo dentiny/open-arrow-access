@@ -1,48 +1,30 @@
-use super::{PmcLimits, capability, input::read_bounded, metadata};
-use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Capability, ReadRequest, Reader, RecordBatch,
-    RecordMetadata, Result, async_trait,
-};
 use std::sync::Arc;
 
-pub(super) struct PmcReader<A> {
-    pub accessor: Arc<A>,
-    pub request: Option<ReadRequest>,
-    pub limits: PmcLimits,
-    pub metadata: RecordMetadata,
-}
-impl<A> PmcReader<A>
+use futures::stream;
+use open_arrow_access_core::{
+    Accessor, ByteReadRequest, ByteReader, ReadRequest, RecordMetadata, RecordReader, StreamReader,
+    read_limited,
+};
+
+use super::{PmcLimits, metadata};
+
+/// Read one bounded metadata object with shared terminal-state handling.
+pub(super) fn create_reader<A>(
+    accessor: Arc<A>,
+    request: ReadRequest,
+    limits: PmcLimits,
+    metadata: RecordMetadata,
+) -> impl RecordReader
 where
-    A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+    A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,
 {
-    async fn read_article(&self, request: ReadRequest) -> Result<RecordBatch> {
-        let raw = read_bounded(
-            self.accessor.as_ref(),
-            request.object.clone(),
-            request.byte_options,
-            self.limits.metadata_bytes.get(),
-        )
-        .await?;
-        metadata::decode_batch(&raw, request.object.locator(), self.metadata.schema.clone())
-    }
-}
-#[async_trait]
-impl<A> Reader for PmcReader<A>
-where
-    A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
-{
-    type Item = RecordBatch;
-    type Metadata = RecordMetadata;
-    fn capability(&self) -> Capability {
-        capability(true)
-    }
-    fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
-    }
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        let Some(request) = self.request.take() else {
-            return Ok(None);
-        };
-        self.read_article(request).await.map(Some)
-    }
+    let schema = metadata.schema.clone();
+    let stream = stream::once(async move {
+        let input = accessor
+            .open(ByteReadRequest::new(request.object.clone()).with_options(request.byte_options))
+            .await?;
+        let raw = read_limited(input, limits.metadata_bytes.get(), "read_pmc").await?;
+        metadata::decode_batch(&raw, request.object.locator(), schema)
+    });
+    StreamReader::new(stream, metadata)
 }

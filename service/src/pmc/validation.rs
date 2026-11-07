@@ -1,5 +1,5 @@
 use super::decode;
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::Result;
 
 pub(super) fn validate_pmcid(pmcid: &str, path: &str) -> Result<()> {
     let value = pmcid.trim();
@@ -24,36 +24,4 @@ pub(super) fn validate_article_version(version: Option<u32>, path: &str) -> Resu
         return Err(decode(format!("{path}: article version must be positive")));
     }
     Ok(())
-}
-
-pub(super) fn validate_content_length(length: Option<u64>, limit: usize, path: &str) -> Result<()> {
-    if length.is_some_and(|size| size > limit as u64) {
-        return Err(object_limit(path, limit));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_chunk(
-    bytes: &[u8],
-    remaining: usize,
-    limit: usize,
-    path: &str,
-) -> Result<()> {
-    if bytes.is_empty() {
-        return Err(Error::new(
-            ErrorKind::Io,
-            "read_pmc",
-            format!("{path}: empty byte chunk"),
-        ));
-    }
-    if bytes.len() > remaining {
-        return Err(object_limit(path, limit));
-    }
-    Ok(())
-}
-
-fn object_limit(path: &str, limit: usize) -> Error {
-    decode(format!(
-        "{path}: exceeds configured {limit}-byte object limit"
-    ))
 }

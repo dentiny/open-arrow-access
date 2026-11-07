@@ -80,3 +80,6 @@ The JSON file-format feature is not required.
 The row target is an upper bound; this single-object service emits at most one
 batch with one row. It does not fetch an inventory, choose a snapshot, filter
 licences, extract text, or write Lance datasets.
+
+The article reader uses core `read_limited` for byte bounds and `StreamReader`
+for terminal handling. JSON conversion and article validation stay in PMC.

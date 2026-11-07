@@ -2,7 +2,6 @@
 //! Content URLs are metadata only; content objects are never opened.
 
 mod accessor;
-mod input;
 mod metadata;
 mod reader;
 mod validation;
