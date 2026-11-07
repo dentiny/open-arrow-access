@@ -1,56 +1,28 @@
-use open_arrow_access_core::{
-    Capability, Error, ErrorKind, ReadState, Reader, RecordBatch, RecordMetadata, Result,
-    async_trait,
-};
+use futures::stream;
+use open_arrow_access_core::{Error, ErrorKind, RecordMetadata, RecordReader, StreamReader};
 
 use super::xml_error;
 
-pub(super) struct XmlRecordReader {
-    pub(super) reader: xml_arrow::XmlReader<'static>,
-    pub(super) metadata: RecordMetadata,
-    pub(super) projection: Option<Vec<usize>>,
-    pub(super) state: ReadState,
-}
-
-#[async_trait]
-impl Reader for XmlRecordReader {
-    type Item = RecordBatch;
-    type Metadata = RecordMetadata;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-    }
-
-    fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
-    }
-
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.state.is_finished() {
-            return Ok(None);
-        }
-        let result = self
-            .reader
-            .next_batch()
-            .await
-            .map_err(xml_error)
-            .and_then(|batch| {
-                batch
-                    .map(|batch| match &self.projection {
-                        None => Ok(batch),
-                        Some(indices) => batch.project(indices).map_err(|error| {
-                            Error::new(ErrorKind::Decode, "read_xml", error.to_string())
-                                .with_source(error)
-                        }),
-                    })
-                    .transpose()
-            });
-        self.state.observe(&result);
-        result
-    }
+/// Adapt native XML batches while retaining format-specific projection and errors.
+pub(super) fn xml_reader(
+    reader: xml_arrow::XmlReader<'static>,
+    metadata: RecordMetadata,
+    projection: Option<Vec<usize>>,
+) -> impl RecordReader {
+    let stream = stream::try_unfold(
+        (reader, projection),
+        |(mut reader, projection)| async move {
+            let Some(batch) = reader.next_batch().await.map_err(xml_error)? else {
+                return Ok(None);
+            };
+            let batch = match &projection {
+                None => batch,
+                Some(indices) => batch.project(indices).map_err(|error| {
+                    Error::new(ErrorKind::Decode, "read_xml", error.to_string()).with_source(error)
+                })?,
+            };
+            Ok(Some((batch, (reader, projection))))
+        },
+    );
+    StreamReader::new(stream, metadata)
 }
