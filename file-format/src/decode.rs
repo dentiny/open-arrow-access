@@ -63,7 +63,7 @@ impl<D: BatchDecoder> DecodeState<D> {
     }
 }
 
-pub(crate) fn decode_reader<D: BatchDecoder>(
+pub(crate) fn create_reader<D: BatchDecoder>(
     input: Box<dyn ByteReader>,
     decoder: D,
     metadata: RecordMetadata,
