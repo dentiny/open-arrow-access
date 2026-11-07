@@ -8,7 +8,7 @@ use open_arrow_access::{
 
 #[tokio::test]
 async fn facade_reads_atif_jsonl_and_ordered_file_sets() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/atif");
+    let root = open_arrow_access_test_support::fixture_path!("atif", "");
     let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(&root));
     let mut reader = AtifAccessor::new(bytes, AtifFormat::JsonLines)
         .open(ReadRequest::new("trajectories.jsonl"))

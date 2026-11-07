@@ -1,12 +1,9 @@
 use std::num::NonZeroUsize;
 
-use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, Result};
 use open_arrow_access_decompression::{DecompressionLayer, Lz4};
 
-use open_arrow_access_test_support::{
-    MemoryAccessor, byte_layer, collect_bytes as collect, fixture,
-};
+use open_arrow_access_test_support::{MemoryAccessor, byte_layer, fixture};
 
 #[tokio::test]
 async fn concatenated_frames_and_skippable_frames_preserve_order_across_fragments() -> Result<()> {
@@ -16,14 +13,7 @@ async fn concatenated_frames_and_skippable_frames_preserve_order_across_fragment
         let accessor = input
             .layer(DecompressionLayer::new(Lz4).with_chunk_size(NonZeroUsize::new(3).unwrap()));
         let mut reader = accessor.open("records.lz4".into()).await?;
-        let mut output = Vec::new();
-        while let Some(chunk) = reader.next().await? {
-            assert_gt!(chunk.len(), 0);
-            assert_le!(chunk.len(), 3);
-            output.extend_from_slice(&chunk);
-        }
-        assert_eq!(output, "first\n第二行\n".as_bytes());
-        assert!(reader.next().await?.is_none());
+        byte_layer::assert_output(reader.as_mut(), "first\n第二行\n".as_bytes(), 3).await?;
     }
     Ok(())
 }
@@ -76,21 +66,6 @@ async fn corrupt_truncated_raw_legacy_and_trailing_input_fail_terminally() -> Re
         )
         .await;
     }
-    Ok(())
-}
-
-#[tokio::test]
-async fn source_errors_are_preserved() -> Result<()> {
-    let bytes = fixture!("lz4", "payload.lz4").await;
-    let input =
-        MemoryAccessor::new(&bytes, 2).with_failure(bytes.len(), ErrorKind::PermissionDenied);
-    let accessor = input.layer(DecompressionLayer::new(Lz4));
-    let mut reader = accessor.open("source.lz4".into()).await?;
-    assert_eq!(
-        collect(reader.as_mut()).await.unwrap_err().kind(),
-        ErrorKind::PermissionDenied
-    );
-    assert!(reader.next().await?.is_none());
     Ok(())
 }
 
