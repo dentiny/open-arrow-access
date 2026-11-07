@@ -120,6 +120,7 @@ impl ByteAccessor for FsAccessor {
                 "expected a root-relative directory path without surrounding whitespace",
             ));
         }
+        self.inner.validate_directory(&request.prefix).await?;
         self.inner.list(request).await
     }
 }

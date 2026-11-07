@@ -129,7 +129,7 @@ for TSV.
 | `storage/` | OpenDAL Fs, recursive file discovery and reusable generic byte I/O, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Reserved; no Hugging Face or other source adapter yet |
+| `service/` | Shared provider crate scaffold; provider implementations arrive under separate default-off features |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
@@ -378,3 +378,16 @@ cargo run --example read_atif --features storage-fs,format-atif -- testdata/atif
 
 The adapter uses the published `atif-arrow 0.3.0` crate with Arrow 59;
 see [dependency alignment](docs/dependencies.md#atif-parser).
+
+## Caller-configured storage
+
+Enable `storage-opendal` to use `storage::{OpenDalAccessor, opendal}` with a
+caller-configured SDK operator, independently of any dataset provider. Backend
+features and credentials stay under the caller's control.
+
+Generic listing accepts implicit object-store directory prefixes without first
+requiring a directory object or `stat` support. The empty prefix selects the
+root, and `ListRequest::recursive` controls traversal. `FsAccessor` preserves
+its stricter requirement that the requested prefix name an existing directory.
+Object and prefix locators must be canonical root-relative paths; aliases such
+as leading slashes, dot components, and repeated separators are rejected.

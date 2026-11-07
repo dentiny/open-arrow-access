@@ -33,6 +33,24 @@ impl OpenDalAccessor {
         }
     }
 
+    #[cfg(feature = "fs")]
+    pub(crate) async fn validate_directory(&self, prefix: &ObjectRef) -> Result<()> {
+        let path = prefix.locator();
+        let metadata = self
+            .operator
+            .stat(path)
+            .await
+            .map_err(|error| map_error("list", path, error))?;
+        if !metadata.is_dir() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "list",
+                "prefix is not a directory",
+            ));
+        }
+        Ok(())
+    }
+
     /// Bound emitted chunks independently of storage I/O splitting.
     pub fn with_chunk_size(mut self, chunk_size: NonZeroUsize) -> Self {
         self.chunk_size = chunk_size;
@@ -54,13 +72,14 @@ impl Accessor for OpenDalAccessor {
             read_with_range: read,
             read_parallel: false,
             // OpenDAL can walk nonrecursive backend listings.
-            list: upstream.stat && upstream.list,
+            list: upstream.list,
         }
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let ByteReadRequest { object, options } = request;
         let path = object.locator();
+        validate_locator(path, false, "open")?;
         let metadata = self
             .operator
             .stat(path)
@@ -114,19 +133,15 @@ impl Accessor for OpenDalAccessor {
 #[async_trait]
 impl ByteAccessor for OpenDalAccessor {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        let path = request.prefix.locator();
-        let metadata = self
-            .operator
-            .stat(path)
-            .await
-            .map_err(|e| map_error("list", path, e))?;
-        if !metadata.is_dir() {
+        if !self.capability().list {
             return Err(Error::new(
-                ErrorKind::InvalidInput,
+                ErrorKind::Unsupported,
                 "list",
-                "prefix is not a directory",
+                "operator does not support listing",
             ));
         }
+        let path = request.prefix.locator();
+        validate_locator(path, true, "list")?;
         let path = if path.is_empty() {
             String::new()
         } else {
@@ -407,4 +422,27 @@ pub(crate) fn map_error(operation: &'static str, path: &str, error: opendal::Err
         _ => ErrorKind::Io,
     };
     Error::new(kind, operation, format!("object {path:?}")).with_source(error)
+}
+
+fn validate_locator(path: &str, prefix: bool, operation: &'static str) -> Result<()> {
+    let base = if prefix {
+        path.strip_suffix('/').unwrap_or(path)
+    } else {
+        path
+    };
+    if path.trim() != path
+        || path.starts_with('/')
+        || (!prefix && path.is_empty())
+        || (!base.is_empty()
+            && base
+                .split('/')
+                .any(|part| part.is_empty() || matches!(part, "." | "..")))
+    {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            operation,
+            "expected a canonical root-relative locator",
+        ));
+    }
+    Ok(())
 }

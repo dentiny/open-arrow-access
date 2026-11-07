@@ -10,3 +10,6 @@ pub use fs::FsAccessor;
 mod tests;
 
 pub use backend::OpenDalAccessor;
+
+/// OpenDAL SDK used by the generic adapter.
+pub use opendal;

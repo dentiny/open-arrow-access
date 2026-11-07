@@ -1136,6 +1136,7 @@ dependencies = [
  "open-arrow-access-file-format",
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
+ "opendal",
  "parquet",
  "tempfile",
  "tokio",
@@ -1191,6 +1192,13 @@ dependencies = [
  "parquet",
  "tokio",
  "xml-arrow",
+]
+
+[[package]]
+name = "open-arrow-access-service"
+version = "0.1.0"
+dependencies = [
+ "open-arrow-access-core",
 ]
 
 [[package]]
