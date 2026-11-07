@@ -24,7 +24,7 @@ open-arrow-access-storage = { workspace = true, optional = true }
 opendal = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
-serde_json = { version = "1", optional = true }
+serde_json = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 
 [dev-dependencies]
