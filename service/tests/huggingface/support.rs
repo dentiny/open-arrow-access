@@ -7,10 +7,11 @@ use std::{
     },
 };
 
-use arrow_array::{cast::AsArray, types::Int64Type};
+use arrow_array::types::Int64Type;
 use futures::stream;
 use http::{Request, Response, StatusCode};
 use open_arrow_access_core::Bytes;
+use open_arrow_access_test_support::{fixture, record::collect_column};
 use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter};
 use serde_json::json;
 
@@ -59,12 +60,9 @@ impl ExportHub {
     pub(super) async fn new(entries: &[ExportEntry<'_>]) -> Self {
         let mut files = BTreeMap::new();
         for entry in entries {
-            let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../testdata/parquet")
-                .join(entry.fixture_path);
             files.insert(
                 entry.repository_path.to_owned(),
-                Bytes::from(tokio::fs::read(fixture).await.unwrap()),
+                Bytes::from(fixture!("parquet", entry.fixture_path).await),
             );
         }
         Self {
@@ -94,12 +92,8 @@ impl ExportHub {
     }
 
     pub(super) async fn read_ids(&self, request: HuggingFaceDatasetRequest) -> Vec<i64> {
-        let mut reader = self.service().await.dataset(request).await.unwrap();
-        let mut ids = Vec::new();
-        while let Some(batch) = reader.next().await.unwrap() {
-            ids.extend_from_slice(batch.column(0).as_primitive::<Int64Type>().values());
-        }
-        ids
+        let reader = self.service().await.dataset(request).await.unwrap();
+        collect_column::<Int64Type>(reader, 0).await
     }
 
     pub(super) fn requests(&self) -> Vec<String> {

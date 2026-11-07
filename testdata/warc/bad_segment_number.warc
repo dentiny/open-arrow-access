@@ -1,9 +1,0 @@
-WARC/1.1
-WARC-Type: continuation
-WARC-Record-ID: <urn:test:a>
-WARC-Date: 2020-07-08T02:52:55Z
-Content-Length: 4
-WARC-Segment-Number: nope
-
-body
-
