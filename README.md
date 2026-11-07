@@ -258,9 +258,9 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 Start at the [test index and placement rules](tests/README.md) to find or add a
 suite. Each crate owns tests in its `tests/` directory; the root `tests/` covers
 facade wiring and cross-crate composition. CSV/TSV, JSON/JSONL, XML and ATIF suites
-live together in `file-format/tests/`. Private implementation tests live in the
-owning crate's `tests/unit/`, explicitly included by its library. Optional test
-targets declare `required-features` in `Cargo.toml`.
+live together in `file-format/tests/`. Private implementation tests, when needed,
+belong in the owning crate's `tests/unit/`, explicitly included by its library.
+Optional test targets declare `required-features` in `Cargo.toml`.
 
 Tests read checked-in Parquet, CSV/TSV, and JSON/JSONL files from `testdata/`. They verify ordered rows and
 nulls across row groups, schema metadata, projection, storage-independent
