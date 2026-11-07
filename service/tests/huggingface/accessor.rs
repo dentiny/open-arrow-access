@@ -14,8 +14,7 @@ async fn constructor_is_lazy_send_and_redacts_token() {
     install_mock_transport();
     let options = HuggingFaceOptions::default()
         .with_endpoint("https://huggingface.co")
-        .with_token(TOKEN)
-        .with_http_downloads();
+        .with_token(TOKEN);
     assert!(!format!("{options:?}").contains(TOKEN));
     let service = tokio::spawn(HuggingFaceService::new(options))
         .await
