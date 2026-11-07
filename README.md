@@ -138,7 +138,7 @@ for TSV.
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | PMC metadata discovery and original PDF URLs over supplied byte accessors, reusing JSON → Arrow |
+| `service/` | Single-object PMC article metadata with upstream field names, nullable content URLs and verbatim JSON |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
@@ -150,14 +150,11 @@ enabled by `decompression-gzip`, `decompression-lz4`, `decompression-bz2`, and `
 It produces sequential bytes and cannot directly satisfy Parquet's range reads.
 Parallel reads and unordered emission are not implemented.
 
-Enable `service-pmc` for `service::pmc::{PmcAccessor, PmcRequest}`. Read a single
-PMC metadata object, an explicit file list, or stream discovery under `metadata/`;
-each output row combines mapped metadata, the original PDF URL and verbatim
-source JSON. Only metadata objects are read; PDFs are never downloaded. Supply
-an existing bucket-rooted OpenDAL byte accessor or a metadata-only local mirror.
-The source reuses our JSON reader, has per-object limits and bounded batch
-payload targets, and reads articles sequentially. See the [PMC source guide](service/README.md)
-and `read_pmc` example for configuration and schema details.
+Enable `service-pmc` for `service::pmc::PmcAccessor`. Open one article-version
+metadata JSON with `ReadRequest`; every valid object yields one row, including
+articles without a PDF URL. Upstream field names, flags, content URLs, and raw
+JSON are preserved. Content objects are never opened. Inventory enumeration is
+a separate service; see the [service guide](service/README.md).
 
 Enable `dataset-directory` for `DirectoryAccessor` and `FileSetAccessor`. Directory
 selection uses a supplied byte accessor for discovery and a supplied format

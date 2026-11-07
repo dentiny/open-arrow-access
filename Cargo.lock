@@ -1207,7 +1207,6 @@ dependencies = [
  "open-arrow-access-file-format",
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
- "percent-encoding",
  "serde",
  "serde_json",
  "tempfile",

@@ -1,6 +1,6 @@
 use open_arrow_access::{
-    Accessor,
-    service::pmc::{PmcAccessor, PmcRequest},
+    Accessor, ReadRequest,
+    service::pmc::PmcAccessor,
     storage::{OpenDalAccessor, opendal},
 };
 
@@ -9,10 +9,7 @@ use open_arrow_access::{
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let root = args.next().expect("expected PMC mirror root");
-    let request = match args.next() {
-        Some(path) => PmcRequest::new(path),
-        None => PmcRequest::prefix("metadata/"),
-    };
+    let request = ReadRequest::new(args.next().expect("expected metadata object"));
     let operator = opendal::Operator::new(opendal::services::Fs::default().root(&root))?;
     let source = PmcAccessor::new(OpenDalAccessor::new(operator));
     let mut reader = source.open(request).await?;

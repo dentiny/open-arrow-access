@@ -49,7 +49,6 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tempfile = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
-percent-encoding = "2"
 open-arrow-access-core = { path = "core", version = "0.1.0" }
 open-arrow-access-storage = { path = "storage", version = "0.1.0", default-features = false }
 open-arrow-access-file-format = { path = "file-format", version = "0.1.0", default-features = false }
@@ -83,7 +82,7 @@ open-arrow-access-file-format = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 
 [dev-dependencies]
-opendal = { workspace = true, features = ["services-fs", "services-memory"] }
+opendal = { workspace = true, features = ["services-fs"] }
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true

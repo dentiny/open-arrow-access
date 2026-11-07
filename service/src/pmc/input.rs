@@ -26,8 +26,7 @@ where
     Ok(output)
 }
 
-/// Normalized metadata JSONL for one batch, consumed by the existing JsonAccessor.
-/// It never contains the PDF payload or the verbatim raw JSON column.
+/// Mapped scalar metadata consumed by the existing JsonAccessor.
 pub(super) struct JsonInput(pub Bytes);
 
 struct JsonReader {

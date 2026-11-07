@@ -1,52 +1,26 @@
-use super::{decode, invalid};
-use open_arrow_access_core::{Error, ErrorKind, ObjectRef, Result};
+use super::decode;
+use open_arrow_access_core::{Error, ErrorKind, Result};
 
-pub(super) fn validate_metadata_objects(objects: &[ObjectRef]) -> Result<()> {
-    if objects.iter().any(|object| !valid_path(object.locator())) {
-        return Err(invalid(
-            "metadata objects must be bucket-relative paths without dot components",
-        ));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_listing_support(supported: bool) -> Result<()> {
-    if !supported {
+pub(super) fn validate_metadata_locator(path: &str) -> Result<()> {
+    if !valid_path(path) {
         return Err(Error::new(
-            ErrorKind::Unsupported,
+            ErrorKind::InvalidInput,
             "open_pmc",
-            "byte accessor does not support listing; use explicit metadata files",
+            "expected a bucket-relative metadata object",
         ));
     }
     Ok(())
 }
-
-pub(super) fn validate_prefix(prefix: &str) -> Result<()> {
-    let path = prefix.strip_suffix('/').unwrap_or(prefix);
-    if prefix == "/" || (!path.is_empty() && !valid_path(path)) {
-        return Err(invalid("expected a bucket-relative directory prefix"));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_discovered_path<'a>(
-    path: &'a str,
-    prefix: &str,
-    recursive: bool,
-) -> Result<Option<&'a str>> {
-    let relative = path
-        .strip_prefix(prefix)
-        .ok_or_else(|| invalid("PMC listing returned an object outside its prefix"))?;
-    if relative.is_empty() || relative.ends_with('/') {
-        return Ok(None);
-    }
-    if !valid_path(relative) || (!recursive && relative.contains('/')) {
-        return Err(invalid("PMC listing returned an invalid object path"));
-    }
-    Ok(Some(relative))
-}
-
-pub(super) fn validate_pmcid_digits(digits: &str, path: &str) -> Result<()> {
+pub(super) fn validate_pmcid(pmcid: &str, path: &str) -> Result<()> {
+    let value = pmcid.trim();
+    let digits = if value
+        .get(..3)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("PMC"))
+    {
+        &value[3..]
+    } else {
+        value
+    };
     if digits.is_empty()
         || !digits.bytes().all(|b| b.is_ascii_digit())
         || digits.bytes().all(|b| b == b'0')
@@ -55,26 +29,9 @@ pub(super) fn validate_pmcid_digits(digits: &str, path: &str) -> Result<()> {
     }
     Ok(())
 }
-
 pub(super) fn validate_article_version(version: Option<u32>, path: &str) -> Result<()> {
     if version == Some(0) {
         return Err(decode(format!("{path}: article version must be positive")));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_pdf_url(uri: &str) -> Result<()> {
-    let invalid = || decode(format!("invalid PMC PDF URL: {uri}"));
-    let path = uri
-        .strip_prefix("s3://pmc-oa-opendata/")
-        .ok_or_else(invalid)?;
-    let path = path.split(['?', '#']).next().unwrap_or_default();
-    // Decode exactly once; '+' is a literal filename character.
-    let path = percent_encoding::percent_decode_str(path)
-        .decode_utf8()
-        .map_err(|_| invalid())?;
-    if !valid_path(&path) {
-        return Err(invalid());
     }
     Ok(())
 }
