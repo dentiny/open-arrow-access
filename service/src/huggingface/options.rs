@@ -47,30 +47,28 @@ impl HuggingFaceOptions {
         }
         self.token = std::env::var("HF_TOKEN").ok().filter(|s| !s.is_empty());
         if self.token.is_none() {
-            let path = std::env::var_os("HF_TOKEN_PATH")
-                .map(PathBuf::from)
-                .or_else(|| {
-                    std::env::var_os("HF_HOME")
-                        .map(PathBuf::from)
-                        .or_else(|| {
-                            std::env::var_os("XDG_CACHE_HOME")
-                                .map(|p| PathBuf::from(p).join("huggingface"))
-                        })
-                        .or_else(|| {
-                            std::env::var_os("HOME")
-                                .map(|p| PathBuf::from(p).join(".cache/huggingface"))
-                        })
-                        .map(|p| p.join("token"))
-                });
-            if let Some(path) = path {
-                self.token = tokio::fs::read_to_string(path)
-                    .await
-                    .ok()
-                    .map(|s| s.trim().to_owned())
-                    .filter(|s| !s.is_empty());
-            }
+            self.token = read_cached_token().await;
         }
     }
+}
+
+async fn read_cached_token() -> Option<String> {
+    let path = if let Some(path) = std::env::var_os("HF_TOKEN_PATH") {
+        PathBuf::from(path)
+    } else {
+        [
+            ("HF_HOME", "token"),
+            ("XDG_CACHE_HOME", "huggingface/token"),
+            ("HOME", ".cache/huggingface/token"),
+        ]
+        .into_iter()
+        .find_map(|(name, suffix)| {
+            std::env::var_os(name).map(|path| PathBuf::from(path).join(suffix))
+        })?
+    };
+    let token = tokio::fs::read_to_string(path).await.ok()?;
+    let token = token.trim();
+    (!token.is_empty()).then(|| token.to_owned())
 }
 
 /// A dataset repository and its file namespace. Revisions may be branches or SHAs.
