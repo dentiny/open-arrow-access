@@ -2,8 +2,8 @@ use std::num::NonZeroUsize;
 
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    ByteReadRequest, ByteReader, Error, ErrorKind, ReaderFactory, Result, StreamReader,
-    async_trait, into_async_read, read_chunks,
+    ByteReadRequest, ByteReader, Error, ErrorKind, FactoryToken, ReaderFactory, Result,
+    StreamReader, async_trait, into_async_read, read_chunks,
 };
 
 use crate::{Codec, layer::DEFAULT_CHUNK_SIZE};
@@ -42,6 +42,7 @@ impl<C: Codec> ReaderFactory for DecompressionFactory<C> {
 
     async fn create_reader(
         &self,
+        _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         _request: ByteReadRequest,
         (): (),

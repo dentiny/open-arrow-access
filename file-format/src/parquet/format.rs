@@ -1,7 +1,7 @@
 use super::{decode_error, input::ParquetInput, reader::parquet_reader};
 use open_arrow_access_core::{
-    ByteReader, Capability, Error, ErrorKind, ReadRequest, ReaderFactory, RecordMetadata,
-    RecordReader, Result, async_trait,
+    ByteReader, Capability, Error, ErrorKind, FactoryToken, ReadRequest, ReaderFactory,
+    RecordMetadata, RecordReader, Result, async_trait,
 };
 use parquet::arrow::{ProjectionMask, async_reader::ParquetRecordBatchStreamBuilder};
 
@@ -30,6 +30,7 @@ impl ReaderFactory for ParquetFormat {
 
     async fn create_reader(
         &self,
+        _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
         (): (),

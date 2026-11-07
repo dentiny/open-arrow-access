@@ -182,9 +182,9 @@ bytes and other parsed items distinct. `Prepared: Send` retains per-open decoder
 and resolved schemas without repeating validation or constructing a decoder twice.
 The default `ReaderFactory::open_reader` runs synchronous `prepare(&request)`,
 converts the request into `ByteReadRequest`, opens storage, then invokes
-`create_reader` with the owned
-input and prepared state. Preparation performs no I/O; reader creation can inspect
-input and must expose metadata when it completes. Errors pass through unchanged.
+`create_reader` with a borrowed `FactoryToken`, the owned input and prepared
+state. Preparation performs no I/O; reader creation can inspect input and must
+expose metadata when it completes. Errors pass through unchanged.
 
 `FileAccessor<B, F>` delegates opening to this shared flow and uses the factory's
 request and reader types. Existing Arrow formats use `ReadRequest` and
@@ -214,6 +214,11 @@ decoded content length. Listing stays with `DecompressionAccessor`, which forwar
 the upstream listing capability and requests. Factories describe reader output
 and do not advertise listing. Multi-object discovery and file-set orchestration
 remain accessor responsibilities.
+
+Creation hooks require `&FactoryToken`. The type is public for cross-crate
+implementations, but its field and construction are private to core. It has no
+public constructor, `Default`, or `Clone`. Only the default `open_reader` supplies
+a token; ordinary callers without one cannot bypass that entry point.
 
 | Adapter | Request | Reader |
 | --- | --- | --- |

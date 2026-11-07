@@ -5,8 +5,8 @@ use std::{
 
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ByteReader, Capability, Error, ErrorKind, ReadOptions, ReadRequest,
-    RecordMetadata, RecordReader, Result, Schema, StreamReader, async_trait,
+    Accessor, ByteReadOptions, ByteReader, Capability, Error, ErrorKind, FactoryToken, ReadOptions,
+    ReadRequest, RecordMetadata, RecordReader, Result, Schema, StreamReader, async_trait,
 };
 use open_arrow_access_file_format::{FileAccessor, FileFormat};
 use open_arrow_access_test_support::MemoryAccessor;
@@ -39,6 +39,7 @@ impl FileFormat for ProbeFormat {
 
     async fn create_reader(
         &self,
+        _token: &FactoryToken,
         _input: Box<dyn ByteReader>,
         request: ReadRequest,
         prepared: usize,

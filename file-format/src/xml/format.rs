@@ -1,7 +1,7 @@
 use super::{reader::xml_reader, xml_error};
 use open_arrow_access_core::{
-    ByteReader, Error, ErrorKind, ReadRequest, ReaderFactory, RecordMetadata, RecordReader, Result,
-    SchemaRef, async_trait, into_async_read,
+    ByteReader, Error, ErrorKind, FactoryToken, ReadRequest, ReaderFactory, RecordMetadata,
+    RecordReader, Result, SchemaRef, async_trait, into_async_read,
 };
 use xml_arrow::{InferenceOptions, NamespaceBinding, ReaderOptions, XmlReader, XmlSchema};
 
@@ -148,6 +148,7 @@ impl ReaderFactory for XmlFormat {
 
     async fn create_reader(
         &self,
+        _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
         (validation_schema, options, explicit_schema): Self::Prepared,

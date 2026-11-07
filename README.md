@@ -435,24 +435,31 @@ Implement `ReaderFactory` for a new single-input format:
 2. Implement `prepare(&ReadRequest)` to validate fixed schemas/projections and
    construct per-open decoder state before storage I/O. Formats that inspect
    their input can use `()` as their prepared state.
-3. Implement async `create_reader(input, request, prepared)` to inspect owned
-   input and return a reader with metadata available. Keep format-specific
+3. Implement async `create_reader(token, input, request, prepared)` to inspect
+   owned input and return a reader with metadata available. Keep format-specific
    batching, projection pushdown and errors in the format.
 4. Override `capability(input)` when the default sequential behavior needs more
    input operations, such as exact ranges. Validate actual input capabilities
    and metadata during `create_reader`.
 
 `ReaderFactory::open_reader` runs preparation, opens storage, and invokes
-`create_reader`. Both `FileAccessor` and decompression use this default method. Conversion from `&Request`
-to `ByteReadRequest` forwards the exact object and byte options; the built-in
+`create_reader`. Both `FileAccessor` and decompression use this default method.
+Conversion from `&Request` to `ByteReadRequest` forwards the exact object and
+byte options; the built-in
 record and byte requests already support it. A custom single-input request can
 implement `From<&CustomRequest> for ByteReadRequest`.
 
 The protocol lives in `open-arrow-access-core` and is re-exported by the facade.
 `file_format::FileFormat` remains another name for `ReaderFactory`. Existing
 implementations must add the request/reader associated types, change `prepare`
-to accept the full request, and rename factory `open` to `create_reader`.
+to accept the full request, and rename factory `open` to `create_reader`,
+accepting a borrowed `FactoryToken`.
 Accessor constructors and builders keep their existing API.
+
+`FactoryToken` is public so other crates can implement the creation hook, but
+its construction is private. The default `open_reader` supplies a borrowed token
+after opening storage. No public constructor, `Default`, or `Clone` is provided,
+so callers without a token cannot directly invoke `create_reader` in safe Rust.
 
 Use `StreamReader` for existing streams, `into_async_read` for futures I/O
 parsers, and the [shared format assertions](test-support/README.md#format-contracts)

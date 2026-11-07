@@ -2,8 +2,8 @@ use super::reader::json_reader;
 use arrow_json::{ReaderBuilder, reader::Decoder};
 use arrow_schema::ArrowError;
 use open_arrow_access_core::{
-    ByteReader, Error, ErrorKind, ReadRequest, ReaderFactory, RecordMetadata, RecordReader, Result,
-    SchemaRef, async_trait,
+    ByteReader, Error, ErrorKind, FactoryToken, ReadRequest, ReaderFactory, RecordMetadata,
+    RecordReader, Result, SchemaRef, async_trait,
 };
 
 /// Read whitespace-separated JSON objects, including JSONL, with a fixed schema.
@@ -46,6 +46,7 @@ impl ReaderFactory for JsonFormat {
 
     async fn create_reader(
         &self,
+        _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
         (schema, decoder): Self::Prepared,

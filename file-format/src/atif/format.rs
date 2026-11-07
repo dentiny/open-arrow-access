@@ -1,8 +1,8 @@
 use super::reader::create_reader;
 use atif_arrow::trajectory_schema;
 use open_arrow_access_core::{
-    ByteReader, ReadRequest, ReaderFactory, RecordMetadata, RecordReader, Result, SchemaRef,
-    async_trait,
+    ByteReader, FactoryToken, ReadRequest, ReaderFactory, RecordMetadata, RecordReader, Result,
+    SchemaRef, async_trait,
 };
 
 /// The explicitly selected layout of ATIF documents; extensions are not inspected.
@@ -27,6 +27,7 @@ impl ReaderFactory for AtifFormat {
 
     async fn create_reader(
         &self,
+        _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
         (schema, projection): Self::Prepared,

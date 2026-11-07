@@ -2,8 +2,8 @@ use super::{CsvFormat, reader::csv_reader};
 use arrow_csv::{ReaderBuilder, reader::Decoder};
 use arrow_schema::{DataType, TimeUnit};
 use open_arrow_access_core::{
-    ByteReader, Error, ErrorKind, ReadRequest, ReaderFactory, RecordMetadata, RecordReader, Result,
-    SchemaRef, async_trait,
+    ByteReader, Error, ErrorKind, FactoryToken, ReadRequest, ReaderFactory, RecordMetadata,
+    RecordReader, Result, SchemaRef, async_trait,
 };
 
 /// Incrementally read CSV or TSV using an explicit positional schema.
@@ -71,6 +71,7 @@ impl ReaderFactory for CsvFileFormat {
 
     async fn create_reader(
         &self,
+        _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
         (schema, decoder): Self::Prepared,

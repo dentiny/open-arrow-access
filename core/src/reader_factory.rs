@@ -1,5 +1,11 @@
 use crate::{Accessor, ByteReadRequest, ByteReader, Capability, Reader, Result, async_trait};
 
+/// Supplied by [`ReaderFactory::open_reader`] to creation hooks.
+/// Public so other crates can implement hooks; only this module can construct it.
+pub struct FactoryToken {
+    _private: (),
+}
+
 /// Create an independently owned reader from one opened byte input.
 /// [`Self::open_reader`] prepares configuration before opening storage.
 #[async_trait]
@@ -24,11 +30,12 @@ pub trait ReaderFactory: Send + Sync {
     /// Validate configuration before storage opens; return configuration errors here.
     fn prepare(&self, request: &Self::Request) -> Result<Self::Prepared>;
 
-    /// Inspect opened bytes and create a reader with metadata available on return.
-    /// Preserve source errors and the reader lifecycle; the output cannot borrow
-    /// the factory or prepared state. Input inspection may perform I/O.
+    /// Inspect opened bytes and return an owned reader with metadata available.
+    /// Preserve source errors and lifecycle; inspection may perform I/O.
+    /// `token` is supplied by [`Self::open_reader`].
     async fn create_reader(
         &self,
+        token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: Self::Request,
         prepared: Self::Prepared,
@@ -46,6 +53,7 @@ pub trait ReaderFactory: Send + Sync {
         let prepared = self.prepare(&request)?;
         let byte_request = ByteReadRequest::from(&request);
         let input = storage.open(byte_request).await?;
-        self.create_reader(input, request, prepared).await
+        let token = FactoryToken { _private: () };
+        self.create_reader(&token, input, request, prepared).await
     }
 }
