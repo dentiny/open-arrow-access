@@ -1,17 +1,19 @@
 use futures::StreamExt;
 use open_arrow_access_core::{
-    Capability, Reader, RecordBatch, RecordMetadata, Result, async_trait,
+    Capability, ReadState, Reader, RecordBatch, RecordMetadata, Result, async_trait,
 };
 use parquet::arrow::async_reader::ParquetRecordBatchStream;
 
 use super::{decode_error, input::ParquetInput};
 
 /// Decode ordered Arrow batches while preserving the inspected output schema.
+// TODO: Read and decode row groups concurrently with bounded concurrency,
+// preserving row order and the fixed output schema.
 pub(super) struct ParquetReader {
     stream: ParquetRecordBatchStream<ParquetInput>,
     metadata: RecordMetadata,
     reorder: Option<Vec<usize>>,
-    finished: bool,
+    state: ReadState,
 }
 
 impl ParquetReader {
@@ -24,7 +26,7 @@ impl ParquetReader {
             stream,
             metadata,
             reorder,
-            finished: false,
+            state: ReadState::default(),
         }
     }
 }
@@ -38,6 +40,7 @@ impl Reader for ParquetReader {
         Capability {
             read: true,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }
@@ -47,7 +50,7 @@ impl Reader for ParquetReader {
     }
 
     async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.finished {
+        if self.state.is_finished() {
             return Ok(None);
         }
         let result = match self.stream.next().await {
@@ -67,9 +70,7 @@ impl Reader for ParquetReader {
                 .transpose()
                 .map_err(|e| decode_error("restore_schema", e))
         });
-        if !matches!(&result, Ok(Some(_))) {
-            self.finished = true;
-        }
+        self.state.observe(&result);
         result
     }
 }

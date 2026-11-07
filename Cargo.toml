@@ -7,7 +7,7 @@ description = "Composable read access to Apache Arrow streams"
 repository.workspace = true
 
 [workspace]
-members = ["core", "storage", "file-format"]
+members = ["core", "storage", "file-format", "dataset", "decompression", "test-support", "service"]
 resolver = "3"
 
 [workspace.package]
@@ -34,8 +34,10 @@ arrow-array = "59.3.0"
 arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
+xml-arrow = "0.2.0"
+atif-arrow = "0.3.0"
+warc = { package = "warc-rs", version = "=0.3.0", default-features = false }
 async-trait = "0.1.91"
-warc = { package = "warc-rs", version = "0.3.0", default-features = false }
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
 datafusion = { version = "55.2.0", default-features = false }
 bytes = "1"
@@ -49,21 +51,37 @@ tempfile = "3"
 open-arrow-access-core = { path = "core", version = "0.1.0" }
 open-arrow-access-storage = { path = "storage", version = "0.1.0", default-features = false }
 open-arrow-access-file-format = { path = "file-format", version = "0.1.0", default-features = false }
+open-arrow-access-decompression = { path = "decompression", version = "0.1.0", default-features = false }
+open-arrow-access-test-support = { path = "test-support" }
+
+open-arrow-access-dataset = { path = "dataset", version = "0.1.0", default-features = false }
+
+open-arrow-access-service = { path = "service", version = "0.1.0", default-features = false }
 
 [features]
 default = []
-storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
 format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
+dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
+format-atif = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/atif"]
+format-xml = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/xml"]
 format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
+decompression-gzip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip"]
+decompression-bz2 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
+decompression-lz4 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/lz4"]
+decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zstd"]
 
 [dependencies]
+open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
-open-arrow-access-storage = { workspace = true, optional = true }
+open-arrow-access-storage.workspace = true
 open-arrow-access-file-format = { workspace = true, optional = true }
+open-arrow-access-decompression = { workspace = true, optional = true }
 
 [dev-dependencies]
+opendal = { workspace = true, features = ["services-fs"] }
+open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
 bytes.workspace = true
@@ -71,30 +89,38 @@ futures.workspace = true
 more-asserts.workspace = true
 parquet.workspace = true
 tempfile.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["fs"] }
 
 [[test]]
-name = "json"
-required-features = ["format-json"]
-
-[[test]]
-name = "csv"
-required-features = ["format-csv"]
+name = "directory"
+required-features = ["dataset-directory"]
 
 [[test]]
 name = "reading"
-required-features = ["storage-fs", "format-parquet"]
-
-[[test]]
-name = "warc"
-required-features = ["format-warc"]
+required-features = ["format-parquet"]
 
 [[example]]
 name = "read_parquet"
-required-features = ["storage-fs", "format-parquet"]
+required-features = ["format-parquet"]
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
 [lints]
 workspace = true
+
+[[example]]
+name = "read_xml"
+required-features = ["format-xml"]
+
+[[example]]
+name = "read_atif"
+required-features = ["format-atif"]
+
+[[test]]
+name = "atif"
+required-features = ["format-atif", "dataset-directory"]
+
+[[test]]
+name = "warc"
+required-features = ["format-warc"]

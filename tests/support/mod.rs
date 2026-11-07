@@ -11,7 +11,7 @@ use arrow_array::Int64Array;
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes,
-    Capability, Error, ErrorKind, Layer, ObjectRef, ObjectStream, Reader, RecordBatch, Result,
+    Capability, Error, ErrorKind, Layer, ListRequest, ObjectStream, Reader, RecordBatch, Result,
     SchemaRef, async_trait,
 };
 use parquet::basic::Compression;
@@ -21,7 +21,7 @@ pub struct Fixture {
     pub schema: SchemaRef,
 }
 
-pub fn fixture(compression: Compression) -> Fixture {
+pub async fn fixture(compression: Compression) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let schema = Arc::new(Schema::new_with_metadata(
         vec![
@@ -35,7 +35,9 @@ pub fn fixture(compression: Compression) -> Fixture {
         Compression::SNAPPY => "ordered-snappy.parquet",
         other => panic!("no checked-in Parquet fixture for {other:?}"),
     };
-    std::fs::copy(fixture_path(name), dir.path().join("data.parquet")).unwrap();
+    tokio::fs::copy(fixture_path(name), dir.path().join("data.parquet"))
+        .await
+        .unwrap();
     Fixture { dir, schema }
 }
 
@@ -55,98 +57,7 @@ pub fn ids(batch: &RecordBatch) -> Vec<i64> {
         .to_vec()
 }
 
-/// An application-owned test backend; no dependency on a production storage crate.
-pub struct MemoryAccessor {
-    bytes: Bytes,
-    ranged: bool,
-}
-
-impl MemoryAccessor {
-    pub fn new(bytes: Bytes, ranged: bool) -> Self {
-        Self { bytes, ranged }
-    }
-}
-
-#[async_trait]
-impl Accessor for MemoryAccessor {
-    type Request = ByteReadRequest;
-    type Reader = dyn ByteReader;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: self.ranged,
-            list: false,
-        }
-    }
-
-    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        Ok(Box::new(MemoryReader {
-            metadata: ByteMetadata {
-                source: Some(request.object),
-                content_length: Some(self.bytes.len() as u64),
-                version: None,
-            },
-            bytes: self.bytes.clone(),
-            ranged: self.ranged,
-            emitted: false,
-        }) as Box<dyn ByteReader>)
-    }
-}
-
-struct MemoryReader {
-    bytes: Bytes,
-    metadata: ByteMetadata,
-    ranged: bool,
-    emitted: bool,
-}
-
-#[async_trait]
-impl Reader for MemoryReader {
-    type Item = Bytes;
-    type Metadata = ByteMetadata;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: self.ranged,
-            list: false,
-        }
-    }
-
-    fn metadata(&self) -> &ByteMetadata {
-        &self.metadata
-    }
-
-    async fn next(&mut self) -> Result<Option<Bytes>> {
-        if self.emitted || self.bytes.is_empty() {
-            return Ok(None);
-        }
-        self.emitted = true;
-        Ok(Some(self.bytes.clone()))
-    }
-}
-
-#[async_trait]
-impl ByteReader for MemoryReader {
-    async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
-        if !self.ranged {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "read_range",
-                "sequential only",
-            ));
-        }
-        if range.start > range.end || range.end > self.bytes.len() as u64 {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "read_range",
-                "invalid range",
-            ));
-        }
-        Ok(self.bytes.slice(range.start as usize..range.end as usize))
-    }
-}
+pub use open_arrow_access_test_support::MemoryAccessor;
 
 #[derive(Default)]
 pub struct Observations {
@@ -192,6 +103,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: inner.list,
         }
     }
@@ -216,8 +128,8 @@ struct ByteObserverReader {
 
 #[async_trait]
 impl<A: ByteAccessor> ByteAccessor for ByteObserverAccessor<A> {
-    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
-        self.inner.list(prefix).await
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        self.inner.list(request).await
     }
 }
 
@@ -237,6 +149,7 @@ impl Reader for ByteObserverReader {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: inner.list,
         }
     }
@@ -317,6 +230,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
         Capability {
             read: self.0.capability().read,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }
@@ -337,6 +251,7 @@ impl Reader for SequentialReader {
         Capability {
             read: self.0.capability().read,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }

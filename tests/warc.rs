@@ -50,6 +50,7 @@ impl Accessor for Memory {
         Capability {
             read: true,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }
@@ -85,6 +86,7 @@ impl Reader for Input {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: inner.list,
         }
     }

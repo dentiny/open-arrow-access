@@ -2,8 +2,8 @@ use std::io;
 
 use futures::{StreamExt, TryStreamExt, io::AsyncBufRead};
 use open_arrow_access_core::{
-    ByteReader, Capability, Error, ErrorKind, Reader, RecordBatch, RecordMetadata, Result,
-    async_trait, into_stream,
+    ByteReader, Capability, Error, ErrorKind, ReadState, Reader, RecordBatch, RecordMetadata,
+    Result, async_trait, into_stream,
 };
 use warc::{EmptyBody, RawRecordIter, Record};
 
@@ -18,7 +18,7 @@ pub(super) struct WarcReader {
     batch_size: usize,
     batch_capacity: usize,
     batch_body_bytes: usize,
-    finished: bool,
+    state: ReadState,
 }
 
 impl WarcReader {
@@ -52,7 +52,7 @@ impl WarcReader {
             batch_size,
             batch_capacity: batch_size,
             batch_body_bytes,
-            finished: false,
+            state: ReadState::default(),
         }
     }
 
@@ -70,7 +70,7 @@ impl WarcReader {
                 }
                 Some(Err(error)) => return Err(decode_error(error)),
                 None => {
-                    self.finished = true;
+                    self.state.mark_input_eof();
                     break;
                 }
             }
@@ -92,6 +92,7 @@ impl Reader for WarcReader {
         Capability {
             read: true,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }
@@ -101,13 +102,11 @@ impl Reader for WarcReader {
     }
 
     async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.finished {
+        if self.state.is_finished() {
             return Ok(None);
         }
         let result = self.read_batch().await;
-        if !matches!(result, Ok(Some(_))) {
-            self.finished = true;
-        }
+        self.state.observe(&result);
         result
     }
 }
