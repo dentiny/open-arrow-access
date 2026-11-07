@@ -1,4 +1,5 @@
-//! Shared byte backend for integration tests. Depend on this crate only through dev-dependencies.
+//! Shared byte fixtures and operator setup for integration tests.
+//! Depend on this crate only through dev-dependencies.
 
 use std::{
     ops::Range,
@@ -14,6 +15,12 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error,
     ErrorKind, ListRequest, ObjectStream, Reader, Result, async_trait,
 };
+
+/// Configure the filesystem SDK backend for test fixtures.
+pub fn fs_operator(root: impl AsRef<Path>) -> opendal::Operator {
+    opendal::Operator::new(opendal::services::Fs::default().root(root.as_ref().to_str().unwrap()))
+        .unwrap()
+}
 
 /// Calls observed across accessor clones and all readers opened from them.
 #[derive(Default)]

@@ -58,7 +58,6 @@ open-arrow-access-dataset = { path = "dataset", version = "0.1.0", default-featu
 [features]
 default = []
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
-storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
 format-atif = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/atif"]
@@ -72,11 +71,12 @@ decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-
 [dependencies]
 open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
-open-arrow-access-storage = { workspace = true, optional = true }
+open-arrow-access-storage.workspace = true
 open-arrow-access-file-format = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 
 [dev-dependencies]
+opendal = { workspace = true, features = ["services-memory", "services-fs"] }
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
@@ -88,16 +88,19 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 
 [[test]]
+name = "storage_opendal"
+
+[[test]]
 name = "directory"
 required-features = ["dataset-directory"]
 
 [[test]]
 name = "reading"
-required-features = ["storage-fs", "format-parquet"]
+required-features = ["format-parquet"]
 
 [[example]]
 name = "read_parquet"
-required-features = ["storage-fs", "format-parquet"]
+required-features = ["format-parquet"]
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -107,12 +110,12 @@ workspace = true
 
 [[example]]
 name = "read_xml"
-required-features = ["storage-fs", "format-xml"]
+required-features = ["format-xml"]
 
 [[example]]
 name = "read_atif"
-required-features = ["storage-fs", "format-atif"]
+required-features = ["format-atif"]
 
 [[test]]
 name = "atif"
-required-features = ["format-atif", "storage-fs", "dataset-directory"]
+required-features = ["format-atif", "dataset-directory"]
