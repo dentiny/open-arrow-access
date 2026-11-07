@@ -1,9 +1,11 @@
-use http::{Request, StatusCode};
+use http::Request;
 use open_arrow_access_core::{Error, ErrorKind, Result};
 use opendal::{Buffer, raw::oio::ReadStream};
 use serde::Deserialize;
 
-use super::{HuggingFaceRepository, HuggingFaceService, client::endpoint, map_error};
+use super::{
+    HuggingFaceRepository, HuggingFaceService, client::endpoint, map_error, map_http_error,
+};
 
 const MAX_METADATA_BYTES: usize = 64 * 1024;
 
@@ -60,18 +62,10 @@ impl HuggingFaceService {
             .map_err(|e| map_error("resolve_huggingface", &repository.repository, e))?;
         let status = response.status();
         if !status.is_success() {
-            let kind = match status {
-                StatusCode::NOT_FOUND => opendal::ErrorKind::NotFound,
-                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
-                    opendal::ErrorKind::PermissionDenied
-                }
-                StatusCode::TOO_MANY_REQUESTS => opendal::ErrorKind::RateLimited,
-                _ => opendal::ErrorKind::Unexpected,
-            };
-            return Err(map_error(
+            return Err(map_http_error(
                 "resolve_huggingface",
                 &repository.repository,
-                opendal::Error::new(kind, format!("Hub metadata HTTP {status}")),
+                status,
             ));
         }
         let mut body = response.into_body();
