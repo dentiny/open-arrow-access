@@ -13,11 +13,18 @@ pub trait FileFormat: Send + Sync {
     /// Per-open configuration or decoder state, owned by this operation.
     type Prepared: Send;
 
-    /// Whether this format can read the advertised input representation.
-    /// This query performs no I/O. Override for requirements such as range reads;
-    /// validate the opened reader's capabilities and metadata in [`Self::open`].
-    fn can_read(&self, input: Capability) -> bool {
-        input.read
+    /// Derive record-accessor capabilities from the upstream byte capabilities.
+    /// This query performs no I/O and does not validate an individual request.
+    /// The default exposes sequential record reading. Overrides must describe
+    /// the record output, without advertising byte ranges or accessor listing.
+    /// Validate the actual input capabilities and metadata in [`Self::open`].
+    fn capability(&self, input: Capability) -> Capability {
+        Capability {
+            read: input.read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
     }
 
     /// Validate options and prepare decoder state without input I/O.

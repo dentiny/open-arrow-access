@@ -14,8 +14,13 @@ pub struct ParquetFormat;
 impl FileFormat for ParquetFormat {
     type Prepared = ();
 
-    fn can_read(&self, input: Capability) -> bool {
-        input.read && input.read_with_range
+    fn capability(&self, input: Capability) -> Capability {
+        Capability {
+            read: input.read && input.read_with_range,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
     }
 
     fn prepare(&self, _options: &ReadOptions) -> Result<()> {

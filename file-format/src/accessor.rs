@@ -52,12 +52,7 @@ where
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> Capability {
-        Capability {
-            read: self.format.can_read(self.inner.capability()),
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        self.format.capability(self.inner.capability())
     }
 
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {

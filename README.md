@@ -421,8 +421,9 @@ Implement `FileFormat` for a new Arrow format:
 2. Implement async `open(input, request, prepared)` to inspect the owned byte
    reader and return a reader with its fixed output schema and source identity.
    Keep format-specific batching, projection pushdown and errors in the format.
-3. Override `can_read` when capabilities such as exact byte ranges are required,
-   and check the actual opened reader and metadata during `open`.
+3. Override `capability(input)` to derive record capabilities when the default
+   sequential behavior needs additional input operations, such as exact byte
+   ranges. Check the actual opened reader and metadata during `open`.
 
 The shared accessor forwards the object and byte options and implements the
 record-accessor capability contract. Each open gets independent prepared state.

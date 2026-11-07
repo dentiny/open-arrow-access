@@ -150,8 +150,10 @@ Fixed schemas validate projection and configuration before byte I/O. Parquet
 prepares no decoder until its input is available and checks actual range support
 and known length before inspecting the file. XML validates its path, limits and
 explicit projection before opening; inferred projection still resolves after
-bounded sampling. `can_read` supplies the input-dependent read flag; the shared
-accessor clears byte-range, listing and parallel flags on record output.
+bounded sampling. `capability(input)` maps upstream byte capabilities to the
+format's record-accessor capabilities without I/O. The default reports sequential
+record reading; Parquet also requires upstream range support. Both report no
+byte-range, listing or parallel operations on their record output.
 
 Existing built-in accessor types alias the shared accessor and preserve their
 constructors/builders. Custom formats use `FileAccessor::from_format` and need
