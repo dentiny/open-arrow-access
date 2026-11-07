@@ -1,46 +1,30 @@
 use http::{Request, StatusCode};
 use open_arrow_access_core::{Error, ErrorKind, Result};
 use opendal::{Buffer, raw::oio::ReadStream};
+use serde::Deserialize;
 
 use super::{HuggingFaceRepository, HuggingFaceService, client::endpoint, map_error};
 
 const MAX_METADATA_BYTES: usize = 64 * 1024;
+
+#[derive(Deserialize)]
+struct RepositoryInfo {
+    sha: String,
+}
 
 impl HuggingFaceService {
     pub(super) async fn pin_revision(
         &self,
         mut repository: HuggingFaceRepository,
     ) -> Result<HuggingFaceRepository> {
-        if repository.revision.len() == 40
-            && repository.revision.bytes().all(|b| b.is_ascii_hexdigit())
-        {
+        if is_commit_sha(&repository.revision) {
             return Ok(repository);
         }
-        let bytes = self.info(&repository).await?;
-        let metadata: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
-            Error::new(
-                ErrorKind::Decode,
-                "resolve_huggingface",
-                "invalid revision metadata",
-            )
-            .with_source(error)
-        })?;
-        repository.revision = metadata
-            .get("sha")
-            .and_then(serde_json::Value::as_str)
-            .filter(|sha| sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit()))
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::Decode,
-                    "resolve_huggingface",
-                    "revision metadata did not contain a commit SHA",
-                )
-            })?
-            .to_owned();
+        repository.revision = self.info(&repository).await?.sha;
         Ok(repository)
     }
 
-    async fn info(&self, repository: &HuggingFaceRepository) -> Result<Vec<u8>> {
+    async fn info(&self, repository: &HuggingFaceRepository) -> Result<RepositoryInfo> {
         let mut url = endpoint(self.options.endpoint())?;
         {
             let mut path = url.path_segments_mut().map_err(|_| {
@@ -111,6 +95,25 @@ impl HuggingFaceService {
                 bytes.extend_from_slice(&part);
             }
         }
-        Ok(bytes)
+        let metadata: RepositoryInfo = serde_json::from_slice(&bytes).map_err(|error| {
+            Error::new(
+                ErrorKind::Decode,
+                "resolve_huggingface",
+                "invalid revision metadata",
+            )
+            .with_source(error)
+        })?;
+        if !is_commit_sha(&metadata.sha) {
+            return Err(Error::new(
+                ErrorKind::Decode,
+                "resolve_huggingface",
+                "revision metadata did not contain a commit SHA",
+            ));
+        }
+        Ok(metadata)
     }
+}
+
+fn is_commit_sha(revision: &str) -> bool {
+    revision.len() == 40 && revision.bytes().all(|b| b.is_ascii_hexdigit())
 }
