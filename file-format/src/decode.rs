@@ -4,38 +4,24 @@ use open_arrow_access_core::{
     StreamReader,
 };
 
-/// Private bridge between the upstream incremental decoders and the shared input loop.
+/// Format-specific decoding hooks for the shared input loop.
 pub(crate) trait BatchDecoder: Send + 'static {
-    /// Operation name attached to the driver's empty-chunk I/O error.
-    /// Errors returned by the upstream byte reader keep their original operation.
+    /// Operation name for empty-chunk input errors.
     const INPUT_OPERATION: &'static str;
 
-    /// Diagnostic for an upstream byte reader that emits an empty chunk instead
-    /// of EOF. Override to retain the format's input-error message.
+    /// Message for empty-chunk input errors.
     const EMPTY_CHUNK_MESSAGE: &'static str = "byte reader returned an empty chunk";
 
-    /// Whether a complete batch can be flushed without consuming more input.
-    /// Checked before each decode or input read; account for partial records so
-    /// the driver does not flush an incomplete record as a full batch.
+    /// Whether a batch is ready to flush without more input.
     fn is_ready(&self) -> bool;
 
-    /// Feed the current nonempty input slice and return its consumed prefix
-    /// length, at most `bytes.len()`. Retain partial-record state internally;
-    /// the driver retains the unconsumed suffix. Repeated calls must make
-    /// progress or become ready. Map parser failures to format-specific errors.
+    /// Consume a prefix of `bytes`; return its length and retain partial records.
     fn decode(&mut self, bytes: &[u8]) -> Result<usize>;
 
-    /// Emit buffered records without reading more input. The driver calls this
-    /// when [`Self::is_ready`] is true; [`Self::finish`] may also flush a short
-    /// final batch. `Ok(None)` ends output rather than requesting more input.
-    /// Return decoding failures with the format's operation and original cause.
+    /// Emit buffered records. `Ok(None)` ends output.
     fn flush(&mut self) -> Result<Option<RecordBatch>>;
 
-    /// Finalize after input EOF and consumption of all pending bytes, applying
-    /// the decoder's EOF rules before emitting remaining records. After a batch,
-    /// this may be called again to drain output without reading more input;
-    /// do not emit the same final batch twice. `Ok(None)` or an error terminates
-    /// output. Report incomplete or malformed final records as decoding errors.
+    /// Apply EOF rules and drain remaining batches until `Ok(None)`.
     fn finish(&mut self) -> Result<Option<RecordBatch>>;
 }
 
