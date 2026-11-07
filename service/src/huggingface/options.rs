@@ -1,7 +1,5 @@
 use std::{fmt, path::PathBuf};
 
-use open_arrow_access_core::{Error, ErrorKind, Result};
-
 const DEFAULT_ENDPOINT: &str = "https://huggingface.co";
 
 /// Connection settings shared by metadata discovery and repository file reads.
@@ -96,37 +94,5 @@ impl HuggingFaceRepository {
     pub fn with_root(mut self, root: impl Into<String>) -> Self {
         self.root = root.into();
         self
-    }
-
-    pub(super) fn validate(&self) -> Result<()> {
-        let parts: Vec<_> = self.repository.split('/').collect();
-        if parts.len() != 2
-            || parts.iter().any(|p| {
-                p.is_empty()
-                    || *p == "."
-                    || *p == ".."
-                    || !p
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-            })
-        {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "configure_huggingface",
-                "expected a repository ID in owner/name form",
-            ));
-        }
-        if self.revision.is_empty()
-            || self.revision.trim() != self.revision
-            || self.revision.contains(['\0', '\\'])
-            || matches!(self.revision.as_str(), "." | "..")
-        {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "configure_huggingface",
-                "invalid repository revision",
-            ));
-        }
-        super::validation::validate_path(&self.root, true)
     }
 }

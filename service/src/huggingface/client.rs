@@ -2,7 +2,9 @@ use open_arrow_access_core::{Error, ErrorKind, Result};
 use opendal::OperationContext;
 use url::Url;
 
-use super::{HuggingFaceAccessor, HuggingFaceOptions, HuggingFaceRepository};
+use super::{
+    HuggingFaceAccessor, HuggingFaceOptions, HuggingFaceRepository, validation::validate_repository,
+};
 
 /// Provider entry point for repository access and dataset selection.
 #[derive(Clone, Debug)]
@@ -41,7 +43,7 @@ impl HuggingFaceService {
         &self,
         repository: HuggingFaceRepository,
     ) -> Result<HuggingFaceAccessor> {
-        repository.validate()?;
+        validate_repository(&repository)?;
         let mut builder = opendal::services::Hf::default()
             .repo_type("dataset")
             .repo_id(&repository.repository)

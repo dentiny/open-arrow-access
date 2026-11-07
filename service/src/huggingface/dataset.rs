@@ -8,7 +8,7 @@ use open_arrow_access_file_format::ParquetAccessor;
 
 use super::{
     HuggingFaceAccessor, HuggingFaceDatasetRequest, HuggingFaceRepository, HuggingFaceService,
-    validation::validate_path,
+    validation::{validate_path, validate_repository},
 };
 
 impl HuggingFaceService {
@@ -22,7 +22,7 @@ impl HuggingFaceService {
     ) -> Result<Box<dyn RecordReader>> {
         let repository =
             HuggingFaceRepository::new(&request.repository).with_revision(&request.revision);
-        repository.validate()?;
+        validate_repository(&repository)?;
         for component in [&request.config, &request.split] {
             validate_path(component, false)?;
             if component.contains('/') {
