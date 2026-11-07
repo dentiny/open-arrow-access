@@ -27,18 +27,7 @@ impl HuggingFaceAccessor {
     ) -> Result<Self> {
         let operator = tokio::task::spawn_blocking(move || {
             opendal::install_default();
-            Operator::new(builder).map_err(|error| {
-                if error.kind() == opendal::ErrorKind::ConfigInvalid {
-                    Error::new(
-                        ErrorKind::InvalidInput,
-                        "configure_huggingface",
-                        "invalid Hugging Face configuration",
-                    )
-                    .with_source(error)
-                } else {
-                    map_error("configure_huggingface", "", error)
-                }
-            })
+            Operator::new(builder).map_err(|error| map_error("configure_huggingface", "", error))
         })
         .await
         .map_err(|error| {
