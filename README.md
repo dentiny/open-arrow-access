@@ -3,7 +3,7 @@
 Composable dataset access for Apache Arrow. Read diverse formats and storage
 backends into Arrow streams.
 
-Read local Parquet, CSV/TSV, or JSON/JSONL files asynchronously through **OpenDAL's filesystem
+Read local Parquet, CSV/TSV, JSON/JSONL, XML, or ATIF files asynchronously through **OpenDAL's filesystem
 service**, individually or as a sequential directory/file-set dataset. Output is
 an ordered stream of Arrow record batches. The project ends at that read interface.
 
@@ -127,7 +127,7 @@ for TSV.
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
 | `storage/` | OpenDAL Fs, recursive file discovery and reusable generic byte I/O, bounded chunks and exact ranges |
-| `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas |
+| `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
 | `service/` | Reserved; no Hugging Face or other source adapter yet |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
@@ -313,3 +313,68 @@ inference mode, projection names are resolved after sampling and output columns
 are selected after conversion. Selected records are read and parsed in full in
 both modes. Run the example on the project-authored inventory fixture with
 `cargo run --features storage-fs,format-xml --example read_xml`.
+
+## ATIF trajectories
+
+Enable `format-atif` and select the document layout explicitly:
+
+```rust,no_run
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+use open_arrow_access::{
+    Accessor, ReadRequest,
+    file_format::{AtifAccessor, AtifFormat},
+    storage::FsAccessor,
+};
+
+let bytes = FsAccessor::new(std::env::current_dir()?).await?;
+let atif = AtifAccessor::new(bytes, AtifFormat::JsonLines);
+let mut reader = atif.open(ReadRequest::new("testdata/atif/trajectories.jsonl")).await?;
+while let Some(batch) = reader.next().await? { /* one trajectory per row */ }
+# Ok(())
+# }
+```
+
+`AtifFormat::Json` reads one whole document, including pretty-printed JSON.
+`JsonLines` reads one complete trajectory per nonblank line, accepts CRLF and
+a final line without a newline, and emits no rows for empty/blank input.
+Whole-document JSON requires one valid document; arrays and concatenated documents
+are rejected. Extensions do not select a format or compression.
+
+The converter validates ATIF v1.0–v1.8 and uses the fixed
+[`atif-arrow` schema](https://github.com/dentiny/atif-arrow/blob/v0.3.0/docs/schema.md).
+The schema is available at `open`, before input bytes are read. Each trajectory
+is one row with ordered nested steps, calls, observations and supplied metrics.
+`raw_json` retains the verbatim document (including its JSONL line ending and
+unknown fields). `source_uri` is the request's opaque object locator;
+`source_record_index` is the one-based nonblank document index within that object,
+reset on each open. Neither field is a synthesized trajectory identifier.
+Content text uses UTF-8 bytes in `LargeBinary`; media paths remain strings.
+Embedded subagents remain JSON, and external references are not fetched.
+
+`ReadOptions` controls rows per batch and top-level projection in caller order,
+including zero-column rows. Projection happens after full ATIF validation and
+conversion; invalid unselected data still fails. Documents are buffered in full,
+and each output row retains raw JSON. The row target does not bound document
+bytes or total memory. A JSONL read buffers the current document, batch and
+one upstream chunk; it does not collect the whole input.
+
+Records retain global input order. Reads are sequential with no detached tasks,
+range reads, partition splitting or unordered emission. Dropping the reader stops
+work; drop it after cancelling an in-flight decoder call. Decode/validation errors
+include the locator and record index, discard the current batch, and terminate
+the reader. Input I/O errors retain their category and source chain.
+
+Any sequential byte accessor works, including storage or
+`DecompressionLayer::new(Gzip)` for ATIF `.jsonl.gz` objects. The format does not
+open OpenDAL operators or implement Harbor Hub discovery. `FileSetAccessor` and
+`DirectoryAccessor` compose through their existing ordered read interfaces.
+
+Run the example with either explicit layout:
+
+```sh
+cargo run --example read_atif --features storage-fs,format-atif
+cargo run --example read_atif --features storage-fs,format-atif -- testdata/atif/trajectories.jsonl jsonl
+```
+
+The adapter uses the published `atif-arrow 0.3.0` crate with Arrow 59;
+see [dependency alignment](docs/dependencies.md#atif-parser).

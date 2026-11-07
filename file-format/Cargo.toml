@@ -8,12 +8,14 @@ description = "Arrow file-format readers for Open Arrow Access"
 
 [features]
 default = []
+atif = ["dep:atif-arrow"]
 parquet = ["dep:parquet", "dep:arrow-schema", "dep:futures"]
 json = ["dep:arrow-json", "dep:arrow-schema"]
 xml = ["dep:xml-arrow", "dep:futures"]
 csv = ["dep:arrow-csv", "dep:arrow-schema"]
 
 [dependencies]
+atif-arrow = { workspace = true, optional = true }
 xml-arrow = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 arrow-csv = { workspace = true, optional = true }
@@ -36,3 +38,7 @@ required-features = ["json"]
 
 [lints]
 workspace = true
+
+[[test]]
+name = "atif"
+required-features = ["atif"]

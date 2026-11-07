@@ -51,3 +51,16 @@ Its companion `xml-io` storage crate is not used, so storage remains on this
 workspace's OpenDAL 0.59.2 baseline. Arrow family versions remain 59.3.0 in the
 lockfile. The parser uses a normal registry dependency, with the resolved version
 and checksum recorded in Cargo.lock.
+
+## ATIF parser
+
+`format-atif` uses the published
+[`atif-arrow 0.3.0`](https://crates.io/crates/atif-arrow/0.3.0) converter for
+Arrow 59 compatibility. It uses a normal registry dependency, with the resolved
+version and checksum recorded in Cargo.lock.
+
+Only the pure parser/schema/converter crate is used. The companion `atif-io`
+and Harbor Hub backend are not dependencies, so ATIF does not bring its own
+storage, transport, runtime or decompression policy. JSON/JSONL framing is handled
+over the shared `ByteReader` contract. Arrow remains 59.3.0 and OpenDAL remains
+0.59.2 in this workspace's lockfile.
