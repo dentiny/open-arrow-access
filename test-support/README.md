@@ -30,5 +30,34 @@ checks source categories/causes, terminal reads, and removal of range support
 without depending on a concrete layer crate. `byte_layer::assert_terminal_error`
 also supports individual malformed-input cases.
 
-Keep record/schema assertions and format-specific scenarios in the owning crate's
-tests.
+## Format contracts
+
+`format` shares assertions for single-file Arrow format accessors. The module
+depends on core contracts and the memory backend, so adding a format does not
+require adding a concrete format dependency to this crate.
+
+| Helper | Contract |
+| --- | --- |
+| `collect_batches` | Source identity, stable schema, nonempty batches within the requested row target, and terminal EOF; returns batches for value checks. |
+| `assert_projection` | Expected projected schema, caller column order, field/schema metadata and total row count, including zero columns; returns batches. |
+| `assert_invalid_projection_before_open` | Missing and duplicate fields fail as `InvalidInput` before any byte open or read. Use with a valid fixed/explicit schema. |
+| `assert_finished` | After EOF/error, repeated reads return EOF with stable metadata and no new upstream polls. |
+| `assert_terminal_error` | The next read fails with the expected kind and terminates; returns the error for operation/parser checks. |
+| `assert_error_contract` | A format factory over `MemoryAccessor` preserves every shared source error category and cause, rejects empty chunks, forwards the object and byte options, and stops polling after read failures. |
+
+Pass the expected full schema and row count to `assert_projection`; the helper
+derives expected fields using Arrow's schema API independently of the accessor.
+It checks the reader metadata even for input that produces no batches.
+
+For `assert_error_contract`, pass valid fixture bytes, the format's read request,
+and reachable fault offsets. It uses one-byte chunks and accepts failures during
+either opening/inference or subsequent reads. Supply nondefault byte options in
+the request to exercise option forwarding. Parquet's range-read faults remain
+in its own suite because the memory backend injects sequential faults only.
+Inferred schemas also keep their own projection-validation timing tests.
+
+See `file-format/tests/csv.rs` for a format factory and explicit projections,
+`file-format/tests/xml.rs` for inference and explicit-schema cases, and
+`tests/reading.rs` for shared projection assertions over Parquet.
+Keep fixtures, expected schemas, parsed-value checks, parser error context,
+read-ahead/drop behavior and format-specific scenarios in the owning tests.

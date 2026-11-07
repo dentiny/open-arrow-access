@@ -5,7 +5,7 @@ use open_arrow_access_core::{
     async_trait,
 };
 
-use super::{FileSetRequest, reader::FileSetReader};
+use super::{FileSetRequest, reader::create_reader};
 
 /// Read files sequentially through one supplied format accessor.
 ///
@@ -71,7 +71,7 @@ where
             schema: reader.metadata().schema.clone(),
             source: None,
         };
-        Ok(Box::new(FileSetReader::new(
+        Ok(Box::new(create_reader(
             self.inner.clone(),
             reader,
             objects,
