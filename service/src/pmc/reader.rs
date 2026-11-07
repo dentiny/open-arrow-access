@@ -1,4 +1,4 @@
-use super::{PmcLimits, capability, decode, input::read_bounded, metadata};
+use super::{PmcLimits, capability, input::read_bounded, metadata};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Capability, ReadRequest, Reader, RecordBatch,
     RecordMetadata, Result, async_trait,
@@ -23,10 +23,7 @@ where
             self.limits.metadata_bytes.get(),
         )
         .await?;
-        let mapped = metadata::parse(&raw, request.object.locator())?;
-        let raw_text = std::str::from_utf8(&raw)
-            .map_err(|error| decode(error.to_string()).with_source(error))?;
-        mapped.into_batch(raw_text, self.metadata.schema.clone())
+        metadata::decode_batch(&raw, request.object.locator(), self.metadata.schema.clone())
     }
 }
 #[async_trait]

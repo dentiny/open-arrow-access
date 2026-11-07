@@ -72,8 +72,11 @@ reader releases its input. Common byte options are forwarded unchanged.
 Projection supports caller field order and zero-column row counts. The schema
 is fixed before reading, and every valid metadata object produces one row.
 Known fields are validated even when omitted from the projection. Only selected
-Arrow columns are built, directly from parsed metadata, without serializing or
-decoding an intermediate JSON object. The JSON file-format feature is not required.
+Arrow columns are built directly from the source fields, without serializing or
+decoding an intermediate JSON object. The Arrow schema is the single field/type
+definition: conversion dispatches on its data types, with special rules only for
+PMCID, PMID, and version. There is no intermediate article struct to maintain.
+The JSON file-format feature is not required.
 The row target is an upper bound; this single-object service emits at most one
 batch with one row. It does not fetch an inventory, choose a snapshot, filter
 licences, extract text, or write Lance datasets.

@@ -134,7 +134,19 @@ async fn missing_pdf_noncommercial_manuscripts_and_unknown_fields_still_produce_
 
 #[tokio::test]
 async fn projections_keep_order_and_zero_column_row_counts() {
-    for names in [vec!["pdf_url", "pmcid"], vec![]] {
+    let full_schema = schema();
+    let all_names = full_schema
+        .fields()
+        .iter()
+        .rev()
+        .map(|field| field.name().as_str())
+        .collect();
+    let mut full_reader = PmcAccessor::new(MemoryAccessor::new(RAW.as_bytes(), 1))
+        .open(ReadRequest::new("a.json"))
+        .await
+        .unwrap();
+    let full_batch = full_reader.next().await.unwrap().unwrap();
+    for names in [vec!["pdf_url", "pmcid"], all_names, vec![]] {
         let request = ReadRequest::new("a.json").with_options(ReadOptions {
             projection: Some(names.iter().map(|s| (*s).into()).collect()),
             ..ReadOptions::default()
@@ -147,6 +159,11 @@ async fn projections_keep_order_and_zero_column_row_counts() {
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(batch.num_columns(), names.len());
         assert!(Arc::ptr_eq(&batch.schema(), &reader.metadata().schema));
+        let indices = names
+            .iter()
+            .map(|name| full_schema.index_of(name).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(batch, full_batch.project(&indices).unwrap());
     }
     let input = MemoryAccessor::new(RAW.as_bytes(), 1);
     let observed = input.observations.clone();
@@ -212,19 +229,32 @@ async fn media_lists_preserve_null_empty_and_populated_values() {
 
 #[tokio::test]
 async fn projection_does_not_skip_validation_of_omitted_fields() {
-    for projection in [vec!["pmcid".into()], vec![]] {
-        let mut reader = PmcAccessor::new(MemoryAccessor::new(
-            br#"{"pmcid":"PMC1","title":false}"#,
-            64,
-        ))
-        .open(ReadRequest::new("a.json").with_options(ReadOptions {
-            projection: Some(projection),
-            ..ReadOptions::default()
-        }))
-        .await
-        .unwrap();
-        assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
-        assert!(reader.next().await.unwrap().is_none());
+    for (field, value) in [
+        ("pmcid", "null"),
+        ("version", "0"),
+        ("pmid", "1.5"),
+        ("doi", "42"),
+        ("title", "false"),
+        ("is_manuscript", r#""true""#),
+        ("media_urls", "[null]"),
+    ] {
+        // A later duplicate must replace the earlier PMCID even when it is invalid.
+        let raw = format!(r#"{{"pmcid":"PMC1","{field}":{value}}}"#);
+        for projection in [vec!["pmcid".into()], vec![]] {
+            let mut reader = PmcAccessor::new(MemoryAccessor::new(raw.as_bytes(), 64))
+                .open(ReadRequest::new("a.json").with_options(ReadOptions {
+                    projection: Some(projection),
+                    ..ReadOptions::default()
+                }))
+                .await
+                .unwrap();
+            assert_eq!(
+                reader.next().await.unwrap_err().kind(),
+                ErrorKind::Decode,
+                "{field}={value}"
+            );
+            assert!(reader.next().await.unwrap().is_none());
+        }
     }
 }
 
