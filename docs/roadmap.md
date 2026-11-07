@@ -25,6 +25,27 @@ The initial Parquet feature supports uncompressed and Snappy pages. Parquet's
 internal codecs are separate from external file decompression. Storage and
 format features are default-off and can be built independently.
 
+## Schema inference and conversion
+
+Planned follow-ups will reduce the schema handling callers must implement:
+
+- Infer CSV/TSV and JSON/JSONL schemas from bounded samples, with configurable
+  record and byte limits and optional CSV header detection. Preserve sampled
+  input for subsequent decoding, including sequential-only sources.
+- Merge schemas across files using explicit rules for field order, nullability,
+  nested fields and metadata conflicts. CSV column/header compatibility remains
+  format-specific.
+- Align record batches to the selected schema by field name, reorder columns and
+  fill missing nullable fields with nulls. Reject incompatible types unless the
+  caller explicitly selects a supported cast policy.
+
+Expose shared schema merge and batch conversion utilities for reuse by format
+and dataset readers. Keep explicit-schema reads available and schema merging
+opt-in. Resolve the output schema before returning the reader so metadata stays
+stable; values outside an inferred schema must follow a documented error policy.
+Implement inference first, then cross-file merging and batch alignment in
+separate PRs.
+
 ## Parallel work and integration
 
 ```mermaid
