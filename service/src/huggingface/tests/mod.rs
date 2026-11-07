@@ -1,5 +1,5 @@
 mod accessor;
+mod cache;
 mod concurrency;
-mod errors;
-mod resolution;
+mod dataset;
 mod support;

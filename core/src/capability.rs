@@ -23,6 +23,13 @@ pub struct Capability {
     /// the sequential cursor, through [`crate::ByteReader::read_range`].
     /// Implies `read`; always false for record interfaces.
     pub read_with_range: bool,
+    /// Can read multiple files or partitions concurrently within this interface.
+    /// Implies `read`; independent of range access and output ordering.
+    /// Does not enable execution or describe per-reader byte I/O concurrency
+    /// or caller-managed concurrency across separate readers.
+    // TODO: Clarify whether this flag means support for caller-managed parallel
+    // scheduling or implemented internal parallel execution before enabling it.
+    pub read_parallel: bool,
     /// Can discover object references through [`crate::ByteAccessor::list`].
     /// Always false for readers and interfaces that do not expose discovery.
     pub list: bool,

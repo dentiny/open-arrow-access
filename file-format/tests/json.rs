@@ -243,9 +243,9 @@ async fn empty_and_whitespace_only_inputs_have_no_rows() {
 
 #[tokio::test]
 async fn local_jsonl_reads_through_opendal() {
-    let storage = open_arrow_access_storage::FsAccessor::new(fixture_path(""))
-        .await
-        .unwrap();
+    let storage = open_arrow_access_storage::OpenDalAccessor::new(
+        open_arrow_access_test_support::fs_operator(fixture_path("")),
+    );
     let accessor = JsonAccessor::new(
         storage.with_chunk_size(NonZeroUsize::new(2).unwrap()),
         schema(),
@@ -323,6 +323,7 @@ impl Accessor for FaultyAccessor {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: inner.list,
         }
     }
@@ -357,6 +358,7 @@ impl Reader for FaultyReader {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: inner.list,
         }
     }

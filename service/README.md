@@ -1,33 +1,35 @@
-# Dataset services
+# Dataset source providers
 
-Provider-specific discovery starts with Hugging Face behind the default-off
-`huggingface` feature (`service-huggingface` on the facade).
+Provider-specific discovery and schema conventions live in this crate. Each provider adds its own default-off feature and facade exports.
 
-`HuggingFaceService` owns repository/revision/config/split selection. `resolve`
-reads the selected revision's Hub metadata and dataset-card configuration,
-expands declared native-file patterns against that manifest, and returns a
-commit-pinned `HuggingFaceDataset`. Explicit path/pattern order is preserved;
-matches within each pattern are sorted, and overlapping matches are deduplicated.
-Missing patterns fail the whole selection. Paths, path lists, named splits and
-`data_dir` are supported; script execution, inferred split conventions, external
-URLs and Dataset Viewer conversion are outside this implementation.
-
-`repository` exposes explicit single-file access and recursive file discovery.
-The private OpenDAL HF constructor delegates byte reads and reader I/O budgets
-to `storage::OpenDalAccessor`. Existing format accessors consume those shared
-byte contracts; dataset-wide schema and multi-file Arrow scans remain in
-`dataset/`. A service using a floating revision directly makes no snapshot claim.
-
-Discovery uses the Hub metadata API, with a 32 MiB response limit. Connection
-options and effective HF credentials are shared by metadata and file requests.
-Cached token lookup runs on the blocking pool. OpenDAL owns HTTP/Xet transfers.
-
-Protocol references:
-- [Hub manual configuration](https://huggingface.co/docs/hub/datasets-manual-configuration)
-- [Hub dataset metadata](https://huggingface.co/docs/huggingface_hub/package_reference/hf_api#huggingface_hub.HfApi.dataset_info)
+Providers use the shared object/reader contracts and existing byte, format,
+and decompression accessors. Backend configuration stays caller-controlled.
+Generic storage access and object-store prefix listing belong in `storage`,
+not in a provider.
 
 The [source-attribute proposal](../docs/source-attributes.md) defines provider
 constraints and conditional planning. Sequential cursor-based file discovery
 can coexist with independent file reads; dependent API page requests require
 a different plan. Services retain their own ordering requirements while
 delegating discovered representations to dataset and format accessors.
+
+The default-off `huggingface` feature (`service-huggingface` on the facade)
+provides `HuggingFaceService::repository` for dataset repository files.
+The service owns repository ID, revision, root, endpoint and authentication.
+Its byte accessor reuses `storage::OpenDalAccessor`; format accessors decode records.
+Floating revisions are not snapshots. Commit-pinned operators cache resolved
+download destinations through OpenDAL; floating revisions resolve every read.
+The same service exposes `dataset(HuggingFaceDatasetRequest)` and implements
+`Accessor` for that request. This opens one config/split as ordered Arrow batches
+from the HF Parquet export. A floating export revision is first pinned with a
+small `expand=sha` metadata request (64 KiB response limit); membership and file
+reads then use that same commit. Explicit commit requests skip the metadata call.
+The selected directory is listed nonrecursively, Parquet paths are sorted, and
+existing `ParquetAccessor`/`FileSetAccessor` perform lazy sequential reading,
+projection, batching and schema validation. Only the shard list is collected.
+
+A missing complete split fails. `with_partial_exports()` explicitly permits
+fallback to `partial-<split>`; full exports take precedence, and permission or
+transport errors never trigger fallback. `with_revision` refers to the Parquet
+representation, not the original source branch. Native dataset-card parsing and
+Viewer row APIs are outside this entry point.

@@ -1,9 +1,15 @@
 //! Composable, asynchronous read access to Arrow record batches.
 //!
-//! Enable a storage or service feature and a format reader.
-//! The default build exposes only the shared extension contracts.
+//! The shared extension contracts and OpenDAL storage adapter are always available.
+//! Enable a `format-parquet`, `format-json`, `format-csv`, `format-xml`, or
+//! `format-atif` reader to decode records.
 
 pub use open_arrow_access_core::*;
+
+#[cfg(feature = "service-huggingface")]
+pub mod service {
+    pub use open_arrow_access_service::huggingface::*;
+}
 
 #[cfg(any(
     feature = "decompression-gzip",
@@ -25,26 +31,36 @@ pub mod decompression {
     };
 }
 
-#[cfg(feature = "storage-fs")]
 pub mod storage {
-    pub use open_arrow_access_storage::FsAccessor;
-}
-
-#[cfg(feature = "service-huggingface")]
-pub mod service {
-    pub use open_arrow_access_service::huggingface::*;
+    pub use open_arrow_access_storage::OpenDalAccessor;
+    pub use open_arrow_access_storage::opendal;
 }
 
 #[cfg(any(
     feature = "format-parquet",
     feature = "format-json",
-    feature = "format-csv"
+    feature = "format-csv",
+    feature = "format-xml",
+    feature = "format-atif"
 ))]
 pub mod file_format {
     #[cfg(feature = "format-json")]
     pub use open_arrow_access_file_format::JsonAccessor;
     #[cfg(feature = "format-parquet")]
     pub use open_arrow_access_file_format::ParquetAccessor;
+    #[cfg(feature = "format-atif")]
+    pub use open_arrow_access_file_format::{AtifAccessor, AtifFormat};
     #[cfg(feature = "format-csv")]
     pub use open_arrow_access_file_format::{CsvAccessor, CsvFormat};
+    #[cfg(feature = "format-xml")]
+    pub use open_arrow_access_file_format::{
+        NamespaceBinding, XmlAccessor, XmlField, XmlLimits, XmlSchema,
+    };
+}
+
+#[cfg(feature = "dataset-directory")]
+pub mod dataset {
+    pub use open_arrow_access_dataset::{
+        DirectoryAccessor, DirectoryRequest, FileSetAccessor, FileSetRequest,
+    };
 }

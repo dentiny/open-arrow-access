@@ -1,4 +1,5 @@
-//! Shared byte backend for integration tests. Depend on this crate only through dev-dependencies.
+//! Shared byte fixtures and operator setup for integration tests.
+//! Depend on this crate only through dev-dependencies.
 
 use std::{
     ops::Range,
@@ -12,8 +13,14 @@ use std::{
 use more_asserts::assert_gt;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error,
-    ErrorKind, ObjectRef, ObjectStream, Reader, Result, async_trait,
+    ErrorKind, ListRequest, ObjectStream, Reader, Result, async_trait,
 };
+
+/// Configure the filesystem SDK backend for test fixtures.
+pub fn fs_operator(root: impl AsRef<Path>) -> opendal::Operator {
+    opendal::Operator::new(opendal::services::Fs::default().root(root.as_ref().to_str().unwrap()))
+        .unwrap()
+}
 
 /// Calls observed across accessor clones and all readers opened from them.
 #[derive(Default)]
@@ -96,6 +103,7 @@ impl Accessor for MemoryAccessor {
         Capability {
             read: true,
             read_with_range: self.ranged,
+            read_parallel: false,
             list: self.listing,
         }
     }
@@ -125,7 +133,7 @@ impl Accessor for MemoryAccessor {
 
 #[async_trait]
 impl ByteAccessor for MemoryAccessor {
-    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
         if !self.listing {
             return Err(Error::new(
                 ErrorKind::Unsupported,
@@ -133,7 +141,7 @@ impl ByteAccessor for MemoryAccessor {
                 "listing is disabled",
             ));
         }
-        Ok(Box::pin(futures::stream::iter([Ok(prefix)])))
+        Ok(Box::pin(futures::stream::iter([Ok(request.prefix)])))
     }
 }
 
@@ -157,6 +165,7 @@ impl Reader for MemoryReader {
         Capability {
             read: true,
             read_with_range: self.ranged,
+            read_parallel: false,
             list: false,
         }
     }

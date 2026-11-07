@@ -11,7 +11,7 @@ use arrow_array::Int64Array;
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes,
-    Capability, Error, ErrorKind, Layer, ObjectRef, ObjectStream, Reader, RecordBatch, Result,
+    Capability, Error, ErrorKind, Layer, ListRequest, ObjectStream, Reader, RecordBatch, Result,
     SchemaRef, async_trait,
 };
 use parquet::basic::Compression;
@@ -103,6 +103,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: inner.list,
         }
     }
@@ -127,8 +128,8 @@ struct ByteObserverReader {
 
 #[async_trait]
 impl<A: ByteAccessor> ByteAccessor for ByteObserverAccessor<A> {
-    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
-        self.inner.list(prefix).await
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        self.inner.list(request).await
     }
 }
 
@@ -148,6 +149,7 @@ impl Reader for ByteObserverReader {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: inner.list,
         }
     }
@@ -228,6 +230,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
         Capability {
             read: self.0.capability().read,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }
@@ -248,6 +251,7 @@ impl Reader for SequentialReader {
         Capability {
             read: self.0.capability().read,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }

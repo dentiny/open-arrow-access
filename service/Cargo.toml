@@ -4,32 +4,32 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Provider-specific dataset discovery for Open Arrow Access"
+description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
 huggingface = [
     "dep:open-arrow-access-storage",
+    "dep:open-arrow-access-dataset", "dep:open-arrow-access-file-format", "dep:futures",
     "dep:opendal", "opendal/services-hf", "opendal/http-transport-reqwest",
-    "dep:tokio", "dep:http", "dep:serde", "dep:serde_json", "dep:url", "dep:glob",
+    "dep:tokio", "dep:http", "dep:serde_json", "dep:url",
 ]
 
 [dependencies]
+open-arrow-access-dataset = { workspace = true, features = ["directory"], optional = true }
+open-arrow-access-file-format = { workspace = true, features = ["parquet"], optional = true }
+futures = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 open-arrow-access-storage = { workspace = true, optional = true }
 opendal = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 http = { version = "1", optional = true }
-serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 url = { version = "2", optional = true }
-glob = { version = "0.3", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["fs", "sync", "time"] }
-futures.workspace = true
 arrow-array.workspace = true
-open-arrow-access-file-format = { workspace = true, features = ["parquet"] }
 
 [lints]
 workspace = true

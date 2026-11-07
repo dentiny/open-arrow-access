@@ -1,17 +1,16 @@
-//! Revision-aware discovery of dataset-card file configurations.
-//!
-//! Services own repository/config/split selection. OpenDAL remains the internal
-//! file transport; format accessors consume the resolved byte accessor unchanged.
+//! Hugging Face repository bytes and Parquet dataset access.
 
 mod accessor;
 mod client;
+mod dataset;
+mod metadata;
 mod options;
-mod resolver;
+mod request;
 
 pub use accessor::HuggingFaceAccessor;
 pub use client::HuggingFaceService;
 pub use options::{HuggingFaceOptions, HuggingFaceRepository};
-pub use resolver::{HuggingFaceDataset, HuggingFaceSelection};
+pub use request::HuggingFaceDatasetRequest;
 
 use open_arrow_access_core::{Error, ErrorKind};
 
