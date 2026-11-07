@@ -23,7 +23,7 @@ invalid UTF-8. The local `.gitattributes` disables line-ending conversion.
 
 `file-format/src/csv/tests.rs` loads these files into the shared memory accessor
 to control chunk sizes and inject I/O failures. Its filesystem composition tests
-use a dev-dependency on `FsAccessor` to read the valid CSV and strict invalid
+use caller-configured filesystem OpenDAL operators to read the valid CSV and strict invalid
 files through the filesystem-to-decoder path.
 
 ```sh
