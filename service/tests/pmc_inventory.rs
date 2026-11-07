@@ -137,7 +137,7 @@ async fn streams_in_manifest_order_and_preserves_identity_without_article_reads(
 }
 #[tokio::test]
 async fn projection_keeps_row_counts_and_validates_before_csv_reads() {
-    for fields in [vec!["metadata_key", "ETag"], vec![]] {
+    for fields in [vec!["metadata_key", "ETag"], vec!["ETag", "Key"], vec![]] {
         let (s, _) = Objects::fixture();
         let mut r = PmcInventoryAccessor::new(s)
             .open(request(Some(fields.clone())))
@@ -147,7 +147,7 @@ async fn projection_keeps_row_counts_and_validates_before_csv_reads() {
         while let Some(b) = r.next().await.unwrap() {
             n += b.num_rows();
             assert_eq!(b.num_columns(), fields.len());
-            assert_eq!(b.schema(), r.metadata().schema);
+            assert!(Arc::ptr_eq(&b.schema(), &r.metadata().schema));
         }
         assert_eq!(n, 3);
     }
@@ -164,6 +164,71 @@ async fn projection_keeps_row_counts_and_validates_before_csv_reads() {
         );
         assert_eq!(s.opened.lock().unwrap().len(), 1);
     }
+}
+
+#[tokio::test]
+async fn batches_share_large_manifest_schema_across_projections_and_shards() {
+    for fields in [None, Some(vec!["metadata_key", "Key"]), Some(vec![])] {
+        let (mut source, mut manifest) = Objects::fixture();
+        manifest["future"] = json!("x".repeat(1024 * 1024));
+        source.manifest(&manifest);
+        let mut reader = PmcInventoryAccessor::new(source)
+            .open(request(fields))
+            .await
+            .unwrap();
+        let schema = reader.metadata().schema.clone();
+        assert!(schema.metadata()["pmc.inventory.raw_manifest_json"].len() > 1024 * 1024);
+        let mut rows = 0;
+        while let Some(batch) = reader.next().await.unwrap() {
+            assert!(Arc::ptr_eq(&batch.schema(), &schema));
+            rows += batch.num_rows();
+        }
+        assert_eq!(rows, 3);
+    }
+}
+
+#[tokio::test]
+async fn decoded_keys_preserve_literal_plus_and_decode_exactly_once() {
+    let keys = [
+        ("metadata/PMC1.1.json", "metadata/PMC1.1.json"),
+        ("metadata%2FPMC2+3.json", "metadata/PMC2+3.json"),
+        ("metadata%2FPMC%252F4.json", "metadata/PMC%2F4.json"),
+        ("metadata%2F%E4%B8%AD.json", "metadata/中.json"),
+    ];
+    let (mut source, mut manifest) = Objects::fixture();
+    manifest["files"].as_array_mut().unwrap().truncate(1);
+    source.manifest(&manifest);
+    let csv = keys
+        .iter()
+        .map(|(key, _)| format!("pmc-oa-opendata,{key},date,tag\n"))
+        .collect::<String>();
+    source.insert(FIRST, &gzip(csv.as_bytes()));
+    let mut reader = PmcInventoryAccessor::new(source)
+        .open(
+            request(Some(vec!["metadata_key", "Key"])).with_options(ReadOptions {
+                batch_size: NonZeroUsize::new(keys.len()).unwrap(),
+                projection: Some(vec!["metadata_key".into(), "Key".into()]),
+            }),
+        )
+        .await
+        .unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(batch.num_rows(), keys.len());
+    for (index, (encoded, decoded)) in keys.iter().enumerate() {
+        for (column, expected) in [("metadata_key", decoded), ("Key", encoded)] {
+            assert_eq!(
+                batch
+                    .column_by_name(column)
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+                    .value(index),
+                *expected
+            );
+        }
+    }
+    assert!(reader.next().await.unwrap().is_none());
 }
 #[tokio::test]
 async fn declared_field_order_extra_columns_and_csv_quoting_are_preserved() {

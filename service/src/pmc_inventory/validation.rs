@@ -1,6 +1,6 @@
 use super::{decode, manifest::Manifest};
 use open_arrow_access_core::{Error, ErrorKind, Result};
-use std::collections::HashSet;
+use std::{borrow::Cow, collections::HashSet};
 
 pub(super) fn validate_manifest_locator(path: &str) -> Result<()> {
     if !valid_path(path) || !(path == "manifest.json" || path.ends_with("/manifest.json")) {
@@ -65,7 +65,7 @@ pub(super) fn validate_fields(schema: &str) -> Result<Vec<String>> {
     }
     Ok(fields)
 }
-pub(super) fn validate_row(bucket: Option<&str>, key: Option<&str>) -> Result<String> {
+pub(super) fn validate_row<'a>(bucket: Option<&str>, key: Option<&'a str>) -> Result<Cow<'a, str>> {
     if bucket != Some("pmc-oa-opendata") {
         return Err(decode("inventory row has a missing or unexpected Bucket"));
     }
@@ -87,7 +87,7 @@ pub(super) fn validate_row(bucket: Option<&str>, key: Option<&str>) -> Result<St
             "inventory Key is not a canonical metadata JSON object",
         ));
     }
-    Ok(decoded.into_owned())
+    Ok(decoded)
 }
 pub(super) fn validate_manifest_length(length: Option<u64>, limit: usize) -> Result<()> {
     if length.is_some_and(|length| length > limit as u64) {

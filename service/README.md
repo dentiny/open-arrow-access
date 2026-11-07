@@ -45,6 +45,9 @@ in manifest order and retains row order and duplicates. Common batch sizing,
 projection, zero-column row counts, and per-open byte I/O options are supported.
 Projection is resolved after the manifest supplies the schema, before any CSV
 shard opens. Validation still examines Bucket and Key when projection omits them.
+Each batch shares the cached output schema, so projection does not copy the raw
+manifest per batch. Selected CSV arrays are reused; `metadata_key` is built
+directly into an Arrow string builder only when selected.
 All validation functions live in `pmc_inventory/validation.rs`.
 
 Missing shards, invalid rows, malformed/truncated CSV/gzip, invalid manifests,

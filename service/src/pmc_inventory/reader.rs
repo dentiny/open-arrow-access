@@ -1,5 +1,5 @@
 use super::{capability, decode, validation};
-use arrow_array::{Array, ArrayRef, StringArray};
+use arrow_array::{Array, ArrayRef, RecordBatchOptions, StringArray, builder::StringBuilder};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteReadOptions, Capability, ObjectRef, ReadOptions,
     ReadRequest, Reader, RecordBatch, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
@@ -13,8 +13,7 @@ pub(super) struct InventoryReader<A> {
     pub files: VecDeque<ObjectRef>,
     pub current: Option<Box<dyn RecordReader>>,
     pub csv_schema: SchemaRef,
-    pub full_schema: SchemaRef,
-    pub projection: Option<Vec<usize>>,
+    pub projection: Vec<usize>,
     pub options: ReadOptions,
     pub byte_options: ByteReadOptions,
     pub metadata: RecordMetadata,
@@ -37,25 +36,39 @@ impl<A: ByteAccessor + 'static> InventoryReader<A> {
                         .as_any()
                         .downcast_ref::<StringArray>()
                         .unwrap();
-                    let decoded = (0..batch.num_rows())
-                        .map(|row| {
-                            validation::validate_row(
-                                (!buckets.is_null(row)).then(|| buckets.value(row)),
-                                (!keys.is_null(row)).then(|| keys.value(row)),
-                            )
+                    let metadata_index = self.csv_schema.fields().len();
+                    let mut decoded = self.projection.contains(&metadata_index).then(|| {
+                        StringBuilder::with_capacity(batch.num_rows(), keys.value_data().len())
+                    });
+                    for row in 0..batch.num_rows() {
+                        let key = validation::validate_row(
+                            (!buckets.is_null(row)).then(|| buckets.value(row)),
+                            (!keys.is_null(row)).then(|| keys.value(row)),
+                        )?;
+                        if let Some(builder) = &mut decoded {
+                            builder.append_value(key);
+                        }
+                    }
+                    let decoded = decoded.map(|mut builder| Arc::new(builder.finish()) as ArrayRef);
+                    let columns = self
+                        .projection
+                        .iter()
+                        .map(|&index| {
+                            if index == metadata_index {
+                                decoded.as_ref().unwrap().clone()
+                            } else {
+                                batch.column(index).clone()
+                            }
                         })
-                        .collect::<Result<Vec<_>>>()?;
-                    let mut columns = batch.columns().to_vec();
-                    columns.push(Arc::new(StringArray::from(decoded)) as ArrayRef);
-                    let batch = RecordBatch::try_new(self.full_schema.clone(), columns)
-                        .map_err(|error| decode(error.to_string()).with_source(error))?;
-                    return match &self.projection {
-                        Some(indices) => batch
-                            .project(indices)
-                            .map(Some)
-                            .map_err(|error| decode(error.to_string()).with_source(error)),
-                        None => Ok(Some(batch)),
-                    };
+                        .collect();
+                    // Reuse the output schema, including the potentially large raw manifest.
+                    return RecordBatch::try_new_with_options(
+                        self.metadata.schema.clone(),
+                        columns,
+                        &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
+                    )
+                    .map(Some)
+                    .map_err(|error| decode(error.to_string()).with_source(error));
                 }
                 self.current = None;
             }

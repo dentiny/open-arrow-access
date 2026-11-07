@@ -78,8 +78,7 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
                 .collect(),
             current: None,
             csv_schema,
-            full_schema,
-            projection,
+            projection: projection.unwrap_or_else(|| (0..full_schema.fields().len()).collect()),
             options: request.options,
             byte_options: request.byte_options,
             metadata: RecordMetadata {
