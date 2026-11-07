@@ -9,11 +9,11 @@ an ordered stream of Arrow record batches. The project ends at that read interfa
 
 ## Quick start
 
-Enable `storage-opendal` and `format-parquet`. The example enables OpenDAL's
-filesystem backend through its development dependencies:
+Enable `format-parquet`; OpenDAL storage is always available. The example
+enables OpenDAL's filesystem backend through its development dependencies:
 
 ```sh
-cargo run --example read_parquet --features storage-opendal,format-parquet -- /absolute/data/root part.parquet
+cargo run --example read_parquet --features format-parquet -- /absolute/data/root part.parquet
 ```
 
 ```rust,no_run
@@ -105,7 +105,7 @@ names its S3 feature `services-s3`.
 Enable `format-json` and construct `file_format::JsonAccessor::new(bytes, schema)`
 with a fixed `SchemaRef`, then open it with the same `ReadRequest` used for
 Parquet. `bytes` can be any sequential byte accessor; range reads and a known
-length are unnecessary. Use `storage-opendal,format-json` and enable OpenDAL's
+length are unnecessary. Use `format-json` and enable OpenDAL's
 `services-fs` backend on your OpenDAL dependency for local files.
 
 The reader uses Arrow JSON's incremental decoder for whitespace-separated JSON
@@ -329,7 +329,7 @@ With explicit mappings, projection avoids conversion of omitted fields. In
 inference mode, projection names are resolved after sampling and output columns
 are selected after conversion. Selected records are read and parsed in full in
 both modes. Run the example on the project-authored inventory fixture with
-`cargo run --features storage-opendal,format-xml --example read_xml`.
+`cargo run --features format-xml --example read_xml`.
 
 ## ATIF trajectories
 
@@ -393,8 +393,8 @@ open OpenDAL operators or implement Harbor Hub discovery. `FileSetAccessor` and
 Run the example with either explicit layout:
 
 ```sh
-cargo run --example read_atif --features storage-opendal,format-atif
-cargo run --example read_atif --features storage-opendal,format-atif -- testdata/atif/trajectories.jsonl jsonl
+cargo run --example read_atif --features format-atif
+cargo run --example read_atif --features format-atif -- testdata/atif/trajectories.jsonl jsonl
 ```
 
 The adapter uses the published `atif-arrow 0.3.0` crate with Arrow 59;
@@ -402,9 +402,10 @@ see [dependency alignment](docs/dependencies.md#atif-parser).
 
 ## Caller-configured storage
 
-Enable `storage-opendal` to use `storage::{OpenDalAccessor, opendal}` with a
-caller-configured SDK operator, independently of any dataset provider. Backend
-features and credentials stay under the caller's control.
+`storage::{OpenDalAccessor, opendal}` is always available, including with
+`--no-default-features`. Wrap a caller-configured SDK operator independently of
+any dataset provider. Backend features and credentials stay under the caller's
+control.
 
 Generic listing accepts implicit object-store directory prefixes without first
 requiring a directory object or `stat` support. The empty prefix selects the

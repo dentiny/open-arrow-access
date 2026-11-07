@@ -197,9 +197,9 @@ schema and optional reader-context contracts.
   directory under `src/`. In `src/parquet/`, `accessor.rs`, `input.rs` and
   `reader.rs` own their respective structs and implementations; `mod.rs` declares
   the modules, exports the accessor and provides common error conversion.
-- The facade forwards independent, additive `storage-opendal` / `format-parquet`
-  features. Features make implementations available; they do not change runtime
-  ordering or silently attach layers.
+- The facade always exposes OpenDAL storage, including with no default features.
+  Format, dataset, and decompression features remain independent and additive;
+  they do not change runtime ordering or silently attach layers.
 - `decompression/` shares streaming byte adapters across codec modules. Its
   independent gzip/LZ4/bzip2/Zstandard features use upstream decoders with
   concatenated frames or members;

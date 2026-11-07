@@ -418,7 +418,7 @@ async fn directory_rejects_traversal_entries() {
     }
 }
 
-#[cfg(all(feature = "storage-opendal", feature = "format-parquet"))]
+#[cfg(feature = "format-parquet")]
 mod filesystem {
     use super::*;
     use more_asserts::assert_le;

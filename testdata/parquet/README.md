@@ -38,5 +38,5 @@ Arrow/Parquet 59.3.0 `ArrowWriter`, using uncompressed columns.
 Run the filesystem and Parquet tests with:
 
 ```sh
-cargo test --locked --features storage-opendal,format-parquet --test reading
+cargo test --locked --features format-parquet --test reading
 ```

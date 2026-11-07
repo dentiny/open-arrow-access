@@ -30,7 +30,8 @@ async fn read() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-This example also needs `storage-opendal`. The layer implements the existing
+OpenDAL storage is always available; enable the upstream `services-fs` backend
+for this example. The layer implements the existing
 `Layer`, `Accessor` and `ByteReader` protocols, so custom storage and nested
 compression wrappers work without format-specific code. Requests and storage
 I/O options pass through unchanged. Discovery delegates to the underlying byte
