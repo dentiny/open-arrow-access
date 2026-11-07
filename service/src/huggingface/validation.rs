@@ -3,7 +3,13 @@ use open_arrow_access_core::{Error, ErrorKind, Result};
 use super::HuggingFaceRepository;
 
 pub(super) fn validate_repository(repository: &HuggingFaceRepository) -> Result<()> {
-    let parts: Vec<_> = repository.repository.split('/').collect();
+    validate_repository_id(&repository.repository)?;
+    validate_revision(&repository.revision)?;
+    validate_path(&repository.root, true)
+}
+
+fn validate_repository_id(repository: &str) -> Result<()> {
+    let parts: Vec<_> = repository.split('/').collect();
     if parts.len() != 2
         || parts.iter().any(|p| {
             p.is_empty()
@@ -20,10 +26,14 @@ pub(super) fn validate_repository(repository: &HuggingFaceRepository) -> Result<
             "expected a repository ID in owner/name form",
         ));
     }
-    if repository.revision.is_empty()
-        || repository.revision.trim() != repository.revision
-        || repository.revision.contains(['\0', '\\'])
-        || matches!(repository.revision.as_str(), "." | "..")
+    Ok(())
+}
+
+fn validate_revision(revision: &str) -> Result<()> {
+    if revision.is_empty()
+        || revision.trim() != revision
+        || revision.contains(['\0', '\\'])
+        || matches!(revision, "." | "..")
     {
         return Err(Error::new(
             ErrorKind::InvalidInput,
@@ -31,7 +41,7 @@ pub(super) fn validate_repository(repository: &HuggingFaceRepository) -> Result<
             "invalid repository revision",
         ));
     }
-    validate_path(&repository.root, true)
+    Ok(())
 }
 
 pub(super) fn validate_path(path: &str, directory: bool) -> Result<()> {
