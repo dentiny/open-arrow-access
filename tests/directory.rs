@@ -436,8 +436,7 @@ mod filesystem {
         std::fs::create_dir(dir.path().join("sub")).unwrap();
         std::fs::write(dir.path().join("a"), b"a").unwrap();
         std::fs::write(dir.path().join("sub/b"), b"b").unwrap();
-        let fs =
-            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()).await);
+        let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
         assert!(fs.capability().list);
         let mut paths = fs
             .list("".into())
@@ -491,8 +490,7 @@ mod filesystem {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("data/sub")).unwrap();
         copy_fixture("a.parquet", &dir.path().join("data/sub/a.parquet"));
-        let fs =
-            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()).await);
+        let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
         let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
         for prefix in ["data/sub", "data//sub", "data///sub//"] {
             let request = DirectoryRequest::new(prefix);
@@ -522,8 +520,7 @@ mod filesystem {
         std::fs::create_dir(&excluded).unwrap();
         copy_fixture("b.parquet", &excluded.join("b.parquet"));
         let permissions = std::fs::metadata(&excluded).unwrap().permissions();
-        let fs =
-            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()).await);
+        let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
         let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
         let mut request = DirectoryRequest::new("");
         request.recursive = false;
@@ -546,8 +543,7 @@ mod filesystem {
         copy_fixture("c.parquet", &dir.path().join(".sub/c.parquet"));
         copy_fixture("hidden.parquet", &dir.path().join(".hidden.parquet"));
         std::fs::write(dir.path().join("readme"), b"not parquet").unwrap();
-        let fs =
-            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()).await);
+        let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
         let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
         let mut request = DirectoryRequest::new("");
         request.suffix = Some(".parquet".into());

@@ -375,7 +375,7 @@ async fn filesystem_csv_preserves_values_across_chunks_and_batches() {
 
     for chunk_size in [1, 7, 4096] {
         let bytes =
-            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(fixture_root()).await)
+            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(fixture_root()))
                 .with_chunk_size(NonZeroUsize::new(chunk_size).unwrap());
         let accessor = CsvAccessor::new(bytes, schema()).with_format(
             CsvFormat::default()
@@ -426,7 +426,7 @@ async fn filesystem_invalid_csv_errors_are_terminal() {
 
     for chunk_size in [1, 4096] {
         let bytes =
-            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(fixture_root()).await)
+            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(fixture_root()))
                 .with_chunk_size(NonZeroUsize::new(chunk_size).unwrap());
         let accessor = CsvAccessor::new(bytes, schema());
         for name in BAD_FILES {

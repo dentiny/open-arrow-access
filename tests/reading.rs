@@ -24,7 +24,7 @@ async fn local_parquet_preserves_values_nulls_and_order_across_row_groups() {
     for compression in [Compression::UNCOMPRESSED, Compression::SNAPPY] {
         let fixture = fixture(compression).await;
         let accessor = ParquetAccessor::new(OpenDalAccessor::new(
-            open_arrow_access_test_support::fs_operator(fixture.dir.path()).await,
+            open_arrow_access_test_support::fs_operator(fixture.dir.path()),
         ));
         let mut reader = accessor
             .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
@@ -71,7 +71,7 @@ async fn local_parquet_preserves_values_nulls_and_order_across_row_groups() {
 async fn projection_honors_requested_field_order_and_schema() {
     let fixture = fixture(Compression::UNCOMPRESSED).await;
     let accessor = ParquetAccessor::new(OpenDalAccessor::new(
-        open_arrow_access_test_support::fs_operator(fixture.dir.path()).await,
+        open_arrow_access_test_support::fs_operator(fixture.dir.path()),
     ));
     let reader = accessor
         .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
@@ -102,7 +102,7 @@ async fn projection_honors_requested_field_order_and_schema() {
 async fn zero_column_projection_preserves_row_count() {
     let fixture = fixture(Compression::UNCOMPRESSED).await;
     let accessor = ParquetAccessor::new(OpenDalAccessor::new(
-        open_arrow_access_test_support::fs_operator(fixture.dir.path()).await,
+        open_arrow_access_test_support::fs_operator(fixture.dir.path()),
     ));
     let reader = accessor
         .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
@@ -121,7 +121,7 @@ async fn zero_column_projection_preserves_row_count() {
 async fn projection_rejects_unknown_and_duplicate_fields() {
     let fixture = fixture(Compression::UNCOMPRESSED).await;
     let accessor = ParquetAccessor::new(OpenDalAccessor::new(
-        open_arrow_access_test_support::fs_operator(fixture.dir.path()).await,
+        open_arrow_access_test_support::fs_operator(fixture.dir.path()),
     ));
     for columns in [vec!["missing".into()], vec!["id".into(), "id".into()]] {
         let result = accessor
@@ -140,7 +140,7 @@ async fn byte_reader_has_bounded_chunks_and_independent_range_cursor() {
     tokio::fs::write(dir.path().join("data.bin"), b"abcdefghij")
         .await
         .unwrap();
-    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()).await)
+    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()))
         .with_chunk_size(NonZeroUsize::new(3).unwrap());
     let mut reader = fs.open("data.bin".into()).await.unwrap();
     assert_eq!(reader.metadata().content_length, Some(10));
@@ -162,7 +162,7 @@ async fn byte_reader_has_bounded_chunks_and_independent_range_cursor() {
 #[tokio::test]
 async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
     let dir = tempfile::tempdir().unwrap();
-    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()).await);
+    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
     let error = fs.open("missing.parquet".into()).await.err().unwrap();
     assert_eq!(error.kind(), ErrorKind::NotFound);
     assert!(error.source().is_some());
@@ -195,7 +195,7 @@ async fn empty_file_and_invalid_ranges_have_explicit_behavior() {
     tokio::fs::write(dir.path().join("empty"), [])
         .await
         .unwrap();
-    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()).await);
+    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
     let mut reader = fs.open("empty".into()).await.unwrap();
     assert!(reader.next().await.unwrap().is_none());
     assert!(reader.read_range(0..0).await.unwrap().is_empty());
@@ -212,7 +212,7 @@ async fn empty_file_and_invalid_ranges_have_explicit_behavior() {
 #[tokio::test]
 async fn malformed_parquet_returns_contextual_decode_error() {
     let accessor = ParquetAccessor::new(OpenDalAccessor::new(
-        open_arrow_access_test_support::fs_operator(fixture_path("")).await,
+        open_arrow_access_test_support::fs_operator(fixture_path("")),
     ));
     let error = accessor
         .open(ReadRequest::new("bad-magic.parquet"))
@@ -256,9 +256,10 @@ async fn parquet_accepts_third_party_accessor_and_rejects_sequential_only_input(
 async fn dropping_reader_does_not_start_background_reads_and_errors_are_terminal() {
     let fixture = fixture(Compression::UNCOMPRESSED).await;
     let observations = Arc::new(Observations::default());
-    let byte_accessor =
-        OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(fixture.dir.path()).await)
-            .layer(ByteObserverLayer(observations.clone()));
+    let byte_accessor = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
+        fixture.dir.path(),
+    ))
+    .layer(ByteObserverLayer(observations.clone()));
     let accessor = ParquetAccessor::new(byte_accessor);
     let mut reader = accessor
         .open(ReadRequest::new("data.parquet"))
@@ -346,10 +347,11 @@ async fn one_layer_contract_composes_at_byte_and_record_boundaries_in_known_orde
         label,
         events: events.clone(),
     };
-    let bytes =
-        OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(fixture.dir.path()).await)
-            .layer(layer("inner-byte"))
-            .layer(layer("outer-byte"));
+    let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
+        fixture.dir.path(),
+    ))
+    .layer(layer("inner-byte"))
+    .layer(layer("outer-byte"));
     assert!(bytes.capability().list);
     assert_eq!(
         bytes
@@ -386,8 +388,9 @@ async fn one_layer_contract_composes_at_byte_and_record_boundaries_in_known_orde
 #[tokio::test]
 async fn capability_downgrade_matches_operations_and_blocks_parquet() {
     let fixture = fixture(Compression::UNCOMPRESSED).await;
-    let fs =
-        OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(fixture.dir.path()).await);
+    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
+        fixture.dir.path(),
+    ));
     assert!(fs.capability().read_with_range);
     let bytes = fs.layer(SequentialLayer);
     assert!(bytes.capability().read);
@@ -480,7 +483,7 @@ async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor
     tokio::fs::write(dir.path().join("data.bin"), b"abcdefghij")
         .await
         .unwrap();
-    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()).await)
+    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()))
         .with_chunk_size(NonZeroUsize::new(3).unwrap());
     for concurrency in [1, 4] {
         let mut reader = fs
@@ -545,9 +548,10 @@ async fn third_party_byte_reader_uses_the_bulk_range_fallback() {
 async fn parquet_forwards_per_open_io_options_and_uses_bulk_ranges_through_layers() {
     let fixture = fixture(Compression::UNCOMPRESSED).await;
     let observations = Arc::new(Observations::default());
-    let bytes =
-        OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(fixture.dir.path()).await)
-            .layer(ByteObserverLayer(observations.clone()));
+    let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
+        fixture.dir.path(),
+    ))
+    .layer(ByteObserverLayer(observations.clone()));
     let records = ParquetAccessor::new(bytes);
     for concurrency in [1, 3] {
         let options = ByteReadOptions {
@@ -597,9 +601,9 @@ async fn parquet_preserves_source_error_categories_during_inspection_and_decodin
             let observations = Arc::new(Observations::default());
             *observations.failure_kind.lock().unwrap() = Some(kind);
             observations.fail_reads.store(inspect, Ordering::SeqCst);
-            let bytes = OpenDalAccessor::new(
-                open_arrow_access_test_support::fs_operator(fixture.dir.path()).await,
-            )
+            let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
+                fixture.dir.path(),
+            ))
             .layer(ByteObserverLayer(observations.clone()));
             let accessor = ParquetAccessor::new(bytes);
             let error = if inspect {

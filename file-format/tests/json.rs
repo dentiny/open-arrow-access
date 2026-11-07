@@ -244,7 +244,7 @@ async fn empty_and_whitespace_only_inputs_have_no_rows() {
 #[tokio::test]
 async fn local_jsonl_reads_through_opendal() {
     let storage = open_arrow_access_storage::OpenDalAccessor::new(
-        open_arrow_access_test_support::fs_operator(fixture_path("")).await,
+        open_arrow_access_test_support::fs_operator(fixture_path("")),
     );
     let accessor = JsonAccessor::new(
         storage.with_chunk_size(NonZeroUsize::new(2).unwrap()),
