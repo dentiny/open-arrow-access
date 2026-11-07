@@ -11,7 +11,7 @@ default = []
 atif = ["dep:atif-arrow"]
 parquet = ["dep:parquet", "dep:arrow-schema", "dep:futures"]
 json = ["dep:arrow-json", "dep:arrow-schema"]
-xml = ["dep:xml-arrow", "dep:futures"]
+xml = ["dep:xml-arrow"]
 csv = ["dep:arrow-csv", "dep:arrow-schema"]
 
 [dependencies]

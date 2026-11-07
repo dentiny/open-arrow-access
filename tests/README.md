@@ -18,6 +18,7 @@ directory owns facade wiring and composition across crates.
 | OpenDAL storage | [`storage/tests/opendal.rs`](../storage/tests/opendal.rs) |
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
+| Byte reader to futures I/O adapter | [`core/tests/async_read.rs`](../core/tests/async_read.rs) |
 | Shared memory backend | [`test-support/tests/memory.rs`](../test-support/tests/memory.rs) |
 
 ## Add a test

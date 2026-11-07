@@ -53,6 +53,14 @@ another valid random-access mechanism. See [decompression](../decompression/READ
 `into_stream` owns the reader and stops polling it after EOF or the first error.
 No background execution is created by these contracts.
 
+`into_async_read` owns a `ByteReader` and exposes futures `AsyncRead` and
+`AsyncBufRead` for streaming parsers. It retains input chunks until consumed,
+rejects empty chunks as I/O errors, and stops polling after EOF or an error.
+Upstream errors remain wrapped in `std::io::Error` with their original category
+and source chain. Construction performs no I/O, and dropping the adapter drops
+the input. XML and decompression share this bridge; it exposes sequential reads
+only, without retaining range operations.
+
 ### Reader lifecycle
 
 `ReadState` in core tracks input EOF separately from output completion. Marking

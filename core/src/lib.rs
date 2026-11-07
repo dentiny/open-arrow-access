@@ -1,6 +1,7 @@
 //! Shared contracts with no dependency on a storage backend or file format.
 
 mod accessor;
+mod async_read;
 mod capability;
 mod error;
 mod layer;
@@ -9,6 +10,7 @@ mod reader;
 mod request;
 
 pub use accessor::{Accessor, ByteAccessor, ObjectStream};
+pub use async_read::into_async_read;
 pub use capability::Capability;
 pub use error::{Error, ErrorKind, Result};
 pub use layer::{AccessorExt, Layer};

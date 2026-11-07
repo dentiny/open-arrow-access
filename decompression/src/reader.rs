@@ -1,9 +1,9 @@
-use std::{io, num::NonZeroUsize};
+use std::num::NonZeroUsize;
 
-use futures::{StreamExt, TryStreamExt, io::AsyncReadExt};
+use futures::io::AsyncReadExt;
 use open_arrow_access_core::{
     ByteMetadata, ByteReader, Bytes, Capability, Error, ErrorKind, ReadState, Reader, Result,
-    async_trait, into_stream,
+    async_trait, into_async_read,
 };
 
 use crate::{Codec, DecodedInput};
@@ -24,23 +24,7 @@ impl DecompressionReader {
     ) -> Self {
         let mut metadata = inner.metadata().clone();
         metadata.content_length = None;
-        let input = into_stream(inner)
-            .map(|result| {
-                result
-                    .and_then(|bytes| {
-                        if bytes.is_empty() {
-                            Err(Error::new(
-                                ErrorKind::Io,
-                                "decompress_input",
-                                "byte reader returned an empty chunk",
-                            ))
-                        } else {
-                            Ok(bytes)
-                        }
-                    })
-                    .map_err(io::Error::other)
-            })
-            .into_async_read();
+        let input = into_async_read(inner, "decompress_input");
         Self {
             decoder: codec.decoder(Box::pin(input)),
             metadata,
