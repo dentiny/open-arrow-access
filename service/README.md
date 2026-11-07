@@ -40,3 +40,7 @@ Construct a request from crawl/segment IDs, a segment URL, or a shared
 
 Manifest byte framing and the 16 KiB per-line bound use core `read_lines`;
 path validation and selected-file duplicate checks remain in the provider.
+
+`format-warc` exposes native parser records through `WarcAccessor`. This service
+composes Arrow readers through FileSet, so its `format` argument requires a
+caller-provided WARC-to-Arrow accessor. Manifest-only `resolve` needs no conversion.

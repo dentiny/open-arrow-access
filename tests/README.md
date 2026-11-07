@@ -18,6 +18,7 @@ directory owns facade wiring and composition across crates.
 | Common Crawl configuration | [`tests/commoncrawl_common.rs`](commoncrawl_common.rs) |
 | Common Crawl WARC inventory | [`tests/commoncrawl_warc.rs`](commoncrawl_warc.rs) |
 | Common Crawl segments | [`tests/commoncrawl_segment.rs`](commoncrawl_segment.rs) |
+| WARC parser | [`tests/warc.rs`](warc.rs) |
 | OpenDAL storage | [`storage/tests/opendal.rs`](../storage/tests/opendal.rs) |
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |

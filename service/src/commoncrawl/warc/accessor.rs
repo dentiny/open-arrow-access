@@ -10,6 +10,8 @@ use open_arrow_access_dataset::{FileSetAccessor, FileSetRequest};
 /// `manifests` must expose decoded `warc.paths.gz` bytes. Supply gzip separately
 /// for the official inventory. `format` handles individual WARC files, including
 /// any decompression. Both accessors use origin-rooted `crawl-data/...` locators.
+/// `format` emits Arrow batches; native `WarcAccessor` records need a caller-provided
+/// Arrow conversion adapter before this boundary.
 #[derive(Debug)]
 pub struct CommonCrawlWarcAccessor<M, F> {
     manifests: M,

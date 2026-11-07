@@ -1,0 +1,8 @@
+WARC/1.1
+WARC-Type: metadata
+WARC-Record-ID: <urn:test:one>
+WARC-Date: 2020-07-08T02:52:55Z
+Content-Length: 4
+
+test
+
