@@ -1,5 +1,6 @@
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Capability, ReaderFactory, Result, async_trait,
+    Accessor, ByteReadRequest, ByteReader, Capability, ReaderFactory, ReaderFactoryExt, Result,
+    async_trait,
 };
 
 /// Compose byte storage with a [`ReaderFactory`] using the common read protocol.
@@ -54,6 +55,6 @@ where
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
-        self.format.open_reader(&self.inner, request).await
+        ReaderFactoryExt::open_reader(&self.format, &self.inner, request).await
     }
 }

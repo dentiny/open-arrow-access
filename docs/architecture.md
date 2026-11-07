@@ -180,11 +180,17 @@ Core `ReaderFactory` transforms one opened `ByteReader` into its associated
 reader interface. Associated `Request` and `Reader` types keep Arrow batches,
 bytes and other parsed items distinct. `Prepared: Send` retains per-open decoders
 and resolved schemas without repeating validation or constructing a decoder twice.
-The default `ReaderFactory::open_reader` runs synchronous `prepare(&request)`,
+The blanket `ReaderFactoryExt::open_reader` implementation runs `prepare(&request)`,
 converts the request into `ByteReadRequest`, opens storage, then invokes
 `create_reader` with a borrowed `FactoryToken`, the owned input and prepared
 state. Preparation performs no I/O; reader creation can inspect input and must
 expose metadata when it completes. Errors pass through unchanged.
+
+`ReaderFactory` requires each implementation to provide its creation hook.
+`ReaderFactoryExt` is implemented once for all factories, including trait objects,
+so downstream implementations cannot override `open_reader`. Accessors call the
+extension trait explicitly; an inherent method of the same name cannot replace
+the shared orchestration. Direct callers import `ReaderFactoryExt`.
 
 `FileAccessor<B, F>` delegates opening to this shared flow and uses the factory's
 request and reader types. Existing Arrow formats use `ReadRequest` and
@@ -208,8 +214,9 @@ no additional `Accessor` implementation. Format configuration and decoding stay
 in `file-format`, with no backend dependencies in the factory trait.
 
 Decompression uses `DecompressionFactory<C>` with `ByteReadRequest` and
-`dyn ByteReader`, delegating to the same default `open_reader` method. `Codec` constructs
-the native decoder; the factory adapts its output, maps codec errors, and clears
+`dyn ByteReader`, delegating to the same blanket `open_reader` implementation.
+`Codec` constructs the native decoder; the factory adapts its output, maps codec
+errors, and clears
 decoded content length. Listing stays with `DecompressionAccessor`, which forwards
 the upstream listing capability and requests. Factories describe reader output
 and do not advertise listing. Multi-object discovery and file-set orchestration
@@ -217,8 +224,9 @@ remain accessor responsibilities.
 
 Creation hooks require `&FactoryToken`. The type is public for cross-crate
 implementations, but its field and construction are private to core. It has no
-public constructor, `Default`, or `Clone`. Only the default `open_reader` supplies
-a token; ordinary callers without one cannot bypass that entry point.
+public constructor, `Default`, or `Clone`. Only the blanket `open_reader`
+implementation supplies a token; ordinary callers without one cannot bypass
+that entry point.
 
 | Adapter | Request | Reader |
 | --- | --- | --- |
@@ -285,7 +293,8 @@ evaluation and DataFusion integration remain a separate PR. See
 schema and optional reader-context contracts.
 
 - `core/` depends on common types and Arrow, never concrete backends or formats.
-  It exposes `ReaderFactory`, including the default `open_reader` orchestration.
+  It exposes `ReaderFactory`, with `ReaderFactoryExt` providing shared opening
+  orchestration.
 - `storage/` exposes one `OpenDalAccessor` over a caller-configured OpenDAL
   operator. Backend features, root validation, credentials, and initialization
   belong to the caller. Production reads and metadata access go through OpenDAL;

@@ -62,9 +62,9 @@ their category and original source; codec corruption uses Decode. Errors and
 EOF are terminal. Drop a decoder after cancelling an in-flight read.
 
 `DecompressionFactory<C>` implements core `ReaderFactory` for byte requests and
-byte output. Both decompression and file accessors use the default factory
-`open_reader` method to prepare configuration before opening storage, then
-create the output reader.
+byte output. Both decompression and file accessors use the blanket
+`ReaderFactoryExt::open_reader` implementation to prepare configuration before
+opening storage, then create the output reader.
 The factory uses `read_chunks` for decoded output and `StreamReader` for metadata,
 sequential capabilities and terminal handling. Codec error mapping stays here;
 listing remains delegated by `DecompressionAccessor`.

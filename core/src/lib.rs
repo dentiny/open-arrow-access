@@ -26,7 +26,7 @@ pub use read_state::ReadState;
 pub use reader::{
     ByteMetadata, ByteReader, Reader, RecordMetadata, RecordReader, RecordStream, into_stream,
 };
-pub use reader_factory::{FactoryToken, ReaderFactory};
+pub use reader_factory::{FactoryToken, ReaderFactory, ReaderFactoryExt};
 pub use request::{
     ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ListRequest, ObjectRef, ReadOptions,
     ReadOptionsProvider, ReadRequest,

@@ -442,8 +442,11 @@ Implement `ReaderFactory` for a new single-input format:
    input operations, such as exact ranges. Validate actual input capabilities
    and metadata during `create_reader`.
 
-`ReaderFactory::open_reader` runs preparation, opens storage, and invokes
-`create_reader`. Both `FileAccessor` and decompression use this default method.
+`ReaderFactoryExt::open_reader` runs preparation, opens storage, and invokes
+`create_reader`. One blanket implementation supplies it for every factory;
+individual factory types cannot override it. Both `FileAccessor` and
+decompression invoke this implementation explicitly. Direct factory callers
+import `ReaderFactoryExt` to use `factory.open_reader(&storage, request)`.
 Conversion from `&Request` to `ByteReadRequest` forwards the exact object and
 byte options; the built-in
 record and byte requests already support it. A custom single-input request can
@@ -457,8 +460,9 @@ accepting a borrowed `FactoryToken`.
 Accessor constructors and builders keep their existing API.
 
 `FactoryToken` is public so other crates can implement the creation hook, but
-its construction is private. The default `open_reader` supplies a borrowed token
-after opening storage. No public constructor, `Default`, or `Clone` is provided,
+its construction is private. The blanket `open_reader` implementation supplies
+a borrowed token after opening storage. No public constructor, `Default`, or
+`Clone` is provided,
 so callers without a token cannot directly invoke `create_reader` in safe Rust.
 
 Use `StreamReader` for existing streams, `into_async_read` for futures I/O

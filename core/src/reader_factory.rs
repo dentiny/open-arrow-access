@@ -1,13 +1,13 @@
 use crate::{Accessor, ByteReadRequest, ByteReader, Capability, Reader, Result, async_trait};
 
-/// Supplied by [`ReaderFactory::open_reader`] to creation hooks.
+/// Supplied by [`ReaderFactoryExt::open_reader`] to creation hooks.
 /// Public so other crates can implement hooks; only this module can construct it.
 pub struct FactoryToken {
     _private: (),
 }
 
 /// Create an independently owned reader from one opened byte input.
-/// [`Self::open_reader`] prepares configuration before opening storage.
+/// [`ReaderFactoryExt::open_reader`] prepares configuration before opening storage.
 #[async_trait]
 pub trait ReaderFactory: Send + Sync {
     /// Typed selection and configuration for one open operation.
@@ -32,7 +32,7 @@ pub trait ReaderFactory: Send + Sync {
 
     /// Inspect opened bytes and return an owned reader with metadata available.
     /// Preserve source errors and lifecycle; inspection may perform I/O.
-    /// `token` is supplied by [`Self::open_reader`].
+    /// `token` is supplied by [`ReaderFactoryExt::open_reader`].
     async fn create_reader(
         &self,
         token: &FactoryToken,
@@ -40,8 +40,23 @@ pub trait ReaderFactory: Send + Sync {
         request: Self::Request,
         prepared: Self::Prepared,
     ) -> Result<Box<Self::Reader>>;
+}
 
-    /// Prepare, open storage, and create a reader, forwarding errors unchanged.
+/// Shared opening flow provided by one blanket implementation for all factories.
+#[async_trait]
+pub trait ReaderFactoryExt: ReaderFactory {
+    /// Prepare, open storage, and create a reader; implementations cannot override it.
+    async fn open_reader(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<Box<Self::Reader>>
+    where
+        for<'a> ByteReadRequest: From<&'a Self::Request>;
+}
+
+#[async_trait]
+impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
     async fn open_reader(
         &self,
         storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
