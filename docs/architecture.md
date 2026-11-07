@@ -1,8 +1,9 @@
 # Framework contracts
 
 The first PR implements the common framework and a single concrete pipeline:
-OpenDAL Fs → Parquet → Arrow. Dataset, service, decompression and production
-layer implementations follow in independent PRs.
+OpenDAL Fs → Parquet → Arrow. The default-off directory dataset adds sequential
+file composition. Streaming decompression layers compose with byte readers;
+services and production record layers follow in independent PRs.
 
 ```mermaid
 flowchart TD
@@ -52,6 +53,20 @@ another valid random-access mechanism. See [decompression](../decompression/READ
 `into_stream` owns the reader and stops polling it after EOF or the first error.
 No background execution is created by these contracts.
 
+### Reader lifecycle
+
+`ReadState` in core tracks input EOF separately from output completion. Marking
+input EOF allows a decoder to drain buffered rows. Observing an output error or
+`Ok(None)` finishes the reader permanently; observing `Ok(Some(item))` preserves
+the current state. A reader can also finish explicitly while emitting a known
+final item, as the JSON decoder does when flushing at input EOF.
+
+Readers check `is_finished()` before doing work and call `observe(&result)` on
+their output. State transitions are synchronous and format-independent. Input,
+decoder, pending bytes, metadata and resource cleanup remain owned by each
+reader. For example, OpenDAL releases its sequential stream and pending buffer
+at completion, while exact range reads remain independent of sequential EOF.
+
 Project-owned I/O methods (`open`, `list`, `next`, `read_range`, `read_ranges`) are declared as
 `async fn` on traits and implementations. Apply the re-exported `#[async_trait]`
 attribute to those traits/impls: it retains Send futures and `dyn` compatibility.
@@ -63,19 +78,20 @@ signatures; its wrappers only box calls to the private `async fn` read helpers.
 
 Both `Accessor::capability()` and `Reader::capability()` return the same public
 `Capability` value, following [OpenDAL's reporting pattern](https://opendal.apache.org/docs/rust/opendal/struct.Capability.html).
-The initial flags cover only operations implemented by this framework:
+The flags describe operation support, including a declaration for future parallel reads:
 
 | Flag | Meaning |
 | --- | --- |
 | `read` | Open/consume the interface's item type |
 | `read_with_range` | Exact byte ranges without changing the sequential cursor; implies `read` |
+| `read_parallel` | Parallel file/partition reads within the interface; implies `read`, independent of range access and output ordering |
 | `list` | Object discovery through `ByteAccessor::list`; accessor-only |
 
 Flags describe the **effective interface after composition**, without I/O.
 Transparent layers forward them; wrappers that remove an operation clear its
 flag on both accessor and reader. The sequential gzip wrapper clears
-`read_with_range`. The Fs adapter reports read/ranges but no listing,
-even though OpenDAL itself supports filesystem listing. The Parquet accessor
+`read_with_range`. The Fs adapter reports read/ranges and recursive
+file listing through OpenDAL. The Parquet accessor
 reports record reading only when its input supports ranges; neither its output
 reader nor its accessor exposes byte-range operations.
 
@@ -86,8 +102,11 @@ invalid options, or unavailable metadata. Parquet also checks the opened byte
 reader's range flag and known length. Capabilities are not authorization or
 snapshot guarantees, and new operation flags are added alongside their APIs.
 Cargo features control which implementations are compiled; runtime capabilities
-describe which operations a particular composed object exposes. No parallelism
-or emission-policy flags are introduced before their contracts exist.
+describe which operations a particular composed object exposes. `read_parallel`
+is a declaration only: existing concrete implementations report `false`, and
+transparent wrappers forward it. It does not enable execution, describe
+per-reader byte I/O concurrency, or describe caller-managed concurrency across
+separate readers. No parallel scheduler or emission-policy flag is introduced.
 
 ## Accessor
 
@@ -109,13 +128,17 @@ contract without a closed enum of every source or format.
 | Fs / generic OpenDAL storage | `ByteReadRequest` | `dyn ByteReader` |
 | Parquet format | `ReadRequest` | `dyn RecordReader` |
 | JSON object stream | `ReadRequest`; schema configured on accessor | Record reader |
-| Future directory dataset | Directory selection and options | Record reader |
+| Directory/file-set dataset | Directory or explicit ordered file selection and options | Record reader |
 | Hugging Face file access | `ByteReadRequest` | `dyn ByteReader` |
 
 `Arc<dyn ByteAccessor>` supports application-owned backend injection. Optional
-`ByteAccessor::list` defaults to Unsupported and is not implemented by the
-initial Fs adapter. The directory PR can add discovery without redesigning
-the opening/reading contract. Input locators remain backend-owned.
+`ByteAccessor::list` accepts `ListRequest` and defaults to Unsupported. Recursive
+discovery is enabled by default; nonrecursive requests must not descend into child
+directories. Fs passes that policy to OpenDAL, and transparent wrappers forward the
+complete request. Other byte accessors can supply their own implementation. Input locators
+remain backend-owned. Directory datasets consume those file
+references and compose any shared single-file record accessor. Directory prefixes
+normalize repeated and trailing slash separators before discovery and matching.
 
 `ByteReadRequest` carries an `ObjectRef` and `ByteReadOptions`. `io_concurrency`
 defaults to one and `io_chunk_size` defaults to the backend's choice. Record-file
@@ -195,8 +218,11 @@ schema and optional reader-context contracts.
   without materializing the input. Top-level arrays/null/scalars are rejected;
   projection selects the decoder schema before opening input. Byte options pass
   through the same `ReadRequest` contract as Parquet.
-- `dataset/` and `layers/` currently contain only
-  scope/extension documentation; unimplemented capabilities are not registered.
+- `dataset/` provides sequential `FileSetAccessor` and `DirectoryAccessor` behind
+  the default-off `dataset-directory` feature, without depending on a format.
+- `service/` provides Hugging Face repository byte access behind the default-off
+  `huggingface` feature; config/split discovery follows separately.
+- `layers/` remains an extension point.
 
 The project output boundary is Arrow records. Internal temporary inputs may be
 introduced for materialization in a later decompression PR; downstream writes,

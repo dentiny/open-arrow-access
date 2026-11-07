@@ -5,7 +5,7 @@ use std::{num::NonZeroUsize, ops::Range, sync::Arc};
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error,
-    ErrorKind, ObjectRef, ObjectStream, Reader, Result, async_trait,
+    ErrorKind, ListRequest, ObjectRef, ObjectStream, ReadState, Reader, Result, async_trait,
 };
 use opendal::{
     Execute, Executor, OperationContext, Operator,
@@ -52,7 +52,9 @@ impl Accessor for OpenDalAccessor {
         Capability {
             read,
             read_with_range: read,
-            list: upstream.stat && upstream.list && upstream.list_with_recursive,
+            read_parallel: false,
+            // OpenDAL can walk nonrecursive backend listings.
+            list: upstream.stat && upstream.list,
         }
     }
 
@@ -104,15 +106,15 @@ impl Accessor for OpenDalAccessor {
             pending: opendal::Buffer::new(),
             len,
             chunk_size: self.chunk_size.get(),
-            finished: false,
+            state: ReadState::default(),
         }) as Box<dyn ByteReader>)
     }
 }
 
 #[async_trait]
 impl ByteAccessor for OpenDalAccessor {
-    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
-        let path = prefix.locator();
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        let path = request.prefix.locator();
         let metadata = self
             .operator
             .stat(path)
@@ -133,7 +135,7 @@ impl ByteAccessor for OpenDalAccessor {
         let lister = self
             .operator
             .lister_with(&path)
-            .recursive(true)
+            .recursive(request.recursive)
             .await
             .map_err(|e| map_error("list", &path, e))?;
         Ok(Box::pin(
@@ -188,7 +190,7 @@ struct OpenDalReader {
     offset: u64,
     len: u64,
     chunk_size: usize,
-    finished: bool,
+    state: ReadState,
 }
 
 impl OpenDalReader {
@@ -326,6 +328,7 @@ impl Reader for OpenDalReader {
         Capability {
             read: true,
             read_with_range: true,
+            read_parallel: false,
             list: false,
         }
     }
@@ -335,21 +338,19 @@ impl Reader for OpenDalReader {
     }
 
     async fn next(&mut self) -> Result<Option<Bytes>> {
-        if self.finished || self.offset == self.len {
-            self.finished = true;
+        if self.state.is_finished() || self.offset == self.len {
+            self.state.finish();
             self.sequential = None;
             self.pending = opendal::Buffer::new();
             return Ok(None);
         }
-        match self.read_next_chunk().await {
-            Ok(bytes) => Ok(Some(bytes)),
-            Err(error) => {
-                self.finished = true;
-                self.sequential = None;
-                self.pending = opendal::Buffer::new();
-                Err(error)
-            }
+        let result = self.read_next_chunk().await.map(Some);
+        self.state.observe(&result);
+        if self.state.is_finished() {
+            self.sequential = None;
+            self.pending = opendal::Buffer::new();
         }
+        result
     }
 }
 

@@ -148,7 +148,17 @@ impl HttpTransport for MockHub {
             return Ok(response(StatusCode::OK, Bytes::from(value.to_string())));
         }
         if uri.contains("/tree/") {
-            let values: Vec<_> = self.files.iter().map(|(path, bytes)| json!({"type":"file","path":path,"size":bytes.len(),"oid":"fixture"})).collect();
+            let recursive = uri.contains("recursive=True");
+            let values: Vec<_> = self
+                .files
+                .iter()
+                .filter(|(path, _)| {
+                    recursive || !path.strip_prefix("data/").unwrap().contains('/')
+                })
+                .map(|(path, bytes)| {
+                    json!({"type":"file","path":path,"size":bytes.len(),"oid":"fixture"})
+                })
+                .collect();
             let page2 = uri.contains("cursor=second");
             let mut page = if page2 {
                 values[values.len().min(1)..].to_vec()
@@ -163,7 +173,13 @@ impl HttpTransport for MockHub {
                 Bytes::from(serde_json::to_string(&page).unwrap()),
             );
             if !page2 && values.len() > 1 {
-                output.headers_mut().insert("link", "<https://hub.invalid/api/datasets/owner/example/tree/refs%2Fconvert%2Fparquet/data?cursor=second>; rel=\"next\"".parse().unwrap());
+                let recursive_query = if recursive { "&recursive=True" } else { "" };
+                output.headers_mut().insert(
+                    "link",
+                    format!("<https://hub.invalid/api/datasets/owner/example/tree/refs%2Fconvert%2Fparquet/data?cursor=second{recursive_query}>; rel=\"next\"")
+                        .parse()
+                        .unwrap(),
+                );
             }
             return Ok(output);
         }

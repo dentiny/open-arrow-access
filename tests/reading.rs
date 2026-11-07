@@ -11,7 +11,7 @@ use futures::TryStreamExt;
 use more_asserts::{assert_gt, assert_le};
 use open_arrow_access::{
     Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, Capability, ErrorKind,
-    Layer, ObjectRef, ObjectStream, ReadOptions, ReadRequest, Result, async_trait,
+    Layer, ListRequest, ObjectRef, ObjectStream, ReadOptions, ReadRequest, Result, async_trait,
     file_format::ParquetAccessor, into_stream, storage::FsAccessor,
 };
 use parquet::basic::Compression;
@@ -183,10 +183,15 @@ async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
         fs.open("subdir/".into()).await.err().unwrap().kind(),
         ErrorKind::InvalidInput
     );
-    assert!(!fs.capability().list);
-    assert_eq!(
-        fs.list("".into()).await.err().unwrap().kind(),
-        ErrorKind::Unsupported
+    assert!(fs.capability().list);
+    assert!(
+        fs.list("".into())
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap()
+            .is_empty()
     );
     let error = FsAccessor::new("relative/root").await.unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
@@ -323,6 +328,7 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: inner.list,
         }
     }
@@ -335,8 +341,8 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
 
 #[async_trait]
 impl<A: ByteAccessor> ByteAccessor for OpenObserverAccessor<A> {
-    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
-        self.inner.list(prefix).await
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        self.inner.list(request).await
     }
 }
 
@@ -353,10 +359,16 @@ async fn one_layer_contract_composes_at_byte_and_record_boundaries_in_known_orde
         .unwrap()
         .layer(layer("inner-byte"))
         .layer(layer("outer-byte"));
-    assert!(!bytes.capability().list);
+    assert!(bytes.capability().list);
     assert_eq!(
-        bytes.list("".into()).await.err().unwrap().kind(),
-        ErrorKind::Unsupported
+        bytes
+            .list("".into())
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap(),
+        vec![ObjectRef::new("data.parquet")]
     );
     let bytes: Arc<dyn ByteAccessor> = Arc::new(bytes);
     assert!(bytes.capability().read_with_range);
@@ -421,6 +433,7 @@ impl Accessor for ListingAccessor {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: true,
         }
     }
@@ -432,8 +445,12 @@ impl Accessor for ListingAccessor {
 
 #[async_trait]
 impl ByteAccessor for ListingAccessor {
-    async fn list(&self, _prefix: ObjectRef) -> Result<ObjectStream> {
-        Ok(Box::pin(futures::stream::iter([Ok("entry".into())])) as ObjectStream)
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        let mut objects = vec![Ok("entry".into())];
+        if request.recursive {
+            objects.push(Ok("sub/entry".into()));
+        }
+        Ok(Box::pin(futures::stream::iter(objects)) as ObjectStream)
     }
 }
 
@@ -449,7 +466,7 @@ async fn listing_capability_survives_transparent_layer_and_shared_accessor() {
     );
     assert!(accessor.capability().list);
     let objects = accessor
-        .list("".into())
+        .list(ListRequest::new("").with_recursive(false))
         .await
         .unwrap()
         .try_collect::<Vec<_>>()

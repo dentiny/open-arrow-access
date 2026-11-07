@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ObjectRef,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ListRequest,
     ObjectStream, Result, async_trait,
 };
 use open_arrow_access_storage::OpenDalAccessor;
@@ -71,6 +71,7 @@ impl Accessor for HuggingFaceAccessor {
         Capability {
             read: inner.read,
             read_with_range: inner.read_with_range,
+            read_parallel: inner.read_parallel,
             list: true,
         }
     }
@@ -83,11 +84,12 @@ impl Accessor for HuggingFaceAccessor {
 
 #[async_trait]
 impl ByteAccessor for HuggingFaceAccessor {
-    /// Recursively list files under a repository-relative directory; empty selects root.
+    /// List files under a repository-relative directory; empty selects root.
+    /// Recursion follows the request and is enabled by default.
     /// Discovery follows Hub pagination order, which is not a stable dataset order.
-    async fn list(&self, prefix: ObjectRef) -> Result<ObjectStream> {
-        validate_path(prefix.locator(), true)?;
-        self.inner.list(prefix).await
+    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        validate_path(request.prefix.locator(), true)?;
+        self.inner.list(request).await
     }
 }
 

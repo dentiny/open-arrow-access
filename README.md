@@ -3,9 +3,10 @@
 Composable dataset access for Apache Arrow. Read diverse formats and storage
 backends into Arrow streams.
 
-Read Parquet, CSV/TSV, or JSON/JSONL asynchronously from local storage or files
-resolved by the Hugging Face service. OpenDAL handles file I/O. Output is an ordered stream of
-Arrow record batches. The project ends at that read interface.
+Read Parquet, CSV/TSV, JSON/JSONL, XML, or ATIF files asynchronously from local
+storage or files resolved by the Hugging Face service, individually or as a
+sequential directory/file-set dataset. OpenDAL handles file I/O. Output is an
+ordered stream of Arrow record batches. The project ends at that read interface.
 
 ## Quick start
 
@@ -132,14 +133,14 @@ sequential byte readers and reuses Arrow CSV's incremental decoder. Configure
 `CsvFormat::default().with_header(true)` for headers or `.with_delimiter(b'\t')`
 for TSV.
 
-## Initial scope
+## Supported components
 
 | Component | Implemented |
 | --- | --- |
 | `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
-| `storage/` | OpenDAL Fs and reusable generic byte I/O, bounded chunks and exact ranges |
-| `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas and incremental Arrow decoding |
-| `dataset/` | Reserved; no directory or multi-file scan yet |
+| `storage/` | OpenDAL Fs, recursive file discovery and reusable generic byte I/O, bounded chunks and exact ranges |
+| `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema |
+| `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
 | `service/` | Hugging Face repository file access; dataset discovery follows separately |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
@@ -151,6 +152,17 @@ pages through the Parquet dependency. External gzip, LZ4, bzip2, and Zstandard d
 enabled by `decompression-gzip`, `decompression-lz4`, `decompression-bz2`, and `decompression-zstd`; see [streaming decompression](decompression/README.md).
 It produces sequential bytes and cannot directly satisfy Parquet's range reads.
 Parallel reads and unordered emission are not implemented.
+
+Enable `dataset-directory` for `DirectoryAccessor` and `FileSetAccessor`. Directory
+selection uses a supplied byte accessor for discovery and a supplied format
+accessor for records. Files are sorted lexicographically; explicit file sets
+retain caller order. Readers open files sequentially and require identical
+projected schemas, including metadata.
+
+Discovery accepts `ListRequest`, with recursion enabled by default. Setting
+`DirectoryRequest::recursive` to `false` prevents descending into child directories.
+Repeated and trailing separators in directory prefixes are normalized before
+discovery and result matching.
 
 ## Extension contracts
 
@@ -175,11 +187,17 @@ synchronous. Fs initialization is also asynchronous:
 blocking pool. Call it within a Tokio runtime.
 
 `capability()` follows OpenDAL's reporting pattern, with `read`,
-`read_with_range`, and accessor-only `list` flags. Layers forward or update
+`read_with_range`, `read_parallel`, and accessor-only `list` flags. Layers forward or update
 them to match the operations they actually expose. `ByteReader::read_range`
 is optional; sequential-only inputs do not have to emulate seeking. The initial
 Parquet adapter requires range reads and a known length. Runtime capabilities
 describe a composed instance; Cargo features make implementations available.
+
+`read_parallel` declares support for reading multiple files or partitions
+concurrently within an interface, independently of range access and output
+ordering. Existing concrete implementations report `false`; transparent
+wrappers forward the flag. This declaration does not schedule work or change
+per-reader byte I/O concurrency.
 
 Byte accessors accept `ByteReadRequest`, which carries an `ObjectRef` and
 `ByteReadOptions`. Existing string locators can still use `open("path".into())`.
@@ -249,3 +267,126 @@ reading, wrapper composition, exact/batched ranges, per-open I/O options,
 bounded backend concurrency, and terminal error/drop behavior.
 Tests may copy fixtures into temporary roots to exercise storage behavior.
 The library exposes no writer or sink API.
+
+## XML
+
+Enable `format-xml` and supply the input accessor and absolute record element path.
+The output schema is inferred automatically:
+
+```rust,no_run
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+use open_arrow_access::{Accessor, ReadRequest, file_format::XmlAccessor, storage::FsAccessor};
+
+let xml = XmlAccessor::new(FsAccessor::new(std::env::current_dir()?.join("testdata/xml")).await?, "/inventory/warehouse");
+let mut reader = xml.open(ReadRequest::new("inventory.xml")).await?;
+while let Some(batch) = reader.next().await? { /* consume batch */ }
+# Ok(())
+# }
+```
+
+Each `open` samples at most 128 records and 8 MiB of serialized XML by default,
+fixes the schema, then replays sampled records before continuing the same stream.
+Configure these bounds with `with_inference_options(XmlInferenceOptions { .. })`.
+Opening an inferred reader performs input I/O; sampling errors are returned by
+`open`. Attributes become `@name` columns, repeated elements become lists, and
+nested elements become structs. Fields absent from the sample are not added
+later; later values incompatible with inferred types produce a terminal error.
+Schemas are inferred independently for each opened file.
+
+Explicit mappings remain available through `.with_schema(schema)` when column
+names or types must be fixed by the caller. For inference with namespace-prefixed
+record paths, use `.with_namespaces(&[NamespaceBinding { prefix, uri }])`;
+explicit schemas carry their own namespace bindings. Namespace URIs in inferred
+fields use the supplied prefixes, with generated prefixes for other namespaces.
+
+`XmlField::structure`, `XmlField::list`, and URI-based `NamespaceBinding` mappings
+support nested records and namespaces. Paths select direct children, terminal
+attributes (`@id`), or direct scalar text (`.`); they are not XPath. Unprefixed
+paths select elements with no namespace. Types are Utf8, Boolean, Int64, finite
+Float64, Struct and List. Missing nullable elements and `xsi:nil` map to null;
+empty strings and empty lists remain distinct. Mixed text and child elements
+cannot be mapped to scalar/struct/list fields as rich text.
+
+The shared `ReadRequest` controls row targets, projection in caller order
+(including zero columns), and byte I/O options. The schema is fixed across batches.
+`XmlLimits` defaults to 8 MiB per record/event, 64 MiB of serialized records per
+batch, and depth 128. These are XML limits, not a bound on total Arrow memory;
+one lookahead record and an upstream byte chunk may also remain buffered.
+Skipped content is only tokenized by quick-xml and remains subject to event/depth
+limits; attribute/entity errors outside selected records may go unreported. Inputs
+must be UTF-8; DTDs and custom entities are rejected. Errors are terminal.
+
+External compression remains independent: compose `XmlAccessor` over an accessor
+with `DecompressionLayer::new(Gzip)` for `.xml.gz`. FileSet and directory reading
+reuse the same format accessor and preserve file/record order. No format
+auto-detection, index or parallel scheduler is added by this adapter.
+With explicit mappings, projection avoids conversion of omitted fields. In
+inference mode, projection names are resolved after sampling and output columns
+are selected after conversion. Selected records are read and parsed in full in
+both modes. Run the example on the project-authored inventory fixture with
+`cargo run --features storage-fs,format-xml --example read_xml`.
+
+## ATIF trajectories
+
+Enable `format-atif` and select the document layout explicitly:
+
+```rust,no_run
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+use open_arrow_access::{
+    Accessor, ReadRequest,
+    file_format::{AtifAccessor, AtifFormat},
+    storage::FsAccessor,
+};
+
+let bytes = FsAccessor::new(std::env::current_dir()?).await?;
+let atif = AtifAccessor::new(bytes, AtifFormat::JsonLines);
+let mut reader = atif.open(ReadRequest::new("testdata/atif/trajectories.jsonl")).await?;
+while let Some(batch) = reader.next().await? { /* one trajectory per row */ }
+# Ok(())
+# }
+```
+
+`AtifFormat::Json` reads one whole document, including pretty-printed JSON.
+`JsonLines` reads one complete trajectory per nonblank line, accepts CRLF and
+a final line without a newline, and emits no rows for empty/blank input.
+Whole-document JSON requires one valid document; arrays and concatenated documents
+are rejected. Extensions do not select a format or compression.
+
+The converter validates ATIF v1.0–v1.8 and uses the fixed
+[`atif-arrow` schema](https://github.com/dentiny/atif-arrow/blob/v0.3.0/docs/schema.md).
+The schema is available at `open`, before input bytes are read. Each trajectory
+is one row with ordered nested steps, calls, observations and supplied metrics.
+`raw_json` retains the verbatim document (including its JSONL line ending and
+unknown fields). `source_uri` is the request's opaque object locator;
+`source_record_index` is the one-based nonblank document index within that object,
+reset on each open. Neither field is a synthesized trajectory identifier.
+Content text uses UTF-8 bytes in `LargeBinary`; media paths remain strings.
+Embedded subagents remain JSON, and external references are not fetched.
+
+`ReadOptions` controls rows per batch and top-level projection in caller order,
+including zero-column rows. Projection happens after full ATIF validation and
+conversion; invalid unselected data still fails. Documents are buffered in full,
+and each output row retains raw JSON. The row target does not bound document
+bytes or total memory. A JSONL read buffers the current document, batch and
+one upstream chunk; it does not collect the whole input.
+
+Records retain global input order. Reads are sequential with no detached tasks,
+range reads, partition splitting or unordered emission. Dropping the reader stops
+work; drop it after cancelling an in-flight decoder call. Decode/validation errors
+include the locator and record index, discard the current batch, and terminate
+the reader. Input I/O errors retain their category and source chain.
+
+Any sequential byte accessor works, including storage or
+`DecompressionLayer::new(Gzip)` for ATIF `.jsonl.gz` objects. The format does not
+open OpenDAL operators or implement Harbor Hub discovery. `FileSetAccessor` and
+`DirectoryAccessor` compose through their existing ordered read interfaces.
+
+Run the example with either explicit layout:
+
+```sh
+cargo run --example read_atif --features storage-fs,format-atif
+cargo run --example read_atif --features storage-fs,format-atif -- testdata/atif/trajectories.jsonl jsonl
+```
+
+The adapter uses the published `atif-arrow 0.3.0` crate with Arrow 59;
+see [dependency alignment](docs/dependencies.md#atif-parser).

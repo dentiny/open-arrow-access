@@ -242,6 +242,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d2050892d4691cf110586070786712b504985a4d37ed64a9cd8a402718e1706"
 
 [[package]]
+name = "atif-arrow"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b29e5e7f997b90f6f164d3ed52306edb5663b7afd1a8ee33b4d3e3ed375132cb"
+dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "time",
+]
+
+[[package]]
 name = "atoi"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1767,6 +1781,7 @@ dependencies = [
  "futures",
  "more-asserts",
  "open-arrow-access-core",
+ "open-arrow-access-dataset",
  "open-arrow-access-decompression",
  "open-arrow-access-file-format",
  "open-arrow-access-service",
@@ -1791,6 +1806,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "open-arrow-access-dataset"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "open-arrow-access-core",
+]
+
+[[package]]
 name = "open-arrow-access-decompression"
 version = "0.1.0"
 dependencies = [
@@ -1810,6 +1833,7 @@ dependencies = [
  "arrow-csv",
  "arrow-json",
  "arrow-schema",
+ "atif-arrow",
  "futures",
  "more-asserts",
  "open-arrow-access-core",
@@ -1817,6 +1841,7 @@ dependencies = [
  "open-arrow-access-test-support",
  "parquet",
  "tokio",
+ "xml-arrow",
 ]
 
 [[package]]
@@ -2073,6 +2098,7 @@ checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "memchr",
  "serde",
+ "tokio",
 ]
 
 [[package]]
@@ -2296,6 +2322,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "roxmltree"
+version = "0.21.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9da7f59328b09405b181fee1018925fad50f157afb43c0c0f5c522c256dd5907"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2510,6 +2545,17 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "serde_path_to_error"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
+dependencies = [
+ "itoa",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -2874,6 +2920,7 @@ checksum = "e464cf451ba96ebfc6f9b6542f17ee8b8956e33f1e40d9690624e59d7a7f8a4b"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "pin-project-lite",
  "tokio",
@@ -3687,6 +3734,21 @@ dependencies = [
  "web-time",
  "whoami",
  "winapi",
+]
+
+[[package]]
+name = "xml-arrow"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c8e3df7095bcbe8192fee1ba4be2f62e8765d812bf4fd32e75810762d78e3ae"
+dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "futures-util",
+ "quick-xml",
+ "roxmltree",
+ "thiserror",
+ "tokio-util",
 ]
 
 [[package]]

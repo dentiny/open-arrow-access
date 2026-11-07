@@ -7,7 +7,7 @@ description = "Composable read access to Apache Arrow streams"
 repository.workspace = true
 
 [workspace]
-members = ["core", "storage", "file-format", "service", "decompression", "test-support"]
+members = ["core", "storage", "file-format", "service", "dataset", "decompression", "test-support"]
 resolver = "3"
 
 [workspace.package]
@@ -34,6 +34,8 @@ arrow-array = "59.3.0"
 arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
+xml-arrow = "0.2.0"
+atif-arrow = "0.3.0"
 async-trait = "0.1.91"
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
 datafusion = { version = "55.2.0", default-features = false }
@@ -52,12 +54,17 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 open-arrow-access-decompression = { path = "decompression", version = "0.1.0", default-features = false }
 open-arrow-access-test-support = { path = "test-support" }
 
+open-arrow-access-dataset = { path = "dataset", version = "0.1.0", default-features = false }
+
 [features]
 default = []
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
+dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 storage-fs = ["dep:open-arrow-access-storage", "open-arrow-access-storage/fs"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
+format-atif = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/atif"]
+format-xml = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/xml"]
 format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
 decompression-gzip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip"]
 decompression-bz2 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
@@ -65,6 +72,7 @@ decompression-lz4 = ["dep:open-arrow-access-decompression", "open-arrow-access-d
 decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zstd"]
 
 [dependencies]
+open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 open-arrow-access-storage = { workspace = true, optional = true }
 open-arrow-access-service = { workspace = true, optional = true }
@@ -83,6 +91,10 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 
 [[test]]
+name = "directory"
+required-features = ["dataset-directory"]
+
+[[test]]
 name = "reading"
 required-features = ["storage-fs", "format-parquet"]
 
@@ -95,3 +107,15 @@ unsafe_code = "forbid"
 
 [lints]
 workspace = true
+
+[[example]]
+name = "read_xml"
+required-features = ["storage-fs", "format-xml"]
+
+[[example]]
+name = "read_atif"
+required-features = ["storage-fs", "format-atif"]
+
+[[test]]
+name = "atif"
+required-features = ["format-atif", "storage-fs", "dataset-directory"]

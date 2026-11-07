@@ -2,8 +2,8 @@ use std::{error::Error as _, num::NonZeroUsize};
 
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, ErrorKind, ReadOptions,
-    ReadRequest,
+    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, ErrorKind, ListRequest,
+    ReadOptions, ReadRequest,
 };
 
 use super::super::{HuggingFaceOptions, HuggingFaceRepository, HuggingFaceService};
@@ -29,6 +29,7 @@ async fn constructor_is_lazy_send_and_redacts_token() {
     assert!(!format!("{service:?}").contains(TOKEN));
     assert!(accessor.capability().read_with_range);
     assert!(accessor.capability().list);
+    assert!(!accessor.capability().read_parallel);
     let error = service
         .repository(HuggingFaceRepository::new(""))
         .await
@@ -59,6 +60,7 @@ async fn ranges_preserve_order_options_metadata_and_sequential_cursor() {
         "bytes.bin"
     );
     assert!(!reader.capability().list);
+    assert!(!reader.capability().read_parallel);
     let ranges = reader
         .read_ranges(vec![8..10, 0..2, 8..10, 4..4])
         .await
@@ -164,6 +166,32 @@ async fn listing_recurses_and_follows_hub_pagination_without_exposing_directorie
     assert!(requests.iter().any(|r| r.uri.contains("cursor=second")));
     let error = accessor.list("a.bin".into()).await.err().unwrap();
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
+}
+
+#[tokio::test]
+async fn nonrecursive_listing_preserves_policy_across_hub_pages() {
+    let hub = MockHub::with_files([
+        ("data/a.bin".to_owned(), Bytes::from_static(b"a")),
+        ("data/c.bin".to_owned(), Bytes::from_static(b"c")),
+        ("data/nested/b.bin".to_owned(), Bytes::from_static(b"b")),
+    ]);
+    let objects = hub
+        .accessor()
+        .list(ListRequest::new("").with_recursive(false))
+        .await
+        .unwrap()
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    assert_eq!(
+        objects.iter().map(|o| o.locator()).collect::<Vec<_>>(),
+        ["a.bin", "c.bin"]
+    );
+    let requests = hub.captured();
+    assert_eq!(requests.len(), 2);
+    assert!(requests.iter().all(|r| r.uri.contains("/data?")));
+    assert!(requests.iter().all(|r| !r.uri.contains("recursive=True")));
+    assert!(requests.iter().any(|r| r.uri.contains("cursor=second")));
 }
 
 #[tokio::test]

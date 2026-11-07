@@ -1,7 +1,7 @@
 use arrow_csv::reader::Decoder;
 use open_arrow_access_core::{
-    ByteReader, Bytes, Capability, Error, ErrorKind, Reader, RecordBatch, RecordMetadata, Result,
-    async_trait,
+    ByteReader, Bytes, Capability, Error, ErrorKind, ReadState, Reader, RecordBatch,
+    RecordMetadata, Result, async_trait,
 };
 
 use super::decode_error;
@@ -12,10 +12,7 @@ pub(super) struct CsvReader {
     metadata: RecordMetadata,
     /// Bytes read from the input but not yet consumed by the decoder.
     pending: Bytes,
-    /// The input has ended; the decoder may still have a final batch to emit.
-    eof: bool,
-    /// Reading has terminated after exhaustion or an error; subsequent calls return `Ok(None)`.
-    finished: bool,
+    state: ReadState,
 }
 
 impl CsvReader {
@@ -29,8 +26,7 @@ impl CsvReader {
             decoder,
             metadata,
             pending: Bytes::new(),
-            eof: false,
-            finished: false,
+            state: ReadState::default(),
         }
     }
 
@@ -39,7 +35,7 @@ impl CsvReader {
             if self.decoder.capacity() == 0 {
                 return self.decoder.flush().map_err(decode_error);
             }
-            if self.pending.is_empty() && !self.eof {
+            if self.pending.is_empty() && !self.state.input_eof() {
                 match self.input.next().await? {
                     Some(bytes) if bytes.is_empty() => {
                         return Err(Error::new(
@@ -49,12 +45,12 @@ impl CsvReader {
                         ));
                     }
                     Some(bytes) => self.pending = bytes,
-                    None => self.eof = true,
+                    None => self.state.mark_input_eof(),
                 }
             }
             let consumed = self.decoder.decode(&self.pending).map_err(decode_error)?;
             self.pending = self.pending.slice(consumed..);
-            if self.eof {
+            if self.state.input_eof() {
                 return self.decoder.flush().map_err(decode_error);
             }
         }
@@ -70,6 +66,7 @@ impl Reader for CsvReader {
         Capability {
             read: true,
             read_with_range: false,
+            read_parallel: false,
             list: false,
         }
     }
@@ -79,13 +76,11 @@ impl Reader for CsvReader {
     }
 
     async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.finished {
+        if self.state.is_finished() {
             return Ok(None);
         }
         let batch = self.read_batch().await;
-        if !matches!(batch, Ok(Some(_))) {
-            self.finished = true;
-        }
+        self.state.observe(&batch);
         batch
     }
 }
