@@ -3,10 +3,10 @@
 mod accessor;
 #[cfg(any(feature = "csv", feature = "json"))]
 mod decode;
-mod format;
 
 pub use accessor::FileAccessor;
-pub use format::FileFormat;
+/// Previous name for the generalized reader factory protocol.
+pub use open_arrow_access_core::ReaderFactory as FileFormat;
 
 #[cfg(feature = "parquet")]
 mod parquet;
