@@ -1,39 +1,22 @@
 use std::collections::HashSet;
 
-use open_arrow_access_core::{ByteReader, Error, ErrorKind, ObjectRef, Result};
+use futures::TryStreamExt;
+use open_arrow_access_core::{ByteReader, Error, ErrorKind, ObjectRef, Result, read_lines};
 
 const MAX_LINE_BYTES: usize = 16 * 1024;
 
 pub(super) async fn read_manifest(
-    mut input: Box<dyn ByteReader>,
+    input: Box<dyn ByteReader>,
     prefix: &str,
 ) -> Result<Vec<ObjectRef>> {
-    let mut line = Vec::new();
+    let lines = read_lines(input, Some(MAX_LINE_BYTES), "read_commoncrawl_manifest");
+    futures::pin_mut!(lines);
     let mut line_number = 1;
     let mut selected = Vec::new();
     let mut seen = HashSet::new();
-    while let Some(chunk) = input.next().await? {
-        if chunk.is_empty() {
-            return Err(Error::new(
-                ErrorKind::Io,
-                "read_commoncrawl_manifest",
-                "byte reader emitted an empty chunk",
-            ));
-        }
-        for part in chunk.split_inclusive(|b| *b == b'\n') {
-            if line.len() + part.len() > MAX_LINE_BYTES {
-                return Err(invalid_line(line_number, "manifest line exceeds 16 KiB"));
-            }
-            line.extend_from_slice(part);
-            if part.ends_with(b"\n") {
-                append_line(&line, line_number, prefix, &mut selected, &mut seen)?;
-                line.clear();
-                line_number += 1;
-            }
-        }
-    }
-    if !line.is_empty() {
+    while let Some(line) = lines.try_next().await? {
         append_line(&line, line_number, prefix, &mut selected, &mut seen)?;
+        line_number += 1;
     }
     if selected.is_empty() {
         return Err(Error::new(

@@ -39,18 +39,19 @@ pub mod storage {
     feature = "format-atif"
 ))]
 pub mod file_format {
-    #[cfg(feature = "format-json")]
-    pub use open_arrow_access_file_format::JsonAccessor;
-    #[cfg(feature = "format-parquet")]
-    pub use open_arrow_access_file_format::ParquetAccessor;
     #[cfg(feature = "format-atif")]
     pub use open_arrow_access_file_format::{AtifAccessor, AtifFormat};
     #[cfg(feature = "format-csv")]
-    pub use open_arrow_access_file_format::{CsvAccessor, CsvFormat};
+    pub use open_arrow_access_file_format::{CsvAccessor, CsvFileFormat, CsvFormat};
+    pub use open_arrow_access_file_format::{FileAccessor, FileFormat};
+    #[cfg(feature = "format-json")]
+    pub use open_arrow_access_file_format::{JsonAccessor, JsonFormat};
     #[cfg(feature = "format-xml")]
     pub use open_arrow_access_file_format::{
-        NamespaceBinding, XmlAccessor, XmlField, XmlLimits, XmlSchema,
+        NamespaceBinding, XmlAccessor, XmlField, XmlFormat, XmlLimits, XmlSchema,
     };
+    #[cfg(feature = "format-parquet")]
+    pub use open_arrow_access_file_format::{ParquetAccessor, ParquetFormat};
 }
 
 #[cfg(feature = "dataset-directory")]

@@ -1,7 +1,5 @@
 use futures::StreamExt;
-use open_arrow_access_core::{
-    Capability, ReadState, Reader, RecordBatch, RecordMetadata, Result, async_trait,
-};
+use open_arrow_access_core::{RecordMetadata, RecordReader, StreamReader};
 use parquet::arrow::async_reader::ParquetRecordBatchStream;
 
 use super::{decode_error, input::ParquetInput};
@@ -9,68 +7,23 @@ use super::{decode_error, input::ParquetInput};
 /// Decode ordered Arrow batches while preserving the inspected output schema.
 // TODO: Read and decode row groups concurrently with bounded concurrency,
 // preserving row order and the fixed output schema.
-pub(super) struct ParquetReader {
+pub(super) fn parquet_reader(
     stream: ParquetRecordBatchStream<ParquetInput>,
     metadata: RecordMetadata,
     reorder: Option<Vec<usize>>,
-    state: ReadState,
-}
-
-impl ParquetReader {
-    pub(super) fn new(
-        stream: ParquetRecordBatchStream<ParquetInput>,
-        metadata: RecordMetadata,
-        reorder: Option<Vec<usize>>,
-    ) -> Self {
-        Self {
-            stream,
-            metadata,
-            reorder,
-            state: ReadState::default(),
-        }
-    }
-}
-
-#[async_trait]
-impl Reader for ParquetReader {
-    type Item = RecordBatch;
-    type Metadata = RecordMetadata;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-    }
-
-    fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
-    }
-
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.state.is_finished() {
-            return Ok(None);
-        }
-        let result = match self.stream.next().await {
-            Some(Ok(batch)) => match self.reorder.as_ref() {
-                Some(indices) => batch
-                    .project(indices)
-                    .map(Some)
-                    .map_err(|e| decode_error("project", e)),
-                None => Ok(Some(batch)),
-            },
-            Some(Err(error)) => Err(decode_error("decode_parquet", error)),
-            None => Ok(None),
+) -> impl RecordReader {
+    let schema = metadata.schema.clone();
+    let stream = stream.map(move |result| {
+        let batch = result.map_err(|error| decode_error("decode_parquet", error))?;
+        let batch = match &reorder {
+            Some(indices) => batch
+                .project(indices)
+                .map_err(|error| decode_error("project", error))?,
+            None => batch,
         };
-        let result = result.and_then(|batch| {
-            batch
-                .map(|batch| batch.with_schema(self.metadata.schema.clone()))
-                .transpose()
-                .map_err(|e| decode_error("restore_schema", e))
-        });
-        self.state.observe(&result);
-        result
-    }
+        batch
+            .with_schema(schema.clone())
+            .map_err(|error| decode_error("restore_schema", error))
+    });
+    StreamReader::new(stream, metadata)
 }

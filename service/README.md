@@ -37,3 +37,6 @@ manifest order and forwards existing read options to the same sequential
 FileSet. A neighboring segment with a longer numeric ID is a different selection.
 Construct a request from crawl/segment IDs, a segment URL, or a shared
 `CommonCrawl` source. No index, batch scheduler or parallel executor is added.
+
+Manifest byte framing and the 16 KiB per-line bound use core `read_lines`;
+path validation and selected-file duplicate checks remain in the provider.

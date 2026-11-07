@@ -12,8 +12,11 @@ use more_asserts::{assert_gt, assert_le};
 use open_arrow_access::{
     Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, Capability, ErrorKind,
     Layer, ListRequest, ObjectRef, ObjectStream, ReadOptions, ReadRequest, Result, async_trait,
-    file_format::ParquetAccessor, into_stream, storage::OpenDalAccessor,
+    file_format::{FileAccessor, ParquetAccessor, ParquetFormat},
+    into_stream,
+    storage::OpenDalAccessor,
 };
+use open_arrow_access_test_support::format;
 use parquet::basic::Compression;
 use support::{
     ByteObserverLayer, MemoryAccessor, Observations, SequentialLayer, fixture, fixture_path, ids,
@@ -23,9 +26,12 @@ use support::{
 async fn local_parquet_preserves_values_nulls_and_order_across_row_groups() {
     for compression in [Compression::UNCOMPRESSED, Compression::SNAPPY] {
         let fixture = fixture(compression).await;
-        let accessor = ParquetAccessor::new(OpenDalAccessor::new(
-            open_arrow_access_test_support::fs_operator(fixture.dir.path()),
-        ));
+        let accessor = FileAccessor::from_format(
+            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
+                fixture.dir.path(),
+            )),
+            ParquetFormat,
+        );
         let mut reader = accessor
             .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
                 batch_size: NonZeroUsize::new(2).unwrap(),
@@ -73,17 +79,16 @@ async fn projection_honors_requested_field_order_and_schema() {
     let accessor = ParquetAccessor::new(OpenDalAccessor::new(
         open_arrow_access_test_support::fs_operator(fixture.dir.path()),
     ));
-    let reader = accessor
-        .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
+    let batches = format::assert_projection(
+        &accessor,
+        ReadRequest::new("data.parquet").with_options(ReadOptions {
             projection: Some(vec!["title".into(), "id".into()]),
             ..ReadOptions::default()
-        }))
-        .await
-        .unwrap();
-    assert_eq!(reader.metadata().schema.field(0).name(), "title");
-    assert_eq!(reader.metadata().schema.field(1).name(), "id");
-    let batches = into_stream(reader).try_collect::<Vec<_>>().await.unwrap();
-    assert_eq!(batches.iter().map(|b| b.num_rows()).sum::<usize>(), 7);
+        }),
+        &fixture.schema,
+        7,
+    )
+    .await;
     let values = batches
         .iter()
         .flat_map(|b| {
@@ -104,17 +109,16 @@ async fn zero_column_projection_preserves_row_count() {
     let accessor = ParquetAccessor::new(OpenDalAccessor::new(
         open_arrow_access_test_support::fs_operator(fixture.dir.path()),
     ));
-    let reader = accessor
-        .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
+    format::assert_projection(
+        &accessor,
+        ReadRequest::new("data.parquet").with_options(ReadOptions {
             projection: Some(vec![]),
             ..ReadOptions::default()
-        }))
-        .await
-        .unwrap();
-    assert!(reader.metadata().schema.fields().is_empty());
-    let batches = into_stream(reader).try_collect::<Vec<_>>().await.unwrap();
-    assert!(batches.iter().all(|b| b.num_columns() == 0));
-    assert_eq!(batches.iter().map(|b| b.num_rows()).sum::<usize>(), 7);
+        }),
+        &fixture.schema,
+        7,
+    )
+    .await;
 }
 
 #[tokio::test]
