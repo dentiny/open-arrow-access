@@ -5,13 +5,15 @@ use std::{num::NonZeroUsize, ops::Range, sync::Arc};
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error,
-    ErrorKind, ListRequest, ObjectRef, ObjectStream, Reader, Result, async_trait,
+    ErrorKind, ListRequest, ObjectRef, ObjectStream, ReadState, Reader, Result, async_trait,
 };
 use opendal::{
     Execute, Executor, OperationContext, Operator,
     raw::{BoxedStaticFuture, Layer, Servicer},
 };
 use tokio::sync::Semaphore;
+
+use crate::validation::validate_locator;
 
 const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
 const DEFAULT_IO_CHUNK_SIZE: usize = 2 * 1024 * 1024;
@@ -31,24 +33,6 @@ impl OpenDalAccessor {
             operator,
             chunk_size: DEFAULT_OUTPUT_CHUNK_SIZE,
         }
-    }
-
-    #[cfg(feature = "fs")]
-    pub(crate) async fn validate_directory(&self, prefix: &ObjectRef) -> Result<()> {
-        let path = prefix.locator();
-        let metadata = self
-            .operator
-            .stat(path)
-            .await
-            .map_err(|error| map_error("list", path, error))?;
-        if !metadata.is_dir() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "list",
-                "prefix is not a directory",
-            ));
-        }
-        Ok(())
     }
 
     /// Bound emitted chunks independently of storage I/O splitting.
@@ -125,7 +109,7 @@ impl Accessor for OpenDalAccessor {
             pending: opendal::Buffer::new(),
             len,
             chunk_size: self.chunk_size.get(),
-            finished: false,
+            state: ReadState::default(),
         }) as Box<dyn ByteReader>)
     }
 }
@@ -205,7 +189,7 @@ struct OpenDalReader {
     offset: u64,
     len: u64,
     chunk_size: usize,
-    finished: bool,
+    state: ReadState,
 }
 
 impl OpenDalReader {
@@ -353,21 +337,19 @@ impl Reader for OpenDalReader {
     }
 
     async fn next(&mut self) -> Result<Option<Bytes>> {
-        if self.finished || self.offset == self.len {
-            self.finished = true;
+        if self.state.is_finished() || self.offset == self.len {
+            self.state.finish();
             self.sequential = None;
             self.pending = opendal::Buffer::new();
             return Ok(None);
         }
-        match self.read_next_chunk().await {
-            Ok(bytes) => Ok(Some(bytes)),
-            Err(error) => {
-                self.finished = true;
-                self.sequential = None;
-                self.pending = opendal::Buffer::new();
-                Err(error)
-            }
+        let result = self.read_next_chunk().await.map(Some);
+        self.state.observe(&result);
+        if self.state.is_finished() {
+            self.sequential = None;
+            self.pending = opendal::Buffer::new();
         }
+        result
     }
 }
 
@@ -424,27 +406,4 @@ pub(crate) fn map_error(operation: &'static str, path: &str, error: opendal::Err
         _ => ErrorKind::Io,
     };
     Error::new(kind, operation, format!("object {path:?}")).with_source(error)
-}
-
-fn validate_locator(path: &str, prefix: bool, operation: &'static str) -> Result<()> {
-    let base = if prefix {
-        path.strip_suffix('/').unwrap_or(path)
-    } else {
-        path
-    };
-    if path.trim() != path
-        || path.starts_with('/')
-        || (!prefix && path.is_empty())
-        || (!base.is_empty()
-            && base
-                .split('/')
-                .any(|part| part.is_empty() || matches!(part, "." | "..")))
-    {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            operation,
-            "expected a canonical root-relative locator",
-        ));
-    }
-    Ok(())
 }
