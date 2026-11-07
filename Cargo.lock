@@ -228,8 +228,9 @@ checksum = "5d2050892d4691cf110586070786712b504985a4d37ed64a9cd8a402718e1706"
 
 [[package]]
 name = "atif-arrow"
-version = "0.3.0"
-source = "git+https://github.com/dentiny/atif-arrow?rev=f3d98483ba9f917ee4e31ec467945d68fd59ec5f#f3d98483ba9f917ee4e31ec467945d68fd59ec5f"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32d4ab0ebee5adae93824027e7048c1c7d99ae431b6cf616fb27d078b793f18c"
 dependencies = [
  "arrow-array",
  "arrow-schema",
