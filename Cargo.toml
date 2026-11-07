@@ -35,7 +35,9 @@ arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
 xml-arrow = "0.2.0"
-atif-arrow = "0.3.0"
+# Temporary immutable pin for projection-aware builders; switch back to a
+# registry release once this API is published (see docs/dependencies.md).
+atif-arrow = { version = "0.3.0", git = "https://github.com/dentiny/atif-arrow", rev = "7b66a504dbd4c3c5ea25e500ce5d1899c5382372" }
 async-trait = "0.1.91"
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
 datafusion = { version = "55.2.0", default-features = false }

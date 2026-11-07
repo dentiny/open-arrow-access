@@ -376,9 +376,10 @@ Content text uses UTF-8 bytes in `LargeBinary`; media paths remain strings.
 Embedded subagents remain JSON, and external references are not fetched.
 
 `ReadOptions` controls rows per batch and top-level projection in caller order,
-including zero-column rows. Projection happens after full ATIF validation and
-conversion; invalid unselected data still fails. Documents are buffered in full,
-and each output row retains raw JSON. The row target does not bound document
+including zero-column rows. All ATIF fields are validated, including unselected
+fields, but only projected columns are built into Arrow arrays. Omitting `steps`
+or `raw_json` avoids accumulating their payloads across the batch. Documents are
+buffered in full, and full-schema output retains raw JSON. The row target does not bound document
 bytes or total memory. A JSONL read buffers the current document, batch and
 one upstream chunk; it does not collect the whole input.
 
@@ -400,8 +401,9 @@ cargo run --example read_atif --features format-atif
 cargo run --example read_atif --features format-atif -- testdata/atif/trajectories.jsonl jsonl
 ```
 
-The adapter uses the published `atif-arrow 0.3.0` crate with Arrow 59;
-see [dependency alignment](docs/dependencies.md#atif-parser).
+The adapter temporarily pins an `atif-arrow` Git revision containing the
+projection-aware builder API with Arrow 59; see
+[dependency alignment and release prerequisites](docs/dependencies.md#atif-parser).
 
 ## Adding a file format
 
