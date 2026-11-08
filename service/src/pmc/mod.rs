@@ -14,6 +14,8 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+const DEFAULT_METADATA_BYTES: NonZeroUsize = NonZeroUsize::new(4 * 1024 * 1024).unwrap();
+
 /// Maximum decoded metadata bytes.
 #[derive(Clone, Copy, Debug)]
 pub struct PmcLimits {
@@ -22,7 +24,7 @@ pub struct PmcLimits {
 impl Default for PmcLimits {
     fn default() -> Self {
         Self {
-            metadata_bytes: NonZeroUsize::new(4 * 1024 * 1024).unwrap(),
+            metadata_bytes: DEFAULT_METADATA_BYTES,
         }
     }
 }
