@@ -47,7 +47,7 @@ impl RecordBatchBuilder {
             ..Default::default()
         }
         .resolve_projection(&schema)?;
-        validate_fields(&fields)?;
+        Self::validate_fields(&fields)?;
         let builder = StructBuilder::from_fields(schema.fields().clone(), 0);
         Ok(Self {
             schema,
@@ -94,6 +94,43 @@ impl RecordBatchBuilder {
             &RecordBatchOptions::new().with_row_count(Some(self.rows)),
         )
         .map_err(|error| decode(error.to_string()).with_source(error))
+    }
+    fn validate_fields(fields: &Fields) -> Result<()> {
+        let mut seen = HashSet::new();
+        for field in fields {
+            if !seen.insert(field.name()) {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "build_record_batch",
+                    "duplicate schema field name",
+                ));
+            }
+            Self::validate_type(field.data_type())?;
+        }
+        Ok(())
+    }
+
+    fn validate_type(data_type: &DataType) -> Result<()> {
+        match data_type {
+            DataType::Boolean
+            | DataType::Int32
+            | DataType::Date32
+            | DataType::UInt32
+            | DataType::UInt64
+            | DataType::Utf8
+            | DataType::LargeUtf8
+            | DataType::Binary
+            | DataType::LargeBinary => Ok(()),
+            DataType::Struct(fields) => Self::validate_fields(fields),
+            DataType::List(field) | DataType::LargeList(field) => {
+                Self::validate_type(field.data_type())
+            }
+            _ => Err(Error::new(
+                ErrorKind::Unsupported,
+                "build_record_batch",
+                format!("unsupported metadata type {data_type}"),
+            )),
+        }
     }
 }
 
@@ -142,9 +179,7 @@ impl<'a> RecordBatchRow<'a> {
     }
 
     pub fn append<'v>(&mut self, name: &str, value: impl Into<FieldValue<'v>>) -> Result<()> {
-        self.write(name, |builder, field| {
-            append_value(builder, field, value.into())
-        })
+        self.write(name, |field| field.append_value(value.into()))
     }
 
     /// Write a primitive list. The iterator is not consumed if the field is omitted.
@@ -153,10 +188,8 @@ impl<'a> RecordBatchRow<'a> {
         I: IntoIterator,
         I::Item: Into<FieldValue<'v>>,
     {
-        self.write(name, |builder, field| {
-            append_list(builder, field, values, |builder, field, value| {
-                append_value(builder, field, value.into())
-            })
+        self.write(name, |field| {
+            field.append_list(values, |field, value| field.append_value(value.into()))
         })
     }
 
@@ -167,9 +200,9 @@ impl<'a> RecordBatchRow<'a> {
         values: I,
         mut write: impl FnMut(&mut RecordBatchRow<'_>, I::Item) -> Result<()>,
     ) -> Result<()> {
-        self.write(name, |builder, field| {
-            append_list(builder, field, values, |builder, field, value| {
-                append_struct(builder, field, |row| write(row, value))
+        self.write(name, |field| {
+            field.append_list(values, |field, value| {
+                field.append_struct(|row| write(row, value))
             })
         })
     }
@@ -179,13 +212,13 @@ impl<'a> RecordBatchRow<'a> {
         name: &str,
         write: impl FnOnce(&mut RecordBatchRow<'_>) -> Result<()>,
     ) -> Result<()> {
-        self.write(name, |builder, field| append_struct(builder, field, write))
+        self.write(name, |field| field.append_struct(write))
     }
 
     fn write(
         &mut self,
         name: &str,
-        write: impl FnOnce(&mut dyn ArrayBuilder, &Field) -> Result<()>,
+        write: impl FnOnce(FieldWriter<'_>) -> Result<()>,
     ) -> Result<()> {
         let result = (|| {
             // TODO: Precompute field-name indexes for O(1) lookups in both schemas.
@@ -204,7 +237,10 @@ impl<'a> RecordBatchRow<'a> {
                 return Err(decode(format!("field {name:?} was already written")));
             }
             let field = self.builder.fields()[index].clone();
-            write(self.builder.field_builders_mut()[index].as_mut(), &field)?;
+            write(FieldWriter {
+                builder: self.builder.field_builders_mut()[index].as_mut(),
+                field: &field,
+            })?;
             self.seen[index] = true;
             Ok(())
         })();
@@ -219,11 +255,11 @@ impl<'a> RecordBatchRow<'a> {
         let fields = self.builder.fields().clone();
         for (index, field) in fields.iter().enumerate() {
             if !self.seen[index] {
-                append_value(
-                    self.builder.field_builders_mut()[index].as_mut(),
+                FieldWriter {
+                    builder: self.builder.field_builders_mut()[index].as_mut(),
                     field,
-                    FieldValue::Null,
-                )?;
+                }
+                .append_value(FieldValue::Null)?;
             }
         }
         self.builder.append(true);
@@ -231,170 +267,153 @@ impl<'a> RecordBatchRow<'a> {
     }
 }
 
-fn downcast<T: ArrayBuilder>(builder: &mut dyn ArrayBuilder) -> &mut T {
-    builder
-        .as_any_mut()
-        .downcast_mut()
-        .expect("builder matches its validated field type")
+struct FieldWriter<'a> {
+    builder: &'a mut dyn ArrayBuilder,
+    field: &'a Field,
 }
 
-fn append_value(
-    builder: &mut dyn ArrayBuilder,
-    field: &Field,
-    value: FieldValue<'_>,
-) -> Result<()> {
-    if matches!(value, FieldValue::Null) {
-        if !field.is_nullable() {
-            return Err(decode(format!("field {:?} is not nullable", field.name())));
-        }
-        append_null(builder, field.data_type());
-        return Ok(());
+impl FieldWriter<'_> {
+    fn downcast<T: ArrayBuilder>(builder: &mut dyn ArrayBuilder) -> &mut T {
+        builder
+            .as_any_mut()
+            .downcast_mut()
+            .expect("builder matches its validated field type")
     }
-    match (value, field.data_type()) {
-        (FieldValue::Bool(value), DataType::Boolean) => {
-            downcast::<BooleanBuilder>(builder).append_value(value)
-        }
-        (FieldValue::Int32(value), DataType::Int32) => {
-            downcast::<Int32Builder>(builder).append_value(value)
-        }
-        (FieldValue::Int32(value), DataType::Date32) => {
-            downcast::<Date32Builder>(builder).append_value(value)
-        }
-        (FieldValue::UInt32(value), DataType::UInt32) => {
-            downcast::<UInt32Builder>(builder).append_value(value)
-        }
-        (FieldValue::UInt64(value), DataType::UInt64) => {
-            downcast::<UInt64Builder>(builder).append_value(value)
-        }
-        (FieldValue::Text(value), DataType::Utf8) => {
-            downcast::<StringBuilder>(builder).append_value(value)
-        }
-        (FieldValue::Text(value), DataType::LargeUtf8) => {
-            downcast::<LargeStringBuilder>(builder).append_value(value)
-        }
-        (FieldValue::Binary(value), DataType::Binary) => {
-            downcast::<BinaryBuilder>(builder).append_value(value)
-        }
-        (FieldValue::Binary(value), DataType::LargeBinary) => {
-            downcast::<LargeBinaryBuilder>(builder).append_value(value)
-        }
-        _ => {
-            return Err(decode(format!(
-                "value does not match field {:?} ({})",
-                field.name(),
-                field.data_type()
-            )));
-        }
-    }
-    Ok(())
-}
 
-fn append_struct(
-    builder: &mut dyn ArrayBuilder,
-    field: &Field,
-    write: impl FnOnce(&mut RecordBatchRow<'_>) -> Result<()>,
-) -> Result<()> {
-    let DataType::Struct(fields) = field.data_type() else {
-        return Err(decode("expected a struct field"));
-    };
-    let mut row = RecordBatchRow::new(downcast(builder), fields.clone());
-    write(&mut row)?;
-    row.finish()
-}
-
-fn append_list<I: IntoIterator>(
-    builder: &mut dyn ArrayBuilder,
-    field: &Field,
-    values: I,
-    mut append: impl FnMut(&mut dyn ArrayBuilder, &Field, I::Item) -> Result<()>,
-) -> Result<()> {
-    let (item, child): (_, &mut dyn ArrayBuilder) = match field.data_type() {
-        DataType::List(item) => (
-            item,
-            downcast::<ListBuilder<Box<dyn ArrayBuilder>>>(builder)
-                .values()
-                .as_mut(),
-        ),
-        DataType::LargeList(item) => (
-            item,
-            downcast::<LargeListBuilder<Box<dyn ArrayBuilder>>>(builder)
-                .values()
-                .as_mut(),
-        ),
-        _ => return Err(decode("expected a list field")),
-    };
-    for value in values {
-        append(child, item, value)?;
-    }
-    match field.data_type() {
-        DataType::List(_) => downcast::<ListBuilder<Box<dyn ArrayBuilder>>>(builder).append(true),
-        DataType::LargeList(_) => {
-            downcast::<LargeListBuilder<Box<dyn ArrayBuilder>>>(builder).append(true)
-        }
-        _ => unreachable!(),
-    }
-    Ok(())
-}
-
-fn append_null(builder: &mut dyn ArrayBuilder, data_type: &DataType) {
-    match data_type {
-        DataType::Boolean => downcast::<BooleanBuilder>(builder).append_null(),
-        DataType::Int32 => downcast::<Int32Builder>(builder).append_null(),
-        DataType::Date32 => downcast::<Date32Builder>(builder).append_null(),
-        DataType::UInt32 => downcast::<UInt32Builder>(builder).append_null(),
-        DataType::UInt64 => downcast::<UInt64Builder>(builder).append_null(),
-        DataType::Utf8 => downcast::<StringBuilder>(builder).append_null(),
-        DataType::LargeUtf8 => downcast::<LargeStringBuilder>(builder).append_null(),
-        DataType::Binary => downcast::<BinaryBuilder>(builder).append_null(),
-        DataType::LargeBinary => downcast::<LargeBinaryBuilder>(builder).append_null(),
-        DataType::List(_) => downcast::<ListBuilder<Box<dyn ArrayBuilder>>>(builder).append(false),
-        DataType::LargeList(_) => {
-            downcast::<LargeListBuilder<Box<dyn ArrayBuilder>>>(builder).append(false)
-        }
-        DataType::Struct(fields) => {
-            let builder = downcast::<StructBuilder>(builder);
-            for (field, child) in fields.iter().zip(builder.field_builders_mut()) {
-                append_null(child.as_mut(), field.data_type());
+    fn append_value(self, value: FieldValue<'_>) -> Result<()> {
+        let Self { builder, field } = self;
+        if matches!(value, FieldValue::Null) {
+            if !field.is_nullable() {
+                return Err(decode(format!("field {:?} is not nullable", field.name())));
             }
-            builder.append(false);
+            Self { builder, field }.append_null();
+            return Ok(());
         }
-        _ => unreachable!("unsupported types fail at construction"),
-    }
-}
-
-fn validate_fields(fields: &Fields) -> Result<()> {
-    let mut seen = HashSet::new();
-    for field in fields {
-        if !seen.insert(field.name()) {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "build_record_batch",
-                "duplicate schema field name",
-            ));
+        match (value, field.data_type()) {
+            (FieldValue::Bool(value), DataType::Boolean) => {
+                Self::downcast::<BooleanBuilder>(builder).append_value(value)
+            }
+            (FieldValue::Int32(value), DataType::Int32) => {
+                Self::downcast::<Int32Builder>(builder).append_value(value)
+            }
+            (FieldValue::Int32(value), DataType::Date32) => {
+                Self::downcast::<Date32Builder>(builder).append_value(value)
+            }
+            (FieldValue::UInt32(value), DataType::UInt32) => {
+                Self::downcast::<UInt32Builder>(builder).append_value(value)
+            }
+            (FieldValue::UInt64(value), DataType::UInt64) => {
+                Self::downcast::<UInt64Builder>(builder).append_value(value)
+            }
+            (FieldValue::Text(value), DataType::Utf8) => {
+                Self::downcast::<StringBuilder>(builder).append_value(value)
+            }
+            (FieldValue::Text(value), DataType::LargeUtf8) => {
+                Self::downcast::<LargeStringBuilder>(builder).append_value(value)
+            }
+            (FieldValue::Binary(value), DataType::Binary) => {
+                Self::downcast::<BinaryBuilder>(builder).append_value(value)
+            }
+            (FieldValue::Binary(value), DataType::LargeBinary) => {
+                Self::downcast::<LargeBinaryBuilder>(builder).append_value(value)
+            }
+            _ => {
+                return Err(decode(format!(
+                    "value does not match field {:?} ({})",
+                    field.name(),
+                    field.data_type()
+                )));
+            }
         }
-        validate_type(field.data_type())?;
+        Ok(())
     }
-    Ok(())
-}
 
-fn validate_type(data_type: &DataType) -> Result<()> {
-    match data_type {
-        DataType::Boolean
-        | DataType::Int32
-        | DataType::Date32
-        | DataType::UInt32
-        | DataType::UInt64
-        | DataType::Utf8
-        | DataType::LargeUtf8
-        | DataType::Binary
-        | DataType::LargeBinary => Ok(()),
-        DataType::Struct(fields) => validate_fields(fields),
-        DataType::List(field) | DataType::LargeList(field) => validate_type(field.data_type()),
-        _ => Err(Error::new(
-            ErrorKind::Unsupported,
-            "build_record_batch",
-            format!("unsupported metadata type {data_type}"),
-        )),
+    fn append_struct(
+        self,
+        write: impl FnOnce(&mut RecordBatchRow<'_>) -> Result<()>,
+    ) -> Result<()> {
+        let Self { builder, field } = self;
+        let DataType::Struct(fields) = field.data_type() else {
+            return Err(decode("expected a struct field"));
+        };
+        let mut row = RecordBatchRow::new(Self::downcast(builder), fields.clone());
+        write(&mut row)?;
+        row.finish()
+    }
+
+    fn append_list<I: IntoIterator>(
+        self,
+        values: I,
+        mut append: impl FnMut(FieldWriter<'_>, I::Item) -> Result<()>,
+    ) -> Result<()> {
+        let Self { builder, field } = self;
+        let (item, child): (_, &mut dyn ArrayBuilder) = match field.data_type() {
+            DataType::List(item) => (
+                item,
+                Self::downcast::<ListBuilder<Box<dyn ArrayBuilder>>>(builder)
+                    .values()
+                    .as_mut(),
+            ),
+            DataType::LargeList(item) => (
+                item,
+                Self::downcast::<LargeListBuilder<Box<dyn ArrayBuilder>>>(builder)
+                    .values()
+                    .as_mut(),
+            ),
+            _ => return Err(decode("expected a list field")),
+        };
+        for value in values {
+            append(
+                FieldWriter {
+                    builder: &mut *child,
+                    field: item,
+                },
+                value,
+            )?;
+        }
+        match field.data_type() {
+            DataType::List(_) => {
+                Self::downcast::<ListBuilder<Box<dyn ArrayBuilder>>>(builder).append(true)
+            }
+            DataType::LargeList(_) => {
+                Self::downcast::<LargeListBuilder<Box<dyn ArrayBuilder>>>(builder).append(true)
+            }
+            _ => unreachable!(),
+        }
+        Ok(())
+    }
+
+    fn append_null(self) {
+        let Self { builder, field } = self;
+        match field.data_type() {
+            DataType::Boolean => Self::downcast::<BooleanBuilder>(builder).append_null(),
+            DataType::Int32 => Self::downcast::<Int32Builder>(builder).append_null(),
+            DataType::Date32 => Self::downcast::<Date32Builder>(builder).append_null(),
+            DataType::UInt32 => Self::downcast::<UInt32Builder>(builder).append_null(),
+            DataType::UInt64 => Self::downcast::<UInt64Builder>(builder).append_null(),
+            DataType::Utf8 => Self::downcast::<StringBuilder>(builder).append_null(),
+            DataType::LargeUtf8 => Self::downcast::<LargeStringBuilder>(builder).append_null(),
+            DataType::Binary => Self::downcast::<BinaryBuilder>(builder).append_null(),
+            DataType::LargeBinary => Self::downcast::<LargeBinaryBuilder>(builder).append_null(),
+            DataType::List(_) => {
+                Self::downcast::<ListBuilder<Box<dyn ArrayBuilder>>>(builder).append(false)
+            }
+            DataType::LargeList(_) => {
+                Self::downcast::<LargeListBuilder<Box<dyn ArrayBuilder>>>(builder).append(false)
+            }
+            DataType::Struct(fields) => {
+                let builder = Self::downcast::<StructBuilder>(builder);
+                for (field, child) in fields.iter().zip(builder.field_builders_mut()) {
+                    FieldWriter {
+                        builder: child.as_mut(),
+                        field,
+                    }
+                    .append_null();
+                }
+                builder.append(false);
+            }
+            _ => unreachable!("unsupported types fail at construction"),
+        }
     }
 }
 
