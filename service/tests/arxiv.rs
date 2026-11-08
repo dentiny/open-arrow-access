@@ -4,7 +4,7 @@ use open_arrow_access_core::{ByteReadOptions, ErrorKind};
 use open_arrow_access_service::arxiv::{ArxivKind, ArxivService};
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::{
-    MemoryAccessor, collect_bytes, fixture, fixture_path, fs_operator,
+    MemoryAccessor, byte_layer, fixture, fixture_path, fs_operator,
 };
 
 fn service() -> ArxivService<OpenDalAccessor> {
@@ -36,10 +36,9 @@ async fn resolves_manifest_order_and_reads_selected_pdf_without_other_bodies() {
         .unwrap();
     drop(archive);
     drop(service);
-    assert_eq!(
-        collect_bytes(reader.as_mut()).await.unwrap(),
-        b"%PDF-first-paper"
-    );
+    byte_layer::assert_output(reader.as_mut(), b"%PDF-first-paper", 4)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -141,9 +140,19 @@ async fn rejects_invalid_manifests_and_changed_archive_length() {
         .manifest(ArxivKind::Pdf, Some(2410), ByteReadOptions::default())
         .await
         .unwrap();
+    let changed = ArxivService::new(MemoryAccessor::new(b"short", 3).with_ranges());
     assert_eq!(
-        ArxivService::new(MemoryAccessor::new(b"short", 3).with_ranges())
+        changed
             .archive(&archives[1], ByteReadOptions::default())
+            .await
+            .err()
+            .unwrap()
+            .kind(),
+        ErrorKind::Decode
+    );
+    assert_eq!(
+        changed
+            .stream(&archives[1], ByteReadOptions::default())
             .await
             .err()
             .unwrap()
@@ -177,10 +186,9 @@ async fn bulk_stream_starts_before_other_headers_and_accepts_sequential_storage(
     assert_eq!(observed.requests.lock().unwrap()[0].options, options);
     drop(service);
     drop(stream);
-    assert_eq!(
-        collect_bytes(reader.as_mut()).await.unwrap(),
-        b"%PDF-first-paper"
-    );
+    byte_layer::assert_output(reader.as_mut(), b"%PDF-first-paper", 64)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

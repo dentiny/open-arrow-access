@@ -108,12 +108,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivServi
         archive: &ArxivArchive,
         options: ByteReadOptions,
     ) -> Result<TarStream> {
-        validate_archive(archive)?;
-        let input = self
-            .storage
-            .open(ByteReadRequest::new(archive.filename.clone()).with_options(options))
-            .await?;
-        validate_archive_length(archive, input.metadata().content_length)?;
+        let input = self.open_archive_input(archive, options).await?;
         Ok(TarStream::new(input, self.tar_limits.clone()))
     }
 
@@ -125,12 +120,21 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivServi
         archive: &ArxivArchive,
         options: ByteReadOptions,
     ) -> Result<TarArchive> {
+        let input = self.open_archive_input(archive, options).await?;
+        TarArchive::open(input, self.tar_limits.clone()).await
+    }
+
+    async fn open_archive_input(
+        &self,
+        archive: &ArxivArchive,
+        options: ByteReadOptions,
+    ) -> Result<Box<dyn ByteReader>> {
         validate_archive(archive)?;
         let input = self
             .storage
             .open(ByteReadRequest::new(archive.filename.clone()).with_options(options))
             .await?;
         validate_archive_length(archive, input.metadata().content_length)?;
-        TarArchive::open(input, self.tar_limits.clone()).await
+        Ok(input)
     }
 }

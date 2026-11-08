@@ -327,8 +327,10 @@ The optional `archive(&shard, byte_options).await` checks the advertised file le
 the manifest and opens the shared TAR session. Use its entries/open_entry APIs
 to stream selected PDFs; source archives return raw entries (often nested tar.gz
 payloads). Both manifest and archive opens forward byte options. Archive members
-are not extracted to disk. Service-specific validation is in validation.rs,
-and error construction is in error.rs.
+are not extracted to disk. Both TAR entry points share archive identity and
+known-length validation before delegating to the generic TAR readers.
+Service-specific validation is in validation.rs, and error construction is in
+error.rs.
 
 The bulk manifests can change upstream; this API supplies source-level version
 guarantees, not an atomic historical snapshot or concept-version resolver.
