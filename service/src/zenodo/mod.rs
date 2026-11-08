@@ -6,21 +6,19 @@ mod validation;
 use std::num::NonZeroU64;
 
 use open_arrow_access_core::Result;
-use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
+use open_arrow_access_storage::OpenDalAccessor;
 
 use serde::Deserialize;
-use url::Url;
 
 use crate::ResolvedFileSet;
-use crate::http_client::HttpClient;
+use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
 use error::membership_error;
-use validation::{validate_endpoint, validate_record};
+use validation::validate_record;
 
 /// Connection settings. Construction performs no network requests.
 #[derive(Clone, Debug)]
 pub struct ZenodoService {
-    endpoint: Url,
-    client: HttpClient,
+    http: HttpFileService,
 }
 
 impl ZenodoService {
@@ -30,42 +28,43 @@ impl ZenodoService {
 
     /// Select an origin, for example `https://sandbox.zenodo.org`.
     pub fn with_endpoint(endpoint: &str) -> Result<Self> {
-        let endpoint = validate_endpoint(endpoint)?;
         Ok(Self {
-            endpoint,
-            client: HttpClient::new()?,
+            http: HttpFileService::new(
+                endpoint,
+                "configure_zenodo",
+                "resolve_zenodo",
+                membership_error,
+            )?,
         })
     }
 
     /// Resolve one published record. Membership is fetched once; attachment
     /// bytes are read lazily through the returned accessor.
     pub async fn record(&self, id: NonZeroU64) -> Result<ZenodoAccessor> {
-        let url = self.endpoint.join(&format!("api/records/{id}")).unwrap();
-        let record: Record = self
-            .client
-            .json(url.as_str(), None, "resolve_zenodo")
-            .await?;
-        validate_record(&record, id)?;
-        // Use the resolved record's canonical content route, never a concept's
-        // latest-version link or an arbitrary host supplied in metadata.
-        let root = format!("api/records/{id}/files/");
-        let bytes = self.client.accessor(&self.endpoint, &root, &[])?;
-        let inner = NamedFileAccessor::new(
-            bytes,
-            record
-                .files
-                .iter()
-                .map(|file| (file.key.clone(), format!("{}/content", file.key).into()))
-                .collect(),
-        )
-        .map_err(membership_error)?;
-        Ok(ResolvedFileSet::new(
-            inner,
-            ZenodoMetadata {
-                id,
-                files: record.files,
-            },
-        ))
+        let url = self
+            .http
+            .endpoint()
+            .join(&format!("api/records/{id}"))
+            .unwrap();
+        self.http
+            .resolve_files(&url, |record: Record| {
+                validate_record(&record, id)?;
+                // Use this version's canonical content route, never a latest
+                // version link or an arbitrary host supplied in metadata.
+                Ok(ResolvedFilesPlan {
+                    root: format!("api/records/{id}/files/"),
+                    files: record
+                        .files
+                        .iter()
+                        .map(|file| (file.key.clone(), format!("{}/content", file.key).into()))
+                        .collect(),
+                    metadata: ZenodoMetadata {
+                        id,
+                        files: record.files,
+                    },
+                })
+            })
+            .await
     }
 }
 

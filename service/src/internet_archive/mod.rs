@@ -4,12 +4,11 @@ mod error;
 mod validation;
 
 use open_arrow_access_core::Result;
-use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
+use open_arrow_access_storage::OpenDalAccessor;
 use serde::{Deserialize, Deserializer, de::Error as _};
-use url::Url;
 
 use crate::ResolvedFileSet;
-use crate::http_client::{HttpClient, validation::validate_origin};
+use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
 use error::membership_error;
 use validation::{extract_items_and_validate, validate_identifier};
 
@@ -19,8 +18,7 @@ const RESOLVE: &str = "resolve_internet_archive";
 /// Resolve one public item at an Internet Archive origin. Construction performs no I/O.
 #[derive(Clone, Debug)]
 pub struct InternetArchiveService {
-    endpoint: Url,
-    client: HttpClient,
+    http: HttpFileService,
 }
 
 impl InternetArchiveService {
@@ -30,8 +28,7 @@ impl InternetArchiveService {
 
     pub fn with_endpoint(endpoint: &str) -> Result<Self> {
         Ok(Self {
-            endpoint: validate_origin(endpoint, CONFIGURE)?,
-            client: HttpClient::new()?,
+            http: HttpFileService::new(endpoint, CONFIGURE, RESOLVE, membership_error)?,
         })
     }
 
@@ -40,29 +37,26 @@ impl InternetArchiveService {
     pub async fn item(&self, identifier: &str) -> Result<InternetArchiveAccessor> {
         validate_identifier(identifier)?;
         let url = self
-            .endpoint
+            .http
+            .endpoint()
             .join(&format!("metadata/{identifier}"))
             .unwrap();
-        let response = self.client.json(url.as_str(), None, RESOLVE).await?;
-        let files = extract_items_and_validate(response, identifier)?;
-        let storage =
-            self.client
-                .accessor(&self.endpoint, &format!("download/{identifier}/"), &[])?;
-        let inner = NamedFileAccessor::new(
-            storage,
-            files
-                .iter()
-                .map(|file| (file.name.clone(), file.name.clone().into()))
-                .collect(),
-        )
-        .map_err(membership_error)?;
-        Ok(ResolvedFileSet::new(
-            inner,
-            InternetArchiveMetadata {
-                identifier: identifier.into(),
-                files,
-            },
-        ))
+        self.http
+            .resolve_files(&url, |response| {
+                let files = extract_items_and_validate(response, identifier)?;
+                Ok(ResolvedFilesPlan {
+                    root: format!("download/{identifier}/"),
+                    files: files
+                        .iter()
+                        .map(|file| (file.name.clone(), file.name.clone().into()))
+                        .collect(),
+                    metadata: InternetArchiveMetadata {
+                        identifier: identifier.into(),
+                        files,
+                    },
+                })
+            })
+            .await
     }
 }
 
