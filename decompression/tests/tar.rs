@@ -2,7 +2,7 @@ use std::num::NonZeroUsize;
 
 use open_arrow_access_core::{Accessor, ByteReadRequest, ErrorKind};
 use open_arrow_access_decompression::tar::{TarArchive, TarLimits};
-use open_arrow_access_test_support::{MemoryAccessor, collect_bytes, fixture};
+use open_arrow_access_test_support::{MemoryAccessor, byte_layer, collect_bytes, fixture};
 
 async fn source(name: &str) -> MemoryAccessor {
     MemoryAccessor::new(&fixture!("tar", name).await, 7).with_ranges()
@@ -60,15 +60,12 @@ async fn inspects_headers_once_and_streams_independent_selected_entries() {
     assert_eq!(empty.metadata().content_length, Some(0));
     assert!(empty.next().await.unwrap().is_none());
     drop(archive);
-    assert_eq!(
-        collect_bytes(first.as_mut()).await.unwrap(),
-        b"F-first-paper"
-    );
-    assert_eq!(
-        collect_bytes(second.as_mut()).await.unwrap(),
-        b"second-paper"
-    );
-    assert!(first.next().await.unwrap().is_none());
+    byte_layer::assert_output(first.as_mut(), b"F-first-paper", 3)
+        .await
+        .unwrap();
+    byte_layer::assert_output(second.as_mut(), b"second-paper", 5)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -185,11 +182,13 @@ async fn preserves_entry_source_errors_and_terminates_reader() {
     let mut reader = archive
         .open_entry(1, NonZeroUsize::new(4).unwrap())
         .unwrap();
-    assert_eq!(
-        reader.next().await.err().unwrap().kind(),
-        ErrorKind::PermissionDenied
-    );
-    assert!(reader.next().await.unwrap().is_none());
+    byte_layer::assert_terminal_error(
+        reader.as_mut(),
+        &source.observations.range_reads,
+        ErrorKind::PermissionDenied,
+        "memory_range",
+    )
+    .await;
 }
 
 #[tokio::test]

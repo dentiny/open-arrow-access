@@ -171,7 +171,8 @@ where
 }
 
 /// Exercise all shared error categories and empty chunks at caller-chosen byte
-/// offsets, with one-byte chunks. Supports failures during schema inference or
+/// offsets, with one-byte chunks. Also checks open failures without reader polls.
+/// Supports failures during schema inference or
 /// later reads. This uses sequential faults, so range-based formats need their
 /// own I/O fault scenarios. Valid input and reachable offsets are required.
 pub async fn assert_error_contract<A>(
@@ -184,16 +185,31 @@ pub async fn assert_error_contract<A>(
 {
     use std::error::Error as _;
     assert!(!offsets.is_empty());
+    let kinds = [
+        ErrorKind::InvalidInput,
+        ErrorKind::Unsupported,
+        ErrorKind::NotFound,
+        ErrorKind::PermissionDenied,
+        ErrorKind::Io,
+        ErrorKind::Decode,
+    ];
+    for kind in kinds {
+        let input = MemoryAccessor::new(bytes, 1).with_open_failure(kind);
+        let observed = input.observations.clone();
+        let error = read_error(make_format(input), &request, &observed).await;
+        assert_eq!(error.kind(), kind);
+        assert_eq!(error.operation(), "memory_open");
+        let cause = error
+            .source()
+            .unwrap()
+            .downcast_ref::<std::io::Error>()
+            .unwrap();
+        assert_eq!(cause.kind(), std::io::ErrorKind::ConnectionReset);
+        assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
+    }
     for &offset in offsets {
         assert!(offset <= bytes.len());
-        for kind in [
-            ErrorKind::InvalidInput,
-            ErrorKind::Unsupported,
-            ErrorKind::NotFound,
-            ErrorKind::PermissionDenied,
-            ErrorKind::Io,
-            ErrorKind::Decode,
-        ] {
+        for kind in kinds {
             let input = MemoryAccessor::new(bytes, 1).with_failure(offset, kind);
             let observed = input.observations.clone();
             let error = read_error(make_format(input), &request, &observed).await;

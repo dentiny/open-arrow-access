@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashMap,
+    ops::Range,
     sync::{
         Arc, LazyLock, Mutex, Once, Weak,
         atomic::{AtomicUsize, Ordering},
@@ -22,10 +23,21 @@ pub struct CapturedRequest {
     pub headers: HeaderMap,
 }
 
+impl CapturedRequest {
+    pub fn range(&self) -> Option<Range<usize>> {
+        self.headers
+            .get("range")
+            .map(|value| request_range(value.to_str().unwrap(), usize::MAX))
+    }
+}
+
+type Handler = dyn Fn(Request<Buffer>) -> opendal::Result<Response<HttpBody>> + Send + Sync;
+
 #[derive(Default)]
 struct State {
     routes: Mutex<HashMap<(Method, String), Route>>,
     requests: Mutex<Vec<CapturedRequest>>,
+    handler: Mutex<Option<Arc<Handler>>>,
 }
 
 #[derive(Clone)]
@@ -102,6 +114,18 @@ impl HttpFixture {
         routes.insert((Method::GET, path.into()), Route::File(bytes));
     }
 
+    /// Handle requests without an exact static route. The callback runs without fixture locks.
+    pub fn handle(
+        &self,
+        handler: impl Fn(Request<Buffer>) -> opendal::Result<Response<HttpBody>> + Send + Sync + 'static,
+    ) {
+        *self.state.handler.lock().unwrap() = Some(Arc::new(handler));
+    }
+
+    pub fn clear_requests(&self) {
+        self.state.requests.lock().unwrap().clear();
+    }
+
     pub fn requests(&self) -> Vec<CapturedRequest> {
         self.state.requests.lock().unwrap().clone()
     }
@@ -127,57 +151,72 @@ impl HttpTransport for FixtureTransport {
             .lock()
             .unwrap()
             .get(&(request.method().clone(), path.into()))
-            .cloned()
-            .unwrap_or_else(|| panic!("unexpected {} request: {path}", request.method()));
+            .cloned();
         match route {
-            Route::Response(status, bytes, length) => Ok(response(status, bytes, length)),
-            Route::File(bytes) => {
-                if request.method() == Method::HEAD {
-                    let mut output = response(StatusCode::OK, Bytes::new(), true);
-                    output
-                        .headers_mut()
-                        .insert("content-length", bytes.len().into());
-                    return Ok(output);
-                }
-                assert_eq!(request.method(), Method::GET);
-                let Some(range) = request.headers().get("range") else {
-                    return Ok(response(StatusCode::OK, bytes, true));
-                };
-                let (start, end) = range
-                    .to_str()
-                    .unwrap()
-                    .strip_prefix("bytes=")
-                    .unwrap()
-                    .split_once('-')
-                    .unwrap();
-                let start: usize = start.parse().unwrap();
-                let end = if end.is_empty() {
-                    bytes.len()
-                } else {
-                    (end.parse::<usize>().unwrap() + 1).min(bytes.len())
-                };
-                if start >= end {
-                    return Ok(response(
-                        StatusCode::RANGE_NOT_SATISFIABLE,
-                        Bytes::new(),
-                        true,
-                    ));
-                }
-                let mut output =
-                    response(StatusCode::PARTIAL_CONTENT, bytes.slice(start..end), true);
-                output.headers_mut().insert(
-                    "content-range",
-                    format!("bytes {start}-{}/{}", end - 1, bytes.len())
-                        .parse()
-                        .unwrap(),
-                );
-                Ok(output)
+            Some(Route::Response(status, bytes, length)) => {
+                Ok(body_response(status, bytes, length))
+            }
+            Some(Route::File(bytes)) => Ok(file_response(&request, bytes)),
+            None => {
+                let handler =
+                    state.handler.lock().unwrap().clone().unwrap_or_else(|| {
+                        panic!("unexpected {} request: {path}", request.method())
+                    });
+                tokio::task::yield_now().await;
+                handler(request)
             }
         }
     }
 }
 
-fn response(status: StatusCode, bytes: Bytes, length: bool) -> Response<HttpBody> {
+/// Build a fragmented response with a known content length.
+pub fn response(status: StatusCode, bytes: impl Into<Bytes>) -> Response<HttpBody> {
+    body_response(status, bytes.into(), true)
+}
+
+/// Serve one file with the same HEAD and exact range behavior as `HttpFixture::file`.
+pub fn file_response(request: &Request<Buffer>, bytes: impl Into<Bytes>) -> Response<HttpBody> {
+    let bytes = bytes.into();
+    if request.method() == Method::HEAD {
+        let mut output = response(StatusCode::OK, Bytes::new());
+        output
+            .headers_mut()
+            .insert("content-length", bytes.len().into());
+        return output;
+    }
+    assert_eq!(request.method(), Method::GET);
+    let Some(range) = request.headers().get("range") else {
+        return response(StatusCode::OK, bytes);
+    };
+    let range = request_range(range.to_str().unwrap(), bytes.len());
+    if range.start >= range.end {
+        return response(StatusCode::RANGE_NOT_SATISFIABLE, Bytes::new());
+    }
+    let mut output = response(StatusCode::PARTIAL_CONTENT, bytes.slice(range.clone()));
+    output.headers_mut().insert(
+        "content-range",
+        format!("bytes {}-{}/{}", range.start, range.end - 1, bytes.len())
+            .parse()
+            .unwrap(),
+    );
+    output
+}
+
+fn request_range(header: &str, len: usize) -> Range<usize> {
+    let (start, end) = header
+        .strip_prefix("bytes=")
+        .unwrap()
+        .split_once('-')
+        .unwrap();
+    let end = if end.is_empty() {
+        len
+    } else {
+        (end.parse::<usize>().unwrap() + 1).min(len)
+    };
+    start.parse::<usize>().unwrap()..end
+}
+
+fn body_response(status: StatusCode, bytes: Bytes, length: bool) -> Response<HttpBody> {
     let size = length.then_some(bytes.len() as u64);
     let mut output = Response::builder().status(status);
     if let Some(size) = size {
