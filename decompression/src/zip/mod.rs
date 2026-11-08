@@ -173,10 +173,9 @@ impl ReaderFactory for ZipFactory {
             )
         })?;
         metadata.content_length = Some(entry.uncompressed_size().map_err(zip_error)?);
-        // The upstream parser exposes GPF as an opaque type. Check the local
-        // flags before opening a decoder, including empty encrypted entries.
-        // Flags start at offset 6: a 4-byte signature followed by a 2-byte version.
-        // The 2-byte flags field must fit entirely within the archive.
+        // ZIP local file header (offsets relative to lfh_offset):
+        // | signature (4 B) | version (2 B) | flags (2 B) | ... |
+        // 0                 4               6             8
         let flags_offset = entry
             .lfh_offset()
             .map_err(zip_error)?
