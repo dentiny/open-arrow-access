@@ -29,7 +29,7 @@ impl HuggingFaceService {
                 "invalid Hub authentication token",
             ));
         }
-        let client = crate::http_client::HttpClient::new();
+        let client = crate::http_client::HttpClient::new()?;
         Ok(Self {
             options,
             context: client.context,

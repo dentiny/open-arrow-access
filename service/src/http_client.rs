@@ -5,9 +5,7 @@ mod error;
 use error::transport_error;
 use http::{Request, StatusCode};
 use open_arrow_access_core::{Error, ErrorKind, Result};
-use opendal::{
-    Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext, raw::oio::ReadStream,
-};
+use opendal::{Buffer, HttpTransporter, OperationContext, raw::oio::ReadStream};
 use serde::de::DeserializeOwned;
 
 #[derive(Clone, Debug)]
@@ -16,14 +14,25 @@ pub(crate) struct HttpClient {
 }
 
 impl HttpClient {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new() -> Result<Self> {
+        let client = reqwest::Client::builder()
+            .user_agent(concat!("open-arrow-access/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|error| {
+                Error::new(
+                    ErrorKind::Io,
+                    "configure_http",
+                    "failed to build HTTP client",
+                )
+                .with_source(error)
+            })?;
+        HttpTransporter::install_default(opendal_http_transport_reqwest::ReqwestTransport::new(
+            client,
+        ));
         opendal::install_default();
-        let context = OperationContext::new();
-        Self {
-            context: context.with_http_transport(HttpTransporter::new(IdentifiedTransport(
-                context.http_transport().clone(),
-            ))),
-        }
+        Ok(Self {
+            context: OperationContext::new(),
+        })
     }
 
     pub(crate) async fn json<T: DeserializeOwned>(
@@ -87,25 +96,5 @@ impl HttpClient {
         serde_json::from_slice(&bytes).map_err(|error| {
             Error::new(ErrorKind::Decode, operation, "invalid JSON metadata").with_source(error)
         })
-    }
-}
-
-// Apply identification to metadata and operator requests using this context.
-#[derive(Debug)]
-struct IdentifiedTransport(HttpTransporter);
-
-impl HttpTransport for IdentifiedTransport {
-    async fn fetch(
-        &self,
-        mut request: Request<Buffer>,
-    ) -> opendal::Result<http::Response<HttpBody>> {
-        request
-            .headers_mut()
-            .entry("user-agent")
-            .or_insert(http::HeaderValue::from_static(concat!(
-                "open-arrow-access/",
-                env!("CARGO_PKG_VERSION")
-            )));
-        self.0.fetch(request).await
     }
 }
