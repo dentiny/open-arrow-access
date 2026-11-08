@@ -4,6 +4,4 @@
 pub mod huggingface;
 
 #[cfg(feature = "commoncrawl")]
-mod commoncrawl;
-#[cfg(feature = "commoncrawl")]
-pub use commoncrawl::{CommonCrawl, create_http_accessor};
+pub mod commoncrawl;
