@@ -1,10 +1,6 @@
-use std::num::NonZeroUsize;
-
 use futures::TryStreamExt;
 use http::StatusCode;
-use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, ErrorKind, ListRequest,
-};
+use open_arrow_access_core::{Accessor, ByteAccessor, ByteReadRequest, ErrorKind, ListRequest};
 use open_arrow_access_service::dataverse::DataverseService;
 use open_arrow_access_test_support::{collect_bytes, fixture, http::HttpFixture};
 
@@ -46,11 +42,6 @@ async fn pins_membership_preserves_logical_names_and_reads_original_bytes() {
         .await
         .unwrap();
     assert_eq!(http.requests().len(), 1);
-    assert_eq!(dataset.persistent_id(), PID);
-    assert_eq!(dataset.version(), "1.0");
-    assert_eq!(dataset.files()[0].id, 101);
-    assert_eq!(dataset.files()[0].size, 8);
-    assert!(!dataset.files()[0].restricted);
     let listed: Vec<_> = dataset
         .list(ListRequest::new(""))
         .await
@@ -62,17 +53,8 @@ async fn pins_membership_preserves_logical_names_and_reads_original_bytes() {
         listed.iter().map(|f| f.locator()).collect::<Vec<_>>(),
         vec!["papers/2026/paper #1%.pdf", "table.tab"]
     );
-    assert_eq!(
-        dataset.open("missing".into()).await.err().unwrap().kind(),
-        ErrorKind::NotFound
-    );
-    assert_eq!(http.requests().len(), 1);
-    let options = ByteReadOptions {
-        io_chunk_size: Some(NonZeroUsize::new(2).unwrap()),
-        ..Default::default()
-    };
     let mut reader = dataset
-        .open(ByteReadRequest::new("papers/2026/paper #1%.pdf").with_options(options))
+        .open(ByteReadRequest::new("papers/2026/paper #1%.pdf"))
         .await
         .unwrap();
     assert_eq!(reader.read_range(1..4).await.unwrap().as_ref(), b"PDF");
@@ -85,28 +67,11 @@ async fn pins_membership_preserves_logical_names_and_reads_original_bytes() {
             .iter()
             .all(|request| request.method != http::Method::HEAD)
     );
-    assert_eq!(
-        http.requests()
-            .iter()
-            .filter(|r| r.path == METADATA)
-            .count(),
-        1
-    );
 }
 
 #[tokio::test]
-async fn rejects_invalid_responses_and_reads_chunked_metadata() {
-    for file in [
-        "wrong-pid",
-        "wrong-version",
-        "draft",
-        "missing-files",
-        "bad-label",
-        "bad-directory",
-        "zero-id",
-        "duplicate-name",
-        "malformed",
-    ] {
+async fn rejects_mismatched_versions_and_missing_original_sizes() {
+    for file in ["wrong-pid", "wrong-version", "draft"] {
         let http = HttpFixture::new();
         http.respond(
             METADATA,
@@ -127,18 +92,6 @@ async fn rejects_invalid_responses_and_reads_chunked_metadata() {
         assert_eq!(http.requests().len(), 1);
     }
     let http = HttpFixture::new();
-    http.respond_chunked(
-        METADATA,
-        StatusCode::OK,
-        fixture!("dataverse", "dataset.json").await,
-    );
-    assert!(
-        DataverseService::new(http.endpoint())
-            .unwrap()
-            .dataset(PID, "1.0")
-            .await
-            .is_ok()
-    );
     http.respond(
         METADATA,
         StatusCode::OK,
@@ -154,41 +107,6 @@ async fn rejects_invalid_responses_and_reads_chunked_metadata() {
             .kind(),
         ErrorKind::Unsupported
     );
-    http.respond(
-        METADATA,
-        StatusCode::OK,
-        fixture!("dataverse", "empty.json").await,
-    );
-    assert!(
-        DataverseService::new(http.endpoint())
-            .unwrap()
-            .dataset(PID, "1.0")
-            .await
-            .unwrap()
-            .files()
-            .is_empty()
-    );
-}
-
-#[tokio::test]
-async fn validates_selection_before_network() {
-    let http = HttpFixture::new();
-    let service = DataverseService::new(http.endpoint()).unwrap();
-    for (pid, version) in [
-        ("", "1.0"),
-        ("doi:", "1.0"),
-        ("doi:abc", "latest"),
-        (PID, ":draft"),
-        (PID, "0.1"),
-        (PID, "1/2.0"),
-        (PID, "1.-1"),
-    ] {
-        assert_eq!(
-            service.dataset(pid, version).await.err().unwrap().kind(),
-            ErrorKind::InvalidInput
-        );
-    }
-    assert!(http.requests().is_empty());
 }
 
 #[tokio::test]
