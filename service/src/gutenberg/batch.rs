@@ -8,13 +8,7 @@ pub(super) fn create_batch(
     selected: &[(&File, Vec<u8>)],
     schema: SchemaRef,
 ) -> Result<RecordBatch> {
-    let projection = schema
-        .fields()
-        .iter()
-        .map(|field| field.name().clone())
-        .collect();
-    let mut builder = RecordBatchBuilder::new(super::schema(), Some(projection))?;
-    builder.push(|row| {
+    RecordBatchBuilder::build_row(super::schema(), schema, |row| {
         row.append("ebook_id", book.ebook_id)?;
         row.append("title", book.title.as_deref())?;
         row.append_structs("creator", &book.creator, |row, creator| {
@@ -40,6 +34,5 @@ pub(super) fn create_batch(
             row.append("modified", file.modified.as_deref())?;
             row.append("data", data.as_slice())
         })
-    })?;
-    builder.finish()
+    })
 }
