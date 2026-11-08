@@ -20,6 +20,6 @@ pub(super) fn unavailable() -> Error {
         "Internet Archive item is not publicly available",
     )
 }
-pub(super) fn membership_error(error: Error) -> Error {
+pub(super) fn map_file_namespace_error(error: Error) -> Error {
     decode("invalid item file membership").with_source(error)
 }
