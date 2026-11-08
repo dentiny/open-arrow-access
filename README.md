@@ -548,13 +548,13 @@ one complete body per record, so this is not a maximum-record-size or memory bou
 
 ## Common Crawl configuration
 
-Enable `service-commoncrawl` for `service::CommonCrawl` and
+Enable `service-warc` for `service::CommonCrawl` and
 `service::create_http_accessor`. A source identifies a crawl release and optional
 mirror origin. HTTP configuration is lazy; gzip and record decoding are composed
 explicitly by the caller. The always-available storage facade wraps
 caller-configured SDK operators.
 
-Enable `service-commoncrawl-warc` for crawl-wide WARC membership and sequential
+Enable `service-warc` for crawl-wide WARC membership and sequential
 reading through a supplied format accessor. The manifest accessor must provide
 decoded inventory bytes; gzip remains an explicit byte layer. `resolve` exposes
 the ordered file set without opening record files.

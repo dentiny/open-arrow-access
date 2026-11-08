@@ -35,12 +35,12 @@ Viewer row APIs are outside this entry point.
 
 ## Common Crawl configuration
 
-Enable `service-commoncrawl` on the facade for `CommonCrawl`, which validates a
+Enable `service-warc` on the facade for `CommonCrawl`, which validates a
 crawl identity and HTTP(S) origin, and `create_http_accessor`, which configures
 an origin-rooted OpenDAL HTTP reader without fetching data. Gzip and record
 format decoding remain explicit caller-supplied layers.
 
-Enable `service-commoncrawl-warc` for `CommonCrawlWarcRequest` and
+Enable `service-warc` for `CommonCrawlWarcRequest` and
 `CommonCrawlWarcAccessor`: resolve all WARC paths from a crawl's decoded
 `warc.paths.gz` inventory, preserving file order, then read through a supplied
 single-file format accessor and the existing sequential FileSet. `resolve`

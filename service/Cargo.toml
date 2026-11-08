@@ -8,13 +8,16 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
-commoncrawl = [
+warc = [
     "dep:open-arrow-access-storage",
     "dep:opendal",
     "dep:opendal-service-http",
     "dep:url",
     "opendal/services-http",
     "opendal/http-transport-reqwest",
+    "dep:open-arrow-access-dataset",
+    "dep:futures",
+    "open-arrow-access-dataset/directory",
 ]
 huggingface = [
     "dep:open-arrow-access-storage",
@@ -33,13 +36,7 @@ huggingface = [
     "open-arrow-access-dataset/directory",
     "open-arrow-access-file-format/parquet",
 ]
-commoncrawl-warc = [
-    "commoncrawl",
-    "dep:open-arrow-access-dataset",
-    "dep:futures",
-    "open-arrow-access-dataset/directory",
-]
-commoncrawl-segment = ["commoncrawl-warc"]
+commoncrawl-segment = ["warc"]
 
 [dependencies]
 open-arrow-access-dataset = { workspace = true, optional = true }
