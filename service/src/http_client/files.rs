@@ -1,5 +1,7 @@
 //! Bind a provider's validated manifest to lazy HTTP file access.
 
+use std::collections::HashMap;
+
 use open_arrow_access_core::{Error, ObjectRef, Result};
 use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
 use serde::de::DeserializeOwned;
@@ -21,10 +23,10 @@ pub(crate) struct ResolvedFilesPlan<M> {
     /// (Query parameter name, value) pairs appended to download requests and
     /// URL-encoded by the transport; metadata requests keep their own query.
     query: Vec<(String, String)>,
-    /// (Download locator relative to `root`, byte length) pairs for the downloaded
-    /// representation. Keys match `files` object locators, not logical filenames.
+    /// Download locator relative to `root` -> byte length of that representation.
+    /// Keys match `files` object locators, not logical filenames.
     /// Supplied lengths are trusted; missing locators fall back to storage stat.
-    content_lengths: Vec<(String, u64)>,
+    content_lengths: HashMap<String, u64>,
 }
 
 impl<M> ResolvedFilesPlan<M> {
@@ -38,7 +40,7 @@ impl<M> ResolvedFilesPlan<M> {
             files,
             metadata,
             query: Vec::new(),
-            content_lengths: Vec::new(),
+            content_lengths: HashMap::new(),
         }
     }
 
@@ -53,11 +55,8 @@ impl<M> ResolvedFilesPlan<M> {
 
     /// Lengths are keyed by download locator and must describe that representation.
     /// Storage uses stat for locators without a supplied length.
-    pub(crate) fn with_content_lengths(
-        mut self,
-        lengths: impl IntoIterator<Item = (String, u64)>,
-    ) -> Self {
-        self.content_lengths = lengths.into_iter().collect();
+    pub(crate) fn with_content_lengths(mut self, lengths: HashMap<String, u64>) -> Self {
+        self.content_lengths = lengths;
         self
     }
 }

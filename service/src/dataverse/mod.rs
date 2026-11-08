@@ -74,7 +74,7 @@ impl DataverseService {
                 let lengths = files
                     .iter()
                     .map(|file| (file.id.to_string(), file.size))
-                    .collect::<Vec<_>>();
+                    .collect();
                 Ok(ResolvedFilesPlan::new(
                     "api/access/datafile/",
                     mappings,
