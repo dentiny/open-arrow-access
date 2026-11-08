@@ -1,7 +1,6 @@
-use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, Capability, Error, ErrorKind, ListRequest, ReadRequest, RecordReader,
-    Result, async_trait,
+    Result, async_trait, list_files,
 };
 
 use super::{
@@ -49,50 +48,33 @@ where
     }
 
     async fn open(&self, request: DirectoryRequest) -> Result<Box<dyn RecordReader>> {
-        let mut prefix = normalize_prefix(request.prefix.locator()).ok_or_else(|| {
+        let prefix = normalize_prefix(request.prefix.locator()).ok_or_else(|| {
             Error::new(
                 ErrorKind::InvalidInput,
                 "open_directory",
                 "expected a root-relative directory prefix without dot components",
             )
         })?;
-        let mut listing = self
-            .discovery
-            .list(ListRequest::new(prefix.as_str()).with_recursive(request.recursive))
-            .await?;
-        if !prefix.is_empty() {
-            prefix.push('/');
-        }
-        let mut objects = Vec::new();
-        while let Some(object) = listing.try_next().await? {
-            let Some(relative) = object.locator().strip_prefix(&prefix) else {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "open_directory",
-                    "listing returned an object outside its directory prefix",
-                ));
-            };
-            if !is_root_relative(relative) {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "open_directory",
-                    "listing returned a rooted or dot-component locator",
-                ));
-            }
-            if relative.is_empty() || relative.ends_with('/') {
-                continue;
-            }
-            if request
-                .suffix
-                .as_ref()
-                .is_some_and(|suffix| !relative.ends_with(suffix))
-            {
-                continue;
-            }
-            objects.push(object);
-        }
-        objects.sort_unstable_by(|a, b| a.locator().cmp(b.locator()));
-        objects.dedup();
+        let objects = list_files(
+            &self.discovery,
+            ListRequest::new(prefix).with_recursive(request.recursive),
+            |relative| {
+                if !is_root_relative(relative) {
+                    return Err(Error::new(
+                        ErrorKind::InvalidInput,
+                        "open_directory",
+                        "listing returned a rooted or dot-component locator",
+                    ));
+                }
+                Ok(!relative.is_empty()
+                    && !relative.ends_with('/')
+                    && request
+                        .suffix
+                        .as_ref()
+                        .is_none_or(|suffix| relative.ends_with(suffix)))
+            },
+        )
+        .await?;
         self.files
             .open(FileSetRequest {
                 objects,
