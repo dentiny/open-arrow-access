@@ -5,13 +5,9 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_dataset::{FileSetAccessor, FileSetRequest};
 
-/// Resolve a crawl-wide WARC inventory and read files sequentially.
-///
-/// `manifests` must expose decoded `warc.paths.gz` bytes. Supply gzip separately
-/// for the official inventory. `format` handles individual WARC files, including
-/// any decompression. Both accessors use origin-rooted `crawl-data/...` locators.
-/// `format` emits Arrow batches; native `WarcAccessor` records need a caller-provided
-/// Arrow conversion adapter before this boundary.
+/// Read a crawl's WARC files in manifest order.
+/// `manifests` supplies decoded paths; `format` supplies Arrow batches.
+/// Both use `crawl-data/...` locators with caller-configured decompression.
 #[derive(Debug)]
 pub struct CommonCrawlWarcAccessor<M, F> {
     manifests: M,
@@ -28,8 +24,7 @@ impl<M, F> CommonCrawlWarcAccessor<M, F> {
 }
 
 impl<M: ByteAccessor, F> CommonCrawlWarcAccessor<M, F> {
-    /// Resolve selected membership before opening any record file.
-    /// A bounded line buffer streams the inventory; selected locators are retained.
+    /// Collect selected paths without opening record files.
     pub async fn resolve(&self, request: CommonCrawlWarcRequest) -> Result<FileSetRequest> {
         let input = self
             .manifests
