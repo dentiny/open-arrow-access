@@ -37,6 +37,8 @@ mod filename;
 #[allow(dead_code)]
 mod http_client;
 
+#[cfg(feature = "arxiv")]
+pub mod arxiv;
 #[cfg(feature = "dataverse")]
 pub mod dataverse;
 #[cfg(feature = "internet-archive")]

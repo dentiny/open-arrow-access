@@ -38,6 +38,7 @@ reqwest = { version = "0.13.5", default-features = false }
 url = "2"
 async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
 tar = { version = "0.4.46", default-features = false }
+quick-xml = { version = "0.41", features = ["serialize"] }
 async_zip = { version = "0.0.19", default-features = false, features = ["deflate"] }
 # Match the resolved Cargo.lock versions at the Lance revision above.
 # See docs/dependencies.md when updating this baseline.
@@ -77,6 +78,7 @@ default = []
 service-courtlistener = ["dep:open-arrow-access-service", "open-arrow-access-service/courtlistener"]
 service-gutenberg = ["dep:open-arrow-access-service", "open-arrow-access-service/gutenberg"]
 service-dataverse = ["dep:open-arrow-access-service", "open-arrow-access-service/dataverse"]
+service-arxiv = ["dep:open-arrow-access-service", "open-arrow-access-service/arxiv"]
 service-internet-archive = ["dep:open-arrow-access-service", "open-arrow-access-service/internet-archive"]
 service-zenodo = ["dep:open-arrow-access-service", "open-arrow-access-service/zenodo"]
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
@@ -161,6 +163,10 @@ required-features = ["service-dataverse"]
 [[example]]
 name = "read_tar"
 required-features = ["decompression-tar"]
+
+[[example]]
+name = "read_arxiv"
+required-features = ["service-arxiv"]
 
 [[example]]
 name = "read_internet_archive"

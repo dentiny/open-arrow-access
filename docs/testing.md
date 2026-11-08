@@ -19,6 +19,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | pmc-inventory | [`service/tests/pmc_inventory.rs`](../service/tests/pmc_inventory.rs) |
 
 | pmc | [`service/tests/pmc.rs`](../service/tests/pmc.rs) |
+| arXiv bulk manifests and TAR composition | [`service/tests/arxiv.rs`](../service/tests/arxiv.rs) |
 | Hugging Face Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
 | Dataverse published-version original files | [`service/tests/dataverse.rs`](../service/tests/dataverse.rs) |
 | CourtListener bulk snapshots | [`service/tests/courtlistener.rs`](../service/tests/courtlistener.rs) |
