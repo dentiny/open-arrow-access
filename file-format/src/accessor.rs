@@ -39,8 +39,6 @@ impl<B, F> FileAccessor<B, F> {
             binding: FactoryAccessor::new(inner, format),
         }
     }
-    /// Transform the configured format while retaining its byte storage.
-    /// Available for built-in and application-defined formats with any features.
     pub fn map_format(self, map: impl FnOnce(F) -> F) -> Self {
         Self {
             binding: self.binding.map_factory(map),
