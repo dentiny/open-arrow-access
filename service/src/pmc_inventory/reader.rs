@@ -7,7 +7,7 @@ use open_arrow_access_core::{
     RecordReader, Result, SchemaRef, StreamReader, into_stream, project_batch,
 };
 use open_arrow_access_decompression::{DecompressionLayer, Gzip};
-use open_arrow_access_file_format::{CsvAccessor, CsvFormat};
+use open_arrow_access_file_format::CsvAccessor;
 
 use super::validation;
 
@@ -29,13 +29,10 @@ impl InventoryTransform {
             source: Some(request.object),
         };
         // S3 Inventory CSV shards are gzip-compressed (*.csv.gz).
-        let csv = Arc::new(
-            CsvAccessor::new(
-                source.layer(DecompressionLayer::new(Gzip)),
-                self.csv_schema.clone(),
-            )
-            .with_format(CsvFormat::default().with_header(false)),
-        );
+        let csv = Arc::new(CsvAccessor::new(
+            source.layer(DecompressionLayer::new(Gzip)),
+            self.csv_schema.clone(),
+        ));
         let options = request.options;
         let readers = stream::iter(files).then(move |file| {
             let csv = csv.clone();
