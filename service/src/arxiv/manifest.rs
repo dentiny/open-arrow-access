@@ -101,6 +101,8 @@ struct Manifest {
 #[derive(Deserialize)]
 struct ManifestFile {
     filename: String,
+    /// Archive month encoded as YYMM (two-digit year and month), e.g. 2410 for October 2024.
+    /// Stored numerically; format with `{:04}` to restore leading zeros (1 becomes 0001).
     yymm: u16,
     seq_num: u32,
     size: u64,
