@@ -72,10 +72,14 @@ async fn external_format_prepares_each_open_and_receives_request_options() {
         input,
         ProbeFormat {
             events: events.clone(),
-            fail_prepare: false,
+            fail_prepare: true,
             fail_open: false,
         },
-    );
+    )
+    .map_format(|mut format| {
+        format.fail_prepare = false;
+        format
+    });
     assert_eq!(
         accessor.capability(),
         Capability {
