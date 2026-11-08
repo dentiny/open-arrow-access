@@ -15,7 +15,13 @@ async fn seeks_clones_and_direct_ranges_preserve_independent_cursors() {
     input.read_exact(&mut head).await.unwrap();
     assert_eq!(&head, b"ab");
     let mut fork = input.clone();
-    assert_eq!(input.read_range(8..10).await.unwrap().as_ref(), b"ij");
+    fn owned_send<T: Send + 'static>(value: T) -> T {
+        value
+    }
+    assert_eq!(
+        owned_send(input.read_range(8..10)).await.unwrap().as_ref(),
+        b"ij"
+    );
     assert_eq!(input.seek(SeekFrom::Current(0)).await.unwrap(), 2);
     input.read_exact(&mut head).await.unwrap();
     assert_eq!(&head, b"cd");

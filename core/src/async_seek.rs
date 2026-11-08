@@ -79,15 +79,23 @@ impl SeekableInput {
     }
 
     /// Read an exact range without changing this adapter's cursor or read-ahead.
-    pub async fn read_range(&self, range: std::ops::Range<u64>) -> Result<Bytes> {
-        if range.start > range.end || range.end > self.len {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                self.operation,
-                "invalid range",
-            ));
+    pub fn read_range(
+        &self,
+        range: std::ops::Range<u64>,
+    ) -> impl std::future::Future<Output = Result<Bytes>> + Send + 'static + use<> {
+        let reader = self.reader.clone();
+        let len = self.len;
+        let operation = self.operation;
+        async move {
+            if range.start > range.end || range.end > len {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    operation,
+                    "invalid range",
+                ));
+            }
+            exact_range(&reader, range, operation).await
         }
-        exact_range(&self.reader, range, self.operation).await
     }
 }
 
