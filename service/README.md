@@ -33,9 +33,9 @@ transport errors never trigger fallback. `with_revision` refers to the Parquet
 representation, not the original source branch. Native dataset-card parsing and
 Viewer row APIs are outside this entry point.
 
-## PMC inventory (`pmc-inventory`)
+## PMC inventory (`pmc`)
 
-Enable `service-pmc-inventory` for `service::pmc_inventory::PmcInventoryAccessor`.
+Enable `service-pmc` for `service::pmc_inventory::PmcInventoryAccessor`.
 A `ReadRequest` selects one `manifest.json`; its `fileSchema` defines CSV columns
 and order. The reader reuses gzip and CSV adapters, opens shards lazily in
 manifest order, and forwards read options. It never fetches article objects.
@@ -70,7 +70,7 @@ async fn read(operator: opendal::Operator) -> Result<(), Box<dyn std::error::Err
 }
 ```
 
-Run `cargo run --example read_pmc_inventory --features service-pmc-inventory --
+Run `cargo run --example read_pmc_inventory --features service-pmc --
 /mirror/root <dated-manifest-key>` against a mirror preserving manifest/shard keys.
 See the [PMC dataset README](https://pmc-oa-opendata.s3.amazonaws.com/README.txt)
 and [S3 inventory manifest format](https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-inventory-location.html).

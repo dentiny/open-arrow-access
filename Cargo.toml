@@ -68,8 +68,6 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 [features]
 default = []
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
-service-pmc-inventory = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc-inventory"]
-
 service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
 service-warc = ["dep:open-arrow-access-service", "open-arrow-access-service/warc"]
 format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
@@ -121,3 +119,7 @@ required-features = ["format-xml"]
 [[example]]
 name = "read_atif"
 required-features = ["format-atif"]
+
+[[example]]
+name = "read_pmc_inventory"
+required-features = ["service-pmc"]

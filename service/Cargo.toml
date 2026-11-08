@@ -36,7 +36,7 @@ huggingface = [
     "open-arrow-access-dataset/directory",
     "open-arrow-access-file-format/parquet",
 ]
-pmc-inventory = [
+pmc = [
     "dep:futures",
     "dep:arrow-array",
     "dep:arrow-schema",
@@ -48,7 +48,6 @@ pmc-inventory = [
     "open-arrow-access-decompression/gzip",
 ]
 
-pmc = ["dep:arrow-schema", "dep:serde", "dep:serde_json"]
 
 
 [dependencies]
@@ -87,7 +86,7 @@ required-features = ["huggingface"]
 
 [[test]]
 name = "pmc_inventory"
-required-features = ["pmc-inventory"]
+required-features = ["pmc"]
 
 [[test]]
 name = "pmc"

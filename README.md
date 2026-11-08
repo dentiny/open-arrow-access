@@ -554,7 +554,7 @@ one complete body per record, so this is not a maximum-record-size or memory bou
 
 ## PMC inventory
 
-Enable `service-pmc-inventory` to read a caller-selected inventory manifest with
+Enable `service-pmc` to read a caller-selected inventory manifest with
 `service::pmc_inventory::PmcInventoryAccessor` and a standard `ReadRequest`.
 It streams the declared gzip CSV shards in order, preserves upstream columns
 and snapshot identity without adding columns. It does not list the

@@ -9,7 +9,7 @@ pub mod commoncrawl;
 #[cfg(feature = "warc")]
 pub mod warc;
 
-#[cfg(feature = "pmc-inventory")]
+#[cfg(feature = "pmc")]
 pub mod pmc_inventory;
 
 #[cfg(feature = "pmc")]
