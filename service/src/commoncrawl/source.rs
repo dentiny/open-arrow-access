@@ -1,27 +1,20 @@
 use open_arrow_access_core::{Error, ErrorKind, Result};
 
-use super::url::parse_url;
+use super::{url::parse_url, validation::validate_crawl};
 
 /// One Common Crawl release and the origin hosting its objects.
 #[derive(Clone, Debug)]
 pub struct CommonCrawl {
+    /// Release ID in `CC-MAIN-YYYY-NN` form.
     crawl: String,
+    /// HTTP(S) scheme and host, with an optional port and no path.
     origin: String,
 }
 
 impl CommonCrawl {
     pub fn new(crawl: impl Into<String>) -> Result<Self> {
         let crawl = crawl.into();
-        let parts = crawl
-            .strip_prefix("CC-MAIN-")
-            .and_then(|value| value.split_once('-'));
-        if !matches!(parts, Some((year, run)) if is_digits(year, 4) && is_digits(run, 2)) {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "configure_commoncrawl",
-                "expected CC-MAIN-YYYY-NN",
-            ));
-        }
+        validate_crawl(&crawl)?;
         Ok(Self {
             crawl,
             origin: "https://data.commoncrawl.org".into(),
@@ -61,8 +54,4 @@ impl CommonCrawl {
     pub fn origin(&self) -> &str {
         &self.origin
     }
-}
-
-fn is_digits(value: &str, len: usize) -> bool {
-    value.len() == len && value.bytes().all(|byte| byte.is_ascii_digit())
 }

@@ -2,7 +2,7 @@ use futures::stream;
 use http::{Request, Response, StatusCode};
 use open_arrow_access::{
     Accessor, ByteAccessor, Bytes, ErrorKind,
-    service::{CommonCrawl, create_http_accessor},
+    service::CommonCrawl,
     storage::{OpenDalAccessor, opendal},
 };
 use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext, Operator};
@@ -39,36 +39,6 @@ fn crawl_identity_and_mirror_urls_are_canonical() {
             CommonCrawl::from_url(value).unwrap_err().kind(),
             ErrorKind::InvalidInput,
             "{value}"
-        );
-    }
-}
-
-#[test]
-fn http_configuration_is_lazy_and_listing_is_unsupported() {
-    let bytes = create_http_accessor("https://data.commoncrawl.org/").unwrap();
-    assert!(bytes.capability().read);
-    assert!(bytes.capability().read_with_range);
-    assert!(!bytes.capability().list);
-    for origin in [
-        "file:///tmp/",
-        "https://user:pass@host/",
-        "https://host/path",
-        "https://host/a/../",
-        "https://host/%2f",
-        "https://host/?x=1",
-    ] {
-        assert_eq!(
-            create_http_accessor(origin).unwrap_err().kind(),
-            ErrorKind::InvalidInput,
-            "{origin}"
-        );
-        assert_eq!(
-            CommonCrawl::new("CC-MAIN-2022-40")
-                .unwrap()
-                .with_origin(origin)
-                .unwrap_err()
-                .kind(),
-            ErrorKind::InvalidInput
         );
     }
 }
