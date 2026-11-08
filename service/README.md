@@ -270,8 +270,7 @@ Configure an installation origin, then resolve an explicit published version:
 DOI and Handle identifiers are supported. Response identity, version and RELEASED
 state are validated; DOI comparison follows ASCII case-insensitive equivalence.
 
-`files()` exposes logical names, file IDs, original byte lengths and restricted
-flags. Folder labels remain part of the logical filename. Empty-root listing
+`files()` exposes logical names, file IDs and original byte lengths. Folder labels remain part of the logical filename. Empty-root listing
 uses cached API order in either recursive mode. Downloads request
 `format=original`, including ingested tabular files whose labels may end in
 `.tab`. Trusted manifest lengths avoid HEAD requests that can fail on URLs signed

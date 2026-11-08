@@ -62,7 +62,6 @@ impl DataverseService {
                     )
                 },
                 id: file.data_file.id,
-                restricted: file.restricted,
                 size: file
                     .data_file
                     .original_file_size
@@ -98,9 +97,6 @@ impl DataverseService {
 pub struct DataverseFile {
     pub name: String,
     pub id: u64,
-    /// Whether Dataverse marks the file as access-restricted.
-    /// Dataset resolution rejects restricted files as unsupported.
-    pub restricted: bool,
     pub size: u64,
 }
 

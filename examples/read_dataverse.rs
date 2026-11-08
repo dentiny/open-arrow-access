@@ -12,10 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .dataset(&persistent_id, &version)
         .await?;
     for file in dataset.files() {
-        println!(
-            "{}\tfile ID {}\trestricted={}",
-            file.name, file.id, file.restricted
-        );
+        println!("{}\tfile ID {}\t{} bytes", file.name, file.id, file.size);
     }
     if let Some(name) = args.next() {
         let mut reader = dataset.open(name.into()).await?;
