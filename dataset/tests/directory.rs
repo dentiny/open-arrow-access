@@ -1,3 +1,6 @@
+use open_arrow_access_dataset::{
+    DirectoryAccessor, DirectoryRequest, FileSetAccessor, FileSetRequest,
+};
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
@@ -9,13 +12,11 @@ use std::{
 
 use arrow_array::{ArrayRef, Int64Array, types::Int64Type};
 use arrow_schema::{DataType, Field};
-use futures::{TryStreamExt, stream};
-use open_arrow_access::{
+use futures::stream;
+use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ListRequest,
     ObjectRef, ObjectStream, ReadOptionsProvider, ReadRequest, Reader, RecordBatch, RecordMetadata,
     RecordReader, Result, Schema, SchemaRef, async_trait,
-    dataset::{DirectoryAccessor, DirectoryRequest, FileSetAccessor, FileSetRequest},
-    into_stream,
 };
 
 fn schema(label: &str) -> SchemaRef {
@@ -402,162 +403,5 @@ async fn directory_rejects_traversal_entries() {
             ErrorKind::InvalidInput
         );
         assert!(files.opens.lock().unwrap().is_empty());
-    }
-}
-
-#[cfg(feature = "format-parquet")]
-mod filesystem {
-    use super::*;
-    use more_asserts::assert_le;
-    use open_arrow_access::{file_format::ParquetAccessor, storage::OpenDalAccessor};
-    fn copy_fixture(name: &str, destination: &std::path::Path) {
-        let source = open_arrow_access_test_support::fixture_path!("parquet/directory", name);
-        std::fs::copy(source, destination).unwrap();
-    }
-
-    #[tokio::test]
-    async fn filesystem_listing_is_recursive_file_only_and_uses_backend_prefix_semantics() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("sub")).unwrap();
-        std::fs::write(dir.path().join("a"), b"a").unwrap();
-        std::fs::write(dir.path().join("sub/b"), b"b").unwrap();
-        let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
-        assert!(fs.capability().list);
-        let mut paths = fs
-            .list("".into())
-            .await
-            .unwrap()
-            .try_collect::<Vec<_>>()
-            .await
-            .unwrap();
-        paths.sort_by(|a, b| a.locator().cmp(b.locator()));
-        assert_eq!(paths, vec![ObjectRef::new("a"), ObjectRef::new("sub/b")]);
-        assert_eq!(
-            fs.list(ListRequest::new("").with_recursive(false))
-                .await
-                .unwrap()
-                .try_collect::<Vec<_>>()
-                .await
-                .unwrap(),
-            vec![ObjectRef::new("a")]
-        );
-        assert_eq!(
-            fs.list("sub".into())
-                .await
-                .unwrap()
-                .try_collect::<Vec<_>>()
-                .await
-                .unwrap(),
-            vec![ObjectRef::new("sub/b")]
-        );
-        for path in ["../outside", "/absolute", ".", " sub"] {
-            assert_eq!(
-                fs.list(path.into()).await.err().unwrap().kind(),
-                ErrorKind::InvalidInput
-            );
-        }
-        // OpenDAL Fs treats nonexistent and non-directory prefixes as empty.
-        for prefix in ["missing", "a"] {
-            assert!(
-                fs.list(prefix.into())
-                    .await
-                    .unwrap()
-                    .try_collect::<Vec<_>>()
-                    .await
-                    .unwrap()
-                    .is_empty()
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn directory_normalizes_prefix_before_listing_and_matching() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("data/sub")).unwrap();
-        copy_fixture("a.parquet", &dir.path().join("data/sub/a.parquet"));
-        let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
-        let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
-        for prefix in ["data/sub", "data//sub", "data///sub//"] {
-            let request = DirectoryRequest::new(prefix);
-            assert_eq!(values(accessor.open(request).await.unwrap()).await, [1, 2]);
-        }
-        for prefix in ["/data/sub", "data//./sub", "data//../sub"] {
-            assert_eq!(
-                accessor
-                    .open(DirectoryRequest::new(prefix))
-                    .await
-                    .err()
-                    .unwrap()
-                    .kind(),
-                ErrorKind::InvalidInput
-            );
-        }
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn nonrecursive_directory_does_not_enter_unreadable_subdirectories() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let dir = tempfile::tempdir().unwrap();
-        copy_fixture("a.parquet", &dir.path().join("a.parquet"));
-        let excluded = dir.path().join("excluded");
-        std::fs::create_dir(&excluded).unwrap();
-        copy_fixture("b.parquet", &excluded.join("b.parquet"));
-        let permissions = std::fs::metadata(&excluded).unwrap().permissions();
-        let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
-        let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
-        let mut request = DirectoryRequest::new("");
-        request.recursive = false;
-        request.suffix = Some(".parquet".into());
-        std::fs::set_permissions(&excluded, std::fs::Permissions::from_mode(0o0)).unwrap();
-        let result = accessor.open(request).await;
-        // Restore permissions before assertions so failed reads still clean up.
-        std::fs::set_permissions(&excluded, permissions).unwrap();
-        // This also checks selection when tests run as root and bypass permissions.
-        assert_eq!(values(result.unwrap()).await, [1, 2]);
-    }
-
-    #[tokio::test]
-    async fn directory_reads_local_parquet_in_sorted_order_with_projection_and_byte_options() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir(dir.path().join(".sub")).unwrap();
-        let schema = schema("same");
-        copy_fixture("b.parquet", &dir.path().join("b.parquet"));
-        copy_fixture("a.parquet", &dir.path().join("a.parquet"));
-        copy_fixture("c.parquet", &dir.path().join(".sub/c.parquet"));
-        copy_fixture("hidden.parquet", &dir.path().join(".hidden.parquet"));
-        std::fs::write(dir.path().join("readme"), b"not parquet").unwrap();
-        let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
-        let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
-        let mut request = DirectoryRequest::new("");
-        request.suffix = Some(".parquet".into());
-        request.options.batch_size = NonZeroUsize::new(1).unwrap();
-        request.byte_options.io_concurrency = NonZeroUsize::new(2).unwrap();
-        request.byte_options.io_chunk_size = NonZeroUsize::new(8);
-        let reader = accessor.open(request.clone()).await.unwrap();
-        assert_eq!(reader.metadata().schema, schema);
-        assert_eq!(values(reader).await, [99, 4, 1, 2, 3]);
-        request.options.projection = Some(vec![]);
-        let batches = into_stream(accessor.open(request.clone()).await.unwrap())
-            .try_collect::<Vec<_>>()
-            .await
-            .unwrap();
-        assert_eq!(batches.iter().map(|b| b.num_rows()).sum::<usize>(), 5);
-        for batch in &batches {
-            assert_eq!(batch.num_columns(), 0);
-            assert_le!(batch.num_rows(), 1);
-        }
-        request.recursive = false;
-        request.options.projection = None;
-        assert_eq!(
-            values(accessor.open(request.clone()).await.unwrap()).await,
-            [99, 1, 2, 3]
-        );
-        request.suffix = Some(".csv".into());
-        assert_eq!(
-            accessor.open(request).await.err().unwrap().kind(),
-            ErrorKind::InvalidInput
-        );
     }
 }

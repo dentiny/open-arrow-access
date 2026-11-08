@@ -422,3 +422,14 @@ async fn manifest_bounds_cover_known_and_decoded_lengths() {
     }
     assert!(s.opened.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn opens_an_empty_explicit_snapshot() {
+    let raw=br#"{"sourceBucket":"pmc-oa-opendata","destinationBucket":"arn:aws:s3:::pmc-oa-opendata","version":"2016-11-30","creationTimestamp":"1793581200000","fileFormat":"CSV","fileSchema":"Bucket, Key, LastModifiedDate, ETag","files":[]}"#;
+    let mut reader = PmcInventoryAccessor::new(MemoryAccessor::new(raw, 1))
+        .open(ReadRequest::new("manifest.json"))
+        .await
+        .unwrap();
+    assert_eq!(reader.metadata().schema.fields().len(), 5);
+    assert!(reader.next().await.unwrap().is_none());
+}

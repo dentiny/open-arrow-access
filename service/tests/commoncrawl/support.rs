@@ -1,6 +1,6 @@
 use arrow_array::StringArray;
 use arrow_schema::{DataType, Field};
-use open_arrow_access::{
+use open_arrow_access_core::{
     Accessor, Capability, Error, ErrorKind, ReadRequest, Reader, RecordBatch, RecordMetadata,
     RecordReader, Result, Schema, async_trait,
 };
@@ -11,11 +11,10 @@ use std::{
 };
 
 pub fn manifest(name: &str, chunk_size: usize) -> MemoryAccessor {
-    let bytes = std::fs::read(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("testdata/commoncrawl")
-            .join(name),
-    )
+    let bytes = std::fs::read(open_arrow_access_test_support::fixture_path!(
+        "commoncrawl",
+        name
+    ))
     .unwrap();
     MemoryAccessor::new(&bytes, chunk_size)
 }
@@ -97,7 +96,7 @@ impl Reader for Batches {
 
 pub async fn paths(reader: Box<dyn RecordReader>) -> Vec<String> {
     use futures::TryStreamExt;
-    open_arrow_access::into_stream(reader)
+    open_arrow_access_core::into_stream(reader)
         .try_collect::<Vec<_>>()
         .await
         .unwrap()

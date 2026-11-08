@@ -69,13 +69,15 @@ percent-encoding = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 
 [dev-dependencies]
+arrow-schema.workspace = true
+http.workspace = true
+tokio.workspace = true
+open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
 flate2.workspace = true
 open-arrow-access-storage.workspace = true
-tokio.workspace = true
 bytes.workspace = true
-
 [[test]]
 name = "huggingface"
 required-features = ["huggingface"]
@@ -86,3 +88,11 @@ required-features = ["pmc-inventory"]
 
 [lints]
 workspace = true
+
+[[test]]
+name = "commoncrawl"
+required-features = ["warc"]
+
+[[test]]
+name = "warc"
+required-features = ["warc"]
