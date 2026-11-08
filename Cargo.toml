@@ -72,6 +72,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 default = []
 service-courtlistener = ["dep:open-arrow-access-service", "open-arrow-access-service/courtlistener"]
 service-gutenberg = ["dep:open-arrow-access-service", "open-arrow-access-service/gutenberg"]
+service-zenodo = ["dep:open-arrow-access-service", "open-arrow-access-service/zenodo"]
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
 service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
 service-warc = ["dep:open-arrow-access-service", "open-arrow-access-service/warc"]
@@ -141,3 +142,7 @@ required-features = ["service-courtlistener"]
 [[example]]
 name = "read_zip"
 required-features = ["decompression-zip"]
+
+[[example]]
+name = "read_zenodo"
+required-features = ["service-zenodo"]

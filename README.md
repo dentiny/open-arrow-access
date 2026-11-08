@@ -604,3 +604,12 @@ the ordered file set without opening record files.
 Enable `service-warc` to select one segment using the same WARC
 inventory parser and sequential reader. Segment selection occurs during manifest
 streaming, so only the selected segment's file locators are retained.
+
+### Zenodo
+
+Enable `service-zenodo` for `service::zenodo::ZenodoService`. Resolve a published
+record ID once, list its attachments, and read selected files through the shared
+byte contracts. Compose the result with existing format and decompression
+accessors. See [service documentation](service/README.md#zenodo-zenodo) and the
+`read_zenodo` example. This entry point supports public records, not repository
+search or restricted-file authentication.

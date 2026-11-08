@@ -232,3 +232,35 @@ the generic Arrow CSV reader does not preserve those distinctions by default.
 
 Sources: [bulk documentation](https://wiki.free.law/c/courtlistener/help/api/bulk-data/bulk-legal-data)
 and the [official exporter](https://github.com/freelawproject/courtlistener/blob/main/scripts/make_bulk_data.sh).
+
+## Zenodo (`zenodo`)
+
+Enable `service-zenodo` for `service::zenodo::{ZenodoService, ZenodoAccessor}`.
+`ZenodoService::new()?.record(record_id).await?` resolves one published record
+using `GET /api/records/{id}`. The ID is a `NonZeroU64`; use a specific record
+version, not a concept DOI. The returned ID must match the request. Sandbox or
+mirror origins can be selected with `ZenodoService::with_endpoint`.
+
+The resolved accessor caches attachment membership and exposes `files()` with
+key, size and checksum. It implements `ByteAccessor`: list the empty root to
+obtain exact attachment keys, then `open(ByteReadRequest::new(key))` to read one.
+Attachments form a flat namespace; both recursive modes list the same files.
+Unknown keys fail without file I/O. Readers use the canonical record content
+route through the shared OpenDAL HTTP accessor, forwarding byte read options.
+Each reader is independent and can outlive the resolved record. HTTP metadata
+and range support are required by that storage accessor.
+
+Metadata collection has a configurable 4 MiB default limit (`with_metadata_limit`),
+including responses without Content-Length. Empty files lists are valid; missing,
+malformed or duplicate membership fails. File bodies are fetched lazily, and
+existing decompression/format accessors can wrap the record accessor. Checksums
+are exposed as upstream metadata, not verified. Reader source locators refer to
+the HTTP content route relative to the record's files root.
+
+This entry point reads publicly accessible published records. Search, OAI-PMH,
+metadata dumps, concept DOI resolution, restricted files and deposit/upload APIs
+are outside its scope. No API credentials are loaded implicitly.
+See the [Zenodo Records API](https://developers.zenodo.org/#records).
+
+Run `cargo run --example read_zenodo --features service-zenodo -- 3551612`
+to list a record, or append an exact file key to stream its contents.

@@ -8,6 +8,7 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
+zenodo = ["dep:open-arrow-access-storage", "dep:opendal", "dep:opendal-service-http", "opendal/services-http", "opendal/http-transport-reqwest", "dep:http", "dep:url", "dep:serde", "dep:serde_json", "dep:futures"]
 courtlistener = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/bz2",
@@ -127,3 +128,7 @@ required-features = ["warc"]
 [[test]]
 name = "commoncrawl_segment"
 required-features = ["warc"]
+
+[[test]]
+name = "zenodo"
+required-features = ["zenodo"]
