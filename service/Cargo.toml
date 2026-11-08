@@ -10,6 +10,7 @@ description = "Dataset source providers for Open Arrow Access"
 default = []
 zenodo = []
 arxiv = ["dep:quick-xml", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
+internet-archive = []
 courtlistener = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/bz2",
@@ -123,3 +124,7 @@ required-features = ["zenodo"]
 [[test]]
 name = "arxiv"
 required-features = ["arxiv"]
+
+[[test]]
+name = "internet_archive"
+required-features = ["internet-archive"]

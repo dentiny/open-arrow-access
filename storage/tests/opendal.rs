@@ -12,7 +12,22 @@ use opendal::{
 };
 
 use open_arrow_access_storage::OpenDalAccessor;
-use open_arrow_access_test_support::{fixture, fixture_path};
+use open_arrow_access_test_support::{byte_accessor, fixture, fixture_path};
+
+#[tokio::test]
+async fn filesystem_read_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    for contents in [b"".as_slice(), b"independent readers"] {
+        tokio::fs::write(dir.path().join("data.bin"), contents)
+            .await
+            .unwrap();
+        let accessor =
+            OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
+        byte_accessor::assert_read_contract(accessor, "data.bin".into(), contents)
+            .await
+            .unwrap();
+    }
+}
 
 #[tokio::test]
 async fn filesystem_rejects_surrounding_whitespace_without_aliasing_files() {
@@ -156,10 +171,6 @@ async fn large_single_and_bulk_ranges_preserve_values_and_cursor() {
             .await
             .unwrap();
         let large = 17..(4 * mib + 3) as u64;
-        assert_eq!(
-            reader.read_range(large.clone()).await.unwrap().as_ref(),
-            &contents[17..4 * mib + 3]
-        );
         let ranges = vec![
             0..mib as u64,
             mib as u64..(2 * mib + 1) as u64,
@@ -168,14 +179,9 @@ async fn large_single_and_bulk_ranges_preserve_values_and_cursor() {
             contents.len() as u64..contents.len() as u64,
             5..23,
         ];
-        let output = reader.read_ranges(ranges.clone()).await.unwrap();
-        assert_eq!(output.len(), ranges.len());
-        for (bytes, range) in output.iter().zip(ranges) {
-            assert_eq!(
-                bytes.as_ref(),
-                &contents[range.start as usize..range.end as usize]
-            );
-        }
+        byte_accessor::assert_ranges(reader.as_mut(), &contents, &ranges)
+            .await
+            .unwrap();
         assert_eq!(
             reader.next().await.unwrap().unwrap().as_ref(),
             &contents[..64 * 1024]

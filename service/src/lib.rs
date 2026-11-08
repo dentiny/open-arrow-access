@@ -1,5 +1,8 @@
 //! Provider services resolve source semantics into shared object/reader contracts.
 
+mod resolved_files;
+pub use resolved_files::ResolvedFileSet;
+
 #[cfg(feature = "courtlistener")]
 pub mod courtlistener;
 
@@ -30,3 +33,5 @@ mod http_client;
 
 #[cfg(feature = "arxiv")]
 pub mod arxiv;
+#[cfg(feature = "internet-archive")]
+pub mod internet_archive;

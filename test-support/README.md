@@ -35,6 +35,25 @@ checks source categories/causes, terminal reads, and removal of range support
 without depending on a concrete layer crate. `byte_layer::assert_terminal_error`
 also supports individual malformed-input cases.
 
+## Byte accessor contracts
+
+`byte_accessor::assert_read_contract(accessor, request, expected)` opens two
+independent readers, advances one cursor, drops the accessor, and checks exact
+output, nonempty chunks, known content lengths, stable metadata, and repeated EOF.
+It works for sequential and ranged sources without requiring listing support.
+
+`byte_accessor::assert_ranges(reader, expected, ranges)` checks each single range
+and the same bulk request, preserving caller order and duplicate/empty ranges.
+Use it only when range reads are supported. The caller supplies ranges suited to
+its fixture and checks subsequent sequential output to verify cursor preservation.
+See `storage/tests/opendal.rs` for filesystem and large-range usage, and the Zenodo
+and Internet Archive tests for HTTP-backed provider usage.
+
+Fixed-name namespace rules belong in `storage/tests/named_files.rs`; provider
+tests retain membership, URL construction, metadata validation, and one complete
+read through their own transport. Backend-specific failures and scheduling
+checks stay in the owning test suite.
+
 ## Format contracts
 
 `format` shares assertions for single-file Arrow format accessors. The module
