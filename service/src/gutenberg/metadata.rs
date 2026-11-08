@@ -96,7 +96,7 @@ fn scalar_value<'a>(field: &Field, column: &'a dyn Array, index: usize) -> Resul
     }
     Ok(match field.data_type() {
         DataType::Utf8 | DataType::LargeUtf8 => text.into(),
-        DataType::UInt64 if name == "ebook_id" => ebook_id(text.unwrap_or_default())?.into(),
+        DataType::UInt64 if name == "ebook_id" => parse_ebook_id(text.unwrap_or_default())?.into(),
         DataType::UInt64 => number::<u64>(text, name)?.into(),
         DataType::Int32 => number::<i32>(text, name)?.into(),
         DataType::Date32 => text.map(issued).transpose()?.into(),
@@ -114,7 +114,7 @@ fn number<T: std::str::FromStr>(value: Option<&str>, field: &str) -> Result<Opti
         .transpose()
 }
 
-fn ebook_id(about: &str) -> Result<u64> {
+fn parse_ebook_id(about: &str) -> Result<u64> {
     let id = about
         .strip_prefix("ebooks/")
         .or_else(|| about.strip_prefix("http://www.gutenberg.org/ebooks/"))
