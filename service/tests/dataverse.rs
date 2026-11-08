@@ -15,27 +15,12 @@ async fn pins_membership_preserves_logical_names_and_reads_original_bytes() {
         StatusCode::OK,
         fixture!("dataverse", "dataset.json").await,
     );
-    http.file(
-        "/api/access/datafile/101?format=original",
-        fixture!("dataverse", "paper.bin").await,
-    );
-    http.file(
-        "/api/access/datafile/102?format=original",
-        fixture!("dataverse", "original.bin").await,
-    );
-    // Dataverse can redirect HEAD to a URL signed for GET, which rejects HEAD.
-    http.respond_for(
-        http::Method::HEAD,
-        "/api/access/datafile/101?format=original",
-        StatusCode::FORBIDDEN,
-        Vec::new(),
-    );
-    http.respond_for(
-        http::Method::HEAD,
-        "/api/access/datafile/102?format=original",
-        StatusCode::FORBIDDEN,
-        Vec::new(),
-    );
+    for (id, file) in [(101, "paper.bin"), (102, "original.bin")] {
+        let path = format!("/api/access/datafile/{id}?format=original");
+        http.file(&path, fixture!("dataverse", file).await);
+        // Dataverse can redirect HEAD to a URL signed for GET, which rejects HEAD.
+        http.respond_for(http::Method::HEAD, &path, StatusCode::FORBIDDEN, Vec::new());
+    }
     let dataset = DataverseService::new(http.endpoint())
         .unwrap()
         .dataset(PID, "1.0")
@@ -76,13 +61,15 @@ async fn pins_membership_preserves_logical_names_and_reads_original_bytes() {
 
 #[tokio::test]
 async fn rejects_mismatched_versions_and_unsupported_files() {
-    for file in ["wrong-pid", "wrong-version", "draft"] {
+    for (file, kind) in [
+        ("wrong-pid.json", ErrorKind::Decode),
+        ("wrong-version.json", ErrorKind::Decode),
+        ("draft.json", ErrorKind::Decode),
+        ("missing-original-size.json", ErrorKind::Unsupported),
+        ("restricted.json", ErrorKind::Unsupported),
+    ] {
         let http = HttpFixture::new();
-        http.respond(
-            METADATA,
-            StatusCode::OK,
-            fixture!("dataverse", &format!("{file}.json")).await,
-        );
+        http.respond(METADATA, StatusCode::OK, fixture!("dataverse", file).await);
         assert_eq!(
             DataverseService::new(http.endpoint())
                 .unwrap()
@@ -91,27 +78,7 @@ async fn rejects_mismatched_versions_and_unsupported_files() {
                 .err()
                 .unwrap()
                 .kind(),
-            ErrorKind::Decode,
-            "{file}"
-        );
-        assert_eq!(http.requests().len(), 1);
-    }
-    for file in ["missing-original-size", "restricted"] {
-        let http = HttpFixture::new();
-        http.respond(
-            METADATA,
-            StatusCode::OK,
-            fixture!("dataverse", &format!("{file}.json")).await,
-        );
-        assert_eq!(
-            DataverseService::new(http.endpoint())
-                .unwrap()
-                .dataset(PID, "1.0")
-                .await
-                .err()
-                .unwrap()
-                .kind(),
-            ErrorKind::Unsupported,
+            kind,
             "{file}"
         );
         assert_eq!(http.requests().len(), 1);
