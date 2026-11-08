@@ -613,3 +613,9 @@ byte contracts. Compose the result with existing format and decompression
 accessors. See [service documentation](service/README.md#zenodo-zenodo) and the
 `read_zenodo` example. This entry point supports public records, not repository
 search or restricted-file authentication.
+
+### Dataverse
+
+Enable `service-dataverse` for `service::dataverse` public file discovery and
+byte access. See [service documentation](service/README.md) and the
+`read_dataverse` example.

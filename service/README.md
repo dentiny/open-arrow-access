@@ -264,3 +264,28 @@ See the [Zenodo Records API](https://developers.zenodo.org/#records).
 
 Run `cargo run --example read_zenodo --features service-zenodo -- 3551612`
 to list a record, or append an exact file key to stream its contents.
+
+## Dataverse (`dataverse`)
+
+Enable `service-dataverse` for `service::dataverse::DataverseService`.
+Configure an installation origin, then resolve an explicit published version:
+`DataverseService::new("https://dataverse.harvard.edu")?
+.dataset("doi:10.7910/DVN/27221", "1.0").await?`.
+DOI and Handle identifiers are supported. Response identity, version and RELEASED
+state are validated; DOI comparison follows ASCII case-insensitive equivalence.
+
+`files()` exposes logical names, file IDs, original byte lengths and restricted
+flags. Folder labels remain part of the logical filename. Empty-root listing
+uses cached API order in either recursive mode. Downloads request
+`format=original`, including ingested tabular files whose labels may end in
+`.tab`. Trusted manifest lengths avoid HEAD requests that can fail on URLs signed
+only for GET. Tabular files without an original byte length are unsupported.
+Existing byte read options, range reads and independently owned readers apply.
+
+The configurable metadata limit defaults to 4 MiB. This entry point covers public
+explicit versions, not search, latest/draft selection, authentication, guestbook
+submission or checksum verification. Restricted files remain visible and upstream
+access failures propagate. See the [Dataverse data access API](https://guides.dataverse.org/en/latest/api/dataaccess.html).
+Run `cargo run --example read_dataverse --features service-dataverse --
+https://dataverse.harvard.edu doi:10.7910/DVN/27221 1.0` to list the example dataset;
+append an exact logical filename to stream its original bytes.
