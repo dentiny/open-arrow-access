@@ -57,7 +57,7 @@ impl HttpFileService {
     ) -> Result<ResolvedFileSet<OpenDalAccessor, M>> {
         let response = self
             .client
-            .json(metadata_url.as_str(), None, self.operation)
+            .json(metadata_url.as_str(), /*token=*/ None, self.operation)
             .await?;
         let plan = resolve(response)?;
         let storage = self.client.accessor(&self.endpoint, &plan.root, &[])?;
