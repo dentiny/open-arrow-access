@@ -16,6 +16,7 @@ directory owns facade wiring and composition across crates.
 | Directory and file-set facade | [`tests/directory.rs`](directory.rs) |
 | ATIF facade and file-set composition | [`tests/atif.rs`](atif.rs) |
 | Hugging Face Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
+| Common Crawl configuration | [`tests/commoncrawl_common.rs`](commoncrawl_common.rs) |
 | WARC parser | [`tests/warc.rs`](warc.rs) |
 | OpenDAL storage | [`storage/tests/opendal.rs`](../storage/tests/opendal.rs) |
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |
