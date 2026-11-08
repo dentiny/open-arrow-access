@@ -4,8 +4,7 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_dataset::FileSetRequest;
 
-/// Select a segment while streaming the shared crawl-wide WARC inventory.
-/// Only selected locators are retained; reading uses the existing sequential FileSet.
+/// Select one segment and read its WARC files in manifest order.
 #[derive(Debug)]
 pub struct CommonCrawlSegmentAccessor<M, F> {
     warc: CommonCrawlWarcAccessor<M, F>,
