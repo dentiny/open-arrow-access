@@ -1,11 +1,9 @@
-use std::num::NonZeroUsize;
-
 use arrow_array::{Array, cast::AsArray};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, RecordBatch, Result,
 };
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
-use open_arrow_access_service::pmc::{PmcAccessor, PmcLimits, schema};
+use open_arrow_access_service::pmc::{PmcAccessor, schema};
 use open_arrow_access_test_support::{MemoryAccessor, fixture};
 
 const RAW: &str = include_str!("../../testdata/pmc/metadata.json");
@@ -109,24 +107,20 @@ async fn validates_metadata_even_when_all_fields_are_projected_away() {
 }
 
 #[tokio::test]
-async fn limits_apply_to_decoded_metadata() {
-    for limit in [RAW.len(), RAW.len() - 1] {
-        let compressed =
-            MemoryAccessor::new(include_bytes!("../../testdata/pmc/metadata.json.gz"), 1);
-        let mut reader = PmcAccessor::new(compressed.layer(DecompressionLayer::new(Gzip)))
-            .with_limits(PmcLimits {
-                metadata_bytes: NonZeroUsize::new(limit).unwrap(),
-            })
-            .open(ReadRequest::new("a.json"))
-            .await
-            .unwrap();
-        let result = reader.next().await;
-        if limit == RAW.len() {
-            assert_eq!(result.unwrap().unwrap().num_rows(), 1);
-        } else {
-            assert_eq!(result.unwrap_err().kind(), ErrorKind::Decode);
-        }
-    }
+async fn reads_decoded_metadata_without_a_byte_limit() {
+    let compressed = MemoryAccessor::new(include_bytes!("../../testdata/pmc/metadata.json.gz"), 1);
+    let mut reader = PmcAccessor::new(compressed.layer(DecompressionLayer::new(Gzip)))
+        .open(ReadRequest::new("a.json"))
+        .await
+        .unwrap();
+    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
+    let mut large = vec![b' '; 4 * 1024 * 1024 + 1];
+    large.extend_from_slice(RAW.as_bytes());
+    let mut reader = PmcAccessor::new(MemoryAccessor::new(&large, 64 * 1024))
+        .open(ReadRequest::new("large.json"))
+        .await
+        .unwrap();
+    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
 }
 
 #[tokio::test]

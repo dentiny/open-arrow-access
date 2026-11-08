@@ -3,8 +3,6 @@ use serde::Deserialize;
 
 use super::{HuggingFaceRepository, HuggingFaceService, client::endpoint};
 
-const MAX_METADATA_BYTES: usize = 64 * 1024;
-
 #[derive(Deserialize)]
 struct RepositoryInfo {
     sha: String,
@@ -45,7 +43,6 @@ impl HuggingFaceService {
         .json(
             url.as_str(),
             self.options.token.as_deref(),
-            MAX_METADATA_BYTES,
             "resolve_huggingface",
         )
         .await?;

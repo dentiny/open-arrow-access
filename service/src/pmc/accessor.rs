@@ -5,18 +5,16 @@ use open_arrow_access_core::{
     ReadRequest, RecordBatch, RecordReader, Result, SchemaRef, async_trait,
 };
 
-use super::{PmcLimits, metadata, schema};
+use super::{metadata, schema};
 
 /// Read one article-version JSON object; content URLs remain metadata.
 pub struct PmcAccessor<A> {
     inner: Arc<A>,
-    limits: PmcLimits,
 }
 impl<A> Clone for PmcAccessor<A> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            limits: self.limits,
         }
     }
 }
@@ -24,12 +22,7 @@ impl<A> PmcAccessor<A> {
     pub fn new(inner: A) -> Self {
         Self {
             inner: Arc::new(inner),
-            limits: PmcLimits::default(),
         }
-    }
-    pub fn with_limits(mut self, limits: PmcLimits) -> Self {
-        self.limits = limits;
-        self
     }
 }
 
@@ -66,12 +59,8 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
         }
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        DocumentAccessor::new(
-            self.inner.clone(),
-            PmcDecoder,
-            self.limits.metadata_bytes.get(),
-        )
-        .open(request)
-        .await
+        DocumentAccessor::new(self.inner.clone(), PmcDecoder)
+            .open(request)
+            .await
     }
 }

@@ -248,38 +248,22 @@ async fn crc_failure_is_terminal() {
 }
 
 #[tokio::test]
-async fn metadata_and_actual_expansion_limits_are_enforced() {
+async fn entry_size_and_actual_expansion_limits_are_enforced() {
     let data = fixture!("zip", "mixed.zip").await;
-    for limits in [
-        ZipLimits {
-            max_entries: 1,
-            ..ZipLimits::default()
-        },
-        ZipLimits {
-            max_directory_bytes: 1,
-            ..ZipLimits::default()
-        },
-        ZipLimits {
-            max_entry_bytes: 1,
-            ..ZipLimits::default()
-        },
-    ] {
-        assert_eq!(
-            ZipAccessor::new(memory(&data), 1)
-                .with_limits(limits)
-                .open(ByteReadRequest::new("archive"))
-                .await
-                .err()
-                .unwrap()
-                .kind(),
-            ErrorKind::Decode
-        );
-    }
+    assert_eq!(
+        ZipAccessor::new(memory(&data), 1)
+            .with_limits(ZipLimits { max_entry_bytes: 1 })
+            .open(ByteReadRequest::new("archive"))
+            .await
+            .err()
+            .unwrap()
+            .kind(),
+        ErrorKind::Decode
+    );
     // Both headers lie about decoded size; bound the actual expansion as well.
     let data = fixture!("zip", "bad_expansion_size.zip").await;
     let zip = ZipAccessor::new(memory(&data), 7).with_limits(ZipLimits {
         max_entry_bytes: 64,
-        ..ZipLimits::default()
     });
     let mut reader = zip.open(ByteReadRequest::new("bomb")).await.unwrap();
     assert_eq!(

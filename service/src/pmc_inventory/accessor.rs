@@ -4,20 +4,16 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, Capability, ReadRequest, RecordReader, Result,
     async_trait,
 };
-use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
-
-const DEFAULT_MANIFEST_BYTES: NonZeroUsize = NonZeroUsize::new(4 * 1024 * 1024).unwrap();
+use std::{collections::HashMap, sync::Arc};
 
 /// Read the gzip CSV shards listed in an inventory manifest.
 pub struct PmcInventoryAccessor<A> {
     inner: Arc<A>,
-    manifest_limit: NonZeroUsize,
 }
 impl<A> Clone for PmcInventoryAccessor<A> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            manifest_limit: self.manifest_limit,
         }
     }
 }
@@ -25,12 +21,7 @@ impl<A> PmcInventoryAccessor<A> {
     pub fn new(inner: A) -> Self {
         Self {
             inner: Arc::new(inner),
-            manifest_limit: DEFAULT_MANIFEST_BYTES,
         }
-    }
-    pub fn with_manifest_limit(mut self, limit: NonZeroUsize) -> Self {
-        self.manifest_limit = limit;
-        self
     }
 }
 #[async_trait]
@@ -49,7 +40,6 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
         let manifest = manifest::read(
             self.inner.as_ref(),
             ByteReadRequest::new(request.object.clone()).with_options(request.byte_options),
-            self.manifest_limit.get(),
         )
         .await?;
         let csv_schema = manifest.file_schema;

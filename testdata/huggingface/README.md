@@ -9,7 +9,7 @@ No credentials or upstream dataset content are included.
 | `revision.json` | Valid revision response with a commit SHA. |
 | `bad_truncated_revision.json` | Incomplete JSON object. |
 | `bad_revision_sha.json` | A branch name instead of an immutable commit SHA. |
-| `bad_oversized_revision.json` | Exactly 65,537 spaces, exceeding the metadata limit. |
+| `bad_oversized_revision.json` | Exactly 65,537 spaces with no JSON value. |
 | `exports/train.json` | One complete training shard. |
 | `exports/paginated.json` | Two training shards, a README, and an unrelated test split. |
 | `exports/partial.json` | Only a partial export. |

@@ -18,7 +18,6 @@ pub trait DocumentDecoder: Send + Sync {
     fn prepare(&self, request: &Self::Request) -> Result<SchemaRef>;
 
     /// Validate all input and return one row with the projected schema.
-    /// Related-object limits belong to the decoder.
     async fn decode(
         &self,
         bytes: &[u8],
@@ -27,21 +26,18 @@ pub trait DocumentDecoder: Send + Sync {
     ) -> Result<RecordBatch>;
 }
 
-/// Read one bounded document into one Arrow row.
+/// Read one document into one Arrow row.
 /// Schema is available at open; input I/O starts on the first `next()`.
 pub struct DocumentAccessor<B, D> {
     storage: Arc<B>,
     decoder: Arc<D>,
-    max_bytes: usize,
 }
 
 impl<B, D> DocumentAccessor<B, D> {
-    /// Limit collected input bytes; decoder allocations are separate.
-    pub fn new(storage: B, decoder: D, max_bytes: usize) -> Self {
+    pub fn new(storage: B, decoder: D) -> Self {
         Self {
             storage: Arc::new(storage),
             decoder: Arc::new(decoder),
-            max_bytes,
         }
     }
 }
@@ -75,10 +71,8 @@ where
         };
         let storage = self.storage.clone();
         let decoder = self.decoder.clone();
-        let max_bytes = self.max_bytes;
         let stream = stream::once(async move {
-            let bytes =
-                read_object(storage.as_ref(), byte_request, max_bytes, "read_document").await?;
+            let bytes = read_object(storage.as_ref(), byte_request, "read_document").await?;
             let batch = decoder.decode(&bytes, request, schema.clone()).await?;
             if batch.num_rows() != 1 || batch.schema() != schema {
                 return Err(Error::new(

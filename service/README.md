@@ -24,7 +24,7 @@ Floating revisions are not snapshots.
 The same service exposes `dataset(HuggingFaceDatasetRequest)` and implements
 `Accessor` for that request. This opens one config/split as ordered Arrow batches
 from the HF Parquet export. A floating export revision is first pinned with a
-small `expand=sha` metadata request (64 KiB response limit); membership and file
+small `expand=sha` metadata request; membership and file
 reads then use that same commit. Explicit commit requests skip the metadata call.
 The selected directory is listed nonrecursively, Parquet paths are sorted, and
 existing `ParquetAccessor`/`FileSetAccessor` perform lazy sequential reading,
@@ -58,8 +58,7 @@ are emitted. Malformed RDF terminates the reader rather than dropping the book.
 Projection preserves caller order and zero-column row counts; mapped fields are
 validated even when projected away. Byte options are forwarded to the RDF read.
 
-`with_limits(GutenbergLimits)` bounds RDF bytes (default 4 MiB). This limit excludes
-parser allocations, upstream chunks and Arrow buffers. One RDF emits one row,
+One RDF emits one row,
 independently of the batch-size target. File downloading, catalogue discovery,
 archive expansion and writing remain with the caller.
 
@@ -82,7 +81,7 @@ Key must be present even when projected away; Key values are not interpreted.
 Schema metadata records the manifest URI, version and creation timestamp.
 Empty inventories retain the declared schema and produce EOF.
 
-`with_manifest_limit` configures the default 4 MiB manifest byte limit. Run the
+Run the
 `read_pmc_inventory` example against a caller-configured inventory snapshot.
 
 ## PMC article-version metadata (`pmc`)
@@ -112,7 +111,7 @@ Run `cargo run --example read_pmc_inventory --features service-pmc --
 See the [PMC dataset README](https://pmc-oa-opendata.s3.amazonaws.com/README.txt)
 and [S3 inventory manifest format](https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-inventory-location.html).
 
-Manifest byte collection uses core `read_limited`. Shard iteration retains its
+Manifest byte collection uses core `read_object`. Shard iteration retains its
 provider state and uses `StreamReader` for metadata and terminal handling.
 
 For a local mirror, run `cargo run --example read_pmc --features service-pmc --
@@ -139,9 +138,7 @@ is filtered by content availability, licence, language, or duplication. Content
 URL strings are retained as supplied and are never interpreted as read requests.
 
 Validation lives in `pmc/validation.rs`. Invalid JSON or mapped field types are
-terminal decode errors. The default hard decoded metadata limit is 4 MiB;
-configure it through `PmcAccessor::with_limits(PmcLimits { metadata_bytes })`.
-Known lengths and streamed chunks are checked. Empty upstream byte chunks are
+terminal decode errors. Empty upstream byte chunks are
 I/O errors. `open` validates projection without starting a read; locator syntax
 is owned by the underlying byte accessor and passed through unchanged.
 `next` performs one metadata read. Errors and EOF are terminal; dropping a pending
@@ -159,7 +156,7 @@ The row target is an upper bound; this single-object service emits at most one
 batch with one row. It does not fetch an inventory, choose a snapshot, filter
 licences, extract text, or write Lance datasets.
 
-The article reader uses core `read_limited` for byte bounds and `StreamReader`
+The article reader uses core `read_object` and `StreamReader`
 for terminal handling. JSON conversion and article validation stay in PMC.
 ## Common Crawl configuration
 
@@ -174,7 +171,7 @@ Enable `service-warc` for `CommonCrawlWarcRequest` and
 single-file format accessor and the existing sequential FileSet. `resolve`
 returns membership without opening record files. The caller supplies gzip for
 compressed inventories and file decompression/format parsing separately.
-Selected locators are held in memory; inventory lines have a 16 KiB limit.
+Selected locators are held in memory.
 There is no index, batch planner or parallel execution.
 
 Enable `service-warc` for `CommonCrawlSegmentRequest` and
@@ -185,7 +182,7 @@ FileSet. A neighboring segment with a longer numeric ID is a different selection
 Construct a request from crawl/segment IDs, a segment URL, or a shared
 `CommonCrawl` source. No index, batch scheduler or parallel executor is added.
 
-Manifest byte framing and the 16 KiB per-line bound use core `read_lines`;
+Manifest byte framing uses core `read_lines`;
 path validation and selected-file duplicate checks remain in the provider.
 
 `format-warc` exposes native parser records through `WarcAccessor`. This service
@@ -250,8 +247,7 @@ route through the shared OpenDAL HTTP accessor, forwarding byte read options.
 Each reader is independent and can outlive the resolved record. HTTP metadata
 and range support are required by that storage accessor.
 
-Metadata collection has a configurable 4 MiB default limit (`with_metadata_limit`),
-including responses without Content-Length. Empty files lists are valid; missing,
+Empty files lists are valid; missing,
 malformed or duplicate membership fails. File bodies are fetched lazily, and
 existing decompression/format accessors can wrap the record accessor. Checksums
 are exposed as upstream metadata, not verified. Reader source locators refer to
