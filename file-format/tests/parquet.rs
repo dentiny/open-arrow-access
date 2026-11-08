@@ -200,7 +200,18 @@ async fn parquet_accepts_third_party_ranged_accessor() {
     let bytes = tokio::fs::read(fixture.dir.path().join("data.parquet"))
         .await
         .unwrap();
-    let accessor = ParquetAccessor::new(MemoryAccessor::new(&bytes, usize::MAX).with_ranges());
+    let memory = MemoryAccessor::new(&bytes, usize::MAX).with_ranges();
+    let observed = memory.observations.clone();
+    for kind in [ErrorKind::Io, ErrorKind::PermissionDenied] {
+        let error = ParquetAccessor::new(memory.clone().with_range_failure(0, kind))
+            .open(ReadRequest::new("opaque:fixture"))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), kind);
+        assert_eq!(ErrorKind::from_source(error.source().unwrap()), Some(kind));
+    }
+    let accessor = ParquetAccessor::new(memory);
     let reader = accessor
         .open(ReadRequest::new("opaque:fixture"))
         .await
@@ -210,6 +221,7 @@ async fn parquet_accepts_third_party_ranged_accessor() {
         batches.iter().flat_map(ids).collect::<Vec<_>>(),
         (0..7).collect::<Vec<_>>()
     );
+    assert!(observed.range_reads.load(Ordering::SeqCst) > 0);
 }
 
 #[tokio::test]

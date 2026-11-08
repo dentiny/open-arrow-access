@@ -1,80 +1,129 @@
+use arrow_array::{Array, StructArray, cast::AsArray};
+use arrow_schema::DataType;
 use chrono::NaiveDate;
-use roxmltree::{Document, Node};
+use futures::io::Cursor;
+use open_arrow_access_core::{
+    FieldValue, RecordBatch, RecordBatchBuilder, RecordBatchRow, Result, SchemaRef,
+};
+use xml_arrow::{ReaderOptions, XmlReader};
 
-use open_arrow_access_core::Result;
+use super::{Mapping, decode, decode_source};
 
-use super::decode;
-
-const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
-const PG: &str = "http://www.gutenberg.org/2009/pgterms/";
-const DC: &str = "http://purl.org/dc/terms/";
-const DCAM: &str = "http://purl.org/dc/dcam/";
-
-pub(super) struct Creator {
-    pub uri: Option<String>,
-    pub name: Option<String>,
-    pub alias: Vec<String>,
-    pub birthdate: Option<i32>,
-    pub deathdate: Option<i32>,
+/// Validate all mapped fields and build one projected row.
+pub(super) async fn read_metadata(raw: &[u8], schema: SchemaRef) -> Result<RecordBatch> {
+    let mut reader = XmlReader::new(
+        Cursor::new(raw),
+        super::mapping(),
+        /*record_path=*/ "/r:RDF",
+        ReaderOptions {
+            // DocumentAccessor already bounds the input. Accept larger caller-
+            // configured documents without imposing XML's default batch limit.
+            max_record_bytes: usize::MAX - 1,
+            max_batch_bytes: usize::MAX,
+            max_depth: 65534,
+            ..Default::default()
+        },
+    )
+    .map_err(decode_source)?;
+    let batch = reader
+        .next_batch()
+        .await
+        .map_err(decode_source)?
+        .ok_or_else(|| decode("expected an RDF document containing one ebook"))?;
+    if batch.num_rows() != 1 || reader.next_batch().await.map_err(decode_source)?.is_some() {
+        return Err(decode("expected one RDF document"));
+    }
+    let source = batch.column(0).as_struct();
+    let definitions = super::definitions();
+    convert_fields(&definitions.fields, source, 0, None)?;
+    let fields = schema.fields().iter().map(|field| {
+        definitions
+            .fields
+            .iter()
+            .find(|mapping| mapping.field.name() == field.name())
+            .unwrap()
+    });
+    RecordBatchBuilder::build_row(definitions.schema.clone(), schema.clone(), |row| {
+        convert_fields(fields, source, 0, Some(row))
+    })
 }
 
-pub(super) struct Subject {
-    pub scheme: Option<String>,
-    pub value: String,
+// Validate every source field with no writer, or write the requested fields.
+fn convert_fields<'m>(
+    fields: impl IntoIterator<Item = &'m Mapping>,
+    source: &StructArray,
+    index: usize,
+    mut row: Option<&mut RecordBatchRow<'_>>,
+) -> Result<()> {
+    for mapping in fields {
+        let field = &mapping.field;
+        let name = field.name().as_str();
+        let column = source.column_by_name(name).unwrap();
+        match field.data_type() {
+            DataType::List(item) => {
+                let values = column.as_list::<i32>().value(index);
+                if matches!(item.data_type(), DataType::Struct(_)) {
+                    let entries = values.as_struct().column(0).as_struct();
+                    if let Some(row) = row.as_deref_mut() {
+                        row.append_structs(name, 0..entries.len(), |row, index| {
+                            convert_fields(&mapping.children, entries, index, Some(row))
+                        })?;
+                    } else {
+                        for index in 0..entries.len() {
+                            convert_fields(&mapping.children, entries, index, None)?;
+                        }
+                    }
+                } else if let Some(row) = row.as_deref_mut() {
+                    row.append_list(
+                        name,
+                        values
+                            .as_string::<i32>()
+                            .iter()
+                            .flatten()
+                            .filter(|s| !s.is_empty()),
+                    )?;
+                }
+            }
+            _ => {
+                let value = scalar_value(mapping, column.as_ref(), index)?;
+                if let Some(row) = row.as_deref_mut() {
+                    row.append(name, value)?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
-pub(super) struct File {
-    pub uri: String,
-    pub format: Vec<String>,
-    pub extent: Option<u64>,
-    pub modified: Option<String>,
+fn scalar_value<'a>(
+    mapping: &Mapping,
+    column: &'a dyn Array,
+    index: usize,
+) -> Result<FieldValue<'a>> {
+    let field = &mapping.field;
+    let name = field.name().as_str();
+    // Empty attributes are values; empty optional element text becomes null.
+    let keep_empty = matches!(field.data_type(), DataType::Utf8 | DataType::LargeUtf8)
+        && mapping.xml.path().contains('@');
+    let text = (!column.is_null(index))
+        .then(|| column.as_string::<i32>().value(index))
+        .filter(|s| !s.is_empty() || keep_empty);
+    if !field.is_nullable() && text.is_none_or(str::is_empty) {
+        return Err(decode(format!("missing {name}")));
+    }
+    if let Some(parse) = mapping.parser {
+        return Ok(text.map(parse).transpose()?.unwrap_or(FieldValue::Null));
+    }
+    Ok(match field.data_type() {
+        DataType::Utf8 | DataType::LargeUtf8 => text.into(),
+        DataType::UInt64 => number::<u64>(text, name)?.into(),
+        DataType::Int32 => number::<i32>(text, name)?.into(),
+        DataType::Date32 => text.map(parse_issued_date).transpose()?.into(),
+        _ => unreachable!("unsupported Gutenberg metadata type"),
+    })
 }
 
-pub(super) struct Book {
-    pub ebook_id: u64,
-    pub title: Option<String>,
-    pub creator: Vec<Creator>,
-    pub language: Vec<String>,
-    pub subject: Vec<Subject>,
-    pub bookshelf: Vec<String>,
-    pub issued: Option<i32>,
-    pub rights: Option<String>,
-    pub files: Vec<File>,
-}
-
-fn children<'a, 'input>(
-    node: Node<'a, 'input>,
-    namespace: &'a str,
-    name: &'a str,
-) -> impl Iterator<Item = Node<'a, 'input>> {
-    node.children()
-        .filter(move |child| child.has_tag_name((namespace, name)))
-}
-
-fn text(node: Node<'_, '_>, namespace: &str, name: &str) -> Option<String> {
-    children(node, namespace, name)
-        .next()
-        .and_then(|child| child.text())
-        .map(str::to_owned)
-}
-
-fn values(node: Node<'_, '_>, namespace: &str, name: &str) -> Vec<String> {
-    children(node, namespace, name)
-        .filter_map(|child| child.text().map(str::to_owned))
-        .collect()
-}
-
-fn described_values(node: Node<'_, '_>, namespace: &str, name: &str) -> Vec<String> {
-    children(node, namespace, name)
-        .filter_map(|child| {
-            children(child, RDF, "Description")
-                .next()
-                .and_then(|description| text(description, RDF, "value"))
-        })
-        .collect()
-}
-
-fn number<T: std::str::FromStr>(value: Option<String>, field: &str) -> Result<Option<T>> {
+fn number<T: std::str::FromStr>(value: Option<&str>, field: &str) -> Result<Option<T>> {
     value
         .map(|value| {
             value
@@ -84,106 +133,23 @@ fn number<T: std::str::FromStr>(value: Option<String>, field: &str) -> Result<Op
         .transpose()
 }
 
-/// Parse book RDF using namespace URIs.
-pub(super) fn parse(raw: &[u8]) -> Result<Book> {
-    let xml = std::str::from_utf8(raw)
-        .map_err(|error| decode("metadata is not UTF-8").with_source(error))?;
-    // DTDs are rejected; external entities are never fetched.
-    let document =
-        Document::parse(xml).map_err(|error| decode("invalid RDF XML").with_source(error))?;
-    let root = document.root_element();
-    if !root.has_tag_name((RDF, "RDF")) {
-        return Err(decode("expected an RDF document"));
-    }
-    let mut books = children(root, PG, "ebook");
-    let book = books
-        .next()
-        .ok_or_else(|| decode("missing Gutenberg ebook"))?;
-    if books.next().is_some() {
-        return Err(decode("expected exactly one ebook per RDF object"));
-    }
-    let about = book.attribute((RDF, "about")).unwrap_or_default();
+pub(super) fn parse_ebook_id(about: &str) -> Result<FieldValue<'_>> {
     let id = about
         .strip_prefix("ebooks/")
         .or_else(|| about.strip_prefix("http://www.gutenberg.org/ebooks/"))
         .or_else(|| about.strip_prefix("https://www.gutenberg.org/ebooks/"))
         .ok_or_else(|| decode("invalid ebook URI"))?;
-    if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(decode("invalid ebook ID"));
-    }
-    let ebook_id = id
-        .parse::<u64>()
+    id.parse::<u64>()
         .ok()
         .filter(|id| *id != 0)
-        .ok_or_else(|| decode("invalid ebook ID"))?;
-    let creator = children(book, DC, "creator")
-        .map(|creator| {
-            let agent = children(creator, PG, "agent")
-                .next()
-                .ok_or_else(|| decode("missing creator agent"))?;
-            Ok(Creator {
-                uri: agent.attribute((RDF, "about")).map(str::to_owned),
-                name: text(agent, PG, "name"),
-                alias: values(agent, PG, "alias"),
-                birthdate: number(text(agent, PG, "birthdate"), "birthdate")?,
-                deathdate: number(text(agent, PG, "deathdate"), "deathdate")?,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let subject = children(book, DC, "subject")
-        .map(|subject| {
-            let description = children(subject, RDF, "Description")
-                .next()
-                .ok_or_else(|| decode("missing subject description"))?;
-            Ok(Subject {
-                scheme: children(description, DCAM, "memberOf")
-                    .next()
-                    .and_then(|node| node.attribute((RDF, "resource")))
-                    .map(str::to_owned),
-                value: text(description, RDF, "value")
-                    .ok_or_else(|| decode("missing subject value"))?,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let issued = text(book, DC, "issued")
-        .map(|value| {
-            NaiveDate::parse_from_str(&value, "%Y-%m-%d")
-                .map(|date| {
-                    date.signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
-                        .num_days() as i32
-                })
-                .map_err(|error| decode("invalid issued date").with_source(error))
-        })
-        .transpose()?;
-    let mut files = Vec::new();
-    for format in children(book, DC, "hasFormat") {
-        let file = children(format, PG, "file")
-            .next()
-            .ok_or_else(|| decode("missing file description"))?;
-        let uri = file
-            .attribute((RDF, "about"))
-            .filter(|uri| !uri.is_empty())
-            .ok_or_else(|| decode("missing file URI"))?
-            .to_owned();
-        if files.iter().any(|file: &File| file.uri == uri) {
-            return Err(decode("duplicate file URI in RDF"));
-        }
-        files.push(File {
-            uri,
-            format: described_values(file, DC, "format"),
-            extent: number(text(file, DC, "extent"), "extent")?,
-            modified: text(file, DC, "modified"),
-        });
-    }
-    Ok(Book {
-        ebook_id,
-        title: text(book, DC, "title"),
-        creator,
-        language: described_values(book, DC, "language"),
-        subject,
-        bookshelf: described_values(book, PG, "bookshelf"),
-        issued,
-        rights: text(book, DC, "rights"),
-        files,
-    })
+        .filter(|_| id.bytes().all(|byte| byte.is_ascii_digit()))
+        .map(FieldValue::UInt64)
+        .ok_or_else(|| decode("invalid ebook ID"))
+}
+
+fn parse_issued_date(value: &str) -> Result<i32> {
+    let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(decode_source)?;
+    Ok(date
+        .signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
+        .num_days() as i32)
 }

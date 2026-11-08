@@ -35,30 +35,52 @@ Viewer row APIs are outside this entry point.
 
 ## Gutenberg
 
-Enable `gutenberg` (`service-gutenberg` on the facade) for one per-book RDF
-object and its selected files as a single Arrow row:
+Enable `gutenberg` (`service-gutenberg` on the facade) to convert one per-book
+RDF/XML object into one Arrow row. `GutenbergAccessor` accepts a standard
+`ReadRequest` and reuses `xml-arrow` for metadata extraction. File entries retain
+RDF order; their URIs are metadata and are never fetched.
 
-```rust,no_run
-use open_arrow_access::{
-    Accessor, Result,
-    service::{GutenbergAccessor, GutenbergFile, GutenbergRequest},
-    storage::{OpenDalAccessor, opendal},
-};
+| Column | Arrow type |
+| --- | --- |
+| `ebook_id` | UInt64 |
+| `title`, `rights` | nullable LargeUtf8 |
+| `creator` | List of struct: nullable `uri`, `name` (Utf8), `alias` (List<Utf8>), nullable `birthdate`, `deathdate` (Int32 years) |
+| `language`, `bookshelf` | List<Utf8> |
+| `subject` | List of struct: nullable `scheme` (Utf8), `value` (Utf8) |
+| `issued` | nullable Date32; Gutenberg release date |
+| `files` | List of struct: `uri` (Utf8), `format` (List<Utf8>), nullable `extent` (UInt64), nullable `modified` (Utf8) |
 
-async fn read() -> Result<()> {
-    let operator = opendal::Operator::new(
-        opendal::services::Fs::default().root("/mirror"),
-    ).expect("configure filesystem");
-    let books = GutenbergAccessor::new(OpenDalAccessor::new(operator));
-    let request = GutenbergRequest::new("cache/epub/11/pg11.rdf", vec![
-        GutenbergFile::new(
-            "https://www.gutenberg.org/ebooks/11.txt.utf-8",
-            "books/11.txt",
-        ),
-    ]);
-    let mut reader = books.open(request).await?;
-    while let Some(batch) = reader.next().await? {
-        println!("{} book", batch.num_rows());
+Missing optional metadata becomes null or an empty list. Only mapped RDF fields
+are emitted. Malformed RDF terminates the reader rather than dropping the book.
+Projection preserves caller order and zero-column row counts; mapped fields are
+validated even when projected away. Byte options are forwarded to the RDF read.
+
+`with_limits(GutenbergLimits)` bounds RDF bytes (default 4 MiB). This limit excludes
+parser allocations, upstream chunks and Arrow buffers. One RDF emits one row,
+independently of the batch-size target. File downloading, catalogue discovery,
+archive expansion and writing remain with the caller.
+
+Run the [example](../examples/read_gutenberg.rs) against the synthetic metadata
+fixture, or supply a mirror root and RDF path:
+
+```sh
+cargo run --example read_gutenberg --features service-gutenberg
+```
+
+## PMC inventory (`pmc`)
+
+Enable `service-pmc` for `service::pmc_inventory::PmcInventoryAccessor`.
+A `ReadRequest` selects one `manifest.json`; its `fileSchema` defines CSV columns
+and order. The reader reuses gzip and CSV adapters, opens shards lazily in
+manifest order, and forwards read options. It never fetches article objects.
+
+Original CSV fields and values are preserved without extra columns. Bucket and
+Key must be present even when projected away; Key values are not interpreted.
+Schema metadata records the manifest URI, version and creation timestamp.
+Empty inventories retain the declared schema and produce EOF.
+
+`with_manifest_limit` configures the default 4 MiB manifest byte limit. Run the
+`read_pmc_inventory` example against a caller-configured inventory snapshot.
 
 ## PMC article-version metadata (`pmc`)
 
@@ -82,52 +104,13 @@ async fn read(operator: opendal::Operator) -> Result<(), Box<dyn std::error::Err
 }
 ```
 
-The URI must match a `pgterms:file` entry in the RDF; the object locator points
-to that file in your storage. This explicit mapping supports local or object
-storage mirrors without inferring paths from HTTP download URLs. Files retain
-request order. An empty selection keeps the book with an empty `files` list.
-Unknown or duplicate selections fail. No licence or language filtering occurs.
+Run `cargo run --example read_pmc_inventory --features service-pmc --
+/mirror/root <dated-manifest-key>` against a mirror preserving manifest/shard keys.
+See the [PMC dataset README](https://pmc-oa-opendata.s3.amazonaws.com/README.txt)
+and [S3 inventory manifest format](https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-inventory-location.html).
 
-| Column | Arrow type |
-| --- | --- |
-| `ebook_id` | UInt64 |
-| `title`, `rights` | nullable LargeUtf8 |
-| `creator` | List of struct: nullable `uri`, `name` (Utf8), `alias` (List<Utf8>), nullable `birthdate`, `deathdate` (Int32 years) |
-| `language`, `bookshelf` | List<Utf8> |
-| `subject` | List of struct: nullable `scheme` (Utf8), `value` (Utf8) |
-| `issued` | nullable Date32; Gutenberg release date |
-| `metadata_rdf` | LargeBinary; verbatim RDF, including unexpanded metadata |
-| `files` | LargeList of struct: `uri` (Utf8), `format` (List<Utf8>), nullable `extent` (UInt64), nullable `modified` (Utf8), `data` (LargeBinary) |
-
-`data` is the original file bytes, including compression, encoding and line
-endings. `extent` and `modified` preserve metadata declarations; they do not
-verify that storage and RDF belong to the same snapshot. Preserve source
-manifests and snapshot identity separately. Missing optional metadata becomes
-null or an empty list. Malformed RDF or failed selected-file reads terminate
-the reader rather than dropping the book.
-
-`with_options` supports top-level projection in caller order, including a
-zero-column row. Omitting `files` skips all file I/O; RDF and selected URI
-membership are still validated. `with_byte_options` forwards I/O settings to
-every open. One RDF emits one row, independently of the batch-size target.
-
-`with_limits(GutenbergLimits)` bounds collected RDF bytes (default 4 MiB), each
-selected file (256 MiB), and combined RDF/file bytes per row (1 GiB). These
-limits do not bound parser allocations, upstream chunks or Arrow copies. Reads
-are sequential and pull-driven; dropping a reader stops its work.
-
-This entry point reads caller-selected per-book UTF-8 RDF and files. Catalogue
-discovery, rsync, HTTP downloading, archive expansion and Lance writing remain
-with the caller. It does not use Gutendex or parse arbitrary RDF graphs. See
-Gutenberg's [catalogue](https://www.gutenberg.org/ebooks/offline_catalogs.html)
-and [mirroring guide](https://www.gutenberg.org/help/mirroring.html) for sources.
-
-Run the [example](../examples/read_gutenberg.rs) against the synthetic metadata
-fixture, or supply a mirror root, RDF path and pairs of file URI / local path:
-
-```sh
-cargo run --example read_gutenberg --features service-gutenberg
-```
+Manifest byte collection uses core `read_limited`. Shard iteration retains its
+provider state and uses `StreamReader` for metadata and terminal handling.
 
 For a local mirror, run `cargo run --example read_pmc --features service-pmc --
 /data/pmc-mirror metadata/PMC123.2.json`. For multiple metadata objects, compose

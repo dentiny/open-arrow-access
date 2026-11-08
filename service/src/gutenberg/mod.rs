@@ -1,109 +1,257 @@
-//! One book per row, with original RDF and selected files.
+//! One book per row, using the fields mapped from RDF.
 
-mod accessor;
-mod batch;
 mod metadata;
-mod request;
-
-pub use accessor::GutenbergAccessor;
-pub use request::{GutenbergFile, GutenbergRequest};
 
 use std::{
     num::NonZeroUsize,
     sync::{Arc, OnceLock},
 };
 
-use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef};
-use open_arrow_access_core::{Error, ErrorKind};
+use arrow_schema::{DataType, Field, Schema};
+use open_arrow_access_core::{
+    Accessor, ByteReadRequest, ByteReader, Capability, DocumentAccessor, DocumentDecoder, Error,
+    ErrorKind, FieldValue, ReadRequest, RecordBatch, RecordReader, Result, SchemaRef, async_trait,
+};
+use xml_arrow::{NamespaceBinding, XmlField, XmlSchema};
+
+const DEFAULT_METADATA_BYTES: NonZeroUsize = NonZeroUsize::new(4 * 1024 * 1024).unwrap();
 
 /// Source byte limits; excludes parser and Arrow allocations.
 #[derive(Clone, Copy, Debug)]
 pub struct GutenbergLimits {
     /// RDF byte limit (default: 4 MiB).
     pub metadata_bytes: NonZeroUsize,
-    /// Per-file byte limit (default: 256 MiB).
-    pub file_bytes: NonZeroUsize,
-    /// Combined RDF and file byte limit (default: 1 GiB).
-    pub row_bytes: NonZeroUsize,
 }
 
 impl Default for GutenbergLimits {
     fn default() -> Self {
         Self {
-            metadata_bytes: NonZeroUsize::new(4 * 1024 * 1024).unwrap(),
-            file_bytes: NonZeroUsize::new(256 * 1024 * 1024).unwrap(),
-            row_bytes: NonZeroUsize::new(1024 * 1024 * 1024).unwrap(),
+            metadata_bytes: DEFAULT_METADATA_BYTES,
         }
     }
 }
 
-fn list(name: &str, data_type: DataType) -> Field {
-    Field::new(
-        name,
-        DataType::List(Arc::new(Field::new("item", data_type, false))),
-        false,
+/// Read per-book RDF metadata through caller-configured storage.
+pub struct GutenbergAccessor<A> {
+    inner: Arc<A>,
+    limits: GutenbergLimits,
+}
+
+impl<A> GutenbergAccessor<A> {
+    pub fn new(inner: A) -> Self {
+        Self {
+            inner: Arc::new(inner),
+            limits: GutenbergLimits::default(),
+        }
+    }
+    pub fn with_limits(mut self, limits: GutenbergLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+}
+
+#[async_trait]
+impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> Accessor
+    for GutenbergAccessor<A>
+{
+    type Request = ReadRequest;
+    type Reader = dyn RecordReader;
+    fn capability(&self) -> Capability {
+        Capability {
+            read: self.inner.capability().read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+    }
+    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
+        DocumentAccessor::new(
+            self.inner.clone(),
+            GutenbergDecoder,
+            self.limits.metadata_bytes.get(),
+        )
+        .open(request)
+        .await
+    }
+}
+
+struct GutenbergDecoder;
+
+#[async_trait]
+impl DocumentDecoder for GutenbergDecoder {
+    type Request = ReadRequest;
+
+    fn prepare(&self, _request: &ReadRequest) -> Result<SchemaRef> {
+        Ok(schema())
+    }
+
+    async fn decode(
+        &self,
+        raw: &[u8],
+        _request: ReadRequest,
+        schema: SchemaRef,
+    ) -> Result<RecordBatch> {
+        metadata::read_metadata(raw, schema).await
+    }
+}
+
+// Declare Arrow fields and their XML locations together. The XML engine extracts
+// scalars as strings; metadata conversion validates them and writes the output
+// types when building the final batch.
+type ScalarParser = for<'a> fn(&'a str) -> Result<FieldValue<'a>>;
+
+struct Mapping {
+    field: Field,
+    xml: XmlField,
+    children: Vec<Mapping>,
+    parser: Option<ScalarParser>,
+}
+
+impl Mapping {
+    fn new(field: Field, xml: XmlField) -> Self {
+        Self {
+            field,
+            xml,
+            children: Vec::new(),
+            parser: None,
+        }
+    }
+
+    fn parse_with(mut self, parser: ScalarParser) -> Self {
+        self.parser = Some(parser);
+        self
+    }
+}
+
+fn scalar(name: &str, path: &str, ty: DataType, nullable: bool) -> Mapping {
+    Mapping::new(
+        Field::new(name, ty, nullable),
+        XmlField::new(name, path, DataType::Utf8, nullable),
     )
 }
 
-fn creator_fields() -> Fields {
-    vec![
-        Field::new("uri", DataType::Utf8, true),
-        Field::new("name", DataType::Utf8, true),
-        list("alias", DataType::Utf8),
-        Field::new("birthdate", DataType::Int32, true),
-        Field::new("deathdate", DataType::Int32, true),
-    ]
-    .into()
+fn strings(name: &str, path: &str) -> Mapping {
+    let xml = XmlField::list(
+        name,
+        ".",
+        false,
+        XmlField::new("item", path, DataType::Utf8, false),
+    );
+    Mapping::new(xml.arrow_field().clone(), xml)
 }
 
-fn subject_fields() -> Fields {
-    vec![
-        Field::new("scheme", DataType::Utf8, true),
-        Field::new("value", DataType::Utf8, false),
-    ]
-    .into()
+fn objects(name: &str, path: &str, container: &str, mappings: Vec<Mapping>) -> Mapping {
+    let fields: Vec<_> = mappings
+        .iter()
+        .map(|mapping| mapping.field.clone())
+        .collect();
+    let children = mappings.iter().map(|mapping| mapping.xml.clone()).collect();
+    let xml = XmlField::list(
+        name,
+        ".",
+        false,
+        XmlField::structure(
+            "item",
+            path,
+            false,
+            vec![XmlField::structure("value", container, false, children)],
+        ),
+    );
+    let item = Arc::new(Field::new("item", DataType::Struct(fields.into()), false));
+    Mapping {
+        children: mappings,
+        ..Mapping::new(Field::new(name, DataType::List(item), false), xml)
+    }
 }
 
-fn file_fields() -> Fields {
-    vec![
-        Field::new("uri", DataType::Utf8, false),
-        list("format", DataType::Utf8),
-        Field::new("extent", DataType::UInt64, true),
-        Field::new("modified", DataType::Utf8, true),
-        Field::new("data", DataType::LargeBinary, false),
-    ]
-    .into()
+struct Definitions {
+    schema: SchemaRef,
+    xml: XmlSchema,
+    fields: Vec<Mapping>,
 }
 
-/// Book schema; `metadata_rdf` retains unmapped fields.
+fn definitions() -> &'static Definitions {
+    static DEFINITIONS: OnceLock<Definitions> = OnceLock::new();
+    DEFINITIONS.get_or_init(|| {
+        use DataType::*;
+        let mappings = vec![
+            scalar("ebook_id", "@r:about", UInt64, false).parse_with(metadata::parse_ebook_id),
+            scalar("title", "d:title", LargeUtf8, true),
+            objects(
+                "creator",
+                "d:creator",
+                "p:agent",
+                vec![
+                    scalar("uri", "@r:about", Utf8, true),
+                    scalar("name", "p:name", Utf8, true),
+                    strings("alias", "p:alias"),
+                    scalar("birthdate", "p:birthdate", Int32, true),
+                    scalar("deathdate", "p:deathdate", Int32, true),
+                ],
+            ),
+            strings("language", "d:language/r:Description/r:value"),
+            objects(
+                "subject",
+                "d:subject",
+                "r:Description",
+                vec![
+                    scalar("scheme", "a:memberOf/@r:resource", Utf8, true),
+                    scalar("value", "r:value", Utf8, false),
+                ],
+            ),
+            strings("bookshelf", "p:bookshelf/r:Description/r:value"),
+            scalar("issued", "d:issued", Date32, true),
+            scalar("rights", "d:rights", LargeUtf8, true),
+            objects(
+                "files",
+                "d:hasFormat",
+                "p:file",
+                vec![
+                    scalar("uri", "@r:about", Utf8, false),
+                    strings("format", "d:format/r:Description/r:value"),
+                    scalar("extent", "d:extent", UInt64, true),
+                    scalar("modified", "d:modified", Utf8, true),
+                ],
+            ),
+        ];
+        let fields: Vec<_> = mappings
+            .iter()
+            .map(|mapping| mapping.field.clone())
+            .collect();
+        let children = mappings.iter().map(|mapping| mapping.xml.clone()).collect();
+        let bindings = [
+            ("r", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"),
+            ("p", "http://www.gutenberg.org/2009/pgterms/"),
+            ("d", "http://purl.org/dc/terms/"),
+            ("a", "http://purl.org/dc/dcam/"),
+        ]
+        .map(|(prefix, uri)| NamespaceBinding { prefix, uri });
+        let xml = XmlSchema::with_namespaces(
+            vec![XmlField::structure("book", "p:ebook", false, children)],
+            &bindings,
+        )
+        .expect("valid Gutenberg XML mapping");
+        Definitions {
+            schema: Arc::new(Schema::new(fields)),
+            xml,
+            fields: mappings,
+        }
+    })
+}
+
+/// Arrow schema for the mapped RDF fields.
 pub fn schema() -> SchemaRef {
-    static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
-    SCHEMA
-        .get_or_init(|| {
-            Arc::new(Schema::new(vec![
-                Field::new("ebook_id", DataType::UInt64, false),
-                Field::new("title", DataType::LargeUtf8, true),
-                list("creator", DataType::Struct(creator_fields())),
-                list("language", DataType::Utf8),
-                list("subject", DataType::Struct(subject_fields())),
-                list("bookshelf", DataType::Utf8),
-                Field::new("issued", DataType::Date32, true),
-                Field::new("rights", DataType::LargeUtf8, true),
-                Field::new("metadata_rdf", DataType::LargeBinary, false),
-                Field::new(
-                    "files",
-                    DataType::LargeList(Arc::new(Field::new(
-                        "item",
-                        DataType::Struct(file_fields()),
-                        false,
-                    ))),
-                    false,
-                ),
-            ]))
-        })
-        .clone()
+    definitions().schema.clone()
+}
+
+fn mapping() -> XmlSchema {
+    definitions().xml.clone()
 }
 
 fn decode(message: impl Into<String>) -> Error {
     Error::new(ErrorKind::Decode, "read_gutenberg", message)
+}
+
+fn decode_source(error: impl std::error::Error + Send + Sync + 'static) -> Error {
+    decode(error.to_string()).with_source(error)
 }
