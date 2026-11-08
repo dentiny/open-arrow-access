@@ -99,7 +99,7 @@ fn scalar_value<'a>(field: &Field, column: &'a dyn Array, index: usize) -> Resul
         DataType::UInt64 if name == "ebook_id" => parse_ebook_id(text.unwrap_or_default())?.into(),
         DataType::UInt64 => number::<u64>(text, name)?.into(),
         DataType::Int32 => number::<i32>(text, name)?.into(),
-        DataType::Date32 => text.map(issued).transpose()?.into(),
+        DataType::Date32 => text.map(parse_issued_date).transpose()?.into(),
         _ => unreachable!("unsupported Gutenberg metadata type"),
     })
 }
@@ -127,7 +127,7 @@ fn parse_ebook_id(about: &str) -> Result<u64> {
         .ok_or_else(|| decode("invalid ebook ID"))
 }
 
-fn issued(value: &str) -> Result<i32> {
+fn parse_issued_date(value: &str) -> Result<i32> {
     let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(decode_source)?;
     Ok(date
         .signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
