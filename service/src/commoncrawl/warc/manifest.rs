@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use futures::TryStreamExt;
 use open_arrow_access_core::{ByteReader, Error, ErrorKind, ObjectRef, Result, read_lines};
 
+use super::{error::invalid_line, validation::validate_manifest_path};
+
 const MAX_LINE_BYTES: usize = 16 * 1024;
 
 pub(super) async fn read_manifest(
@@ -42,29 +44,7 @@ fn append_line(
     if path.is_empty() {
         return Ok(());
     }
-    if !path.starts_with("crawl-data/")
-        || path
-            .bytes()
-            .any(|b| !b.is_ascii_alphanumeric() && !matches!(b, b'/' | b'-' | b'_' | b'.'))
-        || path
-            .split('/')
-            .any(|part| part.is_empty() || matches!(part, "." | ".."))
-        || ![
-            ".warc",
-            ".warc.gz",
-            ".warc.bz2",
-            ".warc.zst",
-            ".warc.zstd",
-            ".warc.lz4",
-        ]
-        .iter()
-        .any(|suffix| path.ends_with(suffix))
-    {
-        return Err(invalid_line(
-            number,
-            "expected a canonical manifest-relative WARC path",
-        ));
-    }
+    validate_manifest_path(path, number)?;
     if path.starts_with(prefix) {
         if !seen.insert(path.to_owned()) {
             return Err(invalid_line(number, "duplicate selected file"));
@@ -72,12 +52,4 @@ fn append_line(
         selected.push(ObjectRef::new(path));
     }
     Ok(())
-}
-
-fn invalid_line(number: usize, message: &str) -> Error {
-    Error::new(
-        ErrorKind::Decode,
-        "read_commoncrawl_manifest",
-        format!("line {number}: {message}"),
-    )
 }
