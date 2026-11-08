@@ -18,13 +18,7 @@ pub(super) fn decode_batch(
         .map_err(|error| decode(format!("{path}: {error}")).with_source(error))?;
     // Preserve raw JSON; duplicate fields use the last value.
     let fields: HashMap<String, &RawValue> = parse(raw, path)?;
-    let projection = output_schema
-        .fields()
-        .iter()
-        .map(|field| field.name().clone())
-        .collect();
-    let mut builder = RecordBatchBuilder::new(schema(), Some(projection))?;
-    builder.push(|row| {
+    RecordBatchBuilder::build_row(schema(), output_schema, |row| {
         for field in schema().fields() {
             if field.name() == "raw_metadata_json" {
                 row.append(field.name(), raw)?;
@@ -38,8 +32,7 @@ pub(super) fn decode_batch(
             }
         }
         Ok(())
-    })?;
-    builder.finish()
+    })
 }
 
 fn append_field(row: &mut RecordBatchRow<'_>, field: &Field, raw: &str, path: &str) -> Result<()> {
