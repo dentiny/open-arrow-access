@@ -9,6 +9,7 @@ description = "Dataset source providers for Open Arrow Access"
 [features]
 default = []
 zenodo = []
+dataverse = []
 arxiv = ["dep:quick-xml", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
 internet-archive = []
 courtlistener = [
@@ -50,6 +51,7 @@ pmc = [
 
 
 [dependencies]
+indexmap.workspace = true
 quick-xml = { workspace = true, optional = true }
 reqwest.workspace = true
 opendal-http-transport-reqwest.workspace = true
@@ -120,6 +122,10 @@ required-features = ["warc"]
 [[test]]
 name = "zenodo"
 required-features = ["zenodo"]
+
+[[test]]
+name = "dataverse"
+required-features = ["dataverse"]
 
 [[test]]
 name = "arxiv"

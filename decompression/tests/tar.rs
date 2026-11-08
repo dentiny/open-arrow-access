@@ -1,8 +1,10 @@
 use std::num::NonZeroUsize;
 
-use open_arrow_access_core::{Accessor, ByteReadRequest, ErrorKind};
+use open_arrow_access_core::{Accessor, ErrorKind};
 use open_arrow_access_decompression::tar::{TarArchive, TarLimits};
-use open_arrow_access_test_support::{MemoryAccessor, byte_layer, collect_bytes, fixture};
+use open_arrow_access_test_support::{
+    MemoryAccessor, byte_layer, collect_bytes, fixture, ranged_input,
+};
 
 async fn source(name: &str) -> MemoryAccessor {
     MemoryAccessor::new(&fixture!("tar", name).await, 7).with_ranges()
@@ -133,38 +135,10 @@ async fn enforces_limits_and_exact_source_contract() {
         );
     }
     let bytes = fixture!("tar", "mixed.tar").await;
-    for source in [
-        MemoryAccessor::new(&bytes, 3),
-        MemoryAccessor::new(&bytes, 3)
-            .with_ranges()
-            .without_content_length(),
-    ] {
-        assert_eq!(
-            TarArchive::open(
-                source.open(ByteReadRequest::new("archive")).await.unwrap(),
-                TarLimits::default()
-            )
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-            ErrorKind::Unsupported
-        );
-    }
-    let source = MemoryAccessor::new(&bytes, 3)
-        .with_ranges()
-        .with_short_ranges();
-    assert_eq!(
-        TarArchive::open(
-            source.open("archive".into()).await.unwrap(),
-            TarLimits::default()
-        )
-        .await
-        .err()
-        .unwrap()
-        .kind(),
-        ErrorKind::Io
-    );
+    ranged_input::assert_contract(&bytes, |source| async move {
+        TarArchive::open(source.open("archive".into()).await?, TarLimits::default()).await
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -443,6 +417,7 @@ async fn cancelled_live_body_read_rejects_advancement_without_waiting_for_its_lo
 async fn sequential_completion_and_malformed_headers_release_source_with_archive_retained() {
     use open_arrow_access_core::{ByteMetadata, Bytes, StreamReader};
     use open_arrow_access_decompression::tar::TarStream;
+    use open_arrow_access_test_support::DropProbe;
     use std::{
         sync::{
             Arc,
@@ -450,16 +425,9 @@ async fn sequential_completion_and_malformed_headers_release_source_with_archive
         },
         task::Poll,
     };
-    struct Dropped(Arc<AtomicBool>);
-    impl Drop for Dropped {
-        fn drop(&mut self) {
-            self.0.store(true, Ordering::SeqCst);
-        }
-    }
-
     for (name, malformed) in [("mixed.tar", false), ("bad-checksum.tar", true)] {
         let dropped = Arc::new(AtomicBool::new(false));
-        let signal = Dropped(dropped.clone());
+        let signal = DropProbe::new(dropped.clone());
         let mut bytes = Some(Bytes::from(fixture!("tar", name).await));
         let source = futures::stream::poll_fn(move |_| {
             let _keep = &signal;

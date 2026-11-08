@@ -44,16 +44,13 @@ impl HttpClient {
         &self,
         endpoint: &Url,
         root: &str,
-        query: &[(&str, &str)],
+        query: Vec<(String, String)>,
     ) -> Result<OpenDalAccessor> {
         let mut context = self.context.clone();
         if !query.is_empty() {
             context = context.with_http_transport(HttpTransporter::new(query::QueryTransport {
                 inner: context.http_transport().clone(),
-                query: query
-                    .iter()
-                    .map(|(key, value)| ((*key).into(), (*value).into()))
-                    .collect(),
+                query,
             }));
         }
         let operator = opendal::Operator::new(

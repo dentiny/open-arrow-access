@@ -2,6 +2,8 @@
 
 mod opendal_error;
 mod resolved_files;
+#[cfg(any(feature = "internet-archive", feature = "pmc"))]
+mod validation;
 pub use resolved_files::ResolvedFileSet;
 
 #[cfg(feature = "courtlistener")]
@@ -28,7 +30,7 @@ pub mod pmc;
 #[cfg(feature = "zenodo")]
 pub mod zenodo;
 
-#[cfg(feature = "zenodo")]
+#[cfg(any(feature = "zenodo", feature = "dataverse"))]
 mod filename;
 
 // Individual providers may use only part of the shared HTTP utilities.
@@ -37,5 +39,7 @@ mod http_client;
 
 #[cfg(feature = "arxiv")]
 pub mod arxiv;
+#[cfg(feature = "dataverse")]
+pub mod dataverse;
 #[cfg(feature = "internet-archive")]
 pub mod internet_archive;

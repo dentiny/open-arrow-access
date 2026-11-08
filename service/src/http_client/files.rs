@@ -1,6 +1,7 @@
 //! Bind a provider's validated manifest to lazy HTTP file access.
 
-use open_arrow_access_core::{Error, ObjectRef, Result};
+use indexmap::IndexMap;
+use open_arrow_access_core::{Error, ErrorKind, ObjectRef, Result};
 use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
 use serde::de::DeserializeOwned;
 use url::Url;
@@ -8,12 +9,60 @@ use url::Url;
 use super::{HttpClient, validation::validate_origin};
 use crate::ResolvedFileSet;
 
+/// One download representation, addressed relative to the plan's `root`.
+pub(crate) struct ResolvedFile {
+    pub(crate) object: ObjectRef,
+    /// Trusted byte length of this representation; None falls back to storage stat.
+    pub(crate) content_length: Option<u64>,
+}
+
 /// Canonical download root, ordered logical-name mappings and provider metadata.
 /// Providers validate identity, availability and names before returning this plan.
 pub(crate) struct ResolvedFilesPlan<M> {
-    pub(crate) root: String,
-    pub(crate) files: Vec<(String, ObjectRef)>,
-    pub(crate) metadata: M,
+    /// Download path prefix relative to the service's HTTP origin.
+    root: String,
+    /// Logical filename -> download object and optional trusted byte length.
+    /// Insertion order is manifest/listing order; empty and duplicate names fail.
+    files: IndexMap<String, ResolvedFile>,
+    /// Provider metadata retained alongside the resolved file namespace.
+    metadata: M,
+    /// (Query parameter name, value) pairs appended to download requests and
+    /// URL-encoded by the transport; metadata requests keep their own query.
+    query: Vec<(String, String)>,
+}
+
+impl<M> ResolvedFilesPlan<M> {
+    pub(crate) fn new(
+        root: impl Into<String>,
+        files: Vec<(String, ResolvedFile)>,
+        metadata: M,
+    ) -> Result<Self> {
+        let mut ordered = IndexMap::with_capacity(files.len());
+        for (name, file) in files {
+            if name.is_empty() || ordered.insert(name, file).is_some() {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "configure_resolved_files",
+                    "empty or duplicate filename",
+                ));
+            }
+        }
+        Ok(Self {
+            root: root.into(),
+            files: ordered,
+            metadata,
+            query: Vec::new(),
+        })
+    }
+
+    /// Query parameters apply to file downloads, not the metadata request.
+    pub(crate) fn with_query(mut self, query: &[(&str, &str)]) -> Self {
+        self.query = query
+            .iter()
+            .map(|(key, value)| ((*key).into(), (*value).into()))
+            .collect();
+        self
+    }
 }
 
 /// Connection and error context shared by public JSON-manifest providers.
@@ -60,9 +109,22 @@ impl HttpFileService {
             .json(metadata_url.as_str(), /*token=*/ None, self.operation)
             .await?;
         let plan = resolve(response)?;
-        let storage = self.client.accessor(&self.endpoint, &plan.root, &[])?;
-        let files =
-            NamedFileAccessor::new(storage, plan.files).map_err(self.map_file_namespace_error)?;
+        let lengths = plan.files.values().filter_map(|file| {
+            file.content_length
+                .map(|length| (file.object.locator().to_owned(), length))
+        });
+        let storage = self
+            .client
+            .accessor(&self.endpoint, &plan.root, plan.query)?
+            .with_content_lengths(lengths);
+        let files = NamedFileAccessor::new(
+            storage,
+            plan.files
+                .into_iter()
+                .map(|(name, file)| (name, file.object))
+                .collect(),
+        )
+        .map_err(self.map_file_namespace_error)?;
         Ok(ResolvedFileSet::new(files, plan.metadata))
     }
 }

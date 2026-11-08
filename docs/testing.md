@@ -21,8 +21,10 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | pmc | [`service/tests/pmc.rs`](../service/tests/pmc.rs) |
 | arXiv bulk manifests and TAR composition | [`service/tests/arxiv.rs`](../service/tests/arxiv.rs) |
 | Hugging Face Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
+| Dataverse published-version original files | [`service/tests/dataverse.rs`](../service/tests/dataverse.rs) |
 | CourtListener bulk snapshots | [`service/tests/courtlistener.rs`](../service/tests/courtlistener.rs) |
 | Service filename components | [`service/tests/unit/filename_validation.rs`](../service/tests/unit/filename_validation.rs) |
+| Service relative file paths | [`service/tests/unit/path_validation.rs`](../service/tests/unit/path_validation.rs) |
 | Common Crawl configuration | [`service/tests/commoncrawl.rs`](../service/tests/commoncrawl.rs) |
 | Common Crawl segments | [`service/tests/commoncrawl_segment.rs`](../service/tests/commoncrawl_segment.rs) |
 | Common Crawl WARC inventory | [`service/tests/warc.rs`](../service/tests/warc.rs) |
@@ -33,9 +35,11 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | Streaming and indexed TAR entries | [`decompression/tests/tar.rs`](../decompression/tests/tar.rs) |
 | Document accessor | [`core/tests/document.rs`](../core/tests/document.rs) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
+| Shared resource lifetime probe | [`test-support/src/drop_probe.rs`](../test-support/src/drop_probe.rs), used by core stream and TAR tests |
 | Generic file-format extension protocol | [`file-format/tests/accessor.rs`](../file-format/tests/accessor.rs), also runs with no format features |
 | Shared format contract assertions | [`test-support/src/format.rs`](../test-support/src/format.rs), used by format and Parquet suites |
 | Generic reader lifecycle and source failures | [`test-support/src/reader.rs`](../test-support/src/reader.rs), shared by Arrow formats, WARC and byte layers |
+| Ranged-input requirements and source errors | [`test-support/src/ranged_input.rs`](../test-support/src/ranged_input.rs), shared by ZIP and TAR |
 
 ## Add a test
 

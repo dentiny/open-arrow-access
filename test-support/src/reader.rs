@@ -8,7 +8,7 @@ use std::{
 
 use open_arrow_access_core::{Accessor, ByteReadRequest, Error, ErrorKind, Reader};
 
-use crate::{MemoryAccessor, Observations, memory_read_error};
+use crate::{MemoryAccessor, Observations, memory_error};
 
 /// After an observed EOF or error, require stable metadata and no upstream polls.
 /// The snapshot selects comparable metadata without imposing traits on the
@@ -147,14 +147,18 @@ pub async fn assert_error_contract<A, M>(
 }
 
 pub(crate) fn assert_memory_read_error(error: &Error, kind: ErrorKind) {
-    let original = memory_read_error(error);
+    assert_memory_error(error, kind, "memory_read", "injected source failure");
+}
+
+pub(crate) fn assert_memory_error(error: &Error, kind: ErrorKind, operation: &str, message: &str) {
+    let original = memory_error(error, operation);
     assert_eq!(original.kind(), kind);
-    assert_eq!(original.to_string(), "memory_read: injected source failure");
+    assert_eq!(original.to_string(), format!("{operation}: {message}"));
     let cause = original
         .source()
         .unwrap()
         .downcast_ref::<std::io::Error>()
         .unwrap();
     assert_eq!(cause.kind(), std::io::ErrorKind::ConnectionReset);
-    assert_eq!(cause.to_string(), "injected source failure");
+    assert_eq!(cause.to_string(), message);
 }

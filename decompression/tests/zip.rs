@@ -2,7 +2,9 @@ use std::{num::NonZeroUsize, sync::atomic::Ordering};
 
 use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest, ErrorKind};
 use open_arrow_access_decompression::zip::{ZipAccessor, ZipLimits};
-use open_arrow_access_test_support::{MemoryAccessor, byte_layer, collect_bytes, fixture};
+use open_arrow_access_test_support::{
+    MemoryAccessor, byte_layer, collect_bytes, fixture, ranged_input,
+};
 
 fn memory(data: &[u8]) -> MemoryAccessor {
     MemoryAccessor::new(data, 1)
@@ -186,26 +188,6 @@ async fn malformed_missing_unsupported_and_sequential_inputs() {
     }
     let sequential = ZipAccessor::new(MemoryAccessor::new(&data, 1), 0);
     assert!(!sequential.capability().read);
-    assert_eq!(
-        sequential
-            .open(ByteReadRequest::new("archive"))
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Unsupported
-    );
-    let source = memory(&data);
-    let source = source.without_content_length();
-    assert_eq!(
-        ZipAccessor::new(source, 0)
-            .open(ByteReadRequest::new("archive"))
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Unsupported
-    );
     let unsupported = fixture!("zip", "unsupported.zip").await;
     assert_eq!(
         ZipAccessor::new(memory(&unsupported), 0)
@@ -273,36 +255,14 @@ async fn entry_size_and_actual_expansion_limits_are_enforced() {
 }
 
 #[tokio::test]
-async fn range_errors_keep_categories_and_short_reads_fail() {
+async fn ranged_input_contract_and_entry_failures() {
     let data = fixture!("zip", "mixed.zip").await;
-    for kind in [
-        ErrorKind::Io,
-        ErrorKind::PermissionDenied,
-        ErrorKind::NotFound,
-    ] {
-        let source = memory(&data);
-        let source = source.with_range_failure(0, kind);
-        assert_eq!(
-            ZipAccessor::new(source, 0)
-                .open(ByteReadRequest::new("archive"))
-                .await
-                .err()
-                .unwrap()
-                .kind(),
-            kind
-        );
-    }
-    let source = memory(&data);
-    let source = source.with_short_ranges();
-    assert_eq!(
+    ranged_input::assert_contract(&data, |source| async move {
         ZipAccessor::new(source, 0)
             .open(ByteReadRequest::new("archive"))
             .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Io
-    );
+    })
+    .await;
 
     let source = memory(&data);
     let zip = ZipAccessor::new(source.clone(), 0);
