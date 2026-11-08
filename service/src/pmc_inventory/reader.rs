@@ -3,8 +3,8 @@ use std::sync::Arc;
 use arrow_array::{Array, cast::AsArray};
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, AccessorExt, ByteAccessor, ObjectRef, ReadOptions, ReadRequest, RecordBatch,
-    RecordMetadata, RecordReader, Result, SchemaRef, StreamReader, into_stream, project_batch,
+    Accessor, AccessorExt, ByteAccessor, ObjectRef, ReadRequest, RecordBatch, RecordMetadata,
+    RecordReader, Result, SchemaRef, StreamReader, into_stream, project_batch,
 };
 use open_arrow_access_decompression::{DecompressionLayer, Gzip};
 use open_arrow_access_file_format::{CsvAccessor, CsvFormat};
@@ -19,7 +19,7 @@ pub(super) struct InventoryTransform {
 
 impl InventoryTransform {
     pub fn create_reader<A: ByteAccessor + 'static>(
-        self,
+        mut self,
         source: Arc<A>,
         files: Vec<ObjectRef>,
         request: ReadRequest,
@@ -36,10 +36,16 @@ impl InventoryTransform {
             )
             .with_format(CsvFormat::default().with_header(false)),
         );
-        let options = ReadOptions {
-            batch_size: request.options.batch_size,
-            projection: None,
-        };
+        let mut options = request.options;
+        if let Some(columns) = options.projection.as_mut() {
+            // Output columns come first; validation-only columns are appended.
+            self.projection = Some((0..columns.len()).collect());
+            for name in ["Bucket", "Key"] {
+                if !columns.iter().any(|column| column == name) {
+                    columns.push(name.into());
+                }
+            }
+        }
         let readers = stream::iter(files).then(move |file| {
             let csv = csv.clone();
             let request = ReadRequest::new(file)

@@ -110,7 +110,12 @@ async fn streams_shards_in_order_with_original_values_and_byte_options() {
 
 #[tokio::test]
 async fn projection_preserves_output_order_and_zero_column_rows() {
-    for names in [vec!["ETag", "Key"], vec![]] {
+    for names in [
+        vec!["ETag", "Key"],
+        vec!["Key", "Bucket"],
+        vec!["ETag"],
+        vec![],
+    ] {
         let (source, _) = Objects::fixture();
         let mut reader = PmcInventoryAccessor::new(source)
             .open(request(Some(names.clone())))
