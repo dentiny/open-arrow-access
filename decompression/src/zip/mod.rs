@@ -91,7 +91,7 @@ impl<B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ZipAccesso
     /// Storage options are forwarded unchanged. Order is central-directory order.
     pub async fn entries(&self, request: ByteReadRequest) -> Result<Vec<ZipEntry>> {
         let input = self.binding.storage().open(request).await?;
-        let archive = open_archive(input, &self.binding.factory().limits).await?;
+        let archive = OpenedArchive::open(input, &self.binding.factory().limits).await?;
         archive
             .parser
             .cdrs()
@@ -164,7 +164,7 @@ impl ReaderFactory for ZipFactory {
         (): (),
     ) -> Result<Box<dyn ByteReader>> {
         let mut metadata = input.metadata().clone();
-        let archive = open_archive(input, &self.limits).await?;
+        let archive = OpenedArchive::open(input, &self.limits).await?;
         let entry = archive.parser.cdrs().get(self.entry_index).ok_or_else(|| {
             Error::new(
                 ErrorKind::NotFound,
@@ -228,24 +228,26 @@ struct OpenedArchive {
     len: u64,
 }
 
-async fn open_archive(input: Box<dyn ByteReader>, limits: &ZipLimits) -> Result<OpenedArchive> {
-    let input = into_async_seek(input, DEFAULT_CHUNK_SIZE, "open_zip")?;
-    let len = input.content_length();
-    let options = ZipOptions {
-        max_cd_num_files: limits.max_entries,
-        max_cd_num_files_load: limits.max_entries,
-        max_cd_size_in_bytes: limits.max_directory_bytes,
-        max_uncompressed_size_per_file: limits.max_entry_bytes,
-        max_compressed_size_per_file: limits.max_entry_bytes,
-        ..ZipOptions::default()
-    };
-    let source = input.clone();
-    let parser = ZipArchiveReader::open_with_options(input, options)
-        .await
-        .map_err(zip_error)?;
-    Ok(OpenedArchive {
-        parser,
-        source,
-        len,
-    })
+impl OpenedArchive {
+    async fn open(input: Box<dyn ByteReader>, limits: &ZipLimits) -> Result<Self> {
+        let input = into_async_seek(input, DEFAULT_CHUNK_SIZE, "open_zip")?;
+        let len = input.content_length();
+        let options = ZipOptions {
+            max_cd_num_files: limits.max_entries,
+            max_cd_num_files_load: limits.max_entries,
+            max_cd_size_in_bytes: limits.max_directory_bytes,
+            max_uncompressed_size_per_file: limits.max_entry_bytes,
+            max_compressed_size_per_file: limits.max_entry_bytes,
+            ..ZipOptions::default()
+        };
+        let source = input.clone();
+        let parser = ZipArchiveReader::open_with_options(input, options)
+            .await
+            .map_err(zip_error)?;
+        Ok(Self {
+            parser,
+            source,
+            len,
+        })
+    }
 }
