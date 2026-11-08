@@ -84,11 +84,11 @@ fn number<T: std::str::FromStr>(value: Option<String>, field: &str) -> Result<Op
         .transpose()
 }
 
-/// Parse the per-eBook RDF layout, matching namespace URIs rather than prefixes.
+/// Parse book RDF using namespace URIs.
 pub(super) fn parse(raw: &[u8]) -> Result<Book> {
     let xml = std::str::from_utf8(raw)
         .map_err(|error| decode("metadata is not UTF-8").with_source(error))?;
-    // roxmltree rejects DTDs by default and never fetches external entities.
+    // DTDs are rejected; external entities are never fetched.
     let document =
         Document::parse(xml).map_err(|error| decode("invalid RDF XML").with_source(error))?;
     let root = document.root_element();

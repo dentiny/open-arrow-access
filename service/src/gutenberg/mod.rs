@@ -1,4 +1,4 @@
-//! One Gutenberg eBook per row, with original RDF and caller-selected file bytes.
+//! One book per row, with original RDF and selected files.
 
 mod accessor;
 mod batch;
@@ -16,14 +16,14 @@ use std::{
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef};
 use open_arrow_access_core::{Error, ErrorKind};
 
-/// Limits on collected source bytes, not process memory or Arrow allocations.
+/// Source byte limits; excludes parser and Arrow allocations.
 #[derive(Clone, Copy, Debug)]
 pub struct GutenbergLimits {
-    /// Maximum size of one per-book RDF document; defaults to 4 MiB.
+    /// RDF byte limit (default: 4 MiB).
     pub metadata_bytes: NonZeroUsize,
-    /// Maximum size of one selected file; defaults to 256 MiB.
+    /// Per-file byte limit (default: 256 MiB).
     pub file_bytes: NonZeroUsize,
-    /// Maximum combined RDF and selected file bytes; defaults to 1 GiB.
+    /// Combined RDF and file byte limit (default: 1 GiB).
     pub row_bytes: NonZeroUsize,
 }
 
@@ -75,7 +75,7 @@ fn file_fields() -> Fields {
     .into()
 }
 
-/// Fixed schema. Unexpanded upstream fields remain in the verbatim `metadata_rdf`.
+/// Book schema; `metadata_rdf` retains unmapped fields.
 pub fn schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
