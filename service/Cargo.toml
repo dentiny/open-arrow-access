@@ -42,7 +42,6 @@ pmc-inventory = [
     "dep:arrow-schema",
     "dep:serde",
     "dep:serde_json",
-    "dep:percent-encoding",
     "dep:open-arrow-access-file-format",
     "open-arrow-access-file-format/csv",
     "dep:open-arrow-access-decompression",
@@ -66,7 +65,6 @@ serde_json = { workspace = true, optional = true }
 opendal-service-http = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
-percent-encoding = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 
 arrow-schema = { workspace = true, optional = true }
@@ -78,7 +76,6 @@ http.workspace = true
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
 flate2.workspace = true
-bytes.workspace = true
 
 open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-storage.workspace = true

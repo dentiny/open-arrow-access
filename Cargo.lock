@@ -1863,7 +1863,6 @@ version = "0.1.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
- "bytes",
  "flate2",
  "futures",
  "http",
@@ -1875,7 +1874,6 @@ dependencies = [
  "open-arrow-access-test-support",
  "opendal",
  "opendal-service-http",
- "percent-encoding",
  "serde",
  "serde_json",
  "tempfile",

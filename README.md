@@ -557,7 +557,7 @@ one complete body per record, so this is not a maximum-record-size or memory bou
 Enable `service-pmc-inventory` to read a caller-selected inventory manifest with
 `service::pmc_inventory::PmcInventoryAccessor` and a standard `ReadRequest`.
 It streams the declared gzip CSV shards in order, preserves upstream columns
-and snapshot identity, and adds a decoded `metadata_key`. It does not list the
+and snapshot identity without adding columns. It does not list the
 bucket or open article JSON/content. Article metadata decoding is a separate,
 independently enabled service. See the [service guide](service/README.md).
 ## Common Crawl configuration

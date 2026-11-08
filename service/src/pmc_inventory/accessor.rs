@@ -6,6 +6,8 @@ use open_arrow_access_core::{
 };
 use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 
+const DEFAULT_MANIFEST_BYTES: NonZeroUsize = NonZeroUsize::new(4 * 1024 * 1024).unwrap();
+
 /// Read the gzip CSV shards listed in an inventory manifest.
 pub struct PmcInventoryAccessor<A> {
     inner: Arc<A>,
@@ -23,7 +25,7 @@ impl<A> PmcInventoryAccessor<A> {
     pub fn new(inner: A) -> Self {
         Self {
             inner: Arc::new(inner),
-            manifest_limit: NonZeroUsize::new(4 * 1024 * 1024).unwrap(),
+            manifest_limit: DEFAULT_MANIFEST_BYTES,
         }
     }
     pub fn with_manifest_limit(mut self, limit: NonZeroUsize) -> Self {
@@ -45,7 +47,7 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         validation::validate_manifest_locator(request.object.locator())?;
-        let (manifest, raw) = manifest::read(
+        let manifest = manifest::read(
             self.inner.as_ref(),
             ByteReadRequest::new(request.object.clone()).with_options(request.byte_options),
             self.manifest_limit.get(),
@@ -58,8 +60,6 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
                 .map(|name| Field::new(name, DataType::Utf8, true))
                 .collect::<Vec<_>>(),
         ));
-        let mut fields: Vec<_> = csv_schema.fields().iter().cloned().collect();
-        fields.push(Arc::new(Field::new("metadata_key", DataType::Utf8, false)));
         let metadata = HashMap::from([
             (
                 "pmc.inventory.manifest_uri".into(),
@@ -70,13 +70,15 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
                 manifest.creation_timestamp,
             ),
             ("pmc.inventory.version".into(), manifest.version),
-            ("pmc.inventory.raw_manifest_json".into(), raw),
         ]);
-        let full_schema = Arc::new(Schema::new_with_metadata(fields, metadata));
+        let full_schema = Arc::new(Schema::new_with_metadata(
+            csv_schema.fields().clone(),
+            metadata,
+        ));
         let (output_schema, projection) = request.options.resolve_projection(&full_schema)?;
         let transform = InventoryTransform {
             csv_schema,
-            projection: projection.unwrap_or_else(|| (0..full_schema.fields().len()).collect()),
+            projection,
             schema: output_schema,
         };
         Ok(Box::new(

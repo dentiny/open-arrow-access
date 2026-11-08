@@ -55,7 +55,6 @@ parquet = { version = "59.3.0", default-features = false, features = ["arrow", "
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tempfile = "3"
 flate2 = "1"
-percent-encoding = "2"
 open-arrow-access-core = { path = "core", version = "0.1.0" }
 open-arrow-access-storage = { path = "storage", version = "0.1.0", default-features = false }
 open-arrow-access-file-format = { path = "file-format", version = "0.1.0", default-features = false }
