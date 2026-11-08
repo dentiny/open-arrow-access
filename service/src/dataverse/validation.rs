@@ -67,16 +67,20 @@ pub(super) fn validate_dataset(
                 "original byte length is absent for an ingested tabular file",
             ));
         }
-        if file.data_file.id == 0
-            || !valid_component(&file.label)
-            || (!file.directory_label.is_empty()
-                && !file
-                    .directory_label
-                    .trim_end_matches('/')
-                    .split('/')
-                    .all(valid_component))
+        if file.data_file.id == 0 {
+            return Err(decode("file ID must be nonzero"));
+        }
+        if !valid_component(&file.label) {
+            return Err(decode("invalid logical filename"));
+        }
+        if !file.directory_label.is_empty()
+            && !file
+                .directory_label
+                .trim_end_matches('/')
+                .split('/')
+                .all(valid_component)
         {
-            return Err(decode("invalid file ID or logical filename"));
+            return Err(decode("invalid directory label"));
         }
     }
     Ok(())
