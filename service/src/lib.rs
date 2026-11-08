@@ -1,5 +1,6 @@
 //! Provider services resolve source semantics into shared object/reader contracts.
 
+mod opendal_error;
 mod resolved_files;
 pub use resolved_files::ResolvedFileSet;
 

@@ -13,15 +13,9 @@ pub use client::HuggingFaceService;
 pub use options::{HuggingFaceOptions, HuggingFaceRepository};
 pub use request::HuggingFaceDatasetRequest;
 
-use open_arrow_access_core::{Error, ErrorKind};
+use open_arrow_access_core::Error;
 
 fn map_error(operation: &'static str, path: &str, error: opendal::Error) -> Error {
-    let kind = match error.kind() {
-        opendal::ErrorKind::ConfigInvalid => ErrorKind::InvalidInput,
-        opendal::ErrorKind::NotFound => ErrorKind::NotFound,
-        opendal::ErrorKind::PermissionDenied => ErrorKind::PermissionDenied,
-        opendal::ErrorKind::Unsupported => ErrorKind::Unsupported,
-        _ => ErrorKind::Io,
-    };
+    let kind = crate::opendal_error::error_kind(error.kind());
     Error::new(kind, operation, format!("Hugging Face object {path:?}")).with_source(error)
 }
