@@ -28,6 +28,7 @@ impl InventoryTransform {
             schema: self.schema.clone(),
             source: Some(request.object),
         };
+        // S3 Inventory CSV shards are gzip-compressed (*.csv.gz).
         let csv = Arc::new(
             CsvAccessor::new(
                 source.layer(DecompressionLayer::new(Gzip)),
