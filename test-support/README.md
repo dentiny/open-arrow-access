@@ -39,6 +39,51 @@ byte at a time and checks a decode error, source chain, terminal EOF, and no fur
 upstream polls. Keep codec-specific fixture lists and special cases in their tests.
 `byte_layer::assert_terminal_error` also supports individual malformed-input cases.
 
+## Composed contract runners
+
+Start a new fixed-schema, sequential Arrow format with one fixture case:
+
+```rust,ignore
+let input = fixture!("my_format", "good.data").await;
+let batches = format::assert_fixed_schema_contract(
+    |bytes| MyFormatAccessor::new(bytes, expected_schema.clone()),
+    format::FormatCase {
+        bytes: &input,
+        request: ReadRequest::new("records").with_options(read_options),
+        schema: expected_schema.clone(),
+        rows: 3,
+        fault_offsets: &[0, 5],
+    },
+).await;
+// Assert format-specific values in the requested projection's returned batches.
+```
+
+The runner combines missing/duplicate projection rejection before byte I/O,
+full/requested/zero-column schemas and row counts, terminal EOF, open/read failures,
+empty chunks, source causes, and byte-option forwarding. Supply independently
+expected schema/rows and reachable fault offsets. Fault cases use the full schema
+and a one-row target, preserving the request's object and byte options. The full
+schema needs at least one field for missing/duplicate projection checks; a
+zero-column output projection is supported. Fieldless schemas can use the
+individual helpers. CSV, JSON and ATIF use this entry point. Inferred schemas retain their own projection-validation timing tests;
+Parquet retains its range-failure tests. The individual helpers remain available
+for those inputs and for native record formats such as WARC.
+
+For a ranged backend, `byte_accessor::assert_ranged_read_contract` combines exact
+single/bulk ranges and sequential-cursor preservation with independent-reader
+ownership, stable metadata and EOF checks. Pass fixture-appropriate ranges; include
+duplicates and empty ranges when useful. Filesystem, Zenodo and Internet Archive
+use this runner. Sequential accessors use `assert_read_contract` directly.
+
+For providers with one metadata response, `http::assert_resolution_cases` accepts
+the calling manifest directory, fixture directory, metadata route, a table of
+`(fixture_filename, HTTP_status, expected_error_kind)`, and an async resolver taking
+an owned endpoint. Each case gets an isolated `HttpFixture`, loads its committed
+response bytes, and requires exactly one metadata request and the expected error.
+No attachment routes are installed, so premature downloads fail the test. See the
+Zenodo and Internet Archive suites. Keep provider-specific expected values, URL
+assertions, successful empty memberships and authentication/pagination cases local.
+
 ## Byte accessor contracts
 
 `byte_accessor::assert_read_contract(accessor, request, expected)` opens two

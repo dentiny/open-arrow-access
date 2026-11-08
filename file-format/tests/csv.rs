@@ -104,39 +104,30 @@ async fn tsv_handles_utf8_and_configured_header_without_a_final_newline() {
 }
 
 #[tokio::test]
-async fn projection_preserves_requested_order_metadata_and_zero_column_rows() {
-    let accessor = CsvAccessor::new(
-        MemoryAccessor::new(&fixture!("csv", "good_no_header.csv").await, 4),
-        schema(),
-    );
-    let batches = format::assert_projection(
-        &accessor,
-        ReadRequest::new("data.csv").with_options(options(2, Some(vec!["title", "id"]))),
-        &schema(),
-        3,
+async fn fixed_schema_contract_preserves_projection_and_source_failures() {
+    let input = fixture!("csv", "good_no_header.csv").await;
+    let batches = format::assert_fixed_schema_contract(
+        |bytes| CsvAccessor::new(bytes, schema()),
+        format::FormatCase {
+            bytes: &input,
+            request: ReadRequest::new("data.csv")
+                .with_options(options(2, Some(vec!["title", "id"])))
+                .with_byte_options(ByteReadOptions {
+                    io_concurrency: NonZeroUsize::new(3).unwrap(),
+                    io_chunk_size: NonZeroUsize::new(7),
+                }),
+            schema: schema(),
+            rows: 3,
+            fault_offsets: &[0, 6],
+        },
     )
     .await;
     assert_eq!(collect_values::<Int64Type>(&batches, 1), [1, 2, 3]);
-    format::assert_projection(
-        &accessor,
-        ReadRequest::new("data.csv").with_options(options(2, Some(vec![]))),
-        &schema(),
-        3,
-    )
-    .await;
 }
 
 #[tokio::test]
-async fn projection_and_input_schema_errors_are_rejected_before_opening() {
+async fn empty_input_schema_is_rejected_before_opening() {
     let bytes = MemoryAccessor::new(&fixture!("csv", "good_no_header.csv").await, 10);
-    let accessor = CsvAccessor::new(bytes.clone(), schema());
-    format::assert_invalid_projection_before_open(
-        &accessor,
-        ReadRequest::new("data.csv"),
-        &schema(),
-        &bytes.observations,
-    )
-    .await;
     let empty = CsvAccessor::new(bytes.clone(), Arc::new(Schema::empty()));
     assert_eq!(
         empty
@@ -229,22 +220,6 @@ async fn invalid_data_errors_are_terminal() {
             assert!(std::error::Error::source(&error).is_some());
         }
     }
-}
-
-#[tokio::test]
-async fn csv_preserves_source_error_categories_and_stops_polling() {
-    format::assert_error_contract(
-        |bytes| CsvAccessor::new(bytes, schema()),
-        &fixture!("csv", "good_no_header.csv").await,
-        ReadRequest::new("good_no_header.csv")
-            .with_options(options(1, None))
-            .with_byte_options(ByteReadOptions {
-                io_concurrency: NonZeroUsize::new(3).unwrap(),
-                io_chunk_size: NonZeroUsize::new(7),
-            }),
-        &[0, 6],
-    )
-    .await;
 }
 
 #[tokio::test]
