@@ -186,7 +186,7 @@ for TSV.
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema; WARC parser records with Arrow conversion deferred |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Hugging Face repository bytes and Parquet datasets; Common Crawl source identity, mirror origin and HTTP configuration |
+| `service/` | Hugging Face repository bytes and Parquet datasets; PMC article metadata with nullable content URLs; Common Crawl source identity and HTTP configuration |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
@@ -197,6 +197,12 @@ pages through the Parquet dependency. External gzip, LZ4, bzip2, and Zstandard d
 enabled by `decompression-gzip`, `decompression-lz4`, `decompression-bz2`, and `decompression-zstd`; see [streaming decompression](decompression/README.md).
 It produces sequential bytes and cannot directly satisfy Parquet's range reads.
 Parallel reads and unordered emission are not implemented.
+
+Enable `service-pmc` for `service::pmc::PmcAccessor`. Open one article-version
+metadata JSON with `ReadRequest`; every valid object yields one row, including
+articles without a PDF URL. Upstream field names, flags, content URLs, and raw
+JSON are preserved. Content objects are never opened. Inventory enumeration is
+a separate service; see the [service guide](service/README.md).
 
 Enable `dataset-directory` for `DirectoryAccessor` and `FileSetAccessor`. Directory
 selection uses a supplied byte accessor for discovery and a supplied format

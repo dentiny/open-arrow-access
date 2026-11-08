@@ -1875,6 +1875,7 @@ dependencies = [
  "opendal-service-http",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "url",
 ]

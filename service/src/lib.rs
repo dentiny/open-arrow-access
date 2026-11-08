@@ -8,3 +8,6 @@ pub mod commoncrawl;
 
 #[cfg(feature = "warc")]
 pub mod warc;
+
+#[cfg(feature = "pmc")]
+pub mod pmc;
