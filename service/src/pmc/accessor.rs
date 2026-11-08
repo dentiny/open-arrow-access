@@ -1,11 +1,13 @@
-use super::{PmcLimits, capability, reader::create_reader, schema};
-use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Capability, ReadRequest, RecordMetadata, RecordReader,
-    Result, async_trait,
-};
 use std::sync::Arc;
 
-/// Read one article-version JSON object. Discovery and content retrieval are separate.
+use open_arrow_access_core::{
+    Accessor, ByteReadRequest, ByteReader, Capability, DocumentAccessor, DocumentDecoder,
+    ReadRequest, RecordBatch, RecordReader, Result, SchemaRef, async_trait,
+};
+
+use super::{PmcLimits, metadata, schema};
+
+/// Read one article-version JSON object; content URLs remain metadata.
 pub struct PmcAccessor<A> {
     inner: Arc<A>,
     limits: PmcLimits,
@@ -30,27 +32,46 @@ impl<A> PmcAccessor<A> {
         self
     }
 }
+
+struct PmcDecoder;
+
 #[async_trait]
-impl<A> Accessor for PmcAccessor<A>
-where
-    A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,
+impl DocumentDecoder for PmcDecoder {
+    type Request = ReadRequest;
+    fn prepare(&self, _: &ReadRequest) -> Result<SchemaRef> {
+        Ok(schema())
+    }
+    async fn decode(
+        &self,
+        bytes: &[u8],
+        request: ReadRequest,
+        schema: SchemaRef,
+    ) -> Result<RecordBatch> {
+        metadata::decode_batch(bytes, request.object.locator(), schema)
+    }
+}
+
+#[async_trait]
+impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> Accessor
+    for PmcAccessor<A>
 {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
     fn capability(&self) -> Capability {
-        capability(self.inner.capability().read)
+        Capability {
+            read: self.inner.capability().read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        let (schema, _) = request.options.resolve_projection(&schema())?;
-        let metadata = RecordMetadata {
-            schema,
-            source: Some(request.object.clone()),
-        };
-        Ok(Box::new(create_reader(
+        DocumentAccessor::new(
             self.inner.clone(),
-            request,
-            self.limits,
-            metadata,
-        )))
+            PmcDecoder,
+            self.limits.metadata_bytes.get(),
+        )
+        .open(request)
+        .await
     }
 }

@@ -3,13 +3,12 @@
 
 mod accessor;
 mod metadata;
-mod reader;
 mod validation;
 
 pub use accessor::PmcAccessor;
 
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use open_arrow_access_core::{Capability, Error, ErrorKind};
+use open_arrow_access_core::{Error, ErrorKind};
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
@@ -61,12 +60,6 @@ pub fn schema() -> SchemaRef {
             ))
         })
         .clone()
-}
-fn capability(read: bool) -> Capability {
-    Capability {
-        read,
-        ..Capability::default()
-    }
 }
 fn decode(message: impl Into<String>) -> Error {
     Error::new(ErrorKind::Decode, "read_pmc", message)
