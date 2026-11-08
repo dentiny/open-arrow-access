@@ -52,8 +52,6 @@ pub struct ArxivArchive {
     pub sequence: u32,
     pub size: u64,
     pub num_items: u64,
-    pub first_item: String,
-    pub last_item: String,
     pub checksum: String,
 }
 

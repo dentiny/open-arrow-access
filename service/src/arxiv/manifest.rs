@@ -70,8 +70,6 @@ pub(super) fn parse_manifest(
             sequence: file.seq_num,
             size: file.size,
             num_items: file.num_items,
-            first_item: file.first_item,
-            last_item: file.last_item,
             checksum: file.md5sum,
         };
         validate_archive(&archive)?;
@@ -107,7 +105,5 @@ struct ManifestFile {
     seq_num: u32,
     size: u64,
     num_items: u64,
-    first_item: String,
-    last_item: String,
     md5sum: String,
 }

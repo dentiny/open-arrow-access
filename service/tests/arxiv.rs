@@ -25,7 +25,6 @@ async fn resolves_manifest_order_and_reads_selected_pdf_without_other_bodies() {
         archives.iter().map(|a| a.sequence).collect::<Vec<_>>(),
         vec![3, 1]
     );
-    assert_eq!(archives[1].first_item, "2410.00001");
     let archive = service
         .archive(&archives[1], ByteReadOptions::default())
         .await
@@ -44,6 +43,7 @@ async fn resolves_manifest_order_and_reads_selected_pdf_without_other_bodies() {
 #[tokio::test]
 async fn supports_source_manifests_and_empty_month_selection() {
     let service = service();
+    // The source fixture omits first/last item metadata; PDF fixtures retain it.
     let source = service
         .manifest(ArxivKind::Source, None, ByteReadOptions::default())
         .await
