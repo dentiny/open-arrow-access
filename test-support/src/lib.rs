@@ -48,6 +48,7 @@ pub struct MemoryAccessor {
     listing: bool,
     version: Option<String>,
     fault: Option<Fault>,
+    open_failure: Option<ErrorKind>,
     range_failure: Option<(usize, ErrorKind)>,
     short_ranges: bool,
     known_length: bool,
@@ -64,6 +65,7 @@ impl MemoryAccessor {
             listing: false,
             version: None,
             fault: None,
+            open_failure: None,
             range_failure: None,
             short_ranges: false,
             known_length: true,
@@ -104,6 +106,12 @@ impl MemoryAccessor {
         self
     }
 
+    /// Fail every open after recording its request, without creating or polling a reader.
+    pub fn with_open_failure(mut self, kind: ErrorKind) -> Self {
+        self.open_failure = Some(kind);
+        self
+    }
+
     /// Fail the next sequential read at or beyond this byte offset, including EOF.
     /// Each opened reader injects its own failure and then terminates.
     pub fn with_failure(mut self, offset: usize, kind: ErrorKind) -> Self {
@@ -139,6 +147,16 @@ impl Accessor for MemoryAccessor {
             .lock()
             .unwrap()
             .push(request.clone());
+        if let Some(kind) = self.open_failure {
+            return Err(
+                Error::new(kind, "memory_open", "injected open failure").with_source(
+                    std::io::Error::new(
+                        std::io::ErrorKind::ConnectionReset,
+                        "injected open failure",
+                    ),
+                ),
+            );
+        }
         Ok(Box::new(MemoryReader {
             data: self.data.clone(),
             chunk_size: self.chunk_size,
