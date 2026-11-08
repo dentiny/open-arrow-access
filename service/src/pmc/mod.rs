@@ -1,13 +1,13 @@
 //! One article-version JSON object per row; content URLs are not fetched.
 
 mod accessor;
+mod error;
 mod metadata;
 mod validation;
 
 pub use accessor::PmcAccessor;
 
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use open_arrow_access_core::{Error, ErrorKind};
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
@@ -61,7 +61,4 @@ pub fn schema() -> SchemaRef {
             ))
         })
         .clone()
-}
-fn decode(message: impl Into<String>) -> Error {
-    Error::new(ErrorKind::Decode, "read_pmc", message)
 }
