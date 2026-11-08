@@ -1,4 +1,4 @@
-//! Read a caller-selected PMC inventory snapshot, without opening article objects.
+//! Read one PMC inventory snapshot without fetching articles.
 mod accessor;
 mod manifest;
 mod reader;

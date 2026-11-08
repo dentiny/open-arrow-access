@@ -6,7 +6,7 @@ use open_arrow_access_core::{
 };
 use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 
-/// Enumerate the gzip CSV shards named by one explicit inventory manifest.
+/// Read the gzip CSV shards listed in an inventory manifest.
 pub struct PmcInventoryAccessor<A> {
     inner: Arc<A>,
     manifest_limit: NonZeroUsize,

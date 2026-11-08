@@ -81,7 +81,7 @@ impl InventoryTransform {
                 }
             })
             .collect();
-        // Reuse the output schema, including the potentially large raw manifest.
+        // Avoid copying raw manifest metadata per batch.
         RecordBatch::try_new_with_options(
             self.schema.clone(),
             columns,
