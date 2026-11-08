@@ -558,8 +558,8 @@ Enable `service-pmc` to read a caller-selected inventory manifest with
 `service::pmc_inventory::PmcInventoryAccessor` and a standard `ReadRequest`.
 It streams the declared gzip CSV shards in order, preserves upstream columns
 and snapshot identity without adding columns. It does not list the
-bucket or open article JSON/content. Article metadata decoding is a separate,
-independently enabled service. See the [service guide](service/README.md).
+bucket or open article JSON/content. See the [service guide](service/README.md).
+
 ## Common Crawl configuration
 
 Enable `service-warc` for `service::CommonCrawl` and
