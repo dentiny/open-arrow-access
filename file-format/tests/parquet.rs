@@ -1,4 +1,7 @@
-use open_arrow_access_file_format::{FileAccessor, ParquetAccessor, ParquetFormat};
+use open_arrow_access_file_format::{
+    FileAccessor,
+    parquet::{ParquetAccessor, ParquetFormat},
+};
 use open_arrow_access_storage::OpenDalAccessor;
 #[path = "parquet/support.rs"]
 mod support;

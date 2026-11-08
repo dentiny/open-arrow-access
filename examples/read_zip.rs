@@ -2,7 +2,7 @@ use std::num::NonZeroUsize;
 
 use open_arrow_access::{
     Accessor, ByteReadRequest,
-    decompression::{ZipArchive, ZipLimits},
+    decompression::zip::{ZipArchive, ZipLimits},
     storage::{OpenDalAccessor, opendal},
 };
 

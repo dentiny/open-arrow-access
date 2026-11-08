@@ -1,6 +1,6 @@
 use open_arrow_access::{
     Accessor,
-    file_format::XmlAccessor,
+    file_format::xml::XmlAccessor,
     storage::{OpenDalAccessor, opendal},
 };
 

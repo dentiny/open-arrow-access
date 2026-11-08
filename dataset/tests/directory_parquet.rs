@@ -18,8 +18,8 @@ mod filesystem {
         open_arrow_access_test_support::record::collect_column::<Int64Type>(reader, 0).await
     }
     use more_asserts::assert_le;
-    use open_arrow_access_dataset::{DirectoryAccessor, DirectoryRequest};
-    use open_arrow_access_file_format::ParquetAccessor;
+    use open_arrow_access_dataset::directory::{DirectoryAccessor, DirectoryRequest};
+    use open_arrow_access_file_format::parquet::ParquetAccessor;
     use open_arrow_access_storage::OpenDalAccessor;
     fn copy_fixture(name: &str, destination: &std::path::Path) {
         let source = open_arrow_access_test_support::fixture_path!("parquet/directory", name);

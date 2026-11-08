@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
 use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, Result};
-use open_arrow_access_decompression::{DecompressionLayer, Zstd};
+use open_arrow_access_decompression::{DecompressionLayer, zstd::Zstd};
 
 use open_arrow_access_test_support::{MemoryAccessor, byte_layer, fixture};
 

@@ -3,7 +3,7 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, Capability, ReadRequest, RecordReader, Result,
     async_trait,
 };
-use open_arrow_access_dataset::{FileSetAccessor, FileSetRequest};
+use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
 
 /// Read a crawl's WARC files in manifest order.
 /// `manifests` supplies decoded paths; `format` supplies Arrow batches.

@@ -13,7 +13,7 @@ select a decoder.
 ```rust,no_run
 use open_arrow_access::{
     Accessor, AccessorExt, ByteReadRequest,
-    decompression::{DecompressionLayer, Gzip}, storage::{OpenDalAccessor, opendal},
+    decompression::{DecompressionLayer, gzip::Gzip}, storage::{OpenDalAccessor, opendal},
 };
 
 async fn read() -> Result<(), Box<dyn std::error::Error>> {
@@ -126,7 +126,7 @@ instead of concatenating files through `DecompressionLayer`.
 
 ```rust,no_run
 use open_arrow_access::{
-    Accessor, ByteReadRequest, decompression::ZipAccessor,
+    Accessor, ByteReadRequest, decompression::zip::ZipAccessor,
     storage::{OpenDalAccessor, opendal},
 };
 
