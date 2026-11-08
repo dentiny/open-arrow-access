@@ -352,3 +352,6 @@ pub async fn collect_bytes(reader: &mut dyn ByteReader) -> Result<Vec<u8>> {
     }
     Ok(output)
 }
+
+/// HTTP route fixtures with isolated hosts and request observations.
+pub mod http;

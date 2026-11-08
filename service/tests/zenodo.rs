@@ -1,98 +1,41 @@
-use std::{
-    num::{NonZeroU64, NonZeroUsize},
-    sync::{
-        Once,
-        atomic::{AtomicUsize, Ordering},
-    },
-};
+use std::num::{NonZeroU64, NonZeroUsize};
 
-use futures::{TryStreamExt, stream};
-use http::{Request, Response, StatusCode};
+use futures::TryStreamExt;
+use http::StatusCode;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, ErrorKind, ListRequest,
 };
 use open_arrow_access_service::zenodo::ZenodoService;
-use open_arrow_access_test_support::{collect_bytes, fixture};
-use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter};
+use open_arrow_access_test_support::{collect_bytes, fixture, http::HttpFixture};
 
 const ID: NonZeroU64 = NonZeroU64::new(3551612).unwrap();
-static FILE_READS: AtomicUsize = AtomicUsize::new(0);
-static METADATA_READS: AtomicUsize = AtomicUsize::new(0);
-struct Transport;
-impl HttpTransport for Transport {
-    async fn fetch(&self, request: Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
-        let host = request.uri().host().unwrap();
-        if request.uri().path() == "/api/records/3551612" {
-            METADATA_READS.fetch_add(1, Ordering::SeqCst);
-            let status = match host {
-                "forbidden.invalid" => StatusCode::FORBIDDEN,
-                "missing.invalid" => StatusCode::NOT_FOUND,
-                "limited.invalid" => StatusCode::TOO_MANY_REQUESTS,
-                _ => StatusCode::OK,
-            };
-            let name = host.strip_suffix(".invalid").unwrap();
-            let name = match name {
-                "forbidden" | "missing" | "limited" => "empty",
-                other => other,
-            };
-            return Ok(response(
-                status,
-                Bytes::from(fixture!("zenodo", &format!("{name}.json")).await),
-            ));
-        }
-        FILE_READS.fetch_add(1, Ordering::SeqCst);
-        assert_eq!(
-            request.uri().path(),
-            "/api/records/3551612/files/paper%20%231%25.pdf/content"
-        );
-        let data = Bytes::from(fixture!("zenodo", "attachment.bin").await);
-        if request.method() == "HEAD" {
-            return Ok(response(StatusCode::OK, data));
-        }
-        let range = request.headers()["range"]
-            .to_str()
-            .unwrap()
-            .strip_prefix("bytes=")
-            .unwrap();
-        let (start, end) = range.split_once('-').unwrap();
-        let start: usize = start.parse().unwrap();
-        let end = if end.is_empty() {
-            data.len()
-        } else {
-            end.parse::<usize>().unwrap() + 1
-        };
-        let mut result = response(StatusCode::PARTIAL_CONTENT, data.slice(start..end));
-        result.headers_mut().insert(
-            "content-range",
-            format!("bytes {start}-{}/{}", end - 1, data.len())
-                .parse()
-                .unwrap(),
-        );
-        Ok(result)
-    }
-}
-fn response(status: StatusCode, data: Bytes) -> Response<HttpBody> {
-    let len = data.len() as u64;
-    Response::builder()
-        .status(status)
-        .header("content-length", len)
-        .body(HttpBody::new(
-            stream::iter(Buffer::from(data).chunks(3).map(Ok)),
-            Some(len),
-        ))
-        .unwrap()
-}
-fn service(name: &str) -> ZenodoService {
-    static INSTALL: Once = Once::new();
-    INSTALL.call_once(|| HttpTransporter::install_default(Transport));
-    ZenodoService::with_endpoint(&format!("https://{name}.invalid")).unwrap()
+
+async fn fixture_service(name: &str) -> (HttpFixture, ZenodoService) {
+    let fixture = HttpFixture::new();
+    let (name, status) = match name {
+        "forbidden" => ("empty", StatusCode::FORBIDDEN),
+        "missing" => ("empty", StatusCode::NOT_FOUND),
+        "limited" => ("empty", StatusCode::TOO_MANY_REQUESTS),
+        name => (name, StatusCode::OK),
+    };
+    fixture.respond(
+        "/api/records/3551612",
+        status,
+        Bytes::from(fixture!("zenodo", &format!("{name}.json")).await),
+    );
+    fixture.file(
+        "/api/records/3551612/files/paper%20%231%25.pdf/content",
+        Bytes::from(fixture!("zenodo", "attachment.bin").await),
+    );
+    let service = ZenodoService::with_endpoint(fixture.endpoint()).unwrap();
+    (fixture, service)
 }
 
 #[tokio::test]
 async fn record_membership_and_lazy_independent_file_reads() {
-    // Other tests only fetch metadata, so these observations isolate attachment I/O.
-    let accessor = service("record").record(ID).await.unwrap();
-    assert_eq!(FILE_READS.load(Ordering::SeqCst), 0);
+    let (fixture, service) = fixture_service("record").await;
+    let accessor = service.record(ID).await.unwrap();
+    assert_eq!(fixture.requests().len(), 1);
     assert_eq!(accessor.id(), ID);
     assert_eq!(accessor.files()[0].size, 8);
     assert_eq!(accessor.files()[0].checksum, "md5:fixture");
@@ -140,14 +83,16 @@ async fn rejects_invalid_metadata_and_bounded_responses() {
         "duplicate",
         "traversal",
     ] {
+        let (_fixture, service) = fixture_service(name).await;
         assert_eq!(
-            service(name).record(ID).await.err().unwrap().kind(),
+            service.record(ID).await.err().unwrap().kind(),
             ErrorKind::Decode,
             "{name}"
         );
     }
+    let (_fixture, service) = fixture_service("record").await;
     assert_eq!(
-        service("record")
+        service
             .with_metadata_limit(8)
             .record(ID)
             .await
@@ -156,14 +101,8 @@ async fn rejects_invalid_metadata_and_bounded_responses() {
             .kind(),
         ErrorKind::Unsupported
     );
-    assert!(
-        service("empty")
-            .record(ID)
-            .await
-            .unwrap()
-            .files()
-            .is_empty()
-    );
+    let (_fixture, service) = fixture_service("empty").await;
+    assert!(service.record(ID).await.unwrap().files().is_empty());
 }
 
 #[tokio::test]
@@ -173,7 +112,8 @@ async fn maps_http_errors() {
         ("missing", ErrorKind::NotFound),
         ("limited", ErrorKind::Io),
     ] {
-        assert_eq!(service(name).record(ID).await.err().unwrap().kind(), kind);
+        let (_fixture, service) = fixture_service(name).await;
+        assert_eq!(service.record(ID).await.err().unwrap().kind(), kind);
     }
 }
 
