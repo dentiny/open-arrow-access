@@ -14,48 +14,124 @@ use xml_arrow::{ReaderOptions, XmlReader};
 
 use super::{decode, decode_source};
 
-/// Use the XML engine behind XmlAccessor; validate all metadata before projection.
-pub(super) async fn parse(raw: &[u8]) -> Result<RecordBatch> {
-    let mut reader = XmlReader::new(
-        Cursor::new(raw),
-        super::mapping(),
-        "/r:RDF",
-        ReaderOptions {
-            // DocumentAccessor already bounds the input. Accept larger caller-
-            // configured documents without imposing XML's default batch limit.
-            max_record_bytes: usize::MAX - 1,
-            max_batch_bytes: usize::MAX,
-            max_depth: 65534,
-            ..Default::default()
-        },
-    )
-    .map_err(decode_source)?;
-    let batch = reader
-        .next_batch()
-        .await
-        .map_err(decode_source)?
-        .ok_or_else(|| decode("expected an RDF document containing one ebook"))?;
-    if batch.num_rows() != 1 || reader.next_batch().await.map_err(decode_source)?.is_some() {
-        return Err(decode("expected one RDF document"));
-    }
-    let schema = super::schema();
-    let book = RecordBatchBuilder::build_row(schema.clone(), schema.clone(), |row| {
-        row.append("metadata_rdf", raw)?;
-        append_fields(row, schema.fields(), batch.column(0).as_struct(), 0)
-    })?;
-    let mut seen = HashSet::new();
-    for uri in files(&book)
-        .column_by_name("uri")
-        .unwrap()
-        .as_string::<i32>()
-        .iter()
-        .flatten()
-    {
-        if uri.is_empty() || !seen.insert(uri) {
-            return Err(decode("missing or duplicate file URI in RDF"));
+/// Validated book metadata, stored directly in Arrow arrays.
+pub(super) struct BookMetadata {
+    batch: RecordBatch,
+}
+
+impl BookMetadata {
+    /// Use the XML engine behind XmlAccessor; validate all metadata before projection.
+    pub(super) async fn parse(raw: &[u8]) -> Result<Self> {
+        let mut reader = XmlReader::new(
+            Cursor::new(raw),
+            super::mapping(),
+            "/r:RDF",
+            ReaderOptions {
+                // DocumentAccessor already bounds the input. Accept larger caller-
+                // configured documents without imposing XML's default batch limit.
+                max_record_bytes: usize::MAX - 1,
+                max_batch_bytes: usize::MAX,
+                max_depth: 65534,
+                ..Default::default()
+            },
+        )
+        .map_err(decode_source)?;
+        let batch = reader
+            .next_batch()
+            .await
+            .map_err(decode_source)?
+            .ok_or_else(|| decode("expected an RDF document containing one ebook"))?;
+        if batch.num_rows() != 1 || reader.next_batch().await.map_err(decode_source)?.is_some() {
+            return Err(decode("expected one RDF document"));
         }
+        let schema = super::schema();
+        let book = Self {
+            batch: RecordBatchBuilder::build_row(schema.clone(), schema.clone(), |row| {
+                row.append("metadata_rdf", raw)?;
+                append_fields(row, schema.fields(), batch.column(0).as_struct(), 0)
+            })?,
+        };
+        let mut seen = HashSet::new();
+        for uri in book
+            .files()
+            .column_by_name("uri")
+            .unwrap()
+            .as_string::<i32>()
+            .iter()
+            .flatten()
+        {
+            if uri.is_empty() || !seen.insert(uri) {
+                return Err(decode("missing or duplicate file URI in RDF"));
+            }
+        }
+        Ok(book)
     }
-    Ok(book)
+
+    fn files(&self) -> &StructArray {
+        self.batch
+            .column_by_name("files")
+            .unwrap()
+            .as_list::<i64>()
+            .values()
+            .as_struct()
+    }
+
+    pub(super) fn file_index(&self, uri: &str) -> Option<usize> {
+        self.files()
+            .column_by_name("uri")
+            .unwrap()
+            .as_string::<i32>()
+            .iter()
+            .position(|candidate| candidate == Some(uri))
+    }
+
+    pub(super) fn into_batch(
+        self,
+        selected: &[(usize, Vec<u8>)],
+        schema: SchemaRef,
+    ) -> Result<RecordBatch> {
+        let mut columns = Vec::new();
+        for field in schema.fields() {
+            let column: ArrayRef = match field.name().as_str() {
+                "files" => {
+                    let indices = UInt64Array::from_iter_values(
+                        selected.iter().map(|(index, _)| *index as u64),
+                    );
+                    let selected_metadata =
+                        take(self.files(), &indices, None).map_err(decode_source)?;
+                    let mut columns = selected_metadata.as_struct().columns().to_vec();
+                    *columns.last_mut().unwrap() = Arc::new(
+                        selected
+                            .iter()
+                            .map(|(_, data)| Some(data.as_slice()))
+                            .collect::<LargeBinaryArray>(),
+                    );
+                    let files = StructArray::new(
+                        selected_metadata.as_struct().fields().clone(),
+                        columns,
+                        None,
+                    );
+                    let DataType::LargeList(item) = field.data_type() else {
+                        unreachable!()
+                    };
+                    Arc::new(LargeListArray::new(
+                        item.clone(),
+                        OffsetBuffer::from_lengths([selected.len()]),
+                        Arc::new(files),
+                        None,
+                    ))
+                }
+                name => self.batch.column_by_name(name).unwrap().clone(),
+            };
+            columns.push(column);
+        }
+        RecordBatch::try_new_with_options(
+            schema,
+            columns,
+            &RecordBatchOptions::new().with_row_count(Some(1)),
+        )
+        .map_err(decode_source)
+    }
 }
 
 // The shared XML mapping handles namespaces and containers. Keep Gutenberg's
@@ -115,14 +191,6 @@ fn append_fields(
     Ok(())
 }
 
-pub(super) fn files(book: &RecordBatch) -> &StructArray {
-    book.column_by_name("files")
-        .unwrap()
-        .as_list::<i64>()
-        .values()
-        .as_struct()
-}
-
 fn number<T: std::str::FromStr>(value: Option<&str>, field: &str) -> Result<Option<T>> {
     value
         .map(|value| {
@@ -151,50 +219,4 @@ fn issued(value: &str) -> Result<i32> {
     Ok(date
         .signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())
         .num_days() as i32)
-}
-
-pub(super) fn create_batch(
-    book: &RecordBatch,
-    selected: &[(usize, Vec<u8>)],
-    schema: SchemaRef,
-) -> Result<RecordBatch> {
-    let mut columns = Vec::new();
-    for field in schema.fields() {
-        let column: ArrayRef = match field.name().as_str() {
-            "files" => {
-                let indices =
-                    UInt64Array::from_iter_values(selected.iter().map(|(index, _)| *index as u64));
-                let selected_metadata = take(files(book), &indices, None).map_err(decode_source)?;
-                let mut columns = selected_metadata.as_struct().columns().to_vec();
-                *columns.last_mut().unwrap() = Arc::new(
-                    selected
-                        .iter()
-                        .map(|(_, data)| Some(data.as_slice()))
-                        .collect::<LargeBinaryArray>(),
-                );
-                let files = StructArray::new(
-                    selected_metadata.as_struct().fields().clone(),
-                    columns,
-                    None,
-                );
-                let DataType::LargeList(item) = field.data_type() else {
-                    unreachable!()
-                };
-                Arc::new(LargeListArray::new(
-                    item.clone(),
-                    OffsetBuffer::from_lengths([selected.len()]),
-                    Arc::new(files),
-                    None,
-                ))
-            }
-            name => book.column_by_name(name).unwrap().clone(),
-        };
-        columns.push(column);
-    }
-    RecordBatch::try_new_with_options(
-        schema,
-        columns,
-        &RecordBatchOptions::new().with_row_count(Some(1)),
-    )
-    .map_err(decode_source)
 }

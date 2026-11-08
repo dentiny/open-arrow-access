@@ -8,7 +8,6 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
     Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability, DocumentAccessor,
@@ -16,6 +15,8 @@ use open_arrow_access_core::{
     RecordBatch, RecordReader, Result, SchemaRef, async_trait, read_object,
 };
 use xml_arrow::{NamespaceBinding, XmlField, XmlSchema};
+
+use metadata::BookMetadata;
 
 /// Source byte limits; excludes parser and Arrow allocations.
 #[derive(Clone, Copy, Debug)]
@@ -178,18 +179,13 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
         request: GutenbergRequest,
         schema: SchemaRef,
     ) -> Result<RecordBatch> {
-        let book = metadata::parse(raw).await?;
-        let uris = metadata::files(&book)
-            .column_by_name("uri")
-            .unwrap()
-            .as_string::<i32>();
+        let book = BookMetadata::parse(raw).await?;
         // Validate membership even when projection omits file data.
         let selections = request
             .files
             .iter()
             .map(|selection| {
-                uris.iter()
-                    .position(|uri| uri == Some(selection.uri.as_str()))
+                book.file_index(&selection.uri)
                     .map(|index| (selection, index))
                     .ok_or_else(|| {
                         decode(format!(
@@ -215,12 +211,12 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
                 files.push((file, data));
             }
         }
-        metadata::create_batch(&book, &files, schema)
+        book.into_batch(&files, schema)
     }
 }
 
 // Declare Arrow fields and their XML locations together. The XML engine extracts
-// scalars as strings; metadata::parse converts the types it cannot emit directly.
+// scalars as strings; BookMetadata::parse converts the types it cannot emit directly.
 type Mapping = (Field, XmlField);
 
 fn scalar(name: &str, path: &str, ty: DataType, nullable: bool) -> Mapping {
