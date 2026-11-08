@@ -1,17 +1,17 @@
 //! ZIP directory inspection and selected-entry byte decompression.
 
+mod error;
+
 use std::num::NonZeroUsize;
 
-use async_zip::{
-    base::read1::{ZipOptions, seek::ZipArchiveReader},
-    error::ZipError,
-};
+use async_zip::base::read1::{ZipOptions, seek::ZipArchiveReader};
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind,
     FactoryAccessor, FactoryToken, ReaderFactory, Result, SeekableInput, async_trait,
     into_async_seek,
 };
 
+use self::error::zip_error;
 use crate::{decoded_reader, layer::DEFAULT_CHUNK_SIZE};
 
 const DEFAULT_MAX_ENTRIES: u64 = 65_536;
@@ -248,14 +248,4 @@ async fn open_archive(input: Box<dyn ByteReader>, limits: &ZipLimits) -> Result<
         source,
         len,
     })
-}
-
-fn zip_error(error: ZipError) -> Error {
-    let kind = ErrorKind::from_source(&error).unwrap_or(match error {
-        ZipError::FeatureNotSupported(_)
-        | ZipError::CompressionNotSupported(_)
-        | ZipError::TargetZip64NotSupported => ErrorKind::Unsupported,
-        _ => ErrorKind::Decode,
-    });
-    Error::new(kind, "read_zip", "ZIP archive operation failed").with_source(error)
 }
