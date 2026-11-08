@@ -88,6 +88,9 @@ read-ahead/drop behavior and format-specific scenarios in the owning tests.
 
 ## Ranged sources
 
+`with_open_failure(kind)` records the attempted request and fails before creating
+a reader. Format error contracts exercise this alongside sequential faults.
+
 `with_ranges` enables exact reads. `observations.range_reads` and `ranges` record
 all range calls, including failures. `with_range_failure(after, kind)` injects
 an error after `after` successful calls independently for each opened reader;
