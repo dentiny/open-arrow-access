@@ -3,14 +3,12 @@
 mod error;
 mod validation;
 
-use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectStream,
-    Result, async_trait,
-};
+use open_arrow_access_core::Result;
 use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
 use serde::Deserialize;
 use url::Url;
 
+use crate::ResolvedFileSet;
 use crate::http_client::{HttpClient, validation::validate_origin};
 use error::membership_error;
 use validation::{validate_dataset, validate_request};
@@ -82,12 +80,14 @@ impl DataverseService {
                 .collect(),
         )
         .map_err(membership_error)?;
-        Ok(DataverseAccessor {
-            persistent_id: persistent_id.to_owned(),
-            version: version.to_owned(),
-            files,
+        Ok(ResolvedFileSet::new(
             inner,
-        })
+            DataverseMetadata {
+                persistent_id: persistent_id.to_owned(),
+                version: version.to_owned(),
+                files,
+            },
+        ))
     }
 }
 
@@ -100,44 +100,25 @@ pub struct DataverseFile {
     pub size: u64,
 }
 
+/// A published version's fixed file namespace and metadata.
+pub type DataverseAccessor = ResolvedFileSet<OpenDalAccessor, DataverseMetadata>;
+
 #[derive(Clone, Debug)]
-pub struct DataverseAccessor {
-    persistent_id: String,
-    version: String,
-    files: Vec<DataverseFile>,
-    inner: NamedFileAccessor<OpenDalAccessor>,
+pub struct DataverseMetadata {
+    pub persistent_id: String,
+    pub version: String,
+    pub files: Vec<DataverseFile>,
 }
 
 impl DataverseAccessor {
     pub fn persistent_id(&self) -> &str {
-        &self.persistent_id
+        &self.metadata().persistent_id
     }
     pub fn version(&self) -> &str {
-        &self.version
+        &self.metadata().version
     }
     pub fn files(&self) -> &[DataverseFile] {
-        &self.files
-    }
-}
-
-#[async_trait]
-impl Accessor for DataverseAccessor {
-    type Request = ByteReadRequest;
-    type Reader = dyn ByteReader;
-    fn capability(&self) -> Capability {
-        self.inner.capability()
-    }
-    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        self.inner.open(request).await
-    }
-}
-
-#[async_trait]
-impl ByteAccessor for DataverseAccessor {
-    /// List the empty root to obtain all logical names, including folder paths,
-    /// in API order. Names are opaque; both recursion settings return this list.
-    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        self.inner.list(request).await
+        &self.metadata().files
     }
 }
 

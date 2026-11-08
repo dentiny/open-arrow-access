@@ -15,7 +15,7 @@ provider metadata. New providers resolve and validate membership, build the
 logical-name-to-object mapping, and return this shared accessor instead of
 implementing `open`, `list`, and capabilities again. `metadata()` borrows the
 provider metadata; readers own their state independently of the resolved set.
-Zenodo and Internet Archive use provider-specific type aliases and retain their
+Zenodo, Internet Archive, and Dataverse use provider-specific type aliases and retain their
 existing metadata getters.
 
 The [source-attribute proposal](../docs/source-attributes.md) defines provider

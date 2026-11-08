@@ -2,7 +2,7 @@ use futures::TryStreamExt;
 use http::StatusCode;
 use open_arrow_access_core::{Accessor, ByteAccessor, ByteReadRequest, ErrorKind, ListRequest};
 use open_arrow_access_service::dataverse::DataverseService;
-use open_arrow_access_test_support::{collect_bytes, fixture, http::HttpFixture};
+use open_arrow_access_test_support::{byte_accessor, collect_bytes, fixture, http::HttpFixture};
 
 const PID: &str = "doi:10.7910/DVN/A&B+";
 const METADATA: &str = "/api/v1/datasets/:persistentId/versions/1.0?persistentId=doi%3A10.7910%2FDVN%2FA%26B%2B&excludeFiles=false&excludeMetadataBlocks=true";
@@ -59,8 +59,13 @@ async fn pins_membership_preserves_logical_names_and_reads_original_bytes() {
         .unwrap();
     assert_eq!(reader.read_range(1..4).await.unwrap().as_ref(), b"PDF");
     let mut tabular = dataset.open("table.tab".into()).await.unwrap();
-    drop(dataset);
-    assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"%PDFdata");
+    byte_accessor::assert_read_contract(
+        dataset,
+        ByteReadRequest::new("papers/2026/paper #1%.pdf"),
+        b"%PDFdata",
+    )
+    .await
+    .unwrap();
     assert_eq!(collect_bytes(tabular.as_mut()).await.unwrap(), b"ORIGINAL");
     assert!(
         http.requests()
