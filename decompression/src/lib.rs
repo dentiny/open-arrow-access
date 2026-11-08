@@ -6,9 +6,6 @@ mod decoded_reader;
 mod factory;
 mod layer;
 
-#[cfg(feature = "gzip")]
-mod gzip;
-
 pub use accessor::DecompressionAccessor;
 pub use codec::{Codec, CompressedInput, DecodedInput};
 pub use decoded_reader::decoded_reader;
@@ -16,19 +13,13 @@ pub use factory::DecompressionFactory;
 pub use layer::DecompressionLayer;
 
 #[cfg(feature = "gzip")]
-pub use gzip::Gzip;
+pub mod gzip;
 
 #[cfg(feature = "bz2")]
-mod bz2;
-#[cfg(feature = "bz2")]
-pub use bz2::Bzip2;
+pub mod bz2;
 
 #[cfg(feature = "lz4")]
-mod lz4;
-#[cfg(feature = "lz4")]
-pub use lz4::Lz4;
+pub mod lz4;
 
 #[cfg(feature = "zstd")]
-mod zstd;
-#[cfg(feature = "zstd")]
-pub use zstd::Zstd;
+pub mod zstd;

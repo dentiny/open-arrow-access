@@ -5,7 +5,7 @@ use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, ErrorKind, ObjectRef,
     Result,
 };
-use open_arrow_access_decompression::{DecompressionLayer, Gzip};
+use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_test_support::{
     MemoryAccessor, byte_layer, collect_bytes as collect, fixture,
 };

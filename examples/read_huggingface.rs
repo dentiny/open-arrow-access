@@ -1,6 +1,6 @@
 use open_arrow_access::{
     ReadOptions,
-    service::{HuggingFaceDatasetRequest, HuggingFaceOptions, HuggingFaceService},
+    service::huggingface::{HuggingFaceDatasetRequest, HuggingFaceOptions, HuggingFaceService},
 };
 
 #[tokio::main]

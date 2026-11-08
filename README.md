@@ -19,7 +19,7 @@ cargo run --example read_parquet --features format-parquet -- /absolute/data/roo
 ```rust,no_run
 use open_arrow_access::{
     Accessor, ReadRequest,
-    file_format::ParquetAccessor,
+    file_format::parquet::ParquetAccessor,
     storage::{OpenDalAccessor, opendal},
 };
 
@@ -121,7 +121,7 @@ accessor composes with existing format readers. Floating revisions are not snaps
 Use the same service for a complete Parquet dataset:
 
 ```rust,no_run
-use open_arrow_access::{Result, service::{HuggingFaceService, HuggingFaceOptions, HuggingFaceDatasetRequest}};
+use open_arrow_access::{Result, service::huggingface::{HuggingFaceService, HuggingFaceOptions, HuggingFaceDatasetRequest}};
 
 async fn read() -> Result<()> {
     let service = HuggingFaceService::new(HuggingFaceOptions::default()).await?;
@@ -150,7 +150,7 @@ cargo run --example read_huggingface --features service-huggingface -- lhoestq/d
 
 ## JSON and JSONL
 
-Enable `format-json` and construct `file_format::JsonAccessor::new(bytes, schema)`
+Enable `format-json` and construct `file_format::json::JsonAccessor::new(bytes, schema)`
 with a fixed `SchemaRef`, then open it with the same `ReadRequest` used for
 Parquet. `bytes` can be any sequential byte accessor; range reads and a known
 length are unnecessary. Use `format-json` and enable OpenDAL's
@@ -190,6 +190,11 @@ for TSV.
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
+
+Feature-specific APIs live in public modules, such as
+`file_format::parquet::ParquetAccessor`, `decompression::gzip::Gzip`, and
+`dataset::file_set::FileSetAccessor`. The facade forwards the component crates,
+so these paths match their standalone crate APIs.
 
 Default features are empty. Only implemented capabilities have Cargo feature
 names. Parquet page compression currently supports uncompressed and Snappy
@@ -340,7 +345,7 @@ The output schema is inferred automatically:
 ```rust,no_run
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 use open_arrow_access::{
-    Accessor, ReadRequest, file_format::XmlAccessor,
+    Accessor, ReadRequest, file_format::xml::XmlAccessor,
     storage::{OpenDalAccessor, opendal},
 };
 
@@ -405,7 +410,7 @@ Enable `format-atif` and select the document layout explicitly:
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 use open_arrow_access::{
     Accessor, ReadRequest,
-    file_format::{AtifAccessor, AtifFormat},
+    file_format::atif::{AtifAccessor, AtifFormat},
     storage::{OpenDalAccessor, opendal},
 };
 
@@ -537,7 +542,7 @@ as leading slashes, dot components, and repeated separators are rejected.
 
 ### WARC parser
 
-Enable `format-warc` for `file_format::WarcAccessor`, a thin adapter over the
+Enable `format-warc` for `file_format::warc::WarcAccessor`, a thin adapter over the
 published `warc-rs` parser. It accepts `ByteReadRequest` and returns one owned
 `WarcRecord` per `next()` call, preserving physical record order, record types,
 headers and binary bodies. Reader metadata is the input `ObjectRef`.
@@ -562,9 +567,9 @@ bucket or open article JSON/content. See the [service guide](service/README.md).
 
 ## Common Crawl configuration
 
-Enable `service-warc` for `service::CommonCrawl` and
-`service::create_http_accessor`. A source identifies a crawl release and optional
-mirror origin. HTTP configuration is lazy; gzip and record decoding are composed
+Enable `service-warc` for `service::commoncrawl::CommonCrawl` and
+`service::commoncrawl::create_http_accessor`. A source identifies a crawl release
+and optional mirror origin. HTTP configuration is lazy; gzip and record decoding are composed
 explicitly by the caller. The always-available storage facade wraps
 caller-configured SDK operators.
 

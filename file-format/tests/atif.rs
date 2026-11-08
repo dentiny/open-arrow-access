@@ -3,7 +3,7 @@ use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 use arrow_array::{RecordBatch, cast::AsArray};
 use atif_arrow::trajectory_schema;
 use open_arrow_access_core::{Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest};
-use open_arrow_access_file_format::{AtifAccessor, AtifFormat};
+use open_arrow_access_file_format::atif::{AtifAccessor, AtifFormat};
 use open_arrow_access_test_support::{MemoryAccessor, fixture, format};
 
 fn text<'a>(batch: &'a RecordBatch, column: &str, row: usize) -> &'a str {

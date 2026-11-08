@@ -19,7 +19,7 @@ use open_arrow_access_core::{
 /// # Request = open_arrow_access_core::ByteReadRequest,
 /// # Reader = dyn open_arrow_access_core::ByteReader> {
 /// use open_arrow_access_core::{Accessor, ReadRequest};
-/// use open_arrow_access_file_format::{FileAccessor, JsonFormat};
+/// use open_arrow_access_file_format::{FileAccessor, json::JsonFormat};
 ///
 /// let files = FileAccessor::from_format(bytes, JsonFormat::new(schema));
 /// let mut reader = files.open(ReadRequest::new("records.jsonl")).await?;

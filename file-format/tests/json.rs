@@ -15,7 +15,7 @@ use open_arrow_access_core::{
     ErrorKind, ReadOptions, ReadRequest, Reader, RecordBatch, Result, SchemaRef, async_trait,
 };
 
-use open_arrow_access_file_format::JsonAccessor;
+use open_arrow_access_file_format::json::JsonAccessor;
 use open_arrow_access_test_support::{MemoryAccessor, Observations, fixture, fixture_path, format};
 
 fn schema() -> SchemaRef {

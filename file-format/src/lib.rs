@@ -7,33 +7,19 @@ pub use accessor::FileAccessor;
 pub use open_arrow_access_core::ReaderFactory as FileFormat;
 
 #[cfg(feature = "parquet")]
-mod parquet;
-#[cfg(feature = "parquet")]
-pub use parquet::{ParquetAccessor, ParquetFormat};
+pub mod parquet;
 
 #[cfg(feature = "warc")]
-mod warc;
-#[cfg(feature = "warc")]
-pub use warc::{WarcAccessor, WarcFormat, WarcHeader, WarcRecord};
+pub mod warc;
 
 #[cfg(feature = "json")]
-mod json;
-#[cfg(feature = "json")]
-pub use json::{JsonAccessor, JsonFormat};
+pub mod json;
 
 #[cfg(feature = "csv")]
-mod csv;
-#[cfg(feature = "csv")]
-pub use csv::{CsvAccessor, CsvFileFormat, CsvFormat};
+pub mod csv;
 
 #[cfg(feature = "xml")]
-mod xml;
-#[cfg(feature = "xml")]
-pub use xml::{
-    NamespaceBinding, XmlAccessor, XmlField, XmlFormat, XmlInferenceOptions, XmlLimits, XmlSchema,
-};
+pub mod xml;
 
 #[cfg(feature = "atif")]
-mod atif;
-#[cfg(feature = "atif")]
-pub use atif::{AtifAccessor, AtifFormat};
+pub mod atif;

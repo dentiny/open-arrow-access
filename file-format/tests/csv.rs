@@ -9,7 +9,7 @@ use open_arrow_access_core::{
     Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
 };
 
-use open_arrow_access_file_format::{CsvAccessor, CsvFormat};
+use open_arrow_access_file_format::csv::{CsvAccessor, CsvFormat};
 use open_arrow_access_test_support::{
     MemoryAccessor, fixture, fixture_path,
     format::{self, collect_batches as collect},

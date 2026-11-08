@@ -1,6 +1,6 @@
 use open_arrow_access::{
     Accessor, ReadRequest,
-    file_format::{AtifAccessor, AtifFormat},
+    file_format::atif::{AtifAccessor, AtifFormat},
     storage::{OpenDalAccessor, opendal},
 };
 

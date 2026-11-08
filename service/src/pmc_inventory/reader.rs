@@ -6,8 +6,8 @@ use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ObjectRef, ReadRequest, RecordBatch, RecordMetadata,
     RecordReader, Result, SchemaRef, StreamReader, into_stream, project_batch,
 };
-use open_arrow_access_decompression::{DecompressionLayer, Gzip};
-use open_arrow_access_file_format::CsvAccessor;
+use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
+use open_arrow_access_file_format::csv::CsvAccessor;
 
 use super::validation;
 
