@@ -26,3 +26,6 @@ pub mod zenodo;
 
 #[cfg(feature = "http-client")]
 mod http_client;
+
+#[cfg(feature = "internet-archive")]
+pub mod internet_archive;

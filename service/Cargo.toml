@@ -21,6 +21,7 @@ http-client = [
 ]
 http-files = ["http-client", "dep:opendal-service-http", "opendal/services-http"]
 zenodo = ["http-files"]
+internet-archive = ["http-files"]
 courtlistener = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/bz2",
@@ -140,3 +141,7 @@ required-features = ["warc"]
 [[test]]
 name = "zenodo"
 required-features = ["zenodo"]
+
+[[test]]
+name = "internet_archive"
+required-features = ["internet-archive"]
