@@ -85,21 +85,21 @@ async fn resolves_once_and_reads_nested_names_lazily_with_independent_readers() 
 
 #[tokio::test]
 async fn maps_empty_missing_and_unavailable_item_responses() {
-    for (name, kind) in [
-        ("not-found", ErrorKind::NotFound),
-        ("api-error", ErrorKind::Decode),
-        ("dark", ErrorKind::PermissionDenied),
-        ("wrong-id", ErrorKind::Decode),
-        ("missing-files", ErrorKind::Decode),
-        ("duplicate", ErrorKind::Decode),
-        ("traversal", ErrorKind::Decode),
-        ("invalid-size", ErrorKind::Decode),
+    for (filename, kind) in [
+        ("not-found.json", ErrorKind::NotFound),
+        ("api-error.json", ErrorKind::Decode),
+        ("dark.json", ErrorKind::PermissionDenied),
+        ("wrong-id.json", ErrorKind::Decode),
+        ("missing-files.json", ErrorKind::Decode),
+        ("duplicate.json", ErrorKind::Decode),
+        ("traversal.json", ErrorKind::Decode),
+        ("invalid-size.json", ErrorKind::Decode),
     ] {
         let fixture = HttpFixture::new();
         fixture.respond(
             METADATA,
             StatusCode::OK,
-            Bytes::from(fixture!("internet_archive", &format!("{name}.json")).await),
+            Bytes::from(fixture!("internet_archive", filename).await),
         );
         let error = InternetArchiveService::with_endpoint(fixture.endpoint())
             .unwrap()
@@ -107,7 +107,7 @@ async fn maps_empty_missing_and_unavailable_item_responses() {
             .await
             .err()
             .unwrap();
-        assert_eq!(error.kind(), kind, "{name}");
+        assert_eq!(error.kind(), kind, "{filename}");
         assert_eq!(fixture.requests().len(), 1);
     }
     let fixture = HttpFixture::new();
