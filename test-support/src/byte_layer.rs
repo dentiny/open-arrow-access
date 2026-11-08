@@ -21,6 +21,50 @@ pub async fn assert_output(
     Ok(())
 }
 
+/// Read the same representation through caller-selected input fragment sizes.
+/// The factory configures the layer's output chunk size; this helper checks it.
+pub async fn assert_fragmented_output<A>(
+    make_layer: impl Fn(MemoryAccessor) -> A,
+    bytes: &[u8],
+    expected: &[u8],
+    input_chunks: &[usize],
+    max_output_chunk_size: usize,
+) -> Result<()>
+where
+    A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+{
+    assert!(!input_chunks.is_empty());
+    for &chunk_size in input_chunks {
+        let mut reader = make_layer(MemoryAccessor::new(bytes, chunk_size))
+            .open("source".into())
+            .await?;
+        assert_output(reader.as_mut(), expected, max_output_chunk_size).await?;
+    }
+    Ok(())
+}
+
+/// Feed malformed input one byte at a time and require a terminal decode error.
+pub async fn assert_decode_error<A>(
+    make_layer: impl Fn(MemoryAccessor) -> A,
+    bytes: &[u8],
+    operation: &str,
+) -> Result<()>
+where
+    A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+{
+    let input = MemoryAccessor::new(bytes, 1);
+    let observed = input.observations.clone();
+    let mut reader = make_layer(input).open("invalid".into()).await?;
+    assert_terminal_error(
+        reader.as_mut(),
+        &observed.reads,
+        ErrorKind::Decode,
+        operation,
+    )
+    .await;
+    Ok(())
+}
+
 /// Consume a failing reader and verify that subsequent calls do not poll upstream.
 pub async fn assert_terminal_error(
     reader: &mut dyn ByteReader,

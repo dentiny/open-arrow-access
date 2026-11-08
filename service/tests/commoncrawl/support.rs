@@ -1,8 +1,8 @@
 use arrow_array::StringArray;
 use arrow_schema::{DataType, Field};
 use open_arrow_access_core::{
-    Accessor, Capability, Error, ErrorKind, ReadRequest, Reader, RecordBatch, RecordMetadata,
-    RecordReader, Result, Schema, async_trait,
+    Accessor, Capability, Error, ErrorKind, ReadRequest, RecordBatch, RecordMetadata, RecordReader,
+    Result, Schema, StreamReader, async_trait,
 };
 use open_arrow_access_test_support::MemoryAccessor;
 use std::{
@@ -61,36 +61,14 @@ impl Accessor for Records {
                 .collect::<Vec<_>>();
             batch = batch.project(&projection).unwrap();
         }
-        Ok(Box::new(Batches {
-            metadata: RecordMetadata {
-                schema: batch.schema(),
-                source: Some(request.object),
-            },
-            batch: Some(batch),
-        }))
-    }
-}
-struct Batches {
-    metadata: RecordMetadata,
-    batch: Option<RecordBatch>,
-}
-#[async_trait]
-impl Reader for Batches {
-    type Item = RecordBatch;
-    type Metadata = RecordMetadata;
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-    }
-    fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
-    }
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        Ok(self.batch.take())
+        let metadata = RecordMetadata {
+            schema: batch.schema(),
+            source: Some(request.object),
+        };
+        Ok(Box::new(StreamReader::new(
+            futures::stream::iter([Ok(batch)]),
+            metadata,
+        )))
     }
 }
 

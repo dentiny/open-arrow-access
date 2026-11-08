@@ -32,8 +32,12 @@ Use `collect_bytes` to
 consume a reader while asserting nonempty chunks. `byte_layer::assert_error_contract`
 accepts a layer factory, encoded input, expected output, and error operation. It
 checks source categories/causes, terminal reads, and removal of range support
-without depending on a concrete layer crate. `byte_layer::assert_terminal_error`
-also supports individual malformed-input cases.
+without depending on a concrete layer crate. `byte_layer::assert_fragmented_output`
+runs a layer factory over caller-selected input chunk sizes and checks exact,
+bounded output. `byte_layer::assert_decode_error` feeds a malformed fixture one
+byte at a time and checks a decode error, source chain, terminal EOF, and no further
+upstream polls. Keep codec-specific fixture lists and special cases in their tests.
+`byte_layer::assert_terminal_error` also supports individual malformed-input cases.
 
 ## Byte accessor contracts
 
@@ -88,6 +92,9 @@ read-ahead/drop behavior and format-specific scenarios in the owning tests.
 
 ## Ranged sources
 
+`with_open_failure(kind)` records the attempted request and fails before creating
+a reader. Format error contracts exercise this alongside sequential faults.
+
 `with_ranges` enables exact reads. `observations.range_reads` and `ranges` record
 all range calls, including failures. `with_range_failure(after, kind)` injects
 an error after `after` successful calls independently for each opened reader;
@@ -95,3 +102,13 @@ the original I/O cause remains in the source chain. `with_short_ranges` returns
 short payloads deliberately. `without_content_length` exercises consumers which
 require known lengths. These settings do not change the sequential cursor or
 sequential fault injection.
+
+## HTTP fixtures
+
+`http::HttpFixture` isolates hosts and captures methods, paths, and headers for
+provider tests. Static responses and files take precedence over `handle`'s dynamic
+fallback. The fallback receives the original request, including POST bodies;
+provider API validation and pagination stay in the calling fixture.
+`http::response` and `http::file_response` share fragmented responses and file
+HEAD/range behavior. Use `clear_requests()` between phases and
+`CapturedRequest::range()` to inspect captured byte ranges.

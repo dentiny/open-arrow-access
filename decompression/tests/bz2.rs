@@ -1,6 +1,6 @@
 use std::num::NonZeroUsize;
 
-use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, Result};
+use open_arrow_access_core::{Accessor, AccessorExt, Result};
 use open_arrow_access_decompression::{DecompressionLayer, bz2::Bzip2};
 
 use open_arrow_access_test_support::{MemoryAccessor, byte_layer, fixture};
@@ -9,12 +9,18 @@ use open_arrow_access_test_support::{MemoryAccessor, byte_layer, fixture};
 async fn concatenated_members_preserve_order_with_fragmented_input_and_bounded_output() -> Result<()>
 {
     let bytes = fixture!("bz2", "good_members.bz2").await;
-    for chunk_size in [1, 7, bytes.len()] {
-        let accessor = MemoryAccessor::new(&bytes, chunk_size)
-            .layer(DecompressionLayer::new(Bzip2).with_chunk_size(NonZeroUsize::new(3).unwrap()));
-        let mut reader = accessor.open("records.bz2".into()).await?;
-        byte_layer::assert_output(reader.as_mut(), "first\n第二行\n".as_bytes(), 3).await?;
-    }
+    byte_layer::assert_fragmented_output(
+        |input| {
+            input.layer(
+                DecompressionLayer::new(Bzip2).with_chunk_size(NonZeroUsize::new(3).unwrap()),
+            )
+        },
+        &bytes,
+        "first\n第二行\n".as_bytes(),
+        &[1, 7, bytes.len()],
+        3,
+    )
+    .await?;
     let accessor = MemoryAccessor::new(&fixture!("bz2", "empty_member.bz2").await, 1)
         .layer(DecompressionLayer::new(Bzip2));
     let mut reader = accessor.open("empty.bz2".into()).await?;
@@ -34,21 +40,12 @@ async fn invalid_truncated_checksum_and_trailing_input_fail_terminally() -> Resu
         "bad_trailing.bz2",
         "bad_truncated_member.bz2",
     ] {
-        let bytes = fixture!("bz2", name).await;
-        let input = MemoryAccessor::new(&bytes, 1);
-        let observed = input.observations.clone();
-        let mut reader = input
-            .layer(DecompressionLayer::new(Bzip2))
-            .open("bad.bz2".into())
-            .await
-            .unwrap();
-        byte_layer::assert_terminal_error(
-            reader.as_mut(),
-            &observed.reads,
-            ErrorKind::Decode,
+        byte_layer::assert_decode_error(
+            |input| input.layer(DecompressionLayer::new(Bzip2)),
+            &fixture!("bz2", name).await,
             "decompress",
         )
-        .await;
+        .await?;
     }
     Ok(())
 }
