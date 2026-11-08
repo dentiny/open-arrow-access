@@ -71,8 +71,8 @@ keys use their final value for typed columns. Reader metadata records the input
 object as its source; schema metadata records `pmc.row_kind = article_metadata`.
 
 `pmcid` is required and validated, but its source spelling is retained. `version`
-is nullable UInt32 and must be positive when present. Numeric PMIDs become
-Utf8 decimal strings; the raw JSON retains the original numeric representation.
+is nullable UInt32 and must be positive when present. `pmid` is nullable Utf8
+and requires a JSON string.
 `title` and `citation` are LargeUtf8, the four `is_*` fields are nullable Boolean,
 `media_urls` is a nullable List<Utf8>, and the other optional fields are nullable
 Utf8. A missing or null PDF URL is a normal row with a null `pdf_url`. No article
@@ -94,7 +94,7 @@ Known fields are validated even when omitted from the projection. Only selected
 Arrow columns are built directly from the source fields, without serializing or
 decoding an intermediate JSON object. The Arrow schema is the single field/type
 definition: conversion dispatches on its data types, with special rules only for
-PMCID, PMID, and version. There is no intermediate article struct to maintain.
+PMCID and version. There is no intermediate article struct to maintain.
 The JSON file-format feature is not required.
 The row target is an upper bound; this single-object service emits at most one
 batch with one row. It does not fetch an inventory, choose a snapshot, filter
