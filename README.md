@@ -186,7 +186,7 @@ for TSV.
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema; WARC parser records with Arrow conversion deferred |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Hugging Face repository bytes and Parquet datasets; PMC inventory snapshots |
+| `service/` | Hugging Face repository bytes and Parquet datasets; PMC inventory snapshots; Common Crawl source identity and HTTP configuration |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
@@ -554,3 +554,10 @@ It streams the declared gzip CSV shards in order, preserves upstream columns
 and snapshot identity, and adds a decoded `metadata_key`. It does not list the
 bucket or open article JSON/content. Article metadata decoding is a separate,
 independently enabled service. See the [service guide](service/README.md).
+## Common Crawl configuration
+
+Enable `service-commoncrawl` for `service::CommonCrawl` and
+`service::create_http_accessor`. A source identifies a crawl release and optional
+mirror origin. HTTP configuration is lazy; gzip and record decoding are composed
+explicitly by the caller. The always-available storage facade wraps
+caller-configured SDK operators.

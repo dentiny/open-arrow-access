@@ -5,3 +5,5 @@ pub mod huggingface;
 
 #[cfg(feature = "pmc-inventory")]
 pub mod pmc_inventory;
+#[cfg(feature = "commoncrawl")]
+pub mod commoncrawl;
