@@ -265,6 +265,7 @@ async fn batch_schema_is_checked_against_the_opened_schema() {
 }
 
 struct Listing {
+    supported: bool,
     objects: Vec<&'static str>,
     fail: bool,
 }
@@ -275,7 +276,7 @@ impl Accessor for Listing {
     type Reader = dyn ByteReader;
     fn capability(&self) -> Capability {
         Capability {
-            list: true,
+            list: self.supported,
             read: false,
             read_with_range: false,
             read_parallel: false,
@@ -289,6 +290,7 @@ impl Accessor for Listing {
 #[async_trait]
 impl ByteAccessor for Listing {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        assert!(self.supported, "unsupported listing must not be called");
         let mut prefix = request.prefix.locator().to_owned();
         if !prefix.is_empty() {
             prefix.push('/');
@@ -312,8 +314,25 @@ impl ByteAccessor for Listing {
 }
 
 #[tokio::test]
+async fn list_files_rejects_unsupported_listing_before_io() {
+    let listing = Listing {
+        supported: false,
+        objects: vec![],
+        fail: false,
+    };
+    let error = list_files(&listing, ListRequest::new(""), |_| {
+        panic!("selection must not run")
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+    assert_eq!(error.operation(), "list_files");
+}
+
+#[tokio::test]
 async fn list_files_accepts_root_and_trailing_slash_and_leaves_empty_results_to_caller() {
     let listing = Listing {
+        supported: true,
         objects: vec!["data/a.parquet"],
         fail: false,
     };
@@ -344,6 +363,7 @@ async fn list_files_accepts_root_and_trailing_slash_and_leaves_empty_results_to_
 #[tokio::test]
 async fn list_files_checks_prefix_boundary_before_filtering_and_preserves_callback_errors() {
     let listing = Listing {
+        supported: true,
         objects: vec!["data/ab/file"],
         fail: false,
     };
@@ -387,6 +407,7 @@ async fn generic_listing_is_sorted_filtered_and_fails_before_opening_on_listing_
     ]);
     let opens = files.opens.clone();
     let listing = Listing {
+        supported: true,
         objects: vec![
             "data/b.parquet",
             "data/.hidden.parquet",
@@ -409,6 +430,7 @@ async fn generic_listing_is_sorted_filtered_and_fails_before_opening_on_listing_
     opens.lock().unwrap().clear();
     let accessor = DirectoryAccessor::new(
         Listing {
+            supported: true,
             objects: vec!["data/a.parquet"],
             fail: true,
         },
@@ -426,6 +448,7 @@ async fn generic_listing_is_sorted_filtered_and_fails_before_opening_on_listing_
     assert!(opens.lock().unwrap().is_empty());
     let accessor = DirectoryAccessor::new(
         Listing {
+            supported: true,
             objects: vec!["different/a.parquet"],
             fail: false,
         },
@@ -448,6 +471,7 @@ async fn directory_rejects_traversal_entries() {
     for path in ["data/../outside", "data/./a", "data//absolute"] {
         let accessor = DirectoryAccessor::new(
             Listing {
+                supported: true,
                 objects: vec![path],
                 fail: false,
             },

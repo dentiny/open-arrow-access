@@ -3,6 +3,7 @@ use futures::TryStreamExt;
 use crate::{ByteAccessor, Error, ErrorKind, ListRequest, ObjectRef, Result};
 
 /// Collect sorted, unique objects beneath a directory prefix.
+/// Return [`ErrorKind::Unsupported`] before I/O if listing is unavailable.
 ///
 /// `select` validates and filters each relative locator. Path rules and empty
 /// results belong to the caller. The request is forwarded unchanged, including
@@ -14,6 +15,13 @@ pub async fn list_files<A: ByteAccessor + ?Sized>(
     request: ListRequest,
     mut select: impl FnMut(&str) -> Result<bool> + Send,
 ) -> Result<Vec<ObjectRef>> {
+    if !accessor.capability().list {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "list_files",
+            "accessor does not support listing",
+        ));
+    }
     let mut prefix = request.prefix.locator().to_owned();
     if !prefix.is_empty() && !prefix.ends_with('/') {
         prefix.push('/');
