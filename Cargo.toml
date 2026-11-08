@@ -34,6 +34,7 @@ http = "1"
 opendal-service-http = "=0.59.2"
 url = "2"
 async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
+async_zip = { version = "0.0.19", default-features = false, features = ["deflate"] }
 # Match the resolved Cargo.lock versions at the Lance revision above.
 # See docs/dependencies.md when updating this baseline.
 arrow-array = "59.3.0"
@@ -81,6 +82,7 @@ decompression-gzip = ["dep:open-arrow-access-decompression", "open-arrow-access-
 decompression-bz2 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 decompression-lz4 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/lz4"]
 decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zstd"]
+decompression-zip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zip"]
 
 [dependencies]
 open-arrow-access-service = { workspace = true, optional = true }
@@ -123,3 +125,7 @@ required-features = ["format-atif"]
 [[example]]
 name = "read_pmc_inventory"
 required-features = ["service-pmc"]
+
+[[example]]
+name = "read_zip"
+required-features = ["decompression-zip"]

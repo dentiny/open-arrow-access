@@ -71,3 +71,11 @@ reusing its async parser without its optional storage dependencies.
 Common Crawl HTTP configuration pins `opendal-service-http` to `0.59.2`, matching
 the recorded OpenDAL baseline. The optional HTTP transport uses the SDK
 implementation; service configuration adds no separate HTTP client.
+
+## ZIP parser
+
+`decompression-zip` uses the registry `async_zip 0.0.19` parser with default
+features disabled and only `deflate` enabled; Stored entries need no codec.
+The adapter uses its `base::read1` seek reader for central-directory parsing,
+ZIP64, data descriptors, CRC and length validation. Exact `ByteReader` ranges
+provide the parser's futures I/O interface without another storage SDK.

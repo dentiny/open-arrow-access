@@ -29,7 +29,8 @@ pub mod service {
     feature = "decompression-gzip",
     feature = "decompression-bz2",
     feature = "decompression-lz4",
-    feature = "decompression-zstd"
+    feature = "decompression-zstd",
+    feature = "decompression-zip"
 ))]
 pub mod decompression {
     #[cfg(feature = "decompression-bz2")]
@@ -44,6 +45,8 @@ pub mod decompression {
         Codec, CompressedInput, DecodedInput, DecompressionAccessor, DecompressionFactory,
         DecompressionLayer,
     };
+    #[cfg(feature = "decompression-zip")]
+    pub use open_arrow_access_decompression::{ZipAccessor, ZipEntry, ZipLimits};
 }
 
 pub mod storage {

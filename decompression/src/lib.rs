@@ -30,3 +30,8 @@ pub use lz4::Lz4;
 mod zstd;
 #[cfg(feature = "zstd")]
 pub use zstd::Zstd;
+
+#[cfg(feature = "zip")]
+mod zip;
+#[cfg(feature = "zip")]
+pub use zip::{ZipAccessor, ZipEntry, ZipLimits};

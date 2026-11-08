@@ -117,3 +117,68 @@ Raw blocks, legacy format and custom dictionary/decoder-parameter configuration
 are outside this adapter. A stream requiring an unavailable dictionary fails
 with a decode error. Codec state, including its frame window, is additional to
 the emitted chunk limit.
+
+## ZIP entries
+
+Enable `decompression-zip` on the facade or `zip` on this crate for
+`ZipAccessor`. ZIP contains named entries, so select a central-directory index
+instead of concatenating files through `DecompressionLayer`.
+
+```rust,no_run
+use open_arrow_access::{
+    Accessor, ByteReadRequest, decompression::ZipAccessor,
+    storage::{OpenDalAccessor, opendal},
+};
+
+async fn read(operator: opendal::Operator) -> open_arrow_access::Result<()> {
+    let zip = ZipAccessor::new(OpenDalAccessor::new(operator), 0);
+    let request = ByteReadRequest::new("paper.meca.zip");
+    for entry in zip.entries(request.clone()).await? {
+        println!("{}: {:?}", entry.index, entry.name);
+    }
+    let mut reader = zip.open(request).await?;
+    while let Some(bytes) = reader.next().await? {
+        // Original decompressed bytes of entry 0, including binary PDF content.
+    }
+    Ok(())
+}
+```
+
+`entries` returns the central directory in order, retaining raw filename bytes,
+duplicate names, directories, and compressed/uncompressed lengths. Select by
+index to distinguish duplicate names. Names are data; no filesystem extraction,
+path normalization, symlink following, or recursive archive expansion occurs.
+The archive's storage identity must remain stable between inspection and open.
+
+Stored and Deflate entries, ZIP64, and data descriptors are supported through
+the published `async_zip` parser. Encrypted entries, split archives, and other
+compression methods are unsupported. Input requires exact ranges and a known
+length, including for Stored entries. Sequential-only sources and an outer
+gzip layer need explicit materialization before this accessor can read them.
+
+The directory is read at inspection/open time; entry decompression is pulled
+on demand. Each compressed range fetch is at most 64 KiB; decoded output chunks
+are at most 64 KiB by default (`with_chunk_size` changes the latter). Only ZIP
+metadata, decoder state and read-ahead are retained, without collecting the
+archive or whole entry. No background tasks are started.
+
+`ZipLimits` defaults to 65,536 declared entries, a 16 MiB declared central
+directory, and 1 GiB each for compressed/decoded entry size. `with_limits`
+overrides them. The parser also checks actual decoded length against the limit.
+CRC and declared decoded length are validated when the entry reaches EOF;
+earlier chunks may already have been emitted. Read through EOF for validation.
+Errors and EOF are terminal and upstream error categories are preserved.
+
+The output implements `ByteReader` and `ZipAccessor` implements `ByteAccessor`,
+so a selected entry composes with `JsonAccessor`, `XmlAccessor`, or other
+sequential consumers. Output ranges and prefix listing are unsupported.
+`ByteMetadata.content_length` is the declared decoded entry size; source and
+version identify the archive. Storage requests and byte options pass through
+unchanged. The selected index belongs to the accessor, never to a synthetic
+storage path.
+
+Run the local example to inspect a ZIP and read one entry:
+
+```sh
+cargo run --example read_zip --features decompression-zip -- testdata/zip mixed.zip 1
+```
