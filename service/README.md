@@ -264,3 +264,40 @@ See the [Zenodo Records API](https://developers.zenodo.org/#records).
 
 Run `cargo run --example read_zenodo --features service-zenodo -- 3551612`
 to list a record, or append an exact file key to stream its contents.
+
+## arXiv (`service-arxiv`)
+
+Enable `service-arxiv` for `service::arxiv::{ArxivService, ArxivKind, ArxivArchive}`.
+Construct `ArxivService::new(storage)` with byte storage rooted above `pdf/` and
+`src/`. For the official S3 bucket, the caller configures `arxiv`, the us-east-1
+region, credentials and requester-pays behavior on their OpenDAL S3 operator.
+A local mirror preserving the same keys works without any network or credentials.
+The service does not configure S3, query paper APIs, or require bucket listing.
+
+`manifest(kind, Some("2410"), byte_options).await` reads the selected PDF/source
+XML manifest, validates all rows, and returns matching TAR metadata in manifest
+order. `None` selects all months. An absent month is a valid empty result.
+A configurable 16 MiB bound applies while collecting manifest bytes. Metadata
+includes shard filename, month, sequence, byte size, item count, first/last arXiv
+IDs and MD5 checksum. Checksums and item counts are exposed, not verified.
+
+`stream(&shard, byte_options).await` is the preferred bulk path. It opens the
+shard once and returns the incremental generic TarStream. Each entry body can
+be consumed before moving to the next header, avoiding thousands of serial
+header-only range GETs before the first PDF. Unknown-length sequential sources
+work here. The example uses this path by default.
+
+The optional `archive(&shard, byte_options).await` checks the advertised file length against
+the manifest and opens the shared TAR session. Use its entries/open_entry APIs
+to stream selected PDFs; source archives return raw entries (often nested tar.gz
+payloads). Both manifest and archive opens forward byte options. Archive members
+are not extracted to disk. Service-specific validation is in validation.rs,
+and error construction is in error.rs.
+
+The bulk manifests can change upstream; this API supplies source-level version
+guarantees, not an atomic historical snapshot or concept-version resolver.
+No API key, credential, or live network access is needed by the automated tests.
+See https://github.com/arXiv/arxiv-docs/blob/develop/source/help/bulk_data_s3.md.
+
+Run `cargo run --example read_arxiv --features service-arxiv -- testdata/arxiv 2410 1 1`
+to inspect the fixture manifest and TAR and stream one PDF entry.

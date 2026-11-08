@@ -645,3 +645,9 @@ Supported: regular USTAR and GNU header files and directories. Unsupported:
 links, sparse files, PAX/GNU extension headers including long names. Compressed
 TAR does not satisfy the ranged input contract through a sequential gzip layer.
 Run `cargo run --example read_tar --features decompression-tar -- testdata/tar mixed.tar 1`.
+
+### arXiv
+
+Enable `service-arxiv` for `service::arxiv` public file discovery and
+byte access. See [service documentation](service/README.md) and the
+`read_arxiv` example.

@@ -1944,6 +1944,7 @@ dependencies = [
  "opendal",
  "opendal-http-transport-reqwest",
  "opendal-service-http",
+ "quick-xml",
  "reqwest",
  "serde",
  "serde_json",
