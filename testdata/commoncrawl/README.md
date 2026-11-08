@@ -17,3 +17,7 @@ request. They use the example crawl `CC-MAIN-2022-40` and segment
 
 Tests read the exact bytes from disk, then use mocks only for chunk boundaries,
 HTTP behavior, and injected failures. Preserve line endings and binary contents.
+
+`no_match.paths` contains only a neighboring segment. `other_duplicate.paths`
+contains one selected entry and duplicates belonging to another segment; those
+duplicates do not invalidate a segment-only selection.

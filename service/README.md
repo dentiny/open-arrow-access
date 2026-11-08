@@ -126,7 +126,13 @@ compressed inventories and file decompression/format parsing separately.
 Selected locators are held in memory; inventory lines have a 16 KiB limit.
 There is no index, batch planner or parallel execution.
 
-Segment selection is a separate addition.
+Enable `service-warc` for `CommonCrawlSegmentRequest` and
+`CommonCrawlSegmentAccessor`. Segment resolution reuses the WARC inventory
+parser and retains only exact `segments/<segment>/warc/` matches. It preserves
+manifest order and forwards existing read options to the same sequential
+FileSet. A neighboring segment with a longer numeric ID is a different selection.
+Construct a request from crawl/segment IDs, a segment URL, or a shared
+`CommonCrawl` source. No index, batch scheduler or parallel executor is added.
 
 Manifest byte framing and the 16 KiB per-line bound use core `read_lines`;
 path validation and selected-file duplicate checks remain in the provider.

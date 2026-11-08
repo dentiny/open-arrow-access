@@ -82,3 +82,7 @@ required-features = ["warc"]
 [[test]]
 name = "warc"
 required-features = ["warc"]
+
+[[test]]
+name = "commoncrawl_segment"
+required-features = ["warc"]
