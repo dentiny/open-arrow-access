@@ -6,21 +6,20 @@
 
 pub use open_arrow_access_core::*;
 
-#[cfg(any(feature = "service-huggingface", feature = "service-commoncrawl", feature = "service-gutenberg"))]
+#[cfg(any(
+    feature = "service-huggingface",
+    feature = "service-commoncrawl",
+    feature = "service-gutenberg"
+))]
 pub mod service {
     #[cfg(feature = "service-commoncrawl")]
     pub use open_arrow_access_service::commoncrawl::{CommonCrawl, create_http_accessor};
-    #[cfg(feature = "service-huggingface")]
-    pub use open_arrow_access_service::huggingface::*;
     #[cfg(feature = "service-gutenberg")]
     pub use open_arrow_access_service::gutenberg;
-}
-
-#[cfg(any(feature = "service-huggingface", feature = "service-commoncrawl"))]
-pub mod service {
-    #[cfg(feature = "service-commoncrawl")]
-    pub use open_arrow_access_service::commoncrawl::{CommonCrawl, create_http_accessor};
->>>>>>> origin/main
+    #[cfg(feature = "service-gutenberg")]
+    pub use open_arrow_access_service::gutenberg::{
+        GutenbergAccessor, GutenbergFile, GutenbergLimits, GutenbergRequest,
+    };
     #[cfg(feature = "service-huggingface")]
     pub use open_arrow_access_service::huggingface::*;
 }
