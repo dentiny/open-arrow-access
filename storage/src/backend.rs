@@ -423,7 +423,7 @@ fn short_read(operation: &'static str) -> Error {
     )
 }
 
-pub(crate) fn map_error(operation: &'static str, path: &str, error: opendal::Error) -> Error {
+fn map_error(operation: &'static str, path: &str, error: opendal::Error) -> Error {
     let kind = match error.kind() {
         opendal::ErrorKind::NotFound => ErrorKind::NotFound,
         opendal::ErrorKind::PermissionDenied => ErrorKind::PermissionDenied,

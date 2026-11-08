@@ -3,7 +3,7 @@ use open_arrow_access_core::Result;
 use super::error::invalid_origin;
 use url::Url;
 
-pub(crate) fn validate_origin(value: &str, operation: &'static str) -> Result<Url> {
+pub(super) fn validate_origin(value: &str, operation: &'static str) -> Result<Url> {
     let invalid = || invalid_origin(operation);
     let url = Url::parse(value).map_err(|_| invalid())?;
     if !matches!(url.scheme(), "http" | "https")

@@ -5,7 +5,7 @@ use open_arrow_access_core::{ByteAccessor, Layer};
 use crate::{Codec, DecompressionAccessor, DecompressionFactory};
 
 /// Default maximum decoded bytes emitted by one `next` call.
-pub const DEFAULT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
+pub(crate) const DEFAULT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
 
 /// A sequential byte transformation. Apply explicitly to compressed inputs;
 /// this layer does not inspect file extensions or infer compression.

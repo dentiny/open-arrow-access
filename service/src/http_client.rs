@@ -3,7 +3,7 @@
 mod error;
 pub(crate) mod files;
 mod query;
-pub(crate) mod validation;
+mod validation;
 
 use error::transport_error;
 use http::{Request, StatusCode};
