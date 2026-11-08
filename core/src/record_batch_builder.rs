@@ -10,6 +10,7 @@ use crate::{Error, ErrorKind, ReadOptions, RecordBatch, Result, SchemaRef};
 /// Supports the PMC/Gutenberg types: bool, i32/Date32, u32, u64, Utf8/LargeUtf8,
 /// Binary/LargeBinary, List/LargeList and Struct. Projection skips unselected
 /// fields and list callbacks. Source parsing and validation remain with callers.
+/// The full schema must use these types, including fields omitted by projection.
 /// An append error invalidates the builder. `finish` preserves schema metadata
 /// and zero-column row counts, and consumes the builder.
 ///
@@ -46,8 +47,7 @@ impl RecordBatchBuilder {
             ..Default::default()
         }
         .resolve_projection(&schema)?;
-        validate_fields(&fields, false)?;
-        validate_fields(schema.fields(), true)?;
+        validate_fields(&fields)?;
         let builder = StructBuilder::from_fields(schema.fields().clone(), 0);
         Ok(Self {
             schema,
@@ -361,7 +361,7 @@ fn append_null(builder: &mut dyn ArrayBuilder, data_type: &DataType) {
     }
 }
 
-fn validate_fields(fields: &Fields, types: bool) -> Result<()> {
+fn validate_fields(fields: &Fields) -> Result<()> {
     let mut seen = HashSet::new();
     for field in fields {
         if !seen.insert(field.name()) {
@@ -371,9 +371,7 @@ fn validate_fields(fields: &Fields, types: bool) -> Result<()> {
                 "duplicate schema field name",
             ));
         }
-        if types {
-            validate_type(field.data_type())?;
-        }
+        validate_type(field.data_type())?;
     }
     Ok(())
 }
@@ -389,7 +387,7 @@ fn validate_type(data_type: &DataType) -> Result<()> {
         | DataType::LargeUtf8
         | DataType::Binary
         | DataType::LargeBinary => Ok(()),
-        DataType::Struct(fields) => validate_fields(fields, true),
+        DataType::Struct(fields) => validate_fields(fields),
         DataType::List(field) | DataType::LargeList(field) => validate_type(field.data_type()),
         _ => Err(Error::new(
             ErrorKind::Unsupported,
