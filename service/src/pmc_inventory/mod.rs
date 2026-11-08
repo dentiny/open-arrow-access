@@ -6,13 +6,7 @@ mod validation;
 
 pub use accessor::PmcInventoryAccessor;
 
-use open_arrow_access_core::{Capability, Error, ErrorKind};
-fn capability(read: bool) -> Capability {
-    Capability {
-        read,
-        ..Capability::default()
-    }
-}
+use open_arrow_access_core::{Error, ErrorKind};
 fn decode(message: impl Into<String>) -> Error {
     Error::new(ErrorKind::Decode, "read_pmc_inventory", message)
 }

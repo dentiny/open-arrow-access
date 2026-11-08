@@ -1,4 +1,4 @@
-use super::{capability, manifest, reader::InventoryTransform, validation};
+use super::{manifest, reader::InventoryTransform, validation};
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, Capability, ReadRequest, RecordReader, Result,
@@ -36,7 +36,12 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
     fn capability(&self) -> Capability {
-        capability(self.inner.capability().read)
+        Capability {
+            read: self.inner.capability().read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         validation::validate_manifest_locator(request.object.locator())?;
