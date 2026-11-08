@@ -66,7 +66,7 @@ pub(super) fn endpoint(value: &str) -> Result<Url> {
         )
     };
     let url = Url::parse(value).map_err(|_| invalid())?;
-    if !crate::http_client::is_http_endpoint(&url) {
+    if !crate::http_client::validation::is_http_endpoint(&url) {
         return Err(invalid());
     }
     Ok(url)
