@@ -50,6 +50,29 @@ impl OpenDalAccessor {
         self.chunk_size = chunk_size;
         self
     }
+
+    async fn content_length(&self, path: &str) -> Result<u64> {
+        if let Some(len) = self
+            .content_lengths
+            .as_ref()
+            .and_then(|lengths| lengths.get(path))
+        {
+            return Ok(*len);
+        }
+        let metadata = self
+            .operator
+            .stat(path)
+            .await
+            .map_err(|e| map_error("stat", path, e))?;
+        if !metadata.is_file() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "open",
+                "object is not a regular file",
+            ));
+        }
+        Ok(metadata.content_length())
+    }
 }
 
 #[async_trait]
@@ -78,27 +101,7 @@ impl Accessor for OpenDalAccessor {
         let ByteReadRequest { object, options } = request;
         let path = object.locator();
         validate_locator(path, false, "open")?;
-        let len = if let Some(len) = self
-            .content_lengths
-            .as_ref()
-            .and_then(|lengths| lengths.get(path))
-        {
-            *len
-        } else {
-            let metadata = self
-                .operator
-                .stat(path)
-                .await
-                .map_err(|e| map_error("stat", path, e))?;
-            if !metadata.is_file() {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "open",
-                    "object is not a regular file",
-                ));
-            }
-            metadata.content_length()
-        };
+        let len = self.content_length(path).await?;
         // OpenDAL gives each stream/fetch its own task queue. Share a budget
         // across those queues so retained sequential prefetch cannot multiply
         // the reader's I/O concurrency when a range read is interleaved.
