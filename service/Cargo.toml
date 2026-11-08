@@ -10,7 +10,6 @@ description = "Dataset source providers for Open Arrow Access"
 default = []
 gutenberg = [
     "dep:arrow-array",
-    "dep:arrow-buffer",
     "dep:arrow-schema",
     "dep:chrono",
     "dep:futures",
@@ -61,7 +60,6 @@ pmc = [
 [dependencies]
 chrono = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
-arrow-buffer = { workspace = true, optional = true }
 xml-arrow = { workspace = true, optional = true }
 open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-file-format = { workspace = true, optional = true }

@@ -1,10 +1,7 @@
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
 
-use arrow_array::{
-    Array, ArrayRef, LargeListArray, RecordBatchOptions, StructArray, cast::AsArray,
-};
-use arrow_buffer::OffsetBuffer;
-use arrow_schema::{DataType, Field, Fields, Schema};
+use arrow_array::{Array, StructArray, cast::AsArray};
+use arrow_schema::{DataType, Field, Fields};
 use chrono::NaiveDate;
 use futures::io::Cursor;
 use open_arrow_access_core::{
@@ -15,14 +12,13 @@ use xml_arrow::{ReaderOptions, XmlReader};
 use super::{decode, decode_source};
 
 /// Validated XML extraction, retained without a second metadata batch.
-pub(super) struct BookMetadata<'a> {
-    raw: &'a [u8],
+pub(super) struct BookMetadata {
     source: StructArray,
 }
 
-impl<'a> BookMetadata<'a> {
+impl BookMetadata {
     /// Validate every mapped field, independently of the output projection.
-    pub(super) async fn parse(raw: &'a [u8]) -> Result<Self> {
+    pub(super) async fn parse(raw: &[u8]) -> Result<Self> {
         let mut reader = XmlReader::new(
             Cursor::new(raw),
             super::mapping(),
@@ -46,7 +42,6 @@ impl<'a> BookMetadata<'a> {
             return Err(decode("expected one RDF document"));
         }
         let book = Self {
-            raw,
             source: batch.column(0).as_struct().clone(),
         };
         convert_fields(super::schema().fields(), &book.source, 0, None)?;
@@ -77,93 +72,14 @@ impl<'a> BookMetadata<'a> {
             .as_struct()
     }
 
-    pub(super) fn file_index(&self, uri: &str) -> Option<usize> {
-        self.files()
-            .column_by_name("uri")
-            .unwrap()
-            .as_string::<i32>()
-            .iter()
-            .position(|candidate| candidate == Some(uri))
-    }
-
-    pub(super) fn files_builder(&self) -> Result<RecordBatchBuilder> {
-        let schema = super::schema();
-        let DataType::LargeList(item) = schema.field_with_name("files").unwrap().data_type() else {
-            unreachable!()
-        };
-        let DataType::Struct(fields) = item.data_type() else {
-            unreachable!()
-        };
-        RecordBatchBuilder::new(Arc::new(Schema::new(fields.clone())), None)
-    }
-
-    pub(super) fn append_file(
-        &self,
-        builder: &mut RecordBatchBuilder,
-        index: usize,
-        data: &[u8],
-    ) -> Result<()> {
-        let fields = builder.schema().fields().clone();
-        builder.push(|row| {
-            convert_fields(&fields, self.files(), index, Some(row))?;
-            row.append("data", data)
+    pub(super) fn into_batch(self, schema: SchemaRef) -> Result<RecordBatch> {
+        RecordBatchBuilder::build_row(super::schema(), schema.clone(), |row| {
+            convert_fields(schema.fields(), &self.source, 0, Some(row))
         })
-    }
-
-    pub(super) fn into_batch(
-        self,
-        files: Option<RecordBatch>,
-        schema: SchemaRef,
-    ) -> Result<RecordBatch> {
-        let projected: Fields = schema
-            .fields()
-            .iter()
-            .filter(|field| field.name() != "files")
-            .cloned()
-            .collect();
-        let projected_schema = Arc::new(Schema::new_with_metadata(
-            projected.clone(),
-            schema.metadata().clone(),
-        ));
-        let metadata = RecordBatchBuilder::build_row(super::schema(), projected_schema, |row| {
-            row.append("metadata_rdf", self.raw)?;
-            convert_fields(&projected, &self.source, 0, Some(row))
-        })?;
-        let files = files.map(|files| {
-            let DataType::LargeList(item) = schema.field_with_name("files").unwrap().data_type()
-            else {
-                unreachable!()
-            };
-            // StructArray and LargeListArray reuse the finished file buffers.
-            Arc::new(LargeListArray::new(
-                item.clone(),
-                OffsetBuffer::from_lengths([files.num_rows()]),
-                Arc::new(StructArray::from(files)),
-                None,
-            )) as ArrayRef
-        });
-        let columns = schema
-            .fields()
-            .iter()
-            .map(|field| {
-                if field.name() == "files" {
-                    files.as_ref().unwrap().clone()
-                } else {
-                    metadata.column_by_name(field.name()).unwrap().clone()
-                }
-            })
-            .collect();
-        RecordBatch::try_new_with_options(
-            schema,
-            columns,
-            &RecordBatchOptions::new().with_row_count(Some(1)),
-        )
-        .map_err(decode_source)
     }
 }
 
 // Validate every source field with no writer, or write the requested fields.
-// Raw RDF and file contents are written explicitly, outside XML conversion.
 fn convert_fields(
     fields: &Fields,
     source: &StructArray,
@@ -172,9 +88,6 @@ fn convert_fields(
 ) -> Result<()> {
     for field in fields {
         let name = field.name().as_str();
-        if matches!(name, "metadata_rdf" | "data") {
-            continue;
-        }
         let column = source.column_by_name(name).unwrap();
         match field.data_type() {
             DataType::List(item) | DataType::LargeList(item) => {

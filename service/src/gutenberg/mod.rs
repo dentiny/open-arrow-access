@@ -1,18 +1,16 @@
-//! One book per row, with original RDF and selected files.
+//! One book per row, using the fields mapped from RDF.
 
 mod metadata;
 
 use std::{
-    collections::HashSet,
     num::NonZeroUsize,
     sync::{Arc, OnceLock},
 };
 
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability, DocumentAccessor,
-    DocumentDecoder, Error, ErrorKind, ObjectRef, ReadOptions, ReadOptionsProvider, ReadRequest,
-    RecordBatch, RecordReader, Result, SchemaRef, async_trait, read_object,
+    Accessor, ByteReadRequest, ByteReader, Capability, DocumentAccessor, DocumentDecoder, Error,
+    ErrorKind, ReadRequest, RecordBatch, RecordReader, Result, SchemaRef, async_trait,
 };
 use xml_arrow::{NamespaceBinding, XmlField, XmlSchema};
 
@@ -23,82 +21,17 @@ use metadata::BookMetadata;
 pub struct GutenbergLimits {
     /// RDF byte limit (default: 4 MiB).
     pub metadata_bytes: NonZeroUsize,
-    /// Per-file byte limit (default: 256 MiB).
-    pub file_bytes: NonZeroUsize,
-    /// Combined RDF and file byte limit (default: 1 GiB).
-    pub row_bytes: NonZeroUsize,
 }
 
 impl Default for GutenbergLimits {
     fn default() -> Self {
         Self {
             metadata_bytes: NonZeroUsize::new(4 * 1024 * 1024).unwrap(),
-            file_bytes: NonZeroUsize::new(256 * 1024 * 1024).unwrap(),
-            row_bytes: NonZeroUsize::new(1024 * 1024 * 1024).unwrap(),
         }
     }
 }
 
-/// Map an RDF file URI to a storage locator.
-#[derive(Clone, Debug)]
-pub struct GutenbergFile {
-    pub uri: String,
-    pub object: ObjectRef,
-}
-
-impl GutenbergFile {
-    pub fn new(uri: impl Into<String>, object: impl Into<ObjectRef>) -> Self {
-        Self {
-            uri: uri.into(),
-            object: object.into(),
-        }
-    }
-}
-
-/// Book RDF and files in output order. An empty selection embeds no files.
-#[derive(Clone, Debug)]
-pub struct GutenbergRequest {
-    pub metadata: ReadRequest,
-    pub files: Vec<GutenbergFile>,
-}
-
-impl GutenbergRequest {
-    pub fn new(metadata: impl Into<ObjectRef>, files: Vec<GutenbergFile>) -> Self {
-        Self {
-            metadata: ReadRequest::new(metadata),
-            files,
-        }
-    }
-
-    pub fn with_options(mut self, options: ReadOptions) -> Self {
-        self.metadata.options = options;
-        self
-    }
-
-    /// Apply I/O settings to RDF and file reads.
-    pub fn with_byte_options(mut self, options: ByteReadOptions) -> Self {
-        self.metadata.byte_options = options;
-        self
-    }
-}
-
-impl ReadOptionsProvider for GutenbergRequest {
-    fn read_options(&self) -> &ReadOptions {
-        &self.metadata.options
-    }
-
-    fn read_options_mut(&mut self) -> &mut ReadOptions {
-        &mut self.metadata.options
-    }
-}
-
-impl From<&GutenbergRequest> for ByteReadRequest {
-    fn from(request: &GutenbergRequest) -> Self {
-        Self::from(&request.metadata)
-    }
-}
-
-/// Read per-book RDF and selected files through caller-configured storage.
+/// Read per-book RDF metadata through caller-configured storage.
 pub struct GutenbergAccessor<A> {
     inner: Arc<A>,
     limits: GutenbergLimits,
@@ -121,7 +54,7 @@ impl<A> GutenbergAccessor<A> {
 impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> Accessor
     for GutenbergAccessor<A>
 {
-    type Request = GutenbergRequest;
+    type Request = ReadRequest;
     type Reader = dyn RecordReader;
     fn capability(&self) -> Capability {
         Capability {
@@ -131,92 +64,34 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
             list: false,
         }
     }
-    async fn open(&self, request: GutenbergRequest) -> Result<Box<dyn RecordReader>> {
+    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         DocumentAccessor::new(
             self.inner.clone(),
-            GutenbergDecoder {
-                inner: self.inner.clone(),
-                limits: self.limits,
-            },
-            self.limits
-                .metadata_bytes
-                .get()
-                .min(self.limits.row_bytes.get()),
+            GutenbergDecoder,
+            self.limits.metadata_bytes.get(),
         )
         .open(request)
         .await
     }
 }
 
-struct GutenbergDecoder<A> {
-    inner: Arc<A>,
-    limits: GutenbergLimits,
-}
+struct GutenbergDecoder;
 
 #[async_trait]
-impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> DocumentDecoder
-    for GutenbergDecoder<A>
-{
-    type Request = GutenbergRequest;
+impl DocumentDecoder for GutenbergDecoder {
+    type Request = ReadRequest;
 
-    fn prepare(&self, request: &GutenbergRequest) -> Result<SchemaRef> {
-        let mut seen = HashSet::new();
-        for file in &request.files {
-            if file.uri.is_empty() || !seen.insert(&file.uri) {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "open_gutenberg",
-                    "file URIs must be nonempty and unique",
-                ));
-            }
-        }
+    fn prepare(&self, _request: &ReadRequest) -> Result<SchemaRef> {
         Ok(schema())
     }
 
     async fn decode(
         &self,
         raw: &[u8],
-        request: GutenbergRequest,
+        _request: ReadRequest,
         schema: SchemaRef,
     ) -> Result<RecordBatch> {
-        let book = BookMetadata::parse(raw).await?;
-        // Validate membership even when projection omits file data.
-        let selections = request
-            .files
-            .iter()
-            .map(|selection| {
-                book.file_index(&selection.uri)
-                    .map(|index| (selection, index))
-                    .ok_or_else(|| {
-                        decode(format!(
-                            "selected file is absent from RDF: {}",
-                            selection.uri
-                        ))
-                    })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let files = if schema.index_of("files").is_ok() {
-            let mut builder = book.files_builder()?;
-            let mut remaining = self.limits.row_bytes.get() - raw.len();
-            for (selection, file) in selections {
-                let data = read_object(
-                    self.inner.as_ref(),
-                    ByteReadRequest::new(selection.object.clone())
-                        .with_options(request.metadata.byte_options),
-                    self.limits.file_bytes.get().min(remaining),
-                    "read_gutenberg",
-                )
-                .await?;
-                remaining -= data.len();
-                // Copy this file into its final Arrow buffer, then release data
-                // before opening the next file.
-                book.append_file(&mut builder, file, &data)?;
-            }
-            Some(builder.finish()?)
-        } else {
-            None
-        };
-        book.into_batch(files, schema)
+        BookMetadata::parse(raw).await?.into_batch(schema)
     }
 }
 
@@ -243,7 +118,7 @@ fn strings(name: &str, path: &str) -> Mapping {
 }
 
 fn objects(name: &str, path: &str, container: &str, mappings: Vec<Mapping>) -> Mapping {
-    let (mut fields, xml): (Vec<_>, Vec<_>) = mappings.into_iter().unzip();
+    let (fields, xml): (Vec<_>, Vec<_>) = mappings.into_iter().unzip();
     let xml = XmlField::list(
         name,
         ".",
@@ -255,10 +130,6 @@ fn objects(name: &str, path: &str, container: &str, mappings: Vec<Mapping>) -> M
             vec![XmlField::structure("value", container, false, xml)],
         ),
     );
-    // Content bytes belong only to the output, not to the XML mapping.
-    if name == "files" {
-        fields.push(Field::new("data", DataType::LargeBinary, false));
-    }
     let item = Arc::new(Field::new("item", DataType::Struct(fields.into()), false));
     let ty = if name == "files" {
         DataType::LargeList(item)
@@ -312,11 +183,7 @@ fn definitions() -> &'static (SchemaRef, XmlSchema) {
                 ],
             ),
         ];
-        let (mut fields, xml): (Vec<_>, Vec<_>) = mappings.into_iter().unzip();
-        fields.insert(
-            fields.len() - 1,
-            Field::new("metadata_rdf", LargeBinary, false),
-        );
+        let (fields, xml): (Vec<_>, Vec<_>) = mappings.into_iter().unzip();
         let bindings = [
             ("r", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"),
             ("p", "http://www.gutenberg.org/2009/pgterms/"),
@@ -333,7 +200,7 @@ fn definitions() -> &'static (SchemaRef, XmlSchema) {
     })
 }
 
-/// Book schema; `metadata_rdf` retains unmapped fields.
+/// Arrow schema for the mapped RDF fields.
 pub fn schema() -> SchemaRef {
     definitions().0.clone()
 }

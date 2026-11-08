@@ -180,11 +180,10 @@ for TSV.
 
 ## Supported components
 
-Enable `service-gutenberg` to read a per-book Gutenberg RDF object and selected
-files from caller-configured storage. Each book produces one Arrow row with
-queryable metadata, the original `metadata_rdf`, and a `files` list containing
-original file bytes. See the [Gutenberg guide](service/README.md#gutenberg)
-for file mapping, schema and limits.
+Enable `service-gutenberg` to convert a per-book RDF object into one Arrow row.
+The output contains mapped book and file metadata in RDF order. Use a standard
+`ReadRequest`; the reader fetches only the RDF object. See the
+[Gutenberg guide](service/README.md#gutenberg) for schema and limits.
 
 | Component | Implemented |
 | --- | --- |
