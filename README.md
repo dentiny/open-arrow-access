@@ -192,7 +192,7 @@ The output contains mapped book and file metadata in RDF order. Use a standard
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema; WARC parser records with Arrow conversion deferred |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
 | `service/` | Hugging Face datasets; PMC article metadata; PMC inventory snapshots; Gutenberg books; Common Crawl WARC datasets |
-| `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
+| `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support; ZIP directory inspection and selected-entry decompression |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
 
@@ -207,6 +207,11 @@ pages through the Parquet dependency. External gzip, LZ4, bzip2, and Zstandard d
 enabled by `decompression-gzip`, `decompression-lz4`, `decompression-bz2`, and `decompression-zstd`; see [streaming decompression](decompression/README.md).
 It produces sequential bytes and cannot directly satisfy Parquet's range reads.
 Parallel reads and unordered emission are not implemented.
+
+Enable `decompression-zip` for `decompression::zip::ZipAccessor`: inspect a ZIP's
+central directory and read a selected Stored/Deflate entry as sequential bytes.
+It supports ZIP64 and data descriptors over ranged, known-length storage.
+See [ZIP entries](decompression/README.md#zip-entries) for limits and composition.
 
 Enable `service-pmc` for `service::pmc::PmcAccessor`. Open one article-version
 metadata JSON with `ReadRequest`; every valid object yields one row, including

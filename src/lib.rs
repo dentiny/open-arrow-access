@@ -19,6 +19,7 @@ pub use open_arrow_access_service as service;
     feature = "decompression-bz2",
     feature = "decompression-lz4",
     feature = "decompression-zstd",
+    feature = "decompression-zip",
 ))]
 pub use open_arrow_access_decompression as decompression;
 

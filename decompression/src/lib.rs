@@ -23,3 +23,6 @@ pub mod lz4;
 
 #[cfg(feature = "zstd")]
 pub mod zstd;
+
+#[cfg(feature = "zip")]
+pub mod zip;
