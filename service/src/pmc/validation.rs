@@ -1,4 +1,4 @@
-use super::decode;
+use super::error::decode;
 use open_arrow_access_core::Result;
 
 pub(super) fn validate_pmcid(pmcid: &str, path: &str) -> Result<()> {

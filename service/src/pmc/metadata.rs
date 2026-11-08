@@ -7,7 +7,7 @@ use open_arrow_access_core::{
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
-use super::{decode, schema, validation};
+use super::{error::decode, schema, validation};
 
 pub(super) fn decode_batch(
     raw: &[u8],
