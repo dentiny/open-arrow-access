@@ -45,7 +45,10 @@ async fn discovers_only_exact_table_snapshots_in_date_order() -> Result<()> {
 
 #[tokio::test]
 async fn explicit_read_reuses_bzip2_and_forwards_io_options() -> Result<()> {
-    let input = MemoryAccessor::new(&fixture!("bz2", "payload.bz2").await, 1);
+    let input = MemoryAccessor::new(
+        &fixture!("courtlistener", "courts-2026-09-30.csv.bz2").await,
+        1,
+    );
     let observed = input.observations.clone();
     let source = CourtListenerBulkAccessor::new(input);
     assert_eq!(
@@ -65,7 +68,10 @@ async fn explicit_read_reuses_bzip2_and_forwards_io_options() -> Result<()> {
     assert!(!source.capability().list);
     assert!(!source.capability().read_with_range);
     assert!(!reader.capability().read_with_range);
-    assert_eq!(collect_bytes(reader.as_mut()).await?, b"payload");
+    assert_eq!(
+        collect_bytes(reader.as_mut()).await?,
+        fixture!("courtlistener", "courts-2026-09-30.csv").await
+    );
     let requests = observed.requests.lock().unwrap();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].object, snapshot.object());
