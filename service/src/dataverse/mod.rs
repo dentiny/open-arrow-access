@@ -4,27 +4,29 @@ mod error;
 mod validation;
 
 use open_arrow_access_core::Result;
-use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
+use open_arrow_access_storage::OpenDalAccessor;
 use serde::Deserialize;
-use url::Url;
 
 use crate::ResolvedFileSet;
-use crate::http_client::{HttpClient, validation::validate_origin};
-use error::membership_error;
+use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
+use error::map_file_namespace_error;
 use validation::{validate_dataset, validate_request};
 
 #[derive(Clone, Debug)]
 pub struct DataverseService {
-    endpoint: Url,
-    client: HttpClient,
+    http: HttpFileService,
 }
 
 impl DataverseService {
     /// Configure a Dataverse installation origin without performing network I/O.
     pub fn new(endpoint: &str) -> Result<Self> {
         Ok(Self {
-            endpoint: validate_origin(endpoint, "configure_dataverse")?,
-            client: HttpClient::new()?,
+            http: HttpFileService::new(
+                endpoint,
+                "configure_dataverse",
+                "resolve_dataverse",
+                map_file_namespace_error,
+            )?,
         })
     }
 
@@ -33,61 +35,59 @@ impl DataverseService {
     pub async fn dataset(&self, persistent_id: &str, version: &str) -> Result<DataverseAccessor> {
         let expected = validate_request(persistent_id, version)?;
         let mut url = self
-            .endpoint
+            .http
+            .endpoint()
             .join(&format!("api/v1/datasets/:persistentId/versions/{version}"))
             .unwrap();
         url.query_pairs_mut()
             .append_pair("persistentId", persistent_id)
             .append_pair("excludeFiles", "false")
             .append_pair("excludeMetadataBlocks", "true");
-        let response: Response = self
-            .client
-            .json(url.as_str(), None, "resolve_dataverse")
-            .await?;
-        validate_dataset(&response, persistent_id, expected)?;
-        let files: Vec<_> = response
-            .data
-            .files
-            .into_iter()
-            .map(|file| DataverseFile {
-                name: if file.directory_label.is_empty() {
-                    file.label
-                } else {
-                    format!(
-                        "{}/{}",
-                        file.directory_label.trim_end_matches('/'),
-                        file.label
-                    )
-                },
-                id: file.data_file.id,
-                size: file
-                    .data_file
-                    .original_file_size
-                    .unwrap_or(file.data_file.filesize),
-            })
-            .collect();
-        let inner = NamedFileAccessor::new(
-            self.client
-                .accessor(
-                    &self.endpoint,
+        self.http
+            .resolve_files(&url, |response: Response| {
+                validate_dataset(&response, persistent_id, expected)?;
+                let files: Vec<_> = response
+                    .data
+                    .files
+                    .into_iter()
+                    .map(|file| DataverseFile {
+                        name: if file.directory_label.is_empty() {
+                            file.label
+                        } else {
+                            format!(
+                                "{}/{}",
+                                file.directory_label.trim_end_matches('/'),
+                                file.label
+                            )
+                        },
+                        id: file.data_file.id,
+                        size: file
+                            .data_file
+                            .original_file_size
+                            .unwrap_or(file.data_file.filesize),
+                    })
+                    .collect();
+                let mappings = files
+                    .iter()
+                    .map(|file| (file.name.clone(), file.id.to_string().into()))
+                    .collect();
+                let lengths = files
+                    .iter()
+                    .map(|file| (file.id.to_string(), file.size))
+                    .collect::<Vec<_>>();
+                Ok(ResolvedFilesPlan::new(
                     "api/access/datafile/",
-                    &[("format", "original")],
-                )?
-                .with_content_lengths(files.iter().map(|file| (file.id.to_string(), file.size))),
-            files
-                .iter()
-                .map(|file| (file.name.clone(), file.id.to_string().into()))
-                .collect(),
-        )
-        .map_err(membership_error)?;
-        Ok(ResolvedFileSet::new(
-            inner,
-            DataverseMetadata {
-                persistent_id: persistent_id.to_owned(),
-                version: version.to_owned(),
-                files,
-            },
-        ))
+                    mappings,
+                    DataverseMetadata {
+                        persistent_id: persistent_id.to_owned(),
+                        version: version.to_owned(),
+                        files,
+                    },
+                )
+                .with_query(&[("format", "original")])
+                .with_content_lengths(lengths))
+            })
+            .await
     }
 }
 

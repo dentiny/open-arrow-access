@@ -6,7 +6,7 @@ pub(super) fn invalid(message: &str) -> Error {
 pub(super) fn decode(message: &str) -> Error {
     Error::new(ErrorKind::Decode, "resolve_dataverse", message)
 }
-pub(super) fn membership_error(error: Error) -> Error {
+pub(super) fn map_file_namespace_error(error: Error) -> Error {
     decode("invalid or duplicate file membership").with_source(error)
 }
 

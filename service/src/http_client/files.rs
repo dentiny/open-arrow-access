@@ -11,9 +11,46 @@ use crate::ResolvedFileSet;
 /// Canonical download root, ordered logical-name mappings and provider metadata.
 /// Providers validate identity, availability and names before returning this plan.
 pub(crate) struct ResolvedFilesPlan<M> {
-    pub(crate) root: String,
-    pub(crate) files: Vec<(String, ObjectRef)>,
-    pub(crate) metadata: M,
+    root: String,
+    files: Vec<(String, ObjectRef)>,
+    metadata: M,
+    query: Vec<(String, String)>,
+    content_lengths: Vec<(String, u64)>,
+}
+
+impl<M> ResolvedFilesPlan<M> {
+    pub(crate) fn new(
+        root: impl Into<String>,
+        files: Vec<(String, ObjectRef)>,
+        metadata: M,
+    ) -> Self {
+        Self {
+            root: root.into(),
+            files,
+            metadata,
+            query: Vec::new(),
+            content_lengths: Vec::new(),
+        }
+    }
+
+    /// Query parameters apply to file downloads, not the metadata request.
+    pub(crate) fn with_query(mut self, query: &[(&str, &str)]) -> Self {
+        self.query = query
+            .iter()
+            .map(|(key, value)| ((*key).into(), (*value).into()))
+            .collect();
+        self
+    }
+
+    /// Lengths are keyed by download locator and must describe that representation.
+    /// Storage uses stat for locators without a supplied length.
+    pub(crate) fn with_content_lengths(
+        mut self,
+        lengths: impl IntoIterator<Item = (String, u64)>,
+    ) -> Self {
+        self.content_lengths = lengths.into_iter().collect();
+        self
+    }
 }
 
 /// Connection and error context shared by public JSON-manifest providers.
@@ -60,7 +97,10 @@ impl HttpFileService {
             .json(metadata_url.as_str(), /*token=*/ None, self.operation)
             .await?;
         let plan = resolve(response)?;
-        let storage = self.client.accessor(&self.endpoint, &plan.root, &[])?;
+        let storage = self
+            .client
+            .accessor(&self.endpoint, &plan.root, plan.query)?
+            .with_content_lengths(plan.content_lengths);
         let files =
             NamedFileAccessor::new(storage, plan.files).map_err(self.map_file_namespace_error)?;
         Ok(ResolvedFileSet::new(files, plan.metadata))

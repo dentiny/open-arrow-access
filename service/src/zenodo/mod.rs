@@ -51,18 +51,18 @@ impl ZenodoService {
                 validate_record(&record, id)?;
                 // Use this version's canonical content route, never a latest
                 // version link or an arbitrary host supplied in metadata.
-                Ok(ResolvedFilesPlan {
-                    root: format!("api/records/{id}/files/"),
-                    files: record
+                Ok(ResolvedFilesPlan::new(
+                    format!("api/records/{id}/files/"),
+                    record
                         .files
                         .iter()
                         .map(|file| (file.key.clone(), format!("{}/content", file.key).into()))
                         .collect(),
-                    metadata: ZenodoMetadata {
+                    ZenodoMetadata {
                         id,
                         files: record.files,
                     },
-                })
+                ))
             })
             .await
     }

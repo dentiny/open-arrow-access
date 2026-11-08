@@ -44,17 +44,17 @@ impl InternetArchiveService {
         self.http
             .resolve_files(&url, |response| {
                 let files = extract_items_and_validate(response, identifier)?;
-                Ok(ResolvedFilesPlan {
-                    root: format!("download/{identifier}/"),
-                    files: files
+                Ok(ResolvedFilesPlan::new(
+                    format!("download/{identifier}/"),
+                    files
                         .iter()
                         .map(|file| (file.name.clone(), file.name.clone().into()))
                         .collect(),
-                    metadata: InternetArchiveMetadata {
+                    InternetArchiveMetadata {
                         identifier: identifier.into(),
                         files,
                     },
-                })
+                ))
             })
             .await
     }

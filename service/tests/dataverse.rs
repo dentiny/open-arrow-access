@@ -2,7 +2,10 @@ use futures::TryStreamExt;
 use http::StatusCode;
 use open_arrow_access_core::{Accessor, ByteAccessor, ByteReadRequest, ErrorKind, ListRequest};
 use open_arrow_access_service::dataverse::DataverseService;
-use open_arrow_access_test_support::{byte_accessor, collect_bytes, fixture, http::HttpFixture};
+use open_arrow_access_test_support::{
+    byte_accessor, collect_bytes, fixture,
+    http::{HttpFixture, assert_resolution_cases},
+};
 
 const PID: &str = "doi:10.7910/DVN/A&B+";
 const METADATA: &str = "/api/v1/datasets/:persistentId/versions/1.0?persistentId=doi%3A10.7910%2FDVN%2FA%26B%2B&excludeFiles=false&excludeMetadataBlocks=true";
@@ -27,6 +30,16 @@ async fn pins_membership_preserves_logical_names_and_reads_original_bytes() {
         .await
         .unwrap();
     assert_eq!(http.requests().len(), 1);
+    assert_eq!(dataset.persistent_id(), PID);
+    assert_eq!(dataset.version(), "1.0");
+    assert_eq!(
+        dataset
+            .files()
+            .iter()
+            .map(|file| (file.id, file.size))
+            .collect::<Vec<_>>(),
+        vec![(101, 8), (102, 8)]
+    );
     let listed: Vec<_> = dataset
         .list(ListRequest::new(""))
         .await
@@ -38,16 +51,12 @@ async fn pins_membership_preserves_logical_names_and_reads_original_bytes() {
         listed.iter().map(|f| f.locator()).collect::<Vec<_>>(),
         vec!["papers/2026/paper #1%.pdf", "table.tab"]
     );
-    let mut reader = dataset
-        .open(ByteReadRequest::new("papers/2026/paper #1%.pdf"))
-        .await
-        .unwrap();
-    assert_eq!(reader.read_range(1..4).await.unwrap().as_ref(), b"PDF");
     let mut tabular = dataset.open("table.tab".into()).await.unwrap();
-    byte_accessor::assert_read_contract(
+    byte_accessor::assert_ranged_read_contract(
         dataset,
         ByteReadRequest::new("papers/2026/paper #1%.pdf"),
         b"%PDFdata",
+        &[1..4, 0..0, 1..4],
     )
     .await
     .unwrap();
@@ -60,29 +69,44 @@ async fn pins_membership_preserves_logical_names_and_reads_original_bytes() {
 }
 
 #[tokio::test]
-async fn rejects_mismatched_versions_and_unsupported_files() {
-    for (file, kind) in [
-        ("wrong-pid.json", ErrorKind::Decode),
-        ("wrong-version.json", ErrorKind::Decode),
-        ("draft.json", ErrorKind::Decode),
-        ("missing-original-size.json", ErrorKind::Unsupported),
-        ("restricted.json", ErrorKind::Unsupported),
-    ] {
-        let http = HttpFixture::new();
-        http.respond(METADATA, StatusCode::OK, fixture!("dataverse", file).await);
-        assert_eq!(
-            DataverseService::new(http.endpoint())
-                .unwrap()
-                .dataset(PID, "1.0")
-                .await
-                .err()
-                .unwrap()
-                .kind(),
-            kind,
-            "{file}"
-        );
-        assert_eq!(http.requests().len(), 1);
-    }
+async fn rejects_invalid_metadata_and_unsupported_files() {
+    assert_resolution_cases(
+        env!("CARGO_MANIFEST_DIR"),
+        "dataverse",
+        METADATA,
+        &[
+            ("wrong-pid.json", StatusCode::OK, ErrorKind::Decode),
+            ("wrong-version.json", StatusCode::OK, ErrorKind::Decode),
+            ("draft.json", StatusCode::OK, ErrorKind::Decode),
+            ("bad-directory.json", StatusCode::OK, ErrorKind::Decode),
+            ("bad-label.json", StatusCode::OK, ErrorKind::Decode),
+            ("duplicate-name.json", StatusCode::OK, ErrorKind::Decode),
+            ("malformed.json", StatusCode::OK, ErrorKind::Decode),
+            ("missing-files.json", StatusCode::OK, ErrorKind::Decode),
+            ("zero-id.json", StatusCode::OK, ErrorKind::Decode),
+            (
+                "missing-original-size.json",
+                StatusCode::OK,
+                ErrorKind::Unsupported,
+            ),
+            ("restricted.json", StatusCode::OK, ErrorKind::Unsupported),
+        ],
+        |endpoint| async move { DataverseService::new(&endpoint)?.dataset(PID, "1.0").await },
+    )
+    .await;
+    let http = HttpFixture::new();
+    http.respond(
+        METADATA,
+        StatusCode::OK,
+        fixture!("dataverse", "empty.json").await,
+    );
+    let dataset = DataverseService::new(http.endpoint())
+        .unwrap()
+        .dataset(PID, "1.0")
+        .await
+        .unwrap();
+    assert!(dataset.files().is_empty());
+    assert_eq!(http.requests().len(), 1);
 }
 
 #[tokio::test]
