@@ -166,3 +166,15 @@ async fn caller_supplied_gzip_decodes_the_official_inventory_representation() {
         1
     );
 }
+
+#[tokio::test]
+async fn manifest_paths_can_exceed_the_previous_line_limit() {
+    let path = entry(SEGMENT, &"x".repeat(16 * 1024));
+    let source = open_arrow_access_test_support::MemoryAccessor::new(path.as_bytes(), 1024);
+    let resolved = CommonCrawlWarcAccessor::new(source, Records::default())
+        .resolve(request())
+        .await
+        .unwrap();
+    assert_eq!(resolved.objects.len(), 1);
+    assert_eq!(resolved.objects[0].locator(), path);
+}

@@ -42,7 +42,7 @@ async fn reads_once_lazily_with_byte_options_projection_and_owned_state() {
     for projection in [None, Some(vec![])] {
         let source = MemoryAccessor::new(&fixture!("bytes", "binary.bin").await, 1);
         let observed = source.observations.clone();
-        let accessor = DocumentAccessor::new(source, RawDocument, 3);
+        let accessor = DocumentAccessor::new(source, RawDocument);
         let options = ByteReadOptions {
             io_concurrency: NonZeroUsize::new(2).unwrap(),
             ..Default::default()
@@ -77,10 +77,10 @@ async fn reads_once_lazily_with_byte_options_projection_and_owned_state() {
 }
 
 #[tokio::test]
-async fn rejects_bad_projection_and_limits_and_preserves_source_errors() {
+async fn rejects_bad_projection_and_preserves_source_errors() {
     let source = MemoryAccessor::new(&fixture!("bytes", "input.bin").await, 1);
     let observed = source.observations.clone();
-    let accessor = DocumentAccessor::new(source, RawDocument, 4);
+    let accessor = DocumentAccessor::new(source, RawDocument);
     let request = ReadRequest::new("input").with_options(ReadOptions {
         projection: Some(vec!["unknown".into()]),
         ..Default::default()
@@ -91,12 +91,12 @@ async fn rejects_bad_projection_and_limits_and_preserves_source_errors() {
     );
     assert!(observed.requests.lock().unwrap().is_empty());
     let mut reader = accessor.open(ReadRequest::new("input")).await.unwrap();
-    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
+    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
     assert!(reader.next().await.unwrap().is_none());
 
     let source = MemoryAccessor::new(&fixture!("bytes", "input.bin").await, 1)
         .with_failure(0, ErrorKind::PermissionDenied);
-    let mut reader = DocumentAccessor::new(source, RawDocument, 5)
+    let mut reader = DocumentAccessor::new(source, RawDocument)
         .open(ReadRequest::new("input"))
         .await
         .unwrap();
@@ -160,7 +160,6 @@ async fn rejects_invalid_output_and_preserves_decoder_errors() {
         let mut reader = DocumentAccessor::new(
             MemoryAccessor::new(&fixture!("bytes", "empty.bin").await, 1),
             decoder,
-            0,
         )
         .open(ReadRequest::new("empty"))
         .await

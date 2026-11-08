@@ -2,7 +2,7 @@ use atif_arrow::TrajectoryBatchBuilder;
 use futures::{StreamExt, TryStreamExt, stream, stream::BoxStream};
 use open_arrow_access_core::{
     ByteReader, Bytes, ObjectRef, RecordBatch, RecordMetadata, RecordReader, Result, StreamReader,
-    read_limited, read_lines,
+    read_all, read_lines,
 };
 
 use super::{AtifFormat, error::decode_error};
@@ -60,12 +60,9 @@ pub(super) fn create_reader(
     metadata: RecordMetadata,
 ) -> impl RecordReader {
     let documents = match format {
-        AtifFormat::Json => stream::once(async move {
-            read_limited(input, usize::MAX, "read_atif")
-                .await
-                .map(Bytes::from)
-        })
-        .boxed(),
+        AtifFormat::Json => {
+            stream::once(async move { read_all(input, "read_atif").await.map(Bytes::from) }).boxed()
+        }
         AtifFormat::JsonLines => read_lines(input, None, "read_atif").boxed(),
     };
     let decoder = AtifDecoder {

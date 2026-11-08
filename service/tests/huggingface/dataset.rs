@@ -113,7 +113,7 @@ async fn invalid_revision_metadata_never_opens_files() {
     for (name, expected) in [
         ("bad_truncated_revision.json", ErrorKind::Decode),
         ("bad_revision_sha.json", ErrorKind::Decode),
-        ("bad_oversized_revision.json", ErrorKind::Unsupported),
+        ("bad_oversized_revision.json", ErrorKind::Decode),
     ] {
         hub.metadata = Bytes::from(fixture!("huggingface", name).await);
         hub.clear_requests();
@@ -121,4 +121,13 @@ async fn invalid_revision_metadata_never_opens_files() {
         assert_eq!(error.kind(), expected);
         assert_eq!(hub.requests().len(), 1);
     }
+}
+
+#[tokio::test]
+async fn revision_metadata_can_exceed_the_previous_size_limit() {
+    let mut hub = ExportHub::new("complete.json").await;
+    let mut metadata = vec![b' '; 64 * 1024 + 1];
+    metadata.extend_from_slice(&hub.metadata);
+    hub.metadata = metadata.into();
+    assert_eq!(hub.read_ids(request()).await, [1, 2]);
 }

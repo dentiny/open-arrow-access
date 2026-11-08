@@ -75,7 +75,7 @@ async fn record_membership_and_lazy_independent_file_reads() {
 }
 
 #[tokio::test]
-async fn rejects_invalid_metadata_and_bounded_responses() {
+async fn rejects_invalid_metadata() {
     for name in [
         "malformed",
         "wrong-id",
@@ -90,17 +90,6 @@ async fn rejects_invalid_metadata_and_bounded_responses() {
             "{name}"
         );
     }
-    let (_fixture, service) = fixture_service("record").await;
-    assert_eq!(
-        service
-            .with_metadata_limit(8)
-            .record(ID)
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Unsupported
-    );
     let (_fixture, service) = fixture_service("empty").await;
     assert!(service.record(ID).await.unwrap().files().is_empty());
 }
@@ -115,6 +104,15 @@ async fn maps_http_errors() {
         let (_fixture, service) = fixture_service(name).await;
         assert_eq!(service.record(ID).await.err().unwrap().kind(), kind);
     }
+}
+
+#[tokio::test]
+async fn record_metadata_can_exceed_the_previous_size_limit() {
+    let (fixture, service) = fixture_service("record").await;
+    let mut raw = fixture!("zenodo", "record.json").await;
+    raw.extend(std::iter::repeat_n(b' ', 4 * 1024 * 1024));
+    fixture.respond_chunked("/api/records/3551612", StatusCode::OK, Bytes::from(raw));
+    assert!(!service.record(ID).await.unwrap().files().is_empty());
 }
 
 #[test]

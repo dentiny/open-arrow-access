@@ -6,7 +6,7 @@ use arrow_array::{
     types::{Date32Type, Int32Type, UInt64Type},
 };
 use open_arrow_access_core::{Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest};
-use open_arrow_access_service::gutenberg::{GutenbergAccessor, GutenbergLimits, schema};
+use open_arrow_access_service::gutenberg::{GutenbergAccessor, schema};
 use open_arrow_access_test_support::{MemoryAccessor, fixture};
 
 fn request() -> ReadRequest {
@@ -109,15 +109,7 @@ async fn rejects_invalid_rdf_without_silently_dropping_rows() {
 }
 
 #[tokio::test]
-async fn enforces_metadata_limit_and_preserves_storage_errors() {
-    let raw = fixture!("gutenberg", "book.rdf").await;
-    let accessor =
-        GutenbergAccessor::new(MemoryAccessor::new(&raw, 17)).with_limits(GutenbergLimits {
-            metadata_bytes: NonZeroUsize::new(raw.len() - 1).unwrap(),
-        });
-    let mut reader = accessor.open(request()).await.unwrap();
-    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
-    assert!(reader.next().await.unwrap().is_none());
+async fn preserves_storage_errors() {
     let bytes = MemoryAccessor::new(&fixture!("gutenberg", "book.rdf").await, 7)
         .with_failure(7, ErrorKind::PermissionDenied);
     let mut reader = GutenbergAccessor::new(bytes).open(request()).await.unwrap();
@@ -135,4 +127,15 @@ async fn keeps_metadata_only_books_with_missing_optional_fields() {
     assert_eq!(batch.num_rows(), 1);
     assert!(batch["title"].is_null(0));
     assert!(batch["files"].as_list::<i32>().value(0).is_empty());
+}
+
+#[tokio::test]
+async fn rdf_metadata_can_exceed_the_previous_size_limit() {
+    let mut raw = fixture!("gutenberg", "book.rdf").await;
+    raw.extend(std::iter::repeat_n(b' ', 4 * 1024 * 1024));
+    let mut reader = GutenbergAccessor::new(MemoryAccessor::new(&raw, 64 * 1024))
+        .open(request())
+        .await
+        .unwrap();
+    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
 }
