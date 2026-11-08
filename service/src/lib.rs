@@ -25,4 +25,6 @@ pub mod pmc;
 pub mod zenodo;
 
 #[cfg(feature = "http-client")]
+// Individual providers may use only part of the shared HTTP utilities.
+#[allow(dead_code)]
 mod http_client;
