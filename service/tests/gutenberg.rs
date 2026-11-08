@@ -66,7 +66,7 @@ async fn keeps_mapped_book_and_file_metadata_in_rdf_order() {
     let files = batch
         .column_by_name("files")
         .unwrap()
-        .as_list::<i64>()
+        .as_list::<i32>()
         .value(0);
     let files = files.as_struct();
     let uris = files.column_by_name("uri").unwrap().as_string::<i32>();
@@ -180,7 +180,7 @@ async fn keeps_metadata_only_books_with_missing_optional_fields() {
         batch
             .column_by_name("files")
             .unwrap()
-            .as_list::<i64>()
+            .as_list::<i32>()
             .value(0)
             .is_empty()
     );

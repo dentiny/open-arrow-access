@@ -129,12 +129,7 @@ fn objects(name: &str, path: &str, container: &str, mappings: Vec<Mapping>) -> M
         ),
     );
     let item = Arc::new(Field::new("item", DataType::Struct(fields.into()), false));
-    let ty = if name == "files" {
-        DataType::LargeList(item)
-    } else {
-        DataType::List(item)
-    };
-    (Field::new(name, ty, false), xml)
+    (Field::new(name, DataType::List(item), false), xml)
 }
 
 fn definitions() -> &'static (SchemaRef, XmlSchema) {

@@ -51,7 +51,7 @@ fn convert_fields(
         let name = field.name().as_str();
         let column = source.column_by_name(name).unwrap();
         match field.data_type() {
-            DataType::List(item) | DataType::LargeList(item) => {
+            DataType::List(item) => {
                 let values = column.as_list::<i32>().value(index);
                 if let DataType::Struct(fields) = item.data_type() {
                     let entries = values.as_struct().column(0).as_struct();
