@@ -154,3 +154,62 @@ path validation and selected-file duplicate checks remain in the provider.
 `format-warc` exposes native parser records through `WarcAccessor`. This service
 composes Arrow readers through FileSet, so its `format` argument requires a
 caller-provided WARC-to-Arrow accessor. Manifest-only `resolve` needs no conversion.
+
+## CourtListener bulk snapshots
+
+Enable `courtlistener` (`service-courtlistener` on the facade) for
+`service::courtlistener::{CourtListenerBulkAccessor, CourtListenerSnapshot}`.
+This entry point discovers bulk table exports and streams their **decoded CSV
+bytes**. Storage must be rooted above `bulk-data/`, whether it is the public
+bucket or a mirror. Configure OpenDAL backends in the calling application.
+
+```rust,no_run
+use open_arrow_access::{Accessor, Result};
+use open_arrow_access::service::courtlistener::{CourtListenerBulkAccessor, CourtListenerSnapshot};
+use open_arrow_access::storage::{OpenDalAccessor, opendal};
+
+async fn read(operator: opendal::Operator) -> Result<()> {
+    let source = CourtListenerBulkAccessor::new(OpenDalAccessor::new(operator));
+    let snapshots = source.snapshots("opinion-clusters").await?;
+    let snapshot = CourtListenerSnapshot::new("opinion-clusters", "2026-09-30")?;
+    let mut reader = source.open(snapshot.object().into()).await?;
+    while let Some(csv_bytes) = reader.next().await? {
+        // Feed original bytes to a PostgreSQL COPY-compatible consumer.
+    }
+    Ok(())
+}
+```
+
+For public discovery, enable OpenDAL `services-s3` and
+`http-transport-reqwest`, and configure
+`opendal::services::S3::default().bucket("com-courtlistener-storage")
+.region("us-west-2").disable_config_load().disable_ec2_metadata().allow_anonymous()`.
+No CourtListener API token or account is required. HTTP can read an explicit
+snapshot without listing. Listing support is required only by `snapshots`;
+unavailable listing returns `Unsupported`, never an empty success.
+
+`snapshots(table)` lists `bulk-data/` nonrecursively, filters exact table names,
+and collects sorted, unique, valid dated `.csv.bz2` object names. It does not
+open table contents. An empty result means listing succeeded without a matching
+export; transport and permission errors propagate. Table names follow published
+filenames, e.g. `courts`, `opinions`, `opinion-clusters`, and `people-db-people`.
+The set of names is open to accommodate future tables. `schema_object()`
+identifies the companion SQL schema without downloading or executing it.
+Dates are UTC generation dates; same-date exports from different tables are
+not an atomic database snapshot. Pin object versions separately if a mirror
+can replace objects. No implicit latest-date selection or cross-table join occurs.
+
+`open(ByteReadRequest)` accepts canonical bulk CSV snapshot locators and forwards
+I/O options to storage. Existing `Bzip2` supplies pull-driven decoding, terminal
+errors and unknown decoded length. Ranges and generic listing are not advertised
+on the decoded byte interface. Dropping the reader stops its work.
+
+The service preserves original CSV bytes, including headers, multiline fields,
+backslash escaping, and unquoted NULL versus quoted empty strings. It does not
+infer Arrow schemas, parse SQL, join tables, use REST/RECAP or download PDFs.
+Record conversion remains a separate consumer: **the generic Arrow CSV reader
+currently treats both unquoted empty fields and quoted empty strings as NULL
+by default**. Use a COPY-compatible decoder for lossless table conversion.
+
+Sources: [bulk documentation](https://wiki.free.law/c/courtlistener/help/api/bulk-data/bulk-legal-data)
+and the [official exporter](https://github.com/freelawproject/courtlistener/blob/main/scripts/make_bulk_data.sh).

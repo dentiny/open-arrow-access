@@ -8,6 +8,10 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
+courtlistener = [
+    "dep:open-arrow-access-decompression",
+    "open-arrow-access-decompression/bz2",
+]
 warc = [
     "dep:open-arrow-access-storage",
     "dep:opendal",
@@ -91,6 +95,10 @@ required-features = ["pmc"]
 [[test]]
 name = "pmc"
 required-features = ["pmc"]
+
+[[test]]
+name = "courtlistener"
+required-features = ["courtlistener"]
 
 [lints]
 workspace = true
