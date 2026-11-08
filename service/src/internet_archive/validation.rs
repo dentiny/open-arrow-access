@@ -7,10 +7,11 @@ use super::{
 };
 
 pub(super) fn validate_identifier(identifier: &str) -> Result<()> {
-    if identifier.len() > 100 || !identifier
-        .bytes()
-        .next()
-        .is_some_and(|byte| byte.is_ascii_alphanumeric())
+    if identifier.len() > 100
+        || !identifier
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
         || !identifier
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))

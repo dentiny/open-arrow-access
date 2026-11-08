@@ -76,7 +76,11 @@ async fn resolves_once_and_reads_nested_names_lazily_with_independent_readers() 
             .count(),
         1
     );
-    assert!(requests.iter().any(|request| request.headers.contains_key("range")));
+    assert!(
+        requests
+            .iter()
+            .any(|request| request.headers.contains_key("range"))
+    );
 }
 
 #[tokio::test]
@@ -138,7 +142,10 @@ async fn validates_selection_before_io_and_bounds_chunked_metadata() {
             ErrorKind::InvalidInput
         );
     }
-    assert_eq!(service.item(&"a".repeat(101)).await.err().unwrap().kind(), ErrorKind::InvalidInput);
+    assert_eq!(
+        service.item(&"a".repeat(101)).await.err().unwrap().kind(),
+        ErrorKind::InvalidInput
+    );
     assert!(fixture.requests().is_empty());
     fixture.respond_chunked(
         METADATA,
