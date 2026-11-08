@@ -35,52 +35,10 @@ Viewer row APIs are outside this entry point.
 
 ## Gutenberg
 
-Enable `gutenberg` (`service-gutenberg` on the facade) for one per-book RDF
-object and its selected files as a single Arrow row:
-
-```rust,no_run
-use open_arrow_access::{
-    Accessor, Result,
-    service::{GutenbergAccessor, GutenbergFile, GutenbergRequest},
-    storage::{OpenDalAccessor, opendal},
-};
-
-async fn read() -> Result<()> {
-    let operator = opendal::Operator::new(
-        opendal::services::Fs::default().root("/mirror"),
-    ).expect("configure filesystem");
-    let books = GutenbergAccessor::new(OpenDalAccessor::new(operator));
-    let request = GutenbergRequest::new("cache/epub/11/pg11.rdf", vec![
-        GutenbergFile::new(
-            "https://www.gutenberg.org/ebooks/11.txt.utf-8",
-            "books/11.txt",
-        ),
-    ]);
-    let mut reader = books.open(request).await?;
-    while let Some(batch) = reader.next().await? {
-        println!("{} book", batch.num_rows());
-
-## PMC article-version metadata (`pmc`)
-
-Enable `service-pmc` for `service::pmc::PmcAccessor`. This service reads exactly
-one metadata JSON object named by a standard `ReadRequest`, and emits one row.
-It never lists a directory or opens a PDF, XML, text, or media URL. Inventory
-enumeration is a separate service. The input byte accessor requires sequential
-reads only; filesystem, SDK operators, and decompression layers are caller-owned.
-
-```rust,no_run
-use open_arrow_access::{Accessor, ReadRequest, service::pmc::PmcAccessor};
-use open_arrow_access_storage::{OpenDalAccessor, opendal};
-
-async fn read(operator: opendal::Operator) -> Result<(), Box<dyn std::error::Error>> {
-    let source = PmcAccessor::new(OpenDalAccessor::new(operator));
-    let mut reader = source.open(ReadRequest::new("metadata/PMC123.2.json")).await?;
-    while let Some(batch) = reader.next().await? {
-        assert_eq!(batch.num_rows(), 1);
-    }
-    Ok(())
-}
-```
+Enable `gutenberg` (`service-gutenberg` on the facade) for one per-book RDF/XML
+object and its selected files as a single Arrow row. Metadata extraction reuses
+`xml-arrow`, the same engine as `XmlAccessor`; Gutenberg adds the book schema,
+type conversion, file selection and byte limits.
 
 The URI must match a `pgterms:file` entry in the RDF; the object locator points
 to that file in your storage. This explicit mapping supports local or object
@@ -127,6 +85,28 @@ fixture, or supply a mirror root, RDF path and pairs of file URI / local path:
 
 ```sh
 cargo run --example read_gutenberg --features service-gutenberg
+```
+
+## PMC article-version metadata (`pmc`)
+
+Enable `service-pmc` for `service::pmc::PmcAccessor`. This service reads exactly
+one metadata JSON object named by a standard `ReadRequest`, and emits one row.
+It never lists a directory or opens a PDF, XML, text, or media URL. Inventory
+enumeration is a separate service. The input byte accessor requires sequential
+reads only; filesystem, SDK operators, and decompression layers are caller-owned.
+
+```rust,no_run
+use open_arrow_access::{Accessor, ReadRequest, service::pmc::PmcAccessor};
+use open_arrow_access_storage::{OpenDalAccessor, opendal};
+
+async fn read(operator: opendal::Operator) -> Result<(), Box<dyn std::error::Error>> {
+    let source = PmcAccessor::new(OpenDalAccessor::new(operator));
+    let mut reader = source.open(ReadRequest::new("metadata/PMC123.2.json")).await?;
+    while let Some(batch) = reader.next().await? {
+        assert_eq!(batch.num_rows(), 1);
+    }
+    Ok(())
+}
 ```
 
 For a local mirror, run `cargo run --example read_pmc --features service-pmc --

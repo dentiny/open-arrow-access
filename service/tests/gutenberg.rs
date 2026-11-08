@@ -48,70 +48,56 @@ async fn keeps_book_metadata_and_original_files_in_requested_order() {
     assert!(!accessor.capability().list);
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch.num_rows(), 1);
+    assert_eq!(batch.column(0).as_primitive::<UInt64Type>().value(0), 42);
+    assert_eq!(batch.column(1).as_string::<i64>().value(0), "A & B");
+    assert_eq!(batch.column(6).as_primitive::<Date32Type>().value(0), 1);
     assert_eq!(
-        batch
-            .column_by_name("ebook_id")
-            .unwrap()
-            .as_primitive::<UInt64Type>()
-            .value(0),
-        42
+        batch.column(7).as_string::<i64>().value(0),
+        "Fixture rights"
     );
-    assert_eq!(
-        batch
-            .column_by_name("title")
-            .unwrap()
-            .as_string::<i64>()
-            .value(0),
-        "A & B"
-    );
-    assert_eq!(
-        batch
-            .column_by_name("issued")
-            .unwrap()
-            .as_primitive::<Date32Type>()
-            .value(0),
-        1
-    );
-    let creators = batch
-        .column_by_name("creator")
-        .unwrap()
-        .as_list::<i32>()
-        .value(0);
+    let creators = batch.column(2).as_list::<i32>().value(0);
     let creators = creators.as_struct();
     assert_eq!(
-        creators
-            .column_by_name("birthdate")
-            .unwrap()
-            .as_primitive::<Int32Type>()
-            .value(0),
-        -20
+        creators.column(0).as_string::<i32>().value(0),
+        "2009/agents/1"
     );
-    let files = batch
-        .column_by_name("files")
-        .unwrap()
-        .as_list::<i64>()
-        .value(0);
+    assert_eq!(
+        creators.column(1).as_string::<i32>().value(0),
+        "Example Author"
+    );
+    let aliases = creators.column(2).as_list::<i32>().value(0);
+    assert_eq!(aliases.as_string::<i32>().value(0), "Alias");
+    assert_eq!(creators.column(3).as_primitive::<Int32Type>().value(0), -20);
+    assert_eq!(creators.column(4).as_primitive::<Int32Type>().value(0), 30);
+    let language = batch.column(3).as_list::<i32>().value(0);
+    assert_eq!(language.as_string::<i32>().value(0), "en");
+    let subject = batch.column(4).as_list::<i32>().value(0);
+    assert_eq!(
+        subject.as_struct().column(0).as_string::<i32>().value(0),
+        "http://purl.org/dc/terms/LCSH"
+    );
+    assert_eq!(
+        subject.as_struct().column(1).as_string::<i32>().value(0),
+        "Example subject"
+    );
+    let shelf = batch.column(5).as_list::<i32>().value(0);
+    assert_eq!(shelf.as_string::<i32>().value(0), "Example shelf");
+    let files = batch.column(9).as_list::<i64>().value(0);
     let files = files.as_struct();
-    let uris = files.column_by_name("uri").unwrap().as_string::<i32>();
+    let uris = files.column(0).as_string::<i32>();
     assert!(uris.value(0).ends_with(".zip"));
-    let data = files.column_by_name("data").unwrap().as_binary::<i64>();
+    let data = files.column(4).as_binary::<i64>();
     assert_eq!(data.value(0), ZIP);
     assert_eq!(data.value(1), TXT);
+    assert_eq!(files.column(1).as_list::<i32>().value(0).len(), 2);
+    assert!(files.column(2).is_null(0));
+    assert_eq!(files.column(2).as_primitive::<UInt64Type>().value(1), 7);
     assert_eq!(
-        files
-            .column_by_name("format")
-            .unwrap()
-            .as_list::<i32>()
-            .value(0)
-            .len(),
-        2
+        files.column(3).as_string::<i32>().value(1),
+        "2026-11-01T01:02:03"
     );
     assert_eq!(
-        batch
-            .column_by_name("metadata_rdf")
-            .unwrap()
-            .as_binary::<i64>()
-            .value(0),
+        batch.column(8).as_binary::<i64>().value(0),
         fixture!("gutenberg", "book.rdf").await
     );
     assert!(reader.next().await.unwrap().is_none());
@@ -175,11 +161,35 @@ async fn rejects_invalid_requests_and_rdf_without_silently_dropping_rows() {
     for invalid in [
         raw.replace("ebooks/42", "ebooks/invalid"),
         raw.replace("1970-01-02", "2026-02-30"),
+        raw.replace("<p:birthdate>-20", "<p:birthdate>2147483648"),
+        raw.replace("<d:extent>7", "<d:extent>-1"),
+        raw.replace("<d:extent>7", "<d:extent> 7"),
+        raw.replace("<p:birthdate>-20", "<p:birthdate> -20"),
+        raw.replace("<d:extent>7", "<d:extent>18446744073709551616"),
+        raw.replace("<p:agent r:about=", "<p:wrong r:about=")
+            .replace("</p:agent>", "</p:wrong>"),
+        raw.replace("<r:RDF ", "<r:wrong ")
+            .replace("</r:RDF>", "</r:wrong>"),
+        raw.replace("</r:RDF>", "</r:RDF><broken>"),
+        raw.replace(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+            "<!DOCTYPE r:RDF>",
+        ),
+        raw.replace(
+            "https://example.invalid/42.zip",
+            "https://example.invalid/42.txt",
+        ),
         raw.replace("<p:ebook", "<p:ebook xmlns:p=\"urn:wrong\""),
         raw.replace("</r:RDF>", "<p:ebook r:about=\"ebooks/43\"/></r:RDF>"),
     ] {
         let accessor = GutenbergAccessor::new(MemoryAccessor::new(invalid.as_bytes(), 19));
-        let mut reader = accessor.open(request()).await.unwrap();
+        let mut reader = accessor
+            .open(request().with_options(ReadOptions {
+                projection: Some(vec!["ebook_id".into()]),
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
         assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
         assert!(reader.next().await.unwrap().is_none());
     }
@@ -246,5 +256,52 @@ async fn keeps_metadata_only_books_with_missing_optional_fields() {
             .as_list::<i64>()
             .value(0)
             .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn accepts_full_unsigned_range_and_cdata() {
+    let root = mirror().await;
+    let raw = String::from_utf8(fixture!("gutenberg", "book.rdf").await)
+        .unwrap()
+        .replace(
+            "ebooks/42",
+            "https://www.gutenberg.org/ebooks/18446744073709551615",
+        )
+        .replace("<d:extent>7", "<d:extent>18446744073709551615")
+        .replace("A &amp; B", "<![CDATA[A & B]]>")
+        .replace("<p:birthdate>-20</p:birthdate>", "<p:birthdate/>")
+        .replace("<p:alias>Alias</p:alias>", "<p:alias/>")
+        .replace("<d:issued>1970-01-02</d:issued>", "<d:issued/>");
+    tokio::fs::write(root.path().join("book.rdf"), raw)
+        .await
+        .unwrap();
+    let accessor = GutenbergAccessor::new(OpenDalAccessor::new(fs_operator(root.path())));
+    let mut reader = accessor.open(request()).await.unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(
+        batch.column(0).as_primitive::<UInt64Type>().value(0),
+        u64::MAX
+    );
+    assert_eq!(batch.column(1).as_string::<i64>().value(0), "A & B");
+    assert!(batch.column(6).is_null(0));
+    let creators = batch.column(2).as_list::<i32>().value(0);
+    assert!(creators.as_struct().column(3).is_null(0));
+    assert!(
+        creators
+            .as_struct()
+            .column(2)
+            .as_list::<i32>()
+            .value(0)
+            .is_empty()
+    );
+    let files = batch.column(9).as_list::<i64>().value(0);
+    assert_eq!(
+        files
+            .as_struct()
+            .column(2)
+            .as_primitive::<UInt64Type>()
+            .value(1),
+        u64::MAX
     );
 }

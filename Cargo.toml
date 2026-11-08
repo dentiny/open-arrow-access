@@ -37,11 +37,12 @@ async-compression = { version = "0.4.50", default-features = false, features = [
 # Match the resolved Cargo.lock versions at the Lance revision above.
 # See docs/dependencies.md when updating this baseline.
 arrow-array = "59.3.0"
+arrow-buffer = "59.3.0"
 arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
+arrow-select = "59.3.0"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-roxmltree = "0.21"
 xml-arrow = "0.2.0"
 atif-arrow = "0.4.0"
 warc = { package = "warc-rs", version = "=0.3.0", default-features = false }
