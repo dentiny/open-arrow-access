@@ -20,3 +20,6 @@ pub mod pmc_inventory;
 
 #[cfg(feature = "pmc")]
 pub mod pmc;
+
+#[cfg(feature = "huggingface")]
+mod http_client;

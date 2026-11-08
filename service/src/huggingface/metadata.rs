@@ -1,11 +1,7 @@
-use http::Request;
 use open_arrow_access_core::{Error, ErrorKind, Result};
-use opendal::{Buffer, raw::oio::ReadStream};
 use serde::Deserialize;
 
-use super::{
-    HuggingFaceRepository, HuggingFaceService, client::endpoint, map_error, map_http_error,
-};
+use super::{HuggingFaceRepository, HuggingFaceService, client::endpoint};
 
 const MAX_METADATA_BYTES: usize = 64 * 1024;
 
@@ -43,60 +39,16 @@ impl HuggingFaceService {
             path.push("revision").push(&repository.revision);
         }
         url.query_pairs_mut().append_pair("expand", "sha");
-        let mut request = Request::get(url.as_str());
-        if let Some(token) = &self.options.token {
-            request = request.header("authorization", format!("Bearer {token}"));
+        let metadata: RepositoryInfo = crate::http_client::HttpClient {
+            context: self.context.clone(),
         }
-        let request = request.body(Buffer::new()).map_err(|_| {
-            Error::new(
-                ErrorKind::InvalidInput,
-                "configure_huggingface",
-                "invalid Hub request configuration",
-            )
-        })?;
-        let response = self
-            .context
-            .http_transport()
-            .fetch(request)
-            .await
-            .map_err(|e| map_error("resolve_huggingface", &repository.repository, e))?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(map_http_error(
-                "resolve_huggingface",
-                &repository.repository,
-                status,
-            ));
-        }
-        let mut body = response.into_body();
-        let mut bytes = Vec::new();
-        loop {
-            let buffer = body
-                .read()
-                .await
-                .map_err(|e| map_error("resolve_huggingface", &repository.repository, e))?;
-            if buffer.is_empty() {
-                break;
-            }
-            if buffer.len() > MAX_METADATA_BYTES - bytes.len() {
-                return Err(Error::new(
-                    ErrorKind::Unsupported,
-                    "resolve_huggingface",
-                    "revision metadata exceeds the 64 KiB limit",
-                ));
-            }
-            for part in buffer {
-                bytes.extend_from_slice(&part);
-            }
-        }
-        let metadata: RepositoryInfo = serde_json::from_slice(&bytes).map_err(|error| {
-            Error::new(
-                ErrorKind::Decode,
-                "resolve_huggingface",
-                "invalid revision metadata",
-            )
-            .with_source(error)
-        })?;
+        .json(
+            url.as_str(),
+            self.options.token.as_deref(),
+            MAX_METADATA_BYTES,
+            "resolve_huggingface",
+        )
+        .await?;
         if !is_commit_sha(&metadata.sha) {
             return Err(Error::new(
                 ErrorKind::Decode,
