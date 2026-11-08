@@ -13,14 +13,16 @@ directory owns facade wiring and composition across crates.
 | XML | [`file-format/tests/xml.rs`](../file-format/tests/xml.rs) |
 | ATIF format | [`file-format/tests/atif.rs`](../file-format/tests/atif.rs) |
 | Parquet and byte/record layer composition | [`tests/reading.rs`](reading.rs) |
-| Directory and file-set facade | [`tests/directory.rs`](directory.rs) |
+| Directory and file-set behavior | [`dataset/tests/directory.rs`](../dataset/tests/directory.rs) |
+| Directory, storage and Parquet composition | [`tests/directory.rs`](directory.rs) |
 | ATIF facade and file-set composition | [`tests/atif.rs`](atif.rs) |
 | Hugging Face Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
-| Common Crawl configuration | [`tests/commoncrawl_common.rs`](commoncrawl_common.rs) |
-| Common Crawl WARC inventory | [`tests/commoncrawl_warc.rs`](commoncrawl_warc.rs) |
-| WARC parser | [`tests/warc.rs`](warc.rs) |
+| Common Crawl configuration | [`service/tests/commoncrawl.rs`](../service/tests/commoncrawl.rs) |
+| Common Crawl WARC inventory | [`service/tests/warc.rs`](../service/tests/warc.rs) |
+| WARC parser | [`file-format/tests/warc.rs`](../file-format/tests/warc.rs) |
 | OpenDAL storage | [`storage/tests/opendal.rs`](../storage/tests/opendal.rs) |
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |
+| Document accessor | [`core/tests/document.rs`](../core/tests/document.rs) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
 | Generic file-format extension protocol | [`file-format/tests/accessor.rs`](../file-format/tests/accessor.rs), also runs with no format features |
 | Shared memory backend | [`test-support/tests/memory.rs`](../test-support/tests/memory.rs) |

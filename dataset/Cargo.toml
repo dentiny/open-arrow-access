@@ -14,5 +14,15 @@ directory = []
 open-arrow-access-core.workspace = true
 futures.workspace = true
 
+[dev-dependencies]
+arrow-array.workspace = true
+arrow-schema.workspace = true
+open-arrow-access-test-support.workspace = true
+tokio.workspace = true
+
+[[test]]
+name = "directory"
+required-features = ["directory"]
+
 [lints]
 workspace = true

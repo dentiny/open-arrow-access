@@ -102,14 +102,6 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 
 [[test]]
-name = "commoncrawl_common"
-required-features = ["service-warc"]
-
-[[test]]
-name = "commoncrawl_warc"
-required-features = ["service-warc"]
-
-[[test]]
 name = "directory"
 required-features = ["dataset-directory"]
 
@@ -142,7 +134,3 @@ required-features = ["format-atif"]
 [[test]]
 name = "atif"
 required-features = ["format-atif", "dataset-directory"]
-
-[[test]]
-name = "warc"
-required-features = ["format-warc"]

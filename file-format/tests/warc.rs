@@ -1,10 +1,8 @@
 use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
-use open_arrow_access::{
-    Accessor, ByteReadOptions, ByteReadRequest, Error, ErrorKind,
-    file_format::{WarcAccessor, WarcHeader},
-    storage::OpenDalAccessor,
-};
+use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest, Error, ErrorKind};
+use open_arrow_access_file_format::{WarcAccessor, WarcHeader};
+use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::{MemoryAccessor, fixture, fs_operator};
 
 #[tokio::test]
