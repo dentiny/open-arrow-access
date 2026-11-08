@@ -11,7 +11,7 @@ use open_arrow_access_storage::OpenDalAccessor;
 use serde::Deserialize;
 
 use crate::ResolvedFileSet;
-use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
+use crate::http_client::files::{HttpFileService, ResolvedFile, ResolvedFilesPlan};
 use error::map_file_namespace_error;
 use validation::validate_record;
 
@@ -51,18 +51,27 @@ impl ZenodoService {
                 validate_record(&record, id)?;
                 // Use this version's canonical content route, never a latest
                 // version link or an arbitrary host supplied in metadata.
-                Ok(ResolvedFilesPlan::new(
+                ResolvedFilesPlan::new(
                     format!("api/records/{id}/files/"),
                     record
                         .files
                         .iter()
-                        .map(|file| (file.key.clone(), format!("{}/content", file.key).into()))
+                        .map(|file| {
+                            (
+                                file.key.clone(),
+                                ResolvedFile {
+                                    object: format!("{}/content", file.key).into(),
+                                    content_length: None,
+                                },
+                            )
+                        })
                         .collect(),
                     ZenodoMetadata {
                         id,
                         files: record.files,
                     },
-                ))
+                )
+                .map_err(map_file_namespace_error)
             })
             .await
     }

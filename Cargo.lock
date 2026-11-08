@@ -1924,6 +1924,7 @@ dependencies = [
  "chrono",
  "futures",
  "http",
+ "indexmap",
  "open-arrow-access-core",
  "open-arrow-access-dataset",
  "open-arrow-access-decompression",

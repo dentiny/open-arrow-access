@@ -50,6 +50,7 @@ pmc = [
 
 
 [dependencies]
+indexmap.workspace = true
 reqwest.workspace = true
 opendal-http-transport-reqwest.workspace = true
 chrono = { workspace = true, optional = true }

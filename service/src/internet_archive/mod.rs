@@ -8,7 +8,7 @@ use open_arrow_access_storage::OpenDalAccessor;
 use serde::{Deserialize, Deserializer, de::Error as _};
 
 use crate::ResolvedFileSet;
-use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
+use crate::http_client::files::{HttpFileService, ResolvedFile, ResolvedFilesPlan};
 use error::map_file_namespace_error;
 use validation::{extract_items_and_validate, validate_identifier};
 
@@ -44,17 +44,26 @@ impl InternetArchiveService {
         self.http
             .resolve_files(&url, |response| {
                 let files = extract_items_and_validate(response, identifier)?;
-                Ok(ResolvedFilesPlan::new(
+                ResolvedFilesPlan::new(
                     format!("download/{identifier}/"),
                     files
                         .iter()
-                        .map(|file| (file.name.clone(), file.name.clone().into()))
+                        .map(|file| {
+                            (
+                                file.name.clone(),
+                                ResolvedFile {
+                                    object: file.name.clone().into(),
+                                    content_length: None,
+                                },
+                            )
+                        })
                         .collect(),
                     InternetArchiveMetadata {
                         identifier: identifier.into(),
                         files,
                     },
-                ))
+                )
+                .map_err(map_file_namespace_error)
             })
             .await
     }

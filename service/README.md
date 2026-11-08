@@ -30,10 +30,11 @@ Pass the provider's configuration/resolve operations and file-namespace error ma
 when constructing the service to retain its error context and cause.
 Zenodo and Internet Archive are examples; the plan does not follow download URLs
 from untrusted metadata. File bodies remain lazy and readers remain independent.
-`ResolvedFilesPlan::new` uses default HTTP file access; `with_query` selects a
-download representation, and `with_content_lengths` supplies trusted lengths keyed
-by download locator. Lengths must describe the requested representation, as in
-Dataverse's original-file downloads; omitted lengths continue to use storage stat.
+`ResolvedFilesPlan::new` builds one insertion-ordered map from logical filenames to
+`ResolvedFile` values containing the download object and an optional trusted byte
+length. Empty and duplicate filenames fail before binding storage. `with_query`
+selects the download representation; lengths must describe that representation,
+as in Dataverse's original-file downloads. Omitted lengths use storage stat.
 
 The [source-attribute proposal](../docs/source-attributes.md) defines provider
 constraints and conditional planning. Sequential cursor-based file discovery
