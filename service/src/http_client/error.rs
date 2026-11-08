@@ -11,7 +11,6 @@ pub(super) fn transport_error(operation: &'static str, error: opendal::Error) ->
     Error::new(kind, operation, "provider HTTP operation failed").with_source(error)
 }
 
-#[cfg(feature = "http-files")]
 pub(super) fn invalid_origin(operation: &'static str) -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -20,7 +19,6 @@ pub(super) fn invalid_origin(operation: &'static str) -> Error {
     )
 }
 
-#[cfg(feature = "http-files")]
 pub(super) fn invalid_download_url(
     error: impl std::error::Error + Send + Sync + 'static,
 ) -> opendal::Error {

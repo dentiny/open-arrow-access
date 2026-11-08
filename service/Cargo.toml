@@ -9,6 +9,8 @@ description = "Dataset source providers for Open Arrow Access"
 [features]
 default = []
 http-client = [
+    "dep:opendal-service-http",
+    "opendal/services-http",
     "dep:open-arrow-access-storage",
     "dep:opendal",
     "opendal/http-transport-reqwest",
@@ -19,9 +21,8 @@ http-client = [
     "dep:serde",
     "dep:serde_json",
 ]
-http-files = ["http-client", "dep:opendal-service-http", "opendal/services-http"]
-zenodo = ["http-files"]
-internet-archive = ["http-files"]
+zenodo = ["http-client"]
+internet-archive = ["http-client"]
 courtlistener = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/bz2",
