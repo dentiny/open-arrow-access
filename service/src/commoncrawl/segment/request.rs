@@ -1,4 +1,5 @@
-use super::super::{CommonCrawl, url::parse_url, warc::CommonCrawlWarcRequest};
+use super::super::{CommonCrawl, url::parse_url};
+use crate::warc::CommonCrawlWarcRequest;
 use open_arrow_access_core::{
     ByteReadOptions, Error, ErrorKind, ObjectRef, ReadOptions, ReadOptionsProvider, Result,
 };

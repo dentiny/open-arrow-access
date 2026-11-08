@@ -1,4 +1,4 @@
-use super::super::CommonCrawl;
+use crate::commoncrawl::CommonCrawl;
 use open_arrow_access_core::{
     ByteReadOptions, ObjectRef, ReadOptions, ReadOptionsProvider, Result,
 };
