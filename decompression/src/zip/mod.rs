@@ -1,6 +1,7 @@
 //! ZIP directory inspection and selected-entry byte decompression.
 
 mod archive;
+mod error;
 pub use archive::ZipArchive;
 
 use std::num::NonZeroUsize;
@@ -10,10 +11,9 @@ use crate::layer::DEFAULT_CHUNK_SIZE;
 const DEFAULT_MAX_ENTRIES: u64 = 65_536;
 const DEFAULT_MAX_DIRECTORY_BYTES: u64 = 16 * 1024 * 1024;
 const DEFAULT_MAX_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;
-use async_zip::error::ZipError;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind,
-    FactoryAccessor, FactoryToken, ReaderFactory, Result, async_trait,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, FactoryAccessor, FactoryToken,
+    ReaderFactory, Result, async_trait,
 };
 
 /// Resource limits checked by the ZIP parser, including actual decoded length.
@@ -157,14 +157,4 @@ impl ReaderFactory for ZipFactory {
             .open_entry(self.entry_index, self.chunk_size)
             .await
     }
-}
-
-fn zip_error(error: ZipError) -> Error {
-    let kind = ErrorKind::from_source(&error).unwrap_or(match error {
-        ZipError::FeatureNotSupported(_)
-        | ZipError::CompressionNotSupported(_)
-        | ZipError::TargetZip64NotSupported => ErrorKind::Unsupported,
-        _ => ErrorKind::Decode,
-    });
-    Error::new(kind, "read_zip", "ZIP archive operation failed").with_source(error)
 }

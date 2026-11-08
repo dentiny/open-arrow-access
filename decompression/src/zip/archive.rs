@@ -8,7 +8,7 @@ use open_arrow_access_core::{
     ByteMetadata, ByteReader, Error, ErrorKind, Result, SeekableInput, into_async_seek,
 };
 
-use super::{ZipEntry, ZipLimits, zip_error};
+use super::{ZipEntry, ZipLimits, error::zip_error};
 use crate::{decoded_reader, layer::DEFAULT_CHUNK_SIZE};
 
 /// One opened ZIP source with a shared, parsed central directory.
