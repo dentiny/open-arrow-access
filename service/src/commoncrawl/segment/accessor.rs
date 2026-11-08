@@ -3,7 +3,7 @@ use crate::warc::CommonCrawlWarcAccessor;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, Capability, ReadRequest, RecordReader, Result, async_trait,
 };
-use open_arrow_access_dataset::FileSetRequest;
+use open_arrow_access_dataset::file_set::FileSetRequest;
 
 /// Select one segment and read its WARC files in manifest order.
 #[derive(Debug)]

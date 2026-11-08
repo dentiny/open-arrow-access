@@ -1,7 +1,7 @@
 use std::{num::NonZeroUsize, sync::atomic::Ordering};
 
 use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest, ErrorKind};
-use open_arrow_access_decompression::{ZipAccessor, ZipLimits};
+use open_arrow_access_decompression::zip::{ZipAccessor, ZipLimits};
 use open_arrow_access_test_support::{MemoryAccessor, byte_layer, collect_bytes, fixture};
 
 fn memory(data: &[u8]) -> MemoryAccessor {

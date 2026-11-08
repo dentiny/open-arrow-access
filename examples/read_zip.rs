@@ -1,6 +1,6 @@
 use open_arrow_access::{
     Accessor, ByteReadRequest,
-    decompression::ZipAccessor,
+    decompression::zip::ZipAccessor,
     storage::{OpenDalAccessor, opendal},
 };
 

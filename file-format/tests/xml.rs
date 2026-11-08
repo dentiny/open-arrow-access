@@ -5,7 +5,7 @@ use arrow_array::{
 };
 use arrow_schema::DataType::{Float64, Int64, Utf8};
 use open_arrow_access_core::{Accessor, ErrorKind, ReadOptions, ReadRequest};
-use open_arrow_access_file_format::{
+use open_arrow_access_file_format::xml::{
     NamespaceBinding, XmlAccessor, XmlField, XmlInferenceOptions, XmlLimits, XmlSchema,
 };
 use open_arrow_access_test_support::{

@@ -2,8 +2,8 @@ use open_arrow_access_core::{
     Accessor, Capability, Error, ErrorKind, ListRequest, ObjectRef, RecordReader, Result,
     async_trait, list_files,
 };
-use open_arrow_access_dataset::{FileSetAccessor, FileSetRequest};
-use open_arrow_access_file_format::ParquetAccessor;
+use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
+use open_arrow_access_file_format::parquet::ParquetAccessor;
 
 use super::{
     HuggingFaceAccessor, HuggingFaceDatasetRequest, HuggingFaceRepository, HuggingFaceService,
