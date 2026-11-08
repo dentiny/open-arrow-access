@@ -3,6 +3,7 @@
 mod accessor;
 mod async_read;
 mod capability;
+mod decode_batches;
 mod document;
 mod error;
 mod layer;
@@ -19,6 +20,7 @@ mod stream_reader;
 pub use accessor::{Accessor, ByteAccessor, ObjectStream};
 pub use async_read::into_async_read;
 pub use capability::Capability;
+pub use decode_batches::{BatchDecoder, decode_batches};
 pub use document::{DocumentAccessor, DocumentDecoder};
 pub use error::{Error, ErrorKind, Result};
 pub use layer::{AccessorExt, Layer};

@@ -1,8 +1,9 @@
 use arrow_json::reader::Decoder;
-use open_arrow_access_core::{ByteReader, RecordBatch, RecordMetadata, RecordReader, Result};
+use open_arrow_access_core::{
+    BatchDecoder, ByteReader, RecordBatch, RecordMetadata, RecordReader, Result, decode_batches,
+};
 
 use super::decode_error;
-use crate::decode::{BatchDecoder, create_reader};
 
 struct JsonDecoder {
     decoder: Decoder,
@@ -43,7 +44,7 @@ pub(super) fn json_reader(
     metadata: RecordMetadata,
     batch_size: usize,
 ) -> impl RecordReader {
-    create_reader(
+    decode_batches(
         input,
         JsonDecoder {
             decoder,

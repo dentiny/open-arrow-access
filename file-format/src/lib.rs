@@ -1,8 +1,6 @@
 //! File-format adapters consume a ByteReader, never a storage-specific handle.
 
 mod accessor;
-#[cfg(any(feature = "csv", feature = "json"))]
-mod decode;
 
 pub use accessor::FileAccessor;
 /// Previous name for the generalized reader factory protocol.
