@@ -11,6 +11,8 @@ mod read_lines;
 mod read_state;
 mod reader;
 mod reader_factory;
+#[cfg(feature = "record-batch-builder")]
+mod record_batch_builder;
 mod request;
 mod stream_reader;
 
@@ -27,6 +29,8 @@ pub use reader::{
     ByteMetadata, ByteReader, Reader, RecordMetadata, RecordReader, RecordStream, into_stream,
 };
 pub use reader_factory::{FactoryToken, ReaderFactory, ReaderFactoryExt};
+#[cfg(feature = "record-batch-builder")]
+pub use record_batch_builder::RecordBatchBuilder;
 pub use request::{
     ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ListRequest, ObjectRef, ReadOptions,
     ReadOptionsProvider, ReadRequest,

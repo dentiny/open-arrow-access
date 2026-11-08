@@ -30,6 +30,8 @@ opendal = "0.59.2"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_arrow = { version = "0.15.1", default-features = false }
+marrow = { version = "0.3.1", default-features = false }
 http = "1"
 url = "2"
 async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
@@ -65,6 +67,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 
 [features]
 default = []
+record-batch-builder = ["open-arrow-access-core/record-batch-builder"]
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
 format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
