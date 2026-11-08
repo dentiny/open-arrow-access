@@ -1,6 +1,7 @@
 //! arXiv bulk-manifest discovery over caller-configured byte storage.
 
 mod error;
+mod manifest;
 mod validation;
 
 use open_arrow_access_core::{
@@ -8,7 +9,8 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_decompression::tar::{TarArchive, TarLimits, TarStream};
 
-use validation::{parse_manifest, validate_archive, validate_archive_length, validate_month};
+use manifest::parse_manifest;
+use validation::{validate_archive, validate_archive_length, validate_month};
 
 /// The two separately published arXiv bulk distributions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
