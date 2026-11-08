@@ -1,13 +1,8 @@
 use std::num::NonZeroU64;
 
 use open_arrow_access_core::Result;
-use url::Url;
 
 use super::{Record, error::decode};
-
-pub(super) fn validate_endpoint(endpoint: &str) -> Result<Url> {
-    crate::http_client::validation::validate_origin(endpoint, "configure_zenodo")
-}
 
 pub(super) fn validate_record(record: &Record, id: NonZeroU64) -> Result<()> {
     if record.id != id.get() {

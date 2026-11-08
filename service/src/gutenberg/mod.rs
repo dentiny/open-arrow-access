@@ -6,46 +6,18 @@ use std::sync::{Arc, OnceLock};
 
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Capability, DocumentAccessor, DocumentDecoder, Error,
-    ErrorKind, FieldValue, ReadRequest, RecordBatch, RecordReader, Result, SchemaRef, async_trait,
+    DefaultDocumentAccessor, DocumentDecoder, Error, ErrorKind, FieldValue, ReadRequest,
+    RecordBatch, Result, SchemaRef, async_trait,
 };
 use xml_arrow::{NamespaceBinding, XmlField, XmlSchema};
 
 /// Read per-book RDF metadata through caller-configured storage.
-pub struct GutenbergAccessor<A> {
-    inner: Arc<A>,
-}
+pub type GutenbergAccessor<A> = DefaultDocumentAccessor<A, GutenbergDecoder>;
 
-impl<A> GutenbergAccessor<A> {
-    pub fn new(inner: A) -> Self {
-        Self {
-            inner: Arc::new(inner),
-        }
-    }
-}
-
-#[async_trait]
-impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> Accessor
-    for GutenbergAccessor<A>
-{
-    type Request = ReadRequest;
-    type Reader = dyn RecordReader;
-    fn capability(&self) -> Capability {
-        Capability {
-            read: self.inner.capability().read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-    }
-    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        DocumentAccessor::new(self.inner.clone(), GutenbergDecoder)
-            .open(request)
-            .await
-    }
-}
-
-struct GutenbergDecoder;
+/// Convert one Gutenberg RDF document into its projected book metadata row.
+/// Use with [`open_arrow_access_core::DocumentAccessor`] for explicit composition.
+#[derive(Default)]
+pub struct GutenbergDecoder;
 
 #[async_trait]
 impl DocumentDecoder for GutenbergDecoder {

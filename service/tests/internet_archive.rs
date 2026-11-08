@@ -1,10 +1,13 @@
 use futures::TryStreamExt;
 use http::StatusCode;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, ErrorKind, ListRequest,
+    ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, ErrorKind, ListRequest,
 };
 use open_arrow_access_service::internet_archive::InternetArchiveService;
-use open_arrow_access_test_support::{byte_accessor, fixture, http::HttpFixture};
+use open_arrow_access_test_support::{
+    byte_accessor, fixture,
+    http::{HttpFixture, assert_resolution_cases},
+};
 
 const ITEM: &str = "sample-item";
 const NAME: &str = "papers/paper #1%.pdf";
@@ -49,15 +52,11 @@ async fn resolves_once_and_reads_nested_names_lazily_with_independent_readers() 
         io_chunk_size: std::num::NonZeroUsize::new(2),
         ..Default::default()
     };
-    let mut reader = item
-        .open(ByteReadRequest::new(NAME).with_options(options))
-        .await
-        .unwrap();
-    assert_eq!(reader.read_range(1..4).await.unwrap().as_ref(), b"PDF");
-    byte_accessor::assert_read_contract(
+    byte_accessor::assert_ranged_read_contract(
         item,
         ByteReadRequest::new(NAME).with_options(options),
         b"%PDFdata",
+        &[1..4, 0..0, 1..4],
     )
     .await
     .unwrap();
@@ -78,31 +77,27 @@ async fn resolves_once_and_reads_nested_names_lazily_with_independent_readers() 
 
 #[tokio::test]
 async fn maps_empty_missing_and_unavailable_item_responses() {
-    for (filename, kind) in [
-        ("not-found.json", ErrorKind::NotFound),
-        ("api-error.json", ErrorKind::Decode),
-        ("dark.json", ErrorKind::PermissionDenied),
-        ("wrong-id.json", ErrorKind::Decode),
-        ("missing-files.json", ErrorKind::Decode),
-        ("duplicate.json", ErrorKind::Decode),
-        ("traversal.json", ErrorKind::Decode),
-        ("invalid-size.json", ErrorKind::Decode),
-    ] {
-        let fixture = HttpFixture::new();
-        fixture.respond(
-            METADATA,
-            StatusCode::OK,
-            Bytes::from(fixture!("internet_archive", filename).await),
-        );
-        let error = InternetArchiveService::with_endpoint(fixture.endpoint())
-            .unwrap()
-            .item(ITEM)
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), kind, "{filename}");
-        assert_eq!(fixture.requests().len(), 1);
-    }
+    assert_resolution_cases(
+        env!("CARGO_MANIFEST_DIR"),
+        "internet_archive",
+        METADATA,
+        &[
+            ("not-found.json", StatusCode::OK, ErrorKind::NotFound),
+            ("api-error.json", StatusCode::OK, ErrorKind::Decode),
+            ("dark.json", StatusCode::OK, ErrorKind::PermissionDenied),
+            ("wrong-id.json", StatusCode::OK, ErrorKind::Decode),
+            ("missing-files.json", StatusCode::OK, ErrorKind::Decode),
+            ("duplicate.json", StatusCode::OK, ErrorKind::Decode),
+            ("traversal.json", StatusCode::OK, ErrorKind::Decode),
+            ("invalid-size.json", StatusCode::OK, ErrorKind::Decode),
+        ],
+        |endpoint| async move {
+            InternetArchiveService::with_endpoint(&endpoint)?
+                .item(ITEM)
+                .await
+        },
+    )
+    .await;
     let fixture = HttpFixture::new();
     fixture.respond(
         METADATA,

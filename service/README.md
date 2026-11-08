@@ -18,6 +18,19 @@ provider metadata; readers own their state independently of the resolved set.
 Zenodo and Internet Archive use provider-specific type aliases and retain their
 existing metadata getters.
 
+For a public HTTP provider backed by one JSON manifest, reuse the crate-internal
+`HttpFileService`, which validates the origin and owns the HTTP client and provider
+error context. Validate request parameters and build the metadata URL in the
+provider, then call `resolve_files(&url, callback)`. The callback validates the
+typed response and returns a `ResolvedFilesPlan` containing the canonical
+download root, ordered logical-name/object mappings and provider metadata. The
+shared flow fetches JSON once and constructs the HTTP storage, named namespace
+and resolved accessor.
+Pass the provider's configuration/resolve operations and file-namespace error mapper
+when constructing the service to retain its error context and cause.
+Zenodo and Internet Archive are examples; the plan does not follow download URLs
+from untrusted metadata. File bodies remain lazy and readers remain independent.
+
 The [source-attribute proposal](../docs/source-attributes.md) defines provider
 constraints and conditional planning. Sequential cursor-based file discovery
 can coexist with independent file reads; dependent API page requests require

@@ -23,9 +23,15 @@ async fn filesystem_read_contract() {
             .unwrap();
         let accessor =
             OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
-        byte_accessor::assert_read_contract(accessor, "data.bin".into(), contents)
-            .await
-            .unwrap();
+        let end = contents.len() as u64;
+        byte_accessor::assert_ranged_read_contract(
+            accessor,
+            "data.bin".into(),
+            contents,
+            &[0..end, end..end, 0..end],
+        )
+        .await
+        .unwrap();
     }
 }
 

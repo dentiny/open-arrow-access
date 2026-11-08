@@ -4,6 +4,6 @@ pub(super) fn decode(message: &str) -> Error {
     Error::new(ErrorKind::Decode, "resolve_zenodo", message)
 }
 
-pub(super) fn membership_error(error: Error) -> Error {
+pub(super) fn map_file_namespace_error(error: Error) -> Error {
     decode("invalid attachment membership").with_source(error)
 }

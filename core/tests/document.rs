@@ -3,11 +3,13 @@ use std::{num::NonZeroUsize, sync::Arc};
 use arrow_array::{RecordBatchOptions, cast::AsArray};
 use arrow_schema::{DataType, Field};
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, DocumentAccessor, DocumentDecoder, Error, ErrorKind, ReadOptions,
-    ReadRequest, RecordBatch, RecordBatchBuilder, Result, Schema, SchemaRef, async_trait,
+    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability, DefaultDocumentAccessor,
+    DocumentAccessor, DocumentDecoder, Error, ErrorKind, ReadOptions, ReadRequest, RecordBatch,
+    RecordBatchBuilder, Result, Schema, SchemaRef, async_trait,
 };
 use open_arrow_access_test_support::{MemoryAccessor, fixture};
 
+#[derive(Default)]
 struct RawDocument;
 
 #[async_trait]
@@ -35,6 +37,82 @@ impl DocumentDecoder for RawDocument {
         assert_eq!(batch.schema(), schema);
         Ok(batch)
     }
+}
+
+// Neither the storage nor the decoder implements Clone. Accessor clones share
+// their ownership handles while each opened reader keeps independent state.
+struct NonCloneStorage(MemoryAccessor);
+
+#[async_trait]
+impl Accessor for NonCloneStorage {
+    type Request = ByteReadRequest;
+    type Reader = dyn ByteReader;
+
+    fn capability(&self) -> Capability {
+        self.0.capability()
+    }
+
+    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        self.0.open(request).await
+    }
+}
+
+#[tokio::test]
+async fn default_decoder_entrypoint_clones_non_clone_inputs_and_opens_independent_readers() {
+    let source = MemoryAccessor::new(&fixture!("bytes", "binary.bin").await, 1);
+    let observed = source.observations.clone();
+    let accessor = DefaultDocumentAccessor::<_, RawDocument>::new(NonCloneStorage(source));
+    let cloned = accessor.clone();
+    let options = ByteReadOptions {
+        io_concurrency: NonZeroUsize::new(3).unwrap(),
+        ..Default::default()
+    };
+    let mut projected = accessor
+        .open(ReadRequest::new("projected").with_options(ReadOptions {
+            projection: Some(vec![]),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    let mut full = cloned
+        .open(ReadRequest::new("full").with_byte_options(options))
+        .await
+        .unwrap();
+    assert!(observed.requests.lock().unwrap().is_empty());
+    assert!(accessor.capability().read);
+    assert!(!accessor.capability().read_with_range);
+    assert!(!accessor.capability().list);
+    drop(accessor);
+    drop(cloned);
+    let full_batch = full.next().await.unwrap().unwrap();
+    assert_eq!(
+        full_batch["data"].as_binary::<i64>().value(0),
+        &[0, 255, 128]
+    );
+    let empty_batch = projected.next().await.unwrap().unwrap();
+    assert_eq!(empty_batch.num_rows(), 1);
+    assert_eq!(empty_batch.num_columns(), 0);
+    assert!(full.next().await.unwrap().is_none());
+    assert!(projected.next().await.unwrap().is_none());
+    let requests = observed.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].object.locator(), "full");
+    assert_eq!(requests[0].options, options);
+    assert_eq!(requests[1].object.locator(), "projected");
+}
+
+#[tokio::test]
+async fn default_decoder_entrypoint_validates_projection_before_storage_io() {
+    let source = MemoryAccessor::new(&fixture!("bytes", "input.bin").await, 1);
+    let observed = source.observations.clone();
+    let accessor = DefaultDocumentAccessor::<_, RawDocument>::new(source);
+    let request = ReadRequest::new("input").with_options(ReadOptions {
+        projection: Some(vec!["unknown".into()]),
+        ..ReadOptions::default()
+    });
+    let error = accessor.open(request).await.err().unwrap();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert!(observed.requests.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
