@@ -7,3 +7,6 @@ pub use backend::OpenDalAccessor;
 
 /// OpenDAL SDK used by the generic adapter.
 pub use opendal;
+
+mod named_files;
+pub use named_files::NamedFileAccessor;
