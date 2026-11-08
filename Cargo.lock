@@ -1961,6 +1961,7 @@ version = "0.1.0"
 dependencies = [
  "arrow-array",
  "futures",
+ "http",
  "more-asserts",
  "open-arrow-access-core",
  "opendal",

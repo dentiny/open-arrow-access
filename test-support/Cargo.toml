@@ -6,6 +6,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+http.workspace = true
 arrow-array.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
 open-arrow-access-core.workspace = true
