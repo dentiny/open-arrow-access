@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, de::Error as _};
 
 use crate::ResolvedFileSet;
 use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
-use error::membership_error;
+use error::map_file_namespace_error;
 use validation::{extract_items_and_validate, validate_identifier};
 
 const CONFIGURE: &str = "configure_internet_archive";
@@ -28,7 +28,7 @@ impl InternetArchiveService {
 
     pub fn with_endpoint(endpoint: &str) -> Result<Self> {
         Ok(Self {
-            http: HttpFileService::new(endpoint, CONFIGURE, RESOLVE, membership_error)?,
+            http: HttpFileService::new(endpoint, CONFIGURE, RESOLVE, map_file_namespace_error)?,
         })
     }
 

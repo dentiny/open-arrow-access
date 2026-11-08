@@ -12,7 +12,7 @@ use serde::Deserialize;
 
 use crate::ResolvedFileSet;
 use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
-use error::membership_error;
+use error::map_file_namespace_error;
 use validation::validate_record;
 
 /// Connection settings. Construction performs no network requests.
@@ -33,7 +33,7 @@ impl ZenodoService {
                 endpoint,
                 "configure_zenodo",
                 "resolve_zenodo",
-                membership_error,
+                map_file_namespace_error,
             )?,
         })
     }

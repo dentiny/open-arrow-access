@@ -26,7 +26,7 @@ typed response and returns a `ResolvedFilesPlan` containing the canonical
 download root, ordered logical-name/object mappings and provider metadata. The
 shared flow fetches JSON once and constructs the HTTP storage, named namespace
 and resolved accessor.
-Pass the provider's configuration/resolve operations and membership-error mapper
+Pass the provider's configuration/resolve operations and file-namespace error mapper
 when constructing the service to retain its error context and cause.
 Zenodo and Internet Archive are examples; the plan does not follow download URLs
 from untrusted metadata. File bodies remain lazy and readers remain independent.

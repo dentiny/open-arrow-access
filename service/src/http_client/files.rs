@@ -25,7 +25,7 @@ pub(crate) struct HttpFileService {
     operation: &'static str,
     /// Maps empty/duplicate filenames to provider-specific decode errors,
     /// retaining the underlying namespace error as the source.
-    membership_error: fn(Error) -> Error,
+    map_file_namespace_error: fn(Error) -> Error,
 }
 
 impl HttpFileService {
@@ -33,13 +33,13 @@ impl HttpFileService {
         endpoint: &str,
         configure: &'static str,
         operation: &'static str,
-        membership_error: fn(Error) -> Error,
+        map_file_namespace_error: fn(Error) -> Error,
     ) -> Result<Self> {
         Ok(Self {
             endpoint: validate_origin(endpoint, configure)?,
             client: HttpClient::new()?,
             operation,
-            membership_error,
+            map_file_namespace_error,
         })
     }
 
@@ -61,7 +61,8 @@ impl HttpFileService {
             .await?;
         let plan = resolve(response)?;
         let storage = self.client.accessor(&self.endpoint, &plan.root, &[])?;
-        let files = NamedFileAccessor::new(storage, plan.files).map_err(self.membership_error)?;
+        let files =
+            NamedFileAccessor::new(storage, plan.files).map_err(self.map_file_namespace_error)?;
         Ok(ResolvedFileSet::new(files, plan.metadata))
     }
 }
