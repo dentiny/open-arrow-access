@@ -8,8 +8,6 @@ use std::num::NonZeroUsize;
 
 use crate::layer::DEFAULT_CHUNK_SIZE;
 
-const DEFAULT_MAX_ENTRIES: u64 = 65_536;
-const DEFAULT_MAX_DIRECTORY_BYTES: u64 = 16 * 1024 * 1024;
 const DEFAULT_MAX_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, FactoryAccessor, FactoryToken,
@@ -19,10 +17,6 @@ use open_arrow_access_core::{
 /// Resource limits checked by the ZIP parser, including actual decoded length.
 #[derive(Clone, Debug)]
 pub struct ZipLimits {
-    /// Maximum number of entries declared by the central directory.
-    pub max_entries: u64,
-    /// Maximum declared size of the central directory.
-    pub max_directory_bytes: u64,
     /// Maximum compressed and decoded size of the selected entry.
     pub max_entry_bytes: u64,
 }
@@ -30,8 +24,6 @@ pub struct ZipLimits {
 impl Default for ZipLimits {
     fn default() -> Self {
         Self {
-            max_entries: DEFAULT_MAX_ENTRIES,
-            max_directory_bytes: DEFAULT_MAX_DIRECTORY_BYTES,
             max_entry_bytes: DEFAULT_MAX_ENTRY_BYTES,
         }
     }
@@ -85,7 +77,7 @@ impl<B> ZipAccessor<B> {
 }
 
 impl<B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ZipAccessor<B> {
-    /// Read the bounded central directory without decompressing entry bodies.
+    /// Read the central directory without decompressing entry bodies.
     /// Storage options are forwarded unchanged. Order is central-directory order.
     pub async fn entries(&self, request: ByteReadRequest) -> Result<Vec<ZipEntry>> {
         Ok(self.archive(request).await?.entries().to_vec())

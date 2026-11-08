@@ -122,3 +122,12 @@ async fn invalid_revision_metadata_never_opens_files() {
         assert_eq!(hub.requests().len(), 1);
     }
 }
+
+#[tokio::test]
+async fn revision_metadata_can_exceed_the_previous_size_limit() {
+    let mut hub = ExportHub::new("complete.json").await;
+    let mut metadata = vec![b' '; 64 * 1024 + 1];
+    metadata.extend_from_slice(&hub.metadata);
+    hub.metadata = metadata.into();
+    assert_eq!(hub.read_ids(request()).await, [1, 2]);
+}

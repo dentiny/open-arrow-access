@@ -5,13 +5,11 @@ use open_arrow_access_core::{ByteReader, Error, ErrorKind, ObjectRef, Result, re
 
 use super::{error::invalid_line, validation::validate_manifest_path};
 
-const MAX_LINE_BYTES: usize = 16 * 1024;
-
 pub(super) async fn read_manifest(
     input: Box<dyn ByteReader>,
     prefix: &str,
 ) -> Result<Vec<ObjectRef>> {
-    let lines = read_lines(input, Some(MAX_LINE_BYTES), "read_commoncrawl_manifest");
+    let lines = read_lines(input, None, "read_commoncrawl_manifest");
     futures::pin_mut!(lines);
     let mut line_number = 1;
     let mut selected = Vec::new();

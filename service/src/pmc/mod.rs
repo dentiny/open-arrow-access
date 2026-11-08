@@ -10,24 +10,8 @@ pub use accessor::PmcAccessor;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use std::{
     collections::HashMap,
-    num::NonZeroUsize,
     sync::{Arc, OnceLock},
 };
-
-const DEFAULT_METADATA_BYTES: NonZeroUsize = NonZeroUsize::new(4 * 1024 * 1024).unwrap();
-
-/// Maximum decoded metadata bytes.
-#[derive(Clone, Copy, Debug)]
-pub struct PmcLimits {
-    pub metadata_bytes: NonZeroUsize,
-}
-impl Default for PmcLimits {
-    fn default() -> Self {
-        Self {
-            metadata_bytes: DEFAULT_METADATA_BYTES,
-        }
-    }
-}
 
 /// Article metadata fields.
 pub fn schema() -> SchemaRef {
