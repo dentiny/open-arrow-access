@@ -10,6 +10,7 @@ pub use open_arrow_access_core::*;
     feature = "service-huggingface",
     feature = "service-pmc",
     feature = "service-warc",
+    feature = "service-gutenberg",
 ))]
 pub use open_arrow_access_service as service;
 

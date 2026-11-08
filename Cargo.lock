@@ -1863,6 +1863,7 @@ version = "0.1.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
+ "chrono",
  "flate2",
  "futures",
  "http",
@@ -1879,6 +1880,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "url",
+ "xml-arrow",
 ]
 
 [[package]]
@@ -3787,9 +3789,9 @@ dependencies = [
 
 [[package]]
 name = "xml-arrow"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c8e3df7095bcbe8192fee1ba4be2f62e8765d812bf4fd32e75810762d78e3ae"
+checksum = "b8c0227f931997c201567050374796b3ae25a35e4841104bc1f213ea0ba461f2"
 dependencies = [
  "arrow-array",
  "arrow-schema",
