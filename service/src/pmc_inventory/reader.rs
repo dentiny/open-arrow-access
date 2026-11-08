@@ -13,19 +13,19 @@ use super::validation;
 
 pub(super) struct InventoryTransform {
     pub csv_schema: SchemaRef,
-    pub projection: Option<Vec<usize>>,
-    pub schema: SchemaRef,
+    pub output_projection: Option<Vec<usize>>,
+    pub output_schema: SchemaRef,
 }
 
 impl InventoryTransform {
     pub fn create_reader<A: ByteAccessor + 'static>(
-        mut self,
+        self,
         source: Arc<A>,
         files: Vec<ObjectRef>,
         request: ReadRequest,
     ) -> impl RecordReader {
         let metadata = RecordMetadata {
-            schema: self.schema.clone(),
+            schema: self.output_schema.clone(),
             source: Some(request.object),
         };
         // S3 Inventory CSV shards are gzip-compressed (*.csv.gz).
@@ -36,16 +36,7 @@ impl InventoryTransform {
             )
             .with_format(CsvFormat::default().with_header(false)),
         );
-        let mut options = request.options;
-        if let Some(columns) = options.projection.as_mut() {
-            // Output columns come first; validation-only columns are appended.
-            self.projection = Some((0..columns.len()).collect());
-            for name in ["Bucket", "Key"] {
-                if !columns.iter().any(|column| column == name) {
-                    columns.push(name.into());
-                }
-            }
-        }
+        let options = request.options;
         let readers = stream::iter(files).then(move |file| {
             let csv = csv.clone();
             let request = ReadRequest::new(file)
@@ -68,6 +59,10 @@ impl InventoryTransform {
                 (!keys.is_null(row)).then(|| keys.value(row)),
             )?;
         }
-        project_batch(batch, self.projection.as_deref(), self.schema.clone())
+        project_batch(
+            batch,
+            self.output_projection.as_deref(),
+            self.output_schema.clone(),
+        )
     }
 }

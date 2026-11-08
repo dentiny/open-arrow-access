@@ -45,7 +45,7 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
             list: false,
         }
     }
-    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
+    async fn open(&self, mut request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         let manifest = manifest::read(
             self.inner.as_ref(),
             ByteReadRequest::new(request.object.clone()).with_options(request.byte_options),
@@ -68,11 +68,21 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
             csv_schema.fields().clone(),
             metadata,
         ));
-        let (output_schema, projection) = request.options.resolve_projection(&full_schema)?;
+        let (output_schema, _) = request.options.resolve_projection(&full_schema)?;
+        let output_projection = request.options.projection.as_mut().map(|csv_columns| {
+            let output_indices = (0..csv_columns.len()).collect();
+            // Output columns come first; validation-only columns are appended.
+            for name in ["Bucket", "Key"] {
+                if !csv_columns.iter().any(|column| column == name) {
+                    csv_columns.push(name.into());
+                }
+            }
+            output_indices
+        });
         let transform = InventoryTransform {
             csv_schema,
-            projection,
-            schema: output_schema,
+            output_projection,
+            output_schema,
         };
         Ok(Box::new(
             transform.create_reader(
