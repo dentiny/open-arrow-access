@@ -41,6 +41,8 @@ huggingface = [
     "dep:tokio",
     "tokio/fs",
     "dep:http",
+    "dep:reqwest",
+    "dep:opendal-http-transport-reqwest",
     "dep:serde",
     "dep:serde_json",
     "dep:url",
@@ -62,6 +64,8 @@ pmc = [
 
 
 [dependencies]
+reqwest = { workspace = true, optional = true }
+opendal-http-transport-reqwest = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
 xml-arrow = { workspace = true, optional = true }
