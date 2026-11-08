@@ -1,5 +1,7 @@
 //! Published Zenodo records and their attached files.
 
+mod validation;
+
 use std::num::NonZeroU64;
 
 use open_arrow_access_core::{
@@ -13,6 +15,7 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::http_client::HttpClient;
+use validation::validate_endpoint;
 
 const DEFAULT_METADATA_LIMIT: usize = 4 * 1024 * 1024;
 
@@ -32,16 +35,7 @@ impl ZenodoService {
     /// Select an origin, for example `https://sandbox.zenodo.org`.
     pub fn with_endpoint(endpoint: &str) -> Result<Self> {
         let endpoint = Url::parse(endpoint).map_err(|_| invalid("invalid endpoint"))?;
-        if !matches!(endpoint.scheme(), "http" | "https")
-            || endpoint.host_str().is_none()
-            || !endpoint.username().is_empty()
-            || endpoint.password().is_some()
-            || endpoint.query().is_some()
-            || endpoint.fragment().is_some()
-            || endpoint.path() != "/"
-        {
-            return Err(invalid("expected an HTTP(S) origin without credentials"));
-        }
+        validate_endpoint(&endpoint)?;
         Ok(Self {
             endpoint,
             client: HttpClient::new()?,
