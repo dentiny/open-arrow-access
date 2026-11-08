@@ -48,13 +48,43 @@ impl RecordBatchBuilder {
         }
         .resolve_projection(&schema)?;
         Self::validate_fields(&fields)?;
+        Ok(Self::from_fields(fields, schema))
+    }
+
+    /// Build one row with a resolved output schema, retaining its Arc and metadata.
+    /// Output fields must be unique, unchanged fields from the full schema.
+    pub fn build_row(
+        schema: SchemaRef,
+        output_schema: SchemaRef,
+        write: impl FnOnce(&mut RecordBatchRow<'_>) -> Result<()>,
+    ) -> Result<RecordBatch> {
+        Self::validate_fields(schema.fields())?;
+        let mut selected = HashSet::new();
+        // TODO: Index full-schema fields for O(1) lookup instead of a linear search.
+        for field in output_schema.fields() {
+            if !selected.insert(field.name())
+                || !schema.fields().iter().any(|source| source == field)
+            {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "build_record_batch",
+                    "output schema must contain unique fields from the full schema",
+                ));
+            }
+        }
+        let mut builder = Self::from_fields(schema.fields().clone(), output_schema);
+        builder.push(write)?;
+        builder.finish()
+    }
+
+    fn from_fields(fields: Fields, schema: SchemaRef) -> Self {
         let builder = StructBuilder::from_fields(schema.fields().clone(), 0);
-        Ok(Self {
+        Self {
             schema,
             fields,
             builder: Some(builder),
             rows: 0,
-        })
+        }
     }
 
     pub fn schema(&self) -> &SchemaRef {
