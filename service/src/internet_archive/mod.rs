@@ -8,7 +8,7 @@ use open_arrow_access_core::{
     Result, async_trait,
 };
 use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer, de::Error as _};
 use url::Url;
 
 use crate::http_client::{HttpClient, validation::validate_origin};
@@ -93,11 +93,28 @@ struct ItemMetadata {
 #[derive(Clone, Debug, Deserialize)]
 pub struct InternetArchiveFile {
     pub name: String,
-    #[serde(default, deserialize_with = "validation::deserialize_size")]
+    #[serde(default, deserialize_with = "deserialize_size")]
     pub size: Option<u64>,
     pub format: Option<String>,
     pub source: Option<String>,
     pub md5: Option<String>,
+}
+
+fn deserialize_size<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<u64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Size {
+        Number(u64),
+        Text(String),
+    }
+    Option::<Size>::deserialize(deserializer)?
+        .map(|size| match size {
+            Size::Number(value) => Ok(value),
+            Size::Text(value) => value.parse().map_err(D::Error::custom),
+        })
+        .transpose()
 }
 
 /// Fixed item membership over independently owned HTTP byte readers.

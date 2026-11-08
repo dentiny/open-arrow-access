@@ -1,5 +1,4 @@
 use open_arrow_access_core::Result;
-use serde::{Deserialize, Deserializer, de::Error as _};
 
 use super::{
     InternetArchiveFile, ItemResponse,
@@ -62,21 +61,4 @@ fn valid_path(path: &str) -> bool {
         && !path.contains('\\')
         && !path.chars().any(char::is_control)
         && path.split('/').all(|part| !matches!(part, "" | "." | ".."))
-}
-
-pub(super) fn deserialize_size<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> std::result::Result<Option<u64>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Size {
-        Number(u64),
-        Text(String),
-    }
-    Option::<Size>::deserialize(deserializer)?
-        .map(|size| match size {
-            Size::Number(value) => Ok(value),
-            Size::Text(value) => value.parse().map_err(D::Error::custom),
-        })
-        .transpose()
 }
