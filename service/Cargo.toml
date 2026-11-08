@@ -8,20 +8,7 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
-http-client = [
-    "dep:opendal-service-http",
-    "opendal/services-http",
-    "dep:open-arrow-access-storage",
-    "dep:opendal",
-    "opendal/http-transport-reqwest",
-    "dep:http",
-    "dep:reqwest",
-    "dep:opendal-http-transport-reqwest",
-    "dep:url",
-    "dep:serde",
-    "dep:serde_json",
-]
-zenodo = ["http-client"]
+zenodo = []
 courtlistener = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/bz2",
@@ -34,18 +21,11 @@ gutenberg = [
     "dep:xml-arrow",
 ]
 warc = [
-    "dep:open-arrow-access-storage",
-    "dep:opendal",
-    "dep:opendal-service-http",
-    "dep:url",
-    "opendal/services-http",
-    "opendal/http-transport-reqwest",
     "dep:open-arrow-access-dataset",
     "dep:futures",
     "open-arrow-access-dataset/directory",
 ]
 huggingface = [
-    "http-client",
     "dep:open-arrow-access-dataset",
     "dep:open-arrow-access-file-format",
     "dep:futures",
@@ -59,8 +39,6 @@ pmc = [
     "dep:futures",
     "dep:arrow-array",
     "dep:arrow-schema",
-    "dep:serde",
-    "dep:serde_json",
     "dep:open-arrow-access-file-format",
     "open-arrow-access-file-format/csv",
     "dep:open-arrow-access-decompression",
@@ -70,8 +48,8 @@ pmc = [
 
 
 [dependencies]
-reqwest = { workspace = true, optional = true }
-opendal-http-transport-reqwest = { workspace = true, optional = true }
+reqwest.workspace = true
+opendal-http-transport-reqwest.workspace = true
 chrono = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
 xml-arrow = { workspace = true, optional = true }
@@ -79,14 +57,14 @@ open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-file-format = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
-open-arrow-access-storage = { workspace = true, optional = true }
-opendal = { workspace = true, optional = true }
+open-arrow-access-storage.workspace = true
+opendal = { workspace = true, features = ["services-http", "http-transport-reqwest"] }
 tokio = { workspace = true, optional = true }
-http = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
-opendal-service-http = { workspace = true, optional = true }
-url = { workspace = true, optional = true }
+http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+opendal-service-http.workspace = true
+url.workspace = true
 open-arrow-access-decompression = { workspace = true, optional = true }
 
 arrow-schema = { workspace = true, optional = true }
@@ -95,12 +73,10 @@ arrow-schema = { workspace = true, optional = true }
 
 futures.workspace = true
 arrow-schema.workspace = true
-http.workspace = true
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
 
 open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
-open-arrow-access-storage.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 [[test]]
