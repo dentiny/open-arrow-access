@@ -21,6 +21,12 @@ static METADATA_READS: AtomicUsize = AtomicUsize::new(0);
 struct Transport;
 impl HttpTransport for Transport {
     async fn fetch(&self, request: Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
+        assert!(
+            request.headers()["user-agent"]
+                .to_str()
+                .unwrap()
+                .starts_with("open-arrow-access/")
+        );
         let host = request.uri().host().unwrap();
         if request.uri().path() == "/api/records/3551612" {
             METADATA_READS.fetch_add(1, Ordering::SeqCst);

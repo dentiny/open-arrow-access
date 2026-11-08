@@ -23,3 +23,6 @@ pub mod pmc;
 
 #[cfg(feature = "zenodo")]
 pub mod zenodo;
+
+#[cfg(any(feature = "huggingface", feature = "zenodo"))]
+mod http_client;

@@ -29,10 +29,10 @@ impl HuggingFaceService {
                 "invalid Hub authentication token",
             ));
         }
-        opendal::install_default();
+        let client = crate::http_client::HttpClient::new();
         Ok(Self {
             options,
-            context: OperationContext::new(),
+            context: client.context,
         })
     }
 

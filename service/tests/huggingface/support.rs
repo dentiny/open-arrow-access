@@ -148,6 +148,12 @@ impl HttpTransport for ExportHub {
             request.headers()["authorization"],
             format!("Bearer {TOKEN}")
         );
+        assert!(
+            request.headers()["user-agent"]
+                .to_str()
+                .unwrap()
+                .starts_with("open-arrow-access/")
+        );
         let uri = request.uri().to_string();
         let range = request
             .headers()

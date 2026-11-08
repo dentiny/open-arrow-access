@@ -3,13 +3,14 @@
 use std::{collections::HashSet, num::NonZeroU64};
 
 use futures::stream;
-use http::{Request, StatusCode};
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ListRequest,
     ObjectRef, ObjectStream, Result, async_trait,
 };
 use open_arrow_access_storage::OpenDalAccessor;
-use opendal::{Buffer, OperationContext, Operator, raw::oio::ReadStream};
+use opendal::Operator;
+
+use crate::http_client::HttpClient;
 use serde::Deserialize;
 use url::Url;
 
@@ -19,7 +20,7 @@ const DEFAULT_METADATA_LIMIT: usize = 4 * 1024 * 1024;
 #[derive(Clone, Debug)]
 pub struct ZenodoService {
     endpoint: Url,
-    context: OperationContext,
+    client: HttpClient,
     metadata_limit: usize,
 }
 
@@ -41,10 +42,9 @@ impl ZenodoService {
         {
             return Err(invalid("expected an HTTP(S) origin without credentials"));
         }
-        opendal::install_default();
         Ok(Self {
             endpoint,
-            context: OperationContext::new(),
+            client: HttpClient::new(),
             metadata_limit: DEFAULT_METADATA_LIMIT,
         })
     }
@@ -58,50 +58,10 @@ impl ZenodoService {
     /// bytes are read lazily through the returned accessor.
     pub async fn record(&self, id: NonZeroU64) -> Result<ZenodoAccessor> {
         let url = self.endpoint.join(&format!("api/records/{id}")).unwrap();
-        let request = Request::get(url.as_str())
-            .header("accept", "application/json")
-            .header("user-agent", "open-arrow-access/0.1.0")
-            .body(Buffer::new())
-            .map_err(|_| invalid("invalid metadata request"))?;
-        let response = self
-            .context
-            .http_transport()
-            .fetch(request)
-            .await
-            .map_err(io_error)?;
-        let status = response.status();
-        if status != StatusCode::OK {
-            let kind = match status {
-                StatusCode::NOT_FOUND => ErrorKind::NotFound,
-                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => ErrorKind::PermissionDenied,
-                _ => ErrorKind::Io,
-            };
-            return Err(Error::new(
-                kind,
-                "resolve_zenodo",
-                format!("metadata HTTP {status}"),
-            ));
-        }
-        let mut body = response.into_body();
-        let mut bytes = Vec::new();
-        loop {
-            let buffer = body.read().await.map_err(io_error)?;
-            if buffer.is_empty() {
-                break;
-            }
-            if buffer.len() > self.metadata_limit - bytes.len() {
-                return Err(Error::new(
-                    ErrorKind::Unsupported,
-                    "resolve_zenodo",
-                    "record metadata exceeds configured byte limit",
-                ));
-            }
-            for part in buffer {
-                bytes.extend_from_slice(&part);
-            }
-        }
-        let record: Record = serde_json::from_slice(&bytes)
-            .map_err(|error| decode("invalid record metadata").with_source(error))?;
+        let record: Record = self
+            .client
+            .json(url.as_str(), None, self.metadata_limit, "resolve_zenodo")
+            .await?;
         if record.id != id.get() {
             return Err(decode("record ID differs from the requested version"));
         }
@@ -120,7 +80,7 @@ impl ZenodoService {
                 .root(&root),
         )
         .map_err(io_error)?
-        .with_context(self.context.clone());
+        .with_context(self.client.context.clone());
         Ok(ZenodoAccessor {
             id,
             files: record.files,
