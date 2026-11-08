@@ -1,8 +1,8 @@
 # Test locations
 
 This is the starting point for finding and adding tests across the workspace.
-Each crate owns its behavior tests under `<crate>/tests/`. The root `tests/`
-directory owns facade wiring and composition across crates.
+Each crate owns its tests under `<crate>/tests/`. Composition tests live in the
+crate whose behavior they exercise. The workspace root has no test directory.
 
 ## Find a test
 
@@ -12,10 +12,10 @@ directory owns facade wiring and composition across crates.
 | JSON and JSONL | [`file-format/tests/json.rs`](../file-format/tests/json.rs) |
 | XML | [`file-format/tests/xml.rs`](../file-format/tests/xml.rs) |
 | ATIF format | [`file-format/tests/atif.rs`](../file-format/tests/atif.rs) |
-| Parquet and byte/record layer composition | [`tests/reading.rs`](reading.rs) |
+| Parquet and byte/record layer composition | [`file-format/tests/parquet.rs`](../file-format/tests/parquet.rs) |
 | Directory and file-set behavior | [`dataset/tests/directory.rs`](../dataset/tests/directory.rs) |
-| Directory, storage and Parquet composition | [`tests/directory.rs`](directory.rs) |
-| ATIF facade and file-set composition | [`tests/atif.rs`](atif.rs) |
+| Directory, storage and Parquet composition | [`dataset/tests/directory_parquet.rs`](../dataset/tests/directory_parquet.rs) |
+| ATIF and file-set composition | [`dataset/tests/atif.rs`](../dataset/tests/atif.rs) |
 | Hugging Face Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
 | Common Crawl configuration | [`service/tests/commoncrawl.rs`](../service/tests/commoncrawl.rs) |
 | Common Crawl WARC inventory | [`service/tests/warc.rs`](../service/tests/warc.rs) |
@@ -33,8 +33,8 @@ directory owns facade wiring and composition across crates.
 - Put format behavior in `file-format/tests/<format>.rs`, storage behavior in
   `storage/tests/<backend>.rs`, and provider behavior in `service/tests/<provider>.rs`.
   Use the owning crate's public API.
-- Keep facade exports and cross-crate composition in root `tests/<scenario>.rs`.
-  Do not duplicate a format's full behavior suite there.
+- Put composition tests in the crate that owns the entry point being tested.
+  Import shared contracts from core and concrete adapters from their owning crates.
 - When a test genuinely requires private implementation access, keep its file in
   the owning crate's `tests/unit/`. Include it from the library with `#[cfg(test)]`
   and `#[path = "../tests/unit/<name>.rs"]`; Cargo does not discover that nested

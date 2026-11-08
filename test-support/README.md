@@ -58,6 +58,6 @@ Inferred schemas also keep their own projection-validation timing tests.
 
 See `file-format/tests/csv.rs` for a format factory and explicit projections,
 `file-format/tests/xml.rs` for inference and explicit-schema cases, and
-`tests/reading.rs` for shared projection assertions over Parquet.
+`file-format/tests/parquet.rs` for shared projection assertions over Parquet.
 Keep fixtures, expected schemas, parsed-value checks, parser error context,
 read-ahead/drop behavior and format-specific scenarios in the owning tests.
