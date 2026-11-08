@@ -1,7 +1,6 @@
-use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, Capability, Error, ErrorKind, ListRequest, ObjectRef, RecordReader,
-    Result, async_trait,
+    Accessor, Capability, Error, ErrorKind, ListRequest, ObjectRef, RecordReader, Result,
+    async_trait, list_files,
 };
 use open_arrow_access_dataset::{FileSetAccessor, FileSetRequest};
 use open_arrow_access_file_format::ParquetAccessor;
@@ -87,26 +86,15 @@ impl Accessor for HuggingFaceService {
 
 impl HuggingFaceAccessor {
     async fn list_parquet_files(&self, prefix: &str) -> Result<Vec<ObjectRef>> {
-        let mut listing = self
-            .list(ListRequest::new(prefix).with_recursive(false))
-            .await?;
-        let prefix = format!("{prefix}/");
-        let mut objects = Vec::new();
-        while let Some(object) = listing.try_next().await? {
-            let relative = object.locator().strip_prefix(&prefix).ok_or_else(|| {
-                Error::new(
-                    ErrorKind::Decode,
-                    "resolve_huggingface",
-                    "listing returned a file outside the selected split",
-                )
-            })?;
-            validate_path(relative, false)?;
-            if !relative.contains('/') && relative.ends_with(".parquet") {
-                objects.push(object);
-            }
-        }
-        objects.sort_unstable_by(|a, b| a.locator().cmp(b.locator()));
-        objects.dedup();
+        let objects = list_files(
+            self,
+            ListRequest::new(prefix).with_recursive(false),
+            |relative| {
+                validate_path(relative, false)?;
+                Ok(!relative.contains('/') && relative.ends_with(".parquet"))
+            },
+        )
+        .await?;
         if objects.is_empty() {
             return Err(Error::new(
                 ErrorKind::NotFound,
