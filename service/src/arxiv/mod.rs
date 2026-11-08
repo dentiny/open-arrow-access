@@ -44,6 +44,8 @@ pub struct ArxivArchive {
     pub kind: ArxivKind,
     pub filename: String,
     pub month: String,
+    /// One-based TAR chunk number within `month` for the selected `kind`.
+    /// Maps to manifest `seq_num` and the filename suffix, e.g. `_003.tar`.
     pub sequence: u32,
     pub size: u64,
     pub num_items: u64,
