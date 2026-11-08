@@ -8,6 +8,7 @@ use super::error::invalid_download_url;
 #[derive(Debug)]
 pub(super) struct QueryTransport {
     pub(super) inner: HttpTransporter,
+    /// Query parameters as (name, value) pairs, encoded when appended to the URL.
     pub(super) query: Vec<(String, String)>,
 }
 
