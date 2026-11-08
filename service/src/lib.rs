@@ -1,5 +1,8 @@
 //! Provider services resolve source semantics into shared object/reader contracts.
 
+#[cfg(feature = "courtlistener")]
+pub mod courtlistener;
+
 #[cfg(feature = "gutenberg")]
 pub mod gutenberg;
 

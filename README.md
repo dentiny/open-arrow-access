@@ -148,6 +148,19 @@ with `Accessor::open` on `HuggingFaceService`.
 cargo run --example read_huggingface --features service-huggingface -- lhoestq/demo1
 ```
 
+## CourtListener bulk snapshots
+
+Enable `service-courtlistener` for table/date discovery and decoded CSV byte
+access, reusing the existing bzip2 layer. Configure storage yourself through
+OpenDAL S3, HTTP, or a local mirror. See the
+[service contract](service/README.md#courtlistener-bulk-snapshots) for public
+access and the boundary with Arrow conversion.
+
+```sh
+cargo run --example read_courtlistener --features service-courtlistener -- /data/courtlistener courts
+cargo run --example read_courtlistener --features service-courtlistener -- /data/courtlistener courts 2026-09-30
+```
+
 ## JSON and JSONL
 
 Enable `format-json` and construct `file_format::json::JsonAccessor::new(bytes, schema)`
@@ -191,7 +204,7 @@ The output contains mapped book and file metadata in RDF order. Use a standard
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema; WARC parser records with Arrow conversion deferred |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Hugging Face datasets; PMC article metadata; PMC inventory snapshots; Gutenberg books; Common Crawl WARC datasets |
+| `service/` | Hugging Face datasets; PMC article metadata; PMC inventory snapshots; Gutenberg books; CourtListener bulk CSV byte access; Common Crawl WARC datasets |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support; ZIP directory inspection and selected-entry decompression |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |

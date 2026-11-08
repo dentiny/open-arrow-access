@@ -1,0 +1,5 @@
+id,pacer_court_id,pacer_has_rss_feed,pacer_rss_entry_types,date_last_pacer_contact,fjc_court_id,date_modified,in_use,has_opinion_scraper,has_oral_argument_scraper,position,citation_string,short_name,full_name,url,start_date,end_date,jurisdiction,notes,parent_court_id
+"nc",,,"",,"","2016-09-08 20:38:41.131652+00","t","t","f","366.97","N.C.","Supreme Court of North Carolina","Supreme Court of North Carolina","http://www.nccourts.org/courts/appellate/supreme/","1799-01-01",,"S","Created by Lawbox
+Start date: http://www.carolana.com/NC/Courts/nc_supreme_court_history.html",
+"minnag",,,"",,"","2017-02-01 17:56:35.255825+00","t","t","f","365.4","Minn. Att'y Gen.","Minnesota Attorney General Reports","Minnesota Attorney General Reports","http://www.ag.state.mn.us/office/opinions/DATE.asp",,,"SAG","",
+"arizsuper",,,"",,"","2017-10-02 21:06:41.874279+00","f","f","f","322.3","Ariz. Super. Ct.","Arizona Superior Court","Arizona Superior Court","http://www.azcourts.gov/AZ-Courts/Superior-Court",,,"ST","",

@@ -70,6 +70,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 
 [features]
 default = []
+service-courtlistener = ["dep:open-arrow-access-service", "open-arrow-access-service/courtlistener"]
 service-gutenberg = ["dep:open-arrow-access-service", "open-arrow-access-service/gutenberg"]
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
 service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
@@ -132,6 +133,10 @@ required-features = ["format-atif"]
 [[example]]
 name = "read_pmc_inventory"
 required-features = ["service-pmc"]
+
+[[example]]
+name = "read_courtlistener"
+required-features = ["service-courtlistener"]
 
 [[example]]
 name = "read_zip"
