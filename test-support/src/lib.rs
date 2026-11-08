@@ -28,6 +28,8 @@ pub struct Observations {
     pub requests: Mutex<Vec<ByteReadRequest>>,
     /// Counts every `next` call, including calls after EOF or failure.
     pub reads: AtomicUsize,
+    pub range_reads: AtomicUsize,
+    pub ranges: Mutex<Vec<Range<u64>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -46,6 +48,9 @@ pub struct MemoryAccessor {
     listing: bool,
     version: Option<String>,
     fault: Option<Fault>,
+    range_failure: Option<(usize, ErrorKind)>,
+    short_ranges: bool,
+    known_length: bool,
     pub observations: Arc<Observations>,
 }
 
@@ -59,12 +64,32 @@ impl MemoryAccessor {
             listing: false,
             version: None,
             fault: None,
+            range_failure: None,
+            short_ranges: false,
+            known_length: true,
             observations: Arc::default(),
         }
     }
 
     pub fn with_ranges(mut self) -> Self {
         self.ranged = true;
+        self
+    }
+
+    /// Fail range reads after this many successful calls, independently per reader.
+    pub fn with_range_failure(mut self, after: usize, kind: ErrorKind) -> Self {
+        self.range_failure = Some((after, kind));
+        self
+    }
+
+    /// Return one byte less than requested to exercise exact-read validation.
+    pub fn with_short_ranges(mut self) -> Self {
+        self.short_ranges = true;
+        self
+    }
+
+    pub fn without_content_length(mut self) -> Self {
+        self.known_length = false;
         self
     }
 
@@ -121,10 +146,13 @@ impl Accessor for MemoryAccessor {
             offset: 0,
             finished: false,
             fault: self.fault,
+            range_failure: self.range_failure,
+            range_calls: 0,
+            short_ranges: self.short_ranges,
             observations: self.observations.clone(),
             metadata: ByteMetadata {
                 source: Some(request.object),
-                content_length: Some(self.data.len() as u64),
+                content_length: self.known_length.then_some(self.data.len() as u64),
                 version: self.version.clone(),
             },
         }))
@@ -152,6 +180,9 @@ struct MemoryReader {
     offset: usize,
     finished: bool,
     fault: Option<Fault>,
+    range_failure: Option<(usize, ErrorKind)>,
+    short_ranges: bool,
+    range_calls: usize,
     observations: Arc<Observations>,
     metadata: ByteMetadata,
 }
@@ -211,6 +242,8 @@ impl Reader for MemoryReader {
 #[async_trait]
 impl ByteReader for MemoryReader {
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
+        self.observations.range_reads.fetch_add(1, Ordering::SeqCst);
+        self.observations.ranges.lock().unwrap().push(range.clone());
         if !self.ranged {
             return Err(Error::new(
                 ErrorKind::Unsupported,
@@ -225,7 +258,25 @@ impl ByteReader for MemoryReader {
                 "invalid range",
             ));
         }
-        Ok(self.data.slice(range.start as usize..range.end as usize))
+        let call = self.range_calls;
+        self.range_calls += 1;
+        if let Some((after, kind)) = self.range_failure
+            && call >= after
+        {
+            return Err(
+                Error::new(kind, "memory_range", "injected range failure").with_source(
+                    std::io::Error::new(
+                        std::io::ErrorKind::ConnectionReset,
+                        "injected range failure",
+                    ),
+                ),
+            );
+        }
+        let mut bytes = self.data.slice(range.start as usize..range.end as usize);
+        if self.short_ranges {
+            bytes.truncate(bytes.len().saturating_sub(1));
+        }
+        Ok(bytes)
     }
 }
 

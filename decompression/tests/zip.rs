@@ -1,104 +1,19 @@
-use std::{
-    num::NonZeroUsize,
-    ops::Range,
-    sync::{Arc, Mutex},
-};
+use std::{num::NonZeroUsize, sync::atomic::Ordering};
 
-use open_arrow_access_core::{
-    Accessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, Error,
-    ErrorKind, Reader, Result, async_trait,
-};
+use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest, ErrorKind};
 use open_arrow_access_decompression::{ZipAccessor, ZipLimits};
-use open_arrow_access_test_support::{MemoryAccessor, collect_bytes, fixture};
+use open_arrow_access_test_support::{MemoryAccessor, byte_layer, collect_bytes, fixture};
 
-#[derive(Clone)]
-struct Source {
-    inner: MemoryAccessor,
-    ranges: Arc<Mutex<Vec<Range<u64>>>>,
-    failure: Option<ErrorKind>,
-    fail_after: usize,
-    unknown_length: bool,
-    short_read: bool,
-}
-
-impl Source {
-    fn new(data: &[u8]) -> Self {
-        Self {
-            inner: MemoryAccessor::new(data, 1)
-                .with_ranges()
-                .with_version("snapshot"),
-            ranges: Arc::default(),
-            failure: None,
-            fail_after: 0,
-            unknown_length: false,
-            short_read: false,
-        }
-    }
-}
-
-#[async_trait]
-impl Accessor for Source {
-    type Request = ByteReadRequest;
-    type Reader = dyn ByteReader;
-    fn capability(&self) -> Capability {
-        self.inner.capability()
-    }
-    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        let inner = self.inner.open(request).await?;
-        let mut metadata = inner.metadata().clone();
-        if self.unknown_length {
-            metadata.content_length = None;
-        }
-        Ok(Box::new(Input {
-            source: self.clone(),
-            inner,
-            metadata,
-        }))
-    }
-}
-
-struct Input {
-    source: Source,
-    inner: Box<dyn ByteReader>,
-    metadata: ByteMetadata,
-}
-#[async_trait]
-impl Reader for Input {
-    type Item = Bytes;
-    type Metadata = ByteMetadata;
-    fn capability(&self) -> Capability {
-        self.inner.capability()
-    }
-    fn metadata(&self) -> &ByteMetadata {
-        &self.metadata
-    }
-    async fn next(&mut self) -> Result<Option<Bytes>> {
-        self.inner.next().await
-    }
-}
-#[async_trait]
-impl ByteReader for Input {
-    async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
-        self.source.ranges.lock().unwrap().push(range.clone());
-        if let Some(kind) = self
-            .source
-            .failure
-            .filter(|_| self.source.ranges.lock().unwrap().len() > self.source.fail_after)
-        {
-            return Err(Error::new(kind, "zip_fixture", "range failure"));
-        }
-        let mut bytes = self.inner.read_range(range).await?;
-        if self.source.short_read {
-            bytes.truncate(bytes.len().saturating_sub(1));
-        }
-        Ok(bytes)
-    }
+fn memory(data: &[u8]) -> MemoryAccessor {
+    MemoryAccessor::new(data, 1)
+        .with_ranges()
+        .with_version("snapshot")
 }
 
 #[tokio::test]
 async fn enumerate_then_read_selected_members_with_bounded_io() {
     let data = fixture!("zip", "mixed.zip").await;
-    let source = Source::new(&data);
+    let source = memory(&data);
     let zip = ZipAccessor::new(source.clone(), 1).with_chunk_size(NonZeroUsize::new(3).unwrap());
     let entries = zip
         .entries(ByteReadRequest::new("papers.zip"))
@@ -110,7 +25,7 @@ async fn enumerate_then_read_selected_members_with_bounded_io() {
     assert_eq!(entries[6].name, b"../original.txt");
     assert_eq!(entries[4].name, b"media/");
     assert_eq!(entries[1].uncompressed_size, 24);
-    source.ranges.lock().unwrap().clear();
+    source.observations.ranges.lock().unwrap().clear();
 
     let options = ByteReadOptions {
         io_concurrency: NonZeroUsize::new(2).unwrap(),
@@ -128,16 +43,14 @@ async fn enumerate_then_read_selected_members_with_bounded_io() {
         reader.read_range(0..1).await.unwrap_err().kind(),
         ErrorKind::Unsupported
     );
-    let mut bytes = Vec::new();
-    while let Some(chunk) = reader.next().await.unwrap() {
-        assert!(!chunk.is_empty() && chunk.len() <= 3);
-        bytes.extend_from_slice(&chunk);
-    }
-    assert_eq!(bytes, b"<article>hello</article>");
-    let reads = source.ranges.lock().unwrap().len();
+    byte_layer::assert_output(reader.as_mut(), b"<article>hello</article>", 3)
+        .await
+        .unwrap();
+    let reads = source.observations.ranges.lock().unwrap().len();
     assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(reads, source.ranges.lock().unwrap().len());
-    let ranges = source.ranges.lock().unwrap();
+    assert_eq!(reads, source.observations.ranges.lock().unwrap().len());
+    assert!(source.observations.range_reads.load(Ordering::SeqCst) > 0);
+    let ranges = source.observations.ranges.lock().unwrap();
     assert!(ranges.iter().all(|range| range.end - range.start <= 65_536));
     assert!(
         ranges
@@ -148,7 +61,6 @@ async fn enumerate_then_read_selected_members_with_bounded_io() {
     );
     assert_eq!(
         source
-            .inner
             .observations
             .requests
             .lock()
@@ -169,7 +81,7 @@ async fn stored_empty_duplicate_and_directory_entries_are_independent() {
         (4, b""),
         (5, b"second version"),
     ] {
-        let zip = ZipAccessor::new(Source::new(&data), index);
+        let zip = ZipAccessor::new(memory(&data), index);
         let mut reader = zip.open(ByteReadRequest::new("archive")).await.unwrap();
         assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), expected);
     }
@@ -190,7 +102,7 @@ async fn stored_and_deflated_data_descriptors_and_zip64() {
         ),
         (fixture!("zip", "zip64.zip").await, 0, b"ZIP64".as_slice()),
     ] {
-        let zip = ZipAccessor::new(Source::new(&data), index);
+        let zip = ZipAccessor::new(memory(&data), index);
         assert_eq!(
             zip.entries(ByteReadRequest::new("archive")).await.unwrap()[index].index,
             index
@@ -212,7 +124,7 @@ async fn stored_and_deflated_data_descriptors_and_zip64() {
 #[tokio::test]
 async fn malformed_missing_unsupported_and_sequential_inputs() {
     let empty = fixture!("zip", "empty.zip").await;
-    let zip = ZipAccessor::new(Source::new(&empty), 0);
+    let zip = ZipAccessor::new(memory(&empty), 0);
     assert!(
         zip.entries(ByteReadRequest::new("empty"))
             .await
@@ -235,7 +147,7 @@ async fn malformed_missing_unsupported_and_sequential_inputs() {
         &bad_offset,
     ] {
         assert_eq!(
-            ZipAccessor::new(Source::new(bytes), 0)
+            ZipAccessor::new(memory(bytes), 0)
                 .open(ByteReadRequest::new("bad"))
                 .await
                 .err()
@@ -255,8 +167,8 @@ async fn malformed_missing_unsupported_and_sequential_inputs() {
             .kind(),
         ErrorKind::Unsupported
     );
-    let mut source = Source::new(&data);
-    source.unknown_length = true;
+    let source = memory(&data);
+    let source = source.without_content_length();
     assert_eq!(
         ZipAccessor::new(source, 0)
             .open(ByteReadRequest::new("archive"))
@@ -268,7 +180,7 @@ async fn malformed_missing_unsupported_and_sequential_inputs() {
     );
     let unsupported = fixture!("zip", "unsupported.zip").await;
     assert_eq!(
-        ZipAccessor::new(Source::new(&unsupported), 0)
+        ZipAccessor::new(memory(&unsupported), 0)
             .open(ByteReadRequest::new("archive"))
             .await
             .err()
@@ -289,7 +201,7 @@ async fn malformed_missing_unsupported_and_sequential_inputs() {
         .unwrap();
     encrypted[local + 6] |= 1;
     assert_eq!(
-        ZipAccessor::new(Source::new(&encrypted), 3)
+        ZipAccessor::new(memory(&encrypted), 3)
             .open(ByteReadRequest::new("encrypted"))
             .await
             .err()
@@ -304,24 +216,18 @@ async fn crc_failure_is_terminal() {
     let mut data = fixture!("zip", "mixed.zip").await;
     let offset = data.windows(5).position(|v| v == b"%PDF-").unwrap();
     data[offset] ^= 1;
-    let source = Source::new(&data);
+    let source = memory(&data);
     let mut reader = ZipAccessor::new(source.clone(), 2)
         .open(ByteReadRequest::new("corrupt"))
         .await
         .unwrap();
-    loop {
-        match reader.next().await {
-            Ok(Some(_)) => (),
-            Err(error) => {
-                assert_eq!(error.kind(), ErrorKind::Decode);
-                break;
-            }
-            Ok(None) => panic!("corrupt entry accepted"),
-        }
-    }
-    let reads = source.ranges.lock().unwrap().len();
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(reads, source.ranges.lock().unwrap().len());
+    byte_layer::assert_terminal_error(
+        reader.as_mut(),
+        &source.observations.range_reads,
+        ErrorKind::Decode,
+        "decompress_zip",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -342,7 +248,7 @@ async fn metadata_and_actual_expansion_limits_are_enforced() {
         },
     ] {
         assert_eq!(
-            ZipAccessor::new(Source::new(&data), 1)
+            ZipAccessor::new(memory(&data), 1)
                 .with_limits(limits)
                 .open(ByteReadRequest::new("archive"))
                 .await
@@ -373,7 +279,7 @@ async fn metadata_and_actual_expansion_limits_are_enforced() {
                 .copy_from_slice(&1u32.to_le_bytes());
         }
     }
-    let zip = ZipAccessor::new(Source::new(&data), 7).with_limits(ZipLimits {
+    let zip = ZipAccessor::new(memory(&data), 7).with_limits(ZipLimits {
         max_entry_bytes: 64,
         ..ZipLimits::default()
     });
@@ -392,8 +298,8 @@ async fn range_errors_keep_categories_and_short_reads_fail() {
         ErrorKind::PermissionDenied,
         ErrorKind::NotFound,
     ] {
-        let mut source = Source::new(&data);
-        source.failure = Some(kind);
+        let source = memory(&data);
+        let source = source.with_range_failure(0, kind);
         assert_eq!(
             ZipAccessor::new(source, 0)
                 .open(ByteReadRequest::new("archive"))
@@ -404,8 +310,8 @@ async fn range_errors_keep_categories_and_short_reads_fail() {
             kind
         );
     }
-    let mut source = Source::new(&data);
-    source.short_read = true;
+    let source = memory(&data);
+    let source = source.with_short_ranges();
     assert_eq!(
         ZipAccessor::new(source, 0)
             .open(ByteReadRequest::new("archive"))
@@ -416,22 +322,21 @@ async fn range_errors_keep_categories_and_short_reads_fail() {
         ErrorKind::Io
     );
 
-    let source = Source::new(&data);
+    let source = memory(&data);
     let zip = ZipAccessor::new(source.clone(), 0);
     drop(zip.open(ByteReadRequest::new("archive")).await.unwrap());
-    let opens = source.ranges.lock().unwrap().len();
-    let mut source = Source::new(&data);
-    source.failure = Some(ErrorKind::PermissionDenied);
-    source.fail_after = opens;
+    let opens = source.observations.ranges.lock().unwrap().len();
+    let source = memory(&data);
+    let source = source.with_range_failure(opens, ErrorKind::PermissionDenied);
     let mut reader = ZipAccessor::new(source.clone(), 0)
         .open(ByteReadRequest::new("archive"))
         .await
         .unwrap();
-    assert_eq!(
-        collect_bytes(reader.as_mut()).await.unwrap_err().kind(),
-        ErrorKind::PermissionDenied
-    );
-    let reads = source.ranges.lock().unwrap().len();
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(reads, source.ranges.lock().unwrap().len());
+    byte_layer::assert_terminal_error(
+        reader.as_mut(),
+        &source.observations.range_reads,
+        ErrorKind::PermissionDenied,
+        "decompress_zip",
+    )
+    .await;
 }

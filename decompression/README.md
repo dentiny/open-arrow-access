@@ -182,3 +182,11 @@ Run the local example to inspect a ZIP and read one entry:
 ```sh
 cargo run --example read_zip --features decompression-zip -- testdata/zip mixed.zip 1
 ```
+
+## Decoder output adapter
+
+`decoded_reader(decoder, metadata, chunk_size, operation, codec_name)` wraps any
+owned futures AsyncRead decoder in the standard sequential ByteReader contract.
+It shares chunking, source-error preservation and terminal handling between
+stream codecs and selected archive entries. Callers supply decoded-coordinate
+metadata and codec-specific configuration; the helper performs no eager I/O.
