@@ -28,12 +28,14 @@ pub mod pmc;
 #[cfg(feature = "zenodo")]
 pub mod zenodo;
 
-#[cfg(feature = "zenodo")]
+#[cfg(any(feature = "zenodo", feature = "dataverse"))]
 mod filename;
 
 // Individual providers may use only part of the shared HTTP utilities.
 #[allow(dead_code)]
 mod http_client;
 
+#[cfg(feature = "dataverse")]
+pub mod dataverse;
 #[cfg(feature = "internet-archive")]
 pub mod internet_archive;

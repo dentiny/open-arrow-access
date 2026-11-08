@@ -621,3 +621,9 @@ search or restricted-file authentication.
 Enable `service-internet-archive` for `service::internet_archive` public file discovery and
 byte access. See [service documentation](service/README.md) and the
 `read_internet_archive` example.
+
+### Dataverse
+
+Enable `service-dataverse` for `service::dataverse` public file discovery and
+byte access. See [service documentation](service/README.md) and the
+`read_dataverse` example.

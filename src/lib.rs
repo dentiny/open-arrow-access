@@ -9,6 +9,7 @@ pub use open_arrow_access_core::*;
 #[cfg(any(
     feature = "service-huggingface",
     feature = "service-zenodo",
+    feature = "service-dataverse",
     feature = "service-internet-archive",
     feature = "service-courtlistener",
     feature = "service-pmc",

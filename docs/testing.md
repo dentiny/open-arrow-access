@@ -20,6 +20,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
 
 | pmc | [`service/tests/pmc.rs`](../service/tests/pmc.rs) |
 | Hugging Face Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
+| Dataverse published-version original files | [`service/tests/dataverse.rs`](../service/tests/dataverse.rs) |
 | CourtListener bulk snapshots | [`service/tests/courtlistener.rs`](../service/tests/courtlistener.rs) |
 | Service filename components | [`service/tests/unit/filename_validation.rs`](../service/tests/unit/filename_validation.rs) |
 | Common Crawl configuration | [`service/tests/commoncrawl.rs`](../service/tests/commoncrawl.rs) |

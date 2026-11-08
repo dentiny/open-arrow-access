@@ -15,7 +15,7 @@ provider metadata. New providers resolve and validate membership, build the
 logical-name-to-object mapping, and return this shared accessor instead of
 implementing `open`, `list`, and capabilities again. `metadata()` borrows the
 provider metadata; readers own their state independently of the resolved set.
-Zenodo and Internet Archive use provider-specific type aliases and retain their
+Zenodo, Internet Archive, and Dataverse use provider-specific type aliases and retain their
 existing metadata getters.
 
 For a public HTTP provider backed by one JSON manifest, reuse the crate-internal
@@ -30,6 +30,11 @@ Pass the provider's configuration/resolve operations and file-namespace error ma
 when constructing the service to retain its error context and cause.
 Zenodo and Internet Archive are examples; the plan does not follow download URLs
 from untrusted metadata. File bodies remain lazy and readers remain independent.
+`ResolvedFilesPlan::new` builds one insertion-ordered map from logical filenames to
+`ResolvedFile` values containing the download object and an optional trusted byte
+length. Empty and duplicate filenames fail before binding storage. `with_query`
+selects the download representation; lengths must describe that representation,
+as in Dataverse's original-file downloads. Omitted lengths use storage stat.
 
 The [source-attribute proposal](../docs/source-attributes.md) defines provider
 constraints and conditional planning. Sequential cursor-based file discovery
@@ -300,3 +305,27 @@ uploads and checksum verification are outside this entry point.
 See the [Internet Archive metadata API](https://archive.org/developers/md-read.html).
 Run `cargo run --example read_internet_archive --features service-internet-archive -- xfetch`
 to list files, or append an exact filename to stream it.
+
+## Dataverse (`dataverse`)
+
+Enable `service-dataverse` for `service::dataverse::DataverseService`.
+Configure an installation origin, then resolve an explicit published version:
+`DataverseService::new("https://dataverse.harvard.edu")?
+.dataset("doi:10.7910/DVN/27221", "1.0").await?`.
+DOI and Handle identifiers are supported. Response identity, version and RELEASED
+state are validated; DOI comparison follows ASCII case-insensitive equivalence.
+
+`files()` exposes logical names, file IDs and original byte lengths. Folder labels remain part of the logical filename. Empty-root listing
+uses cached API order in either recursive mode. Downloads request
+`format=original`, including ingested tabular files whose labels may end in
+`.tab`. Trusted manifest lengths avoid HEAD requests that can fail on URLs signed
+only for GET. Tabular files without an original byte length are unsupported.
+Existing byte read options, range reads and independently owned readers apply.
+
+This entry point covers public
+explicit versions, not search, latest/draft selection, authentication, guestbook
+submission or checksum verification. Datasets containing restricted files return an unsupported error
+before any file download. See the [Dataverse data access API](https://guides.dataverse.org/en/latest/api/dataaccess.html).
+Run `cargo run --example read_dataverse --features service-dataverse --
+https://dataverse.harvard.edu doi:10.7910/DVN/27221 1.0` to list the example dataset;
+append an exact logical filename to stream its original bytes.
