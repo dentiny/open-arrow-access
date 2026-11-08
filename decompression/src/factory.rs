@@ -1,12 +1,10 @@
 use std::num::NonZeroUsize;
 
-use futures::TryStreamExt;
 use open_arrow_access_core::{
-    ByteReadRequest, ByteReader, Error, ErrorKind, FactoryToken, ReaderFactory, Result,
-    StreamReader, async_trait, into_async_read, read_chunks,
+    ByteReadRequest, ByteReader, FactoryToken, ReaderFactory, Result, async_trait, into_async_read,
 };
 
-use crate::{Codec, layer::DEFAULT_CHUNK_SIZE};
+use crate::{Codec, decoded_reader, layer::DEFAULT_CHUNK_SIZE};
 
 /// Configure one codec's sequential byte-reader creation.
 #[derive(Clone, Debug)]
@@ -51,15 +49,12 @@ impl<C: Codec> ReaderFactory for DecompressionFactory<C> {
         metadata.content_length = None;
         let input = into_async_read(input, "decompress_input");
         let decoder = self.codec.decoder(Box::pin(input));
-        let name = self.codec.name();
-        let stream = read_chunks(decoder, self.chunk_size).map_err(move |error| {
-            Error::new(
-                ErrorKind::from_source(&error).unwrap_or(ErrorKind::Decode),
-                "decompress",
-                format!("{name} decoding failed"),
-            )
-            .with_source(error)
-        });
-        Ok(Box::new(StreamReader::new(stream, metadata)))
+        Ok(decoded_reader(
+            decoder,
+            metadata,
+            self.chunk_size,
+            "decompress",
+            self.codec.name(),
+        ))
     }
 }

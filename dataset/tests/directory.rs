@@ -1,5 +1,6 @@
 use open_arrow_access_dataset::{
-    DirectoryAccessor, DirectoryRequest, FileSetAccessor, FileSetRequest,
+    directory::{DirectoryAccessor, DirectoryRequest},
+    file_set::{FileSetAccessor, FileSetRequest},
 };
 use std::{
     collections::HashMap,

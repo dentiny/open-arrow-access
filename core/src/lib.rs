@@ -2,10 +2,12 @@
 
 mod accessor;
 mod async_read;
+mod async_seek;
 mod capability;
 mod decode_batches;
 mod document;
 mod error;
+mod factory_accessor;
 mod layer;
 mod list_files;
 mod project_batch;
@@ -22,10 +24,12 @@ mod stream_reader;
 
 pub use accessor::{Accessor, ByteAccessor, ObjectStream};
 pub use async_read::into_async_read;
+pub use async_seek::{SeekableInput, into_async_seek};
 pub use capability::Capability;
 pub use decode_batches::{BatchDecoder, decode_batches};
 pub use document::{DocumentAccessor, DocumentDecoder};
 pub use error::{Error, ErrorKind, Result};
+pub use factory_accessor::FactoryAccessor;
 pub use layer::{AccessorExt, Layer};
 pub use list_files::list_files;
 pub use project_batch::project_batch;

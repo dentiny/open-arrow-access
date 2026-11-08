@@ -61,3 +61,13 @@ See `file-format/tests/csv.rs` for a format factory and explicit projections,
 `file-format/tests/parquet.rs` for shared projection assertions over Parquet.
 Keep fixtures, expected schemas, parsed-value checks, parser error context,
 read-ahead/drop behavior and format-specific scenarios in the owning tests.
+
+## Ranged sources
+
+`with_ranges` enables exact reads. `observations.range_reads` and `ranges` record
+all range calls, including failures. `with_range_failure(after, kind)` injects
+an error after `after` successful calls independently for each opened reader;
+the original I/O cause remains in the source chain. `with_short_ranges` returns
+short payloads deliberately. `without_content_length` exercises consumers which
+require known lengths. These settings do not change the sequential cursor or
+sequential fault injection.

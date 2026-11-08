@@ -12,11 +12,13 @@ gzip = ["dep:async-compression", "async-compression/gzip"]
 bz2 = ["dep:async-compression", "async-compression/bzip2"]
 lz4 = ["dep:async-compression", "async-compression/lz4"]
 zstd = ["dep:async-compression", "async-compression/zstd"]
+zip = ["dep:async_zip"]
 
 [dependencies]
 open-arrow-access-core.workspace = true
 futures.workspace = true
 async-compression = { workspace = true, optional = true }
+async_zip = { workspace = true, optional = true }
 
 [dev-dependencies]
 open-arrow-access-test-support.workspace = true
@@ -41,3 +43,7 @@ required-features = ["zstd"]
 
 [lints]
 workspace = true
+
+[[test]]
+name = "zip"
+required-features = ["zip"]

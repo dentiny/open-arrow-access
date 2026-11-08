@@ -12,26 +12,22 @@ impl<B> FileAccessor<B, XmlFormat> {
     }
 
     /// Use explicit field mappings instead of inferring a schema.
-    pub fn with_schema(mut self, schema: XmlSchema) -> Self {
-        self.format = self.format.with_schema(schema);
-        self
+    pub fn with_schema(self, schema: XmlSchema) -> Self {
+        self.map_format(|factory| factory.with_schema(schema))
     }
 
     /// Bind record-path prefixes for schema inference.
-    pub fn with_namespaces(mut self, bindings: &[NamespaceBinding<'_>]) -> Self {
-        self.format = self.format.with_namespaces(bindings);
-        self
+    pub fn with_namespaces(self, bindings: &[NamespaceBinding<'_>]) -> Self {
+        self.map_format(|factory| factory.with_namespaces(bindings))
     }
 
     /// Override inference sampling limits. Used when no schema is supplied.
-    pub fn with_inference_options(mut self, options: InferenceOptions) -> Self {
-        self.format = self.format.with_inference_options(options);
-        self
+    pub fn with_inference_options(self, options: InferenceOptions) -> Self {
+        self.map_format(|factory| factory.with_inference_options(options))
     }
 
     /// Override XML parsing limits; invalid limits fail before input I/O.
-    pub fn with_limits(mut self, limits: XmlLimits) -> Self {
-        self.format = self.format.with_limits(limits);
-        self
+    pub fn with_limits(self, limits: XmlLimits) -> Self {
+        self.map_format(|factory| factory.with_limits(limits))
     }
 }

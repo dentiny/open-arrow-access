@@ -13,7 +13,7 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectRef,
     ReaderFactoryExt, Result, async_trait, list_files,
 };
-use open_arrow_access_decompression::{Bzip2, DecompressionFactory};
+use open_arrow_access_decompression::{DecompressionFactory, bz2::Bzip2};
 
 /// One table export and its UTC generation date, not an atomic database snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]

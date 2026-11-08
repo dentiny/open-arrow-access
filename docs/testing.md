@@ -27,6 +27,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | WARC parser | [`file-format/tests/warc.rs`](../file-format/tests/warc.rs) |
 | OpenDAL storage | [`storage/tests/opendal.rs`](../storage/tests/opendal.rs) |
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |
+| ZIP entry decompression | [`decompression/tests/zip.rs`](../decompression/tests/zip.rs) |
 | Document accessor | [`core/tests/document.rs`](../core/tests/document.rs) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
 | Generic file-format extension protocol | [`file-format/tests/accessor.rs`](../file-format/tests/accessor.rs), also runs with no format features |

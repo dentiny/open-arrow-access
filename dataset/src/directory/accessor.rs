@@ -7,7 +7,7 @@ use super::{
     DirectoryRequest,
     path::{is_root_relative, normalize_prefix},
 };
-use crate::{FileSetAccessor, FileSetRequest};
+use crate::file_set::{FileSetAccessor, FileSetRequest};
 
 /// Discover files through a byte accessor and read them through a supplied format.
 ///

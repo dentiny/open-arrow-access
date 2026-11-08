@@ -3,6 +3,9 @@
 #[cfg(feature = "courtlistener")]
 pub mod courtlistener;
 
+#[cfg(feature = "gutenberg")]
+pub mod gutenberg;
+
 #[cfg(feature = "huggingface")]
 pub mod huggingface;
 

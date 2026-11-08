@@ -12,6 +12,13 @@ courtlistener = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/bz2",
 ]
+gutenberg = [
+    "dep:arrow-array",
+    "dep:arrow-schema",
+    "dep:chrono",
+    "dep:futures",
+    "dep:xml-arrow",
+]
 warc = [
     "dep:open-arrow-access-storage",
     "dep:opendal",
@@ -55,6 +62,9 @@ pmc = [
 
 
 [dependencies]
+chrono = { workspace = true, optional = true }
+arrow-array = { workspace = true, optional = true }
+xml-arrow = { workspace = true, optional = true }
 open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-file-format = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
@@ -67,12 +77,12 @@ serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 opendal-service-http = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
-arrow-array = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 
 arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
+
 futures.workspace = true
 arrow-schema.workspace = true
 http.workspace = true
@@ -87,6 +97,10 @@ tokio = { workspace = true, features = ["fs"] }
 [[test]]
 name = "huggingface"
 required-features = ["huggingface"]
+
+[[test]]
+name = "gutenberg"
+required-features = ["gutenberg"]
 
 [[test]]
 name = "pmc_inventory"

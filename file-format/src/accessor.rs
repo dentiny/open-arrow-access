@@ -1,5 +1,5 @@
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Capability, ReaderFactory, ReaderFactoryExt, Result,
+    Accessor, ByteReadRequest, ByteReader, Capability, FactoryAccessor, ReaderFactory, Result,
     async_trait,
 };
 
@@ -19,7 +19,7 @@ use open_arrow_access_core::{
 /// # Request = open_arrow_access_core::ByteReadRequest,
 /// # Reader = dyn open_arrow_access_core::ByteReader> {
 /// use open_arrow_access_core::{Accessor, ReadRequest};
-/// use open_arrow_access_file_format::{FileAccessor, JsonFormat};
+/// use open_arrow_access_file_format::{FileAccessor, json::JsonFormat};
 ///
 /// let files = FileAccessor::from_format(bytes, JsonFormat::new(schema));
 /// let mut reader = files.open(ReadRequest::new("records.jsonl")).await?;
@@ -29,14 +29,20 @@ use open_arrow_access_core::{
 /// ```
 #[derive(Clone, Debug)]
 pub struct FileAccessor<B, F> {
-    inner: B,
-    pub(crate) format: F,
+    binding: FactoryAccessor<B, F>,
 }
 
 impl<B, F> FileAccessor<B, F> {
     /// Bind storage and format configuration without opening input.
     pub fn from_format(inner: B, format: F) -> Self {
-        Self { inner, format }
+        Self {
+            binding: FactoryAccessor::new(inner, format),
+        }
+    }
+    pub fn map_format(self, map: impl FnOnce(F) -> F) -> Self {
+        Self {
+            binding: self.binding.map_factory(map),
+        }
     }
 }
 
@@ -51,10 +57,10 @@ where
     type Reader = F::Reader;
 
     fn capability(&self) -> Capability {
-        self.format.capability(self.inner.capability())
+        self.binding.capability()
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
-        ReaderFactoryExt::open_reader(&self.format, &self.inner, request).await
+        self.binding.open(request).await
     }
 }
