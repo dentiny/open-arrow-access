@@ -32,8 +32,12 @@ Use `collect_bytes` to
 consume a reader while asserting nonempty chunks. `byte_layer::assert_error_contract`
 accepts a layer factory, encoded input, expected output, and error operation. It
 checks source categories/causes, terminal reads, and removal of range support
-without depending on a concrete layer crate. `byte_layer::assert_terminal_error`
-also supports individual malformed-input cases.
+without depending on a concrete layer crate. `byte_layer::assert_fragmented_output`
+runs a layer factory over caller-selected input chunk sizes and checks exact,
+bounded output. `byte_layer::assert_decode_error` feeds a malformed fixture one
+byte at a time and checks a decode error, source chain, terminal EOF, and no further
+upstream polls. Keep codec-specific fixture lists and special cases in their tests.
+`byte_layer::assert_terminal_error` also supports individual malformed-input cases.
 
 ## Byte accessor contracts
 
