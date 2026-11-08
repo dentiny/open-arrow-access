@@ -7,16 +7,16 @@ use std::sync::Arc;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Manifest {
-    pub source_bucket: String,
-    pub destination_bucket: String,
-    pub version: String,
+    pub(super) source_bucket: String,
+    pub(super) destination_bucket: String,
+    pub(super) version: String,
     /// Unix epoch milliseconds.
     #[serde(deserialize_with = "deserialize_timestamp")]
-    pub creation_timestamp: u64,
-    pub file_format: InventoryFormat,
+    pub(super) creation_timestamp: u64,
+    pub(super) file_format: InventoryFormat,
     #[serde(deserialize_with = "deserialize_schema")]
-    pub file_schema: SchemaRef,
-    pub files: Vec<Shard>,
+    pub(super) file_schema: SchemaRef,
+    pub(super) files: Vec<Shard>,
 }
 #[derive(Deserialize, PartialEq)]
 pub(super) enum InventoryFormat {
@@ -48,7 +48,7 @@ fn deserialize_schema<'de, D: Deserializer<'de>>(
 
 #[derive(Deserialize)]
 pub(super) struct Shard {
-    pub key: String,
+    pub(super) key: String,
 }
 
 pub(super) async fn read<A>(source: &A, request: ByteReadRequest) -> Result<Manifest>

@@ -306,6 +306,9 @@ pub mod byte_accessor;
 /// Shared assertions for single-file Arrow format accessors.
 pub mod format;
 
+/// Shared lifecycle and source-failure contracts for any reader output.
+pub mod reader;
+
 /// Shared helpers for record-reader values.
 pub mod record;
 

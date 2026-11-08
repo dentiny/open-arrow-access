@@ -1,8 +1,8 @@
-use futures::stream;
-use http::{Request, Response, StatusCode};
+use http::{Request, Response};
 use open_arrow_access_core::{Accessor, ByteAccessor, Bytes, ErrorKind};
 use open_arrow_access_service::commoncrawl::CommonCrawl;
 use open_arrow_access_storage::{OpenDalAccessor, opendal};
+use open_arrow_access_test_support::http::file_response;
 
 use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext, Operator};
 use std::sync::{Arc, Mutex};
@@ -56,37 +56,7 @@ impl HttpTransport for MockHttp {
             .unwrap()
             .push((request.method().to_string(), uri.clone()));
         assert_eq!(uri, format!("https://data.commoncrawl.org/{MANIFEST}"));
-        let len = self.manifest.len();
-        let mut response = Response::builder().header("content-length", len);
-        let body = if request.method() == http::Method::HEAD {
-            Bytes::new()
-        } else {
-            let value = request.headers()["range"].to_str().unwrap();
-            let (start, end) = value
-                .strip_prefix("bytes=")
-                .unwrap()
-                .split_once('-')
-                .unwrap();
-            let start = start.parse::<usize>().unwrap();
-            let end = if end.is_empty() {
-                len
-            } else {
-                end.parse::<usize>().unwrap() + 1
-            };
-            response = response
-                .status(StatusCode::PARTIAL_CONTENT)
-                .header("content-range", format!("bytes {start}-{}/{len}", end - 1));
-            self.manifest.slice(start..end)
-        };
-        let body_len = body.len() as u64;
-        response
-            .body(HttpBody::new(
-                stream::iter([Ok(Buffer::from(body))]),
-                Some(body_len),
-            ))
-            .map_err(|e| {
-                opendal::Error::new(opendal::ErrorKind::Unexpected, "mock response").set_source(e)
-            })
+        Ok(file_response(&request, self.manifest.clone()))
     }
 }
 

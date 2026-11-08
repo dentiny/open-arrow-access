@@ -66,13 +66,7 @@ pub(super) fn endpoint(value: &str) -> Result<Url> {
         )
     };
     let url = Url::parse(value).map_err(|_| invalid())?;
-    if !matches!(url.scheme(), "http" | "https")
-        || url.host_str().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
+    if !crate::http_client::validation::is_http_endpoint(&url) {
         return Err(invalid());
     }
     Ok(url)

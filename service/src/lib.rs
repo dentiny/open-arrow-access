@@ -1,5 +1,6 @@
 //! Provider services resolve source semantics into shared object/reader contracts.
 
+mod opendal_error;
 mod resolved_files;
 pub use resolved_files::ResolvedFileSet;
 
@@ -26,6 +27,9 @@ pub mod pmc;
 
 #[cfg(feature = "zenodo")]
 pub mod zenodo;
+
+#[cfg(feature = "zenodo")]
+mod filename;
 
 // Individual providers may use only part of the shared HTTP utilities.
 #[allow(dead_code)]

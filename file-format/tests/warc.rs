@@ -3,7 +3,7 @@ use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest, Error, ErrorKind};
 use open_arrow_access_file_format::warc::{WarcAccessor, WarcHeader};
 use open_arrow_access_storage::OpenDalAccessor;
-use open_arrow_access_test_support::{MemoryAccessor, fixture, fs_operator};
+use open_arrow_access_test_support::{MemoryAccessor, fixture, fs_operator, reader};
 
 #[tokio::test]
 async fn parser_preserves_physical_records_order_headers_and_owned_binary_bodies() {
@@ -78,10 +78,7 @@ async fn malformed_and_truncated_records_fail_terminally() {
         assert_eq!(error.kind(), ErrorKind::Decode, "{name}");
         assert_eq!(error.operation(), "decode_warc");
         assert!(error.source().is_some());
-        let polls = observed.reads.load(Ordering::SeqCst);
-        assert!(reader.next().await.unwrap().is_none());
-        assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(observed.reads.load(Ordering::SeqCst), polls);
+        reader::assert_finished(reader.as_mut(), &observed.reads, Clone::clone).await;
     }
 }
 
@@ -116,29 +113,20 @@ fn assert_source_error(error: &Error, kind: ErrorKind) {
 async fn source_errors_keep_categories_and_chains_across_parser_boundaries() {
     let bytes = fixture!("warc", "good_resource.warc").await;
     let body_start = bytes.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
-    for kind in [
-        ErrorKind::NotFound,
-        ErrorKind::PermissionDenied,
-        ErrorKind::Io,
-        ErrorKind::Unsupported,
-        ErrorKind::InvalidInput,
-        ErrorKind::Decode,
-    ] {
-        for offset in [0, body_start + 1, bytes.len() - 1] {
-            // The final offset exercises the terminator parser after the body.
-            let input = MemoryAccessor::new(&bytes, 1).with_failure(offset, kind);
-            let observed = input.observations.clone();
-            let mut reader = WarcAccessor::new(input)
-                .open("a.warc".into())
-                .await
-                .unwrap();
-            let error = reader.next().await.err().unwrap();
-            assert_source_error(&error, kind);
-            let polls = observed.reads.load(Ordering::SeqCst);
-            assert!(reader.next().await.unwrap().is_none());
-            assert_eq!(observed.reads.load(Ordering::SeqCst), polls);
-        }
-    }
+    let options = ByteReadOptions {
+        io_concurrency: NonZeroUsize::new(3).unwrap(),
+        io_chunk_size: NonZeroUsize::new(5),
+    };
+    reader::assert_error_contract(
+        WarcAccessor::new,
+        &bytes,
+        ByteReadRequest::new("a.warc").with_options(options),
+        // Header, body, and the terminator parser after the body.
+        &[0, body_start + 1, bytes.len() - 1],
+        Clone::clone,
+        assert_source_error,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -191,9 +179,7 @@ async fn empty_input_and_independent_opens_have_terminal_eof() {
         .await
         .unwrap();
     assert!(reader.next().await.unwrap().is_none());
-    let polls = observed.reads.load(Ordering::SeqCst);
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(observed.reads.load(Ordering::SeqCst), polls);
+    reader::assert_finished(reader.as_mut(), &observed.reads, Clone::clone).await;
     let input = MemoryAccessor::new(&fixture!("warc", "good_metadata.warc").await, 2);
     let accessor = WarcAccessor::new(input);
     let mut left = accessor.open("a.warc".into()).await.unwrap();
@@ -222,7 +208,5 @@ async fn open_errors_are_forwarded_and_empty_chunks_are_terminal_io_errors() {
         .unwrap();
     let error = reader.next().await.err().unwrap();
     assert_eq!(error.kind(), ErrorKind::Io);
-    let polls = observed.reads.load(Ordering::SeqCst);
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(observed.reads.load(Ordering::SeqCst), polls);
+    reader::assert_finished(reader.as_mut(), &observed.reads, Clone::clone).await;
 }

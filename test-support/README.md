@@ -109,6 +109,29 @@ checks stay in the owning test suite.
 depends on core contracts and the memory backend, so adding a format does not
 require adding a concrete format dependency to this crate.
 
+Lifecycle and injected source failures are implemented in `reader`, independently
+of Arrow batches or a particular request type. The `format` wrappers supply Arrow
+metadata snapshots; projection, schema and batch-size assertions stay in `format`.
+Native formats can call the same runner directly, as WARC does:
+
+```rust,ignore
+reader::assert_error_contract(
+    WarcAccessor::new,
+    &valid_fixture,
+    ByteReadRequest::new("records.warc").with_options(byte_options),
+    &[header_offset, body_offset, terminator_offset],
+    Clone::clone, // ObjectRef metadata; snapshot all fields whose stability matters.
+    assert_warc_source_error, // Keep parser-specific wrapping checks in the suite.
+).await;
+```
+
+The request must be cloneable and convertible by reference to `ByteReadRequest`,
+which defines the expected forwarded object and byte options. Metadata snapshots
+only need `Debug + PartialEq`; neither items nor metadata need those traits.
+`reader::assert_finished` checks repeated EOF, stable snapshots and no new upstream
+polls after an observed EOF/error. `reader::assert_terminal_error` expects the very
+next call to fail; byte-layer helpers retain their drain-until-error behavior.
+
 | Helper | Contract |
 | --- | --- |
 | `collect_batches` | Source identity, stable schema, nonempty batches within the requested row target, and terminal EOF; returns batches for value checks. |
