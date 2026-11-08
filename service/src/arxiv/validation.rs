@@ -73,9 +73,7 @@ pub(super) fn parse_manifest(
                     .checked_sub(1)
                     .ok_or_else(|| decode("unexpected manifest closing tag"))?;
             }
-            Event::Text(text)
-                if depth == 0 && !text.iter().all(u8::is_ascii_whitespace) =>
-            {
+            Event::Text(text) if depth == 0 && !text.iter().all(u8::is_ascii_whitespace) => {
                 return Err(decode("unexpected text outside arXiv manifest root"));
             }
             Event::CData(_) | Event::GeneralRef(_) if depth == 0 => {
