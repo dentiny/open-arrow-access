@@ -49,14 +49,17 @@ pub(super) fn validate_dataset(
     } else {
         data.dataset_persistent_id == persistent_id
     };
-    if response.status != "OK"
-        || !same_id
-        || (data.version_number, data.version_minor_number) != expected
-        || data.version_state != "RELEASED"
-    {
-        return Err(decode(
-            "response differs from the requested published dataset version",
-        ));
+    if response.status != "OK" {
+        return Err(decode("Dataverse response status is not OK"));
+    }
+    if !same_id {
+        return Err(decode("dataset ID differs from the requested identifier"));
+    }
+    if (data.version_number, data.version_minor_number) != expected {
+        return Err(decode("dataset version differs from the requested version"));
+    }
+    if data.version_state != "RELEASED" {
+        return Err(decode("dataset version is not published"));
     }
     for file in &data.files {
         if file.restricted {
