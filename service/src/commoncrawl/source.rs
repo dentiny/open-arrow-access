@@ -5,7 +5,9 @@ use super::{url::parse_url, validation::validate_crawl};
 /// One Common Crawl release and the origin hosting its objects.
 #[derive(Clone, Debug)]
 pub struct CommonCrawl {
+    /// Release ID in `CC-MAIN-YYYY-NN` form.
     crawl: String,
+    /// HTTP(S) scheme and host, with an optional port and no path.
     origin: String,
 }
 
