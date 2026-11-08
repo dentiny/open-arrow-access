@@ -117,3 +117,11 @@ Raw blocks, legacy format and custom dictionary/decoder-parameter configuration
 are outside this adapter. A stream requiring an unavailable dictionary fails
 with a decode error. Codec state, including its frame window, is additional to
 the emitted chunk limit.
+
+## Decoder output adapter
+
+`decoded_reader(decoder, metadata, chunk_size, operation, codec_name)` wraps any
+owned futures AsyncRead decoder in the standard sequential ByteReader contract.
+It shares chunking, source-error preservation and terminal handling between
+stream codecs and selected archive entries. Callers supply decoded-coordinate
+metadata and codec-specific configuration; the helper performs no eager I/O.
