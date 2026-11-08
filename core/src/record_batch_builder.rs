@@ -188,6 +188,7 @@ impl<'a> RecordBatchRow<'a> {
         write: impl FnOnce(&mut dyn ArrayBuilder, &Field) -> Result<()>,
     ) -> Result<()> {
         let result = (|| {
+            // TODO: Precompute field-name indexes for O(1) lookups in both schemas.
             if !self.fields.iter().any(|field| field.name() == name) {
                 return Err(decode(format!("unknown field {name:?}")));
             }
