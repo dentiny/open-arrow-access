@@ -160,6 +160,14 @@ read-ahead/drop behavior and format-specific scenarios in the owning tests.
 
 ## Ranged sources
 
+`ranged_input::assert_contract(bytes, inspect)` checks that ranged consumers reject
+sequential inputs, unknown lengths and short ranges, and preserve all shared error
+categories plus original causes for injected range failures. The async callback
+opens or inspects valid fixture bytes and must perform an initial range read.
+Entry decoding, format-specific errors and failures after inspection stay local.
+ZIP and TAR use this runner; sequential source-error assertions share its internal
+cause checks.
+
 `with_open_failure(kind)` records the attempted request and fails before creating
 a reader. Format error contracts exercise this alongside sequential faults.
 

@@ -35,6 +35,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | Generic file-format extension protocol | [`file-format/tests/accessor.rs`](../file-format/tests/accessor.rs), also runs with no format features |
 | Shared format contract assertions | [`test-support/src/format.rs`](../test-support/src/format.rs), used by format and Parquet suites |
 | Generic reader lifecycle and source failures | [`test-support/src/reader.rs`](../test-support/src/reader.rs), shared by Arrow formats, WARC and byte layers |
+| Ranged-input requirements and source errors | [`test-support/src/ranged_input.rs`](../test-support/src/ranged_input.rs), shared by ZIP and TAR |
 
 ## Add a test
 
