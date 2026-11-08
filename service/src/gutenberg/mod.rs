@@ -195,8 +195,8 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
                     })
             })
             .collect::<Result<Vec<_>>>()?;
-        let mut files = Vec::new();
-        if schema.index_of("files").is_ok() {
+        let files = if schema.index_of("files").is_ok() {
+            let mut builder = book.files_builder()?;
             let mut remaining = self.limits.row_bytes.get() - raw.len();
             for (selection, file) in selections {
                 let data = read_object(
@@ -208,10 +208,15 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
                 )
                 .await?;
                 remaining -= data.len();
-                files.push((file, data));
+                // Copy this file into its final Arrow buffer, then release data
+                // before opening the next file.
+                book.append_file(&mut builder, file, &data)?;
             }
-        }
-        book.into_batch(&files, schema)
+            Some(builder.finish()?)
+        } else {
+            None
+        };
+        book.into_batch(files, schema)
     }
 }
 
