@@ -2,7 +2,7 @@ use super::{
     error::decode,
     manifest::{InventoryFormat, Manifest},
 };
-use crate::path::valid_relative_file_path;
+use crate::validation::valid_relative_file_path;
 use arrow_schema::Fields;
 use open_arrow_access_core::{Error, ErrorKind, Result};
 use std::collections::HashSet;

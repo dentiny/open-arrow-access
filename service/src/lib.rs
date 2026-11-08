@@ -1,9 +1,9 @@
 //! Provider services resolve source semantics into shared object/reader contracts.
 
 mod opendal_error;
-#[cfg(any(feature = "internet-archive", feature = "pmc"))]
-mod path;
 mod resolved_files;
+#[cfg(any(feature = "internet-archive", feature = "pmc"))]
+mod validation;
 pub use resolved_files::ResolvedFileSet;
 
 #[cfg(feature = "courtlistener")]

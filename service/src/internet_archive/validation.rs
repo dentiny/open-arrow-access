@@ -1,4 +1,4 @@
-use crate::path::valid_relative_file_path;
+use crate::validation::valid_relative_file_path;
 use open_arrow_access_core::Result;
 
 use super::{
