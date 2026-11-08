@@ -316,7 +316,7 @@ cargo test --workspace --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```
 
-Start at the [test index and placement rules](tests/README.md) to find or add a
+Start at the [test index and placement rules](docs/testing.md) to find or add a
 suite. Each crate owns tests in its `tests/` directory; the root `tests/` covers
 facade wiring and cross-crate composition. CSV/TSV, JSON/JSONL, XML and ATIF suites
 live together in `file-format/tests/`. Private implementation tests, when needed,

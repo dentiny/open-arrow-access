@@ -92,33 +92,8 @@ open-arrow-access-file-format = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 
 [dev-dependencies]
-http = { workspace = true }
 opendal = { workspace = true, features = ["services-fs"] }
-open-arrow-access-test-support.workspace = true
-arrow-array.workspace = true
-arrow-schema.workspace = true
-bytes.workspace = true
-futures.workspace = true
-more-asserts.workspace = true
-parquet.workspace = true
-tempfile.workspace = true
-tokio = { workspace = true, features = ["fs"] }
-
-[[test]]
-name = "commoncrawl_common"
-required-features = ["service-warc"]
-
-[[test]]
-name = "commoncrawl_warc"
-required-features = ["service-warc"]
-
-[[test]]
-name = "directory"
-required-features = ["dataset-directory"]
-
-[[test]]
-name = "reading"
-required-features = ["format-parquet"]
+tokio.workspace = true
 
 [[example]]
 name = "read_huggingface"
@@ -145,11 +120,3 @@ required-features = ["format-xml"]
 [[example]]
 name = "read_atif"
 required-features = ["format-atif"]
-
-[[test]]
-name = "atif"
-required-features = ["format-atif", "dataset-directory"]
-
-[[test]]
-name = "warc"
-required-features = ["format-warc"]

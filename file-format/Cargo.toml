@@ -27,6 +27,7 @@ arrow-schema = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 
 [dev-dependencies]
+tempfile.workspace = true
 futures.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
@@ -53,3 +54,11 @@ required-features = ["csv"]
 [[test]]
 name = "xml"
 required-features = ["xml"]
+
+[[test]]
+name = "warc"
+required-features = ["warc"]
+
+[[test]]
+name = "parquet"
+required-features = ["parquet"]

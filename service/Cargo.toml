@@ -59,10 +59,12 @@ url = { workspace = true, optional = true }
 [dev-dependencies]
 open-arrow-access-storage.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["fs"] }
+arrow-schema.workspace = true
+http.workspace = true
+tokio.workspace = true
+open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
-
 [[test]]
 name = "huggingface"
 required-features = ["huggingface"]
@@ -72,3 +74,11 @@ name = "gutenberg"
 required-features = ["gutenberg"]
 [lints]
 workspace = true
+
+[[test]]
+name = "commoncrawl"
+required-features = ["warc"]
+
+[[test]]
+name = "warc"
+required-features = ["warc"]
