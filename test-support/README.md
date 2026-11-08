@@ -102,3 +102,13 @@ the original I/O cause remains in the source chain. `with_short_ranges` returns
 short payloads deliberately. `without_content_length` exercises consumers which
 require known lengths. These settings do not change the sequential cursor or
 sequential fault injection.
+
+## HTTP fixtures
+
+`http::HttpFixture` isolates hosts and captures methods, paths, and headers for
+provider tests. Static responses and files take precedence over `handle`'s dynamic
+fallback. The fallback receives the original request, including POST bodies;
+provider API validation and pagination stay in the calling fixture.
+`http::response` and `http::file_response` share fragmented responses and file
+HEAD/range behavior. Use `clear_requests()` between phases and
+`CapturedRequest::range()` to inspect captured byte ranges.
