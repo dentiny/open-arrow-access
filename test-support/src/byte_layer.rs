@@ -1,6 +1,6 @@
 //! Reusable error contract for sequential byte layers.
 
-use crate::{MemoryAccessor, collect_bytes, memory_read_error};
+use crate::{MemoryAccessor, collect_bytes, reader};
 use open_arrow_access_core::{Accessor, ByteReadRequest, ByteReader, Error, ErrorKind, Result};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -77,10 +77,14 @@ pub async fn assert_terminal_error(
     assert_eq!(error.kind(), kind);
     assert_eq!(error.operation(), operation);
     assert!(error.source().is_some());
-    let calls = reads.load(Ordering::SeqCst);
-    assert!(reader.next().await.unwrap().is_none());
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(reads.load(Ordering::SeqCst), calls);
+    reader::assert_finished(reader, reads, |metadata| {
+        (
+            metadata.source.clone(),
+            metadata.content_length,
+            metadata.version.clone(),
+        )
+    })
+    .await;
     error
 }
 
@@ -113,16 +117,7 @@ where
             assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
             let error =
                 assert_terminal_error(reader.as_mut(), &observed.reads, kind, operation).await;
-            let original = memory_read_error(&error);
-            assert_eq!(original.kind(), kind);
-            assert_eq!(original.to_string(), "memory_read: injected source failure");
-            let cause = original
-                .source()
-                .unwrap()
-                .downcast_ref::<std::io::Error>()
-                .unwrap();
-            assert_eq!(cause.kind(), std::io::ErrorKind::ConnectionReset);
-            assert_eq!(cause.to_string(), "injected source failure");
+            reader::assert_memory_read_error(&error, kind);
         }
     }
     for offset in [0, 1, bytes.len()] {

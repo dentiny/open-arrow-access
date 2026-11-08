@@ -8,10 +8,11 @@ use std::sync::{
 };
 
 use open_arrow_access_core::{
-    Accessor, Error, ErrorKind, ReadRequest, RecordBatch, RecordReader, SchemaRef,
+    Accessor, Error, ErrorKind, ObjectRef, ReadRequest, RecordBatch, RecordMetadata, RecordReader,
+    SchemaRef,
 };
 
-use crate::{MemoryAccessor, Observations, memory_read_error};
+use crate::{MemoryAccessor, Observations};
 
 /// One valid fixture for a sequential format with a fixed, explicit schema.
 /// Expected schema and rows come from the test, independently of the accessor.
@@ -63,14 +64,7 @@ where
 
 /// After an observed EOF or error, require stable metadata and no upstream polls.
 pub async fn assert_finished(reader: &mut dyn RecordReader, reads: &AtomicUsize) {
-    let calls = reads.load(Ordering::SeqCst);
-    let schema = reader.metadata().schema.clone();
-    let source = reader.metadata().source.clone();
-    assert!(reader.next().await.unwrap().is_none());
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(reads.load(Ordering::SeqCst), calls);
-    assert_eq!(reader.metadata().schema, schema);
-    assert_eq!(reader.metadata().source, source);
+    crate::reader::assert_finished(reader, reads, metadata_snapshot).await;
 }
 
 /// Require the next call to fail, then verify terminal behavior. Return the error
@@ -80,10 +74,11 @@ pub async fn assert_terminal_error(
     reads: &AtomicUsize,
     kind: ErrorKind,
 ) -> Error {
-    let error = reader.next().await.unwrap_err();
-    assert_eq!(error.kind(), kind);
-    assert_finished(reader, reads).await;
-    error
+    crate::reader::assert_terminal_error(reader, reads, kind, metadata_snapshot).await
+}
+
+fn metadata_snapshot(metadata: &RecordMetadata) -> (SchemaRef, Option<ObjectRef>) {
+    (metadata.schema.clone(), metadata.source.clone())
 }
 
 /// Collect a successful single-file read, checking source identity, schema
@@ -193,36 +188,8 @@ pub async fn assert_invalid_projection_before_open<A>(
     }
 }
 
-async fn read_error<A>(accessor: A, request: &ReadRequest, observed: &Observations) -> Error
-where
-    A: Accessor<Request = ReadRequest, Reader = dyn RecordReader>,
-{
-    let error = match accessor.open(request.clone()).await {
-        Err(error) => error,
-        Ok(mut reader) => {
-            let error = loop {
-                match reader.next().await {
-                    Ok(Some(_)) => {}
-                    Ok(None) => panic!("format ignored an injected input failure"),
-                    Err(error) => break error,
-                }
-            };
-            assert_finished(reader.as_mut(), &observed.reads).await;
-            error
-        }
-    };
-    let requests = observed.requests.lock().unwrap();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].object, request.object);
-    assert_eq!(requests[0].options, request.byte_options);
-    error
-}
-
-/// Exercise all shared error categories and empty chunks at caller-chosen byte
-/// offsets, with one-byte chunks. Also checks open failures without reader polls.
-/// Supports failures during schema inference or
-/// later reads. This uses sequential faults, so range-based formats need their
-/// own I/O fault scenarios. Valid input and reachable offsets are required.
+/// Exercise shared input failures with Arrow metadata stability checks.
+/// See [`crate::reader::assert_error_contract`] for native record readers.
 pub async fn assert_error_contract<A>(
     make_format: impl Fn(MemoryAccessor) -> A,
     bytes: &[u8],
@@ -231,51 +198,13 @@ pub async fn assert_error_contract<A>(
 ) where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader>,
 {
-    use std::error::Error as _;
-    assert!(!offsets.is_empty());
-    let kinds = [
-        ErrorKind::InvalidInput,
-        ErrorKind::Unsupported,
-        ErrorKind::NotFound,
-        ErrorKind::PermissionDenied,
-        ErrorKind::Io,
-        ErrorKind::Decode,
-    ];
-    for kind in kinds {
-        let input = MemoryAccessor::new(bytes, 1).with_open_failure(kind);
-        let observed = input.observations.clone();
-        let error = read_error(make_format(input), &request, &observed).await;
-        assert_eq!(error.kind(), kind);
-        assert_eq!(error.operation(), "memory_open");
-        let cause = error
-            .source()
-            .unwrap()
-            .downcast_ref::<std::io::Error>()
-            .unwrap();
-        assert_eq!(cause.kind(), std::io::ErrorKind::ConnectionReset);
-        assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
-    }
-    for &offset in offsets {
-        assert!(offset <= bytes.len());
-        for kind in kinds {
-            let input = MemoryAccessor::new(bytes, 1).with_failure(offset, kind);
-            let observed = input.observations.clone();
-            let error = read_error(make_format(input), &request, &observed).await;
-            assert_eq!(error.kind(), kind, "offset {offset}: {error}");
-            let original = memory_read_error(&error);
-            assert_eq!(original.kind(), kind);
-            assert_eq!(original.to_string(), "memory_read: injected source failure");
-            let cause = original
-                .source()
-                .unwrap()
-                .downcast_ref::<std::io::Error>()
-                .unwrap();
-            assert_eq!(cause.kind(), std::io::ErrorKind::ConnectionReset);
-            assert_eq!(cause.to_string(), "injected source failure");
-        }
-        let input = MemoryAccessor::new(bytes, 1).with_empty_chunk(offset);
-        let observed = input.observations.clone();
-        let error = read_error(make_format(input), &request, &observed).await;
-        assert_eq!(error.kind(), ErrorKind::Io, "offset {offset}: {error}");
-    }
+    crate::reader::assert_error_contract(
+        make_format,
+        bytes,
+        request,
+        offsets,
+        metadata_snapshot,
+        |_, _| {},
+    )
+    .await;
 }

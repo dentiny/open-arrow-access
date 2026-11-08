@@ -16,12 +16,12 @@ use open_arrow_access_core::{
 };
 use parquet::basic::Compression;
 
-pub struct Fixture {
-    pub dir: tempfile::TempDir,
-    pub schema: SchemaRef,
+pub(super) struct Fixture {
+    pub(super) dir: tempfile::TempDir,
+    pub(super) schema: SchemaRef,
 }
 
-pub async fn fixture(compression: Compression) -> Fixture {
+pub(super) async fn fixture(compression: Compression) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let schema = Arc::new(Schema::new_with_metadata(
         vec![
@@ -41,34 +41,34 @@ pub async fn fixture(compression: Compression) -> Fixture {
     Fixture { dir, schema }
 }
 
-pub fn fixture_path(name: &str) -> PathBuf {
+pub(super) fn fixture_path(name: &str) -> PathBuf {
     open_arrow_access_test_support::fixture_path!("parquet", name)
 }
 
-pub fn ids(batch: &RecordBatch) -> Vec<i64> {
+pub(super) fn ids(batch: &RecordBatch) -> Vec<i64> {
     open_arrow_access_test_support::record::collect_values::<Int64Type>(
         std::slice::from_ref(batch),
         0,
     )
 }
 
-pub use open_arrow_access_test_support::MemoryAccessor;
+pub(super) use open_arrow_access_test_support::MemoryAccessor;
 
 #[derive(Default)]
-pub struct Observations {
-    pub byte_options: Mutex<Vec<ByteReadOptions>>,
-    pub batch_reads: AtomicUsize,
-    pub max_batch_ranges: AtomicUsize,
-    pub range_reads: AtomicUsize,
-    pub fail_reads: AtomicBool,
-    pub failure_kind: Mutex<Option<ErrorKind>>,
-    pub drops: AtomicUsize,
+pub(super) struct Observations {
+    pub(super) byte_options: Mutex<Vec<ByteReadOptions>>,
+    pub(super) batch_reads: AtomicUsize,
+    pub(super) max_batch_ranges: AtomicUsize,
+    pub(super) range_reads: AtomicUsize,
+    pub(super) fail_reads: AtomicBool,
+    pub(super) failure_kind: Mutex<Option<ErrorKind>>,
+    pub(super) drops: AtomicUsize,
 }
 
 /// A test-only layer validating range delegation and failure/cancellation behavior.
-pub struct ByteObserverLayer(pub Arc<Observations>);
+pub(super) struct ByteObserverLayer(pub(super) Arc<Observations>);
 
-pub struct ByteObserverAccessor<A> {
+pub(super) struct ByteObserverAccessor<A> {
     inner: A,
     observations: Arc<Observations>,
 }
@@ -202,9 +202,9 @@ impl ByteReader for ByteObserverReader {
 }
 
 /// Test-only wrapper modeling a decoder that cannot preserve upstream byte ranges.
-pub struct SequentialLayer;
+pub(super) struct SequentialLayer;
 
-pub struct SequentialAccessor<A>(A);
+pub(super) struct SequentialAccessor<A>(A);
 
 impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Layer<A> for SequentialLayer {
     type Layered = SequentialAccessor<A>;

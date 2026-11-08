@@ -12,13 +12,13 @@ use open_arrow_access_file_format::csv::CsvAccessor;
 use super::validation;
 
 pub(super) struct InventoryTransform {
-    pub csv_schema: SchemaRef,
-    pub output_projection: Option<Vec<usize>>,
-    pub output_schema: SchemaRef,
+    pub(super) csv_schema: SchemaRef,
+    pub(super) output_projection: Option<Vec<usize>>,
+    pub(super) output_schema: SchemaRef,
 }
 
 impl InventoryTransform {
-    pub fn create_reader<A: ByteAccessor + 'static>(
+    pub(super) fn create_reader<A: ByteAccessor + 'static>(
         self,
         source: Arc<A>,
         files: Vec<ObjectRef>,
