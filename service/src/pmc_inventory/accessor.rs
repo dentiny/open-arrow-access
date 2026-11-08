@@ -1,12 +1,8 @@
-use super::{
-    capability, manifest,
-    reader::{InventoryState, create_reader},
-    validation,
-};
+use super::{capability, manifest, reader::InventoryTransform, validation};
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, Capability, ReadRequest, RecordMetadata, RecordReader,
-    Result, async_trait,
+    Accessor, ByteAccessor, ByteReadRequest, Capability, ReadRequest, RecordReader, Result,
+    async_trait,
 };
 use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 
@@ -73,26 +69,21 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
         ]);
         let full_schema = Arc::new(Schema::new_with_metadata(fields, metadata));
         let (output_schema, projection) = request.options.resolve_projection(&full_schema)?;
-        let state = InventoryState {
-            source: self.inner.clone(),
-            files: manifest
-                .files
-                .into_iter()
-                .map(|file| file.key.into())
-                .collect(),
-            current: None,
+        let transform = InventoryTransform {
             csv_schema,
             projection: projection.unwrap_or_else(|| (0..full_schema.fields().len()).collect()),
-            options: request.options,
-            byte_options: request.byte_options,
-            schema: output_schema.clone(),
+            schema: output_schema,
         };
-        Ok(Box::new(create_reader(
-            state,
-            RecordMetadata {
-                schema: output_schema,
-                source: Some(request.object),
-            },
-        )))
+        Ok(Box::new(
+            transform.create_reader(
+                self.inner.clone(),
+                manifest
+                    .files
+                    .into_iter()
+                    .map(|file| file.key.into())
+                    .collect(),
+                request,
+            ),
+        ))
     }
 }
