@@ -9,48 +9,35 @@ use xml_arrow::{ReaderOptions, XmlReader};
 
 use super::{decode, decode_source};
 
-/// Validated XML extraction, retained without a second metadata batch.
-pub(super) struct BookMetadata {
-    source: StructArray,
-}
-
-impl BookMetadata {
-    /// Validate every mapped field, independently of the output projection.
-    pub(super) async fn parse(raw: &[u8]) -> Result<Self> {
-        let mut reader = XmlReader::new(
-            Cursor::new(raw),
-            super::mapping(),
-            /*record_path=*/ "/r:RDF",
-            ReaderOptions {
-                // DocumentAccessor already bounds the input. Accept larger caller-
-                // configured documents without imposing XML's default batch limit.
-                max_record_bytes: usize::MAX - 1,
-                max_batch_bytes: usize::MAX,
-                max_depth: 65534,
-                ..Default::default()
-            },
-        )
-        .map_err(decode_source)?;
-        let batch = reader
-            .next_batch()
-            .await
-            .map_err(decode_source)?
-            .ok_or_else(|| decode("expected an RDF document containing one ebook"))?;
-        if batch.num_rows() != 1 || reader.next_batch().await.map_err(decode_source)?.is_some() {
-            return Err(decode("expected one RDF document"));
-        }
-        let book = Self {
-            source: batch.column(0).as_struct().clone(),
-        };
-        convert_fields(super::schema().fields(), &book.source, 0, None)?;
-        Ok(book)
+/// Validate all mapped fields and build one projected row.
+pub(super) async fn read_metadata(raw: &[u8], schema: SchemaRef) -> Result<RecordBatch> {
+    let mut reader = XmlReader::new(
+        Cursor::new(raw),
+        super::mapping(),
+        /*record_path=*/ "/r:RDF",
+        ReaderOptions {
+            // DocumentAccessor already bounds the input. Accept larger caller-
+            // configured documents without imposing XML's default batch limit.
+            max_record_bytes: usize::MAX - 1,
+            max_batch_bytes: usize::MAX,
+            max_depth: 65534,
+            ..Default::default()
+        },
+    )
+    .map_err(decode_source)?;
+    let batch = reader
+        .next_batch()
+        .await
+        .map_err(decode_source)?
+        .ok_or_else(|| decode("expected an RDF document containing one ebook"))?;
+    if batch.num_rows() != 1 || reader.next_batch().await.map_err(decode_source)?.is_some() {
+        return Err(decode("expected one RDF document"));
     }
-
-    pub(super) fn into_batch(self, schema: SchemaRef) -> Result<RecordBatch> {
-        RecordBatchBuilder::build_row(super::schema(), schema.clone(), |row| {
-            convert_fields(schema.fields(), &self.source, 0, Some(row))
-        })
-    }
+    let source = batch.column(0).as_struct();
+    convert_fields(super::schema().fields(), source, 0, None)?;
+    RecordBatchBuilder::build_row(super::schema(), schema.clone(), |row| {
+        convert_fields(schema.fields(), source, 0, Some(row))
+    })
 }
 
 // Validate every source field with no writer, or write the requested fields.

@@ -14,8 +14,6 @@ use open_arrow_access_core::{
 };
 use xml_arrow::{NamespaceBinding, XmlField, XmlSchema};
 
-use metadata::BookMetadata;
-
 /// Source byte limits; excludes parser and Arrow allocations.
 #[derive(Clone, Copy, Debug)]
 pub struct GutenbergLimits {
@@ -91,12 +89,12 @@ impl DocumentDecoder for GutenbergDecoder {
         _request: ReadRequest,
         schema: SchemaRef,
     ) -> Result<RecordBatch> {
-        BookMetadata::parse(raw).await?.into_batch(schema)
+        metadata::read_metadata(raw, schema).await
     }
 }
 
 // Declare Arrow fields and their XML locations together. The XML engine extracts
-// scalars as strings; BookMetadata validates them and writes the requested output
+// scalars as strings; metadata conversion validates them and writes the output
 // types when building the final batch.
 type Mapping = (Field, XmlField);
 
