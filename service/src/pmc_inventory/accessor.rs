@@ -1,4 +1,4 @@
-use super::{manifest, reader::InventoryTransform, validation};
+use super::{manifest, reader::InventoryTransform};
 use arrow_schema::Schema;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, Capability, ReadRequest, RecordReader, Result,
@@ -46,7 +46,6 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
         }
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        validation::validate_manifest_locator(request.object.locator())?;
         let manifest = manifest::read(
             self.inner.as_ref(),
             ByteReadRequest::new(request.object.clone()).with_options(request.byte_options),

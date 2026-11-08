@@ -13,7 +13,7 @@ use std::{
     num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
-const MANIFEST: &str = "snapshot/manifest.json";
+const MANIFEST: &str = "s3://pmc-oa-opendata/snapshot/inventory.json";
 const FIRST: &str = "data/first.csv.gz";
 const SECOND: &str = "data/second.csv.gz";
 const ROW: &str = "pmc-oa-opendata,metadata%2FPMC1.1.json,2026-11-02,tag\n";

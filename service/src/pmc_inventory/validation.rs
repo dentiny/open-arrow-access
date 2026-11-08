@@ -6,16 +6,6 @@ use arrow_schema::Fields;
 use open_arrow_access_core::{Error, ErrorKind, Result};
 use std::collections::HashSet;
 
-pub(super) fn validate_manifest_locator(path: &str) -> Result<()> {
-    if !valid_path(path) || !(path == "manifest.json" || path.ends_with("/manifest.json")) {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "open_pmc_inventory",
-            "expected an explicit snapshot manifest object",
-        ));
-    }
-    Ok(())
-}
 pub(super) fn validate_manifest(manifest: &Manifest) -> Result<()> {
     if manifest.source_bucket != "pmc-oa-opendata"
         || manifest.destination_bucket != "arn:aws:s3:::pmc-oa-opendata"
