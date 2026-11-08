@@ -60,6 +60,7 @@ impl RecordBatchBuilder {
     ) -> Result<RecordBatch> {
         Self::validate_fields(schema.fields())?;
         let mut selected = HashSet::new();
+        // TODO: Index full-schema fields for O(1) lookup instead of a linear search.
         for field in output_schema.fields() {
             if !selected.insert(field.name())
                 || !schema.fields().iter().any(|source| source == field)
