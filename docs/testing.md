@@ -32,6 +32,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
 | Generic file-format extension protocol | [`file-format/tests/accessor.rs`](../file-format/tests/accessor.rs), also runs with no format features |
 | Shared format contract assertions | [`test-support/src/format.rs`](../test-support/src/format.rs), used by format and Parquet suites |
+| Generic reader lifecycle and source failures | [`test-support/src/reader.rs`](../test-support/src/reader.rs), shared by Arrow formats, WARC and byte layers |
 
 ## Add a test
 
@@ -52,6 +53,9 @@ crate whose behavior they exercise. The workspace root has no test directory.
   and a `FormatCase`. Use `byte_accessor::assert_ranged_read_contract` for ranged
   storage and resolved provider files, and `http::assert_resolution_cases` for
   provider metadata failure tables. See the [runner guide](../test-support/README.md#composed-contract-runners).
+  Native output formats can use `reader::assert_error_contract` with a metadata
+  snapshot and parser-specific source assertions; Arrow schema/projection checks
+  remain in `format`.
   Inferred schemas, native record formats and range-read faults retain their own
   specialized contracts; keep parsed-value and provider policy assertions local.
 - Read all serialized test inputs, valid and invalid, from root
