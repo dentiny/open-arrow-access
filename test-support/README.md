@@ -103,6 +103,13 @@ tests retain membership, URL construction, metadata validation, and one complete
 read through their own transport. Backend-specific failures and scheduling
 checks stay in the owning test suite.
 
+## Resource lifetimes
+
+`DropProbe::new(flag.clone())` sets a caller-owned `Arc<AtomicBool>` when the probe
+is dropped. Capture the probe in the source stream or reader being observed, then
+assert the flag in the owning suite. Core stream and TAR tests use this guard for
+EOF, errors and explicit drops while keeping their lifecycle scenarios local.
+
 ## Format contracts
 
 `format` shares assertions for single-file Arrow format accessors. The module

@@ -16,6 +16,9 @@ use open_arrow_access_core::{
     ErrorKind, ListRequest, ObjectStream, Reader, Result, async_trait,
 };
 
+mod drop_probe;
+pub use drop_probe::DropProbe;
+
 /// Configure the filesystem SDK backend for test fixtures.
 pub fn fs_operator(root: impl AsRef<Path>) -> opendal::Operator {
     opendal::Operator::new(opendal::services::Fs::default().root(root.as_ref().to_str().unwrap()))
