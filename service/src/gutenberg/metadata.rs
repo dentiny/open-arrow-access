@@ -1,7 +1,8 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use arrow_array::{
-    Array, ArrayRef, LargeListArray, RecordBatchOptions, StructArray, cast::AsArray,
+    Array, ArrayRef, LargeBinaryArray, LargeListArray, RecordBatchOptions, StructArray,
+    cast::AsArray,
 };
 use arrow_buffer::OffsetBuffer;
 use arrow_schema::{DataType, Field, Fields, Schema};
@@ -50,20 +51,26 @@ impl<'a> BookMetadata<'a> {
             source: batch.column(0).as_struct().clone(),
         };
         convert_fields(super::schema().fields(), &book.source, 0, None)?;
-        let mut seen = HashSet::new();
-        for uri in book
+        Ok(book)
+    }
+
+    /// Validate uniqueness and index every URI once, including unselected files.
+    pub(super) fn file_indices(&self) -> Result<HashMap<&str, usize>> {
+        let mut indices = HashMap::new();
+        for (index, uri) in self
             .files()
             .column_by_name("uri")
             .unwrap()
             .as_string::<i32>()
             .iter()
-            .flatten()
+            .enumerate()
         {
-            if uri.is_empty() || !seen.insert(uri) {
+            let uri = uri.unwrap(); // Required by the validated XML mapping.
+            if uri.is_empty() || indices.insert(uri, index).is_some() {
                 return Err(decode("missing or duplicate file URI in RDF"));
             }
         }
-        Ok(book)
+        Ok(indices)
     }
 
     fn files(&self) -> &StructArray {
@@ -77,16 +84,7 @@ impl<'a> BookMetadata<'a> {
             .as_struct()
     }
 
-    pub(super) fn file_index(&self, uri: &str) -> Option<usize> {
-        self.files()
-            .column_by_name("uri")
-            .unwrap()
-            .as_string::<i32>()
-            .iter()
-            .position(|candidate| candidate == Some(uri))
-    }
-
-    pub(super) fn files_builder(&self) -> Result<RecordBatchBuilder> {
+    pub(super) fn file_metadata_builder(&self) -> Result<RecordBatchBuilder> {
         let schema = super::schema();
         let DataType::LargeList(item) = schema.field_with_name("files").unwrap().data_type() else {
             unreachable!()
@@ -94,25 +92,26 @@ impl<'a> BookMetadata<'a> {
         let DataType::Struct(fields) = item.data_type() else {
             unreachable!()
         };
-        RecordBatchBuilder::new(Arc::new(Schema::new(fields.clone())), None)
+        let fields: Fields = fields
+            .iter()
+            .filter(|field| field.name() != "data")
+            .cloned()
+            .collect();
+        RecordBatchBuilder::new(Arc::new(Schema::new(fields)), None)
     }
 
-    pub(super) fn append_file(
+    pub(super) fn append_file_metadata(
         &self,
         builder: &mut RecordBatchBuilder,
         index: usize,
-        data: &[u8],
     ) -> Result<()> {
         let fields = builder.schema().fields().clone();
-        builder.push(|row| {
-            convert_fields(&fields, self.files(), index, Some(row))?;
-            row.append("data", data)
-        })
+        builder.push(|row| convert_fields(&fields, self.files(), index, Some(row)))
     }
 
     pub(super) fn into_batch(
         self,
-        files: Option<RecordBatch>,
+        files: Option<(RecordBatch, LargeBinaryArray)>,
         schema: SchemaRef,
     ) -> Result<RecordBatch> {
         let projected: Fields = schema
@@ -129,16 +128,21 @@ impl<'a> BookMetadata<'a> {
             row.append("metadata_rdf", self.raw)?;
             convert_fields(&projected, &self.source, 0, Some(row))
         })?;
-        let files = files.map(|files| {
+        let files = files.map(|(files, data)| {
             let DataType::LargeList(item) = schema.field_with_name("files").unwrap().data_type()
             else {
                 unreachable!()
             };
+            let DataType::Struct(fields) = item.data_type() else {
+                unreachable!()
+            };
+            let mut columns = files.columns().to_vec();
+            columns.push(Arc::new(data));
             // StructArray and LargeListArray reuse the finished file buffers.
             Arc::new(LargeListArray::new(
                 item.clone(),
                 OffsetBuffer::from_lengths([files.num_rows()]),
-                Arc::new(StructArray::from(files)),
+                Arc::new(StructArray::new(fields.clone(), columns, None)),
                 None,
             )) as ArrayRef
         });

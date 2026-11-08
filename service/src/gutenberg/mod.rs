@@ -4,15 +4,17 @@ mod metadata;
 
 use std::{
     collections::HashSet,
+    io::Write,
     num::NonZeroUsize,
     sync::{Arc, OnceLock},
 };
 
+use arrow_array::builder::LargeBinaryBuilder;
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
     Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability, DocumentAccessor,
     DocumentDecoder, Error, ErrorKind, ObjectRef, ReadOptions, ReadOptionsProvider, ReadRequest,
-    RecordBatch, RecordReader, Result, SchemaRef, async_trait, read_object,
+    RecordBatch, RecordReader, Result, SchemaRef, async_trait,
 };
 use xml_arrow::{NamespaceBinding, XmlField, XmlSchema};
 
@@ -180,13 +182,15 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
         schema: SchemaRef,
     ) -> Result<RecordBatch> {
         let book = BookMetadata::parse(raw).await?;
+        let indices = book.file_indices()?;
         // Validate membership even when projection omits file data.
         let selections = request
             .files
             .iter()
             .map(|selection| {
-                book.file_index(&selection.uri)
-                    .map(|index| (selection, index))
+                indices
+                    .get(selection.uri.as_str())
+                    .map(|&index| (selection, index))
                     .ok_or_else(|| {
                         decode(format!(
                             "selected file is absent from RDF: {}",
@@ -196,28 +200,71 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
             })
             .collect::<Result<Vec<_>>>()?;
         let files = if schema.index_of("files").is_ok() {
-            let mut builder = book.files_builder()?;
+            let mut builder = book.file_metadata_builder()?;
+            let mut data = LargeBinaryBuilder::with_capacity(selections.len(), 0);
             let mut remaining = self.limits.row_bytes.get() - raw.len();
             for (selection, file) in selections {
-                let data = read_object(
-                    self.inner.as_ref(),
-                    ByteReadRequest::new(selection.object.clone())
-                        .with_options(request.metadata.byte_options),
+                if !self.inner.capability().read {
+                    return Err(Error::new(
+                        ErrorKind::Unsupported,
+                        "read_gutenberg",
+                        "accessor does not support reading",
+                    ));
+                }
+                let input = self
+                    .inner
+                    .open(
+                        ByteReadRequest::new(selection.object.clone())
+                            .with_options(request.metadata.byte_options),
+                    )
+                    .await?;
+                remaining -= append_file_data(
+                    input,
+                    &mut data,
                     self.limits.file_bytes.get().min(remaining),
-                    "read_gutenberg",
                 )
                 .await?;
-                remaining -= data.len();
-                // Copy this file into its final Arrow buffer, then release data
-                // before opening the next file.
-                book.append_file(&mut builder, file, &data)?;
+                book.append_file_metadata(&mut builder, file)?;
             }
-            Some(builder.finish()?)
+            Some((builder.finish()?, data.finish()))
         } else {
             None
         };
         book.into_batch(files, schema)
     }
+}
+
+// Write chunks directly into the final binary value; commit its offset at EOF.
+async fn append_file_data(
+    mut input: Box<dyn ByteReader>,
+    data: &mut LargeBinaryBuilder,
+    limit: usize,
+) -> Result<usize> {
+    let limit_error = || decode(format!("input exceeds configured {limit}-byte limit"));
+    if input
+        .metadata()
+        .content_length
+        .is_some_and(|length| length > limit as u64)
+    {
+        return Err(limit_error());
+    }
+    let mut size = 0;
+    while let Some(chunk) = input.next().await? {
+        if chunk.is_empty() {
+            return Err(Error::new(
+                ErrorKind::Io,
+                "read_gutenberg",
+                "byte reader returned an empty chunk",
+            ));
+        }
+        if chunk.len() > limit - size {
+            return Err(limit_error());
+        }
+        data.write_all(&chunk).map_err(decode_source)?;
+        size += chunk.len();
+    }
+    data.append_value([]);
+    Ok(size)
 }
 
 // Declare Arrow fields and their XML locations together. The XML engine extracts
