@@ -38,6 +38,7 @@ huggingface = [
 ]
 commoncrawl-segment = ["warc"]
 
+
 [dependencies]
 open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-file-format = { workspace = true, optional = true }
