@@ -1,12 +1,13 @@
 use futures::stream;
-use open_arrow_access_core::{
+
+use crate::{
     ByteReader, Bytes, Error, ErrorKind, RecordBatch, RecordMetadata, RecordReader, Result,
     StreamReader,
 };
 
 /// Format-specific decoding hooks for the shared input loop.
-pub(crate) trait BatchDecoder: Send + 'static {
-    /// Operation name for empty-chunk input errors.
+pub trait BatchDecoder: Send + 'static {
+    /// Operation name for input and decoder contract errors.
     const INPUT_OPERATION: &'static str;
 
     /// Message for empty-chunk input errors.
@@ -15,7 +16,8 @@ pub(crate) trait BatchDecoder: Send + 'static {
     /// Whether a batch is ready to flush without more input.
     fn is_ready(&self) -> bool;
 
-    /// Consume a prefix of `bytes`; return its length and retain partial records.
+    /// Consume at most `bytes.len()` bytes and retain partial records.
+    /// Returning zero requires `is_ready()` to become true.
     fn decode(&mut self, bytes: &[u8]) -> Result<usize>;
 
     /// Emit buffered records. `Ok(None)` ends output.
@@ -58,12 +60,29 @@ impl<D: BatchDecoder> DecodeState<D> {
                 }
             }
             let consumed = self.decoder.decode(&self.pending)?;
+            if consumed > self.pending.len() {
+                return Err(Error::new(
+                    ErrorKind::Decode,
+                    D::INPUT_OPERATION,
+                    "decoder consumed more bytes than supplied",
+                ));
+            }
+            if consumed == 0 && !self.decoder.is_ready() {
+                return Err(Error::new(
+                    ErrorKind::Decode,
+                    D::INPUT_OPERATION,
+                    "decoder made no progress",
+                ));
+            }
             self.pending = self.pending.slice(consumed..);
         }
     }
 }
 
-pub(crate) fn create_reader<D: BatchDecoder>(
+/// Decode bytes lazily into batches with the supplied metadata.
+/// Batches must match the metadata schema. EOF and errors terminate the reader;
+/// source and decoder errors are forwarded unchanged.
+pub fn decode_batches<D: BatchDecoder>(
     input: Box<dyn ByteReader>,
     decoder: D,
     metadata: RecordMetadata,
