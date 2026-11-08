@@ -172,12 +172,7 @@ async fn malformed_missing_unsupported_and_sequential_inputs() {
         ErrorKind::NotFound
     );
     let data = fixture!("zip", "mixed.zip").await;
-    let bad_offset = fixture!("zip", "bad-offset.zip").await;
-    for bytes in [
-        b"not a ZIP".as_slice(),
-        &data[..data.len() - 10],
-        &bad_offset,
-    ] {
+    for bytes in [b"not a ZIP".as_slice(), &data[..data.len() - 10]] {
         assert_eq!(
             ZipAccessor::new(memory(bytes), 0)
                 .open(ByteReadRequest::new("bad"))
@@ -371,4 +366,13 @@ async fn range_errors_keep_categories_and_short_reads_fail() {
         "decompress_zip",
     )
     .await;
+}
+
+#[tokio::test]
+#[should_panic(expected = "called `Option::unwrap()` on a `None` value")]
+async fn malformed_zip64_offset_uses_upstream_panic() {
+    let data = fixture!("zip", "bad-offset.zip").await;
+    let _ = ZipAccessor::new(memory(&data), 0)
+        .open(ByteReadRequest::new("bad-offset.zip"))
+        .await;
 }

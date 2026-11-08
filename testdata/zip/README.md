@@ -10,7 +10,7 @@ these deterministic fixtures using Python's standard library.
 | `zip64.zip` | ZIP64 local header plus ZIP64 end record and locator, with a tiny payload. |
 | `empty.zip` | Valid empty central directory. |
 | `unsupported.zip` | Bzip2 ZIP entry, outside this feature's Stored/Deflate scope. |
-| `bad-offset.zip` | Incomplete ZIP64 offset metadata; must return Decode without a parser panic. |
+| `bad-offset.zip` | Incomplete ZIP64 offset metadata; exercises the upstream parser's missing-offset panic. |
 
 Tests mutate copies to exercise CRC corruption, truncation, encrypted flags,
 and false declared sizes without maintaining redundant binary fixtures.

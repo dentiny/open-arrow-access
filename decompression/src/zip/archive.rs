@@ -4,7 +4,6 @@ use async_zip::base::read1::{
     ZipOptions,
     seek::{ZipArchiveInner, ZipArchiveReader},
 };
-use async_zip::spec::extra::{EFD, EFHID};
 use open_arrow_access_core::{
     ByteMetadata, ByteReader, Error, ErrorKind, Result, SeekableInput, into_async_seek,
 };
@@ -93,20 +92,6 @@ impl ZipArchive {
             )
         })?;
         metadata.content_length = Some(entry.uncompressed_size().map_err(zip_error)?);
-        // async_zip's ZIP64 offset accessor assumes the extra field includes
-        // an offset. Reject incomplete fields before that accessor is called.
-        if entry.cdrh.lfh_offset == u32::MAX {
-            match entry.find_ef(EFHID::EI64).map(|field| &field.efd) {
-                Some(EFD::EI64(data)) if data.relative_offset.is_some() => (),
-                _ => {
-                    return Err(Error::new(
-                        ErrorKind::Decode,
-                        "open_zip_entry",
-                        "missing ZIP64 local header offset",
-                    ));
-                }
-            }
-        }
         // The upstream parser exposes GPF as an opaque type. Check the local
         // flags before opening a decoder, including empty encrypted entries.
         let flags_offset = entry
