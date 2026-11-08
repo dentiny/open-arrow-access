@@ -44,7 +44,18 @@ huggingface = [
     "open-arrow-access-dataset/directory",
     "open-arrow-access-file-format/parquet",
 ]
-pmc = ["dep:arrow-schema", "dep:serde", "dep:serde_json"]
+pmc = [
+    "dep:futures",
+    "dep:arrow-array",
+    "dep:arrow-schema",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:open-arrow-access-file-format",
+    "open-arrow-access-file-format/csv",
+    "dep:open-arrow-access-decompression",
+    "open-arrow-access-decompression/gzip",
+]
+
 
 
 [dependencies]
@@ -64,6 +75,8 @@ serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 opendal-service-http = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
+open-arrow-access-decompression = { workspace = true, optional = true }
+
 arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -73,6 +86,7 @@ arrow-schema.workspace = true
 http.workspace = true
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
+flate2.workspace = true
 
 open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-storage.workspace = true
@@ -85,6 +99,10 @@ required-features = ["huggingface"]
 [[test]]
 name = "gutenberg"
 required-features = ["gutenberg"]
+
+[[test]]
+name = "pmc_inventory"
+required-features = ["pmc"]
 
 [[test]]
 name = "pmc"

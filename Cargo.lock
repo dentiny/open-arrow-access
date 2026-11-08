@@ -1865,6 +1865,7 @@ dependencies = [
  "arrow-buffer",
  "arrow-schema",
  "chrono",
+ "flate2",
  "futures",
  "http",
  "open-arrow-access-core",

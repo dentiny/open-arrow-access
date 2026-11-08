@@ -192,7 +192,7 @@ for file mapping, schema and limits.
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema; WARC parser records with Arrow conversion deferred |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Hugging Face datasets; PMC article metadata; Gutenberg books; Common Crawl WARC datasets |
+| `service/` | Hugging Face datasets; PMC article metadata; PMC inventory snapshots; Gutenberg books; Common Crawl WARC datasets |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
@@ -557,6 +557,14 @@ This stage provides parser records, without an Arrow schema, Arrow batches,
 projection, or batch-size controls. Arrow conversion, record locators and generated
 columns are deferred. Supply external decompression separately. The parser buffers
 one complete body per record, so this is not a maximum-record-size or memory bound.
+
+## PMC inventory
+
+Enable `service-pmc` to read a caller-selected inventory manifest with
+`service::pmc_inventory::PmcInventoryAccessor` and a standard `ReadRequest`.
+It streams the declared gzip CSV shards in order, preserves upstream columns
+and snapshot identity without adding columns. It does not list the
+bucket or open article JSON/content. See the [service guide](service/README.md).
 
 ## Common Crawl configuration
 
