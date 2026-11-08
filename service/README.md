@@ -10,6 +10,14 @@ and decompression accessors. Backend configuration stays caller-controlled.
 Generic storage access and object-store prefix listing belong in `storage`,
 not in a provider.
 
+`ResolvedFileSet<A, M>` combines a `storage::NamedFileAccessor<A>` with typed
+provider metadata. New providers resolve and validate membership, build the
+logical-name-to-object mapping, and return this shared accessor instead of
+implementing `open`, `list`, and capabilities again. `metadata()` borrows the
+provider metadata; readers own their state independently of the resolved set.
+Zenodo and Internet Archive use provider-specific type aliases and retain their
+existing metadata getters.
+
 The [source-attribute proposal](../docs/source-attributes.md) defines provider
 constraints and conditional planning. Sequential cursor-based file discovery
 can coexist with independent file reads; dependent API page requests require
@@ -260,3 +268,22 @@ See the [Zenodo Records API](https://developers.zenodo.org/#records).
 
 Run `cargo run --example read_zenodo --features service-zenodo -- 3551612`
 to list a record, or append an exact file key to stream its contents.
+
+## Internet Archive (`internet-archive`)
+
+Enable `service-internet-archive` for
+`service::internet_archive::InternetArchiveService`.
+`InternetArchiveService::new()?.item("xfetch").await?` resolves public item
+metadata once. `files()` exposes names, optional sizes, formats, source labels
+and MD5 values. Exact filenames, including nested paths, map to canonical
+`/download/{identifier}/{filename}` routes through the shared byte accessor.
+List the empty root to enumerate cached membership in API order; both recursion
+modes return the same names. Unknown names fail before file I/O. Byte read options,
+range reads and independent reader lifetime follow the shared storage contracts.
+
+Membership may change upstream;
+no snapshot guarantee is added. Collection/search, restricted borrowing, cookies,
+uploads and checksum verification are outside this entry point.
+See the [Internet Archive metadata API](https://archive.org/developers/md-read.html).
+Run `cargo run --example read_internet_archive --features service-internet-archive -- xfetch`
+to list files, or append an exact filename to stream it.

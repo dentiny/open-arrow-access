@@ -5,15 +5,13 @@ mod validation;
 
 use std::num::NonZeroU64;
 
-use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectStream,
-    Result, async_trait,
-};
+use open_arrow_access_core::Result;
 use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
 
 use serde::Deserialize;
 use url::Url;
 
+use crate::ResolvedFileSet;
 use crate::http_client::HttpClient;
 use error::membership_error;
 use validation::{validate_endpoint, validate_record};
@@ -61,11 +59,13 @@ impl ZenodoService {
                 .collect(),
         )
         .map_err(membership_error)?;
-        Ok(ZenodoAccessor {
-            id,
-            files: record.files,
+        Ok(ResolvedFileSet::new(
             inner,
-        })
+            ZenodoMetadata {
+                id,
+                files: record.files,
+            },
+        ))
     }
 }
 
@@ -86,39 +86,21 @@ pub struct ZenodoFile {
 
 /// A resolved record's flat attachment namespace. Compose with existing format
 /// and decompression accessors to decode selected files.
+pub type ZenodoAccessor = ResolvedFileSet<OpenDalAccessor, ZenodoMetadata>;
+
+/// Metadata retained from the resolved record.
 #[derive(Clone, Debug)]
-pub struct ZenodoAccessor {
-    id: NonZeroU64,
-    files: Vec<ZenodoFile>,
-    inner: NamedFileAccessor<OpenDalAccessor>,
+pub struct ZenodoMetadata {
+    pub id: NonZeroU64,
+    pub files: Vec<ZenodoFile>,
 }
 
 impl ZenodoAccessor {
     pub fn id(&self) -> NonZeroU64 {
-        self.id
+        self.metadata().id
     }
+
     pub fn files(&self) -> &[ZenodoFile] {
-        &self.files
-    }
-}
-
-#[async_trait]
-impl Accessor for ZenodoAccessor {
-    type Request = ByteReadRequest;
-    type Reader = dyn ByteReader;
-
-    fn capability(&self) -> Capability {
-        self.inner.capability()
-    }
-
-    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        self.inner.open(request).await
-    }
-}
-
-#[async_trait]
-impl ByteAccessor for ZenodoAccessor {
-    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        self.inner.list(request).await
+        &self.metadata().files
     }
 }

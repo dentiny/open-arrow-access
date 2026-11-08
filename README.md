@@ -613,6 +613,12 @@ accessors. See [service documentation](service/README.md#zenodo-zenodo) and the
 `read_zenodo` example. This entry point supports public records, not repository
 search or restricted-file authentication.
 
+### Internet Archive
+
+Enable `service-internet-archive` for `service::internet_archive` public file discovery and
+byte access. See [service documentation](service/README.md) and the
+`read_internet_archive` example.
+
 ## TAR (`decompression-tar`)
 
 Enable `decompression-tar` for `decompression::tar::{TarStream, TarArchive, TarEntry, TarLimits}`.

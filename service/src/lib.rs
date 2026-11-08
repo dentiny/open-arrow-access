@@ -1,5 +1,8 @@
 //! Provider services resolve source semantics into shared object/reader contracts.
 
+mod resolved_files;
+pub use resolved_files::ResolvedFileSet;
+
 #[cfg(feature = "courtlistener")]
 pub mod courtlistener;
 
@@ -27,3 +30,6 @@ pub mod zenodo;
 // Individual providers may use only part of the shared HTTP utilities.
 #[allow(dead_code)]
 mod http_client;
+
+#[cfg(feature = "internet-archive")]
+pub mod internet_archive;
