@@ -6,3 +6,6 @@ mod validation;
 
 pub use http::create_http_accessor;
 pub use source::CommonCrawl;
+
+mod segment;
+pub use segment::{CommonCrawlSegmentAccessor, CommonCrawlSegmentRequest};
