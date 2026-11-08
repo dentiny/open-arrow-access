@@ -18,14 +18,11 @@ use crate::http_client::HttpClient;
 use error::membership_error;
 use validation::{validate_endpoint, validate_record};
 
-const DEFAULT_METADATA_LIMIT: usize = 4 * 1024 * 1024;
-
 /// Connection settings. Construction performs no network requests.
 #[derive(Clone, Debug)]
 pub struct ZenodoService {
     endpoint: Url,
     client: HttpClient,
-    metadata_limit: usize,
 }
 
 impl ZenodoService {
@@ -39,13 +36,7 @@ impl ZenodoService {
         Ok(Self {
             endpoint,
             client: HttpClient::new()?,
-            metadata_limit: DEFAULT_METADATA_LIMIT,
         })
-    }
-
-    pub fn with_metadata_limit(mut self, bytes: usize) -> Self {
-        self.metadata_limit = bytes;
-        self
     }
 
     /// Resolve one published record. Membership is fetched once; attachment
@@ -54,7 +45,7 @@ impl ZenodoService {
         let url = self.endpoint.join(&format!("api/records/{id}")).unwrap();
         let record: Record = self
             .client
-            .json(url.as_str(), None, self.metadata_limit, "resolve_zenodo")
+            .json(url.as_str(), None, "resolve_zenodo")
             .await?;
         validate_record(&record, id)?;
         // Use the resolved record's canonical content route, never a concept's

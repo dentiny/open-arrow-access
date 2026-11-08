@@ -113,7 +113,7 @@ async fn invalid_revision_metadata_never_opens_files() {
     for (name, expected) in [
         ("bad_truncated_revision.json", ErrorKind::Decode),
         ("bad_revision_sha.json", ErrorKind::Decode),
-        ("bad_oversized_revision.json", ErrorKind::Unsupported),
+        ("bad_oversized_revision.json", ErrorKind::Decode),
     ] {
         hub.metadata = Bytes::from(fixture!("huggingface", name).await);
         hub.clear_requests();

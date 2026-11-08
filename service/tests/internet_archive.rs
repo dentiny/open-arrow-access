@@ -125,7 +125,7 @@ async fn maps_empty_missing_and_unavailable_item_responses() {
 }
 
 #[tokio::test]
-async fn validates_selection_before_io_and_bounds_chunked_metadata() {
+async fn validates_selection_before_io_and_reads_chunked_metadata() {
     let fixture = HttpFixture::new();
     let service = InternetArchiveService::with_endpoint(fixture.endpoint()).unwrap();
     for identifier in [
@@ -152,14 +152,5 @@ async fn validates_selection_before_io_and_bounds_chunked_metadata() {
         StatusCode::OK,
         Bytes::from(fixture!("internet_archive", "item.json").await),
     );
-    assert_eq!(
-        service
-            .with_metadata_limit(16)
-            .item(ITEM)
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Unsupported
-    );
+    assert!(service.item(ITEM).await.is_ok());
 }

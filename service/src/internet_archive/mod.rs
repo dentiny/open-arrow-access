@@ -15,7 +15,6 @@ use crate::http_client::{HttpClient, validation::validate_origin};
 use error::membership_error;
 use validation::{validate_identifier, validate_item};
 
-const DEFAULT_METADATA_LIMIT: usize = 4 * 1024 * 1024;
 const CONFIGURE: &str = "configure_internet_archive";
 const RESOLVE: &str = "resolve_internet_archive";
 
@@ -24,7 +23,6 @@ const RESOLVE: &str = "resolve_internet_archive";
 pub struct InternetArchiveService {
     endpoint: Url,
     client: HttpClient,
-    metadata_limit: usize,
 }
 
 impl InternetArchiveService {
@@ -36,13 +34,7 @@ impl InternetArchiveService {
         Ok(Self {
             endpoint: validate_origin(endpoint, CONFIGURE)?,
             client: HttpClient::new()?,
-            metadata_limit: DEFAULT_METADATA_LIMIT,
         })
-    }
-
-    pub fn with_metadata_limit(mut self, bytes: usize) -> Self {
-        self.metadata_limit = bytes;
-        self
     }
 
     /// Fetch membership once. File bytes are opened lazily through canonical
@@ -53,10 +45,7 @@ impl InternetArchiveService {
             .endpoint
             .join(&format!("metadata/{identifier}"))
             .unwrap();
-        let response = self
-            .client
-            .json(url.as_str(), None, self.metadata_limit, RESOLVE)
-            .await?;
+        let response = self.client.json(url.as_str(), None, RESOLVE).await?;
         let files = validate_item(response, identifier)?;
         let storage =
             self.client
