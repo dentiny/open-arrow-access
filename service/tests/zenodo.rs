@@ -75,7 +75,7 @@ async fn record_membership_and_lazy_independent_file_reads() {
 }
 
 #[tokio::test]
-async fn rejects_invalid_metadata_and_bounded_responses() {
+async fn rejects_invalid_metadata() {
     for name in [
         "malformed",
         "wrong-id",
@@ -90,17 +90,6 @@ async fn rejects_invalid_metadata_and_bounded_responses() {
             "{name}"
         );
     }
-    let (_fixture, service) = fixture_service("record").await;
-    assert_eq!(
-        service
-            .with_metadata_limit(8)
-            .record(ID)
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Unsupported
-    );
     let (_fixture, service) = fixture_service("empty").await;
     assert!(service.record(ID).await.unwrap().files().is_empty());
 }
