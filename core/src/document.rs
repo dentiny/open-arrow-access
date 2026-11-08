@@ -5,7 +5,7 @@ use futures::stream;
 use crate::{
     Accessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ReadOptionsProvider,
     RecordBatch, RecordMetadata, RecordReader, Result, SchemaRef, StreamReader, async_trait,
-    read_limited,
+    read_object,
 };
 
 /// Decode one whole object into one Arrow row.
@@ -77,8 +77,8 @@ where
         let decoder = self.decoder.clone();
         let max_bytes = self.max_bytes;
         let stream = stream::once(async move {
-            let input = storage.open(byte_request).await?;
-            let bytes = read_limited(input, max_bytes, "read_document").await?;
+            let bytes =
+                read_object(storage.as_ref(), byte_request, max_bytes, "read_document").await?;
             let batch = decoder.decode(&bytes, request, schema.clone()).await?;
             if batch.num_rows() != 1 || batch.schema() != schema {
                 return Err(Error::new(

@@ -8,9 +8,11 @@ mod document;
 mod error;
 mod layer;
 mod list_files;
+mod project_batch;
 mod read_chunks;
 mod read_limited;
 mod read_lines;
+mod read_object;
 mod read_state;
 mod reader;
 mod reader_factory;
@@ -26,9 +28,11 @@ pub use document::{DocumentAccessor, DocumentDecoder};
 pub use error::{Error, ErrorKind, Result};
 pub use layer::{AccessorExt, Layer};
 pub use list_files::list_files;
+pub use project_batch::project_batch;
 pub use read_chunks::read_chunks;
 pub use read_limited::read_limited;
 pub use read_lines::read_lines;
+pub use read_object::read_object;
 pub use read_state::ReadState;
 pub use reader::{
     ByteMetadata, ByteReader, Reader, RecordMetadata, RecordReader, RecordStream, into_stream,
