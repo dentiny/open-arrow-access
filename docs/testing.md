@@ -48,6 +48,12 @@ crate whose behavior they exercise. The workspace root has no test directory.
 - Keep shared byte sources, fixture loading, byte-layer and format contract assertions in
   [`test-support/`](../test-support/). Keep helpers used by only one suite alongside
   that suite, or in its `tests/support/` directory.
+- Start fixed-schema sequential formats with `format::assert_fixed_schema_contract`
+  and a `FormatCase`. Use `byte_accessor::assert_ranged_read_contract` for ranged
+  storage and resolved provider files, and `http::assert_resolution_cases` for
+  provider metadata failure tables. See the [runner guide](../test-support/README.md#composed-contract-runners).
+  Inferred schemas, native record formats and range-read faults retain their own
+  specialized contracts; keep parsed-value and provider policy assertions local.
 - Read all serialized test inputs, valid and invalid, from root
   `testdata/<format>/` with `fixture!` or `fixture_path!`. Reuse existing samples;
   add a named fixture and document its provenance and intended failure when a

@@ -496,6 +496,9 @@ The adapter uses published `atif-arrow 0.4.0` with Arrow 59; see
 
 ## Adding a file format
 
+See [extension entry points](docs/extending.md) for the shared format, document
+provider and OpenDAL storage paths, including default-decoder provider aliases.
+
 `FileAccessor<B, F>` binds a byte accessor to a core `ReaderFactory`. Built-in
 configuration types are `JsonFormat`, `CsvFileFormat`, `ParquetFormat`,
 `XmlFormat`, `WarcFormat` and the existing `AtifFormat` enum. For example,

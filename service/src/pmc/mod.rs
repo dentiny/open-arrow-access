@@ -5,7 +5,7 @@ mod error;
 mod metadata;
 mod validation;
 
-pub use accessor::PmcAccessor;
+pub use accessor::{PmcAccessor, PmcDecoder};
 
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use std::{
