@@ -37,10 +37,12 @@ async-compression = { version = "0.4.50", default-features = false, features = [
 # Match the resolved Cargo.lock versions at the Lance revision above.
 # See docs/dependencies.md when updating this baseline.
 arrow-array = "59.3.0"
+arrow-buffer = "59.3.0"
 arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
-xml-arrow = "0.2.0"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+xml-arrow = "0.2.2"
 atif-arrow = "0.4.0"
 warc = { package = "warc-rs", version = "=0.3.0", default-features = false }
 async-trait = "0.1.91"
@@ -67,6 +69,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 
 [features]
 default = []
+service-gutenberg = ["dep:open-arrow-access-service", "open-arrow-access-service/gutenberg"]
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
 service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
 service-warc = ["dep:open-arrow-access-service", "open-arrow-access-service/warc"]
@@ -97,6 +100,10 @@ tokio.workspace = true
 [[example]]
 name = "read_huggingface"
 required-features = ["service-huggingface"]
+
+[[example]]
+name = "read_gutenberg"
+required-features = ["service-gutenberg"]
 
 [[example]]
 name = "read_pmc"

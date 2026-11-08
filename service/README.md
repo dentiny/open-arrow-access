@@ -33,6 +33,40 @@ transport errors never trigger fallback. `with_revision` refers to the Parquet
 representation, not the original source branch. Native dataset-card parsing and
 Viewer row APIs are outside this entry point.
 
+## Gutenberg
+
+Enable `gutenberg` (`service-gutenberg` on the facade) to convert one per-book
+RDF/XML object into one Arrow row. `GutenbergAccessor` accepts a standard
+`ReadRequest` and reuses `xml-arrow` for metadata extraction. File entries retain
+RDF order; their URIs are metadata and are never fetched.
+
+| Column | Arrow type |
+| --- | --- |
+| `ebook_id` | UInt64 |
+| `title`, `rights` | nullable LargeUtf8 |
+| `creator` | List of struct: nullable `uri`, `name` (Utf8), `alias` (List<Utf8>), nullable `birthdate`, `deathdate` (Int32 years) |
+| `language`, `bookshelf` | List<Utf8> |
+| `subject` | List of struct: nullable `scheme` (Utf8), `value` (Utf8) |
+| `issued` | nullable Date32; Gutenberg release date |
+| `files` | List of struct: `uri` (Utf8), `format` (List<Utf8>), nullable `extent` (UInt64), nullable `modified` (Utf8) |
+
+Missing optional metadata becomes null or an empty list. Only mapped RDF fields
+are emitted. Malformed RDF terminates the reader rather than dropping the book.
+Projection preserves caller order and zero-column row counts; mapped fields are
+validated even when projected away. Byte options are forwarded to the RDF read.
+
+`with_limits(GutenbergLimits)` bounds RDF bytes (default 4 MiB). This limit excludes
+parser allocations, upstream chunks and Arrow buffers. One RDF emits one row,
+independently of the batch-size target. File downloading, catalogue discovery,
+archive expansion and writing remain with the caller.
+
+Run the [example](../examples/read_gutenberg.rs) against the synthetic metadata
+fixture, or supply a mirror root and RDF path:
+
+```sh
+cargo run --example read_gutenberg --features service-gutenberg
+```
+
 ## PMC inventory (`pmc`)
 
 Enable `service-pmc` for `service::pmc_inventory::PmcInventoryAccessor`.

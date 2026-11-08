@@ -9,9 +9,13 @@ pub use open_arrow_access_core::*;
 #[cfg(any(
     feature = "service-huggingface",
     feature = "service-warc",
-    feature = "service-pmc"
+    feature = "service-pmc",
+    feature = "service-gutenberg"
 ))]
 pub mod service {
+    #[cfg(feature = "service-gutenberg")]
+    pub use open_arrow_access_service::gutenberg::{self, GutenbergAccessor, GutenbergLimits};
+
     #[cfg(feature = "service-pmc")]
     pub use open_arrow_access_service::{pmc, pmc_inventory};
 
