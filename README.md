@@ -613,14 +613,14 @@ accessors. See [service documentation](service/README.md#zenodo-zenodo) and the
 `read_zenodo` example. This entry point supports public records, not repository
 search or restricted-file authentication.
 
-### Dataverse
-
-Enable `service-dataverse` for `service::dataverse` public file discovery and
-byte access. See [service documentation](service/README.md) and the
-`read_dataverse` example.
-
 ### Internet Archive
 
 Enable `service-internet-archive` for `service::internet_archive` public file discovery and
 byte access. See [service documentation](service/README.md) and the
 `read_internet_archive` example.
+
+### Dataverse
+
+Enable `service-dataverse` for `service::dataverse` public file discovery and
+byte access. See [service documentation](service/README.md) and the
+`read_dataverse` example.

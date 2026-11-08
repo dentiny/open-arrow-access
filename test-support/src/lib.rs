@@ -283,6 +283,8 @@ impl ByteReader for MemoryReader {
 /// Shared assertions for sequential byte layers.
 pub mod byte_layer;
 
+pub mod byte_accessor;
+
 /// Shared assertions for single-file Arrow format accessors.
 pub mod format;
 
