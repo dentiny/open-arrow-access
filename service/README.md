@@ -10,6 +10,14 @@ and decompression accessors. Backend configuration stays caller-controlled.
 Generic storage access and object-store prefix listing belong in `storage`,
 not in a provider.
 
+`ResolvedFileSet<A, M>` combines a `storage::NamedFileAccessor<A>` with typed
+provider metadata. New providers resolve and validate membership, build the
+logical-name-to-object mapping, and return this shared accessor instead of
+implementing `open`, `list`, and capabilities again. `metadata()` borrows the
+provider metadata; readers own their state independently of the resolved set.
+Zenodo and Internet Archive use provider-specific type aliases and retain their
+existing metadata getters.
+
 The [source-attribute proposal](../docs/source-attributes.md) defines provider
 constraints and conditional planning. Sequential cursor-based file discovery
 can coexist with independent file reads; dependent API page requests require
