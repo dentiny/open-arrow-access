@@ -15,13 +15,10 @@ use crate::http_client::{HttpClient, validation::validate_origin};
 use error::membership_error;
 use validation::{validate_dataset, validate_request};
 
-const DEFAULT_METADATA_LIMIT: usize = 4 * 1024 * 1024;
-
 #[derive(Clone, Debug)]
 pub struct DataverseService {
     endpoint: Url,
     client: HttpClient,
-    metadata_limit: usize,
 }
 
 impl DataverseService {
@@ -30,13 +27,7 @@ impl DataverseService {
         Ok(Self {
             endpoint: validate_origin(endpoint, "configure_dataverse")?,
             client: HttpClient::new()?,
-            metadata_limit: DEFAULT_METADATA_LIMIT,
         })
-    }
-
-    pub fn with_metadata_limit(mut self, bytes: usize) -> Self {
-        self.metadata_limit = bytes;
-        self
     }
 
     /// Resolve one explicit published version, for example `doi:10.7910/DVN/ABC`,
@@ -53,7 +44,7 @@ impl DataverseService {
             .append_pair("excludeMetadataBlocks", "true");
         let response: Response = self
             .client
-            .json(url.as_str(), None, self.metadata_limit, "resolve_dataverse")
+            .json(url.as_str(), None, "resolve_dataverse")
             .await?;
         validate_dataset(&response, persistent_id, expected)?;
         let files: Vec<_> = response

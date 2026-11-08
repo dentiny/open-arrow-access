@@ -1,4 +1,4 @@
-//! Bounded provider JSON requests over the same transport used for file reads.
+//! Provider JSON requests over the same transport used for file reads.
 
 mod error;
 mod query;
@@ -69,7 +69,6 @@ impl HttpClient {
         &self,
         url: &str,
         token: Option<&str>,
-        limit: usize,
         operation: &'static str,
     ) -> Result<T> {
         let mut request = Request::get(url).header("accept", "application/json");
@@ -111,13 +110,6 @@ impl HttpClient {
                 .map_err(|error| transport_error(operation, error))?;
             if buffer.is_empty() {
                 break;
-            }
-            if buffer.len() > limit - bytes.len() {
-                return Err(Error::new(
-                    ErrorKind::Unsupported,
-                    operation,
-                    "metadata exceeds configured byte limit",
-                ));
             }
             for part in buffer {
                 bytes.extend_from_slice(&part);

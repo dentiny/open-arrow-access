@@ -250,8 +250,7 @@ route through the shared OpenDAL HTTP accessor, forwarding byte read options.
 Each reader is independent and can outlive the resolved record. HTTP metadata
 and range support are required by that storage accessor.
 
-Metadata collection has a configurable 4 MiB default limit (`with_metadata_limit`),
-including responses without Content-Length. Empty files lists are valid; missing,
+Empty files lists are valid; missing,
 malformed or duplicate membership fails. File bodies are fetched lazily, and
 existing decompression/format accessors can wrap the record accessor. Checksums
 are exposed as upstream metadata, not verified. Reader source locators refer to
@@ -282,7 +281,7 @@ uses cached API order in either recursive mode. Downloads request
 only for GET. Tabular files without an original byte length are unsupported.
 Existing byte read options, range reads and independently owned readers apply.
 
-The configurable metadata limit defaults to 4 MiB. This entry point covers public
+This entry point covers public
 explicit versions, not search, latest/draft selection, authentication, guestbook
 submission or checksum verification. Restricted files remain visible and upstream
 access failures propagate. See the [Dataverse data access API](https://guides.dataverse.org/en/latest/api/dataaccess.html).

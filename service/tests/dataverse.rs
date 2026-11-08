@@ -95,7 +95,7 @@ async fn pins_membership_preserves_logical_names_and_reads_original_bytes() {
 }
 
 #[tokio::test]
-async fn rejects_invalid_responses_and_bounds_metadata_without_file_io() {
+async fn rejects_invalid_responses_and_reads_chunked_metadata() {
     for file in [
         "wrong-pid",
         "wrong-version",
@@ -132,16 +132,12 @@ async fn rejects_invalid_responses_and_bounds_metadata_without_file_io() {
         StatusCode::OK,
         fixture!("dataverse", "dataset.json").await,
     );
-    assert_eq!(
+    assert!(
         DataverseService::new(http.endpoint())
             .unwrap()
-            .with_metadata_limit(8)
             .dataset(PID, "1.0")
             .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Unsupported
+            .is_ok()
     );
     http.respond(
         METADATA,
