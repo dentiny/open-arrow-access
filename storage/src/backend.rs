@@ -37,10 +37,6 @@ impl OpenDalAccessor {
         }
     }
 
-    /// Use trusted manifest lengths for selected objects instead of issuing stat.
-    /// Useful when download URLs support GET but cannot be signed for HEAD.
-    /// The caller owns freshness and must supply lengths for the exact representation
-    /// being read. Other objects continue to use backend stat.
     pub fn with_content_lengths(
         mut self,
         lengths: impl IntoIterator<Item = (String, u64)>,
