@@ -42,7 +42,7 @@ arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-xml-arrow = "0.2.0"
+xml-arrow = "0.2.1"
 atif-arrow = "0.4.0"
 warc = { package = "warc-rs", version = "=0.3.0", default-features = false }
 async-trait = "0.1.91"
