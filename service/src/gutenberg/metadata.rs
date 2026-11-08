@@ -25,7 +25,7 @@ impl BookMetadata {
         let mut reader = XmlReader::new(
             Cursor::new(raw),
             super::mapping(),
-            /* record_path = */ "/r:RDF",
+            /*record_path=*/ "/r:RDF",
             ReaderOptions {
                 // DocumentAccessor already bounds the input. Accept larger caller-
                 // configured documents without imposing XML's default batch limit.
