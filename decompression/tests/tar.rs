@@ -443,6 +443,7 @@ async fn cancelled_live_body_read_rejects_advancement_without_waiting_for_its_lo
 async fn sequential_completion_and_malformed_headers_release_source_with_archive_retained() {
     use open_arrow_access_core::{ByteMetadata, Bytes, StreamReader};
     use open_arrow_access_decompression::tar::TarStream;
+    use open_arrow_access_test_support::DropProbe;
     use std::{
         sync::{
             Arc,
@@ -450,16 +451,9 @@ async fn sequential_completion_and_malformed_headers_release_source_with_archive
         },
         task::Poll,
     };
-    struct Dropped(Arc<AtomicBool>);
-    impl Drop for Dropped {
-        fn drop(&mut self) {
-            self.0.store(true, Ordering::SeqCst);
-        }
-    }
-
     for (name, malformed) in [("mixed.tar", false), ("bad-checksum.tar", true)] {
         let dropped = Arc::new(AtomicBool::new(false));
-        let signal = Dropped(dropped.clone());
+        let signal = DropProbe::new(dropped.clone());
         let mut bytes = Some(Bytes::from(fixture!("tar", name).await));
         let source = futures::stream::poll_fn(move |_| {
             let _keep = &signal;
