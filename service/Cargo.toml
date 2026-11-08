@@ -36,7 +36,6 @@ huggingface = [
     "open-arrow-access-dataset/directory",
     "open-arrow-access-file-format/parquet",
 ]
-commoncrawl-segment = ["warc"]
 
 
 [dependencies]
@@ -78,4 +77,4 @@ required-features = ["warc"]
 
 [[test]]
 name = "commoncrawl_segment"
-required-features = ["commoncrawl-segment"]
+required-features = ["warc"]

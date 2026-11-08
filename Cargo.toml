@@ -68,7 +68,6 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 default = []
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
 service-warc = ["dep:open-arrow-access-service", "open-arrow-access-service/warc"]
-service-commoncrawl-segment = ["service-warc", "open-arrow-access-service/commoncrawl-segment"]
 format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]

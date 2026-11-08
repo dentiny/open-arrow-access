@@ -49,7 +49,7 @@ compressed inventories and file decompression/format parsing separately.
 Selected locators are held in memory; inventory lines have a 16 KiB limit.
 There is no index, batch planner or parallel execution.
 
-Enable `service-commoncrawl-segment` for `CommonCrawlSegmentRequest` and
+Enable `service-warc` for `CommonCrawlSegmentRequest` and
 `CommonCrawlSegmentAccessor`. Segment resolution reuses the WARC inventory
 parser and retains only exact `segments/<segment>/warc/` matches. It preserves
 manifest order and forwards existing read options to the same sequential

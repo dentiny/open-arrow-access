@@ -559,6 +559,6 @@ reading through a supplied format accessor. The manifest accessor must provide
 decoded inventory bytes; gzip remains an explicit byte layer. `resolve` exposes
 the ordered file set without opening record files.
 
-Enable `service-commoncrawl-segment` to select one segment using the same WARC
+Enable `service-warc` to select one segment using the same WARC
 inventory parser and sequential reader. Segment selection occurs during manifest
 streaming, so only the selected segment's file locators are retained.
