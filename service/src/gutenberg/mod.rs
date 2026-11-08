@@ -14,6 +14,8 @@ use open_arrow_access_core::{
 };
 use xml_arrow::{NamespaceBinding, XmlField, XmlSchema};
 
+const DEFAULT_METADATA_BYTES: NonZeroUsize = NonZeroUsize::new(4 * 1024 * 1024).unwrap();
+
 /// Source byte limits; excludes parser and Arrow allocations.
 #[derive(Clone, Copy, Debug)]
 pub struct GutenbergLimits {
@@ -24,7 +26,7 @@ pub struct GutenbergLimits {
 impl Default for GutenbergLimits {
     fn default() -> Self {
         Self {
-            metadata_bytes: NonZeroUsize::new(4 * 1024 * 1024).unwrap(),
+            metadata_bytes: DEFAULT_METADATA_BYTES,
         }
     }
 }
