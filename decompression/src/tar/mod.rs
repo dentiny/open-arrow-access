@@ -10,7 +10,7 @@ use std::{num::NonZeroUsize, sync::Arc};
 use futures::stream::try_unfold;
 use open_arrow_access_core::{ByteReader, Result, StreamReader};
 
-use crate::archive::{ArchiveSource, DEFAULT_MAX_ENTRY_BYTES, entry_metadata};
+use crate::archive::{ArchiveSource, DEFAULT_MAX_ENTRY_BYTES};
 use error::{decode, missing_entry, unsupported};
 use validation::{BLOCK_SIZE, entry_end, parse_entry};
 
@@ -101,7 +101,8 @@ impl TarArchive {
         if !entry.is_file {
             return Err(unsupported("TAR directory entries have no file reader"));
         }
-        let metadata = entry_metadata(&self.source.metadata, entry.size);
+        let mut metadata = self.source.metadata.clone();
+        metadata.content_length = Some(entry.size);
         let input = self.source.input.clone();
         let end = start + entry.size;
         let stream = try_unfold((input, *start), move |(input, position)| async move {

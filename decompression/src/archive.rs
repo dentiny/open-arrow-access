@@ -18,11 +18,3 @@ impl ArchiveSource {
         Ok(Self { input, metadata })
     }
 }
-
-/// Entry lengths use decoded coordinates; source identity stays with the archive.
-pub(crate) fn entry_metadata(archive: &ByteMetadata, size: u64) -> ByteMetadata {
-    ByteMetadata {
-        content_length: Some(size),
-        ..archive.clone()
-    }
-}

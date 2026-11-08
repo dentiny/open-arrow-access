@@ -72,9 +72,9 @@ header inspection and active-body rules stay in the archive session. Use the
 shared byte-layer output/error assertions alongside those lifetime tests.
 
 Within decompression, `ArchiveSource` shares ranged source setup between TAR and
-ZIP. `entry_metadata` retains archive identity while assigning decoded entry
-lengths for both indexed archives and sequential TAR. Keep format-specific
-parsing, limits and entry ownership in their respective modules.
+ZIP. Each entry reader retains archive identity and sets its own decoded length.
+Keep format-specific parsing, limits and entry ownership in their respective
+modules.
 
 ## OpenDAL backends
 

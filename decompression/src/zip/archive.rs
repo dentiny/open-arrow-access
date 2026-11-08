@@ -7,10 +7,7 @@ use async_zip::base::read1::{
 use open_arrow_access_core::{ByteReader, Error, ErrorKind, Result};
 
 use super::{ZipEntry, ZipLimits, error::zip_error};
-use crate::{
-    archive::{ArchiveSource, entry_metadata},
-    decoded_reader,
-};
+use crate::{archive::ArchiveSource, decoded_reader};
 
 /// One opened ZIP source with a shared, parsed central directory.
 ///
@@ -84,10 +81,8 @@ impl ZipArchive {
                 "ZIP entry index is out of bounds",
             )
         })?;
-        let metadata = entry_metadata(
-            &self.source.metadata,
-            entry.uncompressed_size().map_err(zip_error)?,
-        );
+        let mut metadata = self.source.metadata;
+        metadata.content_length = Some(entry.uncompressed_size().map_err(zip_error)?);
         // ZIP local file header (offsets relative to lfh_offset):
         // | signature (4 B) | version (2 B) | flags (2 B) | ... |
         // 0                 4               6             8
