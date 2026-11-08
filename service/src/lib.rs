@@ -27,3 +27,6 @@ pub mod zenodo;
 // Individual providers may use only part of the shared HTTP utilities.
 #[allow(dead_code)]
 mod http_client;
+
+#[cfg(feature = "internet-archive")]
+pub mod internet_archive;
