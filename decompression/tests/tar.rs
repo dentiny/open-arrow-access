@@ -212,17 +212,15 @@ async fn streams_first_body_without_scanning_later_headers_or_using_ranges() {
         archive.next_entry().await.err().unwrap().kind(),
         ErrorKind::InvalidInput
     );
-    assert_eq!(
-        collect_bytes(first.as_mut()).await.unwrap(),
-        b"%PDF-first-paper"
-    );
+    byte_layer::assert_output(first.as_mut(), b"%PDF-first-paper", 64)
+        .await
+        .unwrap();
     let (_, mut second) = archive.next_entry().await.unwrap().unwrap();
     // A consumed reader never resumes against the next entry's shared source.
     assert!(first.next().await.unwrap().is_none());
-    assert_eq!(
-        collect_bytes(second.as_mut()).await.unwrap(),
-        b"%PDF-second-paper"
-    );
+    byte_layer::assert_output(second.as_mut(), b"%PDF-second-paper", 64)
+        .await
+        .unwrap();
     let (_, mut last) = archive.next_entry().await.unwrap().unwrap();
     assert!(last.next().await.unwrap().is_none());
     assert!(archive.next_entry().await.unwrap().is_none());
@@ -248,10 +246,9 @@ async fn drains_dropped_bodies_and_readers_outlive_sequential_archive() {
     let (entry, mut second) = archive.next_entry().await.unwrap().unwrap();
     assert_eq!(entry.index, 2);
     drop(archive);
-    assert_eq!(
-        collect_bytes(second.as_mut()).await.unwrap(),
-        b"%PDF-second-paper"
-    );
+    byte_layer::assert_output(second.as_mut(), b"%PDF-second-paper", 3)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -324,10 +321,9 @@ async fn cancelled_sequential_header_and_skip_resume_from_persistent_progress() 
     allowed.store(usize::MAX, Ordering::SeqCst);
     let (entry, mut body) = archive.next_entry().await.unwrap().unwrap();
     assert_eq!(entry.index, 2);
-    assert_eq!(
-        collect_bytes(body.as_mut()).await.unwrap(),
-        b"%PDF-second-paper"
-    );
+    byte_layer::assert_output(body.as_mut(), b"%PDF-second-paper", 100)
+        .await
+        .unwrap();
     allowed.store(36, Ordering::SeqCst);
     drop(archive.next_entry().await.unwrap().unwrap());
     // The first zero marker is consumed, with only a partial second marker.
@@ -438,10 +434,9 @@ async fn cancelled_live_body_read_rejects_advancement_without_waiting_for_its_lo
     allowed.store(usize::MAX, Ordering::SeqCst);
     let (entry, mut body) = archive.next_entry().await.unwrap().unwrap();
     assert_eq!(entry.index, 2);
-    assert_eq!(
-        collect_bytes(body.as_mut()).await.unwrap(),
-        b"%PDF-second-paper"
-    );
+    byte_layer::assert_output(body.as_mut(), b"%PDF-second-paper", 512)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
