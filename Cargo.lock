@@ -1788,6 +1788,7 @@ dependencies = [
  "arrow-schema",
  "bytes",
  "futures",
+ "http",
  "more-asserts",
  "open-arrow-access-core",
  "open-arrow-access-dataset",
@@ -1871,6 +1872,7 @@ dependencies = [
  "open-arrow-access-test-support",
  "opendal",
  "roxmltree",
+ "opendal-service-http",
  "serde",
  "serde_json",
  "tempfile",
@@ -1913,6 +1915,7 @@ dependencies = [
  "opendal-http-transport-reqwest",
  "opendal-service-fs",
  "opendal-service-hf",
+ "opendal-service-http",
 ]
 
 [[package]]
@@ -1983,6 +1986,18 @@ dependencies = [
  "percent-encoding",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "opendal-service-http"
+version = "0.59.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ac1553d6b57ca79e200e5c7ded9ab708f2016dadb28ede0f2da71e02fd0b960"
+dependencies = [
+ "http",
+ "log",
+ "opendal-core",
+ "serde",
 ]
 
 [[package]]

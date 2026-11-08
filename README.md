@@ -192,7 +192,7 @@ for file mapping, schema and limits.
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema; WARC parser records with Arrow conversion deferred |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Hugging Face repository bytes and Parquet datasets; Gutenberg books with original RDF and file bytes |
+| `service/` | Hugging Face repository bytes and Parquet datasets; Gutenberg books with original RDF and file bytes; Common Crawl source identity and HTTP configuration |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
@@ -551,3 +551,11 @@ This stage provides parser records, without an Arrow schema, Arrow batches,
 projection, or batch-size controls. Arrow conversion, record locators and generated
 columns are deferred. Supply external decompression separately. The parser buffers
 one complete body per record, so this is not a maximum-record-size or memory bound.
+
+## Common Crawl configuration
+
+Enable `service-commoncrawl` for `service::CommonCrawl` and
+`service::create_http_accessor`. A source identifies a crawl release and optional
+mirror origin. HTTP configuration is lazy; gzip and record decoding are composed
+explicitly by the caller. The always-available storage facade wraps
+caller-configured SDK operators.

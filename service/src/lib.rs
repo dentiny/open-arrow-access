@@ -5,3 +5,6 @@ pub mod gutenberg;
 
 #[cfg(feature = "huggingface")]
 pub mod huggingface;
+
+#[cfg(feature = "commoncrawl")]
+pub mod commoncrawl;
