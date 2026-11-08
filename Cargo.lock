@@ -1947,10 +1947,12 @@ name = "open-arrow-access-storage"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "http",
  "more-asserts",
  "open-arrow-access-core",
  "open-arrow-access-test-support",
  "opendal",
+ "opendal-service-http",
  "tempfile",
  "tokio",
 ]

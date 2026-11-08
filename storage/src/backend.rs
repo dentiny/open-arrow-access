@@ -1,6 +1,6 @@
 //! Shared OpenDAL byte access. New backend constructors reuse this implementation.
 
-use std::{num::NonZeroUsize, ops::Range, sync::Arc};
+use std::{collections::HashMap, num::NonZeroUsize, ops::Range, sync::Arc};
 
 use futures::TryStreamExt;
 use open_arrow_access_core::{
@@ -24,6 +24,7 @@ const MAX_FETCH_BATCH_SIZE: u64 = 2 * 1024 * 1024;
 pub struct OpenDalAccessor {
     operator: Operator,
     chunk_size: NonZeroUsize,
+    content_lengths: Option<Arc<HashMap<String, u64>>>,
 }
 
 impl OpenDalAccessor {
@@ -32,13 +33,45 @@ impl OpenDalAccessor {
         Self {
             operator,
             chunk_size: DEFAULT_OUTPUT_CHUNK_SIZE,
+            content_lengths: None,
         }
+    }
+
+    pub fn with_content_lengths(
+        mut self,
+        lengths: impl IntoIterator<Item = (String, u64)>,
+    ) -> Self {
+        self.content_lengths = Some(Arc::new(lengths.into_iter().collect()));
+        self
     }
 
     /// Bound emitted chunks independently of storage I/O splitting.
     pub fn with_chunk_size(mut self, chunk_size: NonZeroUsize) -> Self {
         self.chunk_size = chunk_size;
         self
+    }
+
+    async fn content_length(&self, path: &str) -> Result<u64> {
+        if let Some(len) = self
+            .content_lengths
+            .as_ref()
+            .and_then(|lengths| lengths.get(path))
+        {
+            return Ok(*len);
+        }
+        let metadata = self
+            .operator
+            .stat(path)
+            .await
+            .map_err(|e| map_error("stat", path, e))?;
+        if !metadata.is_file() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "open",
+                "object is not a regular file",
+            ));
+        }
+        Ok(metadata.content_length())
     }
 }
 
@@ -49,8 +82,12 @@ impl Accessor for OpenDalAccessor {
 
     fn capability(&self) -> Capability {
         let upstream = self.operator.info().capability();
-        let read = upstream.read && upstream.stat;
-        // This adapter requires stat for length and uses OpenDAL's range-read contract.
+        let has_lengths = self
+            .content_lengths
+            .as_ref()
+            .is_some_and(|lengths| !lengths.is_empty());
+        let read = upstream.read && (upstream.stat || has_lengths);
+        // Length comes from trusted metadata or stat; range reads follow OpenDAL's contract.
         Capability {
             read,
             read_with_range: read,
@@ -64,19 +101,7 @@ impl Accessor for OpenDalAccessor {
         let ByteReadRequest { object, options } = request;
         let path = object.locator();
         validate_locator(path, false, "open")?;
-        let metadata = self
-            .operator
-            .stat(path)
-            .await
-            .map_err(|e| map_error("stat", path, e))?;
-        if !metadata.is_file() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "open",
-                "object is not a regular file",
-            ));
-        }
-        let len = metadata.content_length();
+        let len = self.content_length(path).await?;
         // OpenDAL gives each stream/fetch its own task queue. Share a budget
         // across those queues so retained sequential prefetch cannot multiply
         // the reader's I/O concurrency when a range read is interleaved.

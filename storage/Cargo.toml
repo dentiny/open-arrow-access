@@ -16,6 +16,8 @@ tokio = { workspace = true, features = ["sync"] }
 futures.workspace = true
 
 [dev-dependencies]
+opendal-service-http.workspace = true
+http.workspace = true
 open-arrow-access-test-support.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 more-asserts.workspace = true
