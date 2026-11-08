@@ -1,8 +1,5 @@
 # ZIP fixtures
 
-Run `python3 testdata/zip/generate.py` from the repository root to regenerate
-these deterministic fixtures using Python's standard library.
-
 | Fixture | Contents |
 | --- | --- |
 | `mixed.zip` | Stored padding, Deflate XML, binary PDF bytes, empty file, directory, duplicate name, relative name, compressible text. The 256 KiB padding proves selected reads do not collect the archive. |
