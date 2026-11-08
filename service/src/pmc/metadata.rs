@@ -16,7 +16,7 @@ pub(super) fn decode_batch(
 ) -> Result<RecordBatch> {
     let raw = std::str::from_utf8(raw)
         .map_err(|error| decode(format!("{path}: {error}")).with_source(error))?;
-    // Keep raw JSON verbatim; mapped fields use the last duplicate value.
+    // Preserve raw JSON; duplicate fields use the last value.
     let fields: HashMap<String, &RawValue> = parse(raw, path)?;
     let projection = output_schema
         .fields()

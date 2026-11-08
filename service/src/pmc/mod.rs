@@ -1,5 +1,4 @@
-//! One PMC article-version metadata JSON object per Arrow row.
-//! Content URLs are metadata only; content objects are never opened.
+//! One article-version JSON object per row; content URLs are not fetched.
 
 mod accessor;
 mod metadata;
@@ -15,7 +14,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-/// Decoded metadata-object size limit, independent of upstream chunk sizes.
+/// Maximum decoded metadata bytes.
 #[derive(Clone, Copy, Debug)]
 pub struct PmcLimits {
     pub metadata_bytes: NonZeroUsize,
@@ -28,7 +27,7 @@ impl Default for PmcLimits {
     }
 }
 
-/// Upstream field names and nullable content URLs, plus verbatim source JSON.
+/// Article metadata fields and verbatim source JSON.
 pub fn schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA

@@ -238,7 +238,7 @@ async fn projection_does_not_skip_validation_of_omitted_fields() {
         ("is_manuscript", r#""true""#),
         ("media_urls", "[null]"),
     ] {
-        // A later duplicate must replace the earlier PMCID even when it is invalid.
+        // The final duplicate wins, including invalid values.
         let raw = format!(r#"{{"pmcid":"PMC1","{field}":{value}}}"#);
         for projection in [vec!["pmcid".into()], vec![]] {
             let mut reader = PmcAccessor::new(MemoryAccessor::new(raw.as_bytes(), 64))
