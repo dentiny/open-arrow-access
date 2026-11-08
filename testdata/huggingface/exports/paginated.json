@@ -1,0 +1,38 @@
+[
+  {
+    "fixture": "directory/a.parquet",
+    "metadata": {
+      "type": "file",
+      "path": "default/train/0000.parquet",
+      "size": 555,
+      "oid": "fixture"
+    }
+  },
+  {
+    "fixture": "directory/b.parquet",
+    "metadata": {
+      "type": "file",
+      "path": "default/train/0001.parquet",
+      "size": 546,
+      "oid": "fixture"
+    }
+  },
+  {
+    "fixture": "ids.parquet",
+    "metadata": {
+      "type": "file",
+      "path": "default/train/README.md",
+      "size": 484,
+      "oid": "fixture"
+    }
+  },
+  {
+    "fixture": "directory/hidden.parquet",
+    "metadata": {
+      "type": "file",
+      "path": "default/test/0000.parquet",
+      "size": 546,
+      "oid": "fixture"
+    }
+  }
+]

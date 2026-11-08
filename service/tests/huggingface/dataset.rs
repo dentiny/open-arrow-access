@@ -3,14 +3,10 @@ use std::num::NonZeroUsize;
 use arrow_array::{cast::AsArray, types::Int64Type};
 use http::StatusCode;
 use open_arrow_access_core::{Accessor, ByteReadOptions, Bytes, ErrorKind, ReadOptions};
+use open_arrow_access_test_support::fixture;
 
 use super::super::HuggingFaceDatasetRequest;
-use super::support::{COMMIT, ExportEntry, ExportHub};
-
-const TRAIN_A: ExportEntry<'_> = ExportEntry {
-    repository_path: "default/train/0000.parquet",
-    fixture_path: "directory/a.parquet",
-};
+use super::support::{COMMIT, ExportHub};
 
 fn request() -> HuggingFaceDatasetRequest {
     HuggingFaceDatasetRequest::new("owner/example", "default", "train")
@@ -18,22 +14,7 @@ fn request() -> HuggingFaceDatasetRequest {
 
 #[tokio::test]
 async fn dataset_pins_export_sorts_paginated_shards_and_reads_lazily_with_options() {
-    let hub = ExportHub::new(&[
-        TRAIN_A,
-        ExportEntry {
-            repository_path: "default/train/0001.parquet",
-            fixture_path: "directory/b.parquet",
-        },
-        ExportEntry {
-            repository_path: "default/train/README.md",
-            fixture_path: "ids.parquet",
-        },
-        ExportEntry {
-            repository_path: "default/test/0000.parquet",
-            fixture_path: "directory/hidden.parquet",
-        },
-    ])
-    .await;
+    let hub = ExportHub::new("paginated.json").await;
     let service = hub.service().await;
     let mut reader = service
         .open(
@@ -76,18 +57,14 @@ async fn dataset_pins_export_sorts_paginated_shards_and_reads_lazily_with_option
 
 #[tokio::test]
 async fn commit_requests_skip_revision_metadata() {
-    let hub = ExportHub::new(&[TRAIN_A]).await;
+    let hub = ExportHub::new("train.json").await;
     assert_eq!(hub.read_ids(request().with_revision(COMMIT)).await, [1, 2]);
     assert!(!hub.requested("/revision/"));
 }
 
 #[tokio::test]
 async fn partial_exports_require_opt_in_and_do_not_hide_permission_failures() {
-    let mut hub = ExportHub::new(&[ExportEntry {
-        repository_path: "default/partial-train/0000.parquet",
-        fixture_path: "directory/a.parquet",
-    }])
-    .await;
+    let mut hub = ExportHub::new("partial.json").await;
     let service = hub.service().await;
     let error = service.dataset(request()).await.err().unwrap();
     assert_eq!(error.kind(), ErrorKind::NotFound);
@@ -108,21 +85,14 @@ async fn partial_exports_require_opt_in_and_do_not_hide_permission_failures() {
 
 #[tokio::test]
 async fn complete_exports_take_precedence_over_partial_exports() {
-    let hub = ExportHub::new(&[
-        TRAIN_A,
-        ExportEntry {
-            repository_path: "default/partial-train/0000.parquet",
-            fixture_path: "directory/hidden.parquet",
-        },
-    ])
-    .await;
+    let hub = ExportHub::new("complete.json").await;
     assert_eq!(hub.read_ids(request().with_partial_exports()).await, [1, 2]);
     assert!(!hub.requested("partial-train"));
 }
 
 #[tokio::test]
 async fn invalid_dataset_selection_fails_before_network_io() {
-    let hub = ExportHub::new(&[]).await;
+    let hub = ExportHub::new("empty.json").await;
     let service = hub.service().await;
     for selection in [
         HuggingFaceDatasetRequest::new("../repo", "default", "train"),
@@ -139,13 +109,13 @@ async fn invalid_dataset_selection_fails_before_network_io() {
 
 #[tokio::test]
 async fn invalid_revision_metadata_never_opens_files() {
-    let mut hub = ExportHub::new(&[]).await;
-    for (metadata, expected) in [
-        (b"{truncated".to_vec(), ErrorKind::Decode),
-        (b"{\"sha\":\"main\"}".to_vec(), ErrorKind::Decode),
-        (vec![b' '; 65537], ErrorKind::Unsupported),
+    let mut hub = ExportHub::new("empty.json").await;
+    for (name, expected) in [
+        ("bad_truncated_revision.json", ErrorKind::Decode),
+        ("bad_revision_sha.json", ErrorKind::Decode),
+        ("bad_oversized_revision.json", ErrorKind::Unsupported),
     ] {
-        hub.metadata = Bytes::from(metadata);
+        hub.metadata = Bytes::from(fixture!("huggingface", name).await);
         hub.clear_requests();
         let error = hub.service().await.dataset(request()).await.err().unwrap();
         assert_eq!(error.kind(), expected);

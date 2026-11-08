@@ -133,18 +133,14 @@ async fn empty_projection_keeps_rows_and_invalid_projection_fails_before_open() 
 
 #[tokio::test]
 async fn malformed_documents_utf8_and_invalid_atif_are_terminal_with_source_context() {
-    let valid = fixture!("atif", "trajectory.json").await;
-    let valid = String::from_utf8(valid).unwrap().replace('\n', "");
-    for invalid in [
-        b"{".to_vec(),
-        b"[]".to_vec(),
-        vec![0xff],
-        b"{}".to_vec(),
-        valid.replace("ATIF-v1.8", "ATIF-v9.0").into_bytes(),
+    for name in [
+        "bad_truncated.jsonl",
+        "bad_array.jsonl",
+        "bad_utf8.jsonl",
+        "bad_missing_fields.jsonl",
+        "bad_version.jsonl",
     ] {
-        let mut input = valid.as_bytes().to_vec();
-        input.push(b'\n');
-        input.extend(invalid);
+        let input = fixture!("atif", name).await;
         let bytes = MemoryAccessor::new(&input, 3);
         let observations = bytes.observations.clone();
         let mut reader = AtifAccessor::new(bytes, AtifFormat::JsonLines)
@@ -179,13 +175,14 @@ async fn input_failures_keep_error_categories_and_never_retry() {
 
 #[tokio::test]
 async fn jsonl_empty_input_is_eof_but_json_requires_one_document() {
-    for input in [b"".as_slice(), b" \t\r\n\n"] {
-        let mut reader = AtifAccessor::new(MemoryAccessor::new(input, 1), AtifFormat::JsonLines)
+    for name in ["empty.jsonl", "whitespace.jsonl"] {
+        let input = fixture!("atif", name).await;
+        let mut reader = AtifAccessor::new(MemoryAccessor::new(&input, 1), AtifFormat::JsonLines)
             .open(ReadRequest::new("empty"))
             .await
             .unwrap();
         assert!(reader.next().await.unwrap().is_none());
-        let mut reader = AtifAccessor::new(MemoryAccessor::new(input, 1), AtifFormat::Json)
+        let mut reader = AtifAccessor::new(MemoryAccessor::new(&input, 1), AtifFormat::Json)
             .open(ReadRequest::new("empty"))
             .await
             .unwrap();
@@ -195,12 +192,9 @@ async fn jsonl_empty_input_is_eof_but_json_requires_one_document() {
 
 #[tokio::test]
 async fn jsonl_pulls_only_the_requested_batch_and_keeps_delivered_rows_on_later_error() {
-    let valid = fixture!("atif", "trajectory.json").await;
-    let mut input = String::from_utf8(valid).unwrap().replace('\n', "");
-    input.push('\n');
-    let first_line_bytes = input.len();
-    input.push_str("{\n");
-    let bytes = MemoryAccessor::new(input.as_bytes(), 1);
+    let input = fixture!("atif", "bad_late_record.jsonl").await;
+    let first_line_bytes = input.iter().position(|&byte| byte == b'\n').unwrap() + 1;
+    let bytes = MemoryAccessor::new(&input, 1);
     let observations = bytes.observations.clone();
     let mut reader = AtifAccessor::new(bytes, AtifFormat::JsonLines)
         .open(ReadRequest::new("runs.jsonl").with_options(ReadOptions {

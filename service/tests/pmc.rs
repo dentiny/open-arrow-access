@@ -6,7 +6,7 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_service::pmc::{PmcAccessor, PmcLimits, schema};
-use open_arrow_access_test_support::MemoryAccessor;
+use open_arrow_access_test_support::{MemoryAccessor, fixture};
 
 const RAW: &str = include_str!("../../testdata/pmc/metadata.json");
 
@@ -43,12 +43,9 @@ async fn maps_metadata_without_fetching_content() {
     }
     assert!(batch["is_pmc_openaccess"].as_boolean().value(0));
     assert_eq!(observed.requests.lock().unwrap().len(), 1);
-    let batch = read(
-        br#"{"pmcid":"PMC1","license_code":"TDM","is_manuscript":true}"#,
-        None,
-    )
-    .await
-    .unwrap();
+    let batch = read(&fixture!("pmc", "metadata_only.json").await, None)
+        .await
+        .unwrap();
     assert!(batch["pdf_url"].is_null(0));
 }
 
@@ -71,9 +68,13 @@ async fn projection_preserves_order_and_zero_column_rows() {
 
 #[tokio::test]
 async fn media_lists_preserve_null_empty_and_populated_values() {
-    for (value, expected) in [("null", None), ("[]", Some(0)), (r#"["a", "b"]"#, Some(2))] {
-        let raw = format!(r#"{{"pmcid":"PMC1","media_urls":{value}}}"#);
-        let batch = read(raw.as_bytes(), None).await.unwrap();
+    for (name, expected) in [
+        ("media_null.json", None),
+        ("media_empty.json", Some(0)),
+        ("media_populated.json", Some(2)),
+    ] {
+        let raw = fixture!("pmc", name).await;
+        let batch = read(&raw, None).await.unwrap();
         let urls = batch["media_urls"].as_list::<i32>();
         assert_eq!(urls.is_null(0), expected.is_none());
         if let Some(length) = expected {
@@ -84,25 +85,25 @@ async fn media_lists_preserve_null_empty_and_populated_values() {
 
 #[tokio::test]
 async fn validates_metadata_even_when_all_fields_are_projected_away() {
-    let inputs: &[&[u8]] = &[
-        b"",
-        b"[]",
-        b"{",
-        b"{}",
-        b"\xff",
-        br#"{"pmcid":"PMC0"}"#,
-        br#"{"pmcid":"PMC1","pmcid":null}"#,
-        br#"{"pmcid":"PMC1","version":0}"#,
-        br#"{"pmcid":"PMC1","version":4294967296}"#,
-        br#"{"pmcid":"PMC1","doi":42}"#,
-        br#"{"pmcid":"PMC1","is_manuscript":"true"}"#,
-        br#"{"pmcid":"PMC1","media_urls":[null]}"#,
-    ];
-    for raw in inputs {
+    for name in [
+        "bad_empty.json",
+        "bad_array.json",
+        "bad_truncated.json",
+        "bad_missing_pmcid.json",
+        "bad_utf8.json",
+        "bad_pmcid.json",
+        "bad_duplicate_pmcid.json",
+        "bad_zero_version.json",
+        "bad_overflow_version.json",
+        "bad_doi.json",
+        "bad_manuscript.json",
+        "bad_media.json",
+    ] {
+        let raw = fixture!("pmc", name).await;
         assert_eq!(
-            read(raw, Some(vec![])).await.unwrap_err().kind(),
+            read(&raw, Some(vec![])).await.unwrap_err().kind(),
             ErrorKind::Decode,
-            "{raw:?}"
+            "{name}"
         );
     }
 }
@@ -130,12 +131,9 @@ async fn limits_apply_to_decoded_metadata() {
 
 #[tokio::test]
 async fn duplicate_fields_use_the_final_value_and_preserve_empty_strings() {
-    let batch = read(
-        br#"{"pmcid":"PMC1","pmid":1,"pmid":"00001","doi":""}"#,
-        None,
-    )
-    .await
-    .unwrap();
+    let batch = read(&fixture!("pmc", "duplicate_fields.json").await, None)
+        .await
+        .unwrap();
     assert_eq!(batch["pmid"].as_string::<i32>().value(0), "00001");
     assert_eq!(batch["doi"].as_string::<i32>().value(0), "");
 }

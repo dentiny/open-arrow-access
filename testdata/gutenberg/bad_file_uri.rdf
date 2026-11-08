@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+       xmlns:p="http://www.gutenberg.org/2009/pgterms/"
+       xmlns:d="http://purl.org/dc/terms/"
+       xmlns:a="http://purl.org/dc/dcam/">
+  <p:ebook r:about="ebooks/42">
+    <d:title>A &amp; B</d:title>
+    <d:creator><p:agent r:about="2009/agents/1">
+      <p:name>Example Author</p:name><p:alias>Alias</p:alias>
+      <p:birthdate>-20</p:birthdate><p:deathdate>30</p:deathdate>
+    </p:agent></d:creator>
+    <d:language><r:Description><r:value>en</r:value></r:Description></d:language>
+    <d:subject><r:Description><a:memberOf r:resource="http://purl.org/dc/terms/LCSH"/>
+      <r:value>Example subject</r:value></r:Description></d:subject>
+    <p:bookshelf><r:Description><r:value>Example shelf</r:value></r:Description></p:bookshelf>
+    <d:issued>1970-01-02</d:issued><d:rights>Fixture rights</d:rights>
+    <p:marc520>Unexpanded upstream metadata</p:marc520>
+    <d:hasFormat><p:file r:about="">
+      <d:format><r:Description><r:value>text/plain; charset=utf-8</r:value></r:Description></d:format>
+      <d:extent>7</d:extent><d:modified>2026-11-01T01:02:03</d:modified>
+    </p:file></d:hasFormat>
+    <d:hasFormat><p:file r:about="https://example.invalid/42.zip">
+      <d:format><r:Description><r:value>application/zip</r:value></r:Description></d:format>
+      <d:format><r:Description><r:value>text/plain</r:value></r:Description></d:format>
+    </p:file></d:hasFormat>
+    <d:hasFormat><p:file r:about=""/></d:hasFormat>
+  </p:ebook>
+</r:RDF>

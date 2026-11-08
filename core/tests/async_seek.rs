@@ -2,11 +2,11 @@ use std::{io::SeekFrom, num::NonZeroUsize};
 
 use futures::io::{AsyncReadExt, AsyncSeekExt};
 use open_arrow_access_core::{Accessor, ErrorKind, into_async_seek};
-use open_arrow_access_test_support::MemoryAccessor;
+use open_arrow_access_test_support::{MemoryAccessor, fixture};
 
 #[tokio::test]
 async fn seeks_clones_and_direct_ranges_preserve_independent_cursors() {
-    let source = MemoryAccessor::new(b"abcdefghij", 1).with_ranges();
+    let source = MemoryAccessor::new(&fixture!("bytes", "alphabet.bin").await, 1).with_ranges();
     let observed = source.observations.clone();
     let bytes = source.open("data".into()).await.unwrap();
     let mut input = into_async_seek(bytes, NonZeroUsize::new(3).unwrap(), "seek_test").unwrap();
@@ -49,8 +49,8 @@ async fn seeks_clones_and_direct_ranges_preserve_independent_cursors() {
 #[tokio::test]
 async fn requirements_short_reads_and_original_errors_are_checked() {
     for source in [
-        MemoryAccessor::new(b"data", 1),
-        MemoryAccessor::new(b"data", 1)
+        MemoryAccessor::new(&fixture!("bytes", "data.bin").await, 1),
+        MemoryAccessor::new(&fixture!("bytes", "data.bin").await, 1)
             .with_ranges()
             .without_content_length(),
     ] {
@@ -68,13 +68,13 @@ async fn requirements_short_reads_and_original_errors_are_checked() {
     }
     for (source, expected) in [
         (
-            MemoryAccessor::new(b"data", 1)
+            MemoryAccessor::new(&fixture!("bytes", "data.bin").await, 1)
                 .with_ranges()
                 .with_short_ranges(),
             ErrorKind::Io,
         ),
         (
-            MemoryAccessor::new(b"data", 1)
+            MemoryAccessor::new(&fixture!("bytes", "data.bin").await, 1)
                 .with_ranges()
                 .with_range_failure(0, ErrorKind::PermissionDenied),
             ErrorKind::PermissionDenied,
