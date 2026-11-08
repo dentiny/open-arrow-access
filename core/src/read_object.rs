@@ -1,11 +1,10 @@
-use crate::{Accessor, ByteReadRequest, ByteReader, Error, ErrorKind, Result, read_limited};
+use crate::{Accessor, ByteReadRequest, ByteReader, Error, ErrorKind, Result, read_all};
 
-/// Open an object and collect at most `limit` bytes using [`read_limited`].
+/// Open an object and collect its bytes using [`read_all`].
 /// Preserve request options and source errors. Unsupported reads fail before I/O.
 pub async fn read_object<A>(
     accessor: &A,
     request: ByteReadRequest,
-    limit: usize,
     operation: &'static str,
 ) -> Result<Vec<u8>>
 where
@@ -19,5 +18,5 @@ where
         ));
     }
     let input = accessor.open(request).await?;
-    read_limited(input, limit, operation).await
+    read_all(input, operation).await
 }

@@ -106,6 +106,15 @@ async fn maps_http_errors() {
     }
 }
 
+#[tokio::test]
+async fn record_metadata_can_exceed_the_previous_size_limit() {
+    let (fixture, service) = fixture_service("record").await;
+    let mut raw = fixture!("zenodo", "record.json").await;
+    raw.extend(std::iter::repeat_n(b' ', 4 * 1024 * 1024));
+    fixture.respond_chunked("/api/records/3551612", StatusCode::OK, Bytes::from(raw));
+    assert!(!service.record(ID).await.unwrap().files().is_empty());
+}
+
 #[test]
 fn validates_endpoint_without_network() {
     for endpoint in [

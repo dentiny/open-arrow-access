@@ -16,8 +16,6 @@ pub(super) async fn read_metadata(raw: &[u8], schema: SchemaRef) -> Result<Recor
         super::mapping(),
         /*record_path=*/ "/r:RDF",
         ReaderOptions {
-            // DocumentAccessor already bounds the input. Accept larger caller-
-            // configured documents without imposing XML's default batch limit.
             max_record_bytes: usize::MAX - 1,
             max_batch_bytes: usize::MAX,
             max_depth: 65534,

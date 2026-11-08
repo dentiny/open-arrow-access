@@ -162,9 +162,8 @@ are at most 64 KiB by default (`with_chunk_size` changes the latter). Only ZIP
 metadata, decoder state and read-ahead are retained, without collecting the
 archive or whole entry. No background tasks are started.
 
-`ZipLimits` defaults to 65,536 declared entries, a 16 MiB declared central
-directory, and 1 GiB each for compressed/decoded entry size. `with_limits`
-overrides them. The parser also checks actual decoded length against the limit.
+`ZipLimits` defaults to 1 GiB each for compressed/decoded entry size.
+`with_limits` overrides that value. The parser also checks actual decoded length against the limit.
 CRC and declared decoded length are validated when the entry reaches EOF;
 earlier chunks may already have been emitted. Read through EOF for validation.
 Errors and EOF are terminal and upstream error categories are preserved.
