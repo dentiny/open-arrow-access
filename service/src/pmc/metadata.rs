@@ -16,7 +16,7 @@ pub(super) fn decode_batch(
 ) -> Result<RecordBatch> {
     let raw = std::str::from_utf8(raw)
         .map_err(|error| decode(format!("{path}: {error}")).with_source(error))?;
-    // Preserve raw JSON; duplicate fields use the last value.
+    // Duplicate fields use the last value.
     let fields: HashMap<String, &RawValue> = parse(raw, path)?;
     let projection = output_schema
         .fields()
@@ -26,16 +26,12 @@ pub(super) fn decode_batch(
     let mut builder = RecordBatchBuilder::new(schema(), Some(projection))?;
     builder.push(|row| {
         for field in schema().fields() {
-            if field.name() == "raw_metadata_json" {
-                row.append(field.name(), raw)?;
-            } else {
-                append_field(
-                    row,
-                    field,
-                    fields.get(field.name()).map_or("null", |value| value.get()),
-                    path,
-                )?;
-            }
+            append_field(
+                row,
+                field,
+                fields.get(field.name()).map_or("null", |value| value.get()),
+                path,
+            )?;
         }
         Ok(())
     })?;

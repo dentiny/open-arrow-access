@@ -29,7 +29,7 @@ impl Default for PmcLimits {
     }
 }
 
-/// Article metadata fields and verbatim source JSON.
+/// Article metadata fields.
 pub fn schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
@@ -55,7 +55,6 @@ pub fn schema() -> SchemaRef {
                         true,
                     ),
                     Field::new("text_url", DataType::Utf8, true),
-                    Field::new("raw_metadata_json", DataType::LargeUtf8, false),
                 ],
                 HashMap::from([("pmc.row_kind".into(), "article_metadata".into())]),
             ))
