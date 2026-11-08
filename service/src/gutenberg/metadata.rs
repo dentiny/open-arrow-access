@@ -46,7 +46,7 @@ impl<'a> BookMetadata<'a> {
             raw,
             source: batch.column(0).as_struct().clone(),
         };
-        validate_fields(super::metadata_schema().fields(), &book.source, 0)?;
+        convert_fields(super::schema().fields(), &book.source, 0, None)?;
         let mut seen = HashSet::new();
         for uri in book
             .files()
@@ -88,60 +88,42 @@ impl<'a> BookMetadata<'a> {
         selected: &[(usize, Vec<u8>)],
         schema: SchemaRef,
     ) -> Result<RecordBatch> {
-        let metadata = super::metadata_schema();
-        let DataType::LargeList(item) = metadata.field_with_name("files").unwrap().data_type()
+        let full_schema = super::schema();
+        let projected: Fields = schema
+            .fields()
+            .iter()
+            .filter(|field| field.name() != "files")
+            .cloned()
+            .collect();
+        let DataType::LargeList(item) = full_schema.field_with_name("files").unwrap().data_type()
         else {
             unreachable!()
         };
         let DataType::Struct(file_fields) = item.data_type() else {
             unreachable!()
         };
-        RecordBatchBuilder::build_row(super::schema(), schema, |row| {
+        RecordBatchBuilder::build_row(full_schema.clone(), schema, |row| {
             row.append("metadata_rdf", self.raw)?;
-            append_fields(row, metadata.fields(), &self.source, 0)?;
+            convert_fields(&projected, &self.source, 0, Some(row))?;
             row.append_structs("files", selected, |row, (index, data)| {
-                append_fields(row, file_fields, self.files(), *index)?;
+                convert_fields(file_fields, self.files(), *index, Some(row))?;
                 row.append("data", data.as_slice())
             })
         })
     }
 }
 
-fn validate_fields(fields: &Fields, source: &StructArray, index: usize) -> Result<()> {
-    for field in fields {
-        if field.name() == "metadata_rdf" {
-            continue;
-        }
-        let column = source.column_by_name(field.name()).unwrap();
-        match field.data_type() {
-            DataType::List(item) | DataType::LargeList(item) => {
-                if let DataType::Struct(fields) = item.data_type() {
-                    let values = column.as_list::<i32>().value(index);
-                    let entries = values.as_struct().column(0).as_struct();
-                    for index in 0..entries.len() {
-                        validate_fields(fields, entries, index)?;
-                    }
-                }
-            }
-            _ => {
-                scalar_value(field, column.as_ref(), index)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-// Conversion only writes projected columns; validation has already checked all
-// mapped fields, including nested values that projected list callbacks skip.
-fn append_fields(
-    row: &mut RecordBatchRow<'_>,
+// Validate every source field with no writer, or write the requested fields.
+// RDF bytes and selected file contents are supplied explicitly by into_batch.
+fn convert_fields(
     fields: &Fields,
     source: &StructArray,
     index: usize,
+    mut row: Option<&mut RecordBatchRow<'_>>,
 ) -> Result<()> {
     for field in fields {
         let name = field.name().as_str();
-        if matches!(name, "metadata_rdf" | "files") {
+        if matches!(name, "metadata_rdf" | "data") {
             continue;
         }
         let column = source.column_by_name(name).unwrap();
@@ -150,10 +132,16 @@ fn append_fields(
                 let values = column.as_list::<i32>().value(index);
                 if let DataType::Struct(fields) = item.data_type() {
                     let entries = values.as_struct().column(0).as_struct();
-                    row.append_structs(name, 0..entries.len(), |row, index| {
-                        append_fields(row, fields, entries, index)
-                    })?;
-                } else {
+                    if let Some(row) = row.as_deref_mut() {
+                        row.append_structs(name, 0..entries.len(), |row, index| {
+                            convert_fields(fields, entries, index, Some(row))
+                        })?;
+                    } else {
+                        for index in 0..entries.len() {
+                            convert_fields(fields, entries, index, None)?;
+                        }
+                    }
+                } else if let Some(row) = row.as_deref_mut() {
                     row.append_list(
                         name,
                         values
@@ -164,7 +152,12 @@ fn append_fields(
                     )?;
                 }
             }
-            _ => row.append(name, scalar_value(field, column.as_ref(), index)?)?,
+            _ => {
+                let value = scalar_value(field, column.as_ref(), index)?;
+                if let Some(row) = row.as_deref_mut() {
+                    row.append(name, value)?;
+                }
+            }
         }
     }
     Ok(())

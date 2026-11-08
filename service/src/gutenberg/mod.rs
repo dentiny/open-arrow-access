@@ -238,7 +238,7 @@ fn strings(name: &str, path: &str) -> Mapping {
 }
 
 fn objects(name: &str, path: &str, container: &str, mappings: Vec<Mapping>) -> Mapping {
-    let (fields, xml): (Vec<_>, Vec<_>) = mappings.into_iter().unzip();
+    let (mut fields, xml): (Vec<_>, Vec<_>) = mappings.into_iter().unzip();
     let xml = XmlField::list(
         name,
         ".",
@@ -250,6 +250,10 @@ fn objects(name: &str, path: &str, container: &str, mappings: Vec<Mapping>) -> M
             vec![XmlField::structure("value", container, false, xml)],
         ),
     );
+    // Content bytes belong only to the output, not to the XML mapping.
+    if name == "files" {
+        fields.push(Field::new("data", DataType::LargeBinary, false));
+    }
     let item = Arc::new(Field::new("item", DataType::Struct(fields.into()), false));
     let ty = if name == "files" {
         DataType::LargeList(item)
@@ -326,37 +330,6 @@ fn definitions() -> &'static (SchemaRef, XmlSchema) {
 
 /// Book schema; `metadata_rdf` retains unmapped fields.
 pub fn schema() -> SchemaRef {
-    static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
-    SCHEMA
-        .get_or_init(|| {
-            let metadata = metadata_schema();
-            let mut fields = metadata.fields().to_vec();
-            let index = metadata.index_of("files").unwrap();
-            let DataType::LargeList(item) = fields[index].data_type() else {
-                unreachable!()
-            };
-            let DataType::Struct(members) = item.data_type() else {
-                unreachable!()
-            };
-            let mut members = members.to_vec();
-            members.push(Arc::new(Field::new("data", DataType::LargeBinary, false)));
-            let item = item
-                .as_ref()
-                .clone()
-                .with_data_type(DataType::Struct(members.into()));
-            fields[index] = Arc::new(
-                fields[index]
-                    .as_ref()
-                    .clone()
-                    .with_data_type(DataType::LargeList(Arc::new(item))),
-            );
-            Arc::new(Schema::new(fields))
-        })
-        .clone()
-}
-
-// RDF declarations have no file content. Only the output schema includes data.
-fn metadata_schema() -> SchemaRef {
     definitions().0.clone()
 }
 
