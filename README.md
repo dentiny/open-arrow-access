@@ -215,6 +215,14 @@ Discovery accepts `ListRequest`, with recursion enabled by default. Setting
 Repeated and trailing separators in directory prefixes are normalized before
 discovery and result matching.
 
+## Roadmap
+
+Planned schema inference and conversion will let callers read CSV/JSON without
+supplying a schema and combine files with different columns into one Arrow
+schema. This includes CSV header detection, schema merging, column alignment and
+null filling. See the [schema conversion roadmap](docs/roadmap.md#schema-inference-and-conversion)
+for scope and compatibility rules.
+
 ## Extension contracts
 
 ```text
