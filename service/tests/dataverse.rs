@@ -70,7 +70,7 @@ async fn pins_membership_preserves_logical_names_and_reads_original_bytes() {
 }
 
 #[tokio::test]
-async fn rejects_mismatched_versions_and_missing_original_sizes() {
+async fn rejects_mismatched_versions_and_unsupported_files() {
     for file in ["wrong-pid", "wrong-version", "draft"] {
         let http = HttpFixture::new();
         http.respond(
@@ -91,22 +91,26 @@ async fn rejects_mismatched_versions_and_missing_original_sizes() {
         );
         assert_eq!(http.requests().len(), 1);
     }
-    let http = HttpFixture::new();
-    http.respond(
-        METADATA,
-        StatusCode::OK,
-        fixture!("dataverse", "missing-original-size.json").await,
-    );
-    assert_eq!(
-        DataverseService::new(http.endpoint())
-            .unwrap()
-            .dataset(PID, "1.0")
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Unsupported
-    );
+    for file in ["missing-original-size", "restricted"] {
+        let http = HttpFixture::new();
+        http.respond(
+            METADATA,
+            StatusCode::OK,
+            fixture!("dataverse", &format!("{file}.json")).await,
+        );
+        assert_eq!(
+            DataverseService::new(http.endpoint())
+                .unwrap()
+                .dataset(PID, "1.0")
+                .await
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::Unsupported,
+            "{file}"
+        );
+        assert_eq!(http.requests().len(), 1);
+    }
 }
 
 #[tokio::test]

@@ -59,6 +59,9 @@ pub(super) fn validate_dataset(
         ));
     }
     for file in &data.files {
+        if file.restricted {
+            return Err(unsupported("restricted Dataverse files are not supported"));
+        }
         if file.data_file.tabular_data && file.data_file.original_file_size.is_none() {
             return Err(unsupported(
                 "original byte length is absent for an ingested tabular file",

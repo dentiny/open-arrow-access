@@ -98,9 +98,8 @@ impl DataverseService {
 pub struct DataverseFile {
     pub name: String,
     pub id: u64,
-    /// Whether Dataverse restricts downloads to authorized users.
-    /// Informational only: files remain listed and the server enforces access.
-    /// This service does not provide authentication.
+    /// Whether Dataverse marks the file as access-restricted.
+    /// Dataset resolution rejects restricted files as unsupported.
     pub restricted: bool,
     pub size: u64,
 }

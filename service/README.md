@@ -283,8 +283,8 @@ Existing byte read options, range reads and independently owned readers apply.
 
 This entry point covers public
 explicit versions, not search, latest/draft selection, authentication, guestbook
-submission or checksum verification. Restricted files remain visible and upstream
-access failures propagate. See the [Dataverse data access API](https://guides.dataverse.org/en/latest/api/dataaccess.html).
+submission or checksum verification. Datasets containing restricted files return an unsupported error
+before any file download. See the [Dataverse data access API](https://guides.dataverse.org/en/latest/api/dataaccess.html).
 Run `cargo run --example read_dataverse --features service-dataverse --
 https://dataverse.harvard.edu doi:10.7910/DVN/27221 1.0` to list the example dataset;
 append an exact logical filename to stream its original bytes.
