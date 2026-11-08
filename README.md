@@ -180,9 +180,10 @@ for TSV.
 
 ## Supported components
 
-Enable `record-batch-builder` on the facade or core crate to convert Serde
-records into Arrow with `RecordBatchBuilder::new(schema, projection)`, `push`
-and `finish`. The builder handles nested fields, raw binary, output field order
+`RecordBatchBuilder` is always available from the facade and core crate,
+including with `--no-default-features`. Convert Serde records into Arrow with
+`RecordBatchBuilder::new(schema, projection)`, `push` and `finish`.
+The builder handles nested fields, raw binary, output field order
 and zero-column row counts while preserving schema metadata. Only projected
 fields are encoded; source validation remains with the caller. An append error
 invalidates the builder so a partially written row cannot be emitted. See the

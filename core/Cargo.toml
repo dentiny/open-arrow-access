@@ -6,14 +6,10 @@ license.workspace = true
 repository.workspace = true
 description = "Shared reader, accessor, and layer contracts for Open Arrow Access"
 
-[features]
-default = []
-record-batch-builder = ["dep:serde", "dep:serde_arrow", "dep:marrow"]
-
 [dependencies]
-serde = { workspace = true, optional = true }
-serde_arrow = { workspace = true, optional = true }
-marrow = { workspace = true, optional = true, features = ["arrow-59"] }
+serde.workspace = true
+serde_arrow.workspace = true
+marrow = { workspace = true, features = ["arrow-59"] }
 arrow-array.workspace = true
 arrow-schema.workspace = true
 async-trait.workspace = true
@@ -30,4 +26,3 @@ workspace = true
 
 [[test]]
 name = "record_batch_builder"
-required-features = ["record-batch-builder"]
