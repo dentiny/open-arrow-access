@@ -613,3 +613,35 @@ byte contracts. Compose the result with existing format and decompression
 accessors. See [service documentation](service/README.md#zenodo-zenodo) and the
 `read_zenodo` example. This entry point supports public records, not repository
 search or restricted-file authentication.
+
+## TAR (`decompression-tar`)
+
+Enable `decompression-tar` for `decompression::tar::{TarStream, TarArchive, TarEntry, TarLimits}`.
+For remote bulk consumption, construct `TarStream::new(input, limits)` and call
+`next_entry().await` to obtain metadata and a bounded sequential ByteReader. The
+first entry is available after its header, with no full index scan or range reads.
+Consume or drop each body before advancing; dropped bodies are drained on the
+next call. Readers can outlive the stream. The stream retains pending input,
+partial headers and skip progress across cancelled next_entry calls. A cancelled
+body reader must be dropped. Malformed input and source errors terminate the
+stream. Unknown-length and sequential-only sources are supported.
+
+For independent selected-entry readers, use the optional indexed `TarArchive`.
+Open a caller-provided `ByteReader` using `TarArchive::open(input, limits).await`.
+Input must support exact ranges and expose a known content length. Inspection
+reads only 512-byte headers plus the two end blocks, skipping file bodies. TAR
+has no central directory, so inspection requires one dependent header read per
+entry. Open once and reuse the session for multiple files to avoid rescanning.
+
+`entries()` iterates headers in archive order, retaining directories and duplicate
+names as distinct indices. `open_entry(index, chunk_size)` creates an independent
+sequential `ByteReader` without fetching its body yet. Body fetches stay within
+the selected entry and requested chunk size; readers can outlive the session.
+The default limits are 65,536 entries and 1 GiB per entry. Header checksums,
+checked offsets, padding bounds and two zero end blocks are validated. Underlying
+source errors and version metadata are retained; no filesystem extraction occurs.
+
+Supported: regular USTAR and GNU header files and directories. Unsupported:
+links, sparse files, PAX/GNU extension headers including long names. Compressed
+TAR does not satisfy the ranged input contract through a sequential gzip layer.
+Run `cargo run --example read_tar --features decompression-tar -- testdata/tar mixed.tar 1`.

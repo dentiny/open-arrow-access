@@ -26,3 +26,6 @@ pub mod zstd;
 
 #[cfg(feature = "zip")]
 pub mod zip;
+
+#[cfg(feature = "tar")]
+pub mod tar;
