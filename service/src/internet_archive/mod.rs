@@ -13,7 +13,7 @@ use url::Url;
 
 use crate::http_client::{HttpClient, validation::validate_origin};
 use error::membership_error;
-use validation::{validate_identifier, validate_item};
+use validation::{extract_items_and_validate, validate_identifier};
 
 const CONFIGURE: &str = "configure_internet_archive";
 const RESOLVE: &str = "resolve_internet_archive";
@@ -46,7 +46,7 @@ impl InternetArchiveService {
             .join(&format!("metadata/{identifier}"))
             .unwrap();
         let response = self.client.json(url.as_str(), None, RESOLVE).await?;
-        let files = validate_item(response, identifier)?;
+        let files = extract_items_and_validate(response, identifier)?;
         let storage =
             self.client
                 .accessor(&self.endpoint, &format!("download/{identifier}/"), &[])?;

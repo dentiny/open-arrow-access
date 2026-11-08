@@ -23,7 +23,7 @@ pub(super) fn validate_identifier(identifier: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn validate_item(
+pub(super) fn extract_items_and_validate(
     response: ItemResponse,
     identifier: &str,
 ) -> Result<Vec<InternetArchiveFile>> {
