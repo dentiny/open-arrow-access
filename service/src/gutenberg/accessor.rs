@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Capability, DocumentAccessor, DocumentDecoder, Error,
-    ErrorKind, RecordBatch, RecordReader, Result, SchemaRef, async_trait, read_limited,
+    ErrorKind, RecordBatch, RecordReader, Result, SchemaRef, async_trait, read_object,
 };
 
 use super::{GutenbergLimits, GutenbergRequest, batch::create_batch, decode, metadata, schema};
@@ -110,15 +110,10 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
         if schema.index_of("files").is_ok() {
             let mut remaining = self.limits.row_bytes.get() - raw.len();
             for (selection, file) in selections {
-                let input = self
-                    .inner
-                    .open(
-                        ByteReadRequest::new(selection.object.clone())
-                            .with_options(request.metadata.byte_options),
-                    )
-                    .await?;
-                let data = read_limited(
-                    input,
+                let data = read_object(
+                    self.inner.as_ref(),
+                    ByteReadRequest::new(selection.object.clone())
+                        .with_options(request.metadata.byte_options),
                     self.limits.file_bytes.get().min(remaining),
                     "read_gutenberg",
                 )
