@@ -3,5 +3,8 @@
 #[cfg(feature = "huggingface")]
 pub mod huggingface;
 
-#[cfg(feature = "commoncrawl")]
+#[cfg(feature = "warc")]
 pub mod commoncrawl;
+
+#[cfg(feature = "warc")]
+pub mod warc;

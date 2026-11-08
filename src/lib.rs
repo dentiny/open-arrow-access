@@ -6,12 +6,14 @@
 
 pub use open_arrow_access_core::*;
 
-#[cfg(any(feature = "service-huggingface", feature = "service-commoncrawl"))]
+#[cfg(any(feature = "service-huggingface", feature = "service-warc"))]
 pub mod service {
-    #[cfg(feature = "service-commoncrawl")]
+    #[cfg(feature = "service-warc")]
     pub use open_arrow_access_service::commoncrawl::{CommonCrawl, create_http_accessor};
     #[cfg(feature = "service-huggingface")]
     pub use open_arrow_access_service::huggingface::*;
+    #[cfg(feature = "service-warc")]
+    pub use open_arrow_access_service::warc::{CommonCrawlWarcAccessor, CommonCrawlWarcRequest};
 }
 
 #[cfg(any(
