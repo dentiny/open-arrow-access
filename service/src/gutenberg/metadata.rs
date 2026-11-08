@@ -118,7 +118,7 @@ fn scalar_value<'a>(
         DataType::Utf8 | DataType::LargeUtf8 => text.into(),
         DataType::UInt64 => number::<u64>(text, name)?.into(),
         DataType::Int32 => number::<i32>(text, name)?.into(),
-        DataType::Date32 => text.map(issued).transpose()?.into(),
+        DataType::Date32 => text.map(parse_issued_date).transpose()?.into(),
         _ => unreachable!("unsupported Gutenberg metadata type"),
     })
 }
@@ -133,7 +133,7 @@ fn number<T: std::str::FromStr>(value: Option<&str>, field: &str) -> Result<Opti
         .transpose()
 }
 
-pub(super) fn ebook_uri_id(about: &str) -> Result<FieldValue<'_>> {
+pub(super) fn parse_ebook_id(about: &str) -> Result<FieldValue<'_>> {
     let id = about
         .strip_prefix("ebooks/")
         .or_else(|| about.strip_prefix("http://www.gutenberg.org/ebooks/"))
@@ -147,7 +147,7 @@ pub(super) fn ebook_uri_id(about: &str) -> Result<FieldValue<'_>> {
         .ok_or_else(|| decode("invalid ebook ID"))
 }
 
-fn issued(value: &str) -> Result<i32> {
+fn parse_issued_date(value: &str) -> Result<i32> {
     let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(decode_source)?;
     Ok(date
         .signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap())

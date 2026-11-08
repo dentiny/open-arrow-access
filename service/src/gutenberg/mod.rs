@@ -173,7 +173,7 @@ fn definitions() -> &'static Definitions {
     DEFINITIONS.get_or_init(|| {
         use DataType::*;
         let mappings = vec![
-            scalar("ebook_id", "@r:about", UInt64, false).parse_with(metadata::ebook_uri_id),
+            scalar("ebook_id", "@r:about", UInt64, false).parse_with(metadata::parse_ebook_id),
             scalar("title", "d:title", LargeUtf8, true),
             objects(
                 "creator",
