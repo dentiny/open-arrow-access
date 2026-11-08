@@ -1,19 +1,15 @@
 //! Bounded provider JSON requests over the same transport used for file reads.
 
 mod error;
-#[cfg(feature = "http-files")]
 mod query;
-#[cfg(feature = "http-files")]
 pub(crate) mod validation;
 
 use error::transport_error;
 use http::{Request, StatusCode};
 use open_arrow_access_core::{Error, ErrorKind, Result};
-#[cfg(feature = "http-files")]
 use open_arrow_access_storage::OpenDalAccessor;
 use opendal::{Buffer, HttpTransporter, OperationContext, raw::oio::ReadStream};
 use serde::de::DeserializeOwned;
-#[cfg(feature = "http-files")]
 use url::Url;
 
 #[derive(Clone, Debug)]
@@ -43,7 +39,6 @@ impl HttpClient {
         })
     }
 
-    #[cfg(feature = "http-files")]
     pub(crate) fn accessor(
         &self,
         endpoint: &Url,
