@@ -19,6 +19,3 @@ tokio.workspace = true
 
 [lints]
 workspace = true
-
-[[test]]
-name = "record_batch_builder"
