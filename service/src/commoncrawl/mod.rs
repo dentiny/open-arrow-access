@@ -8,6 +8,4 @@ pub use http::create_http_accessor;
 pub use source::CommonCrawl;
 
 #[cfg(feature = "commoncrawl-warc")]
-mod warc;
-#[cfg(feature = "commoncrawl-warc")]
-pub use warc::{CommonCrawlWarcAccessor, CommonCrawlWarcRequest};
+pub mod warc;
