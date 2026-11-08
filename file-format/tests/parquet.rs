@@ -165,9 +165,12 @@ async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
 #[tokio::test]
 async fn empty_file_and_invalid_ranges_have_explicit_behavior() {
     let dir = tempfile::tempdir().unwrap();
-    tokio::fs::write(dir.path().join("empty"), [])
-        .await
-        .unwrap();
+    tokio::fs::copy(
+        open_arrow_access_test_support::fixture_path!("bytes", "empty.bin"),
+        dir.path().join("empty"),
+    )
+    .await
+    .unwrap();
     let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
     let mut reader = fs.open("empty".into()).await.unwrap();
     assert!(reader.next().await.unwrap().is_none());
@@ -427,12 +430,18 @@ impl ByteAccessor for ListingAccessor {
 #[tokio::test]
 async fn listing_capability_survives_transparent_layer_and_shared_accessor() {
     let accessor: Arc<dyn ByteAccessor> = Arc::new(
-        ListingAccessor(MemoryAccessor::new(b"data", usize::MAX).with_ranges())
-            .layer(ByteObserverLayer(Arc::new(Observations::default())))
-            .layer(OpenObserverLayer {
-                label: "list-observer",
-                events: Arc::new(Mutex::new(Vec::new())),
-            }),
+        ListingAccessor(
+            MemoryAccessor::new(
+                &open_arrow_access_test_support::fixture!("bytes", "data.bin").await,
+                usize::MAX,
+            )
+            .with_ranges(),
+        )
+        .layer(ByteObserverLayer(Arc::new(Observations::default())))
+        .layer(OpenObserverLayer {
+            label: "list-observer",
+            events: Arc::new(Mutex::new(Vec::new())),
+        }),
     );
     assert!(accessor.capability().list);
     let objects = accessor
@@ -455,9 +464,12 @@ async fn listing_capability_survives_transparent_layer_and_shared_accessor() {
 #[tokio::test]
 async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor() {
     let dir = tempfile::tempdir().unwrap();
-    tokio::fs::write(dir.path().join("data.bin"), b"abcdefghij")
-        .await
-        .unwrap();
+    tokio::fs::copy(
+        open_arrow_access_test_support::fixture_path!("bytes", "alphabet.bin"),
+        dir.path().join("data.bin"),
+    )
+    .await
+    .unwrap();
     let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()))
         .with_chunk_size(NonZeroUsize::new(3).unwrap());
     for concurrency in [1, 4] {

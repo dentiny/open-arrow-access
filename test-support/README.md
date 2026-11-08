@@ -9,6 +9,11 @@ Load input bytes from the committed `testdata/` fixtures and pass them to
 reads and reports content length. Opt into ranges, listing, and version metadata
 with `with_ranges`, `with_listing`, and `with_version`.
 
+This applies to both valid and invalid inputs. Add a documented fixture when a
+case is missing rather than constructing or corrupting serialized input in the
+test. See the [fixture policy](../testdata/README.md). Expected values and injected
+reader behavior belong in test code.
+
 `with_failure(offset, kind)` injects a sequential failure on the first read whose
 cursor reaches or passes the offset. It preserves the selected shared error kind
 and attaches a `ConnectionReset` I/O source. `with_empty_chunk(offset)` instead

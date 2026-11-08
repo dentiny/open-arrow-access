@@ -88,7 +88,6 @@ arrow-schema.workspace = true
 http.workspace = true
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
-flate2.workspace = true
 
 open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-storage.workspace = true

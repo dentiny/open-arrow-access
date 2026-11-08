@@ -12,13 +12,17 @@ use opendal::{
 };
 
 use open_arrow_access_storage::OpenDalAccessor;
+use open_arrow_access_test_support::{fixture, fixture_path};
 
 #[tokio::test]
 async fn filesystem_rejects_surrounding_whitespace_without_aliasing_files() {
     let dir = tempfile::tempdir().unwrap();
-    tokio::fs::write(dir.path().join("data.bin"), b"other file")
-        .await
-        .unwrap();
+    tokio::fs::write(
+        dir.path().join("data.bin"),
+        &fixture!("bytes", "other.bin").await,
+    )
+    .await
+    .unwrap();
     let locators = [
         " data.bin",
         "data.bin ",
@@ -28,13 +32,19 @@ async fn filesystem_rejects_surrounding_whitespace_without_aliasing_files() {
     ];
     #[cfg(unix)]
     for locator in locators {
-        tokio::fs::write(dir.path().join(locator), b"requested file")
-            .await
-            .unwrap();
-    }
-    tokio::fs::write(dir.path().join("data file.bin"), b"internal space")
+        tokio::fs::write(
+            dir.path().join(locator),
+            &fixture!("bytes", "requested.bin").await,
+        )
         .await
         .unwrap();
+    }
+    tokio::fs::write(
+        dir.path().join("data file.bin"),
+        &fixture!("bytes", "internal_space.bin").await,
+    )
+    .await
+    .unwrap();
     let accessor = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
 
     for locator in locators {
@@ -58,10 +68,14 @@ async fn filesystem_rejects_surrounding_whitespace_without_aliasing_files() {
 async fn sequential_reads_report_short_input_and_terminate() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("short.bin");
-    tokio::fs::write(&path, b"abcdefgh").await.unwrap();
+    tokio::fs::copy(fixture_path!("bytes", "short.bin"), &path)
+        .await
+        .unwrap();
     let accessor = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
     let mut reader = accessor.open("short.bin".into()).await.unwrap();
-    tokio::fs::write(&path, b"abcd").await.unwrap();
+    tokio::fs::copy(fixture_path!("bytes", "short_truncated.bin"), &path)
+        .await
+        .unwrap();
     let error = loop {
         match reader.next().await {
             Ok(Some(_)) => {}
@@ -83,7 +97,7 @@ struct TaskCounts {
 #[tokio::test]
 async fn sequential_output_chunks_reuse_storage_requests_when_ranges_are_interleaved() {
     let dir = tempfile::tempdir().unwrap();
-    let contents: Vec<u8> = (0..64).collect();
+    let contents = fixture!("bytes", "sequence.bin").await;
     tokio::fs::write(dir.path().join("data.bin"), &contents)
         .await
         .unwrap();
@@ -120,9 +134,7 @@ async fn sequential_output_chunks_reuse_storage_requests_when_ranges_are_interle
 async fn large_single_and_bulk_ranges_preserve_values_and_cursor() {
     let dir = tempfile::tempdir().unwrap();
     let mib = 1024 * 1024;
-    let contents = (0..5 * mib + 7)
-        .map(|i| (i % 251) as u8)
-        .collect::<Vec<_>>();
+    let contents = fixture!("bytes", "large.bin").await;
     tokio::fs::write(dir.path().join("large.bin"), &contents)
         .await
         .unwrap();
@@ -175,8 +187,14 @@ async fn large_single_and_bulk_ranges_preserve_values_and_cursor() {
 async fn large_range_reports_short_reads() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("large.bin");
-    let file = tokio::fs::File::create(&path).await.unwrap();
-    file.set_len(3 * 1024 * 1024).await.unwrap();
+    tokio::fs::copy(fixture_path!("bytes", "large.bin"), &path)
+        .await
+        .unwrap();
+    let file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .await
+        .unwrap();
     let accessor = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
     let mut reader = accessor.open("large.bin".into()).await.unwrap();
     file.set_len(1024 * 1024).await.unwrap();
@@ -229,10 +247,7 @@ async fn filesystem_bulk_reads_do_not_merge_across_unrequested_gaps() {
     let dir = tempfile::tempdir().unwrap();
     let middle = 512 * 1024;
     let end = 1024 * 1024;
-    let mut contents = vec![b'.'; end + 2];
-    contents[..2].copy_from_slice(b"ab");
-    contents[middle..middle + 2].copy_from_slice(b"cd");
-    contents[end..end + 2].copy_from_slice(b"ef");
+    let contents = fixture!("bytes", "gaps.bin").await;
     tokio::fs::write(dir.path().join("data.bin"), &contents)
         .await
         .unwrap();
@@ -283,7 +298,7 @@ async fn filesystem_bulk_reads_do_not_merge_across_unrequested_gaps() {
 #[tokio::test]
 async fn io_options_enable_bounded_backend_concurrency_for_single_and_bulk_reads() {
     let dir = tempfile::tempdir().unwrap();
-    let contents = (0..64).collect::<Vec<u8>>();
+    let contents = fixture!("bytes", "sequence.bin").await;
     tokio::fs::write(dir.path().join("data.bin"), &contents)
         .await
         .unwrap();

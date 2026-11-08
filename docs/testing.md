@@ -48,8 +48,14 @@ crate whose behavior they exercise. The workspace root has no test directory.
 - Keep shared byte sources, fixture loading, byte-layer and format contract assertions in
   [`test-support/`](../test-support/). Keep helpers used by only one suite alongside
   that suite, or in its `tests/support/` directory.
-- Store committed input fixtures in root `testdata/<format>/`. Reuse deterministic
-  local fixtures rather than adding network-dependent tests.
+- Read all serialized test inputs, valid and invalid, from root
+  `testdata/<format>/` with `fixture!` or `fixture_path!`. Reuse existing samples;
+  add a named fixture and document its provenance and intended failure when a
+  case is missing. Do not construct documents, encode shards, or corrupt binary
+  formats at runtime. Copy fixtures into temporary directories for filesystem
+  isolation. Keep expected values and behavioral controls (chunking, projections,
+  I/O fault injection, decoder doubles) in test code. See the
+  [`testdata` policy](../testdata/README.md).
 - Add `required-features` to each optional integration test target in its crate's
   `Cargo.toml`. The normal no-feature build must still work.
 - Add a row to this index when introducing a new suite.

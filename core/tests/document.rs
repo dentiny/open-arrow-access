@@ -6,7 +6,7 @@ use open_arrow_access_core::{
     Accessor, ByteReadOptions, DocumentAccessor, DocumentDecoder, Error, ErrorKind, ReadOptions,
     ReadRequest, RecordBatch, RecordBatchBuilder, Result, Schema, SchemaRef, async_trait,
 };
-use open_arrow_access_test_support::MemoryAccessor;
+use open_arrow_access_test_support::{MemoryAccessor, fixture};
 
 struct RawDocument;
 
@@ -40,7 +40,7 @@ impl DocumentDecoder for RawDocument {
 #[tokio::test]
 async fn reads_once_lazily_with_byte_options_projection_and_owned_state() {
     for projection in [None, Some(vec![])] {
-        let source = MemoryAccessor::new(&[0, 255, 128], 1);
+        let source = MemoryAccessor::new(&fixture!("bytes", "binary.bin").await, 1);
         let observed = source.observations.clone();
         let accessor = DocumentAccessor::new(source, RawDocument, 3);
         let options = ByteReadOptions {
@@ -78,7 +78,7 @@ async fn reads_once_lazily_with_byte_options_projection_and_owned_state() {
 
 #[tokio::test]
 async fn rejects_bad_projection_and_limits_and_preserves_source_errors() {
-    let source = MemoryAccessor::new(b"input", 1);
+    let source = MemoryAccessor::new(&fixture!("bytes", "input.bin").await, 1);
     let observed = source.observations.clone();
     let accessor = DocumentAccessor::new(source, RawDocument, 4);
     let request = ReadRequest::new("input").with_options(ReadOptions {
@@ -94,7 +94,8 @@ async fn rejects_bad_projection_and_limits_and_preserves_source_errors() {
     assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
     assert!(reader.next().await.unwrap().is_none());
 
-    let source = MemoryAccessor::new(b"input", 1).with_failure(0, ErrorKind::PermissionDenied);
+    let source = MemoryAccessor::new(&fixture!("bytes", "input.bin").await, 1)
+        .with_failure(0, ErrorKind::PermissionDenied);
     let mut reader = DocumentAccessor::new(source, RawDocument, 5)
         .open(ReadRequest::new("input"))
         .await
@@ -156,10 +157,14 @@ async fn rejects_invalid_output_and_preserves_decoder_errors() {
         (InvalidDocument::WrongSchema, ErrorKind::Decode),
         (InvalidDocument::DecodeError, ErrorKind::Unsupported),
     ] {
-        let mut reader = DocumentAccessor::new(MemoryAccessor::new(b"", 1), decoder, 0)
-            .open(ReadRequest::new("empty"))
-            .await
-            .unwrap();
+        let mut reader = DocumentAccessor::new(
+            MemoryAccessor::new(&fixture!("bytes", "empty.bin").await, 1),
+            decoder,
+            0,
+        )
+        .open(ReadRequest::new("empty"))
+        .await
+        .unwrap();
         let error = reader.next().await.unwrap_err();
         assert_eq!(error.kind(), kind);
         if kind == ErrorKind::Unsupported {

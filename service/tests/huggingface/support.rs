@@ -13,7 +13,8 @@ use http::{Request, Response, StatusCode};
 use open_arrow_access_core::Bytes;
 use open_arrow_access_test_support::{fixture, record::collect_column};
 use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter};
-use serde_json::json;
+use serde::Deserialize;
+use serde_json::Value;
 
 use super::super::{HuggingFaceDatasetRequest, HuggingFaceOptions, HuggingFaceService};
 
@@ -38,9 +39,10 @@ impl HttpTransport for FixtureTransport {
     }
 }
 
-pub(super) struct ExportEntry<'a> {
-    pub(super) repository_path: &'a str,
-    pub(super) fixture_path: &'a str,
+#[derive(Deserialize)]
+struct ExportEntry {
+    fixture: String,
+    metadata: Value,
 }
 
 struct Captured {
@@ -52,22 +54,30 @@ struct Captured {
 pub(super) struct ExportHub {
     files: Arc<BTreeMap<String, Bytes>>,
     pub(super) metadata: Bytes,
+    catalog: Arc<Vec<Value>>,
     pub(super) full_status: StatusCode,
     requests: Arc<Mutex<Vec<Captured>>>,
 }
 
 impl ExportHub {
-    pub(super) async fn new(entries: &[ExportEntry<'_>]) -> Self {
+    pub(super) async fn new(name: &str) -> Self {
+        let entries: Vec<ExportEntry> =
+            serde_json::from_slice(&fixture!("huggingface/exports", name).await).unwrap();
         let mut files = BTreeMap::new();
+        let mut catalog = Vec::new();
         for entry in entries {
+            let bytes = fixture!("parquet", &entry.fixture).await;
+            assert_eq!(entry.metadata["size"].as_u64().unwrap(), bytes.len() as u64);
             files.insert(
-                entry.repository_path.to_owned(),
-                Bytes::from(fixture!("parquet", entry.fixture_path).await),
+                entry.metadata["path"].as_str().unwrap().to_owned(),
+                Bytes::from(bytes),
             );
+            catalog.push(entry.metadata);
         }
         Self {
             files: Arc::new(files),
-            metadata: Bytes::from(json!({"sha": COMMIT}).to_string()),
+            metadata: Bytes::from(fixture!("huggingface", "revision.json").await),
+            catalog: Arc::new(catalog),
             full_status: StatusCode::OK,
             requests: Arc::default(),
         }
@@ -164,9 +174,15 @@ impl HttpTransport for ExportHub {
             }
             // Reverse path order and paginate to exercise provider ordering.
             let prefix = format!("{prefix}/");
-            let files: Vec<_> = self.files.iter().rev()
-                .filter(|(path, _)| path.starts_with(&prefix))
-                .map(|(path, bytes)| json!({"type":"file", "path":path, "size":bytes.len(), "oid":"fixture"})).collect();
+            let mut files: Vec<_> = self
+                .catalog
+                .iter()
+                .filter(|entry| {
+                    let path = entry["path"].as_str().unwrap();
+                    path.starts_with(&prefix) && self.files.contains_key(path)
+                })
+                .collect();
+            files.sort_by(|a, b| b["path"].as_str().cmp(&a["path"].as_str()));
             if files.is_empty() {
                 return Ok(response(StatusCode::NOT_FOUND, Bytes::new()));
             }
@@ -197,9 +213,11 @@ impl HttpTransport for ExportHub {
                 .split('&')
                 .next()
                 .unwrap();
-            let files: Vec<_> = self.files.get(path).map(|bytes|
-                json!({"type":"file", "path":path, "size":bytes.len(), "oid":"fixture"})
-            ).into_iter().collect();
+            let files: Vec<_> = self
+                .catalog
+                .iter()
+                .filter(|entry| entry["path"] == path && self.files.contains_key(path))
+                .collect();
             return Ok(response(
                 StatusCode::OK,
                 Bytes::from(serde_json::to_vec(&files).unwrap()),

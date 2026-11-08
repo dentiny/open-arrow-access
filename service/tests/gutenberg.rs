@@ -93,16 +93,15 @@ async fn projection_reads_only_rdf_and_preserves_zero_column_rows() {
 
 #[tokio::test]
 async fn rejects_invalid_rdf_without_silently_dropping_rows() {
-    let raw = fixture!("gutenberg", "book.rdf").await;
-    let raw = String::from_utf8(raw).unwrap();
-    for invalid in [
-        raw.replace("ebooks/42", "ebooks/invalid"),
-        raw.replace("1970-01-02", "2026-02-30"),
-        raw.replace("https://example.invalid/42.txt", ""),
-        raw.replace("<p:ebook", "<p:ebook xmlns:p=\"urn:wrong\""),
-        raw.replace("</r:RDF>", "<p:ebook r:about=\"ebooks/43\"/></r:RDF>"),
+    for name in [
+        "bad_ebook_id.rdf",
+        "bad_date.rdf",
+        "bad_file_uri.rdf",
+        "bad_namespace.rdf",
+        "bad_multiple_books.rdf",
     ] {
-        let accessor = GutenbergAccessor::new(MemoryAccessor::new(invalid.as_bytes(), 19));
+        let raw = fixture!("gutenberg", name).await;
+        let accessor = GutenbergAccessor::new(MemoryAccessor::new(&raw, 19));
         let mut reader = accessor.open(request()).await.unwrap();
         assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
         assert!(reader.next().await.unwrap().is_none());
@@ -129,8 +128,8 @@ async fn enforces_metadata_limit_and_preserves_storage_errors() {
 
 #[tokio::test]
 async fn keeps_metadata_only_books_with_missing_optional_fields() {
-    let raw = br#"<r:RDF xmlns:r="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:p="http://www.gutenberg.org/2009/pgterms/"><p:ebook r:about="ebooks/1"/></r:RDF>"#;
-    let accessor = GutenbergAccessor::new(MemoryAccessor::new(raw, 13));
+    let raw = fixture!("gutenberg", "metadata_only.rdf").await;
+    let accessor = GutenbergAccessor::new(MemoryAccessor::new(&raw, 13));
     let mut reader = accessor.open(ReadRequest::new("book.rdf")).await.unwrap();
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch.num_rows(), 1);

@@ -30,8 +30,8 @@ mod filesystem {
     async fn filesystem_listing_is_recursive_file_only_and_uses_backend_prefix_semantics() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
-        std::fs::write(dir.path().join("a"), b"a").unwrap();
-        std::fs::write(dir.path().join("sub/b"), b"b").unwrap();
+        copy_fixture("a.parquet", &dir.path().join("a"));
+        copy_fixture("b.parquet", &dir.path().join("sub/b"));
         let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
         assert!(fs.capability().list);
         let mut paths = fs
@@ -138,7 +138,11 @@ mod filesystem {
         copy_fixture("a.parquet", &dir.path().join("a.parquet"));
         copy_fixture("c.parquet", &dir.path().join(".sub/c.parquet"));
         copy_fixture("hidden.parquet", &dir.path().join(".hidden.parquet"));
-        std::fs::write(dir.path().join("readme"), b"not parquet").unwrap();
+        std::fs::copy(
+            open_arrow_access_test_support::fixture_path!("csv", "good.csv"),
+            dir.path().join("readme"),
+        )
+        .unwrap();
         let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
         let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
         let mut request = DirectoryRequest::new("");

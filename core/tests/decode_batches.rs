@@ -6,6 +6,7 @@ use open_arrow_access_core::{
     BatchDecoder, ByteMetadata, ByteReader, Bytes, Error, ErrorKind, Reader, RecordBatch,
     RecordMetadata, Result, Schema, StreamReader, decode_batches,
 };
+use open_arrow_access_test_support::fixture;
 
 struct Decoder {
     steps: VecDeque<(&'static str, usize, bool)>,
@@ -81,11 +82,9 @@ async fn preserves_pending_input_and_drains_batches_at_eof() {
         ("bc", 2, false),
         ("d", 1, false),
     ]);
+    let bytes = Bytes::from(fixture!("bytes", "decoder.bin").await);
     let mut reader = decode_batches(
-        input(vec![
-            Ok(Bytes::from_static(b"abc")),
-            Ok(Bytes::from_static(b"d")),
-        ]),
+        input(vec![Ok(bytes.slice(..3)), Ok(bytes.slice(3..))]),
         decoder,
         metadata(),
     );
@@ -100,7 +99,9 @@ async fn preserves_pending_input_and_drains_batches_at_eof() {
 async fn rejects_invalid_consumption_and_no_progress() {
     for (consumed, message) in [(2, "more bytes"), (0, "no progress")] {
         let mut reader = decode_batches(
-            input(vec![Ok(Bytes::from_static(b"x"))]),
+            input(vec![Ok(Bytes::from(
+                fixture!("bytes", "decoder_invalid.bin").await,
+            ))]),
             Decoder::new([("x", consumed, false)]),
             metadata(),
         );

@@ -1,0 +1,20 @@
+[
+  {
+    "fixture": "directory/a.parquet",
+    "metadata": {
+      "type": "file",
+      "path": "default/train/0000.parquet",
+      "size": 555,
+      "oid": "fixture"
+    }
+  },
+  {
+    "fixture": "directory/hidden.parquet",
+    "metadata": {
+      "type": "file",
+      "path": "default/partial-train/0000.parquet",
+      "size": 546,
+      "oid": "fixture"
+    }
+  }
+]

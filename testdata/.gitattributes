@@ -1,0 +1,6 @@
+# Preserve exact bytes in binary and intentionally malformed fixtures.
+bytes/*.bin binary
+**/bad_utf8.* binary
+zip/*.zip binary
+atif/whitespace.jsonl -text -whitespace
+huggingface/bad_oversized_revision.json binary

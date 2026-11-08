@@ -172,9 +172,10 @@ async fn malformed_missing_unsupported_and_sequential_inputs() {
         ErrorKind::NotFound
     );
     let data = fixture!("zip", "mixed.zip").await;
-    for bytes in [b"not a ZIP".as_slice(), &data[..data.len() - 10]] {
+    for name in ["bad_magic.zip", "bad_truncated.zip"] {
+        let bytes = fixture!("zip", name).await;
         assert_eq!(
-            ZipAccessor::new(memory(bytes), 0)
+            ZipAccessor::new(memory(&bytes), 0)
                 .open(ByteReadRequest::new("bad"))
                 .await
                 .err()
@@ -217,16 +218,7 @@ async fn malformed_missing_unsupported_and_sequential_inputs() {
     );
 
     // Even an empty entry must reject encryption before constructing a decoder.
-    let mut encrypted = data.clone();
-    let local = encrypted
-        .windows(4)
-        .enumerate()
-        .find_map(|(offset, bytes)| {
-            (bytes == b"PK\x03\x04" && encrypted[offset + 30..].starts_with(b"empty.txt"))
-                .then_some(offset)
-        })
-        .unwrap();
-    encrypted[local + 6] |= 1;
+    let encrypted = fixture!("zip", "bad_encrypted.zip").await;
     assert_eq!(
         ZipAccessor::new(memory(&encrypted), 3)
             .open(ByteReadRequest::new("encrypted"))
@@ -240,9 +232,7 @@ async fn malformed_missing_unsupported_and_sequential_inputs() {
 
 #[tokio::test]
 async fn crc_failure_is_terminal() {
-    let mut data = fixture!("zip", "mixed.zip").await;
-    let offset = data.windows(5).position(|v| v == b"%PDF-").unwrap();
-    data[offset] ^= 1;
+    let data = fixture!("zip", "bad_crc.zip").await;
     let source = memory(&data);
     let mut reader = ZipAccessor::new(source.clone(), 2)
         .open(ByteReadRequest::new("corrupt"))
@@ -286,26 +276,7 @@ async fn metadata_and_actual_expansion_limits_are_enforced() {
         );
     }
     // Both headers lie about decoded size; bound the actual expansion as well.
-    let mut data = data;
-    let signatures: Vec<_> = data
-        .windows(4)
-        .enumerate()
-        .filter_map(|(i, bytes)| {
-            if bytes == b"PK\x03\x04" {
-                Some((i, 22, 30))
-            } else if bytes == b"PK\x01\x02" {
-                Some((i, 24, 46))
-            } else {
-                None
-            }
-        })
-        .collect();
-    for (offset, size_offset, name_offset) in signatures {
-        if data[offset + name_offset..].starts_with(b"expanded.txt") {
-            data[offset + size_offset..offset + size_offset + 4]
-                .copy_from_slice(&1u32.to_le_bytes());
-        }
-    }
+    let data = fixture!("zip", "bad_expansion_size.zip").await;
     let zip = ZipAccessor::new(memory(&data), 7).with_limits(ZipLimits {
         max_entry_bytes: 64,
         ..ZipLimits::default()

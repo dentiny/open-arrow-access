@@ -1,27 +1,18 @@
 use arrow_array::cast::AsArray;
-use flate2::{Compression, write::GzEncoder};
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability, Error,
     ErrorKind, ReadOptions, ReadRequest, Result, async_trait,
 };
 use open_arrow_access_service::pmc_inventory::PmcInventoryAccessor;
-use open_arrow_access_test_support::MemoryAccessor;
-use serde_json::{Value, json};
+use open_arrow_access_test_support::{MemoryAccessor, fixture};
 use std::{
     collections::HashMap,
-    io::Write,
     num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
 const MANIFEST: &str = "s3://pmc-oa-opendata/snapshot/inventory.json";
 const FIRST: &str = "data/first.csv.gz";
 const SECOND: &str = "data/second.csv.gz";
-const ROW: &str = "tag,metadata%2FPMC1.1.json,pmc-oa-opendata,2026-11-02,extra\n";
-fn gzip(bytes: &[u8]) -> Vec<u8> {
-    let mut e = GzEncoder::new(Vec::new(), Compression::default());
-    e.write_all(bytes).unwrap();
-    e.finish().unwrap()
-}
 #[derive(Clone, Default)]
 struct Objects {
     files: HashMap<String, MemoryAccessor>,
@@ -31,24 +22,12 @@ impl Objects {
     fn insert(&mut self, key: &str, bytes: &[u8]) {
         self.files.insert(key.into(), MemoryAccessor::new(bytes, 1));
     }
-    fn manifest(&mut self, value: &Value) {
-        self.insert(MANIFEST, &serde_json::to_vec(value).unwrap());
-    }
-    fn fixture() -> (Self, Value) {
-        let mut s = Self::default();
-        s.insert(FIRST, &gzip(format!("{ROW}{ROW}").as_bytes()));
-        s.insert(SECOND, &gzip(ROW.replace("PMC1", "PMC2").as_bytes()));
-        let m = json!({
-            "sourceBucket": "pmc-oa-opendata",
-            "destinationBucket": "arn:aws:s3:::pmc-oa-opendata",
-            "version": "2016-11-30",
-            "creationTimestamp": "1793581200000",
-            "fileFormat": "CSV",
-            "fileSchema": "ETag, Key, Bucket, LastModifiedDate, FutureField",
-            "files": [{"key": FIRST}, {"key": SECOND}]
-        });
-        s.manifest(&m);
-        (s, m)
+    async fn fixture() -> Self {
+        let mut source = Self::default();
+        source.insert(FIRST, &fixture!("pmc/inventory", "first.csv.gz").await);
+        source.insert(SECOND, &fixture!("pmc/inventory", "second.csv.gz").await);
+        source.insert(MANIFEST, &fixture!("pmc/inventory", "manifest.json").await);
+        source
     }
 }
 #[async_trait]
@@ -82,7 +61,7 @@ fn request(p: Option<Vec<&str>>) -> ReadRequest {
 }
 #[tokio::test]
 async fn streams_shards_in_order_with_original_values_and_byte_options() {
-    let (source, _) = Objects::fixture();
+    let source = Objects::fixture().await;
     let options = ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
         io_chunk_size: NonZeroUsize::new(7),
@@ -136,7 +115,7 @@ async fn projection_preserves_output_order_and_zero_column_rows() {
         vec!["ETag"],
         vec![],
     ] {
-        let (source, _) = Objects::fixture();
+        let source = Objects::fixture().await;
         let mut reader = PmcInventoryAccessor::new(source)
             .open(request(Some(names.clone())))
             .await
@@ -160,24 +139,23 @@ async fn projection_preserves_output_order_and_zero_column_rows() {
 
 #[tokio::test]
 async fn invalid_manifests_fail_before_opening_shards() {
-    for (field, value) in [
-        ("sourceBucket", json!("other")),
-        ("creationTimestamp", json!("yesterday")),
-        ("fileSchema", json!("Bucket,Key,Key,ETag")),
-        ("files", json!([{"key":"../escape.csv.gz"}])),
+    for name in [
+        "bad_bucket.json",
+        "bad_timestamp.json",
+        "bad_schema.json",
+        "bad_shard_path.json",
     ] {
-        let (mut source, mut manifest) = Objects::fixture();
-        manifest[field] = value;
-        source.manifest(&manifest);
+        let mut source = Objects::fixture().await;
+        source.insert(MANIFEST, &fixture!("pmc/inventory", name).await);
         let error = PmcInventoryAccessor::new(source.clone())
             .open(request(None))
             .await
             .err()
             .unwrap();
-        assert_eq!(error.kind(), ErrorKind::Decode, "{field}");
+        assert_eq!(error.kind(), ErrorKind::Decode, "{name}");
         assert_eq!(source.opened.lock().unwrap().len(), 1);
     }
-    let (source, _) = Objects::fixture();
+    let source = Objects::fixture().await;
     assert_eq!(
         PmcInventoryAccessor::new(source)
             .with_manifest_limit(NonZeroUsize::MIN)
@@ -192,12 +170,9 @@ async fn invalid_manifests_fail_before_opening_shards() {
 
 #[tokio::test]
 async fn validates_rows_even_with_zero_column_projection() {
-    for row in [
-        "tag,metadata/a.json,other,date,extra\n",
-        "tag,,pmc-oa-opendata,date,extra\n",
-    ] {
-        let (mut source, _) = Objects::fixture();
-        source.insert(FIRST, &gzip(row.as_bytes()));
+    for name in ["bad_bucket.csv.gz", "bad_empty_key.csv.gz"] {
+        let mut source = Objects::fixture().await;
+        source.insert(FIRST, &fixture!("pmc/inventory", name).await);
         let mut reader = PmcInventoryAccessor::new(source)
             .open(request(Some(vec![])))
             .await
@@ -205,24 +180,26 @@ async fn validates_rows_even_with_zero_column_projection() {
         assert_eq!(
             reader.next().await.unwrap_err().kind(),
             ErrorKind::Decode,
-            "{row}"
+            "{name}"
         );
     }
 }
 
 #[tokio::test]
 async fn empty_manifests_and_shards_keep_the_declared_schema() {
-    let (mut source, mut manifest) = Objects::fixture();
-    manifest["files"] = json!([]);
-    source.manifest(&manifest);
+    let mut source = Objects::fixture().await;
+    source.insert(
+        MANIFEST,
+        &fixture!("pmc/inventory", "empty_manifest.json").await,
+    );
     let mut reader = PmcInventoryAccessor::new(source)
         .open(request(None))
         .await
         .unwrap();
     assert_eq!(reader.metadata().schema.fields().len(), 5);
     assert!(reader.next().await.unwrap().is_none());
-    let (mut source, _) = Objects::fixture();
-    source.insert(FIRST, &gzip(b""));
+    let mut source = Objects::fixture().await;
+    source.insert(FIRST, &fixture!("pmc/inventory", "empty.csv.gz").await);
     let mut reader = PmcInventoryAccessor::new(source)
         .open(request(None))
         .await

@@ -9,7 +9,7 @@ use open_arrow_access_core::{
     ReadRequest, RecordMetadata, RecordReader, Result, Schema, StreamReader, async_trait,
 };
 use open_arrow_access_file_format::{FileAccessor, FileFormat};
-use open_arrow_access_test_support::MemoryAccessor;
+use open_arrow_access_test_support::{MemoryAccessor, fixture};
 
 // An external format can implement the public protocol with all built-ins disabled.
 struct ProbeFormat {
@@ -65,7 +65,9 @@ impl FileFormat for ProbeFormat {
 
 #[tokio::test]
 async fn external_format_prepares_each_open_and_receives_request_options() {
-    let input = MemoryAccessor::new(b"", 1).with_ranges().with_listing();
+    let input = MemoryAccessor::new(&fixture!("bytes", "empty.bin").await, 1)
+        .with_ranges()
+        .with_listing();
     let observed = input.observations.clone();
     let events = Arc::new(Mutex::new(Vec::new()));
     let accessor = FileAccessor::from_format(
@@ -128,7 +130,7 @@ async fn external_format_prepares_each_open_and_receives_request_options() {
 
 #[tokio::test]
 async fn preparation_errors_prevent_storage_io_and_decode() {
-    let input = MemoryAccessor::new(b"", 1);
+    let input = MemoryAccessor::new(&fixture!("bytes", "empty.bin").await, 1);
     let observed = input.observations.clone();
     let events = Arc::new(Mutex::new(Vec::new()));
     let accessor = FileAccessor::from_format(
@@ -149,7 +151,7 @@ async fn preparation_errors_prevent_storage_io_and_decode() {
 
 #[tokio::test]
 async fn format_open_errors_keep_their_category_and_context() {
-    let input = MemoryAccessor::new(b"", 1);
+    let input = MemoryAccessor::new(&fixture!("bytes", "empty.bin").await, 1);
     let observed = input.observations.clone();
     let events = Arc::new(Mutex::new(Vec::new()));
     let accessor = FileAccessor::from_format(

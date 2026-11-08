@@ -1,0 +1,9 @@
+{
+  "sourceBucket": "pmc-oa-opendata",
+  "destinationBucket": "arn:aws:s3:::pmc-oa-opendata",
+  "version": "2016-11-30",
+  "creationTimestamp": "1793581200000",
+  "fileFormat": "CSV",
+  "fileSchema": "ETag, Key, Bucket, LastModifiedDate, FutureField",
+  "files": []
+}
