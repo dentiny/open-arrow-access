@@ -250,8 +250,7 @@ route through the shared OpenDAL HTTP accessor, forwarding byte read options.
 Each reader is independent and can outlive the resolved record. HTTP metadata
 and range support are required by that storage accessor.
 
-Metadata collection has a configurable 4 MiB default limit (`with_metadata_limit`),
-including responses without Content-Length. Empty files lists are valid; missing,
+Empty files lists are valid; missing,
 malformed or duplicate membership fails. File bodies are fetched lazily, and
 existing decompression/format accessors can wrap the record accessor. Checksums
 are exposed as upstream metadata, not verified. Reader source locators refer to
