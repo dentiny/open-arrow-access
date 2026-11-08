@@ -5,7 +5,7 @@ use arrow_array::{
     UInt64Array, cast::AsArray,
 };
 use arrow_buffer::OffsetBuffer;
-use arrow_schema::{DataType, Fields};
+use arrow_schema::{DataType, Field, Fields};
 use arrow_select::take::take;
 use chrono::NaiveDate;
 use futures::io::Cursor;
@@ -14,7 +14,7 @@ use xml_arrow::{ReaderOptions, XmlReader};
 
 use super::{decode, decode_source};
 
-/// Validated book metadata, stored directly in Arrow arrays.
+/// Validated RDF metadata and file declarations, without file content.
 pub(super) struct BookMetadata {
     batch: RecordBatch,
 }
@@ -44,7 +44,7 @@ impl BookMetadata {
         if batch.num_rows() != 1 || reader.next_batch().await.map_err(decode_source)?.is_some() {
             return Err(decode("expected one RDF document"));
         }
-        let schema = super::schema();
+        let schema = super::metadata_schema();
         let book = Self {
             batch: RecordBatchBuilder::build_row(schema.clone(), schema.clone(), |row| {
                 row.append("metadata_rdf", raw)?;
@@ -90,47 +90,68 @@ impl BookMetadata {
         selected: &[(usize, Vec<u8>)],
         schema: SchemaRef,
     ) -> Result<RecordBatch> {
-        let mut columns = Vec::new();
-        for field in schema.fields() {
-            let column: ArrayRef = match field.name().as_str() {
-                "files" => {
-                    let indices = UInt64Array::from_iter_values(
-                        selected.iter().map(|(index, _)| *index as u64),
-                    );
-                    let selected_metadata =
-                        take(self.files(), &indices, None).map_err(decode_source)?;
-                    let mut columns = selected_metadata.as_struct().columns().to_vec();
-                    *columns.last_mut().unwrap() = Arc::new(
-                        selected
-                            .iter()
-                            .map(|(_, data)| Some(data.as_slice()))
-                            .collect::<LargeBinaryArray>(),
-                    );
-                    let files = StructArray::new(
-                        selected_metadata.as_struct().fields().clone(),
-                        columns,
-                        None,
-                    );
-                    let DataType::LargeList(item) = field.data_type() else {
-                        unreachable!()
-                    };
-                    Arc::new(LargeListArray::new(
-                        item.clone(),
-                        OffsetBuffer::from_lengths([selected.len()]),
-                        Arc::new(files),
-                        None,
-                    ))
+        let files = schema
+            .field_with_name("files")
+            .ok()
+            .map(|field| self.build_files_column(selected, field))
+            .transpose()?;
+        let columns = schema
+            .fields()
+            .iter()
+            .map(|field| {
+                if field.name() == "files" {
+                    files.as_ref().unwrap().clone()
+                } else {
+                    self.batch.column_by_name(field.name()).unwrap().clone()
                 }
-                name => self.batch.column_by_name(name).unwrap().clone(),
-            };
-            columns.push(column);
-        }
+            })
+            .collect();
         RecordBatch::try_new_with_options(
             schema,
             columns,
             &RecordBatchOptions::new().with_row_count(Some(1)),
         )
         .map_err(decode_source)
+    }
+
+    // Combine selected RDF declarations with bytes read from storage once, by name.
+    fn build_files_column(&self, selected: &[(usize, Vec<u8>)], field: &Field) -> Result<ArrayRef> {
+        let DataType::LargeList(item) = field.data_type() else {
+            unreachable!()
+        };
+        let DataType::Struct(fields) = item.data_type() else {
+            unreachable!()
+        };
+        let indices =
+            UInt64Array::from_iter_values(selected.iter().map(|(index, _)| *index as u64));
+        let metadata = take(self.files(), &indices, None).map_err(decode_source)?;
+        let data: ArrayRef = Arc::new(
+            selected
+                .iter()
+                .map(|(_, data)| Some(data.as_slice()))
+                .collect::<LargeBinaryArray>(),
+        );
+        let columns = fields
+            .iter()
+            .map(|field| {
+                if field.name() == "data" {
+                    data.clone()
+                } else {
+                    metadata
+                        .as_struct()
+                        .column_by_name(field.name())
+                        .unwrap()
+                        .clone()
+                }
+            })
+            .collect();
+        let files = StructArray::new(fields.clone(), columns, None);
+        Ok(Arc::new(LargeListArray::new(
+            item.clone(),
+            OffsetBuffer::from_lengths([selected.len()]),
+            Arc::new(files),
+            None,
+        )))
     }
 }
 
@@ -145,10 +166,6 @@ fn append_fields(
     for field in fields {
         let name = field.name().as_str();
         if name == "metadata_rdf" {
-            continue;
-        }
-        if name == "data" {
-            row.append(name, b"".as_slice())?; // File bytes are acquired later.
             continue;
         }
         let column = source.column_by_name(name).unwrap();
