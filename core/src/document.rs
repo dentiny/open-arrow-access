@@ -59,7 +59,9 @@ where
     fn capability(&self) -> Capability {
         Capability {
             read: self.storage.capability().read,
-            ..Capability::default()
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
         }
     }
 
