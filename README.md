@@ -186,7 +186,7 @@ for TSV.
 | `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
 | `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema; WARC parser records with Arrow conversion deferred |
 | `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Hugging Face repository bytes and Parquet datasets; PMC article metadata with nullable content URLs and verbatim JSON; Common Crawl source identity and HTTP configuration |
+| `service/` | Hugging Face repository bytes and Parquet datasets; PMC article metadata with nullable content URLs; Common Crawl source identity and HTTP configuration |
 | `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support |
 | `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
 | `layers/` | Reserved; only the public layer contract and test-only wrappers exist |

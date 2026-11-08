@@ -24,7 +24,7 @@ async fn read(raw: &[u8], projection: Option<Vec<String>>) -> Result<RecordBatch
 }
 
 #[tokio::test]
-async fn maps_metadata_and_preserves_raw_json_without_fetching_content() {
+async fn maps_metadata_without_fetching_content() {
     let source = MemoryAccessor::new(RAW.as_bytes(), 1);
     let observed = source.observations.clone();
     let mut reader = PmcAccessor::new(source)
@@ -42,7 +42,6 @@ async fn maps_metadata_and_preserves_raw_json_without_fetching_content() {
         assert_eq!(batch[field].as_string::<i32>().value(0), expected);
     }
     assert!(batch["is_pmc_openaccess"].as_boolean().value(0));
-    assert_eq!(batch["raw_metadata_json"].as_string::<i64>().value(0), RAW);
     assert_eq!(observed.requests.lock().unwrap().len(), 1);
     let batch = read(
         br#"{"pmcid":"PMC1","license_code":"TDM","is_manuscript":true}"#,

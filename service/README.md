@@ -65,10 +65,9 @@ inventory reader. There is no provider-specific `Files` or `Prefix` input.
 The schema uses the upstream names: `pmcid`, `version`, `pmid`, `doi`, `title`,
 `citation`, `is_pmc_openaccess`, `is_manuscript`, `is_historical_ocr`,
 `is_retracted`, `license_code`, `xml_url`, `pdf_url`, `media_urls`, and `text_url`.
-`raw_metadata_json` contains the complete verbatim UTF-8 object, preserving
-unknown fields, large numbers, whitespace, and duplicate keys. Known duplicate
-keys use their final value for typed columns. Reader metadata records the input
-object as its source; schema metadata records `pmc.row_kind = article_metadata`.
+Unknown fields are ignored; duplicate keys use their final value. Reader metadata
+records the input object as its source; schema metadata records
+`pmc.row_kind = article_metadata`.
 
 `pmcid` is required and validated, but its source spelling is retained. `version`
 is nullable UInt32 and must be positive when present. `pmid` is nullable Utf8
