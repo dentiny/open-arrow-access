@@ -7,6 +7,8 @@ use futures::{
 };
 use open_arrow_access_core::{ByteMetadata, ByteReader, Bytes, Result, StreamReader, into_stream};
 
+use crate::archive::entry_metadata;
+
 use super::{
     TarEntry, TarLimits,
     error::{active_entry, decode, empty_chunk},
@@ -75,8 +77,7 @@ impl TarStream {
         let Some(entry) = entry else {
             return Ok(None);
         };
-        let mut metadata = self.metadata.clone();
-        metadata.content_length = Some(entry.size);
+        let metadata = entry_metadata(&self.metadata, entry.size);
         let token = Arc::new(());
         self.active = Arc::downgrade(&token);
         let stream = stream::try_unfold(

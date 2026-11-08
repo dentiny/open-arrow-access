@@ -6,9 +6,7 @@ pub use archive::ZipArchive;
 
 use std::num::NonZeroUsize;
 
-use crate::layer::DEFAULT_CHUNK_SIZE;
-
-const DEFAULT_MAX_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;
+use crate::{archive::DEFAULT_MAX_ENTRY_BYTES, layer::DEFAULT_CHUNK_SIZE};
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, FactoryAccessor, FactoryToken,
     ReaderFactory, Result, async_trait,

@@ -8,16 +8,13 @@ mod validation;
 use std::{num::NonZeroUsize, sync::Arc};
 
 use futures::stream::try_unfold;
-use open_arrow_access_core::{
-    ByteMetadata, ByteReader, Result, SeekableInput, StreamReader, into_async_seek,
-};
+use open_arrow_access_core::{ByteReader, Result, StreamReader};
 
-use crate::layer::DEFAULT_CHUNK_SIZE;
+use crate::archive::{ArchiveSource, DEFAULT_MAX_ENTRY_BYTES, entry_metadata};
 use error::{decode, missing_entry, unsupported};
 use validation::{BLOCK_SIZE, entry_end, parse_entry};
 
 const DEFAULT_MAX_ENTRIES: usize = 65_536;
-const DEFAULT_MAX_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct TarLimits {
@@ -51,15 +48,14 @@ pub struct TarEntry {
 /// ranged representation; a sequential gzip decoder cannot supply this input.
 #[derive(Clone)]
 pub struct TarArchive {
-    input: SeekableInput,
-    metadata: ByteMetadata,
+    source: ArchiveSource,
     entries: Arc<[(TarEntry, u64)]>,
 }
 
 impl TarArchive {
     pub async fn open(input: Box<dyn ByteReader>, limits: TarLimits) -> Result<Self> {
-        let metadata = input.metadata().clone();
-        let input = into_async_seek(input, DEFAULT_CHUNK_SIZE, "open_tar")?;
+        let source = ArchiveSource::new(input, "open_tar")?;
+        let input = &source.input;
         let mut offset = 0;
         let mut entries = Vec::new();
         loop {
@@ -85,8 +81,7 @@ impl TarArchive {
             entries.push((entry, start));
         }
         Ok(Self {
-            input,
-            metadata,
+            source,
             entries: entries.into(),
         })
     }
@@ -106,9 +101,8 @@ impl TarArchive {
         if !entry.is_file {
             return Err(unsupported("TAR directory entries have no file reader"));
         }
-        let mut metadata = self.metadata.clone();
-        metadata.content_length = Some(entry.size);
-        let input = self.input.clone();
+        let metadata = entry_metadata(&self.source.metadata, entry.size);
+        let input = self.source.input.clone();
         let end = start + entry.size;
         let stream = try_unfold((input, *start), move |(input, position)| async move {
             if position == end {
