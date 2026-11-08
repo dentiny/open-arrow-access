@@ -5,6 +5,9 @@ pub(crate) mod files;
 mod query;
 mod validation;
 
+#[cfg(feature = "huggingface")]
+pub(crate) use validation::is_http_endpoint;
+
 use error::transport_error;
 use http::{Request, StatusCode};
 use open_arrow_access_core::{Error, ErrorKind, Result};
