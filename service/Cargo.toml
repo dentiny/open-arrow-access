@@ -8,7 +8,17 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
-commoncrawl = ["dep:open-arrow-access-storage", "dep:opendal", "dep:opendal-service-http", "dep:url", "opendal/services-http", "opendal/http-transport-reqwest"]
+warc = [
+    "dep:open-arrow-access-storage",
+    "dep:opendal",
+    "dep:opendal-service-http",
+    "dep:url",
+    "opendal/services-http",
+    "opendal/http-transport-reqwest",
+    "dep:open-arrow-access-dataset",
+    "dep:futures",
+    "open-arrow-access-dataset/directory",
+]
 huggingface = [
     "dep:open-arrow-access-storage",
     "dep:open-arrow-access-dataset",
@@ -38,6 +48,7 @@ pmc-inventory = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/gzip",
 ]
+
 
 [dependencies]
 open-arrow-access-dataset = { workspace = true, optional = true }

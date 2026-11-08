@@ -18,6 +18,7 @@ directory owns facade wiring and composition across crates.
 | Hugging Face Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
 | PMC inventory | [`service/tests/pmc_inventory.rs`](../service/tests/pmc_inventory.rs), [`tests/pmc_inventory.rs`](pmc_inventory.rs) |
 | Common Crawl configuration | [`tests/commoncrawl_common.rs`](commoncrawl_common.rs) |
+| Common Crawl WARC inventory | [`tests/commoncrawl_warc.rs`](commoncrawl_warc.rs) |
 | WARC parser | [`tests/warc.rs`](warc.rs) |
 | OpenDAL storage | [`storage/tests/opendal.rs`](../storage/tests/opendal.rs) |
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |

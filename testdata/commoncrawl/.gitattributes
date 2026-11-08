@@ -1,0 +1,4 @@
+*.paths -text
+*.gz -text
+good.paths whitespace=cr-at-eol
+blank.paths whitespace=cr-at-eol,-blank-at-eof
