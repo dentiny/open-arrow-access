@@ -21,7 +21,10 @@ pub(crate) struct ResolvedFilesPlan<M> {
 pub(crate) struct HttpFileService {
     endpoint: Url,
     client: HttpClient,
+    /// Provider resolve operation (e.g. `resolve_zenodo`) for metadata HTTP/JSON errors.
     operation: &'static str,
+    /// Maps empty/duplicate filenames to provider-specific decode errors,
+    /// retaining the underlying namespace error as the source.
     membership_error: fn(Error) -> Error,
 }
 
