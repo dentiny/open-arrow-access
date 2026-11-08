@@ -11,10 +11,19 @@ use crate::ResolvedFileSet;
 /// Canonical download root, ordered logical-name mappings and provider metadata.
 /// Providers validate identity, availability and names before returning this plan.
 pub(crate) struct ResolvedFilesPlan<M> {
+    /// Download path prefix relative to the service's HTTP origin.
     root: String,
+    /// Ordered (logical filename, download object) mappings. The filename is
+    /// exposed by listing/open; the object's locator is relative to `root`.
     files: Vec<(String, ObjectRef)>,
+    /// Provider metadata retained alongside the resolved file namespace.
     metadata: M,
+    /// (Query parameter name, value) pairs appended to download requests and
+    /// URL-encoded by the transport; metadata requests keep their own query.
     query: Vec<(String, String)>,
+    /// (Download locator relative to `root`, byte length) pairs for the downloaded
+    /// representation. Keys match `files` object locators, not logical filenames.
+    /// Supplied lengths are trusted; missing locators fall back to storage stat.
     content_lengths: Vec<(String, u64)>,
 }
 
