@@ -46,6 +46,7 @@ impl HttpClient {
             .map_err(|error| transport_error(operation, error))?;
         let status = response.status();
         if status != StatusCode::OK {
+            // TODO: Extract shared HTTP status-to-error translation.
             let kind = match status {
                 StatusCode::NOT_FOUND => opendal::ErrorKind::NotFound,
                 StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
