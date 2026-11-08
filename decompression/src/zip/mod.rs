@@ -1,22 +1,20 @@
 //! ZIP directory inspection and selected-entry byte decompression.
 
+mod archive;
 mod error;
+pub use archive::ZipArchive;
 
 use std::num::NonZeroUsize;
 
-use async_zip::base::read1::{ZipOptions, seek::ZipArchiveReader};
-use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind,
-    FactoryAccessor, FactoryToken, ReaderFactory, Result, SeekableInput, async_trait,
-    into_async_seek,
-};
-
-use self::error::zip_error;
-use crate::{decoded_reader, layer::DEFAULT_CHUNK_SIZE};
+use crate::layer::DEFAULT_CHUNK_SIZE;
 
 const DEFAULT_MAX_ENTRIES: u64 = 65_536;
 const DEFAULT_MAX_DIRECTORY_BYTES: u64 = 16 * 1024 * 1024;
 const DEFAULT_MAX_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;
+use open_arrow_access_core::{
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, FactoryAccessor, FactoryToken,
+    ReaderFactory, Result, async_trait,
+};
 
 /// Resource limits checked by the ZIP parser, including actual decoded length.
 #[derive(Clone, Debug)]
@@ -90,22 +88,13 @@ impl<B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ZipAccesso
     /// Read the bounded central directory without decompressing entry bodies.
     /// Storage options are forwarded unchanged. Order is central-directory order.
     pub async fn entries(&self, request: ByteReadRequest) -> Result<Vec<ZipEntry>> {
+        Ok(self.archive(request).await?.entries().to_vec())
+    }
+
+    /// Inspect once and reuse the same directory/source for multiple entries.
+    pub async fn archive(&self, request: ByteReadRequest) -> Result<ZipArchive> {
         let input = self.binding.storage().open(request).await?;
-        let archive = OpenedArchive::open(input, &self.binding.factory().limits).await?;
-        archive
-            .parser
-            .cdrs()
-            .iter()
-            .enumerate()
-            .map(|(index, entry)| {
-                Ok(ZipEntry {
-                    index,
-                    name: entry.insecure_file_name.as_bytes().to_vec(),
-                    compressed_size: entry.compressed_size().map_err(zip_error)?,
-                    uncompressed_size: entry.uncompressed_size().map_err(zip_error)?,
-                })
-            })
-            .collect()
+        ZipArchive::open(input, self.binding.factory().limits.clone()).await
     }
 }
 
@@ -163,90 +152,9 @@ impl ReaderFactory for ZipFactory {
         _: ByteReadRequest,
         (): (),
     ) -> Result<Box<dyn ByteReader>> {
-        let mut metadata = input.metadata().clone();
-        let archive = OpenedArchive::open(input, &self.limits).await?;
-        let entry = archive.parser.cdrs().get(self.entry_index).ok_or_else(|| {
-            Error::new(
-                ErrorKind::NotFound,
-                "open_zip_entry",
-                "ZIP entry index is out of bounds",
-            )
-        })?;
-        metadata.content_length = Some(entry.uncompressed_size().map_err(zip_error)?);
-        // ZIP local file header (offsets relative to lfh_offset):
-        // | signature (4 B) | version (2 B) | flags (2 B) | ... |
-        // 0                 4               6             8
-        let flags_offset = entry
-            .lfh_offset()
-            .map_err(zip_error)?
-            .checked_add(6)
-            .filter(|offset| offset.checked_add(2).is_some_and(|end| end <= archive.len))
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::Decode,
-                    "open_zip_entry",
-                    "invalid local header offset",
-                )
-            })?;
-        let flags = archive
-            .source
-            .read_range(flags_offset..flags_offset + 2)
-            .await?;
-        let flags: [u8; 2] = flags.as_ref().try_into().map_err(|_| {
-            Error::new(
-                ErrorKind::Io,
-                "open_zip_entry",
-                "range reader returned an incorrect length",
-            )
-        })?;
-        if u16::from_le_bytes(flags) & 0x41 != 0 {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "open_zip_entry",
-                "encrypted ZIP entries are unsupported",
-            ));
-        }
-        let file = archive
-            .parser
-            .file_oneshot(self.entry_index)
+        ZipArchive::open(input, self.limits.clone())
+            .await?
+            .open_entry(self.entry_index, self.chunk_size)
             .await
-            .map_err(zip_error)?;
-        Ok(decoded_reader(
-            file,
-            metadata,
-            self.chunk_size,
-            "decompress_zip",
-            "ZIP",
-        ))
-    }
-}
-
-struct OpenedArchive {
-    parser: ZipArchiveReader<SeekableInput>,
-    source: SeekableInput,
-    len: u64,
-}
-
-impl OpenedArchive {
-    async fn open(input: Box<dyn ByteReader>, limits: &ZipLimits) -> Result<Self> {
-        let input = into_async_seek(input, DEFAULT_CHUNK_SIZE, "open_zip")?;
-        let len = input.content_length();
-        let options = ZipOptions {
-            max_cd_num_files: limits.max_entries,
-            max_cd_num_files_load: limits.max_entries,
-            max_cd_size_in_bytes: limits.max_directory_bytes,
-            max_uncompressed_size_per_file: limits.max_entry_bytes,
-            max_compressed_size_per_file: limits.max_entry_bytes,
-            ..ZipOptions::default()
-        };
-        let source = input.clone();
-        let parser = ZipArchiveReader::open_with_options(input, options)
-            .await
-            .map_err(zip_error)?;
-        Ok(Self {
-            parser,
-            source,
-            len,
-        })
     }
 }
