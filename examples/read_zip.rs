@@ -1,6 +1,8 @@
+use std::num::NonZeroUsize;
+
 use open_arrow_access::{
     Accessor, ByteReadRequest,
-    decompression::ZipAccessor,
+    decompression::{ZipArchive, ZipLimits},
     storage::{OpenDalAccessor, opendal},
 };
 
@@ -11,9 +13,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("usage: read_zip <root> <archive> <entry-index>".into());
     }
     let operator = opendal::Operator::new(opendal::services::Fs::default().root(&args[1]))?;
-    let zip = ZipAccessor::new(OpenDalAccessor::new(operator), args[3].parse()?);
     let request = ByteReadRequest::new(args[2].as_str());
-    for entry in zip.entries(request.clone()).await? {
+    let input = OpenDalAccessor::new(operator).open(request).await?;
+    let archive = ZipArchive::open(input, ZipLimits::default()).await?;
+    for entry in archive.entries() {
         println!(
             "{}: {:?} ({} bytes)",
             entry.index,
@@ -21,7 +24,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             entry.uncompressed_size
         );
     }
-    let mut reader = zip.open(request).await?;
+    let mut reader = archive
+        .open_entry(args[3].parse()?, NonZeroUsize::new(64 * 1024).unwrap())
+        .await?;
     let mut count = 0;
     while let Some(chunk) = reader.next().await? {
         count += chunk.len();

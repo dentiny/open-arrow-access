@@ -46,7 +46,7 @@ pub mod decompression {
         DecompressionLayer,
     };
     #[cfg(feature = "decompression-zip")]
-    pub use open_arrow_access_decompression::{ZipAccessor, ZipEntry, ZipLimits};
+    pub use open_arrow_access_decompression::{ZipAccessor, ZipArchive, ZipEntry, ZipLimits};
 }
 
 pub mod storage {

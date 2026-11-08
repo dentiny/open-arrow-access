@@ -190,3 +190,17 @@ owned futures AsyncRead decoder in the standard sequential ByteReader contract.
 It shares chunking, source-error preservation and terminal handling between
 stream codecs and selected archive entries. Callers supply decoded-coordinate
 metadata and codec-specific configuration; the helper performs no eager I/O.
+
+## Reusing a ZIP directory
+
+`ZipAccessor::archive(request).await` opens one `ZipArchive` session. Its
+`entries()` borrows the cached directory, and `open_entry(index, chunk_size)`
+returns an independently owned reader over the same opened source. Cloning a
+session shares metadata and the source without reparsing the directory. Readers
+can be interleaved and outlive the session. The direct entry futures are owned
+and Send; existing source-version guarantees are retained.
+
+For an already opened ByteReader, use `ZipArchive::open(input, limits).await`.
+Existing `ZipAccessor::entries` and `open` convenience methods remain available;
+use a session when reading multiple entries to avoid repeated storage opens and
+directory parsing. The `read_zip` example demonstrates this session path.

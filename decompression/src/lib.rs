@@ -36,4 +36,4 @@ pub use zstd::Zstd;
 #[cfg(feature = "zip")]
 mod zip;
 #[cfg(feature = "zip")]
-pub use zip::{ZipAccessor, ZipEntry, ZipLimits};
+pub use zip::{ZipAccessor, ZipArchive, ZipEntry, ZipLimits};

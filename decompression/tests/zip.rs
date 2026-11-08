@@ -11,6 +11,38 @@ fn memory(data: &[u8]) -> MemoryAccessor {
 }
 
 #[tokio::test]
+async fn archive_session_reuses_storage_and_interleaves_independent_entries() {
+    let data = fixture!("zip", "mixed.zip").await;
+    let source = memory(&data);
+    let observed = source.observations.clone();
+    let archive = ZipAccessor::new(source, 0)
+        .archive(ByteReadRequest::new("papers.zip"))
+        .await
+        .unwrap();
+    assert_eq!(archive.entries().len(), 8);
+    let chunk = NonZeroUsize::new(3).unwrap();
+    fn owned_send<T: Send + 'static>(value: T) -> T {
+        value
+    }
+    let mut xml = owned_send(archive.open_entry(1, chunk)).await.unwrap();
+    let mut pdf = owned_send(archive.open_entry(2, chunk)).await.unwrap();
+    assert_eq!(xml.next().await.unwrap().unwrap().as_ref(), b"<ar");
+    assert_eq!(pdf.next().await.unwrap().unwrap().as_ref(), b"%PD");
+    let mut duplicate = archive.clone().open_entry(5, chunk).await.unwrap();
+    drop(archive);
+    byte_layer::assert_output(xml.as_mut(), b"ticle>hello</article>", 3)
+        .await
+        .unwrap();
+    byte_layer::assert_output(pdf.as_mut(), b"F-\x00\xff", 3)
+        .await
+        .unwrap();
+    byte_layer::assert_output(duplicate.as_mut(), b"second version", 3)
+        .await
+        .unwrap();
+    assert_eq!(observed.requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn enumerate_then_read_selected_members_with_bounded_io() {
     let data = fixture!("zip", "mixed.zip").await;
     let source = memory(&data);
