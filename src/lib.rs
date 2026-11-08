@@ -16,7 +16,9 @@ pub mod service {
     pub use open_arrow_access_service::pmc;
 
     #[cfg(feature = "service-warc")]
-    pub use open_arrow_access_service::commoncrawl::{CommonCrawl, create_http_accessor};
+    pub use open_arrow_access_service::commoncrawl::{
+        CommonCrawl, CommonCrawlSegmentAccessor, CommonCrawlSegmentRequest, create_http_accessor,
+    };
     #[cfg(feature = "service-huggingface")]
     pub use open_arrow_access_service::huggingface::*;
     #[cfg(feature = "service-warc")]

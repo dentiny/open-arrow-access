@@ -11,7 +11,7 @@ use open_arrow_access_dataset::{FileSetAccessor, FileSetRequest};
 #[derive(Debug)]
 pub struct CommonCrawlWarcAccessor<M, F> {
     manifests: M,
-    files: FileSetAccessor<F>,
+    pub(crate) files: FileSetAccessor<F>,
 }
 
 impl<M, F> CommonCrawlWarcAccessor<M, F> {
@@ -26,11 +26,20 @@ impl<M, F> CommonCrawlWarcAccessor<M, F> {
 impl<M: ByteAccessor, F> CommonCrawlWarcAccessor<M, F> {
     /// Collect selected paths without opening record files.
     pub async fn resolve(&self, request: CommonCrawlWarcRequest) -> Result<FileSetRequest> {
+        let prefix = request.prefix();
+        self.resolve_prefix(request, &prefix).await
+    }
+
+    pub(crate) async fn resolve_prefix(
+        &self,
+        request: CommonCrawlWarcRequest,
+        prefix: &str,
+    ) -> Result<FileSetRequest> {
         let input = self
             .manifests
             .open(ByteReadRequest::new(request.manifest()).with_options(request.byte_options))
             .await?;
-        let objects = read_manifest(input, &request.prefix()).await?;
+        let objects = read_manifest(input, prefix).await?;
         Ok(FileSetRequest::new(objects)
             .with_options(request.options)
             .with_byte_options(request.byte_options))
