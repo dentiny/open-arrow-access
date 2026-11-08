@@ -49,6 +49,8 @@ pmc-inventory = [
     "open-arrow-access-decompression/gzip",
 ]
 
+pmc = ["dep:arrow-schema", "dep:serde", "dep:serde_json"]
+
 
 [dependencies]
 open-arrow-access-dataset = { workspace = true, optional = true }
@@ -64,20 +66,24 @@ serde_json = { workspace = true, optional = true }
 opendal-service-http = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
-arrow-schema = { workspace = true, optional = true }
 percent-encoding = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 
+arrow-schema = { workspace = true, optional = true }
+
 [dev-dependencies]
+futures.workspace = true
 arrow-schema.workspace = true
 http.workspace = true
-tokio.workspace = true
-open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
 flate2.workspace = true
-open-arrow-access-storage.workspace = true
 bytes.workspace = true
+
+open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
+open-arrow-access-storage.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["fs"] }
 [[test]]
 name = "huggingface"
 required-features = ["huggingface"]
@@ -85,6 +91,10 @@ required-features = ["huggingface"]
 [[test]]
 name = "pmc_inventory"
 required-features = ["pmc-inventory"]
+
+[[test]]
+name = "pmc"
+required-features = ["pmc"]
 
 [lints]
 workspace = true

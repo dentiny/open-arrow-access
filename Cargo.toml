@@ -29,7 +29,7 @@ opendal = "0.59.2"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["raw_value"] }
 http = "1"
 opendal-service-http = "=0.59.2"
 url = "2"
@@ -70,6 +70,8 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 default = []
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
 service-pmc-inventory = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc-inventory"]
+
+service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
 service-warc = ["dep:open-arrow-access-service", "open-arrow-access-service/warc"]
 format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
@@ -98,6 +100,10 @@ tokio.workspace = true
 [[example]]
 name = "read_huggingface"
 required-features = ["service-huggingface"]
+
+[[example]]
+name = "read_pmc"
+required-features = ["service-pmc"]
 
 [[example]]
 name = "read_parquet"

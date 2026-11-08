@@ -11,3 +11,6 @@ pub mod warc;
 
 #[cfg(feature = "pmc-inventory")]
 pub mod pmc_inventory;
+
+#[cfg(feature = "pmc")]
+pub mod pmc;
