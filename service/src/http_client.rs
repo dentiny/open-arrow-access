@@ -1,12 +1,20 @@
 //! Bounded provider JSON requests over the same transport used for file reads.
 
 mod error;
+#[cfg(feature = "http-files")]
+mod query;
+#[cfg(feature = "http-files")]
+pub(crate) mod validation;
 
 use error::transport_error;
 use http::{Request, StatusCode};
 use open_arrow_access_core::{Error, ErrorKind, Result};
+#[cfg(feature = "http-files")]
+use open_arrow_access_storage::OpenDalAccessor;
 use opendal::{Buffer, HttpTransporter, OperationContext, raw::oio::ReadStream};
 use serde::de::DeserializeOwned;
+#[cfg(feature = "http-files")]
+use url::Url;
 
 #[derive(Clone, Debug)]
 pub(crate) struct HttpClient {
@@ -33,6 +41,33 @@ impl HttpClient {
         Ok(Self {
             context: OperationContext::new(),
         })
+    }
+
+    #[cfg(feature = "http-files")]
+    pub(crate) fn accessor(
+        &self,
+        endpoint: &Url,
+        root: &str,
+        query: &[(&str, &str)],
+    ) -> Result<OpenDalAccessor> {
+        let mut context = self.context.clone();
+        if !query.is_empty() {
+            context = context.with_http_transport(HttpTransporter::new(query::QueryTransport {
+                inner: context.http_transport().clone(),
+                query: query
+                    .iter()
+                    .map(|(key, value)| ((*key).into(), (*value).into()))
+                    .collect(),
+            }));
+        }
+        let operator = opendal::Operator::new(
+            opendal_service_http::Http::default()
+                .endpoint(endpoint.as_str().trim_end_matches('/'))
+                .root(root),
+        )
+        .map_err(|error| transport_error("configure_http", error))?
+        .with_context(context);
+        Ok(OpenDalAccessor::new(operator))
     }
 
     pub(crate) async fn json<T: DeserializeOwned>(

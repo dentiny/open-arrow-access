@@ -10,13 +10,12 @@ use open_arrow_access_core::{
     Result, async_trait,
 };
 use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
-use opendal::Operator;
 
 use serde::Deserialize;
 use url::Url;
 
 use crate::http_client::HttpClient;
-use error::{io_error, membership_error};
+use error::membership_error;
 use validation::{validate_endpoint, validate_record};
 
 const DEFAULT_METADATA_LIMIT: usize = 4 * 1024 * 1024;
@@ -61,15 +60,9 @@ impl ZenodoService {
         // Use the resolved record's canonical content route, never a concept's
         // latest-version link or an arbitrary host supplied in metadata.
         let root = format!("api/records/{id}/files/");
-        let operator = Operator::new(
-            opendal_service_http::Http::default()
-                .endpoint(self.endpoint.as_str().trim_end_matches('/'))
-                .root(&root),
-        )
-        .map_err(io_error)?
-        .with_context(self.client.context.clone());
+        let bytes = self.client.accessor(&self.endpoint, &root, &[])?;
         let inner = NamedFileAccessor::new(
-            OpenDalAccessor::new(operator),
+            bytes,
             record
                 .files
                 .iter()

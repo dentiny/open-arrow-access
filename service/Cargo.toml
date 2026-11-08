@@ -8,11 +8,9 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
-zenodo = [
+http-client = [
     "dep:open-arrow-access-storage",
     "dep:opendal",
-    "dep:opendal-service-http",
-    "opendal/services-http",
     "opendal/http-transport-reqwest",
     "dep:http",
     "dep:reqwest",
@@ -21,6 +19,8 @@ zenodo = [
     "dep:serde",
     "dep:serde_json",
 ]
+http-files = ["http-client", "dep:opendal-service-http", "opendal/services-http"]
+zenodo = ["http-files"]
 courtlistener = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/bz2",
@@ -44,21 +44,13 @@ warc = [
     "open-arrow-access-dataset/directory",
 ]
 huggingface = [
-    "dep:open-arrow-access-storage",
+    "http-client",
     "dep:open-arrow-access-dataset",
     "dep:open-arrow-access-file-format",
     "dep:futures",
-    "dep:opendal",
     "opendal/services-hf",
-    "opendal/http-transport-reqwest",
     "dep:tokio",
     "tokio/fs",
-    "dep:http",
-    "dep:reqwest",
-    "dep:opendal-http-transport-reqwest",
-    "dep:serde",
-    "dep:serde_json",
-    "dep:url",
     "open-arrow-access-dataset/directory",
     "open-arrow-access-file-format/parquet",
 ]
