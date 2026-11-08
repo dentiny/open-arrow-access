@@ -1,13 +1,11 @@
 use arrow_array::cast::AsArray;
-use open_arrow_access::{
-    Accessor, ReadOptions, ReadRequest,
-    dataset::{FileSetAccessor, FileSetRequest},
-    file_format::{AtifAccessor, AtifFormat},
-    storage::OpenDalAccessor,
-};
+use open_arrow_access_core::{Accessor, ReadOptions, ReadRequest};
+use open_arrow_access_dataset::{FileSetAccessor, FileSetRequest};
+use open_arrow_access_file_format::{AtifAccessor, AtifFormat};
+use open_arrow_access_storage::OpenDalAccessor;
 
 #[tokio::test]
-async fn facade_reads_atif_jsonl_and_ordered_file_sets() {
+async fn reads_atif_jsonl_and_ordered_file_sets() {
     let root = open_arrow_access_test_support::fixture_path!("atif", "");
     let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(&root));
     let mut reader = AtifAccessor::new(bytes, AtifFormat::JsonLines)

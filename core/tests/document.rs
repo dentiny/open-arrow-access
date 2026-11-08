@@ -2,7 +2,7 @@ use std::{num::NonZeroUsize, sync::Arc};
 
 use arrow_array::{RecordBatchOptions, cast::AsArray};
 use arrow_schema::{DataType, Field};
-use open_arrow_access::{
+use open_arrow_access_core::{
     Accessor, ByteReadOptions, DocumentAccessor, DocumentDecoder, Error, ErrorKind, ReadOptions,
     ReadRequest, RecordBatch, RecordBatchBuilder, Result, Schema, SchemaRef, async_trait,
 };

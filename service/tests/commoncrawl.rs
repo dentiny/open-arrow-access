@@ -1,10 +1,9 @@
 use futures::stream;
 use http::{Request, Response, StatusCode};
-use open_arrow_access::{
-    Accessor, ByteAccessor, Bytes, ErrorKind,
-    service::CommonCrawl,
-    storage::{OpenDalAccessor, opendal},
-};
+use open_arrow_access_core::{Accessor, ByteAccessor, Bytes, ErrorKind};
+use open_arrow_access_service::commoncrawl::CommonCrawl;
+use open_arrow_access_storage::{OpenDalAccessor, opendal};
+
 use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext, Operator};
 use std::sync::{Arc, Mutex};
 
@@ -93,7 +92,7 @@ impl HttpTransport for MockHttp {
 
 #[tokio::test]
 async fn origin_rooted_http_uses_injected_transport_and_rejects_aliases() {
-    let manifest = Bytes::from_static(include_bytes!("../testdata/commoncrawl/one.paths"));
+    let manifest = Bytes::from_static(include_bytes!("../../testdata/commoncrawl/one.paths"));
     let transport = MockHttp {
         manifest: manifest.clone(),
         requests: Arc::default(),

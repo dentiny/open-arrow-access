@@ -56,13 +56,14 @@ arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
 futures.workspace = true
+arrow-schema.workspace = true
+http.workspace = true
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
 open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-storage.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
-
 [[test]]
 name = "huggingface"
 required-features = ["huggingface"]
@@ -73,3 +74,11 @@ required-features = ["pmc"]
 
 [lints]
 workspace = true
+
+[[test]]
+name = "commoncrawl"
+required-features = ["warc"]
+
+[[test]]
+name = "warc"
+required-features = ["warc"]
