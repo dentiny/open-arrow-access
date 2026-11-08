@@ -1,12 +1,13 @@
 //! Published Zenodo records and their attached files.
 
+mod error;
 mod validation;
 
 use std::num::NonZeroU64;
 
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ListRequest,
-    ObjectStream, Result, async_trait,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectStream,
+    Result, async_trait,
 };
 use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
 use opendal::Operator;
@@ -15,7 +16,8 @@ use serde::Deserialize;
 use url::Url;
 
 use crate::http_client::HttpClient;
-use validation::validate_endpoint;
+use error::{io_error, membership_error};
+use validation::{validate_endpoint, validate_record};
 
 const DEFAULT_METADATA_LIMIT: usize = 4 * 1024 * 1024;
 
@@ -34,8 +36,7 @@ impl ZenodoService {
 
     /// Select an origin, for example `https://sandbox.zenodo.org`.
     pub fn with_endpoint(endpoint: &str) -> Result<Self> {
-        let endpoint = Url::parse(endpoint).map_err(|_| invalid("invalid endpoint"))?;
-        validate_endpoint(&endpoint)?;
+        let endpoint = validate_endpoint(endpoint)?;
         Ok(Self {
             endpoint,
             client: HttpClient::new()?,
@@ -56,12 +57,7 @@ impl ZenodoService {
             .client
             .json(url.as_str(), None, self.metadata_limit, "resolve_zenodo")
             .await?;
-        if record.id != id.get() {
-            return Err(decode("record ID differs from the requested version"));
-        }
-        if record.files.iter().any(|file| !valid_key(&file.key)) {
-            return Err(decode("invalid attachment key"));
-        }
+        validate_record(&record, id)?;
         // Use the resolved record's canonical content route, never a concept's
         // latest-version link or an arbitrary host supplied in metadata.
         let root = format!("api/records/{id}/files/");
@@ -80,7 +76,7 @@ impl ZenodoService {
                 .map(|file| (file.key.clone(), format!("{}/content", file.key).into()))
                 .collect(),
         )
-        .map_err(|error| decode("invalid attachment membership").with_source(error))?;
+        .map_err(membership_error)?;
         Ok(ZenodoAccessor {
             id,
             files: record.files,
@@ -141,28 +137,4 @@ impl ByteAccessor for ZenodoAccessor {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
         self.inner.list(request).await
     }
-}
-
-fn valid_key(key: &str) -> bool {
-    !key.is_empty()
-        && key != "."
-        && key != ".."
-        && !key.contains(['/', '\\'])
-        && !key.chars().any(char::is_control)
-        && key.trim() == key
-}
-
-fn invalid(message: &str) -> Error {
-    Error::new(ErrorKind::InvalidInput, "configure_zenodo", message)
-}
-fn decode(message: &str) -> Error {
-    Error::new(ErrorKind::Decode, "resolve_zenodo", message)
-}
-fn io_error(error: opendal::Error) -> Error {
-    let kind = match error.kind() {
-        opendal::ErrorKind::NotFound => ErrorKind::NotFound,
-        opendal::ErrorKind::PermissionDenied => ErrorKind::PermissionDenied,
-        _ => ErrorKind::Io,
-    };
-    Error::new(kind, "resolve_zenodo", "Zenodo HTTP operation failed").with_source(error)
 }
