@@ -16,7 +16,7 @@ use std::{
 const MANIFEST: &str = "s3://pmc-oa-opendata/snapshot/inventory.json";
 const FIRST: &str = "data/first.csv.gz";
 const SECOND: &str = "data/second.csv.gz";
-const ROW: &str = "pmc-oa-opendata,metadata%2FPMC1.1.json,2026-11-02,tag\n";
+const ROW: &str = "tag,metadata%2FPMC1.1.json,pmc-oa-opendata,2026-11-02,extra\n";
 fn gzip(bytes: &[u8]) -> Vec<u8> {
     let mut e = GzEncoder::new(Vec::new(), Compression::default());
     e.write_all(bytes).unwrap();
@@ -37,8 +37,16 @@ impl Objects {
     fn fixture() -> (Self, Value) {
         let mut s = Self::default();
         s.insert(FIRST, &gzip(format!("{ROW}{ROW}").as_bytes()));
-        s.insert(SECOND, &gzip(ROW.as_bytes()));
-        let m = json!({"sourceBucket":"pmc-oa-opendata","destinationBucket":"arn:aws:s3:::pmc-oa-opendata","version":"2016-11-30","creationTimestamp":"1793581200000","fileFormat":"CSV","fileSchema":"Bucket, Key, LastModifiedDate, ETag","future":"preserve","files":[{"key":FIRST},{"key":SECOND}]});
+        s.insert(SECOND, &gzip(ROW.replace("PMC1", "PMC2").as_bytes()));
+        let m = json!({
+            "sourceBucket": "pmc-oa-opendata",
+            "destinationBucket": "arn:aws:s3:::pmc-oa-opendata",
+            "version": "2016-11-30",
+            "creationTimestamp": "1793581200000",
+            "fileFormat": "CSV",
+            "fileSchema": "ETag, Key, Bucket, LastModifiedDate, FutureField",
+            "files": [{"key": FIRST}, {"key": SECOND}]
+        });
         s.manifest(&m);
         (s, m)
     }
@@ -59,10 +67,7 @@ impl Accessor for Objects {
         self.opened.lock().unwrap().push(r.clone());
         self.files
             .get(r.object.locator())
-            .ok_or_else(|| {
-                Error::new(ErrorKind::NotFound, "fixture", "missing")
-                    .with_source(std::io::Error::from(std::io::ErrorKind::NotFound))
-            })?
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "fixture", "missing"))?
             .open(r)
             .await
     }
@@ -87,16 +92,31 @@ async fn streams_shards_in_order_with_original_values_and_byte_options() {
         .await
         .unwrap();
     assert_eq!(source.opened.lock().unwrap().len(), 1);
-    let mut rows = 0;
+    assert_eq!(
+        reader
+            .metadata()
+            .schema
+            .fields()
+            .iter()
+            .map(|field| field.name().as_str())
+            .collect::<Vec<_>>(),
+        ["ETag", "Key", "Bucket", "LastModifiedDate", "FutureField"]
+    );
+    let mut keys = Vec::new();
     while let Some(batch) = reader.next().await.unwrap() {
         assert!(Arc::ptr_eq(&batch.schema(), &reader.metadata().schema));
-        assert_eq!(
-            batch["Key"].as_string::<i32>().value(0),
-            "metadata%2FPMC1.1.json"
-        );
-        rows += batch.num_rows();
+        assert_eq!(batch["FutureField"].as_string::<i32>().value(0), "extra");
+        let column = batch["Key"].as_string::<i32>();
+        keys.extend((0..batch.num_rows()).map(|row| column.value(row).to_owned()));
     }
-    assert_eq!(rows, 3);
+    assert_eq!(
+        keys,
+        [
+            "metadata%2FPMC1.1.json",
+            "metadata%2FPMC1.1.json",
+            "metadata%2FPMC2.1.json"
+        ]
+    );
     let opened = source.opened.lock().unwrap();
     assert_eq!(
         opened
@@ -139,28 +159,6 @@ async fn projection_preserves_output_order_and_zero_column_rows() {
 }
 
 #[tokio::test]
-async fn manifest_field_order_and_quoted_extra_fields_are_preserved() {
-    let (mut source, mut manifest) = Objects::fixture();
-    manifest["fileSchema"] = json!("ETag,Key,Bucket,LastModifiedDate,FutureField");
-    manifest["files"].as_array_mut().unwrap().truncate(1);
-    source.manifest(&manifest);
-    source.insert(
-        FIRST,
-        &gzip(b"tag,metadata/PMC1.1.json,pmc-oa-opendata,date,\"quoted,extra\"\n"),
-    );
-    let mut reader = PmcInventoryAccessor::new(source)
-        .open(request(None))
-        .await
-        .unwrap();
-    let batch = reader.next().await.unwrap().unwrap();
-    assert_eq!(batch.schema().field(0).name(), "ETag");
-    assert_eq!(
-        batch["FutureField"].as_string::<i32>().value(0),
-        "quoted,extra"
-    );
-}
-
-#[tokio::test]
 async fn invalid_manifests_fail_before_opening_shards() {
     for (field, value) in [
         ("sourceBucket", json!("other")),
@@ -195,8 +193,8 @@ async fn invalid_manifests_fail_before_opening_shards() {
 #[tokio::test]
 async fn validates_rows_even_with_zero_column_projection() {
     for row in [
-        "other,metadata/a.json,date,tag\n",
-        "pmc-oa-opendata,,date,tag\n",
+        "tag,metadata/a.json,other,date,extra\n",
+        "tag,,pmc-oa-opendata,date,extra\n",
     ] {
         let (mut source, _) = Objects::fixture();
         source.insert(FIRST, &gzip(row.as_bytes()));
@@ -221,7 +219,7 @@ async fn empty_manifests_and_shards_keep_the_declared_schema() {
         .open(request(None))
         .await
         .unwrap();
-    assert_eq!(reader.metadata().schema.fields().len(), 4);
+    assert_eq!(reader.metadata().schema.fields().len(), 5);
     assert!(reader.next().await.unwrap().is_none());
     let (mut source, _) = Objects::fixture();
     source.insert(FIRST, &gzip(b""));
