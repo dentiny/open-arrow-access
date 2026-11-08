@@ -2,6 +2,9 @@
 
 Provider-specific discovery and schema conventions live in this crate. Each provider adds its own default-off feature and facade exports.
 
+See [service response schemas](response-schemas.md) for each entry point's return
+type, Arrow fields and nullability, reader metadata, and example response shapes.
+
 Providers use the shared object/reader contracts and existing byte, format,
 and decompression accessors. Backend configuration stays caller-controlled.
 Generic storage access and object-store prefix listing belong in `storage`,
