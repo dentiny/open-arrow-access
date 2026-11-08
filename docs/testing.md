@@ -16,6 +16,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | Directory and file-set behavior | [`dataset/tests/directory.rs`](../dataset/tests/directory.rs) |
 | Directory, storage and Parquet composition | [`dataset/tests/directory_parquet.rs`](../dataset/tests/directory_parquet.rs) |
 | ATIF and file-set composition | [`dataset/tests/atif.rs`](../dataset/tests/atif.rs) |
+| pmc | [`service/tests/pmc.rs`](../service/tests/pmc.rs) |
 | Hugging Face Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
 | Common Crawl configuration | [`service/tests/commoncrawl.rs`](../service/tests/commoncrawl.rs) |
 | Common Crawl segments | [`service/tests/commoncrawl_segment.rs`](../service/tests/commoncrawl_segment.rs) |

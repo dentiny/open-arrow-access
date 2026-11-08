@@ -1,0 +1,8 @@
+ {
+  "pmcid": " pmc00123 ", "version": 2, "pmid": "36537061",
+  "doi": "10.0000/synthetic", "title": "Synthetic 医学 article",
+  "license_code": "CC BY", "is_pmc_openaccess": true,
+  "pdf_url": "s3://pmc-oa-opendata/PMC123.2/article%20%2B%2520.pdf?md5=example",
+  "xml_url": "s3://pmc-oa-opendata/PMC123.2/article.xml",
+  "unknown": {"large_number": 1e9999}, "duplicate": 1, "duplicate": 2
+}
