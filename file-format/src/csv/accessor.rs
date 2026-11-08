@@ -11,8 +11,7 @@ impl<B> FileAccessor<B, CsvFileFormat> {
     }
 
     /// Configure delimiter, header handling and other Arrow CSV options.
-    pub fn with_format(mut self, format: CsvFormat) -> Self {
-        self.format = self.format.with_format(format);
-        self
+    pub fn with_format(self, format: CsvFormat) -> Self {
+        self.map_format(|factory| factory.with_format(format))
     }
 }
