@@ -1,18 +1,18 @@
 //! Published Zenodo records and their attached files.
 
-use std::{collections::HashSet, num::NonZeroU64};
+use std::num::NonZeroU64;
 
-use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ListRequest,
-    ObjectRef, ObjectStream, Result, async_trait,
+    ObjectStream, Result, async_trait,
 };
-use open_arrow_access_storage::OpenDalAccessor;
+use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
 use opendal::Operator;
 
-use crate::http_client::HttpClient;
 use serde::Deserialize;
 use url::Url;
+
+use crate::http_client::HttpClient;
 
 const DEFAULT_METADATA_LIMIT: usize = 4 * 1024 * 1024;
 
@@ -65,11 +65,8 @@ impl ZenodoService {
         if record.id != id.get() {
             return Err(decode("record ID differs from the requested version"));
         }
-        let mut keys = HashSet::new();
-        for file in &record.files {
-            if !valid_key(&file.key) || !keys.insert(&file.key) {
-                return Err(decode("invalid or duplicate attachment key"));
-            }
+        if record.files.iter().any(|file| !valid_key(&file.key)) {
+            return Err(decode("invalid attachment key"));
         }
         // Use the resolved record's canonical content route, never a concept's
         // latest-version link or an arbitrary host supplied in metadata.
@@ -81,10 +78,19 @@ impl ZenodoService {
         )
         .map_err(io_error)?
         .with_context(self.client.context.clone());
+        let inner = NamedFileAccessor::new(
+            OpenDalAccessor::new(operator),
+            record
+                .files
+                .iter()
+                .map(|file| (file.key.clone(), format!("{}/content", file.key).into()))
+                .collect(),
+        )
+        .map_err(|error| decode("invalid attachment membership").with_source(error))?;
         Ok(ZenodoAccessor {
             id,
             files: record.files,
-            inner: OpenDalAccessor::new(operator),
+            inner,
         })
     }
 }
@@ -110,7 +116,7 @@ pub struct ZenodoFile {
 pub struct ZenodoAccessor {
     id: NonZeroU64,
     files: Vec<ZenodoFile>,
-    inner: OpenDalAccessor,
+    inner: NamedFileAccessor<OpenDalAccessor>,
 }
 
 impl ZenodoAccessor {
@@ -128,41 +134,18 @@ impl Accessor for ZenodoAccessor {
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
-        Capability {
-            list: true,
-            ..self.inner.capability()
-        }
+        self.inner.capability()
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        let key = request.object.locator();
-        if !self.files.iter().any(|file| file.key == key) {
-            return Err(Error::new(
-                ErrorKind::NotFound,
-                "open_zenodo",
-                "attachment not found in record",
-            ));
-        }
-        self.inner
-            .open(ByteReadRequest::new(format!("{key}/content")).with_options(request.options))
-            .await
+        self.inner.open(request).await
     }
 }
 
 #[async_trait]
 impl ByteAccessor for ZenodoAccessor {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        if !request.prefix.locator().is_empty() {
-            return Err(invalid(
-                "Zenodo attachments have a flat namespace; list the empty root",
-            ));
-        }
-        Ok(Box::pin(stream::iter(
-            self.files
-                .iter()
-                .map(|file| Ok(ObjectRef::new(file.key.clone())))
-                .collect::<Vec<_>>(),
-        )))
+        self.inner.list(request).await
     }
 }
 

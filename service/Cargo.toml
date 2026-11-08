@@ -18,7 +18,6 @@ zenodo = [
     "dep:url",
     "dep:serde",
     "dep:serde_json",
-    "dep:futures",
 ]
 courtlistener = [
     "dep:open-arrow-access-decompression",
