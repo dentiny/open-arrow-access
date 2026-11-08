@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-pub fn manifest(name: &str, chunk_size: usize) -> MemoryAccessor {
+pub(super) fn manifest(name: &str, chunk_size: usize) -> MemoryAccessor {
     let bytes = std::fs::read(open_arrow_access_test_support::fixture_path!(
         "commoncrawl",
         name
@@ -19,13 +19,13 @@ pub fn manifest(name: &str, chunk_size: usize) -> MemoryAccessor {
     MemoryAccessor::new(&bytes, chunk_size)
 }
 
-pub fn entry(segment: &str, name: &str) -> String {
+pub(super) fn entry(segment: &str, name: &str) -> String {
     format!("crawl-data/CC-MAIN-2022-40/segments/{segment}/warc/{name}.warc.gz")
 }
 
 #[derive(Clone, Default)]
-pub struct Records {
-    pub opens: Arc<Mutex<Vec<ReadRequest>>>,
+pub(super) struct Records {
+    pub(super) opens: Arc<Mutex<Vec<ReadRequest>>>,
 }
 
 #[async_trait]
@@ -72,7 +72,7 @@ impl Accessor for Records {
     }
 }
 
-pub async fn paths(reader: Box<dyn RecordReader>) -> Vec<String> {
+pub(super) async fn paths(reader: Box<dyn RecordReader>) -> Vec<String> {
     use futures::TryStreamExt;
     open_arrow_access_core::into_stream(reader)
         .try_collect::<Vec<_>>()
