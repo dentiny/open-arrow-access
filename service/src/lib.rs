@@ -2,6 +2,8 @@
 
 mod opendal_error;
 mod resolved_files;
+#[cfg(any(feature = "internet-archive", feature = "pmc"))]
+mod validation;
 pub use resolved_files::ResolvedFileSet;
 
 #[cfg(feature = "courtlistener")]

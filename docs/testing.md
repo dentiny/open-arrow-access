@@ -23,6 +23,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | Dataverse published-version original files | [`service/tests/dataverse.rs`](../service/tests/dataverse.rs) |
 | CourtListener bulk snapshots | [`service/tests/courtlistener.rs`](../service/tests/courtlistener.rs) |
 | Service filename components | [`service/tests/unit/filename_validation.rs`](../service/tests/unit/filename_validation.rs) |
+| Service relative file paths | [`service/tests/unit/path_validation.rs`](../service/tests/unit/path_validation.rs) |
 | Common Crawl configuration | [`service/tests/commoncrawl.rs`](../service/tests/commoncrawl.rs) |
 | Common Crawl segments | [`service/tests/commoncrawl_segment.rs`](../service/tests/commoncrawl_segment.rs) |
 | Common Crawl WARC inventory | [`service/tests/warc.rs`](../service/tests/warc.rs) |
