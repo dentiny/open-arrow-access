@@ -1,27 +1,25 @@
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
 
-use arrow_array::{
-    Array, ArrayRef, LargeBinaryArray, LargeListArray, RecordBatchOptions, StructArray,
-    UInt64Array, cast::AsArray,
-};
-use arrow_buffer::OffsetBuffer;
+use arrow_array::{Array, StructArray, cast::AsArray};
 use arrow_schema::{DataType, Field, Fields};
-use arrow_select::take::take;
 use chrono::NaiveDate;
 use futures::io::Cursor;
-use open_arrow_access_core::{RecordBatch, RecordBatchBuilder, RecordBatchRow, Result, SchemaRef};
+use open_arrow_access_core::{
+    FieldValue, RecordBatch, RecordBatchBuilder, RecordBatchRow, Result, SchemaRef,
+};
 use xml_arrow::{ReaderOptions, XmlReader};
 
 use super::{decode, decode_source};
 
-/// Validated RDF metadata and file declarations, without file content.
-pub(super) struct BookMetadata {
-    batch: RecordBatch,
+/// Validated XML extraction, retained without a second metadata batch.
+pub(super) struct BookMetadata<'a> {
+    raw: &'a [u8],
+    source: StructArray,
 }
 
-impl BookMetadata {
-    /// Use the XML engine behind XmlAccessor; validate all metadata before projection.
-    pub(super) async fn parse(raw: &[u8]) -> Result<Self> {
+impl<'a> BookMetadata<'a> {
+    /// Validate every mapped field, independently of the output projection.
+    pub(super) async fn parse(raw: &'a [u8]) -> Result<Self> {
         let mut reader = XmlReader::new(
             Cursor::new(raw),
             super::mapping(),
@@ -44,13 +42,11 @@ impl BookMetadata {
         if batch.num_rows() != 1 || reader.next_batch().await.map_err(decode_source)?.is_some() {
             return Err(decode("expected one RDF document"));
         }
-        let schema = super::metadata_schema();
         let book = Self {
-            batch: RecordBatchBuilder::build_row(schema.clone(), schema.clone(), |row| {
-                row.append("metadata_rdf", raw)?;
-                append_fields(row, schema.fields(), batch.column(0).as_struct(), 0)
-            })?,
+            raw,
+            source: batch.column(0).as_struct().clone(),
         };
+        validate_fields(super::metadata_schema().fields(), &book.source, 0)?;
         let mut seen = HashSet::new();
         for uri in book
             .files()
@@ -68,11 +64,13 @@ impl BookMetadata {
     }
 
     fn files(&self) -> &StructArray {
-        self.batch
+        self.source
             .column_by_name("files")
             .unwrap()
-            .as_list::<i64>()
+            .as_list::<i32>()
             .values()
+            .as_struct()
+            .column(0)
             .as_struct()
     }
 
@@ -90,73 +88,51 @@ impl BookMetadata {
         selected: &[(usize, Vec<u8>)],
         schema: SchemaRef,
     ) -> Result<RecordBatch> {
-        let files = schema
-            .field_with_name("files")
-            .ok()
-            .map(|field| self.build_files_column(selected, field))
-            .transpose()?;
-        let columns = schema
-            .fields()
-            .iter()
-            .map(|field| {
-                if field.name() == "files" {
-                    files.as_ref().unwrap().clone()
-                } else {
-                    self.batch.column_by_name(field.name()).unwrap().clone()
-                }
-            })
-            .collect();
-        RecordBatch::try_new_with_options(
-            schema,
-            columns,
-            &RecordBatchOptions::new().with_row_count(Some(1)),
-        )
-        .map_err(decode_source)
-    }
-
-    // Combine selected RDF declarations with bytes read from storage once, by name.
-    fn build_files_column(&self, selected: &[(usize, Vec<u8>)], field: &Field) -> Result<ArrayRef> {
-        let DataType::LargeList(item) = field.data_type() else {
+        let metadata = super::metadata_schema();
+        let DataType::LargeList(item) = metadata.field_with_name("files").unwrap().data_type()
+        else {
             unreachable!()
         };
-        let DataType::Struct(fields) = item.data_type() else {
+        let DataType::Struct(file_fields) = item.data_type() else {
             unreachable!()
         };
-        let indices =
-            UInt64Array::from_iter_values(selected.iter().map(|(index, _)| *index as u64));
-        let metadata = take(self.files(), &indices, None).map_err(decode_source)?;
-        let data: ArrayRef = Arc::new(
-            selected
-                .iter()
-                .map(|(_, data)| Some(data.as_slice()))
-                .collect::<LargeBinaryArray>(),
-        );
-        let columns = fields
-            .iter()
-            .map(|field| {
-                if field.name() == "data" {
-                    data.clone()
-                } else {
-                    metadata
-                        .as_struct()
-                        .column_by_name(field.name())
-                        .unwrap()
-                        .clone()
-                }
+        RecordBatchBuilder::build_row(super::schema(), schema, |row| {
+            row.append("metadata_rdf", self.raw)?;
+            append_fields(row, metadata.fields(), &self.source, 0)?;
+            row.append_structs("files", selected, |row, (index, data)| {
+                append_fields(row, file_fields, self.files(), *index)?;
+                row.append("data", data.as_slice())
             })
-            .collect();
-        let files = StructArray::new(fields.clone(), columns, None);
-        Ok(Arc::new(LargeListArray::new(
-            item.clone(),
-            OffsetBuffer::from_lengths([selected.len()]),
-            Arc::new(files),
-            None,
-        )))
+        })
     }
 }
 
-// The shared XML mapping handles namespaces and containers. Keep Gutenberg's
-// empty-text and strict numeric/date semantics when writing its typed Arrow row.
+fn validate_fields(fields: &Fields, source: &StructArray, index: usize) -> Result<()> {
+    for field in fields {
+        if field.name() == "metadata_rdf" {
+            continue;
+        }
+        let column = source.column_by_name(field.name()).unwrap();
+        match field.data_type() {
+            DataType::List(item) | DataType::LargeList(item) => {
+                if let DataType::Struct(fields) = item.data_type() {
+                    let values = column.as_list::<i32>().value(index);
+                    let entries = values.as_struct().column(0).as_struct();
+                    for index in 0..entries.len() {
+                        validate_fields(fields, entries, index)?;
+                    }
+                }
+            }
+            _ => {
+                scalar_value(field, column.as_ref(), index)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+// Conversion only writes projected columns; validation has already checked all
+// mapped fields, including nested values that projected list callbacks skip.
 fn append_fields(
     row: &mut RecordBatchRow<'_>,
     fields: &Fields,
@@ -165,7 +141,7 @@ fn append_fields(
 ) -> Result<()> {
     for field in fields {
         let name = field.name().as_str();
-        if name == "metadata_rdf" {
+        if matches!(name, "metadata_rdf" | "files") {
             continue;
         }
         let column = source.column_by_name(name).unwrap();
@@ -188,24 +164,28 @@ fn append_fields(
                     )?;
                 }
             }
-            ty => {
-                let text = (!column.is_null(index))
-                    .then(|| column.as_string::<i32>().value(index))
-                    .filter(|s| !s.is_empty() || matches!(name, "uri" | "scheme"));
-                match ty {
-                    DataType::Utf8 | DataType::LargeUtf8 => row.append(name, text)?,
-                    DataType::UInt64 if name == "ebook_id" => {
-                        row.append(name, ebook_id(text.unwrap_or_default())?)?
-                    }
-                    DataType::UInt64 => row.append(name, number::<u64>(text, name)?)?,
-                    DataType::Int32 => row.append(name, number::<i32>(text, name)?)?,
-                    DataType::Date32 => row.append(name, text.map(issued).transpose()?)?,
-                    _ => unreachable!("unsupported Gutenberg metadata type"),
-                }
-            }
+            _ => row.append(name, scalar_value(field, column.as_ref(), index)?)?,
         }
     }
     Ok(())
+}
+
+fn scalar_value<'a>(field: &Field, column: &'a dyn Array, index: usize) -> Result<FieldValue<'a>> {
+    let name = field.name().as_str();
+    let text = (!column.is_null(index))
+        .then(|| column.as_string::<i32>().value(index))
+        .filter(|s| !s.is_empty() || matches!(name, "uri" | "scheme"));
+    if text.is_none() && !field.is_nullable() {
+        return Err(decode(format!("missing {name}")));
+    }
+    Ok(match field.data_type() {
+        DataType::Utf8 | DataType::LargeUtf8 => text.into(),
+        DataType::UInt64 if name == "ebook_id" => ebook_id(text.unwrap_or_default())?.into(),
+        DataType::UInt64 => number::<u64>(text, name)?.into(),
+        DataType::Int32 => number::<i32>(text, name)?.into(),
+        DataType::Date32 => text.map(issued).transpose()?.into(),
+        _ => unreachable!("unsupported Gutenberg metadata type"),
+    })
 }
 
 fn number<T: std::str::FromStr>(value: Option<&str>, field: &str) -> Result<Option<T>> {

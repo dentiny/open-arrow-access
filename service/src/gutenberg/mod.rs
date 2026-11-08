@@ -216,7 +216,8 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
 }
 
 // Declare Arrow fields and their XML locations together. The XML engine extracts
-// scalars as strings; BookMetadata::parse converts the types it cannot emit directly.
+// scalars as strings; BookMetadata validates them and writes the requested output
+// types when building the final batch.
 type Mapping = (Field, XmlField);
 
 fn scalar(name: &str, path: &str, ty: DataType, nullable: bool) -> Mapping {
