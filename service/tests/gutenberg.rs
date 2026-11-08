@@ -72,6 +72,8 @@ async fn keeps_mapped_book_and_file_metadata_in_rdf_order() {
     let uris = files.column_by_name("uri").unwrap().as_string::<i32>();
     assert_eq!(uris.value(0), "https://example.invalid/42.txt");
     assert_eq!(uris.value(1), "https://example.invalid/42.zip");
+    assert_eq!(uris.len(), 3);
+    assert_eq!(uris.value(2), uris.value(0));
     assert_eq!(files.num_columns(), 4);
     assert_eq!(
         files
@@ -137,6 +139,7 @@ async fn rejects_invalid_rdf_without_silently_dropping_rows() {
     for invalid in [
         raw.replace("ebooks/42", "ebooks/invalid"),
         raw.replace("1970-01-02", "2026-02-30"),
+        raw.replace("https://example.invalid/42.txt", ""),
         raw.replace("<p:ebook", "<p:ebook xmlns:p=\"urn:wrong\""),
         raw.replace("</r:RDF>", "<p:ebook r:about=\"ebooks/43\"/></r:RDF>"),
     ] {

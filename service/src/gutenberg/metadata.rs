@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use arrow_array::{Array, StructArray, cast::AsArray};
 use arrow_schema::{DataType, Field, Fields};
 use chrono::NaiveDate;
@@ -45,31 +43,7 @@ impl BookMetadata {
             source: batch.column(0).as_struct().clone(),
         };
         convert_fields(super::schema().fields(), &book.source, 0, None)?;
-        let mut seen = HashSet::new();
-        for uri in book
-            .files()
-            .column_by_name("uri")
-            .unwrap()
-            .as_string::<i32>()
-            .iter()
-            .flatten()
-        {
-            if uri.is_empty() || !seen.insert(uri) {
-                return Err(decode("missing or duplicate file URI in RDF"));
-            }
-        }
         Ok(book)
-    }
-
-    fn files(&self) -> &StructArray {
-        self.source
-            .column_by_name("files")
-            .unwrap()
-            .as_list::<i32>()
-            .values()
-            .as_struct()
-            .column(0)
-            .as_struct()
     }
 
     pub(super) fn into_batch(self, schema: SchemaRef) -> Result<RecordBatch> {
@@ -130,7 +104,7 @@ fn scalar_value<'a>(field: &Field, column: &'a dyn Array, index: usize) -> Resul
     let text = (!column.is_null(index))
         .then(|| column.as_string::<i32>().value(index))
         .filter(|s| !s.is_empty() || matches!(name, "uri" | "scheme"));
-    if text.is_none() && !field.is_nullable() {
+    if !field.is_nullable() && text.is_none_or(str::is_empty) {
         return Err(decode(format!("missing {name}")));
     }
     Ok(match field.data_type() {
