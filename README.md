@@ -622,6 +622,12 @@ Enable `service-internet-archive` for `service::internet_archive` public file di
 byte access. See [service documentation](service/README.md) and the
 `read_internet_archive` example.
 
+### Dataverse
+
+Enable `service-dataverse` for `service::dataverse` public file discovery and
+byte access. See [service documentation](service/README.md) and the
+`read_dataverse` example.
+
 ## TAR (`decompression-tar`)
 
 Enable `decompression-tar` for `decompression::tar::{TarStream, TarArchive, TarEntry, TarLimits}`.
