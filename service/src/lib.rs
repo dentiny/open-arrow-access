@@ -10,4 +10,7 @@ pub mod commoncrawl;
 pub mod warc;
 
 #[cfg(feature = "pmc")]
+pub mod pmc_inventory;
+
+#[cfg(feature = "pmc")]
 pub mod pmc;

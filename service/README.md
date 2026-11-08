@@ -33,6 +33,21 @@ transport errors never trigger fallback. `with_revision` refers to the Parquet
 representation, not the original source branch. Native dataset-card parsing and
 Viewer row APIs are outside this entry point.
 
+## PMC inventory (`pmc`)
+
+Enable `service-pmc` for `service::pmc_inventory::PmcInventoryAccessor`.
+A `ReadRequest` selects one `manifest.json`; its `fileSchema` defines CSV columns
+and order. The reader reuses gzip and CSV adapters, opens shards lazily in
+manifest order, and forwards read options. It never fetches article objects.
+
+Original CSV fields and values are preserved without extra columns. Bucket and
+Key must be present even when projected away; Key values are not interpreted.
+Schema metadata records the manifest URI, version and creation timestamp.
+Empty inventories retain the declared schema and produce EOF.
+
+`with_manifest_limit` configures the default 4 MiB manifest byte limit. Run the
+`read_pmc_inventory` example against a caller-configured inventory snapshot.
+
 ## PMC article-version metadata (`pmc`)
 
 Enable `service-pmc` for `service::pmc::PmcAccessor`. This service reads exactly
@@ -54,6 +69,14 @@ async fn read(operator: opendal::Operator) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 ```
+
+Run `cargo run --example read_pmc_inventory --features service-pmc --
+/mirror/root <dated-manifest-key>` against a mirror preserving manifest/shard keys.
+See the [PMC dataset README](https://pmc-oa-opendata.s3.amazonaws.com/README.txt)
+and [S3 inventory manifest format](https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-inventory-location.html).
+
+Manifest byte collection uses core `read_limited`. Shard iteration retains its
+provider state and uses `StreamReader` for metadata and terminal handling.
 
 For a local mirror, run `cargo run --example read_pmc --features service-pmc --
 /data/pmc-mirror metadata/PMC123.2.json`. For multiple metadata objects, compose
