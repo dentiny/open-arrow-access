@@ -1,4 +1,4 @@
-use super::{super::CommonCrawlWarcAccessor, CommonCrawlSegmentRequest};
+use super::{super::warc::CommonCrawlWarcAccessor, CommonCrawlSegmentRequest};
 use open_arrow_access_core::{
     Accessor, ByteAccessor, Capability, ReadRequest, RecordReader, Result, async_trait,
 };
