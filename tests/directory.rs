@@ -15,7 +15,7 @@ use open_arrow_access::{
     ObjectRef, ObjectStream, ReadOptionsProvider, ReadRequest, Reader, RecordBatch, RecordMetadata,
     RecordReader, Result, Schema, SchemaRef, async_trait,
     dataset::{DirectoryAccessor, DirectoryRequest, FileSetAccessor, FileSetRequest},
-    into_stream,
+    into_stream, list_files,
 };
 
 fn schema(label: &str) -> SchemaRef {
@@ -309,6 +309,63 @@ impl ByteAccessor for Listing {
         }
         Ok(Box::pin(stream::iter(items)))
     }
+}
+
+#[tokio::test]
+async fn list_files_accepts_root_and_trailing_slash_and_leaves_empty_results_to_caller() {
+    let listing = Listing {
+        objects: vec!["data/a.parquet"],
+        fail: false,
+    };
+    for prefix in ["", "data", "data/"] {
+        let objects = list_files(&listing, ListRequest::new(prefix), |relative| {
+            assert_eq!(
+                relative,
+                if prefix.is_empty() {
+                    "data/a.parquet"
+                } else {
+                    "a.parquet"
+                }
+            );
+            Ok(true)
+        })
+        .await
+        .unwrap();
+        assert_eq!(objects, [ObjectRef::new("data/a.parquet")]);
+    }
+    assert!(
+        list_files(&listing, ListRequest::new("data"), |_| Ok(false))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn list_files_checks_prefix_boundary_before_filtering_and_preserves_callback_errors() {
+    let listing = Listing {
+        objects: vec!["data/ab/file"],
+        fail: false,
+    };
+    let error = list_files(&listing, ListRequest::new("data/a"), |_| {
+        panic!("outside-prefix objects must not reach the callback")
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert_eq!(error.operation(), "list_files");
+
+    let error = list_files(&listing, ListRequest::new("data"), |_| {
+        Err(Error::new(
+            ErrorKind::Decode,
+            "validate_fixture",
+            "invalid path",
+        ))
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert_eq!(error.operation(), "validate_fixture");
 }
 
 #[tokio::test]
