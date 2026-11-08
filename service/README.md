@@ -112,9 +112,25 @@ cargo run --example read_gutenberg --features service-gutenberg
 ```
 ## Common Crawl configuration
 
-Enable `service-commoncrawl` on the facade for `CommonCrawl`, which validates a
+Enable `service-warc` on the facade for `CommonCrawl`, which validates a
 crawl identity and HTTP(S) origin, and `create_http_accessor`, which configures
 an origin-rooted OpenDAL HTTP reader without fetching data. Gzip and record
 format decoding remain explicit caller-supplied layers.
 
-Crawl-wide WARC datasets and segment selection are separate additions.
+Enable `service-warc` for `CommonCrawlWarcRequest` and
+`CommonCrawlWarcAccessor`: resolve all WARC paths from a crawl's decoded
+`warc.paths.gz` inventory, preserving file order, then read through a supplied
+single-file format accessor and the existing sequential FileSet. `resolve`
+returns membership without opening record files. The caller supplies gzip for
+compressed inventories and file decompression/format parsing separately.
+Selected locators are held in memory; inventory lines have a 16 KiB limit.
+There is no index, batch planner or parallel execution.
+
+Segment selection is a separate addition.
+
+Manifest byte framing and the 16 KiB per-line bound use core `read_lines`;
+path validation and selected-file duplicate checks remain in the provider.
+
+`format-warc` exposes native parser records through `WarcAccessor`. This service
+composes Arrow readers through FileSet, so its `format` argument requires a
+caller-provided WARC-to-Arrow accessor. Manifest-only `resolve` needs no conversion.
