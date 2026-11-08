@@ -107,26 +107,19 @@ async fn jsonl_batching_projection_and_document_indices_preserve_order() {
 }
 
 #[tokio::test]
-async fn empty_projection_keeps_rows_and_invalid_projection_fails_before_open() {
-    let input = fixture!("atif", "trajectory.json").await;
-    let bytes = MemoryAccessor::new(&input, 5);
-    let observations = bytes.observations.clone();
-    let accessor = AtifAccessor::new(bytes, AtifFormat::Json);
-    format::assert_invalid_projection_before_open(
-        &accessor,
-        ReadRequest::new("x"),
-        &trajectory_schema(),
-        &observations,
-    )
-    .await;
-    format::assert_projection(
-        &accessor,
-        ReadRequest::new("x").with_options(ReadOptions {
-            projection: Some(vec![]),
-            ..ReadOptions::default()
-        }),
-        &trajectory_schema(),
-        1,
+async fn fixed_schema_contract_preserves_projection_and_source_failures() {
+    format::assert_fixed_schema_contract(
+        |bytes| AtifAccessor::new(bytes, AtifFormat::Json),
+        format::FormatCase {
+            bytes: &fixture!("atif", "trajectory.json").await,
+            request: ReadRequest::new("x").with_options(ReadOptions {
+                projection: Some(vec!["source_record_index".into(), "trajectory_id".into()]),
+                ..ReadOptions::default()
+            }),
+            schema: trajectory_schema(),
+            rows: 1,
+            fault_offsets: &[0, 8],
+        },
     )
     .await;
 }
@@ -160,17 +153,6 @@ async fn malformed_documents_utf8_and_invalid_atif_are_terminal_with_source_cont
         );
         assert!(error.source().is_some());
     }
-}
-
-#[tokio::test]
-async fn input_failures_keep_error_categories_and_never_retry() {
-    format::assert_error_contract(
-        |bytes| AtifAccessor::new(bytes, AtifFormat::Json),
-        &fixture!("atif", "trajectory.json").await,
-        ReadRequest::new("x"),
-        &[0, 8],
-    )
-    .await;
 }
 
 #[tokio::test]
