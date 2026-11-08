@@ -8,7 +8,7 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
-gutenberg = ["dep:arrow-array", "dep:arrow-schema", "dep:chrono", "dep:futures", "dep:roxmltree"]
+gutenberg = ["dep:arrow-schema", "dep:chrono", "dep:roxmltree"]
 huggingface = [
     "dep:open-arrow-access-storage",
     "dep:open-arrow-access-dataset", "dep:open-arrow-access-file-format", "dep:futures",
@@ -17,7 +17,6 @@ huggingface = [
 ]
 
 [dependencies]
-arrow-array = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 roxmltree = { workspace = true, optional = true }
