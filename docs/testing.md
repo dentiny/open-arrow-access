@@ -18,6 +18,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | ATIF and file-set composition | [`dataset/tests/atif.rs`](../dataset/tests/atif.rs) |
 | Hugging Face Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
 | Common Crawl configuration | [`service/tests/commoncrawl.rs`](../service/tests/commoncrawl.rs) |
+| Common Crawl segments | [`service/tests/commoncrawl_segment.rs`](../service/tests/commoncrawl_segment.rs) |
 | Common Crawl WARC inventory | [`service/tests/warc.rs`](../service/tests/warc.rs) |
 | WARC parser | [`file-format/tests/warc.rs`](../file-format/tests/warc.rs) |
 | OpenDAL storage | [`storage/tests/opendal.rs`](../storage/tests/opendal.rs) |
