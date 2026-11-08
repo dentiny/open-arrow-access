@@ -30,9 +30,6 @@ impl ZipArchive {
         let metadata = input.metadata().clone();
         let input = into_async_seek(input, DEFAULT_CHUNK_SIZE, "open_zip")?;
         let options = ZipOptions {
-            max_cd_num_files: limits.max_entries,
-            max_cd_num_files_load: limits.max_entries,
-            max_cd_size_in_bytes: limits.max_directory_bytes,
             max_uncompressed_size_per_file: limits.max_entry_bytes,
             max_compressed_size_per_file: limits.max_entry_bytes,
             ..ZipOptions::default()

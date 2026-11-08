@@ -87,13 +87,9 @@ reads, and EOF or the first error drops the input and terminates the stream.
 I/O errors pass through unchanged. Decompression maps these errors with codec
 context and uses `StreamReader` for metadata, capabilities and terminal behavior.
 
-`read_limited(reader, limit, operation)` collects an owned byte reader into a
-`Vec<u8>` for small metadata objects. It rejects an advertised length above the
-limit before reading, and checks actual bytes before copying each chunk. Unknown
-or understated lengths do not bypass the limit. Limit failures are decode errors;
-empty chunks are I/O errors. Both use the supplied operation, while upstream
-errors pass through unchanged. The limit bounds collected bytes, not allocation
-capacity or upstream buffers. Parsing and provider validation stay with callers.
+`read_all(reader, operation)` collects an owned byte reader into a `Vec<u8>`.
+Empty chunks are I/O errors using the supplied operation; upstream errors pass
+through unchanged. Parsing and provider validation stay with callers.
 
 `read_lines(reader, max_line_bytes, operation)` streams byte lines across chunk
 boundaries, retaining LF/CRLF endings and a final nonempty unterminated line.
@@ -103,7 +99,7 @@ the input, and errors terminate the stream. Empty chunks are I/O errors and
 oversized lines are decode errors using the supplied operation; upstream errors
 pass through unchanged. ATIF JSONL uses this utility without a line limit, keeping
 UTF-8 decoding, blank-line filtering and record context in the format. ATIF JSON
-uses `read_limited` with `usize::MAX` to collect its single document.
+uses `read_all` to collect its single document.
 
 ### Reader lifecycle
 

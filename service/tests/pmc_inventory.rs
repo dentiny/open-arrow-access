@@ -155,17 +155,6 @@ async fn invalid_manifests_fail_before_opening_shards() {
         assert_eq!(error.kind(), ErrorKind::Decode, "{name}");
         assert_eq!(source.opened.lock().unwrap().len(), 1);
     }
-    let source = Objects::fixture().await;
-    assert_eq!(
-        PmcInventoryAccessor::new(source)
-            .with_manifest_limit(NonZeroUsize::MIN)
-            .open(request(None))
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Decode
-    );
 }
 
 #[tokio::test]
@@ -206,4 +195,20 @@ async fn empty_manifests_and_shards_keep_the_declared_schema() {
         .unwrap();
     assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
     assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn manifest_metadata_can_exceed_the_previous_size_limit() {
+    let mut source = Objects::fixture().await;
+    let mut raw = fixture!("pmc/inventory", "manifest.json").await;
+    raw.extend(std::iter::repeat_n(b' ', 4 * 1024 * 1024));
+    source
+        .files
+        .insert(MANIFEST.into(), MemoryAccessor::new(&raw, 64 * 1024));
+    assert!(
+        PmcInventoryAccessor::new(source)
+            .open(request(None))
+            .await
+            .is_ok()
+    );
 }
