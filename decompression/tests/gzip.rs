@@ -16,11 +16,18 @@ async fn members_preserve_order_and_output_chunk_limit() -> Result<()> {
         ("good_multi_member.gz", "first第二行".as_bytes()),
         ("empty_member.gz", &b""[..]),
     ] {
-        let input = fixture!("gzip", name).await;
-        let accessor = MemoryAccessor::new(&input, 1)
-            .layer(DecompressionLayer::new(Gzip).with_chunk_size(NonZeroUsize::new(3).unwrap()));
-        let mut reader = accessor.open("data.gz".into()).await?;
-        byte_layer::assert_output(reader.as_mut(), expected, 3).await?;
+        byte_layer::assert_fragmented_output(
+            |input| {
+                input.layer(
+                    DecompressionLayer::new(Gzip).with_chunk_size(NonZeroUsize::new(3).unwrap()),
+                )
+            },
+            &fixture!("gzip", name).await,
+            expected,
+            &[1, 7],
+            3,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -76,18 +83,12 @@ async fn invalid_gzip_is_terminal() -> Result<()> {
         "bad_trailing.gz",
         "bad_truncated_member.gz",
     ] {
-        let bytes = fixture!("gzip", name).await;
-        let input = MemoryAccessor::new(&bytes, 2);
-        let observed = input.observations.clone();
-        let accessor = input.layer(DecompressionLayer::new(Gzip));
-        let mut reader = accessor.open("bad.gz".into()).await?;
-        byte_layer::assert_terminal_error(
-            reader.as_mut(),
-            &observed.reads,
-            ErrorKind::Decode,
+        byte_layer::assert_decode_error(
+            |input| input.layer(DecompressionLayer::new(Gzip)),
+            &fixture!("gzip", name).await,
             "decompress",
         )
-        .await;
+        .await?;
     }
     Ok(())
 }

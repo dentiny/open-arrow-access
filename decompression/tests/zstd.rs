@@ -1,6 +1,6 @@
 use std::num::NonZeroUsize;
 
-use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, Result};
+use open_arrow_access_core::{Accessor, AccessorExt, Result};
 use open_arrow_access_decompression::{DecompressionLayer, zstd::Zstd};
 
 use open_arrow_access_test_support::{MemoryAccessor, byte_layer, fixture};
@@ -9,12 +9,17 @@ use open_arrow_access_test_support::{MemoryAccessor, byte_layer, fixture};
 async fn concatenated_empty_and_skippable_frames_preserve_order_with_bounded_output() -> Result<()>
 {
     let bytes = fixture!("zstd", "good_frames.zst").await;
-    for chunk_size in [1, 7, 4096] {
-        let accessor = MemoryAccessor::new(&bytes, chunk_size)
-            .layer(DecompressionLayer::new(Zstd).with_chunk_size(NonZeroUsize::new(3).unwrap()));
-        let mut reader = accessor.open("records.zst".into()).await?;
-        byte_layer::assert_output(reader.as_mut(), "first\n第二行\n".as_bytes(), 3).await?;
-    }
+    byte_layer::assert_fragmented_output(
+        |input| {
+            input
+                .layer(DecompressionLayer::new(Zstd).with_chunk_size(NonZeroUsize::new(3).unwrap()))
+        },
+        &bytes,
+        "first\n第二行\n".as_bytes(),
+        &[1, 7, 4096],
+        3,
+    )
+    .await?;
     Ok(())
 }
 
@@ -27,17 +32,12 @@ async fn empty_frames_are_valid_but_empty_input_is_not() -> Result<()> {
         assert!(reader.next().await?.is_none());
         assert!(reader.next().await?.is_none());
     }
-    let input = MemoryAccessor::new(&fixture!("zstd", "bad_empty.zst").await, 1);
-    let observed = input.observations.clone();
-    let accessor = input.layer(DecompressionLayer::new(Zstd));
-    let mut reader = accessor.open("missing-header.zst".into()).await?;
-    byte_layer::assert_terminal_error(
-        reader.as_mut(),
-        &observed.reads,
-        ErrorKind::Decode,
+    byte_layer::assert_decode_error(
+        |input| input.layer(DecompressionLayer::new(Zstd)),
+        &fixture!("zstd", "bad_empty.zst").await,
         "decompress",
     )
-    .await;
+    .await?;
     Ok(())
 }
 
@@ -52,21 +52,12 @@ async fn corruption_truncation_and_trailing_junk_are_terminal_errors() -> Result
         "bad_truncated_second.zst",
         "bad_truncated_skippable.zst",
     ] {
-        let bytes = fixture!("zstd", name).await;
-        let memory = MemoryAccessor::new(&bytes, 1);
-        let observed = memory.observations.clone();
-        let mut reader = memory
-            .layer(DecompressionLayer::new(Zstd))
-            .open("invalid.zst".into())
-            .await
-            .unwrap();
-        byte_layer::assert_terminal_error(
-            reader.as_mut(),
-            &observed.reads,
-            ErrorKind::Decode,
+        byte_layer::assert_decode_error(
+            |input| input.layer(DecompressionLayer::new(Zstd)),
+            &fixture!("zstd", name).await,
             "decompress",
         )
-        .await;
+        .await?;
     }
     Ok(())
 }
