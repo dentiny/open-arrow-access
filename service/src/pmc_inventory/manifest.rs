@@ -51,11 +51,11 @@ pub(super) struct Shard {
     pub key: String,
 }
 
-pub(super) async fn read<A>(source: &A, request: ByteReadRequest, limit: usize) -> Result<Manifest>
+pub(super) async fn read<A>(source: &A, request: ByteReadRequest) -> Result<Manifest>
 where
     A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
-    let bytes = read_object(source, request, limit, "read_pmc_inventory").await?;
+    let bytes = read_object(source, request, "read_pmc_inventory").await?;
     let manifest: Manifest = serde_json::from_slice(&bytes)
         .map_err(|error| decode(error.to_string()).with_source(error))?;
     validation::validate_manifest(&manifest)?;

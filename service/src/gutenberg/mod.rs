@@ -2,10 +2,7 @@
 
 mod metadata;
 
-use std::{
-    num::NonZeroUsize,
-    sync::{Arc, OnceLock},
-};
+use std::sync::{Arc, OnceLock};
 
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
@@ -14,39 +11,16 @@ use open_arrow_access_core::{
 };
 use xml_arrow::{NamespaceBinding, XmlField, XmlSchema};
 
-const DEFAULT_METADATA_BYTES: NonZeroUsize = NonZeroUsize::new(4 * 1024 * 1024).unwrap();
-
-/// Source byte limits; excludes parser and Arrow allocations.
-#[derive(Clone, Copy, Debug)]
-pub struct GutenbergLimits {
-    /// RDF byte limit (default: 4 MiB).
-    pub metadata_bytes: NonZeroUsize,
-}
-
-impl Default for GutenbergLimits {
-    fn default() -> Self {
-        Self {
-            metadata_bytes: DEFAULT_METADATA_BYTES,
-        }
-    }
-}
-
 /// Read per-book RDF metadata through caller-configured storage.
 pub struct GutenbergAccessor<A> {
     inner: Arc<A>,
-    limits: GutenbergLimits,
 }
 
 impl<A> GutenbergAccessor<A> {
     pub fn new(inner: A) -> Self {
         Self {
             inner: Arc::new(inner),
-            limits: GutenbergLimits::default(),
         }
-    }
-    pub fn with_limits(mut self, limits: GutenbergLimits) -> Self {
-        self.limits = limits;
-        self
     }
 }
 
@@ -65,13 +39,9 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
         }
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        DocumentAccessor::new(
-            self.inner.clone(),
-            GutenbergDecoder,
-            self.limits.metadata_bytes.get(),
-        )
-        .open(request)
-        .await
+        DocumentAccessor::new(self.inner.clone(), GutenbergDecoder)
+            .open(request)
+            .await
     }
 }
 

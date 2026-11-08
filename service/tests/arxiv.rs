@@ -102,7 +102,7 @@ async fn forwards_byte_options_and_validates_before_opening_storage() {
 }
 
 #[tokio::test]
-async fn rejects_invalid_bounded_manifests_and_changed_archive_length() {
+async fn rejects_invalid_manifests_and_changed_archive_length() {
     for name in [
         "duplicate.xml",
         "traversal.xml",
@@ -129,17 +129,6 @@ async fn rejects_invalid_bounded_manifests_and_changed_archive_length() {
             "{name}"
         );
     }
-    let bytes = fixture!("arxiv", "pdf/arXiv_pdf_manifest.xml").await;
-    assert_eq!(
-        ArxivService::new(MemoryAccessor::new(&bytes, 3))
-            .with_manifest_limit(8)
-            .manifest(ArxivKind::Pdf, None, ByteReadOptions::default())
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Decode
-    );
     let empty = fixture!("arxiv", "empty.xml").await;
     assert!(
         ArxivService::new(MemoryAccessor::new(&empty, 3))

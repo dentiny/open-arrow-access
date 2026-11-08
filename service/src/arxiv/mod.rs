@@ -10,8 +10,6 @@ use open_arrow_access_decompression::tar::{TarArchive, TarLimits, TarStream};
 
 use validation::{parse_manifest, validate_archive, validate_archive_length, validate_month};
 
-const DEFAULT_MANIFEST_BYTES: usize = 16 * 1024 * 1024;
-
 /// The two separately published arXiv bulk distributions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ArxivKind {
@@ -60,7 +58,6 @@ pub struct ArxivArchive {
 #[derive(Clone, Debug)]
 pub struct ArxivService<A> {
     storage: A,
-    manifest_bytes: usize,
     tar_limits: TarLimits,
 }
 
@@ -68,13 +65,8 @@ impl<A> ArxivService<A> {
     pub fn new(storage: A) -> Self {
         Self {
             storage,
-            manifest_bytes: DEFAULT_MANIFEST_BYTES,
             tar_limits: TarLimits::default(),
         }
-    }
-    pub fn with_manifest_limit(mut self, bytes: usize) -> Self {
-        self.manifest_bytes = bytes;
-        self
     }
     pub fn with_tar_limits(mut self, limits: TarLimits) -> Self {
         self.tar_limits = limits;
@@ -97,7 +89,6 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivServi
         let bytes = read_object(
             &self.storage,
             ByteReadRequest::new(kind.manifest_key()).with_options(options),
-            self.manifest_bytes,
             "read_arxiv_manifest",
         )
         .await?;
