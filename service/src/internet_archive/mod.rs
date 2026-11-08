@@ -3,14 +3,12 @@
 mod error;
 mod validation;
 
-use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectStream,
-    Result, async_trait,
-};
+use open_arrow_access_core::Result;
 use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
 use serde::{Deserialize, Deserializer, de::Error as _};
 use url::Url;
 
+use crate::ResolvedFileSet;
 use crate::http_client::{HttpClient, validation::validate_origin};
 use error::membership_error;
 use validation::{extract_items_and_validate, validate_identifier};
@@ -58,11 +56,13 @@ impl InternetArchiveService {
                 .collect(),
         )
         .map_err(membership_error)?;
-        Ok(InternetArchiveAccessor {
-            identifier: identifier.into(),
-            files,
+        Ok(ResolvedFileSet::new(
             inner,
-        })
+            InternetArchiveMetadata {
+                identifier: identifier.into(),
+                files,
+            },
+        ))
     }
 }
 
@@ -119,39 +119,21 @@ fn deserialize_size<'de, D: Deserializer<'de>>(
 
 /// Fixed item membership over independently owned HTTP byte readers.
 /// Listing the empty root returns exact names, including nested paths, in API order.
+pub type InternetArchiveAccessor = ResolvedFileSet<OpenDalAccessor, InternetArchiveMetadata>;
+
+/// Metadata retained from the resolved item.
 #[derive(Clone, Debug)]
-pub struct InternetArchiveAccessor {
-    identifier: String,
-    files: Vec<InternetArchiveFile>,
-    inner: NamedFileAccessor<OpenDalAccessor>,
+pub struct InternetArchiveMetadata {
+    pub identifier: String,
+    pub files: Vec<InternetArchiveFile>,
 }
 
 impl InternetArchiveAccessor {
     pub fn identifier(&self) -> &str {
-        &self.identifier
+        &self.metadata().identifier
     }
+
     pub fn files(&self) -> &[InternetArchiveFile] {
-        &self.files
-    }
-}
-
-#[async_trait]
-impl Accessor for InternetArchiveAccessor {
-    type Request = ByteReadRequest;
-    type Reader = dyn ByteReader;
-
-    fn capability(&self) -> Capability {
-        self.inner.capability()
-    }
-
-    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        self.inner.open(request).await
-    }
-}
-
-#[async_trait]
-impl ByteAccessor for InternetArchiveAccessor {
-    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        self.inner.list(request).await
+        &self.metadata().files
     }
 }
