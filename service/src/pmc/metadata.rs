@@ -38,14 +38,7 @@ pub(super) fn decode_batch(
 fn append_field(row: &mut RecordBatchRow<'_>, field: &Field, raw: &str, path: &str) -> Result<()> {
     match field.data_type() {
         DataType::Utf8 | DataType::LargeUtf8 => {
-            let value: Option<String> = if field.name() == "pmid" {
-                parse::<Option<Pmid>>(raw, path)?.map(|value| match value {
-                    Pmid::Text(text) => text,
-                    Pmid::Number(number) => number.to_string(),
-                })
-            } else {
-                parse(raw, path)?
-            };
+            let value: Option<String> = parse(raw, path)?;
             if field.name() == "pmcid" {
                 validation::validate_pmcid(value.as_deref().unwrap_or_default(), path)?;
             }
@@ -68,13 +61,6 @@ fn append_field(row: &mut RecordBatchRow<'_>, field: &Field, raw: &str, path: &s
         }
         _ => unreachable!("PMC schema only contains metadata fields"),
     }
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum Pmid {
-    Text(String),
-    Number(u64),
 }
 
 fn parse<'a, T: Deserialize<'a>>(raw: &'a str, path: &str) -> Result<T> {
