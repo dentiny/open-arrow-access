@@ -2,6 +2,7 @@ use super::{
     error::decode,
     manifest::{InventoryFormat, Manifest},
 };
+use crate::path::valid_relative_file_path;
 use arrow_schema::Fields;
 use open_arrow_access_core::{Error, ErrorKind, Result};
 use std::collections::HashSet;
@@ -58,10 +59,5 @@ pub(super) fn validate_row(bucket: Option<&str>, key: Option<&str>) -> Result<()
 }
 
 fn valid_path(path: &str) -> bool {
-    !path.is_empty()
-        && path.trim() == path
-        && !path.contains(['\\', '?', '#'])
-        && !path.contains("://")
-        && !path.chars().any(char::is_control)
-        && !path.split('/').any(|p| matches!(p, "" | "." | ".."))
+    valid_relative_file_path(path) && !path.contains(['?', '#']) && !path.contains("://")
 }
