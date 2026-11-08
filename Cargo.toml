@@ -67,8 +67,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 [features]
 default = []
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
-service-commoncrawl = ["dep:open-arrow-access-service", "open-arrow-access-service/commoncrawl"]
-service-commoncrawl-warc = ["service-commoncrawl", "open-arrow-access-service/commoncrawl-warc"]
+service-warc = ["dep:open-arrow-access-service", "open-arrow-access-service/warc"]
 format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
@@ -104,11 +103,11 @@ tokio = { workspace = true, features = ["fs"] }
 
 [[test]]
 name = "commoncrawl_common"
-required-features = ["service-commoncrawl"]
+required-features = ["service-warc"]
 
 [[test]]
 name = "commoncrawl_warc"
-required-features = ["service-commoncrawl-warc"]
+required-features = ["service-warc"]
 
 [[test]]
 name = "directory"
