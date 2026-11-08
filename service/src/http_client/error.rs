@@ -10,3 +10,21 @@ pub(super) fn transport_error(operation: &'static str, error: opendal::Error) ->
     };
     Error::new(kind, operation, "provider HTTP operation failed").with_source(error)
 }
+
+pub(super) fn invalid_origin(operation: &'static str) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        operation,
+        "expected an HTTP(S) origin without credentials, query or fragment",
+    )
+}
+
+pub(super) fn invalid_download_url(
+    error: impl std::error::Error + Send + Sync + 'static,
+) -> opendal::Error {
+    opendal::Error::new(
+        opendal::ErrorKind::ConfigInvalid,
+        "invalid HTTP download URL",
+    )
+    .set_source(error)
+}

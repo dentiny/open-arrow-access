@@ -3,24 +3,10 @@ use std::num::NonZeroU64;
 use open_arrow_access_core::Result;
 use url::Url;
 
-use super::{
-    Record,
-    error::{decode, invalid},
-};
+use super::{Record, error::decode};
 
 pub(super) fn validate_endpoint(endpoint: &str) -> Result<Url> {
-    let endpoint = Url::parse(endpoint).map_err(|_| invalid("invalid endpoint"))?;
-    if !matches!(endpoint.scheme(), "http" | "https")
-        || endpoint.host_str().is_none()
-        || !endpoint.username().is_empty()
-        || endpoint.password().is_some()
-        || endpoint.query().is_some()
-        || endpoint.fragment().is_some()
-        || endpoint.path() != "/"
-    {
-        return Err(invalid("expected an HTTP(S) origin without credentials"));
-    }
-    Ok(endpoint)
+    crate::http_client::validation::validate_origin(endpoint, "configure_zenodo")
 }
 
 pub(super) fn validate_record(record: &Record, id: NonZeroU64) -> Result<()> {
