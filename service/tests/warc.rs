@@ -1,11 +1,12 @@
+#[path = "commoncrawl/support.rs"]
 mod commoncrawl_support;
 
 use commoncrawl_support::{Records, entry, manifest};
 use futures::TryStreamExt;
-use open_arrow_access::{
+use open_arrow_access_core::{
     Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadOptionsProvider, into_stream,
-    service::{CommonCrawlWarcAccessor, CommonCrawlWarcRequest},
 };
+use open_arrow_access_service::warc::{CommonCrawlWarcAccessor, CommonCrawlWarcRequest};
 use std::num::NonZeroUsize;
 
 const SEGMENT: &str = "1664030338280.51";
@@ -150,13 +151,10 @@ async fn empty_selections_and_manifest_source_errors_are_explicit() {
     );
 }
 
-#[cfg(feature = "decompression-gzip")]
 #[tokio::test]
 async fn caller_supplied_gzip_decodes_the_official_inventory_representation() {
-    use open_arrow_access::{
-        AccessorExt,
-        decompression::{DecompressionLayer, Gzip},
-    };
+    use open_arrow_access_core::AccessorExt;
+    use open_arrow_access_decompression::{DecompressionLayer, Gzip};
     let bytes = manifest("raw_manifest.paths.gz", 1).layer(DecompressionLayer::new(Gzip));
     let accessor = CommonCrawlWarcAccessor::new(bytes, Records::default());
     let batches = into_stream(accessor.open(request()).await.unwrap())

@@ -1812,6 +1812,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "open-arrow-access-test-support",
  "thiserror",
  "tokio",
 ]
@@ -1820,8 +1821,12 @@ dependencies = [
 name = "open-arrow-access-dataset"
 version = "0.1.0"
 dependencies = [
+ "arrow-array",
+ "arrow-schema",
  "futures",
  "open-arrow-access-core",
+ "open-arrow-access-test-support",
+ "tokio",
 ]
 
 [[package]]
@@ -1851,6 +1856,7 @@ dependencies = [
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
  "parquet",
+ "tempfile",
  "tokio",
  "warc-rs",
  "xml-arrow",
@@ -1861,10 +1867,12 @@ name = "open-arrow-access-service"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
+ "arrow-schema",
  "futures",
  "http",
  "open-arrow-access-core",
  "open-arrow-access-dataset",
+ "open-arrow-access-decompression",
  "open-arrow-access-file-format",
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
