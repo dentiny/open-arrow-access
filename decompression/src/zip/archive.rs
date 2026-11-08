@@ -4,12 +4,10 @@ use async_zip::base::read1::{
     ZipOptions,
     seek::{ZipArchiveInner, ZipArchiveReader},
 };
-use open_arrow_access_core::{
-    ByteMetadata, ByteReader, Error, ErrorKind, Result, SeekableInput, into_async_seek,
-};
+use open_arrow_access_core::{ByteReader, Error, ErrorKind, Result};
 
 use super::{ZipEntry, ZipLimits, error::zip_error};
-use crate::{decoded_reader, layer::DEFAULT_CHUNK_SIZE};
+use crate::{archive::ArchiveSource, decoded_reader};
 
 /// One opened ZIP source with a shared, parsed central directory.
 ///
@@ -19,23 +17,20 @@ use crate::{decoded_reader, layer::DEFAULT_CHUNK_SIZE};
 #[derive(Clone)]
 pub struct ZipArchive {
     directory: Arc<ZipArchiveInner>,
-    input: SeekableInput,
-    metadata: ByteMetadata,
+    source: ArchiveSource,
     entries: Arc<[ZipEntry]>,
 }
 
 impl ZipArchive {
     /// Inspect the central directory once over a ranged, known-length source.
     pub async fn open(input: Box<dyn ByteReader>, limits: ZipLimits) -> Result<Self> {
-        let metadata = input.metadata().clone();
-        let input = into_async_seek(input, DEFAULT_CHUNK_SIZE, "open_zip")?;
+        let source = ArchiveSource::new(input, "open_zip")?;
         let options = ZipOptions {
             max_uncompressed_size_per_file: limits.max_entry_bytes,
             max_compressed_size_per_file: limits.max_entry_bytes,
             ..ZipOptions::default()
         };
-        let source = input.clone();
-        let parser = ZipArchiveReader::open_with_options(input, options)
+        let parser = ZipArchiveReader::open_with_options(source.input.clone(), options)
             .await
             .map_err(zip_error)?;
         let entries = parser
@@ -53,8 +48,7 @@ impl ZipArchive {
             .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             directory: parser.inner().clone(),
-            input: source,
-            metadata,
+            source,
             entries: entries.into(),
         })
     }
@@ -80,7 +74,6 @@ impl ZipArchive {
         entry_index: usize,
         chunk_size: NonZeroUsize,
     ) -> Result<Box<dyn ByteReader>> {
-        let mut metadata = self.metadata;
         let entry = self.directory.cdrs().get(entry_index).ok_or_else(|| {
             Error::new(
                 ErrorKind::NotFound,
@@ -88,6 +81,7 @@ impl ZipArchive {
                 "ZIP entry index is out of bounds",
             )
         })?;
+        let mut metadata = self.source.metadata;
         metadata.content_length = Some(entry.uncompressed_size().map_err(zip_error)?);
         // ZIP local file header (offsets relative to lfh_offset):
         // | signature (4 B) | version (2 B) | flags (2 B) | ... |
@@ -99,7 +93,7 @@ impl ZipArchive {
             .filter(|offset| {
                 offset
                     .checked_add(2)
-                    .is_some_and(|end| end <= self.input.content_length())
+                    .is_some_and(|end| end <= self.source.input.content_length())
             })
             .ok_or_else(|| {
                 Error::new(
@@ -109,24 +103,20 @@ impl ZipArchive {
                 )
             })?;
         let flags = self
+            .source
             .input
             .read_range(flags_offset..flags_offset + 2)
             .await?;
-        let flags: [u8; 2] = flags.as_ref().try_into().map_err(|_| {
-            Error::new(
-                ErrorKind::Io,
-                "open_zip_entry",
-                "range reader returned an incorrect length",
-            )
-        })?;
-        if u16::from_le_bytes(flags) & 0x41 != 0 {
+        // SeekableInput validates the exact range length. Encryption flags are
+        // bits 0 and 6 of the little-endian field's first byte.
+        if flags[0] & 0x41 != 0 {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "open_zip_entry",
                 "encrypted ZIP entries are unsupported",
             ));
         }
-        let parser = ZipArchiveReader::new_with_inner(self.input, self.directory);
+        let parser = ZipArchiveReader::new_with_inner(self.source.input, self.directory);
         let file = parser.file_oneshot(entry_index).await.map_err(zip_error)?;
         Ok(decoded_reader(
             file,

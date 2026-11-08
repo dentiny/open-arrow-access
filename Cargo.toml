@@ -37,6 +37,7 @@ opendal-http-transport-reqwest = { version = "=0.59.2", default-features = false
 reqwest = { version = "0.13.5", default-features = false }
 url = "2"
 async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
+tar = { version = "0.4.46", default-features = false }
 async_zip = { version = "0.0.19", default-features = false, features = ["deflate"] }
 # Match the resolved Cargo.lock versions at the Lance revision above.
 # See docs/dependencies.md when updating this baseline.
@@ -92,6 +93,7 @@ decompression-gzip = ["dep:open-arrow-access-decompression", "open-arrow-access-
 decompression-bz2 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 decompression-lz4 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/lz4"]
 decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zstd"]
+decompression-tar = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
 decompression-zip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zip"]
 
 [dependencies]
@@ -155,6 +157,10 @@ required-features = ["service-zenodo"]
 [[example]]
 name = "read_dataverse"
 required-features = ["service-dataverse"]
+
+[[example]]
+name = "read_tar"
+required-features = ["decompression-tar"]
 
 [[example]]
 name = "read_internet_archive"

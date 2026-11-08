@@ -31,11 +31,14 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | OpenDAL storage | [`storage/tests/opendal.rs`](../storage/tests/opendal.rs) |
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |
 | ZIP entry decompression | [`decompression/tests/zip.rs`](../decompression/tests/zip.rs) |
+| Streaming and indexed TAR entries | [`decompression/tests/tar.rs`](../decompression/tests/tar.rs) |
 | Document accessor | [`core/tests/document.rs`](../core/tests/document.rs) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
+| Shared resource lifetime probe | [`test-support/src/drop_probe.rs`](../test-support/src/drop_probe.rs), used by core stream and TAR tests |
 | Generic file-format extension protocol | [`file-format/tests/accessor.rs`](../file-format/tests/accessor.rs), also runs with no format features |
 | Shared format contract assertions | [`test-support/src/format.rs`](../test-support/src/format.rs), used by format and Parquet suites |
 | Generic reader lifecycle and source failures | [`test-support/src/reader.rs`](../test-support/src/reader.rs), shared by Arrow formats, WARC and byte layers |
+| Ranged-input requirements and source errors | [`test-support/src/ranged_input.rs`](../test-support/src/ranged_input.rs), shared by ZIP and TAR |
 
 ## Add a test
 

@@ -1,6 +1,8 @@
 //! Streaming decompression through the shared byte accessor and layer contracts.
 
 mod accessor;
+#[cfg(any(feature = "tar", feature = "zip"))]
+mod archive;
 mod codec;
 mod decoded_reader;
 mod factory;
@@ -26,3 +28,6 @@ pub mod zstd;
 
 #[cfg(feature = "zip")]
 pub mod zip;
+
+#[cfg(feature = "tar")]
+pub mod tar;

@@ -8,6 +8,7 @@ use std::task::Poll;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{Capability, Error, ErrorKind, Reader, StreamReader, into_stream};
+use open_arrow_access_test_support::DropProbe;
 
 use common::FailingReader;
 
@@ -20,19 +21,11 @@ async fn stream_stops_after_error_without_polling_reader_again() {
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
-struct DropSignal(Arc<AtomicBool>);
-
-impl Drop for DropSignal {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::SeqCst);
-    }
-}
-
 #[tokio::test]
 async fn stream_reader_is_lazy_preserves_order_and_fuses_non_unpin_streams() {
     let calls = Arc::new(AtomicUsize::new(0));
     let dropped = Arc::new(AtomicBool::new(false));
-    let guard = DropSignal(dropped.clone());
+    let guard = DropProbe::new(dropped.clone());
     let observed = calls.clone();
     // Deliberately resume producing items after EOF to exercise the adapter's fuse.
     let stream = stream::poll_fn(move |_| {
@@ -74,7 +67,7 @@ async fn stream_reader_preserves_errors_and_releases_the_stream_before_returning
     let calls = Arc::new(AtomicUsize::new(0));
     let observed = calls.clone();
     let dropped = Arc::new(AtomicBool::new(false));
-    let guard = DropSignal(dropped.clone());
+    let guard = DropProbe::new(dropped.clone());
     let stream = stream::poll_fn(move |_| {
         let _keep_alive = &guard;
         Poll::Ready(Some(if observed.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -114,7 +107,7 @@ async fn dropping_stream_reader_releases_unpolled_or_partially_consumed_streams(
         let calls = Arc::new(AtomicUsize::new(0));
         let observed = calls.clone();
         let dropped = Arc::new(AtomicBool::new(false));
-        let guard = DropSignal(dropped.clone());
+        let guard = DropProbe::new(dropped.clone());
         let stream = stream::poll_fn(move |_| {
             let _keep_alive = &guard;
             observed.fetch_add(1, Ordering::SeqCst);

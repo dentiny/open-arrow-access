@@ -13,8 +13,10 @@ bz2 = ["dep:async-compression", "async-compression/bzip2"]
 lz4 = ["dep:async-compression", "async-compression/lz4"]
 zstd = ["dep:async-compression", "async-compression/zstd"]
 zip = ["dep:async_zip"]
+tar = ["dep:tar"]
 
 [dependencies]
+tar = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 futures.workspace = true
 async-compression = { workspace = true, optional = true }
@@ -47,3 +49,7 @@ workspace = true
 [[test]]
 name = "zip"
 required-features = ["zip"]
+
+[[test]]
+name = "tar"
+required-features = ["tar"]

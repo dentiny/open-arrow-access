@@ -16,6 +16,9 @@ use open_arrow_access_core::{
     ErrorKind, ListRequest, ObjectStream, Reader, Result, async_trait,
 };
 
+mod drop_probe;
+pub use drop_probe::DropProbe;
+
 /// Configure the filesystem SDK backend for test fixtures.
 pub fn fs_operator(root: impl AsRef<Path>) -> opendal::Operator {
     opendal::Operator::new(opendal::services::Fs::default().root(root.as_ref().to_str().unwrap()))
@@ -303,6 +306,9 @@ pub mod byte_layer;
 
 pub mod byte_accessor;
 
+/// Shared input requirements and source errors for ranged consumers.
+pub mod ranged_input;
+
 /// Shared assertions for single-file Arrow format accessors.
 pub mod format;
 
@@ -312,11 +318,11 @@ pub mod reader;
 /// Shared helpers for record-reader values.
 pub mod record;
 
-fn memory_read_error(error: &Error) -> &Error {
+fn memory_error<'a>(error: &'a Error, operation: &str) -> &'a Error {
     let mut source: &(dyn std::error::Error + 'static) = error;
     loop {
         if let Some(shared) = source.downcast_ref::<Error>()
-            && shared.operation() == "memory_read"
+            && shared.operation() == operation
         {
             return shared;
         }
