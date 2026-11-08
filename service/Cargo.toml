@@ -54,6 +54,10 @@ opendal-service-http = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 
 [dev-dependencies]
+arrow-schema.workspace = true
+http.workspace = true
+tokio.workspace = true
+open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
 
@@ -63,3 +67,15 @@ required-features = ["huggingface"]
 
 [lints]
 workspace = true
+
+[[test]]
+name = "commoncrawl"
+required-features = ["warc"]
+
+[[test]]
+name = "warc"
+required-features = ["warc"]
+
+[[test]]
+name = "commoncrawl_segment"
+required-features = ["commoncrawl-segment"]

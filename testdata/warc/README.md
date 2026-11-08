@@ -1,6 +1,6 @@
 # WARC test fixtures
 
-These small, checked-in WARC/1.1 files are the inputs to `tests/warc.rs`.
+These small, checked-in WARC/1.1 files are the inputs to `file-format/tests/warc.rs`.
 Tests read them from disk and feed their bytes through the mock accessor to
 exercise fragmentation, lazy reading, and injected I/O errors. Tests do not
 serialize WARC records or construct malformed inputs at runtime.

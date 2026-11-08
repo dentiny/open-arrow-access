@@ -1,10 +1,11 @@
+use open_arrow_access_service::commoncrawl::{
+    CommonCrawlSegmentAccessor, CommonCrawlSegmentRequest,
+};
+#[path = "commoncrawl/support.rs"]
 mod commoncrawl_support;
 
 use commoncrawl_support::{Records, entry, manifest, paths};
-use open_arrow_access::{
-    Accessor, ByteReadOptions, ErrorKind, ReadOptionsProvider,
-    service::{CommonCrawlSegmentAccessor, CommonCrawlSegmentRequest},
-};
+use open_arrow_access_core::{Accessor, ByteReadOptions, ErrorKind, ReadOptionsProvider};
 use std::num::NonZeroUsize;
 
 const SEGMENT: &str = "1664030338280.51";
