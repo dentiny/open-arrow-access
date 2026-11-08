@@ -14,8 +14,6 @@ use open_arrow_access_core::{
 };
 use xml_arrow::{NamespaceBinding, XmlField, XmlSchema};
 
-use metadata::BookMetadata;
-
 /// Source byte limits; excludes parser and Arrow allocations.
 #[derive(Clone, Copy, Debug)]
 pub struct GutenbergLimits {
@@ -91,12 +89,12 @@ impl DocumentDecoder for GutenbergDecoder {
         _request: ReadRequest,
         schema: SchemaRef,
     ) -> Result<RecordBatch> {
-        BookMetadata::parse(raw).await?.into_batch(schema)
+        metadata::read_metadata(raw, schema).await
     }
 }
 
 // Declare Arrow fields and their XML locations together. The XML engine extracts
-// scalars as strings; BookMetadata validates them and writes the requested output
+// scalars as strings; metadata conversion validates them and writes the output
 // types when building the final batch.
 type ScalarParser = for<'a> fn(&'a str) -> Result<FieldValue<'a>>;
 
@@ -105,7 +103,6 @@ struct Mapping {
     xml: XmlField,
     children: Vec<Mapping>,
     parser: Option<ScalarParser>,
-    unique: Option<&'static str>,
 }
 
 impl Mapping {
@@ -115,17 +112,11 @@ impl Mapping {
             xml,
             children: Vec::new(),
             parser: None,
-            unique: None,
         }
     }
 
     fn parse_with(mut self, parser: ScalarParser) -> Self {
         self.parser = Some(parser);
-        self
-    }
-
-    fn unique(mut self, error: &'static str) -> Self {
-        self.unique = Some(error);
         self
     }
 }
@@ -147,13 +138,7 @@ fn strings(name: &str, path: &str) -> Mapping {
     Mapping::new(xml.arrow_field().clone(), xml)
 }
 
-fn objects(
-    name: &str,
-    path: &str,
-    container: &str,
-    list: fn(Arc<Field>) -> DataType,
-    mappings: Vec<Mapping>,
-) -> Mapping {
+fn objects(name: &str, path: &str, container: &str, mappings: Vec<Mapping>) -> Mapping {
     let fields: Vec<_> = mappings
         .iter()
         .map(|mapping| mapping.field.clone())
@@ -173,7 +158,7 @@ fn objects(
     let item = Arc::new(Field::new("item", DataType::Struct(fields.into()), false));
     Mapping {
         children: mappings,
-        ..Mapping::new(Field::new(name, list(item), false), xml)
+        ..Mapping::new(Field::new(name, DataType::List(item), false), xml)
     }
 }
 
@@ -188,13 +173,12 @@ fn definitions() -> &'static Definitions {
     DEFINITIONS.get_or_init(|| {
         use DataType::*;
         let mappings = vec![
-            scalar("ebook_id", "@r:about", UInt64, false).parse_with(metadata::ebook_id),
+            scalar("ebook_id", "@r:about", UInt64, false).parse_with(metadata::ebook_uri_id),
             scalar("title", "d:title", LargeUtf8, true),
             objects(
                 "creator",
                 "d:creator",
                 "p:agent",
-                List,
                 vec![
                     scalar("uri", "@r:about", Utf8, true),
                     scalar("name", "p:name", Utf8, true),
@@ -208,7 +192,6 @@ fn definitions() -> &'static Definitions {
                 "subject",
                 "d:subject",
                 "r:Description",
-                List,
                 vec![
                     scalar("scheme", "a:memberOf/@r:resource", Utf8, true),
                     scalar("value", "r:value", Utf8, false),
@@ -221,10 +204,8 @@ fn definitions() -> &'static Definitions {
                 "files",
                 "d:hasFormat",
                 "p:file",
-                LargeList,
                 vec![
-                    scalar("uri", "@r:about", Utf8, false)
-                        .unique("missing or duplicate file URI in RDF"),
+                    scalar("uri", "@r:about", Utf8, false),
                     strings("format", "d:format/r:Description/r:value"),
                     scalar("extent", "d:extent", UInt64, true),
                     scalar("modified", "d:modified", Utf8, true),

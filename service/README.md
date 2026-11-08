@@ -48,7 +48,7 @@ RDF order; their URIs are metadata and are never fetched.
 | `language`, `bookshelf` | List<Utf8> |
 | `subject` | List of struct: nullable `scheme` (Utf8), `value` (Utf8) |
 | `issued` | nullable Date32; Gutenberg release date |
-| `files` | LargeList of struct: `uri` (Utf8), `format` (List<Utf8>), nullable `extent` (UInt64), nullable `modified` (Utf8) |
+| `files` | List of struct: `uri` (Utf8), `format` (List<Utf8>), nullable `extent` (UInt64), nullable `modified` (Utf8) |
 
 Missing optional metadata becomes null or an empty list. Only mapped RDF fields
 are emitted. Malformed RDF terminates the reader rather than dropping the book.

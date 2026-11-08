@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use arrow_array::{Array, StructArray, cast::AsArray};
 use arrow_schema::DataType;
 use chrono::NaiveDate;
@@ -11,56 +9,43 @@ use xml_arrow::{ReaderOptions, XmlReader};
 
 use super::{Mapping, decode, decode_source};
 
-/// Validated XML extraction, retained without a second metadata batch.
-pub(super) struct BookMetadata {
-    source: StructArray,
-}
-
-impl BookMetadata {
-    /// Validate every mapped field, independently of the output projection.
-    pub(super) async fn parse(raw: &[u8]) -> Result<Self> {
-        let mut reader = XmlReader::new(
-            Cursor::new(raw),
-            super::mapping(),
-            /*record_path=*/ "/r:RDF",
-            ReaderOptions {
-                // DocumentAccessor already bounds the input. Accept larger caller-
-                // configured documents without imposing XML's default batch limit.
-                max_record_bytes: usize::MAX - 1,
-                max_batch_bytes: usize::MAX,
-                max_depth: 65534,
-                ..Default::default()
-            },
-        )
-        .map_err(decode_source)?;
-        let batch = reader
-            .next_batch()
-            .await
-            .map_err(decode_source)?
-            .ok_or_else(|| decode("expected an RDF document containing one ebook"))?;
-        if batch.num_rows() != 1 || reader.next_batch().await.map_err(decode_source)?.is_some() {
-            return Err(decode("expected one RDF document"));
-        }
-        let book = Self {
-            source: batch.column(0).as_struct().clone(),
-        };
-        convert_fields(&super::definitions().fields, &book.source, 0, None)?;
-        Ok(book)
+/// Validate all mapped fields and build one projected row.
+pub(super) async fn read_metadata(raw: &[u8], schema: SchemaRef) -> Result<RecordBatch> {
+    let mut reader = XmlReader::new(
+        Cursor::new(raw),
+        super::mapping(),
+        /*record_path=*/ "/r:RDF",
+        ReaderOptions {
+            // DocumentAccessor already bounds the input. Accept larger caller-
+            // configured documents without imposing XML's default batch limit.
+            max_record_bytes: usize::MAX - 1,
+            max_batch_bytes: usize::MAX,
+            max_depth: 65534,
+            ..Default::default()
+        },
+    )
+    .map_err(decode_source)?;
+    let batch = reader
+        .next_batch()
+        .await
+        .map_err(decode_source)?
+        .ok_or_else(|| decode("expected an RDF document containing one ebook"))?;
+    if batch.num_rows() != 1 || reader.next_batch().await.map_err(decode_source)?.is_some() {
+        return Err(decode("expected one RDF document"));
     }
-
-    pub(super) fn into_batch(self, schema: SchemaRef) -> Result<RecordBatch> {
-        let definitions = super::definitions();
-        let fields = schema.fields().iter().map(|field| {
-            definitions
-                .fields
-                .iter()
-                .find(|mapping| mapping.field.name() == field.name())
-                .unwrap()
-        });
-        RecordBatchBuilder::build_row(definitions.schema.clone(), schema.clone(), |row| {
-            convert_fields(fields, &self.source, 0, Some(row))
-        })
-    }
+    let source = batch.column(0).as_struct();
+    let definitions = super::definitions();
+    convert_fields(&definitions.fields, source, 0, None)?;
+    let fields = schema.fields().iter().map(|field| {
+        definitions
+            .fields
+            .iter()
+            .find(|mapping| mapping.field.name() == field.name())
+            .unwrap()
+    });
+    RecordBatchBuilder::build_row(definitions.schema.clone(), schema.clone(), |row| {
+        convert_fields(fields, source, 0, Some(row))
+    })
 }
 
 // Validate every source field with no writer, or write the requested fields.
@@ -75,7 +60,7 @@ fn convert_fields<'m>(
         let name = field.name().as_str();
         let column = source.column_by_name(name).unwrap();
         match field.data_type() {
-            DataType::List(item) | DataType::LargeList(item) => {
+            DataType::List(item) => {
                 let values = column.as_list::<i32>().value(index);
                 if matches!(item.data_type(), DataType::Struct(_)) {
                     let entries = values.as_struct().column(0).as_struct();
@@ -86,22 +71,6 @@ fn convert_fields<'m>(
                     } else {
                         for index in 0..entries.len() {
                             convert_fields(&mapping.children, entries, index, None)?;
-                        }
-                        for child in &mapping.children {
-                            if let Some(error) = child.unique {
-                                let mut seen = HashSet::new();
-                                for value in entries
-                                    .column_by_name(child.field.name())
-                                    .unwrap()
-                                    .as_string::<i32>()
-                                    .iter()
-                                    .flatten()
-                                {
-                                    if value.is_empty() || !seen.insert(value) {
-                                        return Err(decode(error));
-                                    }
-                                }
-                            }
                         }
                     }
                 } else if let Some(row) = row.as_deref_mut() {
@@ -135,16 +104,11 @@ fn scalar_value<'a>(
     let name = field.name().as_str();
     // Empty attributes are values; empty optional element text becomes null.
     let keep_empty = matches!(field.data_type(), DataType::Utf8 | DataType::LargeUtf8)
-        && mapping
-            .xml
-            .path()
-            .rsplit('/')
-            .next()
-            .is_some_and(|path| path.starts_with('@'));
+        && mapping.xml.path().contains('@');
     let text = (!column.is_null(index))
         .then(|| column.as_string::<i32>().value(index))
         .filter(|s| !s.is_empty() || keep_empty);
-    if text.is_none() && !field.is_nullable() {
+    if !field.is_nullable() && text.is_none_or(str::is_empty) {
         return Err(decode(format!("missing {name}")));
     }
     if let Some(parse) = mapping.parser {
@@ -169,7 +133,7 @@ fn number<T: std::str::FromStr>(value: Option<&str>, field: &str) -> Result<Opti
         .transpose()
 }
 
-pub(super) fn ebook_id(about: &str) -> Result<FieldValue<'_>> {
+pub(super) fn ebook_uri_id(about: &str) -> Result<FieldValue<'_>> {
     let id = about
         .strip_prefix("ebooks/")
         .or_else(|| about.strip_prefix("http://www.gutenberg.org/ebooks/"))

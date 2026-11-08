@@ -25,63 +25,24 @@ async fn keeps_mapped_book_and_file_metadata_in_rdf_order() {
     assert!(!accessor.capability().list);
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch.num_rows(), 1);
-    assert_eq!(
-        batch
-            .column_by_name("ebook_id")
-            .unwrap()
-            .as_primitive::<UInt64Type>()
-            .value(0),
-        42
-    );
-    assert_eq!(
-        batch
-            .column_by_name("title")
-            .unwrap()
-            .as_string::<i64>()
-            .value(0),
-        "A & B"
-    );
-    assert_eq!(
-        batch
-            .column_by_name("issued")
-            .unwrap()
-            .as_primitive::<Date32Type>()
-            .value(0),
-        1
-    );
-    let creators = batch
-        .column_by_name("creator")
-        .unwrap()
-        .as_list::<i32>()
-        .value(0);
+    assert_eq!(batch["ebook_id"].as_primitive::<UInt64Type>().value(0), 42);
+    assert_eq!(batch["title"].as_string::<i64>().value(0), "A & B");
+    assert_eq!(batch["issued"].as_primitive::<Date32Type>().value(0), 1);
+    let creators = batch["creator"].as_list::<i32>().value(0);
     let creators = creators.as_struct();
     assert_eq!(
-        creators
-            .column_by_name("birthdate")
-            .unwrap()
-            .as_primitive::<Int32Type>()
-            .value(0),
+        creators["birthdate"].as_primitive::<Int32Type>().value(0),
         -20
     );
-    let files = batch
-        .column_by_name("files")
-        .unwrap()
-        .as_list::<i64>()
-        .value(0);
+    let files = batch["files"].as_list::<i32>().value(0);
     let files = files.as_struct();
-    let uris = files.column_by_name("uri").unwrap().as_string::<i32>();
+    let uris = files["uri"].as_string::<i32>();
     assert_eq!(uris.value(0), "https://example.invalid/42.txt");
     assert_eq!(uris.value(1), "https://example.invalid/42.zip");
+    assert_eq!(uris.len(), 3);
+    assert_eq!(uris.value(2), uris.value(0));
     assert_eq!(files.num_columns(), 4);
-    assert_eq!(
-        files
-            .column_by_name("format")
-            .unwrap()
-            .as_list::<i32>()
-            .value(0)
-            .len(),
-        1
-    );
+    assert_eq!(files["format"].as_list::<i32>().value(0).len(), 1);
     assert!(reader.next().await.unwrap().is_none());
     assert!(reader.next().await.unwrap().is_none());
 }
@@ -137,6 +98,7 @@ async fn rejects_invalid_rdf_without_silently_dropping_rows() {
     for invalid in [
         raw.replace("ebooks/42", "ebooks/invalid"),
         raw.replace("1970-01-02", "2026-02-30"),
+        raw.replace("https://example.invalid/42.txt", ""),
         raw.replace("<p:ebook", "<p:ebook xmlns:p=\"urn:wrong\""),
         raw.replace("</r:RDF>", "<p:ebook r:about=\"ebooks/43\"/></r:RDF>"),
     ] {
@@ -172,13 +134,6 @@ async fn keeps_metadata_only_books_with_missing_optional_fields() {
     let mut reader = accessor.open(ReadRequest::new("book.rdf")).await.unwrap();
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch.num_rows(), 1);
-    assert!(batch.column_by_name("title").unwrap().is_null(0));
-    assert!(
-        batch
-            .column_by_name("files")
-            .unwrap()
-            .as_list::<i64>()
-            .value(0)
-            .is_empty()
-    );
+    assert!(batch["title"].is_null(0));
+    assert!(batch["files"].as_list::<i32>().value(0).is_empty());
 }

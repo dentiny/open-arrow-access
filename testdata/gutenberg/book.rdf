@@ -23,5 +23,6 @@
       <d:format><r:Description><r:value>application/zip</r:value></r:Description></d:format>
       <d:format><r:Description><r:value>text/plain</r:value></r:Description></d:format>
     </p:file></d:hasFormat>
+    <d:hasFormat><p:file r:about="https://example.invalid/42.txt"/></d:hasFormat>
   </p:ebook>
 </r:RDF>
