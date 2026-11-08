@@ -43,7 +43,8 @@ impl ArxivKind {
 pub struct ArxivArchive {
     pub kind: ArxivKind,
     pub filename: String,
-    pub month: String,
+    /// Year and month encoded as YYMM, e.g. 2410 for October 2024.
+    pub month: u16,
     /// One-based TAR chunk number within `month` for the selected `kind`.
     /// Maps to manifest `seq_num` and the filename suffix, e.g. `_003.tar`.
     pub sequence: u32,
@@ -82,7 +83,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivServi
     pub async fn manifest(
         &self,
         kind: ArxivKind,
-        month: Option<&str>,
+        month: Option<u16>,
         options: ByteReadOptions,
     ) -> Result<Vec<ArxivArchive>> {
         if let Some(month) = month {

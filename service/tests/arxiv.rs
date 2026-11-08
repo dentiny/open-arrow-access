@@ -17,7 +17,7 @@ fn service() -> ArxivService<OpenDalAccessor> {
 async fn resolves_manifest_order_and_reads_selected_pdf_without_other_bodies() {
     let service = service();
     let archives = service
-        .manifest(ArxivKind::Pdf, Some("2410"), ByteReadOptions::default())
+        .manifest(ArxivKind::Pdf, Some(2410), ByteReadOptions::default())
         .await
         .unwrap();
     assert_eq!(archives.len(), 2);
@@ -52,7 +52,7 @@ async fn supports_source_manifests_and_empty_month_selection() {
     assert_eq!(source[0].filename, "src/arXiv_src_2410_001.tar");
     assert!(
         service
-            .manifest(ArxivKind::Pdf, Some("2501"), ByteReadOptions::default())
+            .manifest(ArxivKind::Pdf, Some(2501), ByteReadOptions::default())
             .await
             .unwrap()
             .is_empty()
@@ -74,7 +74,7 @@ async fn forwards_byte_options_and_validates_before_opening_storage() {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
         ..Default::default()
     };
-    for month in ["2413", "2400", "202410", "24é"] {
+    for month in [2413, 2400, 10000] {
         assert_eq!(
             service
                 .manifest(ArxivKind::Pdf, Some(month), options)
@@ -87,7 +87,7 @@ async fn forwards_byte_options_and_validates_before_opening_storage() {
     }
     assert!(observed.requests.lock().unwrap().is_empty());
     let selected = service
-        .manifest(ArxivKind::Pdf, Some("2410"), options)
+        .manifest(ArxivKind::Pdf, Some(2410), options)
         .await
         .unwrap();
     let request = observed.requests.lock().unwrap()[0].clone();
@@ -138,7 +138,7 @@ async fn rejects_invalid_manifests_and_changed_archive_length() {
             .is_empty()
     );
     let archives = service()
-        .manifest(ArxivKind::Pdf, Some("2410"), ByteReadOptions::default())
+        .manifest(ArxivKind::Pdf, Some(2410), ByteReadOptions::default())
         .await
         .unwrap();
     assert_eq!(
@@ -157,7 +157,7 @@ async fn bulk_stream_starts_before_other_headers_and_accepts_sequential_storage(
     use std::sync::atomic::Ordering;
 
     let archives = service()
-        .manifest(ArxivKind::Pdf, Some("2410"), ByteReadOptions::default())
+        .manifest(ArxivKind::Pdf, Some(2410), ByteReadOptions::default())
         .await
         .unwrap();
     let bytes = fixture!("arxiv", "pdf/arXiv_pdf_2410_001.tar").await;
@@ -181,4 +181,18 @@ async fn bulk_stream_starts_before_other_headers_and_accepts_sequential_storage(
         collect_bytes(reader.as_mut()).await.unwrap(),
         b"%PDF-first-paper"
     );
+}
+
+#[tokio::test]
+async fn numeric_month_preserves_zero_padded_archive_names() {
+    let raw = fixture!("arxiv", "pdf/arXiv_pdf_manifest.xml").await;
+    let raw = String::from_utf8(raw).unwrap().replace("2410", "0001");
+    let service = ArxivService::new(MemoryAccessor::new(raw.as_bytes(), 64));
+    let archives = service
+        .manifest(ArxivKind::Pdf, Some(1), ByteReadOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(archives.len(), 2);
+    assert_eq!(archives[0].month, 1);
+    assert_eq!(archives[0].filename, "pdf/arXiv_pdf_0001_003.tar");
 }

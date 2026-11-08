@@ -10,11 +10,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = args
         .next()
         .ok_or("usage: read_arxiv <local-mirror-root> <YYMM> [archive-index] [entry-index]")?;
-    let month = args.next().ok_or("missing YYMM month")?;
+    let month: u16 = args.next().ok_or("missing YYMM month")?.parse()?;
     let operator = opendal::Operator::new(opendal::services::Fs::default().root(&root))?;
     let service = ArxivService::new(OpenDalAccessor::new(operator));
     let archives = service
-        .manifest(ArxivKind::Pdf, Some(&month), ByteReadOptions::default())
+        .manifest(ArxivKind::Pdf, Some(month), ByteReadOptions::default())
         .await?;
     for (index, archive) in archives.iter().enumerate() {
         println!("{index}\t{}\t{} bytes", archive.filename, archive.size);

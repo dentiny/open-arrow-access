@@ -270,7 +270,7 @@ region, credentials and requester-pays behavior on their OpenDAL S3 operator.
 A local mirror preserving the same keys works without any network or credentials.
 The service does not configure S3, query paper APIs, or require bucket listing.
 
-`manifest(kind, Some("2410"), byte_options).await` reads the selected PDF/source
+`manifest(kind, Some(2410), byte_options).await` reads the selected PDF/source
 XML manifest, validates all rows, and returns matching TAR metadata in manifest
 order. `None` selects all months. An absent month is a valid empty result.
 Metadata
