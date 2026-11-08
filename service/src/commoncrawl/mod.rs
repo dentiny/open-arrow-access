@@ -1,3 +1,4 @@
+mod error;
 mod http;
 mod source;
 mod url;

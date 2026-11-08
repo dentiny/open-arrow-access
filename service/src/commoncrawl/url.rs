@@ -1,5 +1,7 @@
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::Result;
 use url::Url;
+
+use super::error::invalid_url;
 
 pub(super) fn parse_url(value: &str) -> Result<Url> {
     let url = Url::parse(value).map_err(|error| invalid_url().with_source(error))?;
@@ -22,12 +24,4 @@ pub(super) fn parse_url(value: &str) -> Result<Url> {
         return Err(invalid_url());
     }
     Ok(url)
-}
-
-fn invalid_url() -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "configure_commoncrawl",
-        "expected a canonical HTTP(S) URL without credentials, query or fragment",
-    )
 }
