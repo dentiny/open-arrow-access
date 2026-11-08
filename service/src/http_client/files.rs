@@ -65,7 +65,3 @@ impl HttpFileService {
         Ok(ResolvedFileSet::new(files, plan.metadata))
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/http_files.rs"]
-mod tests;

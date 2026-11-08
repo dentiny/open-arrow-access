@@ -32,7 +32,6 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
 | Generic file-format extension protocol | [`file-format/tests/accessor.rs`](../file-format/tests/accessor.rs), also runs with no format features |
 | Shared format contract assertions | [`test-support/src/format.rs`](../test-support/src/format.rs), used by format and Parquet suites |
-| Shared HTTP manifest resolution | [`service/tests/unit/http_files.rs`](../service/tests/unit/http_files.rs), included by the private HTTP file resolver |
 
 ## Add a test
 
