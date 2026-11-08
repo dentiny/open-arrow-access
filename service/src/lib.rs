@@ -30,3 +30,6 @@ mod http_client;
 
 #[cfg(feature = "dataverse")]
 pub mod dataverse;
+
+#[cfg(feature = "internet-archive")]
+pub mod internet_archive;

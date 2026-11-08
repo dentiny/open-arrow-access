@@ -10,6 +10,7 @@ description = "Dataset source providers for Open Arrow Access"
 default = []
 zenodo = []
 dataverse = []
+internet-archive = []
 courtlistener = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/bz2",
@@ -122,3 +123,7 @@ required-features = ["zenodo"]
 [[test]]
 name = "dataverse"
 required-features = ["dataverse"]
+
+[[test]]
+name = "internet_archive"
+required-features = ["internet-archive"]

@@ -284,3 +284,22 @@ before any file download. See the [Dataverse data access API](https://guides.dat
 Run `cargo run --example read_dataverse --features service-dataverse --
 https://dataverse.harvard.edu doi:10.7910/DVN/27221 1.0` to list the example dataset;
 append an exact logical filename to stream its original bytes.
+
+## Internet Archive (`internet-archive`)
+
+Enable `service-internet-archive` for
+`service::internet_archive::InternetArchiveService`.
+`InternetArchiveService::new()?.item("xfetch").await?` resolves public item
+metadata once. `files()` exposes names, optional sizes, formats, source labels
+and MD5 values. Exact filenames, including nested paths, map to canonical
+`/download/{identifier}/{filename}` routes through the shared byte accessor.
+List the empty root to enumerate cached membership in API order; both recursion
+modes return the same names. Unknown names fail before file I/O. Byte read options,
+range reads and independent reader lifetime follow the shared storage contracts.
+
+Membership may change upstream;
+no snapshot guarantee is added. Collection/search, restricted borrowing, cookies,
+uploads and checksum verification are outside this entry point.
+See the [Internet Archive metadata API](https://archive.org/developers/md-read.html).
+Run `cargo run --example read_internet_archive --features service-internet-archive -- xfetch`
+to list files, or append an exact filename to stream it.
