@@ -8,17 +8,17 @@ use crate::{
     read_limited,
 };
 
-/// Decode one complete byte object into one Arrow row.
+/// Decode one whole object into one Arrow row.
 #[async_trait]
 pub trait DocumentDecoder: Send + Sync {
-    /// Owned request, including projection and per-open byte settings.
+    /// Per-document request and read options.
     type Request: ReadOptionsProvider + 'static;
 
-    /// Validate the request and return the full schema, without I/O.
+    /// Validate without I/O and return the full schema.
     fn prepare(&self, request: &Self::Request) -> Result<SchemaRef>;
 
-    /// Parse and validate all input, returning one row with the supplied schema.
-    /// Async decoding may read related objects; their limits belong to the decoder.
+    /// Validate all input and return one row with the projected schema.
+    /// Related-object limits belong to the decoder.
     async fn decode(
         &self,
         bytes: &[u8],
@@ -27,13 +27,8 @@ pub trait DocumentDecoder: Send + Sync {
     ) -> Result<RecordBatch>;
 }
 
-/// Read one bounded document with schema metadata available before input I/O.
-///
-/// The first `next()` opens storage, collects the input through `read_limited`,
-/// and invokes the decoder once. Even empty input is passed to the decoder.
-/// Output is one row regardless of the requested batch-size target. Projection
-/// is resolved before opening storage; source errors pass through unchanged.
-/// Dropping the reader releases its input and decoder without background work.
+/// Read one bounded document into one Arrow row.
+/// Schema is available at open; input I/O starts on the first `next()`.
 pub struct DocumentAccessor<B, D> {
     storage: Arc<B>,
     decoder: Arc<D>,
@@ -41,7 +36,7 @@ pub struct DocumentAccessor<B, D> {
 }
 
 impl<B, D> DocumentAccessor<B, D> {
-    /// Bound collected document bytes, independently of decoder/Arrow allocations.
+    /// Limit collected input bytes; decoder allocations are separate.
     pub fn new(storage: B, decoder: D, max_bytes: usize) -> Self {
         Self {
             storage: Arc::new(storage),
