@@ -181,9 +181,11 @@ for TSV.
 ## Supported components
 
 `RecordBatchBuilder` is always available from the facade and core crate,
-including with `--no-default-features`. Convert Serde records into Arrow with
-`RecordBatchBuilder::new(schema, projection)`, `push` and `finish`.
-The builder handles nested fields, raw binary, output field order
+including with `--no-default-features`. Use
+`RecordBatchBuilder::new(schema, projection)`, write named fields in a `push`
+callback, and call `finish`. Native Arrow builders cover the metadata types
+used by PMC and Gutenberg, with no new dependencies. The utility handles
+nested fields, raw binary, output field order
 and zero-column row counts while preserving schema metadata. Only projected
 fields are encoded; source validation remains with the caller. An append error
 invalidates the builder so a partially written row cannot be emitted. See the

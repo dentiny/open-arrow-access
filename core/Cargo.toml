@@ -7,9 +7,6 @@ repository.workspace = true
 description = "Shared reader, accessor, and layer contracts for Open Arrow Access"
 
 [dependencies]
-serde.workspace = true
-serde_arrow.workspace = true
-marrow = { workspace = true, features = ["arrow-59"] }
 arrow-array.workspace = true
 arrow-schema.workspace = true
 async-trait.workspace = true
@@ -18,7 +15,6 @@ futures.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tokio.workspace = true
 
 [lints]
