@@ -7,7 +7,9 @@ use open_arrow_access_test_support::{
 };
 
 async fn source(name: &str) -> MemoryAccessor {
-    MemoryAccessor::new(&fixture!("tar", name).await, 7).with_ranges()
+    MemoryAccessor::new(&fixture!("tar", name).await, 7)
+        .with_ranges()
+        .with_version("snapshot")
 }
 
 #[tokio::test]
@@ -53,6 +55,9 @@ async fn inspects_headers_once_and_streams_independent_selected_entries() {
     let mut first = archive
         .open_entry(1, NonZeroUsize::new(3).unwrap())
         .unwrap();
+    assert_eq!(first.metadata().source, Some("archive".into()));
+    assert_eq!(first.metadata().version.as_deref(), Some("snapshot"));
+    assert_eq!(first.metadata().content_length, Some(entries[1].size));
     let mut second = archive
         .open_entry(2, NonZeroUsize::new(5).unwrap())
         .unwrap();
@@ -171,7 +176,9 @@ async fn streams_first_body_without_scanning_later_headers_or_using_ranges() {
     use std::sync::atomic::Ordering;
 
     let bytes = fixture!("tar", "mixed.tar").await;
-    let source = MemoryAccessor::new(&bytes, 64).without_content_length();
+    let source = MemoryAccessor::new(&bytes, 64)
+        .without_content_length()
+        .with_version("snapshot");
     let mut archive = TarStream::new(
         source.open("archive".into()).await.unwrap(),
         TarLimits::default(),
@@ -181,6 +188,9 @@ async fn streams_first_body_without_scanning_later_headers_or_using_ranges() {
     assert!(empty.next().await.unwrap().is_none());
     let (entry, mut first) = archive.next_entry().await.unwrap().unwrap();
     assert_eq!(entry.name, b"papers/paper.pdf");
+    assert_eq!(first.metadata().source, Some("archive".into()));
+    assert_eq!(first.metadata().version.as_deref(), Some("snapshot"));
+    assert_eq!(first.metadata().content_length, Some(entry.size));
     assert_eq!(source.observations.reads.load(Ordering::SeqCst), 16);
     assert_eq!(
         archive.next_entry().await.err().unwrap().kind(),
