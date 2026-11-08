@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use arrow_array::{Array, StructArray, cast::AsArray};
-use arrow_schema::{DataType, Field, Fields};
+use arrow_schema::DataType;
 use chrono::NaiveDate;
 use futures::io::Cursor;
 use open_arrow_access_core::{
@@ -9,7 +9,7 @@ use open_arrow_access_core::{
 };
 use xml_arrow::{ReaderOptions, XmlReader};
 
-use super::{decode, decode_source};
+use super::{Mapping, decode, decode_source};
 
 /// Validated XML extraction, retained without a second metadata batch.
 pub(super) struct BookMetadata {
@@ -44,63 +44,64 @@ impl BookMetadata {
         let book = Self {
             source: batch.column(0).as_struct().clone(),
         };
-        convert_fields(super::schema().fields(), &book.source, 0, None)?;
-        let mut seen = HashSet::new();
-        for uri in book
-            .files()
-            .column_by_name("uri")
-            .unwrap()
-            .as_string::<i32>()
-            .iter()
-            .flatten()
-        {
-            if uri.is_empty() || !seen.insert(uri) {
-                return Err(decode("missing or duplicate file URI in RDF"));
-            }
-        }
+        convert_fields(&super::definitions().fields, &book.source, 0, None)?;
         Ok(book)
     }
 
-    fn files(&self) -> &StructArray {
-        self.source
-            .column_by_name("files")
-            .unwrap()
-            .as_list::<i32>()
-            .values()
-            .as_struct()
-            .column(0)
-            .as_struct()
-    }
-
     pub(super) fn into_batch(self, schema: SchemaRef) -> Result<RecordBatch> {
-        RecordBatchBuilder::build_row(super::schema(), schema.clone(), |row| {
-            convert_fields(schema.fields(), &self.source, 0, Some(row))
+        let definitions = super::definitions();
+        let fields = schema.fields().iter().map(|field| {
+            definitions
+                .fields
+                .iter()
+                .find(|mapping| mapping.field.name() == field.name())
+                .unwrap()
+        });
+        RecordBatchBuilder::build_row(definitions.schema.clone(), schema.clone(), |row| {
+            convert_fields(fields, &self.source, 0, Some(row))
         })
     }
 }
 
 // Validate every source field with no writer, or write the requested fields.
-fn convert_fields(
-    fields: &Fields,
+fn convert_fields<'m>(
+    fields: impl IntoIterator<Item = &'m Mapping>,
     source: &StructArray,
     index: usize,
     mut row: Option<&mut RecordBatchRow<'_>>,
 ) -> Result<()> {
-    for field in fields {
+    for mapping in fields {
+        let field = &mapping.field;
         let name = field.name().as_str();
         let column = source.column_by_name(name).unwrap();
         match field.data_type() {
             DataType::List(item) | DataType::LargeList(item) => {
                 let values = column.as_list::<i32>().value(index);
-                if let DataType::Struct(fields) = item.data_type() {
+                if matches!(item.data_type(), DataType::Struct(_)) {
                     let entries = values.as_struct().column(0).as_struct();
                     if let Some(row) = row.as_deref_mut() {
                         row.append_structs(name, 0..entries.len(), |row, index| {
-                            convert_fields(fields, entries, index, Some(row))
+                            convert_fields(&mapping.children, entries, index, Some(row))
                         })?;
                     } else {
                         for index in 0..entries.len() {
-                            convert_fields(fields, entries, index, None)?;
+                            convert_fields(&mapping.children, entries, index, None)?;
+                        }
+                        for child in &mapping.children {
+                            if let Some(error) = child.unique {
+                                let mut seen = HashSet::new();
+                                for value in entries
+                                    .column_by_name(child.field.name())
+                                    .unwrap()
+                                    .as_string::<i32>()
+                                    .iter()
+                                    .flatten()
+                                {
+                                    if value.is_empty() || !seen.insert(value) {
+                                        return Err(decode(error));
+                                    }
+                                }
+                            }
                         }
                     }
                 } else if let Some(row) = row.as_deref_mut() {
@@ -115,7 +116,7 @@ fn convert_fields(
                 }
             }
             _ => {
-                let value = scalar_value(field, column.as_ref(), index)?;
+                let value = scalar_value(mapping, column.as_ref(), index)?;
                 if let Some(row) = row.as_deref_mut() {
                     row.append(name, value)?;
                 }
@@ -125,17 +126,32 @@ fn convert_fields(
     Ok(())
 }
 
-fn scalar_value<'a>(field: &Field, column: &'a dyn Array, index: usize) -> Result<FieldValue<'a>> {
+fn scalar_value<'a>(
+    mapping: &Mapping,
+    column: &'a dyn Array,
+    index: usize,
+) -> Result<FieldValue<'a>> {
+    let field = &mapping.field;
     let name = field.name().as_str();
+    // Empty attributes are values; empty optional element text becomes null.
+    let keep_empty = matches!(field.data_type(), DataType::Utf8 | DataType::LargeUtf8)
+        && mapping
+            .xml
+            .path()
+            .rsplit('/')
+            .next()
+            .is_some_and(|path| path.starts_with('@'));
     let text = (!column.is_null(index))
         .then(|| column.as_string::<i32>().value(index))
-        .filter(|s| !s.is_empty() || matches!(name, "uri" | "scheme"));
+        .filter(|s| !s.is_empty() || keep_empty);
     if text.is_none() && !field.is_nullable() {
         return Err(decode(format!("missing {name}")));
     }
+    if let Some(parse) = mapping.parser {
+        return Ok(text.map(parse).transpose()?.unwrap_or(FieldValue::Null));
+    }
     Ok(match field.data_type() {
         DataType::Utf8 | DataType::LargeUtf8 => text.into(),
-        DataType::UInt64 if name == "ebook_id" => ebook_id(text.unwrap_or_default())?.into(),
         DataType::UInt64 => number::<u64>(text, name)?.into(),
         DataType::Int32 => number::<i32>(text, name)?.into(),
         DataType::Date32 => text.map(issued).transpose()?.into(),
@@ -153,7 +169,7 @@ fn number<T: std::str::FromStr>(value: Option<&str>, field: &str) -> Result<Opti
         .transpose()
 }
 
-fn ebook_id(about: &str) -> Result<u64> {
+pub(super) fn ebook_id(about: &str) -> Result<FieldValue<'_>> {
     let id = about
         .strip_prefix("ebooks/")
         .or_else(|| about.strip_prefix("http://www.gutenberg.org/ebooks/"))
@@ -163,6 +179,7 @@ fn ebook_id(about: &str) -> Result<u64> {
         .ok()
         .filter(|id| *id != 0)
         .filter(|_| id.bytes().all(|byte| byte.is_ascii_digit()))
+        .map(FieldValue::UInt64)
         .ok_or_else(|| decode("invalid ebook ID"))
 }
 
