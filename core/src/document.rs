@@ -33,6 +33,15 @@ pub struct DocumentAccessor<B, D> {
     decoder: Arc<D>,
 }
 
+impl<B, D> Clone for DocumentAccessor<B, D> {
+    fn clone(&self) -> Self {
+        Self {
+            storage: self.storage.clone(),
+            decoder: self.decoder.clone(),
+        }
+    }
+}
+
 impl<B, D> DocumentAccessor<B, D> {
     pub fn new(storage: B, decoder: D) -> Self {
         Self {

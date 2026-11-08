@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashMap,
+    future::Future,
     ops::Range,
     sync::{
         Arc, LazyLock, Mutex, Once, Weak,
@@ -11,10 +12,39 @@ use std::{
 
 use futures::stream;
 use http::{HeaderMap, Method, Request, Response, StatusCode};
-use open_arrow_access_core::Bytes;
+use open_arrow_access_core::{Bytes, ErrorKind, Result};
 use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter};
 
 static FIXTURES: LazyLock<Mutex<HashMap<String, Weak<State>>>> = LazyLock::new(Mutex::default);
+
+/// Resolve each committed metadata fixture and require its expected error.
+/// The resolver receives an owned endpoint so its future can own the service.
+/// Exactly one metadata request is allowed; no attachment routes are installed.
+pub async fn assert_resolution_cases<A, F>(
+    manifest_dir: &str,
+    fixture_format: &str,
+    metadata_path: &str,
+    cases: &[(&str, StatusCode, ErrorKind)],
+    resolve: impl Fn(String) -> F,
+) where
+    F: Future<Output = Result<A>>,
+{
+    assert!(!cases.is_empty());
+    for &(filename, status, kind) in cases {
+        let fixture = HttpFixture::new();
+        fixture.respond(
+            metadata_path,
+            status,
+            crate::read_fixture(manifest_dir, fixture_format, filename).await,
+        );
+        let error = resolve(fixture.endpoint().to_owned())
+            .await
+            .err()
+            .expect("provider accepted failing metadata");
+        assert_eq!(error.kind(), kind, "{filename}: {status}: {error}");
+        assert_eq!(fixture.requests().len(), 1, "{filename}: {status}");
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct CapturedRequest {

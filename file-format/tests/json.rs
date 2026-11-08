@@ -76,45 +76,31 @@ async fn fragmented_json_objects_preserve_values_schema_and_batch_order() {
 }
 
 #[tokio::test]
-async fn projection_preserves_requested_order_metadata_and_zero_column_row_counts() {
-    for projection in [vec!["title", "id"], vec![]] {
-        let (input, _) = fixture("projection.jsonl", 3).await;
-        let accessor = JsonAccessor::new(input, schema());
-        let batches = format::assert_projection(
-            &accessor,
-            request(1, Some(projection.clone())),
-            &schema(),
-            2,
-        )
-        .await;
-        for (batch, id) in batches.iter().zip([1, 2]) {
-            assert_eq!(batch.num_rows(), 1);
-            if !projection.is_empty() {
-                assert_eq!(
-                    batch
-                        .column(1)
-                        .as_any()
-                        .downcast_ref::<Int64Array>()
-                        .unwrap()
-                        .value(0),
-                    id
-                );
-            }
-        }
-    }
-}
-
-#[tokio::test]
-async fn invalid_projection_fails_before_opening_bytes() {
-    let (input, observed) = fixture("empty.json", 1).await;
-    let accessor = JsonAccessor::new(input, schema());
-    format::assert_invalid_projection_before_open(
-        &accessor,
-        request(2, None),
-        &schema(),
-        &observed,
+async fn fixed_schema_contract_preserves_projection_and_source_failures() {
+    let input = fixture!("json", "projection.jsonl").await;
+    let batches = format::assert_fixed_schema_contract(
+        |bytes| JsonAccessor::new(bytes, schema()),
+        format::FormatCase {
+            bytes: &input,
+            request: request(1, Some(vec!["title", "id"])),
+            schema: schema(),
+            rows: 2,
+            fault_offsets: &[0, 5],
+        },
     )
     .await;
+    for (batch, id) in batches.iter().zip([1, 2]) {
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(
+            batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap()
+                .value(0),
+            id
+        );
+    }
 }
 
 #[tokio::test]
@@ -246,17 +232,6 @@ async fn decoder_configuration_errors_are_classified_before_opening_bytes() {
         assert!(observed.requests.lock().unwrap().is_empty());
         assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
     }
-}
-
-#[tokio::test]
-async fn source_errors_preserve_category_and_cause_at_open_and_mid_record() {
-    format::assert_error_contract(
-        |input| JsonAccessor::new(input, schema()),
-        &fixture!("json", "good.json").await,
-        request(1, None),
-        &[0, 5],
-    )
-    .await;
 }
 
 #[tokio::test]

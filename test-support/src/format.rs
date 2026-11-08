@@ -13,6 +13,54 @@ use open_arrow_access_core::{
 
 use crate::{MemoryAccessor, Observations, memory_read_error};
 
+/// One valid fixture for a sequential format with a fixed, explicit schema.
+/// Expected schema and rows come from the test, independently of the accessor.
+/// The full schema must contain a field to exercise invalid projections.
+pub struct FormatCase<'a> {
+    pub bytes: &'a [u8],
+    /// The selected projection is returned for format-specific value assertions.
+    pub request: ReadRequest,
+    pub schema: SchemaRef,
+    pub rows: usize,
+    /// Reachable input positions for source-error and empty-chunk injection.
+    pub fault_offsets: &'a [usize],
+}
+
+/// Run projection, validation-before-I/O and source-failure contracts together.
+/// Also reads full and zero-column output, retaining the request's byte options.
+/// Inferred schemas and range-based inputs use the individual helpers instead:
+/// their validation timing and fault injection differ from this contract.
+pub async fn assert_fixed_schema_contract<A>(
+    make_format: impl Fn(MemoryAccessor) -> A,
+    case: FormatCase<'_>,
+) -> Vec<RecordBatch>
+where
+    A: Accessor<Request = ReadRequest, Reader = dyn RecordReader>,
+{
+    let input = MemoryAccessor::new(case.bytes, 1);
+    let observed = input.observations.clone();
+    let accessor = make_format(input);
+    assert_invalid_projection_before_open(&accessor, case.request.clone(), &case.schema, &observed)
+        .await;
+    let selected =
+        assert_projection(&accessor, case.request.clone(), &case.schema, case.rows).await;
+    for projection in [None, Some(vec![])] {
+        if case.request.options.projection == projection {
+            continue;
+        }
+        let mut request = case.request.clone();
+        request.options.projection = projection;
+        assert_projection(&accessor, request, &case.schema, case.rows).await;
+    }
+    // Fault scenarios exercise full decoding and can deliver one row at a time,
+    // independently of the happy-path projection and batch target.
+    let mut fault_request = case.request;
+    fault_request.options.projection = None;
+    fault_request.options.batch_size = std::num::NonZeroUsize::MIN;
+    assert_error_contract(make_format, case.bytes, fault_request, case.fault_offsets).await;
+    selected
+}
+
 /// After an observed EOF or error, require stable metadata and no upstream polls.
 pub async fn assert_finished(reader: &mut dyn RecordReader, reads: &AtomicUsize) {
     let calls = reads.load(Ordering::SeqCst);

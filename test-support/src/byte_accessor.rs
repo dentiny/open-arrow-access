@@ -6,6 +6,25 @@ use open_arrow_access_core::{Accessor, ByteReadRequest, ByteReader, Result};
 
 use crate::collect_bytes;
 
+/// Run exact single/bulk ranges, cursor preservation and independent-reader
+/// ownership contracts together. The caller supplies fixture-appropriate ranges.
+pub async fn assert_ranged_read_contract<A>(
+    accessor: A,
+    request: ByteReadRequest,
+    expected: &[u8],
+    ranges: &[Range<u64>],
+) -> Result<()>
+where
+    A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+{
+    let mut reader = accessor.open(request.clone()).await?;
+    assert_ranges(reader.as_mut(), expected, ranges).await?;
+    // Neither the single nor bulk range operations may move the sequential cursor.
+    assert_reader(reader.as_mut(), expected).await?;
+    drop(reader);
+    assert_read_contract(accessor, request, expected).await
+}
+
 /// Check independent cursors, reader ownership, exact output, stable metadata, and EOF.
 /// Takes ownership so readers must remain usable after the accessor is dropped.
 pub async fn assert_read_contract<A>(

@@ -1,6 +1,7 @@
 //! Provider JSON requests over the same transport used for file reads.
 
 mod error;
+pub(crate) mod files;
 mod query;
 pub(crate) mod validation;
 
