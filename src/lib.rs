@@ -8,82 +8,31 @@ pub use open_arrow_access_core::*;
 
 #[cfg(any(
     feature = "service-huggingface",
-    feature = "service-warc",
     feature = "service-pmc",
-    feature = "service-gutenberg"
+    feature = "service-warc",
+    feature = "service-gutenberg",
 ))]
-pub mod service {
-    #[cfg(feature = "service-gutenberg")]
-    pub use open_arrow_access_service::gutenberg::{self, GutenbergAccessor, GutenbergLimits};
-
-    #[cfg(feature = "service-pmc")]
-    pub use open_arrow_access_service::{pmc, pmc_inventory};
-
-    #[cfg(feature = "service-warc")]
-    pub use open_arrow_access_service::commoncrawl::{
-        CommonCrawl, CommonCrawlSegmentAccessor, CommonCrawlSegmentRequest, create_http_accessor,
-    };
-    #[cfg(feature = "service-huggingface")]
-    pub use open_arrow_access_service::huggingface::*;
-    #[cfg(feature = "service-warc")]
-    pub use open_arrow_access_service::warc::{CommonCrawlWarcAccessor, CommonCrawlWarcRequest};
-}
+pub use open_arrow_access_service as service;
 
 #[cfg(any(
     feature = "decompression-gzip",
     feature = "decompression-bz2",
     feature = "decompression-lz4",
-    feature = "decompression-zstd"
+    feature = "decompression-zstd",
 ))]
-pub mod decompression {
-    #[cfg(feature = "decompression-bz2")]
-    pub use open_arrow_access_decompression::Bzip2;
-    #[cfg(feature = "decompression-gzip")]
-    pub use open_arrow_access_decompression::Gzip;
-    #[cfg(feature = "decompression-lz4")]
-    pub use open_arrow_access_decompression::Lz4;
-    #[cfg(feature = "decompression-zstd")]
-    pub use open_arrow_access_decompression::Zstd;
-    pub use open_arrow_access_decompression::{
-        Codec, CompressedInput, DecodedInput, DecompressionAccessor, DecompressionFactory,
-        DecompressionLayer,
-    };
-}
-
-pub mod storage {
-    pub use open_arrow_access_storage::OpenDalAccessor;
-    pub use open_arrow_access_storage::opendal;
-}
+pub use open_arrow_access_decompression as decompression;
 
 #[cfg(any(
+    feature = "format-warc",
     feature = "format-parquet",
     feature = "format-json",
-    feature = "format-csv",
-    feature = "format-warc",
+    feature = "format-atif",
     feature = "format-xml",
-    feature = "format-atif"
+    feature = "format-csv",
 ))]
-pub mod file_format {
-    #[cfg(feature = "format-atif")]
-    pub use open_arrow_access_file_format::{AtifAccessor, AtifFormat};
-    #[cfg(feature = "format-csv")]
-    pub use open_arrow_access_file_format::{CsvAccessor, CsvFileFormat, CsvFormat};
-    pub use open_arrow_access_file_format::{FileAccessor, FileFormat};
-    #[cfg(feature = "format-json")]
-    pub use open_arrow_access_file_format::{JsonAccessor, JsonFormat};
-    #[cfg(feature = "format-xml")]
-    pub use open_arrow_access_file_format::{
-        NamespaceBinding, XmlAccessor, XmlField, XmlFormat, XmlLimits, XmlSchema,
-    };
-    #[cfg(feature = "format-parquet")]
-    pub use open_arrow_access_file_format::{ParquetAccessor, ParquetFormat};
-    #[cfg(feature = "format-warc")]
-    pub use open_arrow_access_file_format::{WarcAccessor, WarcFormat, WarcHeader, WarcRecord};
-}
+pub use open_arrow_access_file_format as file_format;
 
 #[cfg(feature = "dataset-directory")]
-pub mod dataset {
-    pub use open_arrow_access_dataset::{
-        DirectoryAccessor, DirectoryRequest, FileSetAccessor, FileSetRequest,
-    };
-}
+pub use open_arrow_access_dataset as dataset;
+
+pub use open_arrow_access_storage as storage;

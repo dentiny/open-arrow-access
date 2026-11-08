@@ -4,7 +4,7 @@ use arrow_array::{Array, cast::AsArray};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, RecordBatch, Result,
 };
-use open_arrow_access_decompression::{DecompressionLayer, Gzip};
+use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_service::pmc::{PmcAccessor, PmcLimits, schema};
 use open_arrow_access_test_support::MemoryAccessor;
 

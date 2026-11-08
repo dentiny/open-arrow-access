@@ -1,6 +1,6 @@
 use open_arrow_access::{
     Accessor, ReadRequest,
-    file_format::ParquetAccessor,
+    file_format::parquet::ParquetAccessor,
     storage::{OpenDalAccessor, opendal},
 };
 

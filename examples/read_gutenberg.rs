@@ -1,6 +1,6 @@
 use open_arrow_access::{
     Accessor, ReadRequest,
-    service::GutenbergAccessor,
+    service::gutenberg::GutenbergAccessor,
     storage::{OpenDalAccessor, opendal},
 };
 

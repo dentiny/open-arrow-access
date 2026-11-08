@@ -1,7 +1,7 @@
 use arrow_array::cast::AsArray;
 use open_arrow_access_core::{Accessor, ReadOptions, ReadRequest};
-use open_arrow_access_dataset::{FileSetAccessor, FileSetRequest};
-use open_arrow_access_file_format::{AtifAccessor, AtifFormat};
+use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
+use open_arrow_access_file_format::atif::{AtifAccessor, AtifFormat};
 use open_arrow_access_storage::OpenDalAccessor;
 
 #[tokio::test]

@@ -154,7 +154,7 @@ async fn empty_selections_and_manifest_source_errors_are_explicit() {
 #[tokio::test]
 async fn caller_supplied_gzip_decodes_the_official_inventory_representation() {
     use open_arrow_access_core::AccessorExt;
-    use open_arrow_access_decompression::{DecompressionLayer, Gzip};
+    use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
     let bytes = manifest("raw_manifest.paths.gz", 1).layer(DecompressionLayer::new(Gzip));
     let accessor = CommonCrawlWarcAccessor::new(bytes, Records::default());
     let batches = into_stream(accessor.open(request()).await.unwrap())
