@@ -15,6 +15,10 @@ use open_arrow_access_core::{
 
 use crate::{decoded_reader, layer::DEFAULT_CHUNK_SIZE};
 
+const DEFAULT_MAX_ENTRIES: u64 = 65_536;
+const DEFAULT_MAX_DIRECTORY_BYTES: u64 = 16 * 1024 * 1024;
+const DEFAULT_MAX_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;
+
 /// Resource limits checked by the ZIP parser, including actual decoded length.
 #[derive(Clone, Debug)]
 pub struct ZipLimits {
@@ -29,9 +33,9 @@ pub struct ZipLimits {
 impl Default for ZipLimits {
     fn default() -> Self {
         Self {
-            max_entries: 65_536,
-            max_directory_bytes: 16 * 1024 * 1024,
-            max_entry_bytes: 1024 * 1024 * 1024,
+            max_entries: DEFAULT_MAX_ENTRIES,
+            max_directory_bytes: DEFAULT_MAX_DIRECTORY_BYTES,
+            max_entry_bytes: DEFAULT_MAX_ENTRY_BYTES,
         }
     }
 }
