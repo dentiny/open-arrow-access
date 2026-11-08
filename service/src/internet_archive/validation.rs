@@ -31,7 +31,7 @@ pub(super) fn validate_item(
         ItemResponse::Missing([]) => return Err(not_found()),
         ItemResponse::Item(item) => item,
     };
-    if item.is_dark {
+    if item.is_unavailable {
         return Err(unavailable());
     }
     if item.error.is_some() {

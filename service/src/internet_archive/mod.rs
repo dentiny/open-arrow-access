@@ -78,8 +78,9 @@ struct Item {
     metadata: Option<ItemMetadata>,
     files: Option<Vec<InternetArchiveFile>>,
     error: Option<String>,
-    #[serde(default)]
-    is_dark: bool,
+    /// Item was hidden by Internet Archive and is not publicly accessible.
+    #[serde(default, rename = "is_dark")]
+    is_unavailable: bool,
 }
 
 #[derive(Deserialize)]
