@@ -1,5 +1,5 @@
 use super::{manifest, reader::InventoryTransform, validation};
-use arrow_schema::{DataType, Field, Schema};
+use arrow_schema::Schema;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, Capability, ReadRequest, RecordReader, Result,
     async_trait,
@@ -53,13 +53,7 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
             self.manifest_limit.get(),
         )
         .await?;
-        let names = validation::validate_fields(&manifest.file_schema)?;
-        let csv_schema = Arc::new(Schema::new(
-            names
-                .iter()
-                .map(|name| Field::new(name, DataType::Utf8, true))
-                .collect::<Vec<_>>(),
-        ));
+        let csv_schema = manifest.file_schema;
         let metadata = HashMap::from([
             (
                 "pmc.inventory.manifest_uri".into(),
@@ -67,7 +61,7 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
             ),
             (
                 "pmc.inventory.creation_timestamp".into(),
-                manifest.creation_timestamp,
+                manifest.creation_timestamp.to_string(),
             ),
             ("pmc.inventory.version".into(), manifest.version),
         ]);

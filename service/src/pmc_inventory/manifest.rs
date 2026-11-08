@@ -1,6 +1,8 @@
 use super::{error::decode, validation};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use open_arrow_access_core::{Accessor, ByteReadRequest, ByteReader, Result, read_object};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer, de::Error as _};
+use std::sync::Arc;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -8,11 +10,42 @@ pub(super) struct Manifest {
     pub source_bucket: String,
     pub destination_bucket: String,
     pub version: String,
-    pub creation_timestamp: String,
-    pub file_format: String,
-    pub file_schema: String,
+    /// Unix epoch milliseconds.
+    #[serde(deserialize_with = "deserialize_timestamp")]
+    pub creation_timestamp: u64,
+    pub file_format: InventoryFormat,
+    #[serde(deserialize_with = "deserialize_schema")]
+    pub file_schema: SchemaRef,
     pub files: Vec<Shard>,
 }
+#[derive(Deserialize, PartialEq)]
+pub(super) enum InventoryFormat {
+    #[serde(rename = "CSV")]
+    Csv,
+    #[serde(other)]
+    Other,
+}
+
+fn deserialize_timestamp<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<u64, D::Error> {
+    String::deserialize(deserializer)?
+        .parse()
+        .map_err(D::Error::custom)
+}
+
+fn deserialize_schema<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<SchemaRef, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    Ok(Arc::new(Schema::new(
+        value
+            .split(',')
+            .map(|name| Field::new(name.trim(), DataType::Utf8, true))
+            .collect::<Vec<_>>(),
+    )))
+}
+
 #[derive(Deserialize)]
 pub(super) struct Shard {
     pub key: String,
