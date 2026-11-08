@@ -1,7 +1,8 @@
 use super::super::{CommonCrawl, url::parse_url};
+use super::{error::invalid_segment, validation::validate_segment};
 use crate::warc::CommonCrawlWarcRequest;
 use open_arrow_access_core::{
-    ByteReadOptions, Error, ErrorKind, ObjectRef, ReadOptions, ReadOptionsProvider, Result,
+    ByteReadOptions, ObjectRef, ReadOptions, ReadOptionsProvider, Result,
 };
 
 /// Select one exact segment from a crawl-wide WARC inventory.
@@ -17,12 +18,7 @@ impl CommonCrawlSegmentRequest {
     }
     pub fn from_source(source: CommonCrawl, segment: impl Into<String>) -> Result<Self> {
         let segment = segment.into();
-        if !matches!(segment.split_once('.'), Some((timestamp, part)) if !timestamp.is_empty() && !part.is_empty() && timestamp.bytes().all(|byte| byte.is_ascii_digit()) && part.bytes().all(|byte| byte.is_ascii_digit()))
-        {
-            return Err(invalid_segment(
-                "expected a numeric timestamp.part segment identifier",
-            ));
-        }
+        validate_segment(&segment)?;
         Ok(Self {
             dataset: CommonCrawlWarcRequest::from_source(source),
             segment,
@@ -77,12 +73,4 @@ impl ReadOptionsProvider for CommonCrawlSegmentRequest {
     fn read_options_mut(&mut self) -> &mut ReadOptions {
         self.dataset.read_options_mut()
     }
-}
-
-fn invalid_segment(message: &str) -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "select_commoncrawl_segment",
-        message,
-    )
 }
