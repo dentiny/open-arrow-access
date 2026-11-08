@@ -8,6 +8,7 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
+commoncrawl = ["dep:open-arrow-access-storage", "dep:opendal", "dep:opendal-service-http", "dep:url", "opendal/services-http", "opendal/http-transport-reqwest"]
 huggingface = [
     "dep:open-arrow-access-storage",
     "dep:open-arrow-access-dataset",
@@ -38,6 +39,7 @@ tokio = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+opendal-service-http = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
 

@@ -31,6 +31,7 @@ opendal = "0.59.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 http = "1"
+opendal-service-http = "=0.59.2"
 url = "2"
 async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
 # Match the resolved Cargo.lock versions at the Lance revision above.
@@ -67,6 +68,7 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 default = []
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
 service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
+service-commoncrawl = ["dep:open-arrow-access-service", "open-arrow-access-service/commoncrawl"]
 format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
@@ -88,6 +90,7 @@ open-arrow-access-file-format = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 
 [dev-dependencies]
+http = { workspace = true }
 opendal = { workspace = true, features = ["services-fs"] }
 open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
@@ -102,6 +105,10 @@ tokio = { workspace = true, features = ["fs"] }
 [[test]]
 name = "pmc"
 required-features = ["service-pmc"]
+
+[[test]]
+name = "commoncrawl_common"
+required-features = ["service-commoncrawl"]
 
 [[test]]
 name = "directory"

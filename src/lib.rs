@@ -6,8 +6,21 @@
 
 pub use open_arrow_access_core::*;
 
-#[cfg(any(feature = "service-huggingface", feature = "service-pmc"))]
+#[cfg(any(feature = "service-huggingface", feature = "service-commoncrawl", feature = "service-pmc"))]
 pub mod service {
+    #[cfg(feature = "service-commoncrawl")]
+    pub use open_arrow_access_service::commoncrawl::{CommonCrawl, create_http_accessor};
+    #[cfg(feature = "service-huggingface")]
+    pub use open_arrow_access_service::huggingface::*;
+    #[cfg(feature = "service-pmc")]
+    pub use open_arrow_access_service::pmc;
+}
+
+#[cfg(any(feature = "service-huggingface", feature = "service-commoncrawl"))]
+pub mod service {
+    #[cfg(feature = "service-commoncrawl")]
+    pub use open_arrow_access_service::commoncrawl::{CommonCrawl, create_http_accessor};
+>>>>>>> origin/main
     #[cfg(feature = "service-huggingface")]
     pub use open_arrow_access_service::huggingface::*;
     #[cfg(feature = "service-pmc")]
