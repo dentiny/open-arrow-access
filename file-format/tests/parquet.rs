@@ -1,3 +1,6 @@
+use open_arrow_access_file_format::{FileAccessor, ParquetAccessor, ParquetFormat};
+use open_arrow_access_storage::OpenDalAccessor;
+#[path = "parquet/support.rs"]
 mod support;
 
 use std::{
@@ -9,12 +12,10 @@ use std::{
 use arrow_array::{StringArray, types::Int64Type};
 use futures::TryStreamExt;
 use more_asserts::{assert_gt, assert_le};
-use open_arrow_access::{
+use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, Capability, ErrorKind,
     Layer, ListRequest, ObjectRef, ObjectStream, ReadOptions, ReadRequest, Result, async_trait,
-    file_format::{FileAccessor, ParquetAccessor, ParquetFormat},
     into_stream,
-    storage::OpenDalAccessor,
 };
 use open_arrow_access_test_support::format;
 use parquet::basic::Compression;
@@ -380,7 +381,7 @@ struct ListingAccessor(MemoryAccessor);
 #[async_trait]
 impl Accessor for ListingAccessor {
     type Request = ByteReadRequest;
-    type Reader = dyn open_arrow_access::ByteReader;
+    type Reader = dyn open_arrow_access_core::ByteReader;
 
     fn capability(&self) -> Capability {
         let inner = self.0.capability();

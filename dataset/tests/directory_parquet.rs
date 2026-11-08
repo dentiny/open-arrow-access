@@ -1,12 +1,9 @@
-#[cfg(feature = "format-parquet")]
 mod filesystem {
     use arrow_array::types::Int64Type;
     use arrow_schema::{DataType, Field, Schema};
     use futures::TryStreamExt;
-    use open_arrow_access::{
-        Accessor, ByteAccessor, ErrorKind, ListRequest, ObjectRef, RecordReader,
-        dataset::{DirectoryAccessor, DirectoryRequest},
-        into_stream,
+    use open_arrow_access_core::{
+        Accessor, ByteAccessor, ErrorKind, ListRequest, ObjectRef, RecordReader, into_stream,
     };
     use std::{num::NonZeroUsize, sync::Arc};
 
@@ -21,7 +18,9 @@ mod filesystem {
         open_arrow_access_test_support::record::collect_column::<Int64Type>(reader, 0).await
     }
     use more_asserts::assert_le;
-    use open_arrow_access::{file_format::ParquetAccessor, storage::OpenDalAccessor};
+    use open_arrow_access_dataset::{DirectoryAccessor, DirectoryRequest};
+    use open_arrow_access_file_format::ParquetAccessor;
+    use open_arrow_access_storage::OpenDalAccessor;
     fn copy_fixture(name: &str, destination: &std::path::Path) {
         let source = open_arrow_access_test_support::fixture_path!("parquet/directory", name);
         std::fs::copy(source, destination).unwrap();

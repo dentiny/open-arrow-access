@@ -9,7 +9,7 @@ use std::{
 
 use arrow_array::types::Int64Type;
 use arrow_schema::{DataType, Field, Schema};
-use open_arrow_access::{
+use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes,
     Capability, Error, ErrorKind, Layer, ListRequest, ObjectStream, Reader, RecordBatch, Result,
     SchemaRef, async_trait,

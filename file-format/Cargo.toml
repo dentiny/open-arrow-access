@@ -58,3 +58,7 @@ required-features = ["xml"]
 [[test]]
 name = "warc"
 required-features = ["warc"]
+
+[[test]]
+name = "parquet"
+required-features = ["parquet"]
