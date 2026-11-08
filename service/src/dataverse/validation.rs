@@ -44,7 +44,8 @@ pub(super) fn validate_dataset(
 ) -> Result<()> {
     let data = &response.data;
     let same_id = if persistent_id.starts_with("doi:") {
-        data.dataset_persistent_id.eq_ignore_ascii_case(persistent_id)
+        data.dataset_persistent_id
+            .eq_ignore_ascii_case(persistent_id)
     } else {
         data.dataset_persistent_id == persistent_id
     };

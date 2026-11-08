@@ -199,9 +199,16 @@ async fn validates_selection_before_network() {
 async fn accepts_equivalent_doi_casing() {
     let http = HttpFixture::new();
     let path = METADATA.replace("DVN%2FA%26B", "dvn%2Fa%26b");
-    http.respond(&path, StatusCode::OK, fixture!("dataverse", "dataset.json").await);
-    let dataset = DataverseService::new(http.endpoint()).unwrap()
-        .dataset(&PID.to_ascii_lowercase(), "1.0").await.unwrap();
+    http.respond(
+        &path,
+        StatusCode::OK,
+        fixture!("dataverse", "dataset.json").await,
+    );
+    let dataset = DataverseService::new(http.endpoint())
+        .unwrap()
+        .dataset(&PID.to_ascii_lowercase(), "1.0")
+        .await
+        .unwrap();
     assert_eq!(dataset.files().len(), 2);
     assert_eq!(http.requests().len(), 1);
 }
