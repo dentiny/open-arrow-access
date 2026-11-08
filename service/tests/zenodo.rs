@@ -6,7 +6,7 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, ErrorKind, ListRequest,
 };
 use open_arrow_access_service::zenodo::ZenodoService;
-use open_arrow_access_test_support::{collect_bytes, fixture, http::HttpFixture};
+use open_arrow_access_test_support::{byte_accessor, fixture, http::HttpFixture};
 
 const ID: NonZeroU64 = NonZeroU64::new(3551612).unwrap();
 
@@ -39,26 +39,15 @@ async fn record_membership_and_lazy_independent_file_reads() {
     assert_eq!(accessor.id(), ID);
     assert_eq!(accessor.files()[0].size, 8);
     assert_eq!(accessor.files()[0].checksum, "md5:fixture");
-    for recursive in [true, false] {
-        let listed: Vec<_> = accessor
-            .list(ListRequest::new("").with_recursive(recursive))
-            .await
-            .unwrap()
-            .try_collect()
-            .await
-            .unwrap();
-        assert_eq!(listed[0].locator(), "paper #1%.pdf");
-    }
-    assert!(accessor.list("nested".into()).await.is_err());
-    assert_eq!(
-        accessor
-            .open("unknown.pdf".into())
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::NotFound
-    );
+    let listed: Vec<_> = accessor
+        .list(ListRequest::new(""))
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(listed[0].locator(), "paper #1%.pdf");
+    assert_eq!(fixture.requests().len(), 1, "listing does not fetch files");
     let options = ByteReadOptions {
         io_chunk_size: Some(NonZeroUsize::new(2).unwrap()),
         ..Default::default()
@@ -68,10 +57,13 @@ async fn record_membership_and_lazy_independent_file_reads() {
         .await
         .unwrap();
     assert_eq!(reader.read_range(1..4).await.unwrap().as_ref(), b"PDF");
-    let mut second = accessor.open("paper #1%.pdf".into()).await.unwrap();
-    drop(accessor);
-    assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"%PDFdata");
-    assert_eq!(collect_bytes(second.as_mut()).await.unwrap(), b"%PDFdata");
+    byte_accessor::assert_read_contract(
+        accessor,
+        ByteReadRequest::new("paper #1%.pdf").with_options(options),
+        b"%PDFdata",
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

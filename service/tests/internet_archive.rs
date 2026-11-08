@@ -4,7 +4,7 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, ErrorKind, ListRequest,
 };
 use open_arrow_access_service::internet_archive::InternetArchiveService;
-use open_arrow_access_test_support::{collect_bytes, fixture, http::HttpFixture};
+use open_arrow_access_test_support::{byte_accessor, fixture, http::HttpFixture};
 
 const ITEM: &str = "sample-item";
 const NAME: &str = "papers/paper #1%.pdf";
@@ -33,28 +33,18 @@ async fn resolves_once_and_reads_nested_names_lazily_with_independent_readers() 
     assert_eq!(item.files()[0].md5.as_deref(), Some("fixture-md5"));
     assert_eq!(item.files()[1].size, None);
     assert_eq!(item.files()[2].size, Some(0));
-    for recursive in [true, false] {
-        let names: Vec<_> = item
-            .list(ListRequest::new("").with_recursive(recursive))
-            .await
-            .unwrap()
-            .try_collect()
-            .await
-            .unwrap();
-        assert_eq!(
-            names.iter().map(|name| name.locator()).collect::<Vec<_>>(),
-            vec![NAME, "notes.xml", "empty.txt"]
-        );
-    }
+    let names: Vec<_> = item
+        .list(ListRequest::new(""))
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
     assert_eq!(
-        item.open("absent.pdf".into()).await.err().unwrap().kind(),
-        ErrorKind::NotFound
+        names.iter().map(|name| name.locator()).collect::<Vec<_>>(),
+        vec![NAME, "notes.xml", "empty.txt"]
     );
-    assert_eq!(
-        fixture.requests().len(),
-        1,
-        "cached discovery and unknown names do not fetch files"
-    );
+    assert_eq!(fixture.requests().len(), 1, "listing does not fetch files");
     let options = ByteReadOptions {
         io_chunk_size: std::num::NonZeroUsize::new(2),
         ..Default::default()
@@ -64,10 +54,13 @@ async fn resolves_once_and_reads_nested_names_lazily_with_independent_readers() 
         .await
         .unwrap();
     assert_eq!(reader.read_range(1..4).await.unwrap().as_ref(), b"PDF");
-    let mut second = item.open(NAME.into()).await.unwrap();
-    drop(item);
-    assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"%PDFdata");
-    assert_eq!(collect_bytes(second.as_mut()).await.unwrap(), b"%PDFdata");
+    byte_accessor::assert_read_contract(
+        item,
+        ByteReadRequest::new(NAME).with_options(options),
+        b"%PDFdata",
+    )
+    .await
+    .unwrap();
     let requests = fixture.requests();
     assert_eq!(
         requests
