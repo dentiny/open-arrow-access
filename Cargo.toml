@@ -104,7 +104,7 @@ required-features = ["service-huggingface"]
 name = "read_gutenberg"
 required-features = ["service-gutenberg"]
 
-[[test]]
+[[example]]
 name = "read_pmc"
 required-features = ["service-pmc"]
 
