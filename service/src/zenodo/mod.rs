@@ -44,7 +44,7 @@ impl ZenodoService {
         }
         Ok(Self {
             endpoint,
-            client: HttpClient::new(),
+            client: HttpClient::new()?,
             metadata_limit: DEFAULT_METADATA_LIMIT,
         })
     }

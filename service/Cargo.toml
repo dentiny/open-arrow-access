@@ -15,6 +15,8 @@ zenodo = [
     "opendal/services-http",
     "opendal/http-transport-reqwest",
     "dep:http",
+    "dep:reqwest",
+    "dep:opendal-http-transport-reqwest",
     "dep:url",
     "dep:serde",
     "dep:serde_json",
