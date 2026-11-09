@@ -69,3 +69,6 @@ pub mod federal_register;
 
 #[cfg(feature = "govinfo")]
 pub mod govinfo;
+
+#[cfg(feature = "oapen")]
+pub mod oapen;
