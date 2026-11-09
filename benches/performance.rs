@@ -194,7 +194,9 @@ async fn main() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = HttpFixture::new();
     // All fixture and payload construction happens before timed iterations.
-    std::fs::write(dir.path().join("data"), &input).unwrap();
+    if case == "storage/fs" {
+        std::fs::write(dir.path().join("data"), &input).unwrap();
+    }
     let body = open_arrow_access_core::Bytes::copy_from_slice(&input);
     fixture.handle(move |request| {
         use open_arrow_access_storage::opendal::{Buffer, HttpBody};
