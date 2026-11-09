@@ -33,6 +33,7 @@ huggingface = [
     "open-arrow-access-file-format/parquet",
 ]
 internet-archive = []
+library-of-congress = []
 meca = [
     "format-xml",
     "dep:percent-encoding",
@@ -190,6 +191,10 @@ required-features = ["oapen"]
 [[test]]
 name = "figshare"
 required-features = ["figshare"]
+
+[[test]]
+name = "library_of_congress"
+required-features = ["library-of-congress"]
 
 [[test]]
 name = "meca"
