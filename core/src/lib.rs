@@ -3,7 +3,6 @@
 mod accessor;
 mod async_read;
 mod async_seek;
-mod byte_range;
 mod capability;
 mod decode_batches;
 mod document;
@@ -24,11 +23,11 @@ mod record_batch_builder;
 mod record_stream;
 mod request;
 mod stream_reader;
+mod validation;
 
 pub use accessor::{Accessor, ByteAccessor, ObjectStream};
 pub use async_read::into_async_read;
 pub use async_seek::{SeekableInput, into_async_seek};
-pub use byte_range::validate_byte_range;
 pub use capability::Capability;
 pub use decode_batches::{BatchDecoder, decode_batches};
 pub use document::{DocumentAccessor, DocumentDecoder};
@@ -54,6 +53,7 @@ pub use request::{
     ReadOptionsProvider, ReadRequest,
 };
 pub use stream_reader::StreamReader;
+pub use validation::validate_byte_range;
 
 pub use arrow_array::RecordBatch;
 pub use arrow_schema::{Schema, SchemaRef};
