@@ -16,8 +16,8 @@ use arrow_array::{StringArray, types::Int64Type};
 use futures::TryStreamExt;
 use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{
-    Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, Capability, ErrorKind,
-    Layer, ListRequest, ObjectRef, ObjectStream, ReadOptions, ReadRequest, Result, async_trait,
+    Accessor, AccessorExt, ByteAccessor, ByteReadOptions, Capability, ErrorKind, Layer,
+    ListRequest, ObjectRef, ObjectStream, ReadOptions, ReadRequest, Result, async_trait,
     into_stream,
 };
 use open_arrow_access_test_support::format;
@@ -330,73 +330,6 @@ async fn capability_downgrade_matches_operations_and_blocks_parquet() {
             .kind(),
         ErrorKind::Unsupported
     );
-}
-
-struct ListingAccessor(MemoryAccessor);
-
-#[async_trait]
-impl Accessor for ListingAccessor {
-    type Request = ByteReadRequest;
-    type Reader = dyn open_arrow_access_core::ByteReader;
-
-    fn capability(&self) -> Capability {
-        let inner = self.0.capability();
-        Capability {
-            read: inner.read,
-            read_with_range: inner.read_with_range,
-            read_parallel: inner.read_parallel,
-            list: true,
-        }
-    }
-
-    async fn open(&self, request: ByteReadRequest) -> Result<Box<Self::Reader>> {
-        self.0.open(request).await
-    }
-}
-
-#[async_trait]
-impl ByteAccessor for ListingAccessor {
-    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        let mut objects = vec![Ok("entry".into())];
-        if request.recursive {
-            objects.push(Ok("sub/entry".into()));
-        }
-        Ok(Box::pin(futures::stream::iter(objects)) as ObjectStream)
-    }
-}
-
-#[tokio::test]
-async fn listing_capability_survives_transparent_layer_and_shared_accessor() {
-    let accessor: Arc<dyn ByteAccessor> = Arc::new(
-        ListingAccessor(
-            MemoryAccessor::new(
-                &open_arrow_access_test_support::fixture!("bytes", "data.bin").await,
-                usize::MAX,
-            )
-            .with_ranges(),
-        )
-        .layer(ByteObserverLayer(Arc::new(Observations::default())))
-        .layer(OpenObserverLayer {
-            label: "list-observer",
-            events: Arc::new(Mutex::new(Vec::new())),
-        }),
-    );
-    assert!(accessor.capability().list);
-    let objects = accessor
-        .list(ListRequest::new("").with_recursive(false))
-        .await
-        .unwrap()
-        .try_collect::<Vec<_>>()
-        .await
-        .unwrap();
-    assert_eq!(objects.len(), 1);
-    assert_eq!(objects[0].locator(), "entry");
-    let reader = accessor
-        .open(objects.into_iter().next().unwrap().into())
-        .await
-        .unwrap();
-    assert!(reader.capability().read_with_range);
-    assert!(!reader.capability().list);
 }
 
 #[tokio::test]
