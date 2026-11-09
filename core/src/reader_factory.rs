@@ -19,12 +19,7 @@ pub trait ReaderFactory: Send + Sync {
 
     /// Derive output capabilities without I/O; listing belongs to the accessor.
     fn capability(&self, input: Capability) -> Capability {
-        Capability {
-            read: input.read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        Capability::sequential(input.read)
     }
 
     /// Validate configuration before storage opens; return configuration errors here.

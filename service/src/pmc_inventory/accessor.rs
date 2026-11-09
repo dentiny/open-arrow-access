@@ -29,12 +29,7 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
     fn capability(&self) -> Capability {
-        Capability {
-            read: self.inner.capability().read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        Capability::sequential(self.inner.capability().read)
     }
     async fn open(&self, mut request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         let manifest = manifest::read(

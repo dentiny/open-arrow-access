@@ -124,12 +124,7 @@ impl ReaderFactory for ZipFactory {
     type Reader = dyn ByteReader;
 
     fn capability(&self, input: Capability) -> Capability {
-        Capability {
-            read: input.read && input.read_with_range,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        Capability::sequential(input.read && input.read_with_range)
     }
 
     fn prepare(&self, _: &ByteReadRequest) -> Result<()> {

@@ -16,12 +16,7 @@ impl ReaderFactory for ParquetFormat {
     type Prepared = ();
 
     fn capability(&self, input: Capability) -> Capability {
-        Capability {
-            read: input.read && input.read_with_range,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        Capability::sequential(input.read && input.read_with_range)
     }
 
     fn prepare(&self, _request: &ReadRequest) -> Result<()> {

@@ -102,12 +102,7 @@ impl<A: ByteAccessor> Accessor for CourtListenerBulkAccessor<A> {
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
-        Capability {
-            read: self.inner.capability().read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        Capability::sequential(self.inner.capability().read)
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {

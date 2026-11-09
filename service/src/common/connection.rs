@@ -180,12 +180,7 @@ impl Accessor for Connection {
     type Request = ByteReadRequest;
     type Reader = dyn ByteReader;
     fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        Capability::sequential(true)
     }
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         Connection::open(self, request.object.locator(), request.options).await
