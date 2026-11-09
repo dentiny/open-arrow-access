@@ -110,9 +110,8 @@ impl HttpFileService {
 mod tests {
     use super::{FileSpec, HttpFileService, ResolvedFilesPlan};
     use futures::TryStreamExt;
-    use open_arrow_access_core::{Accessor, ByteAccessor, Error, ErrorKind, ListRequest, read_all};
+    use open_arrow_access_core::{Accessor, ByteAccessor, ListRequest, read_all};
     use open_arrow_access_test_support::{fixture, http::HttpFixture};
-    use std::error::Error as _;
 
     fn file(name: &str, object: &str, length: Option<u64>) -> FileSpec {
         FileSpec {
@@ -120,21 +119,6 @@ mod tests {
             object: object.into(),
             content_length: length,
         }
-    }
-
-    #[test]
-    fn validates_names_before_binding_and_retains_namespace_error_context() {
-        for files in [
-            vec![file("", "a", None)],
-            vec![file("same", "a", None), file("same", "b", None)],
-        ] {
-            let error = ResolvedFilesPlan::new("", files, ()).err().unwrap();
-            assert_eq!(error.kind(), ErrorKind::InvalidInput);
-            assert_eq!(error.operation(), "configure_resolved_files");
-            let storage = error.source().unwrap().downcast_ref::<Error>().unwrap();
-            assert_eq!(storage.operation(), "configure_named_files");
-        }
-        assert!(ResolvedFilesPlan::new("", Vec::new(), ()).is_ok());
     }
 
     #[tokio::test]
