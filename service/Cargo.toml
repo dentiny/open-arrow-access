@@ -17,8 +17,10 @@ courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decom
 dataverse = []
 default = []
 doab = ["oai"]
+federal-register = []
 govinfo = []
 gutenberg = ["format-xml", "dep:chrono"]
+hathifiles = []
 huggingface = [
     "dep:open-arrow-access-dataset",
     "dep:open-arrow-access-file-format",
@@ -158,6 +160,14 @@ required-features = ["doab"]
 [[test]]
 name = "arxiv_metadata"
 required-features = ["arxiv"]
+
+[[test]]
+name = "hathifiles"
+required-features = ["hathifiles"]
+
+[[test]]
+name = "federal_register"
+required-features = ["federal-register"]
 
 [[test]]
 name = "govinfo"
