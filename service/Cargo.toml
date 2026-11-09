@@ -18,6 +18,7 @@ dataverse = []
 default = []
 doab = ["oai"]
 federal-register = []
+figshare = []
 govinfo = []
 gutenberg = ["format-xml", "dep:chrono"]
 hathifiles = []
@@ -177,3 +178,7 @@ required-features = ["govinfo"]
 [[test]]
 name = "oapen"
 required-features = ["oapen"]
+
+[[test]]
+name = "figshare"
+required-features = ["figshare"]

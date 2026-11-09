@@ -72,3 +72,6 @@ pub mod govinfo;
 
 #[cfg(feature = "oapen")]
 pub mod oapen;
+
+#[cfg(feature = "figshare")]
+pub mod figshare;
