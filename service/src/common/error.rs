@@ -12,12 +12,6 @@ pub(super) fn io(error: opendal::Error) -> Error {
     crate::http_client::transport_error(OP, error)
 }
 
-pub(super) fn request(error: http::Error) -> Error {
-    crate::http_client::request_error(OP, error)
-}
-pub(super) fn json(error: serde_json::Error) -> Error {
-    crate::http_client::json_error(OP, error)
-}
 pub(super) fn download_url(error: url::ParseError) -> Error {
     decode("invalid download URL").with_source(error)
 }
@@ -46,7 +40,7 @@ pub(super) fn transport(error: Error) -> opendal::Error {
         .set_source(error)
 }
 pub(super) fn transport_request(error: http::Error) -> opendal::Error {
-    transport(request(error))
+    transport(crate::http_client::request_error(OP, error))
 }
 pub(super) fn missing_auth_scope() -> opendal::Error {
     opendal::Error::new(

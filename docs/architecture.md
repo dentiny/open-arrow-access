@@ -145,3 +145,34 @@ snapshot. Some providers pin a revision or release, such as Hugging Face's Parqu
 export; others expose mutable catalogues. Record the chosen identity and provider
 metadata in your pipeline's manifest. Reader source metadata is not automatically
 added as Arrow provenance columns.
+
+## Shared service HTTP client
+
+Service HTTP mechanisms compile without provider features. The root facade
+always exposes `service::common`, including with `--no-default-features`. The internal
+`HttpClient` constructs GET requests, checks metadata/sequential response status,
+collects bodies, validates declared lengths and parses typed JSON. Public
+`common::Connection` supplies provider URL rules and scoped credentials, then
+uses that same client; `ApiDocument` uses its JSON parser. The shared body-length
+tracker also validates lazy sequential downloads. Error operations remain owned
+by callers (`provider_http`, `resolve_zenodo`, and so on), and transport and parser
+causes remain attached.
+
+Transport policy and download capabilities remain explicit. OpenDAL HTTP and
+Hugging Face use the ordinary redirect-following transport and handle HEAD/range
+statuses themselves. `Connection` uses a single-hop transport underneath its
+origin-scoped redirect layer, including when a custom context is supplied. That
+layer preserves signed URLs, strips configured credentials on an origin change
+and rejects HTTPS downgrades. Keeping those policies distinct prevents a second
+redirect follower or an `AuthScope` requirement on raw OpenDAL requests.
+
+The OpenDAL download adapter retains exact ranges and known-length storage
+semantics; `Connection` retains sequential absolute-URL downloads. Sharing the
+client does not make a sequential download suitable for Parquet. Provider
+identity/version validation, metadata mappings and optional concrete providers
+stay outside the client. No provider feature is required to use `Connection`.
+
+This default-on facade deliberately includes the service crate's HTTP baseline
+(OpenDAL HTTP/reqwest transport, JSON/Serde, URL and supporting utilities).
+Provider features remain empty by default: making common code available does not
+enable Hugging Face, Zenodo, XML parsing, or other concrete providers.

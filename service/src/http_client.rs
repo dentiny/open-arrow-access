@@ -3,6 +3,7 @@
 mod error;
 pub(crate) mod files;
 mod parser;
+pub(crate) use parser::parse_json;
 mod query;
 mod url_util;
 pub(crate) use url_util::resolve_origin;
@@ -10,11 +11,11 @@ mod transport;
 pub(crate) use transport::{MAX_REDIRECTS, new_single_hop_transport, new_transport};
 pub(crate) mod validation;
 
-pub(crate) use error::{http_status_error, json_error, request_error, transport_error};
+pub(crate) use error::{json_error, request_error, transport_error};
 use http::Request;
 use open_arrow_access_core::Result;
 use open_arrow_access_storage::OpenDalAccessor;
-use opendal::{Buffer, HttpTransporter, OperationContext};
+use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext};
 use serde::de::DeserializeOwned;
 use url::Url;
 
@@ -61,28 +62,94 @@ impl HttpClient {
         token: Option<&str>,
         operation: &'static str,
     ) -> Result<T> {
-        let mut request = Request::get(url).header("accept", "application/json");
+        let mut request = Self::get(url, "application/json", operation)?;
         if let Some(token) = token {
-            request = request.header("authorization", format!("Bearer {token}"));
+            let mut value =
+                http::HeaderValue::from_str(&format!("Bearer {token}")).map_err(|error| {
+                    open_arrow_access_core::Error::new(
+                        open_arrow_access_core::ErrorKind::InvalidInput,
+                        operation,
+                        "invalid HTTP authentication token",
+                    )
+                    .with_source(error)
+                })?;
+            value.set_sensitive(true);
+            request
+                .headers_mut()
+                .insert(http::header::AUTHORIZATION, value);
         }
-        let request = request
+        let bytes = self.bytes(request, operation).await?;
+        parse_json(&bytes, operation)
+    }
+
+    /// Construct a GET without embedding provider authentication or URL policy.
+    pub(crate) fn get(url: &str, accept: &str, operation: &'static str) -> Result<Request<Buffer>> {
+        Request::get(url)
+            .header("accept", accept)
             .body(Buffer::new())
-            .map_err(|error| request_error(operation, error))?;
+            .map_err(|error| request_error(operation, error))
+    }
+
+    /// Fetch one metadata or sequential-download response. Ranged storage keeps
+    /// its own status handling (HEAD/206) inside OpenDAL.
+    pub(crate) async fn response(
+        &self,
+        request: Request<Buffer>,
+        operation: &'static str,
+    ) -> Result<http::Response<HttpBody>> {
         let response = self
             .context
             .http_transport()
             .fetch(request)
             .await
             .map_err(|error| transport_error(operation, error))?;
-        let status = response.status();
-        if status != http::StatusCode::OK {
+        if response.status() != http::StatusCode::OK {
             return Err(error::http_status_error(
                 operation,
-                status,
+                response.status(),
                 response.headers(),
             ));
         }
-        let bytes = crate::http_body::collect(response, operation).await?;
-        parser::parse_json(&bytes, operation)
+        Ok(response)
+    }
+
+    pub(crate) async fn bytes(
+        &self,
+        request: Request<Buffer>,
+        operation: &'static str,
+    ) -> Result<open_arrow_access_core::Bytes> {
+        crate::http_body::collect(self.response(request, operation).await?, operation).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HttpClient;
+    use http::StatusCode;
+    use open_arrow_access_test_support::http::HttpFixture;
+    use serde::Deserialize;
+
+    #[derive(Debug, Deserialize)]
+    struct Metadata {
+        id: u64,
+    }
+
+    #[tokio::test]
+    async fn reads_typed_metadata_from_fixed_and_chunked_responses() {
+        let fixture = HttpFixture::new();
+        fixture.respond("/good", StatusCode::OK, "{\"id\":7}");
+        fixture.respond_chunked("/chunked", StatusCode::OK, "{\"id\":8}");
+        let client = HttpClient::new().unwrap();
+        for (path, id) in [("good", 7), ("chunked", 8)] {
+            let metadata: Metadata = client
+                .json(
+                    &format!("{}/{path}", fixture.endpoint()),
+                    None,
+                    "resolve_fixture",
+                )
+                .await
+                .unwrap();
+            assert_eq!(metadata.id, id);
+        }
     }
 }

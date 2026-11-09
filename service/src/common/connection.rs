@@ -3,7 +3,7 @@ use super::{
     transport::{self, AuthScope},
     url_util, validation,
 };
-use crate::{ResolvedFileSet, http_body::BodyLength};
+use crate::{ResolvedFileSet, http_body::BodyLength, http_client::HttpClient};
 use futures::stream;
 use http::{HeaderMap, HeaderValue, Request, header::HeaderName};
 use open_arrow_access_core::{
@@ -24,7 +24,7 @@ pub struct Connection {
     pub(super) origin: Url,
     pub(super) headers: HeaderMap,
     pub(super) query: Vec<(String, String)>,
-    pub(super) context: OperationContext,
+    client: HttpClient,
 }
 impl std::fmt::Debug for Connection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -43,13 +43,13 @@ impl Connection {
             origin,
             headers: HeaderMap::new(),
             query: vec![],
-            context,
+            client: HttpClient { context },
         })
     }
     /// Override transport, for custom TLS/proxy configuration or deterministic tests.
     /// The inner transport must return single-hop responses; redirects are followed by the provider transport.
     pub fn with_context(mut self, context: OperationContext) -> Self {
-        self.context = transport::follow_redirects(context);
+        self.client.context = transport::follow_redirects(context);
         self
     }
     pub fn origin(&self) -> &Url {
@@ -72,10 +72,7 @@ impl Connection {
     }
 
     fn request(&self, url: &Url, accept: &str) -> Result<Request<Buffer>> {
-        let mut request = Request::get(url.as_str())
-            .header("accept", accept)
-            .body(Buffer::new())
-            .map_err(error::request)?;
+        let mut request = HttpClient::get(url.as_str(), accept, error::OP)?;
         request.extensions_mut().insert(AuthScope {
             origin: self.origin.clone(),
             headers: self.headers.clone(),
@@ -91,20 +88,7 @@ impl Connection {
     ) -> Result<http::Response<HttpBody>> {
         let url = resolve_download_url(url.as_str())?;
         let request = self.request(&url, accept)?;
-        let response = self
-            .context
-            .http_transport()
-            .fetch(request)
-            .await
-            .map_err(error::io)?;
-        if response.status() != http::StatusCode::OK {
-            return Err(crate::http_client::http_status_error(
-                error::OP,
-                response.status(),
-                response.headers(),
-            ));
-        }
-        Ok(response)
+        self.client.response(request, error::OP).await
     }
     /// Fetch one API page as parsed JSON metadata.
     pub async fn json(&self, path: &str, query: &[(&str, &str)]) -> Result<ApiDocument> {
@@ -118,8 +102,10 @@ impl Connection {
     }
     /// Read small XML/catalogue metadata; large file content should use `open`.
     pub async fn bytes(&self, url: Url, accept: &str) -> Result<Bytes> {
-        let response = self.response(url, accept).await?;
-        crate::http_body::collect(response, error::OP).await
+        let url = resolve_download_url(url.as_str())?;
+        self.client
+            .bytes(self.request(&url, accept)?, error::OP)
+            .await
     }
     /// Open an absolute URL, preserving encoded paths and signatures byte-for-byte.
     pub async fn open(&self, url: &str, options: ByteReadOptions) -> Result<Box<dyn ByteReader>> {

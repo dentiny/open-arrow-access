@@ -21,7 +21,7 @@ pub fn array<'a>(value: &'a Value, field: &str) -> Result<&'a Vec<Value>> {
 }
 
 pub(super) fn parse(bytes: &[u8]) -> Result<Value> {
-    serde_json::from_slice(bytes).map_err(error::json)
+    crate::http_client::parse_json(bytes, error::OP)
 }
 
 /// Map a JSON URL field to a logical file name.

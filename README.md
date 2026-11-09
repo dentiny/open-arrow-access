@@ -70,7 +70,11 @@ See [architecture](docs/architecture.md) for component boundaries and execution 
 | Providers | Hugging Face, Common Crawl, PMC, Gutenberg, research repositories, books, and government data | [Provider matrix and output types](docs/support.md#dataset-providers) |
 | Execution | Pull-based reads; per-reader storage I/O concurrency | [Ordering and concurrency](docs/architecture.md#execution-and-resource-ownership) |
 
-Default Cargo features are empty. Enable the formats and providers you need.
+Default Cargo features are empty. Shared service utilities such as
+`service::common::Connection` and `ApiDocument` are always available, alongside
+core contracts and OpenDAL storage. This includes the HTTP/JSON/URL dependency
+baseline; concrete providers remain feature-gated. Enable the formats and
+providers you need.
 A compiled backend still needs suitable read, metadata, and discovery capabilities;
 not every storage/decoder combination is valid.
 

@@ -1,36 +1,12 @@
 //! Composable, asynchronous read access to Arrow record batches.
 //!
-//! The shared extension contracts and OpenDAL storage adapter are always available.
+//! The shared extension contracts, OpenDAL storage adapter and service HTTP
+//! utilities are always available. Concrete providers remain opt-in.
 //! Enable a `format-parquet`, `format-json`, `format-csv`, `format-xml`, or
 //! `format-atif` reader to decode records.
 
 pub use open_arrow_access_core::*;
 
-#[cfg(any(
-    feature = "service-huggingface",
-    feature = "service-zenodo",
-    feature = "service-dataverse",
-    feature = "service-arxiv",
-    feature = "service-internet-archive",
-    feature = "service-courtlistener",
-    feature = "service-pmc",
-    feature = "service-warc",
-    feature = "service-gutenberg",
-    feature = "service-uspto",
-    feature = "service-doab",
-    feature = "service-hathifiles",
-    feature = "service-federal-register",
-    feature = "service-govinfo",
-    feature = "service-oapen",
-    feature = "service-figshare",
-    feature = "service-library-of-congress",
-    feature = "service-meca",
-    feature = "service-biorxiv",
-    feature = "service-openstax",
-    feature = "service-semantic-scholar",
-    feature = "service-bhl",
-    feature = "service-regulations",
-))]
 pub use open_arrow_access_service as service;
 
 #[cfg(any(
