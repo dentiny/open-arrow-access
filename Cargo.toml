@@ -49,10 +49,10 @@ arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
 async-trait = "0.1.91"
-atif-arrow = "0.4.1"
+atif-arrow = "0.4.2"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-warc = { package = "warc-rs", version = "=0.3.0", default-features = false }
-xml-arrow = "0.2.2"
+warc = { package = "warc-rs", version = "=0.3.1", default-features = false }
+xml-arrow = "0.2.3"
 
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
 datafusion = { version = "55.2.0", default-features = false }
