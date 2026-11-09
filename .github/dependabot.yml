@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    # These families follow the recorded Lance baseline. Update their manifests,
+    # lockfile, metadata, and docs together as described in docs/dependencies.md.
+    # Ignore rules also exclude these families from Dependabot security updates.
+    ignore:
+      - dependency-name: "arrow-*"
+      - dependency-name: "parquet"
+      - dependency-name: "datafusion*"
+      - dependency-name: "opendal*"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
