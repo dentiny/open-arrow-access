@@ -10,19 +10,54 @@ pub enum ErrorKind {
     InvalidInput,
     Unsupported,
     NotFound,
+    /// Credentials are missing, invalid, or required by a proxy or network.
+    Unauthenticated,
     PermissionDenied,
+    /// The operation conflicts with the current resource state, including a lock.
+    Conflict,
+    /// A required condition is missing or evaluates to false.
+    ConditionNotMet,
+    Timeout,
+    RateLimited,
+    /// The endpoint or an upstream dependency cannot currently accept the request.
+    Unavailable,
+    /// A storage or other capacity limit prevents the operation.
+    ResourceExhausted,
     Io,
     Decode,
 }
 
 impl ErrorKind {
-    /// Classify an HTTP failure without depending on a storage backend.
-    /// Callers handle successful responses and redirects before translating failures.
-    /// Rate limits and other HTTP failures retain the existing `Io` category.
+    /// Classify HTTP failures using backend-independent error categories.
+    ///
+    /// Covers registered 4xx/5xx statuses, including WebDAV and proxy failures.
+    /// Unknown 4xx codes follow the generic 400 category (`InvalidInput`);
+    /// unknown 5xx codes use `Io`. Unused 418 also follows the 4xx fallback.
+    ///
+    /// Callers handle successful responses and redirects before calling this method.
+    /// Non-error or invalid status codes defensively return `Io`.
+    /// Categories alone do not imply that an operation is safe to retry.
+    ///
+    /// Status definitions: <https://www.iana.org/assignments/http-status-codes/>.
     pub fn from_http_status(status: u16) -> Self {
         match status {
-            404 => Self::NotFound,
-            401 | 403 => Self::PermissionDenied,
+            // Request syntax, content, length, range, or expectation is unacceptable.
+            400 | 411 | 413 | 414 | 416 | 417 | 422 | 431 => Self::InvalidInput,
+            401 | 407 | 511 => Self::Unauthenticated,
+            402 | 403 | 451 => Self::PermissionDenied,
+            404 | 410 => Self::NotFound,
+            // Method, representation, protocol version, or extension is unsupported.
+            405 | 406 | 415 | 426 | 501 | 505 | 510 => Self::Unsupported,
+            408 | 504 => Self::Timeout,
+            409 | 423 => Self::Conflict,
+            412 | 428 => Self::ConditionNotMet,
+            // Routing, early-data, gateway, or service availability failures.
+            421 | 425 | 502 | 503 => Self::Unavailable,
+            429 => Self::RateLimited,
+            507 => Self::ResourceExhausted,
+            // Failed dependency, internal/negotiation errors, and dependency loops.
+            424 | 500 | 506 | 508 => Self::Io,
+            400..=499 => Self::InvalidInput,
             _ => Self::Io,
         }
     }
