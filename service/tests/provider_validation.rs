@@ -27,10 +27,10 @@ fn shares_json_field_and_component_rules() {
 
 #[test]
 fn optional_representations_keep_selector_order_and_reject_invalid_links() {
-    use open_arrow_access_service::common::{LinkField, MetadataLink, optional_links};
+    use open_arrow_access_service::common::{LinkField, MetadataLink, resolve_optional_links};
     let raw = serde_json::json!({"pdf":"https://files.example/paper?sig=a%2Bb","text":null,"other":"retained"});
     assert_eq!(
-        optional_links(
+        resolve_optional_links(
             &raw,
             &[
                 LinkField {
@@ -54,7 +54,7 @@ fn optional_representations_keep_selector_order_and_reject_invalid_links() {
         }]
     );
     assert!(
-        optional_links(
+        resolve_optional_links(
             &serde_json::json!({"pdf":123}),
             &[LinkField {
                 json_field: "pdf",
@@ -64,7 +64,7 @@ fn optional_representations_keep_selector_order_and_reject_invalid_links() {
         .is_err()
     );
     assert!(
-        optional_links(
+        resolve_optional_links(
             &serde_json::json!({"pdf":"file:///private"}),
             &[LinkField {
                 json_field: "pdf",

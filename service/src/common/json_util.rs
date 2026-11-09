@@ -43,7 +43,10 @@ pub struct MetadataLink {
 /// Resolve optional HTTP representations in caller-selected field order.
 /// Missing/null/empty links mean that representation is unavailable; wrong types fail.
 /// Logical-name uniqueness remains the responsibility of the shared file accessor.
-pub fn optional_links(value: &Value, fields: &[LinkField<'_>]) -> Result<Vec<MetadataLink>> {
+pub fn resolve_optional_links(
+    value: &Value,
+    fields: &[LinkField<'_>],
+) -> Result<Vec<MetadataLink>> {
     if !value.is_object() {
         return Err(error::decode("expected metadata object"));
     }

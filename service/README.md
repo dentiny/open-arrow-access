@@ -392,7 +392,7 @@ See [remote-files](remote-files.md) for this utility.
 
 ## Common metadata links
 
-`common::optional_links` maps provider-selected optional URL fields to logical file names without modifying parsed metadata. It is shared by BHL and Federal Register.
+`common::resolve_optional_links` maps provider-selected optional URL fields to logical file names without modifying parsed metadata. It is shared by BHL and Federal Register.
 
 ## Common XML metadata envelopes
 
