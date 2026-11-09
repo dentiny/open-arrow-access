@@ -41,6 +41,7 @@ class RangeServer(ThreadingHTTPServer):
 
 class RangeHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    disable_nagle_algorithm = True
 
     def log_message(self, *_args):
         pass

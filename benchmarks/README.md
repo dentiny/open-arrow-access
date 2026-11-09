@@ -2,7 +2,9 @@
 
 Build and run from the repository root using the pinned Rust toolchain and
 Python 3.9+ on macOS or Linux. If `cargo` is a system installation rather
-than a rustup shim, invoke it as `rustup run 1.97.0 cargo` to honor the pin:
+than a rustup shim, explicitly select both Cargo and rustc, for example
+`RUSTC="$(rustup which --toolchain 1.97.0 rustc)" rustup run 1.97.0 cargo build ...`.
+The compiler used is embedded in every sample; verify it before comparing:
 
 ```sh
 cargo build --release -p open-arrow-access-benchmarks --locked
