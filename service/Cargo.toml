@@ -41,6 +41,7 @@ meca = [
     "open-arrow-access-decompression/zip",
 ]
 oapen = ["oai"]
+openstax = []
 pmc = [
     "dep:arrow-array",
     "dep:arrow-schema",
@@ -204,6 +205,10 @@ required-features = ["meca"]
 [[test]]
 name = "biorxiv"
 required-features = ["biorxiv"]
+
+[[test]]
+name = "openstax"
+required-features = ["openstax"]
 
 [[test]]
 name = "semantic_scholar"

@@ -458,6 +458,10 @@ See [storage-independent MECA archives](meca.md).
 
 See [biorxiv service](biorxiv.md) for its contract and usage.
 
+## openstax
+
+See [openstax service](openstax.md) for its contract and usage.
+
 ## semantic-scholar
 
 See [semantic-scholar service](semantic-scholar.md).
