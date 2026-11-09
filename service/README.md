@@ -430,6 +430,14 @@ See [arxiv-metadata service](arxiv-metadata.md).
 
 See [hathifiles service](hathifiles.md).
 
+## federal-register
+
+See [federal-register service](federal-register.md) for its contract and usage.
+
 ## MECA
 
 See [storage-independent MECA archives](meca.md).
+
+## biorxiv
+
+See [biorxiv service](biorxiv.md) for its contract and usage.
