@@ -31,7 +31,7 @@ impl MecaArchive {
             .open_entry(index, NonZeroUsize::new(65536).unwrap())
             .await?;
         let manifest = Bytes::from(read_all(reader, "read_meca_manifest").await?);
-        let parsed = parser::parse_manifest(&manifest)?;
+        let parsed = parser::parse_manifest(&manifest).await?;
         let files = resolver::resolve_files(parsed, archive.entries())?;
         Ok(Self {
             archive,
