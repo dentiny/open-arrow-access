@@ -60,10 +60,10 @@ impl OpenStaxService {
         let sha = parser::parse_commit_sha(commit.value())?.to_owned();
         let url = self
             .archives
-            .url(&format!("openstax/{repo}/tar.gz/{sha}"), &[])?;
+            .url(&format!("openstax/{repo}/zip/{sha}"), &[])?;
         self.archives.files(
             vec![MetadataLink {
-                file_name: format!("{repository}.tar.gz"),
+                file_name: format!("{repository}.zip"),
                 url: url.into(),
             }],
             BookMetadata {
