@@ -31,6 +31,10 @@ use std::{
 
 type AnyResult<T> = Result<T, Box<dyn std::error::Error>>;
 
+#[cfg(feature = "allocation-stats")]
+#[global_allocator]
+static ALLOCATOR: &stats_alloc::StatsAlloc<std::alloc::System> = &stats_alloc::INSTRUMENTED_SYSTEM;
+
 fn schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int64, false),
@@ -157,6 +161,8 @@ async fn main() -> AnyResult<()> {
     let name = format!("data.{extension}");
     let input_bytes = fs::metadata(root.join(&name))?.len();
     let source = source::Source::new(root, backend, &name, chunk).await?;
+    #[cfg(feature = "allocation-stats")]
+    let allocation_region = stats_alloc::Region::new(ALLOCATOR);
     let started = Instant::now();
     let mut first_item_ns = None;
     let mut rows = 0_u64;
@@ -251,9 +257,16 @@ async fn main() -> AnyResult<()> {
         }
     }
     let elapsed_ns = started.elapsed().as_nanos();
+    #[cfg(feature = "allocation-stats")]
+    let allocation_stats = {
+        let stats = allocation_region.change();
+        json!({"allocations":stats.allocations,"deallocations":stats.deallocations,"reallocations":stats.reallocations,"bytes_allocated":stats.bytes_allocated,"bytes_deallocated":stats.bytes_deallocated,"bytes_reallocated":stats.bytes_reallocated})
+    };
+    #[cfg(not(feature = "allocation-stats"))]
+    let allocation_stats = serde_json::Value::Null;
     println!(
         "{}",
-        json!({"compiler":env!("OAA_BENCH_COMPILER"),"backend":backend,"case":case,"chunk":chunk.get(),"batch":batch_size.get(),"concurrency":byte_options.io_concurrency.get(),"io_chunk":byte_options.io_chunk_size.unwrap().get(),"projection":args[8],"iterations":iterations,"input_bytes":input_bytes,"elapsed_ns":elapsed_ns,"first_item_ns":first_item_ns,"rows":rows,"output_bytes":output_bytes,"logical_io":source.stats()})
+        json!({"compiler":env!("OAA_BENCH_COMPILER"),"allocation_stats":allocation_stats,"backend":backend,"case":case,"chunk":chunk.get(),"batch":batch_size.get(),"concurrency":byte_options.io_concurrency.get(),"io_chunk":byte_options.io_chunk_size.unwrap().get(),"projection":args[8],"iterations":iterations,"input_bytes":input_bytes,"elapsed_ns":elapsed_ns,"first_item_ns":first_item_ns,"rows":rows,"output_bytes":output_bytes,"logical_io":source.stats()})
     );
     Ok(())
 }

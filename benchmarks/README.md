@@ -1,7 +1,8 @@
 # Local performance benchmarks
 
 Build and run from the repository root using the pinned Rust toolchain and
-Python 3.9+ on macOS or Linux:
+Python 3.9+ on macOS or Linux. If `cargo` is a system installation rather
+than a rustup shim, invoke it as `rustup run 1.97.0 cargo` to honor the pin:
 
 ```sh
 cargo build --release -p open-arrow-access-benchmarks --locked
@@ -105,6 +106,18 @@ perf record -g -- target/release/open-arrow-access-benchmarks \
 perf report
 # macOS: run the same long workload, then `sample PID 2 -file target/cpu.txt`.
 ```
+
+## Allocation diagnostics
+
+For suspected copies/allocation pressure, build an additional executable with
+`cargo build --release -p open-arrow-access-benchmarks --features allocation-stats`.
+Keep the ordinary executable separately and use `--binary` to select the
+instrumented one. This optional global allocator counts allocation/reallocation
+calls and cumulative allocated/deallocated bytes **within the timed scan**, not
+preload. It adds atomic-counter overhead, so use the ordinary executable for
+throughput claims. It does not report retained or peak allocator bytes.
+Each sample declares its instrumentation; the comparison tool rejects comparisons
+between instrumented and ordinary runs.
 
 ## Remote storage
 

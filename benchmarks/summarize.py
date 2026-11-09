@@ -17,6 +17,7 @@ DIMENSIONS = (
     "io_chunk",
     "projection",
     "iterations",
+    "instrumented",
 )
 
 
@@ -28,6 +29,7 @@ def load(path):
         if item["type"] == "metadata":
             metadata = item
         elif not item["warmup"]:
+            item["instrumented"] = item.get("allocation_stats") is not None
             groups[tuple(item[k] for k in DIMENSIONS)].append(item)
     if metadata is None or not groups:
         raise ValueError(f"no metadata or measured samples: {path}")

@@ -5,6 +5,7 @@ edition.workspace = true
 publish = false
 
 [features]
+allocation-stats = ["dep:stats_alloc"]
 s3 = ["opendal/services-s3"]
 
 [dependencies]
@@ -29,6 +30,7 @@ opendal = { workspace = true, features = [
 ] }
 parquet.workspace = true
 serde_json.workspace = true
+stats_alloc = { version = "0.1.10", optional = true }
 tokio.workspace = true
 
 [lints]
