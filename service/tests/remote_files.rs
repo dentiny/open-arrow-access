@@ -118,3 +118,56 @@ async fn opaque_aliases_keep_metadata_and_download_locator() {
             .all(|request| request.path == "/content?sig=a%2Bb")
     );
 }
+
+#[tokio::test]
+async fn buffered_and_streaming_downloads_enforce_the_same_body_framing() {
+    use http::{Response, StatusCode};
+    use open_arrow_access_core::{ByteReadOptions, ErrorKind};
+    use open_arrow_access_test_support::collect_bytes;
+    use opendal::{Buffer, HttpBody};
+
+    for (declared, valid) in [
+        (None, true),
+        (Some("3"), true),
+        (Some("2"), false),
+        (Some("4"), false),
+        (Some("invalid"), false),
+    ] {
+        let f = HttpFixture::new();
+        f.handle(move |_| {
+            let mut response = Response::builder().status(StatusCode::OK);
+            if let Some(length) = declared {
+                response = response.header("content-length", length);
+            }
+            // Leave SDK length checking disabled to exercise our shared framing.
+            Ok(response
+                .body(HttpBody::new(
+                    futures::stream::iter([Ok(Buffer::from("abc"))]),
+                    None,
+                ))
+                .unwrap())
+        });
+        let connection = providers::connection(&f);
+        let url = format!("{}/content", f.endpoint());
+        let buffered = connection
+            .bytes(url::Url::parse(&url).unwrap(), "*/*")
+            .await;
+        let streamed = match connection.open(&url, ByteReadOptions::default()).await {
+            Ok(mut reader) => {
+                let result = collect_bytes(reader.as_mut()).await.map(Bytes::from);
+                assert!(reader.next().await.unwrap().is_none());
+                result
+            }
+            Err(error) => Err(error),
+        };
+        for result in [buffered, streamed] {
+            if valid {
+                assert_eq!(result.unwrap().as_ref(), b"abc");
+            } else {
+                let error = result.unwrap_err();
+                assert_eq!(error.kind(), ErrorKind::Decode, "{declared:?}");
+                assert_eq!(error.operation(), "provider_http");
+            }
+        }
+    }
+}

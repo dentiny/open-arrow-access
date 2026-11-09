@@ -3,7 +3,7 @@ use super::{
     transport::{self, AuthScope},
     url_util, validation,
 };
-use crate::{ResolvedFileSet, http_body::BodyLength, http_client::HttpClient};
+use crate::{ResolvedFileSet, http_body::BodyReader, http_client::HttpClient};
 use futures::stream;
 use http::{HeaderMap, HeaderValue, Request, header::HeaderName};
 use open_arrow_access_core::{
@@ -11,7 +11,7 @@ use open_arrow_access_core::{
     Capability, Result, StreamReader, async_trait,
 };
 use open_arrow_access_storage::NamedFileAccessor;
-use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext, raw::oio::ReadStream};
+use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext};
 use url::Url;
 
 use crate::file_manifest::FileSpec;
@@ -110,8 +110,6 @@ impl Connection {
     /// Open an absolute URL, preserving encoded paths and signatures byte-for-byte.
     pub async fn open(&self, url: &str, options: ByteReadOptions) -> Result<Box<dyn ByteReader>> {
         let response = self.response(resolve_download_url(url)?, "*/*").await?;
-        let length = BodyLength::new(response.headers(), error::OP)?;
-        let content_length = length.expected;
         let version = response
             .headers()
             .get("etag")
@@ -120,23 +118,19 @@ impl Connection {
         let chunk_size = options
             .io_chunk_size
             .map_or(DEFAULT_CHUNK_SIZE, |s| s.get());
-        let state = (response.into_body(), Bytes::new(), length);
-        let chunks = stream::try_unfold(
-            state,
-            move |(mut body, mut pending, mut length)| async move {
-                if pending.is_empty() {
-                    let buffer = body.read().await.map_err(error::io)?;
-                    if buffer.is_empty() {
-                        length.finish()?;
-                        return Ok(None);
-                    }
-                    pending = buffer.to_bytes();
-                    length.push(pending.len())?;
-                }
-                let chunk = pending.split_to(pending.len().min(chunk_size));
-                Ok(Some((chunk, (body, pending, length))))
-            },
-        );
+        let body = BodyReader::new(response, error::OP)?;
+        let content_length = body.content_length();
+        let state = (body, Bytes::new());
+        let chunks = stream::try_unfold(state, move |(mut body, mut pending)| async move {
+            if pending.is_empty() {
+                let Some(buffer) = body.next().await? else {
+                    return Ok(None);
+                };
+                pending = buffer.to_bytes();
+            }
+            let chunk = pending.split_to(pending.len().min(chunk_size));
+            Ok(Some((chunk, (body, pending))))
+        });
         Ok(Box::new(StreamReader::new(
             chunks,
             ByteMetadata {
