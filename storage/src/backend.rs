@@ -93,7 +93,6 @@ impl Accessor for OpenDalAccessor {
             read,
             read_with_range: read,
             read_parallel: false,
-            // OpenDAL can walk nonrecursive backend listings.
             list: upstream.list,
         }
     }
@@ -103,9 +102,8 @@ impl Accessor for OpenDalAccessor {
         let path = object.locator();
         validate_locator(path, false, "open")?;
         let len = self.content_length(path).await?;
-        // OpenDAL gives each stream/fetch its own task queue. Share a budget
-        // across those queues so retained sequential prefetch cannot multiply
-        // the reader's I/O concurrency when a range read is interleaved.
+        // Share a budget across OpenDAL's stream/fetch queues so interleaved
+        // range reads cannot multiply sequential prefetch concurrency.
         let mut operator = self.operator.clone();
         if options.io_concurrency.get() > 1 {
             operator = operator.layer(ReaderBudget(options.io_concurrency.get()));

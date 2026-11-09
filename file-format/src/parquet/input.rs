@@ -55,7 +55,6 @@ impl ParquetInput {
     }
 }
 
-// Parquet requires boxed futures; I/O is implemented by the async helpers above.
 impl AsyncFileReader for ParquetInput {
     fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, ParquetResult<Bytes>> {
         Box::pin(self.read_bytes(range))
