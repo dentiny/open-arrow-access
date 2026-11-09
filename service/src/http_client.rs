@@ -5,8 +5,9 @@ pub(crate) mod files;
 mod query;
 pub(crate) mod validation;
 
-pub(crate) use error::transport_error;
-use http::{Request, StatusCode};
+pub use error::HttpStatusError;
+pub(crate) use error::{check_status, transport_error};
+use http::Request;
 use open_arrow_access_core::{Error, ErrorKind, Result};
 use open_arrow_access_storage::OpenDalAccessor;
 use opendal::{Buffer, HttpTransporter, OperationContext, raw::oio::ReadStream};
@@ -115,45 +116,3 @@ pub(crate) fn new_transport(follow_redirects: bool) -> Result<impl opendal::Http
         client,
     ))
 }
-
-pub(crate) fn check_status(
-    status: StatusCode,
-    headers: &http::HeaderMap,
-    operation: &'static str,
-) -> Result<()> {
-    if status == StatusCode::OK {
-        return Ok(());
-    }
-    let kind = match status {
-        StatusCode::NOT_FOUND => opendal::ErrorKind::NotFound,
-        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => opendal::ErrorKind::PermissionDenied,
-        StatusCode::TOO_MANY_REQUESTS => opendal::ErrorKind::RateLimited,
-        _ => opendal::ErrorKind::Unexpected,
-    };
-    Err(Error::new(
-        crate::opendal_error::error_kind(kind),
-        operation,
-        format!("provider HTTP {status}"),
-    )
-    .with_source(HttpStatusError {
-        status,
-        retry_after: headers
-            .get("retry-after")
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned),
-    }))
-}
-
-/// Status error retained in the shared Error source chain. No URL or credential is stored.
-#[derive(Debug)]
-pub struct HttpStatusError {
-    pub status: StatusCode,
-    /// Upstream Retry-After value (seconds or HTTP date), unchanged.
-    pub retry_after: Option<String>,
-}
-impl std::fmt::Display for HttpStatusError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "HTTP {}", self.status)
-    }
-}
-impl std::error::Error for HttpStatusError {}
