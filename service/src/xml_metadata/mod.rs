@@ -1,4 +1,6 @@
-//! Shared envelope checks for provider-owned XML metadata.
+//! Read protocol metadata with the same XML engine as the XML file format.
 mod error;
+mod parser;
 mod validation;
-pub use validation::validate_root;
+
+pub use parser::{XmlDocument, validate_root};
