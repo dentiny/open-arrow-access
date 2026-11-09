@@ -55,5 +55,8 @@ pub mod uspto;
 #[cfg(feature = "oai")]
 pub mod oai;
 
+#[cfg(feature = "doab")]
+pub mod doab;
+
 #[cfg(feature = "arxiv-metadata")]
 pub mod arxiv_metadata;
