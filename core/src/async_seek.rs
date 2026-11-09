@@ -6,7 +6,7 @@ use std::{
     task::{Context, Poll, ready},
 };
 
-use crate::{ByteReader, Bytes, Error, ErrorKind, Result};
+use crate::{ByteReader, Bytes, Error, ErrorKind, Result, validate_byte_range};
 use futures::{
     TryStreamExt,
     io::{AsyncBufRead, AsyncRead, AsyncSeek},
@@ -87,13 +87,7 @@ impl SeekableInput {
         let len = self.len;
         let operation = self.operation;
         async move {
-            if range.start > range.end || range.end > len {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    operation,
-                    "invalid range",
-                ));
-            }
+            validate_byte_range(&range, len, operation)?;
             exact_range(&reader, range, operation).await
         }
     }

@@ -23,6 +23,7 @@ mod record_batch_builder;
 mod record_stream;
 mod request;
 mod stream_reader;
+mod validation;
 
 pub use accessor::{Accessor, ByteAccessor, ObjectStream};
 pub use async_read::into_async_read;
@@ -52,6 +53,7 @@ pub use request::{
     ReadOptionsProvider, ReadRequest,
 };
 pub use stream_reader::StreamReader;
+pub use validation::validate_byte_range;
 
 pub use arrow_array::RecordBatch;
 pub use arrow_schema::{Schema, SchemaRef};
