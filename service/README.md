@@ -392,11 +392,11 @@ See [provider-connection](provider-connection.md) for this utility.
 
 ## Common XML metadata envelopes
 
-Enable `xml-metadata` for `xml_metadata::validate_root(bytes,name)`. OAI and MECA use this shared envelope check before their own complete parsing and schema checks; original bytes remain unchanged.
+Enable `format-xml` for `xml_metadata::validate_root(bytes,name)`. OAI and MECA use this shared envelope check before their own complete parsing and schema checks; original bytes remain unchanged.
 
 ## Common XML metadata envelopes
 
-Enable `xml-metadata` for `xml_metadata::validate_root(bytes,name)`. OAI and MECA use this shared envelope check before their own complete parsing and schema checks; original bytes remain unchanged.
+Enable `format-xml` for `xml_metadata::validate_root(bytes,name)`. OAI and MECA use this shared envelope check before their own complete parsing and schema checks; original bytes remain unchanged.
 
 
 ## Common OAI protocol
