@@ -120,3 +120,11 @@ impl Error {
         self.operation
     }
 }
+
+pub(crate) fn invalid_output_schema() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "build_record_batch",
+        "output schema must contain unique fields from the full schema",
+    )
+}

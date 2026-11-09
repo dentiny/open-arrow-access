@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use arrow_array::{RecordBatchOptions, builder::*};
 use arrow_schema::{DataType, Field, Fields};
 
+use crate::error::invalid_output_schema;
 use crate::{Error, ErrorKind, FieldNameIndex, ReadOptions, RecordBatch, Result, SchemaRef};
 
 /// Build metadata batches using Arrow's native builders and named fields.
@@ -201,14 +202,6 @@ impl ValueLayout {
             _ => Self::Scalar,
         })
     }
-}
-
-fn invalid_output_schema() -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "build_record_batch",
-        "output schema must contain unique fields from the full schema",
-    )
 }
 
 /// Values used by metadata readers. `Option<T>` writes null for `None`.
