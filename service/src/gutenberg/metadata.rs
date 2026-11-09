@@ -33,13 +33,13 @@ pub(super) async fn read_metadata(
     .await?;
     let source = batch.column(0).as_struct();
     let definitions = super::definitions();
-    convert_fields(&definitions.fields, source, 0, None)?;
+    convert_fields(definitions.fields.iter().enumerate(), source, 0, None)?;
     let fields = schema.fields().iter().map(|field| {
-        definitions
-            .fields
-            .iter()
-            .find(|mapping| mapping.field.name() == field.name())
-            .unwrap()
+        let index = definitions
+            .field_index
+            .index_of(field.name())
+            .expect("validated Gutenberg projection");
+        (index, &definitions.fields[index])
     });
     RecordBatchBuilder::build_row(definitions.schema.clone(), schema.clone(), |row| {
         convert_fields(fields, source, 0, Some(row))
@@ -48,15 +48,16 @@ pub(super) async fn read_metadata(
 
 // Validate every source field with no writer, or write the requested fields.
 fn convert_fields<'m>(
-    fields: impl IntoIterator<Item = &'m Mapping>,
+    fields: impl IntoIterator<Item = (usize, &'m Mapping)>,
     source: &StructArray,
     index: usize,
     mut row: Option<&mut RecordBatchRow<'_>>,
 ) -> Result<()> {
-    for mapping in fields {
+    for (column_index, mapping) in fields {
         let field = &mapping.field;
         let name = field.name().as_str();
-        let column = source.column_by_name(name).unwrap();
+        // The XML mapping fixes the source column order before reading.
+        let column = source.column(column_index);
         match field.data_type() {
             DataType::List(item) => {
                 let values = column.as_list::<i32>().value(index);
@@ -64,11 +65,21 @@ fn convert_fields<'m>(
                     let entries = values.as_struct().column(0).as_struct();
                     if let Some(row) = row.as_deref_mut() {
                         row.append_structs(name, 0..entries.len(), |row, index| {
-                            convert_fields(&mapping.children, entries, index, Some(row))
+                            convert_fields(
+                                mapping.children.iter().enumerate(),
+                                entries,
+                                index,
+                                Some(row),
+                            )
                         })?;
                     } else {
                         for index in 0..entries.len() {
-                            convert_fields(&mapping.children, entries, index, None)?;
+                            convert_fields(
+                                mapping.children.iter().enumerate(),
+                                entries,
+                                index,
+                                None,
+                            )?;
                         }
                     }
                 } else if let Some(row) = row.as_deref_mut() {

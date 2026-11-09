@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use arrow_array::{RecordBatchOptions, builder::*};
 use arrow_schema::{DataType, Field, Fields};
 
-use crate::{Error, ErrorKind, ReadOptions, RecordBatch, Result, SchemaRef};
+use crate::{Error, ErrorKind, FieldNameIndex, ReadOptions, RecordBatch, Result, SchemaRef};
 
 /// Build metadata batches using Arrow's native builders and named fields.
 ///
@@ -33,7 +33,7 @@ use crate::{Error, ErrorKind, ReadOptions, RecordBatch, Result, SchemaRef};
 /// ```
 pub struct RecordBatchBuilder {
     schema: SchemaRef,
-    fields: Fields,
+    layout: StructLayout,
     builder: Option<StructBuilder>,
     rows: usize,
 }
@@ -48,7 +48,7 @@ impl RecordBatchBuilder {
         }
         .resolve_projection(&schema)?;
         Self::validate_fields(&fields)?;
-        Ok(Self::from_fields(fields, schema))
+        Self::from_fields(fields, schema)
     }
 
     /// Build one row with a resolved output schema, retaining its Arc and metadata.
@@ -59,32 +59,20 @@ impl RecordBatchBuilder {
         write: impl FnOnce(&mut RecordBatchRow<'_>) -> Result<()>,
     ) -> Result<RecordBatch> {
         Self::validate_fields(schema.fields())?;
-        let mut selected = HashSet::new();
-        // TODO: Index full-schema fields for O(1) lookup instead of a linear search.
-        for field in output_schema.fields() {
-            if !selected.insert(field.name())
-                || !schema.fields().iter().any(|source| source == field)
-            {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "build_record_batch",
-                    "output schema must contain unique fields from the full schema",
-                ));
-            }
-        }
-        let mut builder = Self::from_fields(schema.fields().clone(), output_schema);
+        let mut builder = Self::from_fields(schema.fields().clone(), output_schema)?;
         builder.push(write)?;
         builder.finish()
     }
 
-    fn from_fields(fields: Fields, schema: SchemaRef) -> Self {
+    fn from_fields(fields: Fields, schema: SchemaRef) -> Result<Self> {
+        let layout = StructLayout::new(&fields, schema.fields())?;
         let builder = StructBuilder::from_fields(schema.fields().clone(), 0);
-        Self {
+        Ok(Self {
             schema,
-            fields,
+            layout,
             builder: Some(builder),
             rows: 0,
-        }
+        })
     }
 
     pub fn schema(&self) -> &SchemaRef {
@@ -103,7 +91,7 @@ impl RecordBatchBuilder {
         write: impl FnOnce(&mut RecordBatchRow<'_>) -> Result<()>,
     ) -> Result<()> {
         let mut builder = self.builder.take().ok_or_else(failed_builder)?;
-        let mut row = RecordBatchRow::new(&mut builder, self.fields.clone());
+        let mut row = RecordBatchRow::new(&mut builder, &self.layout);
         write(&mut row)?;
         row.finish()?;
         self.builder = Some(builder);
@@ -164,6 +152,65 @@ impl RecordBatchBuilder {
     }
 }
 
+// Cached once per builder, including nested structs inside lists. Row callbacks
+// borrow these layouts instead of rebuilding indexes for every row/list element.
+struct StructLayout {
+    names: FieldNameIndex,
+    output_indices: Vec<Option<usize>>,
+    values: Vec<ValueLayout>,
+}
+
+impl StructLayout {
+    fn new(full: &Fields, output: &Fields) -> Result<Self> {
+        let names = FieldNameIndex::new(full);
+        let mut output_indices = vec![None; full.len()];
+        for (index, field) in output.iter().enumerate() {
+            let source = names
+                .get(field.name())
+                .filter(|&source| &full[source] == field)
+                .ok_or_else(invalid_output_schema)?;
+            if output_indices[source].replace(index).is_some() {
+                return Err(invalid_output_schema());
+            }
+        }
+        let values = output
+            .iter()
+            .map(|field| ValueLayout::new(field.data_type()))
+            .collect::<Result<_>>()?;
+        Ok(Self {
+            names,
+            output_indices,
+            values,
+        })
+    }
+}
+
+enum ValueLayout {
+    Scalar,
+    Struct(Box<StructLayout>),
+    List(Box<ValueLayout>),
+}
+
+impl ValueLayout {
+    fn new(data_type: &DataType) -> Result<Self> {
+        Ok(match data_type {
+            DataType::Struct(fields) => Self::Struct(Box::new(StructLayout::new(fields, fields)?)),
+            DataType::List(field) | DataType::LargeList(field) => {
+                Self::List(Box::new(Self::new(field.data_type())?))
+            }
+            _ => Self::Scalar,
+        })
+    }
+}
+
+fn invalid_output_schema() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "build_record_batch",
+        "output schema must contain unique fields from the full schema",
+    )
+}
+
 /// Values used by metadata readers. `Option<T>` writes null for `None`.
 pub enum FieldValue<'a> {
     Null,
@@ -192,17 +239,17 @@ impl<'a, T: Into<FieldValue<'a>>> From<Option<T>> for FieldValue<'a> {
 /// A row callback writes named fields, including lists and nested metadata rows.
 pub struct RecordBatchRow<'a> {
     builder: &'a mut StructBuilder,
-    fields: Fields,
+    layout: &'a StructLayout,
     seen: Vec<bool>,
     failed: bool,
 }
 
 impl<'a> RecordBatchRow<'a> {
-    fn new(builder: &'a mut StructBuilder, fields: Fields) -> Self {
+    fn new(builder: &'a mut StructBuilder, layout: &'a StructLayout) -> Self {
         let seen = vec![false; builder.num_fields()];
         Self {
             builder,
-            fields,
+            layout,
             seen,
             failed: false,
         }
@@ -251,16 +298,12 @@ impl<'a> RecordBatchRow<'a> {
         write: impl FnOnce(FieldWriter<'_>) -> Result<()>,
     ) -> Result<()> {
         let result = (|| {
-            // TODO: Precompute field-name indexes for O(1) lookups in both schemas.
-            if !self.fields.iter().any(|field| field.name() == name) {
-                return Err(decode(format!("unknown field {name:?}")));
-            }
-            let Some(index) = self
-                .builder
-                .fields()
-                .iter()
-                .position(|field| field.name() == name)
-            else {
+            let source_index = self
+                .layout
+                .names
+                .get(name)
+                .ok_or_else(|| decode(format!("unknown field {name:?}")))?;
+            let Some(index) = self.layout.output_indices[source_index] else {
                 return Ok(());
             };
             if self.seen[index] {
@@ -270,6 +313,7 @@ impl<'a> RecordBatchRow<'a> {
             write(FieldWriter {
                 builder: self.builder.field_builders_mut()[index].as_mut(),
                 field: &field,
+                layout: &self.layout.values[index],
             })?;
             self.seen[index] = true;
             Ok(())
@@ -288,6 +332,7 @@ impl<'a> RecordBatchRow<'a> {
                 FieldWriter {
                     builder: self.builder.field_builders_mut()[index].as_mut(),
                     field,
+                    layout: &self.layout.values[index],
                 }
                 .append_value(FieldValue::Null)?;
             }
@@ -300,6 +345,7 @@ impl<'a> RecordBatchRow<'a> {
 struct FieldWriter<'a> {
     builder: &'a mut dyn ArrayBuilder,
     field: &'a Field,
+    layout: &'a ValueLayout,
 }
 
 impl FieldWriter<'_> {
@@ -311,12 +357,21 @@ impl FieldWriter<'_> {
     }
 
     fn append_value(self, value: FieldValue<'_>) -> Result<()> {
-        let Self { builder, field } = self;
+        let Self {
+            builder,
+            field,
+            layout,
+        } = self;
         if matches!(value, FieldValue::Null) {
             if !field.is_nullable() {
                 return Err(decode(format!("field {:?} is not nullable", field.name())));
             }
-            Self { builder, field }.append_null();
+            Self {
+                builder,
+                field,
+                layout,
+            }
+            .append_null();
             return Ok(());
         }
         match (value, field.data_type()) {
@@ -362,11 +417,18 @@ impl FieldWriter<'_> {
         self,
         write: impl FnOnce(&mut RecordBatchRow<'_>) -> Result<()>,
     ) -> Result<()> {
-        let Self { builder, field } = self;
-        let DataType::Struct(fields) = field.data_type() else {
+        let Self {
+            builder,
+            field,
+            layout,
+        } = self;
+        if !matches!(field.data_type(), DataType::Struct(_)) {
             return Err(decode("expected a struct field"));
+        }
+        let ValueLayout::Struct(layout) = layout else {
+            unreachable!("layout matches its validated field type");
         };
-        let mut row = RecordBatchRow::new(Self::downcast(builder), fields.clone());
+        let mut row = RecordBatchRow::new(Self::downcast(builder), layout);
         write(&mut row)?;
         row.finish()
     }
@@ -376,7 +438,11 @@ impl FieldWriter<'_> {
         values: I,
         mut append: impl FnMut(FieldWriter<'_>, I::Item) -> Result<()>,
     ) -> Result<()> {
-        let Self { builder, field } = self;
+        let Self {
+            builder,
+            field,
+            layout,
+        } = self;
         let (item, child): (_, &mut dyn ArrayBuilder) = match field.data_type() {
             DataType::List(item) => (
                 item,
@@ -392,11 +458,15 @@ impl FieldWriter<'_> {
             ),
             _ => return Err(decode("expected a list field")),
         };
+        let ValueLayout::List(item_layout) = layout else {
+            unreachable!("layout matches its validated field type");
+        };
         for value in values {
             append(
                 FieldWriter {
                     builder: &mut *child,
                     field: item,
+                    layout: item_layout,
                 },
                 value,
             )?;
@@ -414,7 +484,11 @@ impl FieldWriter<'_> {
     }
 
     fn append_null(self) {
-        let Self { builder, field } = self;
+        let Self {
+            builder,
+            field,
+            layout,
+        } = self;
         match field.data_type() {
             DataType::Boolean => Self::downcast::<BooleanBuilder>(builder).append_null(),
             DataType::Int32 => Self::downcast::<Int32Builder>(builder).append_null(),
@@ -433,10 +507,18 @@ impl FieldWriter<'_> {
             }
             DataType::Struct(fields) => {
                 let builder = Self::downcast::<StructBuilder>(builder);
-                for (field, child) in fields.iter().zip(builder.field_builders_mut()) {
+                let ValueLayout::Struct(layout) = layout else {
+                    unreachable!("layout matches its validated field type");
+                };
+                for ((field, child), value_layout) in fields
+                    .iter()
+                    .zip(builder.field_builders_mut())
+                    .zip(&layout.values)
+                {
                     FieldWriter {
                         builder: child.as_mut(),
                         field,
+                        layout: value_layout,
                     }
                     .append_null();
                 }
