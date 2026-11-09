@@ -1,3 +1,4 @@
+use open_arrow_access_service::common::MetadataLink;
 mod providers;
 use futures::TryStreamExt;
 use open_arrow_access_core::{Accessor, ByteAccessor, Bytes, ListRequest};
@@ -9,10 +10,10 @@ async fn membership_is_lazy_ordered_and_readers_are_independent() {
     let c = providers::connection(&f);
     let files = c
         .files(
-            vec![(
-                "paper".into(),
-                format!("{}/content?sig=a%2Bb", f.endpoint()),
-            )],
+            vec![MetadataLink {
+                file_name: "paper".into(),
+                url: format!("{}/content?sig=a%2Bb", f.endpoint()),
+            }],
             "metadata",
         )
         .unwrap();
@@ -37,12 +38,27 @@ async fn membership_is_lazy_ordered_and_readers_are_independent() {
 fn invalid_or_duplicate_membership_fails_before_network_io() {
     let f = HttpFixture::new();
     let c = providers::connection(&f);
-    assert!(c.files(vec![("x".into(), "file:///x".into())], ()).is_err());
+    assert!(
+        c.files(
+            vec![MetadataLink {
+                file_name: "x".into(),
+                url: "file:///x".into()
+            }],
+            ()
+        )
+        .is_err()
+    );
     assert!(
         c.files(
             vec![
-                ("x".into(), "https://example.com/a".into()),
-                ("x".into(), "https://example.com/b".into())
+                MetadataLink {
+                    file_name: "x".into(),
+                    url: "https://example.com/a".into()
+                },
+                MetadataLink {
+                    file_name: "x".into(),
+                    url: "https://example.com/b".into()
+                }
             ],
             ()
         )
