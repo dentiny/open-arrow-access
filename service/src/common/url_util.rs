@@ -5,7 +5,7 @@ use open_arrow_access_core::Result;
 use url::Url;
 
 /// Parse an absolute download URL without altering its signed query string.
-pub fn download_url(value: &str) -> Result<Url> {
+pub fn resolve_download_url(value: &str) -> Result<Url> {
     let url = Url::parse(value).map_err(error::download_url)?;
     validation::download_url(&url)?;
     Ok(url)
@@ -40,7 +40,7 @@ pub(super) fn redirect(url: &Url, headers: &HeaderMap) -> Result<Url> {
         .get("location")
         .and_then(|v| v.to_str().ok())
         .ok_or_else(|| error::decode("redirect lacks Location"))?;
-    let next = download_url(url.join(location).map_err(error::redirect)?.as_str())?;
+    let next = resolve_download_url(url.join(location).map_err(error::redirect)?.as_str())?;
     validation::redirect(url, &next)?;
     Ok(next)
 }
