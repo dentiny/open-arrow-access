@@ -13,10 +13,6 @@ pub(super) fn xml(error: impl std::error::Error + Send + Sync + 'static) -> Erro
     invalid("invalid XML metadata").with_source(error)
 }
 
-pub(super) fn utf8(error: std::str::Utf8Error) -> Error {
-    invalid("invalid XML namespace").with_source(error)
-}
-
 pub(super) fn root(expected: &str) -> Error {
     invalid(&format!("expected XML root {expected}"))
 }
