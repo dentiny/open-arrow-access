@@ -51,3 +51,6 @@ pub mod xml_metadata;
 
 #[cfg(feature = "uspto")]
 pub mod uspto;
+
+#[cfg(feature = "oai")]
+pub mod oai;
