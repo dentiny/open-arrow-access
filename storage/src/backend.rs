@@ -375,6 +375,11 @@ impl ByteReader for OpenDalReader {
         for range in &ranges {
             validate_byte_range(range, self.len, "read_range")?;
         }
+        // Empty ranges need no fetch/coalescing plan. Preserve one output per
+        // range after validating the entire request, including empty offsets.
+        if ranges.iter().all(Range::is_empty) {
+            return Ok(vec![Bytes::new(); ranges.len()]);
+        }
         let mut output = Vec::with_capacity(ranges.len());
         let mut start = 0;
         // Keep fragmented staging bounded. Large ranges are assembled directly;

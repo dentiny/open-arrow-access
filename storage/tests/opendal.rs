@@ -35,6 +35,20 @@ async fn filesystem_read_contract() {
         .await
         .unwrap();
         let mut reader = accessor.open("data.bin".into()).await.unwrap();
+        let empty = reader
+            .read_ranges(vec![0..0, end..end, 0..0])
+            .await
+            .unwrap();
+        assert_eq!(empty.len(), 3);
+        assert!(empty.iter().all(|bytes| bytes.is_empty()));
+        assert_eq!(
+            reader
+                .read_ranges(vec![0..0, end + 1..end + 1])
+                .await
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidInput,
+        );
         for range in [end..end + 1, std::ops::Range { start: 2, end: 1 }] {
             assert_eq!(
                 reader.read_range(range).await.unwrap_err().kind(),
