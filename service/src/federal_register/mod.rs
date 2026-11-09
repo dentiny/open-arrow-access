@@ -36,11 +36,12 @@ impl FederalRegisterService {
     }
 
     pub async fn document(&self, number: &str) -> Result<RemoteFiles> {
-        let doc = self
-            .connection
-            .json(&format!("api/v1/documents/{}.json", segment(number)?), &[])
-            .await?;
-        let files = resolver::resolve_document_files(doc.value(), number)?;
-        self.connection.files(files, doc)
+        self.connection
+            .resolve_json_files(
+                &format!("api/v1/documents/{}.json", segment(number)?),
+                &[],
+                |doc| resolver::resolve_document_files(doc.value(), number),
+            )
+            .await
     }
 }
