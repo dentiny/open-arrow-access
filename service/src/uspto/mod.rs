@@ -35,18 +35,16 @@ impl UsptoService {
         let id_path = filename(id)?;
         let offset = offset.to_string();
         let limit = limit.to_string();
-        let doc = self
-            .connection
-            .json(
+        self.connection
+            .resolve_json_files(
                 &format!("api/v1/datasets/products/{id_path}"),
                 &[
                     ("includeFiles", "true"),
                     ("offset", &offset),
                     ("limit", &limit),
                 ],
+                |doc| parser::parse_product_files(doc.value(), id),
             )
-            .await?;
-        let files = parser::parse_product_files(doc.value(), id)?;
-        self.connection.files(files, doc)
+            .await
     }
 }

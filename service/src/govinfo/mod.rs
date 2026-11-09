@@ -31,12 +31,11 @@ impl GovInfoService {
     /// Resolve direct files in one bulk directory, retaining child folders in metadata.
     pub async fn bulk_directory(&self, prefix: &str) -> Result<RemoteFiles> {
         let prefix = resolver::resolve_prefix(prefix)?;
-        let doc = self
-            .bulk
-            .json(&format!("bulkdata/json/{prefix}"), &[])
-            .await?;
-        let files = resolver::resolve_bulk_files(&self.bulk, &prefix, doc.value())?;
-        self.bulk.files(files, doc)
+        self.bulk
+            .resolve_json_files(&format!("bulkdata/json/{prefix}"), &[], |doc| {
+                resolver::resolve_bulk_files(&self.bulk, &prefix, doc.value())
+            })
+            .await
     }
 
     pub async fn collections(&self) -> Result<ApiDocument> {
@@ -84,11 +83,10 @@ impl GovInfoService {
 
     /// Resolve all content and metadata representations advertised by a package.
     pub async fn package(&self, id: &str) -> Result<RemoteFiles> {
-        let doc = self
-            .api
-            .json(&format!("packages/{}/summary", segment(id)?), &[])
-            .await?;
-        let files = resolver::resolve_package_files(doc.value(), id)?;
-        self.api.files(files, doc)
+        self.api
+            .resolve_json_files(&format!("packages/{}/summary", segment(id)?), &[], |doc| {
+                resolver::resolve_package_files(doc.value(), id)
+            })
+            .await
     }
 }

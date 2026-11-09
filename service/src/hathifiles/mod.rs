@@ -20,11 +20,10 @@ impl HathifilesService {
 
     /// Resolve the upstream ordered catalogue. No full/update or rights filtering is applied.
     pub async fn catalog(&self) -> Result<RemoteFiles> {
-        let doc = self
-            .connection
-            .json("files/hathifiles/hathi_file_list.json", &[])
-            .await?;
-        let files = resolver::resolve_catalog_files(&self.connection, doc.value())?;
-        self.connection.files(files, doc)
+        self.connection
+            .resolve_json_files("files/hathifiles/hathi_file_list.json", &[], |doc| {
+                resolver::resolve_catalog_files(&self.connection, doc.value())
+            })
+            .await
     }
 }
