@@ -85,5 +85,8 @@ pub mod meca;
 #[cfg(feature = "biorxiv")]
 pub mod biorxiv;
 
+#[cfg(feature = "openstax")]
+pub mod openstax;
+
 #[cfg(feature = "bhl")]
 pub mod bhl;
