@@ -156,5 +156,33 @@
     "passed": true,
     "test_summaries": [],
     "log_sha256": "b9676d301c83e5b35659ac62a761a3e6ce4d01e38a2e9a0ba985f87ca82b668b"
+  },
+  {
+    "check": "independent named-files PR",
+    "command": "cargo test -p open-arrow-access-storage --test named_files --offline",
+    "passed": true,
+    "test_summaries": [
+      "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    ],
+    "log_sha256": "a35d8ff465571b8bb31794cb1e3c87237aa372896059861a3afa51afb3d7ceed"
+  },
+  {
+    "check": "independent ATIF adapter PR",
+    "command": "cargo test -p open-arrow-access-file-format --features atif --test atif --offline",
+    "passed": true,
+    "test_summaries": [
+      "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    ],
+    "log_sha256": "d50c46aa51a869998b3fbfa3e95592616f459b1009494ec07c68af42ed4c62af"
+  },
+  {
+    "check": "WARC all features",
+    "command": "cargo test --all-features --offline",
+    "passed": true,
+    "test_summaries": [
+      "test result: ok. 53 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    ],
+    "log_sha256": "b73a10f3dd835f1727f9df6f3237b93a6525401b2feb2fd99067e61fc8deeafc"
   }
 ]

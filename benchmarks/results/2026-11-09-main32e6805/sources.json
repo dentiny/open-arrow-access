@@ -20,6 +20,10 @@
   "open-arrow-access": {
     "upstream_main": "32e68053d6801932fed3e2ed3e0f50e1eaa33f93",
     "harness_source": "20acbff",
-    "lock_sha256": "d75bd7ce3cbfe2f0df5d65bb94e1a95fb647bf3c5a44929ce400ef1467a6b4b2"
+    "lock_sha256": "d75bd7ce3cbfe2f0df5d65bb94e1a95fb647bf3c5a44929ce400ef1467a6b4b2",
+    "independent_pr_heads": {
+      "codex/lazy-manifest-listing": "236585409ebab7be9e184ce518940fd4432647c1",
+      "codex/reuse-atif-batch-builder": "d6ff0878673331b60c231aca0f82c681ec45a3a8"
+    }
   }
 }
