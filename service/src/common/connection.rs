@@ -1,5 +1,5 @@
 use super::{
-    ApiDocument, download_url, error,
+    ApiDocument, error, resolve_download_url,
     transport::{self, AuthScope},
     url_util,
     validation::{self, BodyLength},
@@ -80,7 +80,7 @@ impl Connection {
         url: Url,
         accept: &str,
     ) -> Result<http::Response<HttpBody>> {
-        let url = download_url(url.as_str())?;
+        let url = resolve_download_url(url.as_str())?;
         let request = self.request(&url, accept)?;
         let response = self
             .context
