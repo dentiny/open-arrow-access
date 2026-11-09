@@ -1,76 +1,44 @@
-use std::collections::HashSet;
-
-use open_arrow_access_core::Result;
-use quick_xml::{Reader, events::Event};
-use serde::Deserialize;
-
 use super::{
     ArxivArchive, ArxivKind,
     error::{decode, xml_error},
     validation::validate_archive,
 };
+use crate::xml_metadata::XmlDocument;
+use arrow_array::{Array, StructArray, cast::AsArray};
+use arrow_schema::DataType::Utf8;
+use open_arrow_access_core::Result;
+use std::{collections::HashSet, str::FromStr};
+use xml_arrow::XmlField;
 
-pub(super) fn parse_manifest(
+pub(super) async fn parse_manifest(
     bytes: &[u8],
     kind: ArxivKind,
     month: Option<u16>,
 ) -> Result<Vec<ArxivArchive>> {
-    let mut reader = Reader::from_reader(bytes);
-    let mut depth = 0_usize;
-    let mut root_seen = false;
-    let mut declaration_seen = false;
-    loop {
-        match reader.read_event().map_err(xml_error)? {
-            Event::Start(start) => {
-                if depth == 0 {
-                    validate_root(start.name().as_ref(), kind, root_seen)?;
-                    root_seen = true;
-                }
-                depth += 1;
-            }
-            Event::Empty(start) if depth == 0 => {
-                validate_root(start.name().as_ref(), kind, root_seen)?;
-                root_seen = true;
-            }
-            Event::End(_) => {
-                depth = depth
-                    .checked_sub(1)
-                    .ok_or_else(|| decode("unexpected manifest closing tag"))?;
-            }
-            Event::Text(text) if depth == 0 && !text.iter().all(u8::is_ascii_whitespace) => {
-                return Err(decode("unexpected text outside arXiv manifest root"));
-            }
-            Event::CData(_) | Event::GeneralRef(_) if depth == 0 => {
-                return Err(decode("unexpected content outside manifest root"));
-            }
-            Event::DocType(_) => return Err(decode("manifest document types are unsupported")),
-            Event::Decl(_) => {
-                if root_seen || declaration_seen {
-                    return Err(decode("unexpected manifest XML declaration"));
-                }
-                declaration_seen = true;
-            }
-            Event::Eof => {
-                if !root_seen || depth != 0 {
-                    return Err(decode("incomplete arXiv manifest root"));
-                }
-                break;
-            }
-            _ => (),
-        }
-    }
-    let manifest: Manifest = quick_xml::de::from_reader(bytes).map_err(xml_error)?;
+    let document = XmlDocument::new(bytes, kind.root())?;
+    let fields = ["filename", "yymm", "seq_num", "size", "num_items", "md5sum"]
+        .map(|name| XmlField::new(name, document.element(name), Utf8, false));
+    let batch = document
+        .read(vec![XmlField::list(
+            "files",
+            ".",
+            false,
+            XmlField::structure("file", document.element("file"), false, fields.into()),
+        )])
+        .await?;
+    let values = batch.column(0).as_list::<i32>().value(0);
+    let files = values.as_struct();
     let mut names = HashSet::new();
     let mut selected = Vec::new();
-    for file in manifest.files {
+    for index in 0..files.len() {
         let archive = ArxivArchive {
             kind,
-            filename: file.filename,
-            month: file.yymm,
-            sequence: file.seq_num,
-            size: file.size,
-            num_items: file.num_items,
-            checksum: file.md5sum,
+            filename: text(files, "filename", index).into(),
+            month: number(files, "yymm", index)?,
+            sequence: number(files, "seq_num", index)?,
+            size: number(files, "size", index)?,
+            num_items: number(files, "num_items", index)?,
+            checksum: text(files, "md5sum", index).into(),
         };
         validate_archive(&archive)?;
         if !names.insert(archive.filename.clone()) {
@@ -83,29 +51,17 @@ pub(super) fn parse_manifest(
     Ok(selected)
 }
 
-fn validate_root(name: &[u8], kind: ArxivKind, root_seen: bool) -> Result<()> {
-    if root_seen || name != kind.root().as_bytes() {
-        return Err(decode(
-            "expected one manifest root matching the selected arXiv data kind",
-        ));
-    }
-    Ok(())
+fn text<'a>(files: &'a StructArray, field: &str, index: usize) -> &'a str {
+    files
+        .column_by_name(field)
+        .unwrap()
+        .as_string::<i32>()
+        .value(index)
 }
 
-#[derive(Deserialize)]
-struct Manifest {
-    #[serde(rename = "file", default)]
-    files: Vec<ManifestFile>,
-}
-
-#[derive(Deserialize)]
-struct ManifestFile {
-    filename: String,
-    /// Archive month encoded as YYMM (two-digit year and month), e.g. 2410 for October 2024.
-    /// Stored numerically; format with `{:04}` to restore leading zeros (1 becomes 0001).
-    yymm: u16,
-    seq_num: u32,
-    size: u64,
-    num_items: u64,
-    md5sum: String,
+fn number<T: FromStr>(files: &StructArray, field: &str, index: usize) -> Result<T>
+where
+    T::Err: std::error::Error + Send + Sync + 'static,
+{
+    text(files, field, index).trim().parse().map_err(xml_error)
 }
