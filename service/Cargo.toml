@@ -52,6 +52,7 @@ pmc = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/gzip",
 ]
+semantic-scholar = []
 uspto = []
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 zenodo = []
@@ -209,6 +210,10 @@ required-features = ["biorxiv"]
 [[test]]
 name = "openstax"
 required-features = ["openstax"]
+
+[[test]]
+name = "semantic_scholar"
+required-features = ["semantic-scholar"]
 
 [[test]]
 name = "bhl"
