@@ -54,3 +54,6 @@ pub mod uspto;
 
 #[cfg(feature = "oai")]
 pub mod oai;
+
+#[cfg(feature = "doab")]
+pub mod doab;

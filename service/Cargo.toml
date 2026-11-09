@@ -11,6 +11,7 @@ arxiv = ["format-xml", "dep:open-arrow-access-decompression", "open-arrow-access
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
+doab = ["oai"]
 gutenberg = ["format-xml", "dep:chrono"]
 huggingface = [
     "dep:open-arrow-access-dataset",
@@ -143,3 +144,7 @@ required-features = ["oai"]
 [[test]]
 name = "oai_provider"
 required-features = ["oai"]
+
+[[test]]
+name = "doab"
+required-features = ["doab"]

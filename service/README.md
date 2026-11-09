@@ -417,3 +417,7 @@ See [OAI protocol](oai-protocol.md). Record counts and resumption tokens are dec
 ## Common OAI provider configuration
 
 See [OAI provider configuration](oai-provider.md).
+
+## doab
+
+See [doab service](doab.md).
