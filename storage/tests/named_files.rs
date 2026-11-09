@@ -1,6 +1,6 @@
 use futures::TryStreamExt;
 use open_arrow_access_core::{Accessor, ByteAccessor, ByteReadRequest, ErrorKind, ListRequest};
-use open_arrow_access_storage::NamedFileAccessor;
+use open_arrow_access_storage::{NamedFileAccessor, validate_file_names};
 use open_arrow_access_test_support::{MemoryAccessor, collect_bytes};
 
 #[tokio::test]
@@ -52,17 +52,29 @@ async fn maps_names_and_lists_without_storage_io() {
 }
 
 #[test]
-fn rejects_ambiguous_names() {
-    for names in [vec![""], vec!["same", "same"]] {
-        assert!(
-            NamedFileAccessor::new(
-                MemoryAccessor::new(b"", 2),
-                names
-                    .into_iter()
-                    .map(|name| (name.to_owned(), "key".into()))
-                    .collect()
-            )
-            .is_err()
+fn validation_and_construction_share_namespace_rules() {
+    for (names, valid) in [
+        (vec![], true),
+        (vec!["../opaque", " padded ", "雪"], true),
+        (vec![""], false),
+        (vec!["same", "same"], false),
+        (vec!["a", "b", "a"], false),
+    ] {
+        let validation = validate_file_names(names.iter().copied());
+        let construction = NamedFileAccessor::new(
+            MemoryAccessor::new(b"", 2),
+            names
+                .into_iter()
+                .map(|name| (name.to_owned(), "key".into()))
+                .collect(),
         );
+        assert_eq!(validation.is_ok(), valid);
+        assert_eq!(construction.is_ok(), valid);
+        if !valid {
+            let expected = validation.unwrap_err();
+            let actual = construction.err().unwrap();
+            assert_eq!(actual.kind(), expected.kind());
+            assert_eq!(actual.operation(), expected.operation());
+        }
     }
 }
