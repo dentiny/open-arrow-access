@@ -438,6 +438,14 @@ See [federal-register service](federal-register.md) for its contract and usage.
 
 See [govinfo service](govinfo.md).
 
+## oapen
+
+See [oapen service](oapen.md).
+
+## figshare
+
+See [figshare service](figshare.md).
+
 ## MECA
 
 See [storage-independent MECA archives](meca.md).
