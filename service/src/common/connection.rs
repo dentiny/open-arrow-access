@@ -96,7 +96,11 @@ impl Connection {
             .await
             .map_err(error::io)?;
         if response.status() != http::StatusCode::OK {
-            return Err(error::http(response.status()));
+            return Err(crate::http_client::http_status_error(
+                error::OP,
+                response.status(),
+                response.headers(),
+            ));
         }
         Ok(response)
     }
