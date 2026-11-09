@@ -64,12 +64,12 @@ def main():
         if baseline.keys() != candidate.keys():
             raise ValueError("workload dimensions differ; select matching input files")
         print(
-            "| Workload (backend/case/chunk/batch/concurrency/I/O chunk/projection/iterations) | n | Before ms | After ms | Speedup (bootstrap 95% interval) | Before/after peak RSS MiB |"
+            "| Workload (backend/case/chunk/batch/concurrency/I/O chunk/projection/iterations/instrumented) | n | Before ms | After ms | Speedup (bootstrap 95% interval) | Before/after peak RSS MiB |"
         )
         print("| --- | ---: | ---: | ---: | ---: | ---: |")
     else:
         print(
-            "| Workload (backend/case/chunk/batch/concurrency/I/O chunk/projection/iterations) | n | Median ms (min–max) | Input MiB/s | Process CPU ms | Peak RSS MiB | Logical MiB | HTTP GET/HEAD |"
+            "| Workload (backend/case/chunk/batch/concurrency/I/O chunk/projection/iterations/instrumented) | n | Median ms (min–max) | Input MiB/s | Process CPU ms | Peak RSS MiB | Logical MiB | HTTP GET/HEAD |"
         )
         print("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     for key, samples in sorted(baseline.items()):
