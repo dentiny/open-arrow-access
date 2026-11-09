@@ -17,33 +17,30 @@ struct AtifDecoder {
 }
 
 impl AtifDecoder {
-    async fn read_document(&mut self) -> Result<Option<String>> {
-        while let Some(bytes) = self.documents.try_next().await? {
-            let document = String::from_utf8(bytes.into())
+    async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
+        let mut builder = TrajectoryBatchBuilder::new(self.batch_size, self.projection.as_deref())
+            .map_err(|error| decode_error(self.source.as_ref(), self.record_index, error))?;
+        let mut appended = 0;
+        while appended < self.batch_size {
+            let Some(bytes) = self.documents.try_next().await? else {
+                break;
+            };
+            // Keep shared line slices borrowed through conversion. Turning Bytes
+            // into a Vec/String can copy the entire document first.
+            let document = std::str::from_utf8(&bytes)
                 .map_err(|error| decode_error(self.source.as_ref(), self.record_index, error))?;
             if self.format == AtifFormat::JsonLines && document.trim().is_empty() {
                 continue;
             }
-            return Ok(Some(document));
-        }
-        Ok(None)
-    }
-
-    async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
-        let mut builder = TrajectoryBatchBuilder::new(self.batch_size, self.projection.as_deref())
-            .map_err(|error| decode_error(self.source.as_ref(), self.record_index, error))?;
-        for _ in 0..self.batch_size {
-            let Some(document) = self.read_document().await? else {
-                break;
-            };
             builder
                 .append_json(
-                    &document,
+                    document,
                     self.source.as_ref().map(|source| source.locator()),
                     self.record_index,
                 )
                 .map_err(|error| decode_error(self.source.as_ref(), self.record_index, error))?;
             self.record_index += 1;
+            appended += 1;
         }
         builder
             .flush()
