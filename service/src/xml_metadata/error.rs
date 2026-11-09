@@ -5,10 +5,6 @@ pub(super) fn invalid(message: &str) -> Error {
     Error::new(ErrorKind::Decode, OP, message)
 }
 
-pub(super) fn parse(error: quick_xml::Error) -> Error {
-    invalid("invalid XML metadata").with_source(error)
-}
-
 pub(super) fn xml(error: impl std::error::Error + Send + Sync + 'static) -> Error {
     invalid("invalid XML metadata").with_source(error)
 }

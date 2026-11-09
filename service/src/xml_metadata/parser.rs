@@ -22,7 +22,7 @@ impl<'a> XmlDocument<'a> {
         let mut doctype = None;
         loop {
             let start = reader.buffer_position() as usize;
-            let (namespace, event) = reader.read_resolved_event().map_err(error::parse)?;
+            let (namespace, event) = reader.read_resolved_event().map_err(error::xml)?;
             match event {
                 Event::Start(element) | Event::Empty(element) => {
                     validation::validate_root_name(element.local_name().as_ref(), expected_root)?;
