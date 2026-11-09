@@ -12,9 +12,21 @@ arrow-array.workspace = true
 arrow-schema.workspace = true
 futures.workspace = true
 open-arrow-access-core.workspace = true
-open-arrow-access-file-format = { workspace = true, features = ["csv", "json", "xml", "atif", "warc", "parquet"] }
+open-arrow-access-file-format = { workspace = true, features = [
+    "csv",
+    "json",
+    "xml",
+    "atif",
+    "warc",
+    "parquet",
+] }
 open-arrow-access-storage.workspace = true
-opendal = { workspace = true, features = ["services-fs", "services-memory", "services-http", "http-transport-reqwest"] }
+opendal = { workspace = true, features = [
+    "services-fs",
+    "services-memory",
+    "services-http",
+    "http-transport-reqwest",
+] }
 parquet.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
