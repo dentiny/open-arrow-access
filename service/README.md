@@ -390,6 +390,10 @@ See [provider-connection](provider-connection.md) for this utility.
 
 See [provider-test-fixtures](provider-test-fixtures.md) for this utility.
 
+## Common http-downloads
+
+See [http-downloads](http-downloads.md) for this utility.
+
 ## Common metadata links
 
 `common::optional_links` maps provider-selected optional URL fields to logical file names without modifying parsed metadata. It is shared by BHL and Federal Register.
