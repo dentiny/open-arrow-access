@@ -8,7 +8,6 @@ serialize WARC records or construct malformed inputs at runtime.
 | File | Case |
 | --- | --- |
 | `good_physical_records.warc` | Ordered warcinfo, resource, and continuation records, including an empty body, binary bytes `00 ff 0d 0a`, optional headers, and segment metadata. |
-| `good_request_response.warc` | Two physical response/request records. |
 | `good_resource.warc` | First record of `good_resources.warc`; its byte length identifies the fault-injection boundary. |
 | `good_resources.warc` | Two complete resource records for lazy reading and errors after the first delivered record. |
 | `good_metadata.warc` | One metadata record for independent-reader checks. |

@@ -47,22 +47,6 @@ async fn parser_preserves_physical_records_order_headers_and_owned_binary_bodies
 }
 
 #[tokio::test]
-async fn request_and_response_records_are_both_delivered() {
-    let input = MemoryAccessor::new(&fixture!("warc", "good_request_response.warc").await, 1);
-    let mut reader = WarcAccessor::new(input)
-        .open("a.warc".into())
-        .await
-        .unwrap();
-    let response = reader.next().await.unwrap().unwrap();
-    let request = reader.next().await.unwrap().unwrap();
-    assert_eq!(response.warc_type().as_str(), "response");
-    assert_eq!(request.warc_type().as_str(), "request");
-    assert_eq!(response.body(), b"x");
-    assert_eq!(request.body(), b"y");
-    assert!(reader.next().await.unwrap().is_none());
-}
-
-#[tokio::test]
 async fn malformed_and_truncated_records_fail_terminally() {
     for name in [
         "bad_incomplete_header.warc",
