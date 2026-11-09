@@ -34,6 +34,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | ZIP entry decompression | [`decompression/tests/zip.rs`](../decompression/tests/zip.rs) |
 | Streaming and indexed TAR entries | [`decompression/tests/tar.rs`](../decompression/tests/tar.rs) |
 | Document accessor | [`core/tests/document.rs`](../core/tests/document.rs) |
+| Field-name index and wide projections | [`core/tests/field_index.rs`](../core/tests/field_index.rs) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
 | Shared resource lifetime probe | [`test-support/src/drop_probe.rs`](../test-support/src/drop_probe.rs), used by core stream and TAR tests |
 | Generic file-format extension protocol | [`file-format/tests/accessor.rs`](../file-format/tests/accessor.rs), also runs with no format features |
