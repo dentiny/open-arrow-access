@@ -386,6 +386,18 @@ See [api-document](api-document.md) for this utility.
 
 See [provider-connection](provider-connection.md) for this utility.
 
+## Common remote-files
+
+See [remote-files](remote-files.md) for this utility.
+
+## Common metadata links
+
+`common::resolve_optional_links` maps provider-selected optional URL fields to logical file names without modifying parsed metadata. It is shared by BHL and Federal Register.
+
+## Common XML metadata envelopes
+
+Enable `format-xml` for `xml_metadata::validate_root(bytes,name)`. OAI and MECA use this shared envelope check before their own complete parsing and schema checks; original bytes remain unchanged.
+
 ## Common provider-test-fixtures
 
 See [provider-test-fixtures](provider-test-fixtures.md) for this utility.
@@ -401,7 +413,3 @@ See [remote-files](remote-files.md) for this utility.
 ## Common metadata links
 
 `common::optional_links` maps provider-selected optional URL fields to logical file names without modifying parsed metadata. It is shared by BHL and Federal Register.
-
-## Common XML metadata envelopes
-
-Enable `format-xml` for `xml_metadata::validate_root(bytes,name)`. OAI and MECA use this shared envelope check before their own complete parsing and schema checks; original bytes remain unchanged.
