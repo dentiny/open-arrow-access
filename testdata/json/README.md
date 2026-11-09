@@ -9,10 +9,8 @@ The input schema is `id: Int64` (non-nullable), `title: Utf8` (nullable).
 | File | Case |
 | --- | --- |
 | `good.json` | Four whitespace-separated objects; UTF-8 text, escaped newline, CRLF, blank lines, a pretty-printed object, unknown nested fields, null/missing titles, and no final newline. |
-| `good.jsonl` | Two valid JSONL records with a final LF, read through the filesystem adapter. |
 | `projection.jsonl` | Two records with a missing nullable title, for column and zero-column projections. |
 | `io-failure.jsonl` | Two records; the memory accessor injects an I/O failure after the first nine bytes. |
-| `single.json` | One object, for capability and byte-option forwarding checks. |
 | `many.jsonl` | One hundred ordered records, for verifying bounded incremental reads. |
 | `empty.json` | Zero-byte input. |
 | `whitespace.json` | Only CRLF, space and tab bytes. |

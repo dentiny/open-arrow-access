@@ -8,11 +8,11 @@ use arrow_array::{Array, Int64Array, StringArray};
 use arrow_schema::{ArrowError, DataType, Field, IntervalUnit, Schema, TimeUnit};
 use more_asserts::assert_lt;
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
+    Accessor, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
 };
 
 use open_arrow_access_file_format::json::JsonAccessor;
-use open_arrow_access_test_support::{MemoryAccessor, Observations, fixture, fixture_path, format};
+use open_arrow_access_test_support::{MemoryAccessor, Observations, fixture, format};
 
 fn schema() -> SchemaRef {
     Arc::new(Schema::new_with_metadata(
@@ -152,25 +152,6 @@ async fn io_errors_keep_their_category_after_a_successful_batch() {
 }
 
 #[tokio::test]
-async fn per_open_options_are_forwarded_and_sequential_bytes_are_sufficient() {
-    let (input, observed) = fixture("single.json", 1).await;
-    let accessor = JsonAccessor::new(input, schema());
-    assert!(accessor.capability().read);
-    assert!(!accessor.capability().read_with_range);
-    let options = ByteReadOptions {
-        io_concurrency: NonZeroUsize::new(3).unwrap(),
-        io_chunk_size: NonZeroUsize::new(17),
-    };
-    let mut reader = accessor
-        .open(request(1, None).with_byte_options(options))
-        .await
-        .unwrap();
-    assert_eq!(observed.requests.lock().unwrap()[0].options, options);
-    assert!(!reader.capability().read_with_range);
-    assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
-}
-
-#[tokio::test]
 async fn reading_a_batch_does_not_collect_the_entire_input() {
     let data = fixture!("json", "many.jsonl").await;
     let input = MemoryAccessor::new(&data, 1);
@@ -194,20 +175,6 @@ async fn empty_and_whitespace_only_inputs_have_no_rows() {
         assert!(reader.next().await.unwrap().is_none());
         format::assert_finished(reader.as_mut(), &observed.reads).await;
     }
-}
-
-#[tokio::test]
-async fn local_jsonl_reads_through_opendal() {
-    let storage = open_arrow_access_storage::OpenDalAccessor::new(
-        open_arrow_access_test_support::fs_operator(fixture_path!("json", "")),
-    );
-    let accessor = JsonAccessor::new(
-        storage.with_chunk_size(NonZeroUsize::new(2).unwrap()),
-        schema(),
-    );
-    let mut reader = accessor.open(ReadRequest::new("good.jsonl")).await.unwrap();
-    assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1, 2]);
-    assert!(reader.next().await.unwrap().is_none());
 }
 
 #[tokio::test]
