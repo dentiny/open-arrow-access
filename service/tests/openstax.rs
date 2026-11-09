@@ -1,8 +1,9 @@
 mod providers;
 use http::StatusCode;
-use open_arrow_access_core::{Bytes, ErrorKind};
+use open_arrow_access_core::{Accessor, Bytes, ErrorKind, read_all};
+use open_arrow_access_decompression::zip::{ZipArchive, ZipLimits};
 use open_arrow_access_service::openstax::OpenStaxService;
-use open_arrow_access_test_support::{byte_accessor, fixture, http::HttpFixture};
+use open_arrow_access_test_support::{MemoryAccessor, byte_accessor, fixture, http::HttpFixture};
 
 #[tokio::test]
 async fn book_snapshot_pins_commit_and_defers_archive_download() {
@@ -31,9 +32,6 @@ async fn book_snapshot_pins_commit_and_defers_archive_download() {
     byte_accessor::assert_read_contract(files.clone(), "osbooks-physics.zip".into(), &expected)
         .await
         .unwrap();
-    use open_arrow_access_core::{Accessor, read_all};
-    use open_arrow_access_decompression::zip::{ZipArchive, ZipLimits};
-    use open_arrow_access_test_support::MemoryAccessor;
     // Provider downloads are sequential; materialize once before ZIP range access.
     let input = files.open("osbooks-physics.zip".into()).await.unwrap();
     let bytes = read_all(input, "read_openstax").await.unwrap();
