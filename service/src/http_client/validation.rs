@@ -12,10 +12,15 @@ pub(crate) fn validate_origin(url: &Url, operation: &'static str) -> Result<()> 
 
 /// Shared endpoint rules; callers decide whether a path is allowed.
 pub(crate) fn is_http_endpoint(url: &Url) -> bool {
+    is_http_resource_url(url) && url.query().is_none()
+}
+
+/// Credential-free HTTP(S) resource with a host and no fragment. Paths and
+/// signed queries are allowed; endpoint callers impose their additional rules.
+pub(crate) fn is_http_resource_url(url: &Url) -> bool {
     matches!(url.scheme(), "http" | "https")
         && url.host_str().is_some()
         && url.username().is_empty()
         && url.password().is_none()
-        && url.query().is_none()
         && url.fragment().is_none()
 }

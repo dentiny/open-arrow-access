@@ -63,7 +63,15 @@ async fn scoped_query_survives_redirect_and_cannot_duplicate_existing_key() {
 
 #[tokio::test]
 async fn validates_endpoint_header_and_api_continuation() {
-    assert!(Connection::new("https://u:p@example.com").is_err());
+    for endpoint in [
+        "https://u:p@example.com",
+        "https://example.com/path",
+        "https://example.com/?sig=a%2Bb",
+        "https://example.com/#fragment",
+        "ftp://example.com",
+    ] {
+        assert!(Connection::new(endpoint).is_err(), "{endpoint}");
+    }
     let fixture = HttpFixture::new();
     assert!(
         connection(&fixture)
