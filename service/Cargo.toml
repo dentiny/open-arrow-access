@@ -168,14 +168,6 @@ name = "oai_provider"
 required-features = ["oai"]
 
 [[test]]
-name = "doab"
-required-features = ["doab"]
-
-[[test]]
-name = "arxiv_metadata"
-required-features = ["arxiv"]
-
-[[test]]
 name = "hathifiles"
 required-features = ["hathifiles"]
 
