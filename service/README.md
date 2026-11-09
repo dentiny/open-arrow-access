@@ -414,6 +414,22 @@ Enable `format-xml` for `xml_metadata::XmlDocument`. Protocol metadata is decode
 
 See [OAI protocol](oai-protocol.md). Record counts and resumption tokens are decoded through the shared XML metadata reader.
 
+## Common OAI provider configuration
+
+See [OAI provider configuration](oai-provider.md).
+
+## doab
+
+See [doab service](doab.md).
+
+## arxiv-metadata
+
+See [arxiv-metadata service](arxiv-metadata.md).
+
+## hathifiles
+
+See [hathifiles service](hathifiles.md).
+
 ## federal-register
 
 See [federal-register service](federal-register.md) for its contract and usage.

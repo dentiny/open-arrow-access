@@ -6,3 +6,6 @@ mod protocol;
 mod validation;
 pub use page::OaiPage;
 pub use protocol::OaiService;
+
+mod provider;
+pub use provider::{OaiProvider, OaiProviderService};

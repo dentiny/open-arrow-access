@@ -55,5 +55,14 @@ pub mod uspto;
 #[cfg(feature = "oai")]
 pub mod oai;
 
+#[cfg(feature = "doab")]
+pub mod doab;
+
+#[cfg(feature = "arxiv")]
+pub mod arxiv_metadata;
+
+#[cfg(feature = "hathifiles")]
+pub mod hathifiles;
+
 #[cfg(feature = "federal-register")]
 pub mod federal_register;
