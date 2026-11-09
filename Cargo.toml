@@ -134,10 +134,10 @@ arrow-schema.workspace = true
 futures.workspace = true
 http.workspace = true
 open-arrow-access-test-support.workspace = true
+opendal = { workspace = true, features = ["services-fs"] }
 parquet.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-opendal = { workspace = true, features = ["services-fs"] }
 tokio.workspace = true
 
 [[example]]
@@ -205,4 +205,11 @@ required-features = ["service-internet-archive"]
 [[bench]]
 name = "performance"
 harness = false
-required-features = ["format-atif", "format-csv", "format-json", "format-parquet", "format-warc", "format-xml"]
+required-features = [
+    "format-atif",
+    "format-csv",
+    "format-json",
+    "format-parquet",
+    "format-warc",
+    "format-xml",
+]

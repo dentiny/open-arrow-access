@@ -149,6 +149,7 @@ and records dependencies between workstreams.
 | Integrate a source provider | [Provider guide](service/README.md) |
 | Implement a format, provider, or wrapper | [Extension guide](docs/extending.md) |
 | Explore future capabilities | [Roadmap](docs/roadmap.md) |
+| Measure local throughput and resource costs | [Performance benchmarks](docs/performance/README.md) |
 | Work on the library | [Documentation index](docs/README.md#contributing) |
 
 ## Development

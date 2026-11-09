@@ -1,0 +1,39 @@
+{
+  "main": "bd5f64f118928d6a53d72190d56c36d65611b83d",
+  "benchmark_source": "97599cb",
+  "compiler": "rustc 1.97.1 (8bab26f4f 2026-07-14), Homebrew",
+  "machine": "Apple M5 Pro, 18 logical CPUs, 24 GiB RAM; macOS 26.5.2 (25F84)",
+  "lockfile_sha256": "2d64db9cabd7e2880183a9ba8eba8a94363b18a28b3b0a94b0a1cec58d0f64de",
+  "binaries": {
+    "baseline": {
+      "path": "/Users/haojiang/Documents/Codex/2026-11-09/https-github-com-dentiny-open-arrow-23/work/performance-baseline-final",
+      "sha256": "5ff7f9bc433d4fa540806471176c6fc82cb1274ccab1946a190fe77994218299"
+    },
+    "optimized": {
+      "path": "/Users/haojiang/Documents/Codex/2026-11-09/https-github-com-dentiny-open-arrow-23/work/performance-optimized-final",
+      "sha256": "2b03b773131a1e1c7e4d278e5353ffaf45893b65d19089726cdadf33fb905989"
+    }
+  },
+  "patches": {
+    "atif-arrow": "cc7bf3a",
+    "xml-arrow": "ca07916",
+    "warc-rs": "52e5739",
+    "http": "e778fa1"
+  },
+  "scope": "23 synthetic cases; local FS and controlled HTTP; no remote cloud performance claim",
+  "matrix": {
+    "rows": 20000,
+    "warmups": 1,
+    "measured_rounds": 7,
+    "batch": 1024,
+    "format_chunk_bytes": 65536,
+    "transport_chunk_bytes": 16384
+  },
+  "paired": {
+    "trials_per_variant": 3,
+    "warmups_per_trial": 1,
+    "measured_rounds_per_trial": 15,
+    "order": "baseline/optimized, optimized/baseline, baseline/optimized"
+  },
+  "note": "CPU/RSS include process setup and warmup; only timed samples exclude setup. Any working-tree dirty metadata includes report files and temporary local dependency patches. Only the FS workload writes a payload to disk."
+}

@@ -27,6 +27,7 @@ library fits before cleaning, deduplication, tokenization, and sample packing.
 | --- | --- |
 | [Extending the library](extending.md) | Format factories, document decoders, storage adapters, and layers |
 | [API contracts](contracts.md) | Detailed reader lifecycle, capabilities, and factory orchestration |
+| [Performance benchmarks](performance/README.md) | Local format/storage matrix, CPU/RSS measurements, and A/B comparisons |
 | [Testing](testing.md) | Test ownership, fixtures, and commands |
 | [Dependency alignment](dependencies.md) | Pinned upstream baseline and update procedure |
 
