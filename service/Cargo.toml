@@ -7,9 +7,8 @@ repository.workspace = true
 description = "Dataset source providers for Open Arrow Access"
 
 [features]
-biorxiv = ["meca", "dep:chrono"]
-meca = ["format-xml", "dep:percent-encoding", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/zip"]
 arxiv = ["format-xml", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
+biorxiv = ["meca", "dep:chrono"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
@@ -24,6 +23,12 @@ huggingface = [
     "open-arrow-access-file-format/parquet",
 ]
 internet-archive = []
+meca = [
+    "format-xml",
+    "dep:percent-encoding",
+    "dep:open-arrow-access-decompression",
+    "open-arrow-access-decompression/zip",
+]
 pmc = [
     "dep:arrow-array",
     "dep:arrow-schema",
@@ -45,7 +50,6 @@ format-xml = [
 oai = ["format-xml"]
 
 [dependencies]
-percent-encoding = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 futures.workspace = true
@@ -59,6 +63,7 @@ open-arrow-access-storage.workspace = true
 opendal = { workspace = true, features = ["services-http", "http-transport-reqwest"] }
 opendal-http-transport-reqwest.workspace = true
 opendal-service-http.workspace = true
+percent-encoding = { workspace = true, optional = true }
 quick-xml = { workspace = true, optional = true }
 reqwest.workspace = true
 serde.workspace = true
