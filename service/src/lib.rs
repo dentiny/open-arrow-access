@@ -49,8 +49,11 @@ pub mod common;
 #[cfg(feature = "format-xml")]
 pub mod xml_metadata;
 
-#[cfg(feature = "federal-register")]
-pub mod federal_register;
+#[cfg(feature = "uspto")]
+pub mod uspto;
 
 #[cfg(feature = "oai")]
 pub mod oai;
+
+#[cfg(feature = "federal-register")]
+pub mod federal_register;
