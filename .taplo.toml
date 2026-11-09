@@ -1,0 +1,24 @@
+include = ["**/*.toml"]
+exclude = ["**/target/**"]
+
+[formatting]
+column_width = 100
+indent_string = "    "
+
+# Keep package metadata and arrays in their existing order. Sort dependency and
+# feature names within each group, preserving comments and blank-line groups.
+[[rule]]
+include = ["**/Cargo.toml"]
+keys = [
+    "dependencies",
+    "dev-dependencies",
+    "build-dependencies",
+    "workspace.dependencies",
+    "target.*.dependencies",
+    "target.*.dev-dependencies",
+    "target.*.build-dependencies",
+    "features",
+]
+
+[rule.formatting]
+reorder_keys = true
