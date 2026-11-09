@@ -16,7 +16,6 @@ courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decom
 dataverse = []
 default = []
 figshare = []
-format-xml = ["dep:quick-xml"]
 gutenberg = ["dep:arrow-array", "dep:arrow-schema", "dep:chrono", "dep:xml-arrow"]
 huggingface = [
     "dep:open-arrow-access-dataset",
@@ -38,6 +37,9 @@ pmc = [
 ]
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 zenodo = []
+
+format-xml = ["dep:quick-xml"]
+oai = ["format-xml"]
 
 [dependencies]
 arrow-array = { workspace = true, optional = true }
@@ -131,3 +133,7 @@ required-features = ["format-xml"]
 [[test]]
 name = "figshare"
 required-features = ["figshare"]
+
+[[test]]
+name = "oai"
+required-features = ["oai"]
