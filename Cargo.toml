@@ -104,6 +104,10 @@ service-internet-archive = [
     "open-arrow-access-service/internet-archive",
 ]
 service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
+service-semantic-scholar = [
+    "dep:open-arrow-access-service",
+    "open-arrow-access-service/semantic-scholar",
+]
 service-warc = ["dep:open-arrow-access-service", "open-arrow-access-service/warc"]
 service-zenodo = ["dep:open-arrow-access-service", "open-arrow-access-service/zenodo"]
 

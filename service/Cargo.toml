@@ -35,6 +35,7 @@ pmc = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/gzip",
 ]
+semantic-scholar = []
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 zenodo = []
 
@@ -126,3 +127,7 @@ required-features = ["internet-archive"]
 [[test]]
 name = "xml_metadata"
 required-features = ["format-xml"]
+
+[[test]]
+name = "semantic_scholar"
+required-features = ["semantic-scholar"]
