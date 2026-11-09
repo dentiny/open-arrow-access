@@ -14,6 +14,5 @@ fn decode_error<E>(operation: &'static str, error: E) -> Error
 where
     E: std::error::Error + Send + Sync + 'static,
 {
-    let kind = ErrorKind::from_source(&error).unwrap_or(ErrorKind::Decode);
-    Error::new(kind, operation, error.to_string()).with_source(error)
+    crate::error::source_error(operation, ErrorKind::Decode, error)
 }

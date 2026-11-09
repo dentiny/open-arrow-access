@@ -1,6 +1,8 @@
 //! File-format adapters consume a ByteReader, never a storage-specific handle.
 
 mod accessor;
+#[cfg(any(feature = "parquet", feature = "warc", feature = "xml"))]
+mod error;
 
 pub use accessor::FileAccessor;
 /// Previous name for the generalized reader factory protocol.
