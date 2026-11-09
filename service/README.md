@@ -422,6 +422,14 @@ See [OAI provider configuration](oai-provider.md).
 
 See [doab service](doab.md).
 
+## arxiv-metadata
+
+See [arxiv-metadata service](arxiv-metadata.md).
+
+## hathifiles
+
+See [hathifiles service](hathifiles.md).
+
 ## openstax
 
 See [openstax service](openstax.md) for its contract and usage.

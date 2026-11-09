@@ -58,5 +58,11 @@ pub mod oai;
 #[cfg(feature = "doab")]
 pub mod doab;
 
+#[cfg(feature = "arxiv")]
+pub mod arxiv_metadata;
+
+#[cfg(feature = "hathifiles")]
+pub mod hathifiles;
+
 #[cfg(feature = "openstax")]
 pub mod openstax;

@@ -99,6 +99,7 @@ service-courtlistener = ["dep:open-arrow-access-service", "open-arrow-access-ser
 service-dataverse = ["dep:open-arrow-access-service", "open-arrow-access-service/dataverse"]
 service-doab = ["dep:open-arrow-access-service", "open-arrow-access-service/doab"]
 service-gutenberg = ["dep:open-arrow-access-service", "open-arrow-access-service/gutenberg"]
+service-hathifiles = ["dep:open-arrow-access-service", "open-arrow-access-service/hathifiles"]
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
 service-internet-archive = [
     "dep:open-arrow-access-service",
