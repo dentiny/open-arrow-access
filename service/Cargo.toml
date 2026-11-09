@@ -7,8 +7,8 @@ repository.workspace = true
 description = "Dataset source providers for Open Arrow Access"
 
 [features]
-biorxiv = ["meca", "dep:chrono"]
 arxiv = ["format-xml", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
+biorxiv = ["meca", "dep:chrono"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
