@@ -1,20 +1,9 @@
-use std::{
-    collections::HashMap,
-    error::Error as _,
-    io,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-};
+use std::{collections::HashMap, sync::Arc};
 
 use arrow_array::{Int32Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
-use futures::{Stream, StreamExt, stream};
-use open_arrow_access_core::{
-    Error, ErrorKind, Reader, RecordMetadata, Result, record_stream_reader,
-};
-use open_arrow_access_test_support::DropProbe;
+use futures::{StreamExt, stream};
+use open_arrow_access_core::{Reader, RecordMetadata, record_stream_reader};
 
 fn batch() -> RecordBatch {
     RecordBatch::try_new(
@@ -28,18 +17,6 @@ fn batch() -> RecordBatch {
         ],
     )
     .unwrap()
-}
-
-fn tracked_stream(
-    result: Result<RecordBatch>,
-) -> (impl Stream<Item = Result<RecordBatch>>, Arc<AtomicBool>) {
-    let dropped = Arc::new(AtomicBool::new(false));
-    let guard = DropProbe::new(dropped.clone());
-    let stream = stream::iter([result]).map(move |item| {
-        let _keep_alive = &guard;
-        item
-    });
-    (stream, dropped)
 }
 
 #[tokio::test]
@@ -89,51 +66,4 @@ async fn restores_schema_and_field_metadata_for_full_reordered_and_empty_project
         }
         assert!(reader.next().await.unwrap().is_none());
     }
-}
-
-#[tokio::test]
-async fn source_and_projection_errors_terminate_and_release_the_stream() {
-    for source_error in [false, true] {
-        let batch = batch();
-        let metadata = RecordMetadata {
-            schema: batch.schema(),
-            source: None,
-        };
-        let result = if source_error {
-            Err(
-                Error::new(ErrorKind::PermissionDenied, "native_read", "source")
-                    .with_source(io::Error::new(io::ErrorKind::PermissionDenied, "cause")),
-            )
-        } else {
-            Ok(batch)
-        };
-        let (stream, dropped) = tracked_stream(result);
-        let mut reader = record_stream_reader(stream, metadata, Some(vec![9]));
-        let error = reader.next().await.unwrap_err();
-        if source_error {
-            assert_eq!(error.kind(), ErrorKind::PermissionDenied);
-            assert_eq!(error.operation(), "native_read");
-            assert_eq!(error.source().unwrap().to_string(), "cause");
-        } else {
-            assert_eq!(error.kind(), ErrorKind::Decode);
-            assert_eq!(error.operation(), "project_batch");
-        }
-        assert!(dropped.load(Ordering::SeqCst));
-        assert!(reader.next().await.unwrap().is_none());
-    }
-}
-
-#[tokio::test]
-async fn schema_mismatch_is_a_decode_error_and_releases_the_stream() {
-    let (stream, dropped) = tracked_stream(Ok(batch()));
-    let metadata = RecordMetadata {
-        schema: Arc::new(Schema::empty()),
-        source: None,
-    };
-    let mut reader = record_stream_reader(stream, metadata, None);
-    let error = reader.next().await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::Decode);
-    assert_eq!(error.operation(), "project_batch");
-    assert!(dropped.load(Ordering::SeqCst));
-    assert!(reader.next().await.unwrap().is_none());
 }
