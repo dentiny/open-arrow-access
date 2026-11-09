@@ -27,6 +27,7 @@ pmc = [
     "dep:arrow-schema",
     "dep:open-arrow-access-file-format",
     "open-arrow-access-file-format/csv",
+    "open-arrow-access-file-format/json",
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/gzip",
 ]
