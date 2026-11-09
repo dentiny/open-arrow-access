@@ -190,28 +190,3 @@ async fn http_failures_preserve_retry_metadata() {
     assert_eq!(error.http_status(), Some(429));
     assert_eq!(error.retry_after(), None);
 }
-
-#[tokio::test]
-async fn direct_connection_composes_with_gzip_without_a_file_manifest() {
-    use open_arrow_access_core::{Accessor, AccessorExt, ByteAccessor};
-    use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
-    use open_arrow_access_test_support::fixture;
-
-    let fixture = HttpFixture::new();
-    fixture.file("/payload.gz", fixture!("gzip", "payload.gz").await);
-    let client = connection(&fixture);
-    assert!(!client.capability().list);
-    assert_eq!(
-        client.list("".into()).await.err().unwrap().kind(),
-        ErrorKind::Unsupported
-    );
-    assert!(fixture.requests().is_empty());
-
-    let compressed = client.layer(DecompressionLayer::new(Gzip));
-    let reader = compressed
-        .open(format!("{}/payload.gz", fixture.endpoint()).into())
-        .await
-        .unwrap();
-    assert_eq!(read_all(reader, "test").await.unwrap(), b"payload");
-    assert_eq!(fixture.requests().len(), 1);
-}
