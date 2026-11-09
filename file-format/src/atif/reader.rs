@@ -12,14 +12,21 @@ struct AtifDecoder {
     format: AtifFormat,
     batch_size: usize,
     projection: Option<Vec<usize>>,
+    builder: Option<TrajectoryBatchBuilder>,
     source: Option<ObjectRef>,
     record_index: u64,
 }
 
 impl AtifDecoder {
     async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
-        let mut builder = TrajectoryBatchBuilder::new(self.batch_size, self.projection.as_deref())
-            .map_err(|error| decode_error(self.source.as_ref(), self.record_index, error))?;
+        if self.builder.is_none() {
+            self.builder = Some(
+                TrajectoryBatchBuilder::new(self.batch_size, self.projection.as_deref()).map_err(
+                    |error| decode_error(self.source.as_ref(), self.record_index, error),
+                )?,
+            );
+        }
+        let builder = self.builder.as_mut().unwrap();
         let mut appended = 0;
         while appended < self.batch_size {
             let Some(bytes) = self.documents.try_next().await? else {
@@ -67,6 +74,7 @@ pub(super) fn create_reader(
         format,
         batch_size,
         projection,
+        builder: None,
         source: metadata.source.clone(),
         record_index: 1,
     };
