@@ -1,12 +1,13 @@
 use super::{OaiPage, parser, validation};
 use crate::common::Connection;
 use open_arrow_access_core::Result;
+use url::Url;
 
 /// Protocol shared by arXiv, DOAB and OAPEN. One method call fetches one page.
 #[derive(Clone, Debug)]
 pub struct OaiService {
     connection: Connection,
-    path: String,
+    endpoint: Url,
     metadata_prefix: String,
 }
 impl OaiService {
@@ -15,10 +16,11 @@ impl OaiService {
     }
 
     pub fn new(connection: Connection, path: &str, metadata_prefix: &str) -> Result<Self> {
-        validation::configuration(&connection, path, metadata_prefix)?;
+        let endpoint = connection.url(path, &[])?;
+        validation::validate_nonempty_text(metadata_prefix, "metadata prefix")?;
         Ok(Self {
             connection,
-            path: path.into(),
+            endpoint,
             metadata_prefix: metadata_prefix.into(),
         })
     }
@@ -34,7 +36,7 @@ impl OaiService {
         ];
         for (key, value) in [("from", from), ("until", until), ("set", set)] {
             if let Some(value) = value {
-                validation::nonempty(value, "OAI selector")?;
+                validation::validate_nonempty_text(value, "OAI selector")?;
                 query.push((key, value));
             }
         }
@@ -42,12 +44,13 @@ impl OaiService {
     }
     /// Resumption requests contain only verb and token, as required by OAI-PMH.
     pub async fn resume(&self, token: &str) -> Result<OaiPage> {
-        validation::nonempty(token, "resumption token")?;
+        validation::validate_nonempty_text(token, "resumption token")?;
         self.page(&[("verb", "ListRecords"), ("resumptionToken", token)])
             .await
     }
     async fn page(&self, query: &[(&str, &str)]) -> Result<OaiPage> {
-        let url = self.connection.url(&self.path, query)?;
+        let mut url = self.endpoint.clone();
+        url.query_pairs_mut().extend_pairs(query.iter().copied());
         let bytes = self.connection.bytes(url, "application/xml").await?;
         parser::parse_page(bytes)
     }
