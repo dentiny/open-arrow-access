@@ -1,9 +1,11 @@
 # Generated columns
 
-Status: required feature, designed here for a separate follow-up PR. The initial
-framework only supplies the reusable contracts. This change does not implement
-expression evaluation or enable DataFusion. The workspace only records an
-unused dependency declaration for the follow-up layer.
+Status: design proposal. Expression evaluation and the generated-column layer are
+not implemented. See the [roadmap](roadmap.md#generated-columns-and-observation).
+
+The framework supplies reusable request and layer contracts. DataFusion is
+recorded as a workspace dependency for this work but is not enabled in the
+current dependency graph.
 
 ## Semantics
 
