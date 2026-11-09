@@ -6,9 +6,9 @@ mod query;
 pub(crate) mod validation;
 
 pub use error::HttpStatusError;
-pub(crate) use error::{check_status, transport_error};
+pub(crate) use error::{check_status, json_error, request_error, transport_error};
 use http::Request;
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::Result;
 use open_arrow_access_storage::OpenDalAccessor;
 use opendal::{Buffer, HttpTransporter, OperationContext, raw::oio::ReadStream};
 use serde::de::DeserializeOwned;
@@ -61,10 +61,9 @@ impl HttpClient {
         if let Some(token) = token {
             request = request.header("authorization", format!("Bearer {token}"));
         }
-        let request = request.body(Buffer::new()).map_err(|error| {
-            Error::new(ErrorKind::InvalidInput, operation, "invalid HTTP request")
-                .with_source(error)
-        })?;
+        let request = request
+            .body(Buffer::new())
+            .map_err(|error| request_error(operation, error))?;
         let response = self
             .context
             .http_transport()
@@ -87,9 +86,7 @@ impl HttpClient {
                 bytes.extend_from_slice(&part);
             }
         }
-        serde_json::from_slice(&bytes).map_err(|error| {
-            Error::new(ErrorKind::Decode, operation, "invalid JSON metadata").with_source(error)
-        })
+        validation::json(&bytes, operation)
     }
 }
 
@@ -104,14 +101,7 @@ pub(crate) fn new_transport(follow_redirects: bool) -> Result<impl opendal::Http
         .redirect(redirect)
         .user_agent(concat!("open-arrow-access/", env!("CARGO_PKG_VERSION")))
         .build()
-        .map_err(|e| {
-            Error::new(
-                ErrorKind::Io,
-                "configure_http",
-                "failed to build HTTP client",
-            )
-            .with_source(e)
-        })?;
+        .map_err(error::client_error)?;
     Ok(opendal_http_transport_reqwest::ReqwestTransport::new(
         client,
     ))

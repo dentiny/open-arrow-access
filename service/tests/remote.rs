@@ -42,17 +42,16 @@ async fn raw_json_and_lazy_signed_downloads() {
             .len(),
         1
     );
-    let mut r = a.open("one".into()).await.unwrap();
-    assert!(!r.capability().read_with_range);
-    assert_eq!(r.metadata().content_length, Some(7));
-    let mut data = Vec::new();
-    while let Some(b) = r.next().await.unwrap() {
-        data.extend_from_slice(&b);
-    }
-    assert_eq!(data, b"1234567");
-    assert!(r.next().await.unwrap().is_none());
-    assert_eq!(f.requests().len(), 2, "no HEAD request");
+    assert!(!a.capability().read_with_range);
     assert!(a.open("missing".into()).await.is_err());
+    open_arrow_access_test_support::byte_accessor::assert_read_contract(
+        a,
+        "one".into(),
+        b"1234567",
+    )
+    .await
+    .unwrap();
+    assert_eq!(f.requests().len(), 3, "one page plus two GETs, no HEAD");
 }
 #[tokio::test]
 async fn redirects_strip_credentials_and_keep_exact_signatures() {
@@ -132,4 +131,50 @@ fn invalid_endpoints_names_and_paths() {
         assert!(c.url(path, &[]).is_err());
     }
     assert!(c.files(vec![("x".into(), "file:///x".into())], ()).is_err());
+}
+
+#[tokio::test]
+async fn scoped_query_survives_same_origin_redirect_without_duplicate_keys() {
+    let f = HttpFixture::new();
+    f.handle(|request| {
+        let target = request.uri().to_string();
+        assert!(target.ends_with("api_key=secret"));
+        assert_eq!(target.matches("api_key=").count(), 1);
+        let response = if request.uri().path() == "/start" {
+            Response::builder()
+                .status(302)
+                .header("location", "/finish")
+        } else {
+            Response::builder().status(200)
+        };
+        Ok(response
+            .body(HttpBody::new(futures::stream::empty(), Some(0)))
+            .unwrap())
+    });
+    let c = connection(&f).with_query("api_key", "secret");
+    let url = format!("{}/start?api_key=secret", f.endpoint());
+    let mut reader = c.open(&url, ByteReadOptions::default()).await.unwrap();
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(f.requests().len(), 2);
+}
+#[tokio::test]
+async fn retains_retry_after_in_shared_error_source() {
+    use open_arrow_access_service::remote::HttpStatusError;
+    use std::error::Error as _;
+    let f = HttpFixture::new();
+    f.handle(|_| {
+        Ok(Response::builder()
+            .status(429)
+            .header("retry-after", "120")
+            .body(HttpBody::new(futures::stream::empty(), Some(0)))
+            .unwrap())
+    });
+    let error = connection(&f).json("page", &[]).await.unwrap_err();
+    let status = error
+        .source()
+        .unwrap()
+        .downcast_ref::<HttpStatusError>()
+        .unwrap();
+    assert_eq!(status.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(status.retry_after.as_deref(), Some("120"));
 }

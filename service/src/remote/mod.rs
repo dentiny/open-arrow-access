@@ -8,6 +8,7 @@ mod document;
 mod download;
 mod error;
 mod files;
+mod request;
 mod response;
 mod validation;
 

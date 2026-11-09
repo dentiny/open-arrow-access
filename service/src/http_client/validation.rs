@@ -21,3 +21,11 @@ pub(crate) fn is_http_endpoint(url: &Url) -> bool {
         && url.query().is_none()
         && url.fragment().is_none()
 }
+
+/// Decode metadata through the shared error context.
+pub(crate) fn json<T: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+    operation: &'static str,
+) -> Result<T> {
+    serde_json::from_slice(bytes).map_err(|error| super::json_error(operation, error))
+}

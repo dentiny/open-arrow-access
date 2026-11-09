@@ -65,3 +65,18 @@ impl std::fmt::Display for HttpStatusError {
     }
 }
 impl std::error::Error for HttpStatusError {}
+
+pub(crate) fn client_error(error: reqwest::Error) -> Error {
+    Error::new(
+        ErrorKind::Io,
+        "configure_http",
+        "failed to build HTTP client",
+    )
+    .with_source(error)
+}
+pub(crate) fn request_error(operation: &'static str, error: http::Error) -> Error {
+    Error::new(ErrorKind::InvalidInput, operation, "invalid HTTP request").with_source(error)
+}
+pub(crate) fn json_error(operation: &'static str, error: serde_json::Error) -> Error {
+    Error::new(ErrorKind::Decode, operation, "invalid JSON metadata").with_source(error)
+}

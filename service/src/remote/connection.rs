@@ -1,5 +1,5 @@
-use super::error::{OP, invalid};
-use http::{HeaderMap, HeaderValue};
+use super::{error::OP, validation};
+use http::HeaderMap;
 use open_arrow_access_core::Result;
 use opendal::{HttpTransporter, OperationContext};
 use url::Url;
@@ -43,11 +43,7 @@ impl Connection {
         &self.origin
     }
     pub fn with_header(mut self, name: &str, value: &str) -> Result<Self> {
-        let name = http::header::HeaderName::from_bytes(name.as_bytes())
-            .map_err(|_| invalid("invalid header name"))?;
-        let mut value =
-            HeaderValue::from_str(value).map_err(|_| invalid("invalid header value"))?;
-        value.set_sensitive(true);
+        let (name, value) = validation::header(name, value)?;
         self.headers.insert(name, value);
         Ok(self)
     }
@@ -57,22 +53,6 @@ impl Connection {
         self
     }
     pub fn url(&self, path: &str, query: &[(&str, &str)]) -> Result<Url> {
-        if path.starts_with('/')
-            || path.contains(['?', '#', '\\'])
-            || path.split('/').any(|s| matches!(s, "." | ".."))
-        {
-            return Err(invalid("expected relative provider path"));
-        }
-        let mut url = self
-            .origin
-            .join(path)
-            .map_err(|_| invalid("invalid provider path"))?;
-        if url.origin() != self.origin.origin() {
-            return Err(invalid("path changed provider origin"));
-        }
-        if !query.is_empty() {
-            url.query_pairs_mut().extend_pairs(query.iter().copied());
-        }
-        Ok(url)
+        validation::provider_url(&self.origin, path, query)
     }
 }
