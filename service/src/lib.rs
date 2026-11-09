@@ -58,6 +58,9 @@ pub mod oai;
 #[cfg(feature = "doab")]
 pub mod doab;
 
+#[cfg(feature = "arxiv")]
+pub mod arxiv_metadata;
+
 #[cfg(feature = "meca")]
 pub mod meca;
 

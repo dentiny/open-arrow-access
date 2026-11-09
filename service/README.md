@@ -422,6 +422,10 @@ See [OAI provider configuration](oai-provider.md).
 
 See [doab service](doab.md).
 
+## arxiv-metadata
+
+See [arxiv-metadata service](arxiv-metadata.md).
+
 ## MECA
 
 See [storage-independent MECA archives](meca.md).
