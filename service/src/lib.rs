@@ -93,3 +93,6 @@ pub mod semantic_scholar;
 
 #[cfg(feature = "bhl")]
 pub mod bhl;
+
+#[cfg(feature = "regulations")]
+pub mod regulations;

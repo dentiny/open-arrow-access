@@ -469,3 +469,7 @@ See [semantic-scholar service](semantic-scholar.md).
 ## bhl
 
 See [bhl service](bhl.md).
+
+## regulations
+
+See [regulations service](regulations.md) for its contract and usage.

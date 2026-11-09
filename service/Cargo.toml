@@ -52,6 +52,7 @@ pmc = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/gzip",
 ]
+regulations = []
 semantic-scholar = []
 uspto = []
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
@@ -218,3 +219,7 @@ required-features = ["semantic-scholar"]
 [[test]]
 name = "bhl"
 required-features = ["bhl"]
+
+[[test]]
+name = "regulations"
+required-features = ["regulations"]
