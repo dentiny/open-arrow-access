@@ -111,6 +111,10 @@ service-internet-archive = [
     "dep:open-arrow-access-service",
     "open-arrow-access-service/internet-archive",
 ]
+service-library-of-congress = [
+    "dep:open-arrow-access-service",
+    "open-arrow-access-service/library-of-congress",
+]
 service-oapen = ["dep:open-arrow-access-service", "open-arrow-access-service/oapen"]
 service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
 service-regulations = ["dep:open-arrow-access-service", "open-arrow-access-service/regulations"]
