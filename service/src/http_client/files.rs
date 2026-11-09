@@ -1,7 +1,7 @@
 //! Bind a provider's validated manifest to lazy HTTP file access.
 
 use open_arrow_access_core::{Error, Result};
-use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
+use open_arrow_access_storage::OpenDalAccessor;
 use serde::de::DeserializeOwned;
 use url::Url;
 
@@ -90,12 +90,8 @@ impl HttpFileService {
             .client
             .accessor(&self.endpoint, &plan.root, plan.query)?
             .with_content_lengths(lengths);
-        let files = NamedFileAccessor::new(
-            storage,
-            plan.files.into_iter().map(FileSpec::into_mapping).collect(),
-        )
-        .map_err(self.map_file_namespace_error)?;
-        Ok(ResolvedFileSet::new(files, plan.metadata))
+        ResolvedFileSet::from_files(storage, plan.files, plan.metadata)
+            .map_err(self.map_file_namespace_error)
     }
 }
 

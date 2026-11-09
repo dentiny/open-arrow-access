@@ -4,6 +4,8 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_storage::NamedFileAccessor;
 
+use crate::file_manifest::FileSpec;
+
 /// A fixed file namespace with provider-defined metadata and independently owned readers.
 #[derive(Clone, Debug)]
 pub struct ResolvedFileSet<A, M> {
@@ -14,6 +16,21 @@ pub struct ResolvedFileSet<A, M> {
 impl<A, M> ResolvedFileSet<A, M> {
     pub fn new(accessor: NamedFileAccessor<A>, metadata: M) -> Self {
         Self { accessor, metadata }
+    }
+
+    pub(crate) fn from_files(
+        accessor: A,
+        files: impl IntoIterator<Item = FileSpec>,
+        metadata: M,
+    ) -> Result<Self> {
+        let files = files
+            .into_iter()
+            .map(|file| (file.name, file.object))
+            .collect();
+        Ok(Self::new(
+            NamedFileAccessor::new(accessor, files)?,
+            metadata,
+        ))
     }
 
     pub fn metadata(&self) -> &M {
