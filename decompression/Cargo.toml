@@ -7,24 +7,24 @@ repository.workspace = true
 description = "Streaming byte decompression layers for Open Arrow Access"
 
 [features]
+bz2 = ["dep:async-compression", "async-compression/bzip2"]
 default = []
 gzip = ["dep:async-compression", "async-compression/gzip"]
-bz2 = ["dep:async-compression", "async-compression/bzip2"]
 lz4 = ["dep:async-compression", "async-compression/lz4"]
-zstd = ["dep:async-compression", "async-compression/zstd"]
-zip = ["dep:async_zip"]
 tar = ["dep:tar"]
+zip = ["dep:async_zip"]
+zstd = ["dep:async-compression", "async-compression/zstd"]
 
 [dependencies]
-tar = { workspace = true, optional = true }
-open-arrow-access-core.workspace = true
-futures.workspace = true
 async-compression = { workspace = true, optional = true }
 async_zip = { workspace = true, optional = true }
+futures.workspace = true
+open-arrow-access-core.workspace = true
+tar = { workspace = true, optional = true }
 
 [dev-dependencies]
-open-arrow-access-test-support.workspace = true
 more-asserts.workspace = true
+open-arrow-access-test-support.workspace = true
 tokio.workspace = true
 
 [[test]]

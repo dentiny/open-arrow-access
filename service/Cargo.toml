@@ -7,26 +7,16 @@ repository.workspace = true
 description = "Dataset source providers for Open Arrow Access"
 
 [features]
-format-xml = ["dep:quick-xml"]
-default = []
-zenodo = []
-dataverse = []
-arxiv = ["dep:quick-xml", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
-internet-archive = []
-courtlistener = [
+arxiv = [
+    "dep:quick-xml",
     "dep:open-arrow-access-decompression",
-    "open-arrow-access-decompression/bz2",
+    "open-arrow-access-decompression/tar",
 ]
-gutenberg = [
-    "dep:arrow-array",
-    "dep:arrow-schema",
-    "dep:chrono",
-    "dep:xml-arrow",
-]
-warc = [
-    "dep:open-arrow-access-dataset",
-    "open-arrow-access-dataset/directory",
-]
+courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
+dataverse = []
+default = []
+format-xml = ["dep:quick-xml"]
+gutenberg = ["dep:arrow-array", "dep:arrow-schema", "dep:chrono", "dep:xml-arrow"]
 huggingface = [
     "dep:open-arrow-access-dataset",
     "dep:open-arrow-access-file-format",
@@ -36,6 +26,7 @@ huggingface = [
     "open-arrow-access-dataset/directory",
     "open-arrow-access-file-format/parquet",
 ]
+internet-archive = []
 pmc = [
     "dep:arrow-array",
     "dep:arrow-schema",
@@ -44,37 +35,39 @@ pmc = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/gzip",
 ]
+warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
+zenodo = []
 
 [dependencies]
-indexmap.workspace = true
-quick-xml = { workspace = true, optional = true }
-reqwest.workspace = true
-opendal-http-transport-reqwest.workspace = true
-chrono = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
-xml-arrow = { workspace = true, optional = true }
-open-arrow-access-dataset = { workspace = true, optional = true }
-open-arrow-access-file-format = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
 futures.workspace = true
+http.workspace = true
+indexmap.workspace = true
 open-arrow-access-core.workspace = true
+open-arrow-access-dataset = { workspace = true, optional = true }
+open-arrow-access-decompression = { workspace = true, optional = true }
+open-arrow-access-file-format = { workspace = true, optional = true }
 open-arrow-access-storage.workspace = true
 opendal = { workspace = true, features = ["services-http", "http-transport-reqwest"] }
-tokio = { workspace = true, optional = true }
-http.workspace = true
+opendal-http-transport-reqwest.workspace = true
+opendal-service-http.workspace = true
+quick-xml = { workspace = true, optional = true }
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-opendal-service-http.workspace = true
+tokio = { workspace = true, optional = true }
 url.workspace = true
-open-arrow-access-decompression = { workspace = true, optional = true }
+xml-arrow = { workspace = true, optional = true }
 
 arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
 
-futures.workspace = true
-arrow-schema.workspace = true
-open-arrow-access-test-support.workspace = true
 arrow-array.workspace = true
+arrow-schema.workspace = true
+futures.workspace = true
+open-arrow-access-test-support.workspace = true
 
 open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 tempfile.workspace = true
