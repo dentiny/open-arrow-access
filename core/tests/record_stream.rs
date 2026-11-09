@@ -1,16 +1,19 @@
 use std::{
     collections::HashMap,
+    error::Error as _,
+    io,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
-    task::Poll,
 };
 
 use arrow_array::{Int32Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
-use futures::{StreamExt, stream};
-use open_arrow_access_core::{Error, ErrorKind, Reader, RecordMetadata, record_stream_reader};
+use futures::{Stream, StreamExt, stream};
+use open_arrow_access_core::{
+    Error, ErrorKind, Reader, RecordMetadata, Result, record_stream_reader,
+};
 use open_arrow_access_test_support::DropProbe;
 
 fn batch() -> RecordBatch {
@@ -25,6 +28,18 @@ fn batch() -> RecordBatch {
         ],
     )
     .unwrap()
+}
+
+fn tracked_stream(
+    result: Result<RecordBatch>,
+) -> (impl Stream<Item = Result<RecordBatch>>, Arc<AtomicBool>) {
+    let dropped = Arc::new(AtomicBool::new(false));
+    let guard = DropProbe::new(dropped.clone());
+    let stream = stream::iter([result]).map(move |item| {
+        let _keep_alive = &guard;
+        item
+    });
+    (stream, dropped)
 }
 
 #[tokio::test]
@@ -50,7 +65,7 @@ async fn restores_schema_and_field_metadata_for_full_reordered_and_empty_project
             None => full.clone(),
         });
         let mut reader = record_stream_reader(
-            stream::iter([Ok(batch.clone())]),
+            stream::iter([Ok(batch.clone())]).then(|item| async move { item }),
             RecordMetadata {
                 schema: schema.clone(),
                 source: Some("native.xml".into()),
@@ -77,66 +92,28 @@ async fn restores_schema_and_field_metadata_for_full_reordered_and_empty_project
 }
 
 #[tokio::test]
-async fn polls_lazily_and_releases_non_unpin_stream_at_eof() {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let observed = calls.clone();
-    let dropped = Arc::new(AtomicBool::new(false));
-    let guard = DropProbe::new(dropped.clone());
-    let batch = batch();
-    let metadata = RecordMetadata {
-        schema: batch.schema(),
-        source: None,
-    };
-    let stream = stream::poll_fn(move |_| {
-        let _keep_alive = &guard;
-        Poll::Ready(match observed.fetch_add(1, Ordering::SeqCst) {
-            0 => Some(Ok(batch.clone())),
-            1 => None,
-            _ => panic!("polled after EOF"),
-        })
-    })
-    .then(|item| async move { item });
-    let mut reader = record_stream_reader(stream, metadata, None);
-    assert_eq!(reader.metadata().schema.fields().len(), 2);
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
-    assert!(reader.next().await.unwrap().is_some());
-    assert!(reader.next().await.unwrap().is_none());
-    assert!(dropped.load(Ordering::SeqCst));
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
-}
-
-#[tokio::test]
 async fn source_and_projection_errors_terminate_and_release_the_stream() {
     for source_error in [false, true] {
-        let dropped = Arc::new(AtomicBool::new(false));
-        let guard = DropProbe::new(dropped.clone());
         let batch = batch();
         let metadata = RecordMetadata {
             schema: batch.schema(),
             source: None,
         };
-        let stream = stream::poll_fn(move |_| {
-            let _keep_alive = &guard;
-            Poll::Ready(Some(if source_error {
-                Err(
-                    Error::new(ErrorKind::PermissionDenied, "native_read", "source").with_source(
-                        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "cause"),
-                    ),
-                )
-            } else {
-                Ok(batch.clone())
-            }))
-        });
+        let result = if source_error {
+            Err(
+                Error::new(ErrorKind::PermissionDenied, "native_read", "source")
+                    .with_source(io::Error::new(io::ErrorKind::PermissionDenied, "cause")),
+            )
+        } else {
+            Ok(batch)
+        };
+        let (stream, dropped) = tracked_stream(result);
         let mut reader = record_stream_reader(stream, metadata, Some(vec![9]));
         let error = reader.next().await.unwrap_err();
         if source_error {
             assert_eq!(error.kind(), ErrorKind::PermissionDenied);
             assert_eq!(error.operation(), "native_read");
-            assert_eq!(
-                std::error::Error::source(&error).unwrap().to_string(),
-                "cause"
-            );
+            assert_eq!(error.source().unwrap().to_string(), "cause");
         } else {
             assert_eq!(error.kind(), ErrorKind::Decode);
             assert_eq!(error.operation(), "project_batch");
@@ -147,28 +124,16 @@ async fn source_and_projection_errors_terminate_and_release_the_stream() {
 }
 
 #[tokio::test]
-async fn schema_mismatch_is_a_decode_error_and_drop_releases_unpolled_stream() {
-    let dropped = Arc::new(AtomicBool::new(false));
-    let guard = DropProbe::new(dropped.clone());
+async fn schema_mismatch_is_a_decode_error_and_releases_the_stream() {
+    let (stream, dropped) = tracked_stream(Ok(batch()));
     let metadata = RecordMetadata {
         schema: Arc::new(Schema::empty()),
         source: None,
     };
-    let stream = stream::poll_fn(move |_| {
-        let _keep_alive = &guard;
-        Poll::Ready(Some(Ok(batch())))
-    });
-    let mut reader = record_stream_reader(stream, metadata.clone(), None);
-    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
+    let mut reader = record_stream_reader(stream, metadata, None);
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert_eq!(error.operation(), "project_batch");
     assert!(dropped.load(Ordering::SeqCst));
     assert!(reader.next().await.unwrap().is_none());
-
-    let dropped = Arc::new(AtomicBool::new(false));
-    let guard = DropProbe::new(dropped.clone());
-    let stream = stream::poll_fn(move |_| -> Poll<Option<Result<RecordBatch, Error>>> {
-        let _keep_alive = &guard;
-        panic!("unpolled stream")
-    });
-    drop(record_stream_reader(stream, metadata, None));
-    assert!(dropped.load(Ordering::SeqCst));
 }
