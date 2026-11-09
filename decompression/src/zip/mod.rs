@@ -2,6 +2,7 @@
 
 mod archive;
 mod error;
+mod validation;
 pub use archive::ZipArchive;
 
 use std::num::NonZeroUsize;

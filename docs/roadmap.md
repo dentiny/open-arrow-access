@@ -1,106 +1,102 @@
-# PR plan
+# Roadmap
 
-PR-0 denotes the initial framework change, not a GitHub pull request number.
-Follow-up labels match the planned workstreams; they can be developed in
-parallel against the shared contracts once PR-0 lands.
+The goal is composable source access and decoding for **pretraining data
+preparation**: select a raw corpus representation, decode it through shared
+interfaces, and hand consistent Arrow batches to downstream preprocessing.
+Planned capabilities focus on making corpus inputs easier to access, combine,
+and prepare for cleaning, filtering, deduplication, and tokenization jobs.
 
-| PR | Scope | Review/acceptance boundary |
+This is a capability roadmap, not a release schedule. Existing support is listed
+in the [support matrix](support.md); the items below labeled planned do not have
+public implementations or reserved Cargo feature flags.
+
+## Implemented foundations
+
+- Shared async accessor, reader, factory, layer, and capability contracts.
+- Caller-configured OpenDAL storage, exact ranges, discovery, and per-reader I/O settings.
+- Parquet, CSV/TSV, JSON/JSONL, XML, and ATIF Arrow readers; native WARC parsing.
+- Streaming gzip, bzip2, LZ4, and Zstandard; ZIP and TAR entry access.
+- Ordered directory/file-set reads with strict projected-schema compatibility.
+- Provider discovery, metadata, and file access, including a Hugging Face Parquet split reader.
+
+The earlier framework PR plan is superseded by this capability view. S3 uses the
+existing OpenDAL adapter with upstream backend features; it does not require a
+new project-specific storage implementation.
+
+## Planned capabilities
+
+| Workstream | Intended result | Prerequisite / completion boundary |
 | --- | --- | --- |
-| PR-0 | Async OpenDAL Fs, Parquet, shared reader/accessor/layer and capability contracts | Single local file → ordered Arrow; test-only wrappers prove extension/delegation and capability updates |
-| PR-1 | S3 storage | Reuse shared OpenDAL reads; add S3 configuration/auth and feature; reuse Parquet tests |
-| PR-2 | JSON | Add a format feature consuming ByteReader; explicit record selection/schema policy; define JSONL separately if included |
-| PR-3 | Directory dataset | Add discovery and Dataset/Table composition, fixed schema, sequential ordered file reads |
-| PR-4 | Hugging Face | Resolve repository revision/config/split into object references; provide single-file access via shared contracts |
-| PR-5 | Gzip decompression | ByteReader/Accessor wrapper, multi-member support, decoded byte coordinates, accurate capabilities |
-| PR-6 | Generated-column layer | Implement the required GeneratedColumnsLayer, expression planning, fixed augmented schema, and dependency-safe projection |
+| CSV/JSON schema inference | Read common tabular/text corpora without hand-writing a schema | Bounded record/byte sampling, replay for sequential inputs, optional CSV header detection, stable schema at open |
+| Cross-file schema reconciliation | Read compatible shards with missing or reordered fields | Explicit merge rules, nullability/metadata conflict policy, batch alignment, opt-in supported casts |
+| Generated columns | Compute derived fields during reading | Dependency-aware projection, fixed augmented schema, isolated expression-engine dependency |
+| Metrics | Observe source cost and throughput | Separate byte I/O from emitted rows/batches; preserve values, schema, and order |
+| Timeout and read budgets | Bound read operations and resource use | Cover sequential and ranged paths; preserve errors without replaying delivered records |
+| Source attributes and planning | Describe legal partitions and ordering constraints | Resolve source requirements before admitting execution/emission policies |
+| Parallel reads | Read independent files/partitions concurrently | Bounded scheduling, cancellation, and ordered merging by default |
+| Unordered emission | Emit ready partitions when source semantics allow | Explicit opt-in; reject sources requiring global order |
+| WARC Arrow conversion | Feed web-archive records into Arrow pipelines and existing record datasets | Defined schema, binary payload policy, provenance/record locator semantics |
+| Indexing and splitting | Plan format-specific independent work units | Validate index identity, compression coordinates, and source-order compatibility |
 
-## Initial framework
+## Schema inference and reconciliation
 
-The first PR intentionally does not implement datasets, services, external
-decompression, archive handling, or production layers. Their top-level
-directories document where independent implementations belong. No fake feature
-flags or placeholder methods report these capabilities as available.
+Inference comes first, followed by cross-file merging and batch alignment as
+separate changes. Explicit schemas remain supported, and merging stays opt-in.
 
-The initial Parquet feature supports uncompressed and Snappy pages. Parquet's
-internal codecs are separate from external file decompression. Storage and
-format features are default-off and can be built independently.
+Inference must bound its sample, retain sampled input for replay, and resolve the
+output schema before returning a reader. Later values outside that schema need
+an explicit error policy. XML's existing inference does not supply CSV/JSON
+inference or dataset-wide merging.
 
-## Schema inference and conversion
+Cross-file rules must define field order, nullability, nested compatibility, and
+metadata conflicts. Alignment should reorder by name and fill missing nullable
+fields with nulls. Incompatible types must fail unless the caller selects an
+explicit supported cast policy. CSV headers and column compatibility need their
+own format rules.
 
-Planned follow-ups will reduce the schema handling callers must implement:
+## Generated columns and observation
 
-- Infer CSV/TSV and JSON/JSONL schemas from bounded samples, with configurable
-  record and byte limits and optional CSV header detection. Preserve sampled
-  input for subsequent decoding, including sequential-only sources.
-- Merge schemas across files using explicit rules for field order, nullability,
-  nested fields and metadata conflicts. CSV column/header compatibility remains
-  format-specific.
-- Align record batches to the selected schema by field name, reorder columns and
-  fill missing nullable fields with nulls. Reject incompatible types unless the
-  caller explicitly selects a supported cast policy.
+Generated columns are the first planned functional record layer. The existing
+`ReadOptionsProvider` contract allows a layer to widen an inner projection for
+expression dependencies, then apply the caller's final selection. Expression
+execution and DataFusion integration are not implemented. See the
+[generated-column proposal](generated-columns.md).
 
-Expose shared schema merge and batch conversion utilities for reuse by format
-and dataset readers. Keep explicit-schema reads available and schema merging
-opt-in. Resolve the output schema before returning the reader so metadata stays
-stable; values outside an inferred schema must follow a documented error policy.
-Implement inference first, then cross-file merging and batch alignment in
-separate PRs.
+Metrics can be developed independently. Byte counts, record batches, row counts,
+latency, and failures describe different stages and should remain separate.
+Timeout/budget layers should reuse OpenDAL policies where those already cover
+the required storage behavior.
 
-## Parallel work and integration
+## Planning, parallelism, and order
 
 ```mermaid
 flowchart LR
-    Base[PR-0: contracts + Fs + Parquet] --> S3[PR-1: S3]
-    Base --> JSON[PR-2: JSON]
-    Base --> Dataset[PR-3: directory]
-    Base --> HF[PR-4: Hugging Face]
-    Base --> Gzip[PR-5: gzip]
-    Base --> Generated[PR-6: generated columns]
-    HF -. combined dataset entry point .-> Integration[Cross-feature integration]
-    Dataset -. combine after merge .-> Integration
-    JSON -. compressed JSON .-> Integration
-    Gzip -. compressed inputs .-> Integration
+    Attributes["Source attributes and ordering"] --> Plan["Validated partition plan"]
+    Plan --> Parallel["Parallel execution + ordered merge"]
+    Plan --> Policy["Optional unordered emission"]
+    Index["Format-specific index / split support"] -. adds partition strategies .-> Plan
 ```
 
-- HF discovery and explicit file reading do not require a Dataset/Table
-  implementation. The combined dataset entry point is integrated with PR-3;
-  supported HF representations must be stated explicitly.
-- Gzip itself can be verified against byte fixtures without JSON or directory
-  support. To support `.parquet.gz`, add a bounded materialization helper before
-  passing input to the existing Parquet accessor. This is temporary input
-  handling, not a sink. Compressed JSON integration can follow PR-2's merge.
-- Each PR primarily changes its own directory and feature forwarding. Changes
-  to common contracts require review rather than backend/format-specific forks.
-- Cross-feature tests are added when both implementations are available; parallel
-  development does not imply every combination exists in every intermediate PR.
+Parallel execution and output ordering are independent:
 
-## Layer candidates
-
-Use PR-6 for the required **GeneratedColumnsLayer**, with a separate default-off
-feature. The framework provides `ReadOptionsProvider` for generic request options;
-expression evaluation remains outside the initial framework PR. The
-[feature design](generated-columns.md) defines expression dependencies, final
-projection, schema/metadata behavior and optional source-context fields.
-
-**MetricsLayer** can follow separately: count opens, operations, failures and latency;
-at byte scope measure bytes read, and at record scope count batches/rows. Keep
-these distinct to avoid equating I/O bytes with emitted record bytes. It should
-observe operations without changing values, metadata or order.
-
-Next candidates are **TimeoutLayer** and **ReadBudgetLayer** (for example, byte
-budgets enforced on both sequential and ranged paths). Use OpenDAL's existing
-storage policies where sufficient. Layers must never transparently replay
-already delivered Arrow records.
-
-After directory/partition contracts are justified, independently implement
-**ParallelReadLayer** and **UnorderedEmissionLayer**, both default-off:
-
-| Execution | Emission | Behavior |
+| Execution | Emission | Intended behavior |
 | --- | --- | --- |
-| Sequential | Ordered | Baseline |
-| Sequential | Unordered | Same arrival order when no other concurrent stage exists |
+| Sequential | Ordered | Current baseline |
 | Parallel | Ordered | Concurrent work with bounded ordered merging |
-| Parallel | Unordered | Emit ready results without waiting for preceding units; benchmark for throughput |
+| Parallel | Unordered | Emit ready results when source constraints permit |
 
-Indices and format-specific splitting are subsequent extensions, not blockers
-for a basic reader, storage adapter, service or observation layer.
+ATIF requires global order. WARC splitting depends on valid indexing and the
+compressed representation. Planning-aware layers must also wrap the partition
+accessors they create so generated columns, observation, and budgets survive
+partition execution. See [source attributes and scan planning](source-attributes.md).
+
+A sequential decompressor alone cannot enable random access. Reading externally
+compressed Parquet would need an explicit materialization or indexing strategy;
+this remains separate from streaming codec support.
+
+## Scope of future additions
+
+New formats and providers should reuse byte/record boundaries and document their
+output types, source identity, ordering, and memory behavior. Feature availability
+must track implemented capabilities. Tokenization, deduplication, sample packing,
+and dataset writing remain downstream concerns.
