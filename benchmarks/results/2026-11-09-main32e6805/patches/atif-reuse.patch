@@ -1,0 +1,66 @@
+diff --git a/file-format/src/atif/reader.rs b/file-format/src/atif/reader.rs
+index 1d33732..c9a5e95 100644
+--- a/file-format/src/atif/reader.rs
++++ b/file-format/src/atif/reader.rs
+@@ -12,14 +12,21 @@ struct AtifDecoder {
+     format: AtifFormat,
+     batch_size: usize,
+     projection: Option<Vec<usize>>,
++    builder: Option<TrajectoryBatchBuilder>,
+     source: Option<ObjectRef>,
+     record_index: u64,
+ }
+ 
+ impl AtifDecoder {
+     async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
+-        let mut builder = TrajectoryBatchBuilder::new(self.batch_size, self.projection.as_deref())
+-            .map_err(|error| decode_error(self.source.as_ref(), self.record_index, error))?;
++        if self.builder.is_none() {
++            self.builder = Some(
++                TrajectoryBatchBuilder::new(self.batch_size, self.projection.as_deref()).map_err(
++                    |error| decode_error(self.source.as_ref(), self.record_index, error),
++                )?,
++            );
++        }
++        let builder = self.builder.as_mut().unwrap();
+         let mut appended = 0;
+         while appended < self.batch_size {
+             let Some(bytes) = self.documents.try_next().await? else {
+@@ -67,6 +74,7 @@ pub(super) fn create_reader(
+         format,
+         batch_size,
+         projection,
++        builder: None,
+         source: metadata.source.clone(),
+         record_index: 1,
+     };
+diff --git a/file-format/tests/atif.rs b/file-format/tests/atif.rs
+index 32b12bb..88e4582 100644
+--- a/file-format/tests/atif.rs
++++ b/file-format/tests/atif.rs
+@@ -197,3 +197,25 @@ async fn jsonl_pulls_only_the_requested_batch_and_keeps_delivered_rows_on_later_
+     assert_eq!(observations.reads.load(Ordering::SeqCst), reads);
+     assert_eq!(text(&batch, "trajectory_id", 0), "first");
+ }
++
++#[tokio::test]
++async fn singleton_batches_keep_nested_arrays_and_previously_returned_batches() {
++    let bytes = fixture!("atif", "trajectories.jsonl").await;
++    let mut reader = AtifAccessor::new(MemoryAccessor::new(&bytes, 17), AtifFormat::JsonLines)
++        .open(ReadRequest::new("runs.jsonl").with_options(ReadOptions {
++            batch_size: NonZeroUsize::MIN,
++            projection: None,
++        }))
++        .await
++        .unwrap();
++    let mut batches = Vec::new();
++    while let Some(batch) = reader.next().await.unwrap() {
++        batches.push(batch);
++    }
++    assert_eq!(batches.len(), 3);
++    for (batch, id) in batches.iter().zip(["first", "second", "third"]) {
++        assert_eq!(batch.num_rows(), 1);
++        assert_eq!(text(batch, "trajectory_id", 0), id);
++        assert_eq!(batch["steps"].as_list::<i32>().value(0).len(), 2);
++    }
++}

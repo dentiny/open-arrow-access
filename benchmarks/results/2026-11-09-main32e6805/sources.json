@@ -1,0 +1,25 @@
+{
+  "atif-arrow": {
+    "revision": "dcc81203b74b6a4b238315d41f1de5c7ff00c15f",
+    "base": "dd89a05654646ebf4f7ba71bb2d86b67cf2d77e9",
+    "lock_sha256": "1defd5c132f39d24518f5c7be43fe9ba0e43b69c17abc796b020e6ca0dd880cb",
+    "pr_head": "1f715c6e4396eb63bbabf478275e0672a4b00e27"
+  },
+  "xml-arrow-rs": {
+    "revision": "6d9075cd8629676dec095c36640c0f37fc00bd4b",
+    "base": "5db34250c074f0c242f4b63e719377a92959560e",
+    "lock_sha256": "bdd7c19c8872612e108e9827e28e9fe1c396e4f3cf139878bc650f0645e52151",
+    "pr_head": "b0b585826e8fe3ceb8d896d6928e194da7f2443f"
+  },
+  "warc-rs": {
+    "revision": "ef7245ca5efe87a585ca715fa41e60e262dc194a",
+    "base": "00af372c4d4f96d9a6b5333e219bc52ba1f2d18c",
+    "lock_sha256": "ffa3f015cf7d22762109e52a373d89fd3a07ca97f7dfdd5f409fc8cad9c553f6",
+    "pr_head": "f5ffb8bf33a00069aae32b2f7f2196c4832c617f"
+  },
+  "open-arrow-access": {
+    "upstream_main": "32e68053d6801932fed3e2ed3e0f50e1eaa33f93",
+    "harness_source": "20acbff",
+    "lock_sha256": "d75bd7ce3cbfe2f0df5d65bb94e1a95fb647bf3c5a44929ce400ef1467a6b4b2"
+  }
+}

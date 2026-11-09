@@ -147,3 +147,7 @@ python3 benchmarks/run.py --data target/benchmark-smoke --samples 1 --warmups 0 
   --iterations 1 --output target/benchmark-smoke.jsonl
 cargo test --workspace --all-features --release --locked
 ```
+
+## Latest-main supplemental coverage
+
+[Provider and allocation-sensitive benchmarks](../docs/performance-supplement.md) add representative paths for all 23 service features, Hugging Face storage, sparse reads and early manifest cancellation. The [latest-main report](results/2026-11-09-main32e6805/REPORT.md) contains 320 measured samples and five independent optimization comparisons. Its deterministic HTTP fixtures and repeated payloads have different purposes from the loopback/latency/corpus matrix above; compare only matching workloads within each suite.
