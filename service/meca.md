@@ -6,4 +6,4 @@ The existing ZIP implementation handles storage ranges, compression and limits. 
 
 Sources: [MECA specification resources](https://meca.zip/) and [NISO transfer manifest example](https://www.ncbi.nlm.nih.gov/books/NBK555480/bin/randall-ubnoske_app.pdf).
 
-Manifest fields are read with our `xml-arrow` engine through the shared XML metadata adapter. External DTD declarations are ignored without retrieval; internal subsets are unsupported. The original manifest returned by `manifest()` is unchanged.
+Manifest fields are read with our `file-format::xml::XmlFormat` through the shared XML metadata adapter. External DTD declarations are ignored without retrieval; internal subsets are unsupported. The original manifest returned by `manifest()` is unchanged.

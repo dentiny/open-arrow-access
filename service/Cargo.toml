@@ -7,6 +7,7 @@ repository.workspace = true
 description = "Dataset source providers for Open Arrow Access"
 
 [features]
+meca = ["format-xml", "dep:percent-encoding", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/zip"]
 arxiv = ["format-xml", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
@@ -33,16 +34,17 @@ pmc = [
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 zenodo = []
 
-format-xml = ["dep:quick-xml", "dep:xml-arrow", "dep:arrow-array", "dep:arrow-schema"]
-meca = [
-    "format-xml",
-    "dep:percent-encoding",
-    "dep:open-arrow-access-decompression",
-    "open-arrow-access-decompression/zip",
+format-xml = [
+    "dep:quick-xml",
+    "dep:open-arrow-access-file-format",
+    "open-arrow-access-file-format/xml",
+    "dep:arrow-array",
+    "dep:arrow-schema",
 ]
 oai = ["format-xml"]
 
 [dependencies]
+percent-encoding = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 futures.workspace = true
@@ -56,7 +58,6 @@ open-arrow-access-storage.workspace = true
 opendal = { workspace = true, features = ["services-http", "http-transport-reqwest"] }
 opendal-http-transport-reqwest.workspace = true
 opendal-service-http.workspace = true
-percent-encoding = { workspace = true, optional = true }
 quick-xml = { workspace = true, optional = true }
 reqwest.workspace = true
 serde.workspace = true

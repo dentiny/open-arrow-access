@@ -17,8 +17,8 @@ async fn checks_namespaced_envelopes_and_accepts_standard_xml_headers() {
 async fn document_uses_xml_engine_for_namespaces_entities_and_complete_input() {
     use arrow_array::cast::AsArray;
     use arrow_schema::DataType::Utf8;
+    use open_arrow_access_file_format::xml::XmlField;
     use open_arrow_access_service::xml_metadata::XmlDocument;
-    use xml_arrow::XmlField;
 
     let raw = fixture!("xml-metadata", "namespaces-entities.xml").await;
     let document = XmlDocument::new(&raw, "manifest").unwrap();
