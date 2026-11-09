@@ -2,7 +2,10 @@
 
 mod error;
 pub(crate) mod files;
+mod parser;
 mod query;
+mod url_util;
+pub(crate) use url_util::resolve_origin;
 mod transport;
 pub(crate) use transport::{MAX_REDIRECTS, new_single_hop_transport, new_transport};
 pub(crate) mod validation;
@@ -89,6 +92,6 @@ impl HttpClient {
                 bytes.extend_from_slice(&part);
             }
         }
-        validation::json(&bytes, operation)
+        parser::parse_json(&bytes, operation)
     }
 }
