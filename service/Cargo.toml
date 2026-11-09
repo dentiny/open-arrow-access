@@ -12,6 +12,7 @@ arxiv = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/tar",
 ]
+bhl = ["figshare"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
@@ -131,3 +132,7 @@ required-features = ["format-xml"]
 [[test]]
 name = "figshare"
 required-features = ["figshare"]
+
+[[test]]
+name = "bhl"
+required-features = ["bhl"]

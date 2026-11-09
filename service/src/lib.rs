@@ -51,3 +51,6 @@ pub mod xml_metadata;
 
 #[cfg(feature = "figshare")]
 pub mod figshare;
+
+#[cfg(feature = "bhl")]
+pub mod bhl;

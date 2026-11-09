@@ -95,6 +95,7 @@ format-xml = [
     "open-arrow-access-service?/format-xml",
 ]
 service-arxiv = ["dep:open-arrow-access-service", "open-arrow-access-service/arxiv"]
+service-bhl = ["dep:open-arrow-access-service", "open-arrow-access-service/bhl"]
 service-courtlistener = ["dep:open-arrow-access-service", "open-arrow-access-service/courtlistener"]
 service-dataverse = ["dep:open-arrow-access-service", "open-arrow-access-service/dataverse"]
 service-figshare = ["dep:open-arrow-access-service", "open-arrow-access-service/figshare"]
