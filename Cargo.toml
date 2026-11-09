@@ -34,6 +34,7 @@ http = "1"
 indexmap = "2"
 opendal-http-transport-reqwest = { version = "=0.59.2", default-features = false }
 opendal-service-http = "=0.59.2"
+percent-encoding = "2"
 quick-xml = { version = "0.41", features = ["serialize"] }
 reqwest = { version = "0.13.5", default-features = false }
 serde = { version = "1", features = ["derive"] }
@@ -96,6 +97,7 @@ format-xml = [
 ]
 service-arxiv = ["dep:open-arrow-access-service", "open-arrow-access-service/arxiv"]
 service-bhl = ["dep:open-arrow-access-service", "open-arrow-access-service/bhl"]
+service-biorxiv = ["dep:open-arrow-access-service", "open-arrow-access-service/biorxiv"]
 service-courtlistener = ["dep:open-arrow-access-service", "open-arrow-access-service/courtlistener"]
 service-dataverse = ["dep:open-arrow-access-service", "open-arrow-access-service/dataverse"]
 service-doab = ["dep:open-arrow-access-service", "open-arrow-access-service/doab"]
@@ -112,6 +114,11 @@ service-internet-archive = [
     "dep:open-arrow-access-service",
     "open-arrow-access-service/internet-archive",
 ]
+service-library-of-congress = [
+    "dep:open-arrow-access-service",
+    "open-arrow-access-service/library-of-congress",
+]
+service-meca = ["dep:open-arrow-access-service", "open-arrow-access-service/meca"]
 service-oapen = ["dep:open-arrow-access-service", "open-arrow-access-service/oapen"]
 service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
 service-uspto = ["dep:open-arrow-access-service", "open-arrow-access-service/uspto"]
