@@ -438,6 +438,18 @@ See [federal-register service](federal-register.md) for its contract and usage.
 
 See [govinfo service](govinfo.md).
 
+## oapen
+
+See [oapen service](oapen.md).
+
+## figshare
+
+See [figshare service](figshare.md).
+
+## library-of-congress
+
+See [library-of-congress service](library-of-congress.md) for its contract and usage.
+
 ## semantic-scholar
 
 See [semantic-scholar service](semantic-scholar.md).

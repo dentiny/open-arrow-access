@@ -18,6 +18,7 @@ dataverse = []
 default = []
 doab = ["oai"]
 federal-register = []
+figshare = []
 govinfo = []
 gutenberg = ["format-xml", "dep:chrono"]
 hathifiles = []
@@ -31,6 +32,8 @@ huggingface = [
     "open-arrow-access-file-format/parquet",
 ]
 internet-archive = []
+library-of-congress = []
+oapen = ["oai"]
 pmc = [
     "dep:arrow-array",
     "dep:arrow-schema",
@@ -173,6 +176,18 @@ required-features = ["federal-register"]
 [[test]]
 name = "govinfo"
 required-features = ["govinfo"]
+
+[[test]]
+name = "oapen"
+required-features = ["oapen"]
+
+[[test]]
+name = "figshare"
+required-features = ["figshare"]
+
+[[test]]
+name = "library_of_congress"
+required-features = ["library-of-congress"]
 
 [[test]]
 name = "semantic_scholar"

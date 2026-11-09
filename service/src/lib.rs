@@ -70,5 +70,14 @@ pub mod federal_register;
 #[cfg(feature = "govinfo")]
 pub mod govinfo;
 
+#[cfg(feature = "oapen")]
+pub mod oapen;
+
+#[cfg(feature = "figshare")]
+pub mod figshare;
+
+#[cfg(feature = "library-of-congress")]
+pub mod library_of_congress;
+
 #[cfg(feature = "semantic-scholar")]
 pub mod semantic_scholar;
