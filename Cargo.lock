@@ -1952,7 +1952,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "url",
- "xml-arrow",
 ]
 
 [[package]]
