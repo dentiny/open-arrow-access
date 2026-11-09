@@ -23,3 +23,8 @@ pub mod xml;
 
 #[cfg(feature = "atif")]
 pub mod atif;
+
+#[cfg(any(feature = "xml", feature = "json", feature = "csv"))]
+mod document;
+#[cfg(any(feature = "xml", feature = "json", feature = "csv"))]
+pub use document::read_document;

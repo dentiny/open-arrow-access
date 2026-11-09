@@ -1,9 +1,11 @@
 use super::{error, validation};
-use futures::io::Cursor;
-use open_arrow_access_core::{RecordBatch, Result};
+use open_arrow_access_core::{Bytes, ReadRequest, RecordBatch, Result};
+use open_arrow_access_file_format::{
+    read_document,
+    xml::{NamespaceBinding, XmlField, XmlFormat, XmlLimits, XmlSchema},
+};
 use quick_xml::{NsReader, events::Event, name::ResolveResult};
 use std::borrow::Cow;
-use xml_arrow::{NamespaceBinding, ReaderOptions, XmlField, XmlReader, XmlSchema};
 
 /// An XML metadata document whose element mappings use its root namespace.
 /// External DTD declarations are ignored, as in the previous metadata decoder;
@@ -80,26 +82,19 @@ impl<'a> XmlDocument<'a> {
         // Metadata is already buffered. Preserve the previous document-size
         // allowance while retaining the XML engine's default depth limit.
         let budget = self.bytes.len().saturating_add(4096);
-        let mut reader = XmlReader::new(
-            Cursor::new(self.bytes.as_ref()),
-            schema,
-            &format!("/{}", self.element(&self.root)),
-            ReaderOptions {
+        let format = XmlFormat::new(format!("/{}", self.element(&self.root)))
+            .with_schema(schema)
+            .with_limits(XmlLimits {
                 max_record_bytes: budget,
                 max_batch_bytes: budget,
                 ..Default::default()
-            },
+            });
+        read_document(
+            Bytes::copy_from_slice(&self.bytes),
+            format,
+            ReadRequest::new("xml-metadata"),
         )
-        .map_err(error::xml)?;
-        let batch = reader
-            .next_batch()
-            .await
-            .map_err(error::xml)?
-            .ok_or_else(|| error::root(&self.root))?;
-        if batch.num_rows() != 1 || reader.next_batch().await.map_err(error::xml)?.is_some() {
-            return Err(error::invalid("expected one XML metadata document"));
-        }
-        Ok(batch)
+        .await
     }
 }
 
