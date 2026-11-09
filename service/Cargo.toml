@@ -44,7 +44,7 @@ pmc = [
     "open-arrow-access-decompression/gzip",
 ]
 
-xml-metadata = ["dep:quick-xml"]
+format-xml = ["dep:quick-xml"]
 
 [dependencies]
 indexmap.workspace = true
@@ -133,4 +133,4 @@ required-features = ["internet-archive"]
 
 [[test]]
 name = "xml_metadata"
-required-features = ["xml-metadata"]
+required-features = ["format-xml"]
