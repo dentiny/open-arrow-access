@@ -29,8 +29,7 @@ impl Default for XmlLimits {
 }
 
 /// Select XML records by an absolute element path and infer a fixed output schema.
-/// Explicit field mappings are optional. External
-/// compression composes through the byte accessor. No file/partition parallelism.
+/// Use [`Self::with_schema`] for explicit field mappings.
 #[derive(Clone, Debug)]
 pub struct XmlFormat {
     schema: Option<XmlSchema>,

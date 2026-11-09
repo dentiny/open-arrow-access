@@ -7,10 +7,8 @@ use open_arrow_access_core::{
 };
 
 /// Read whitespace-separated JSON objects, including JSONL, with a fixed schema.
-///
 /// Missing nullable fields become null; unknown fields are ignored. Top-level
-/// arrays and scalar records are rejected. Schema inference is not performed.
-/// Reading requires only sequential bytes, so decompression wrappers can be used.
+/// arrays and scalar records are rejected.
 #[derive(Clone, Debug)]
 pub struct JsonFormat {
     schema: SchemaRef,

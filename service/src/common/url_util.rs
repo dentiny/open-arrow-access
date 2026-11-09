@@ -19,9 +19,7 @@ pub fn segment(value: &str) -> Result<String> {
     Ok(url.path()[1..].to_owned())
 }
 
-/// Encode each component of a slash-separated provider path.
-/// Reject empty and dot components rather than normalizing them. Callers decide
-/// whether an empty root or trailing slash is meaningful before calling this.
+/// Encode slash-separated provider paths, rejecting empty and dot components.
 pub fn encode_path(value: &str) -> Result<String> {
     value
         .split('/')
@@ -30,7 +28,7 @@ pub fn encode_path(value: &str) -> Result<String> {
         .map(|parts| parts.join("/"))
 }
 
-/// Validate and encode one logical filename using the existing provider filename rules.
+/// Validate and encode one logical filename component.
 pub fn filename(value: &str) -> Result<String> {
     super::validate_filename(value)?;
     segment(value)
