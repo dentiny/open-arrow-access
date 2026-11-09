@@ -2,7 +2,7 @@
 
 mod opendal_error;
 mod resolved_files;
-#[cfg(any(feature = "internet-archive", feature = "pmc"))]
+#[cfg(any(feature = "internet-archive", feature = "pmc", feature = "meca"))]
 mod validation;
 pub use resolved_files::ResolvedFileSet;
 
@@ -78,6 +78,12 @@ pub mod figshare;
 
 #[cfg(feature = "library-of-congress")]
 pub mod library_of_congress;
+
+#[cfg(feature = "meca")]
+pub mod meca;
+
+#[cfg(feature = "biorxiv")]
+pub mod biorxiv;
 
 #[cfg(feature = "regulations")]
 pub mod regulations;
