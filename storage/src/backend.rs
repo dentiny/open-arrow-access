@@ -19,6 +19,9 @@ use crate::validation::validate_locator;
 const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
 const DEFAULT_IO_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 const MAX_FETCH_BATCH_SIZE: u64 = 2 * 1024 * 1024;
+// Bound scattered staging as well as payload bytes: tiny network responses
+// can each retain a receive allocation much larger than their payload.
+const MAX_FETCH_RANGES: usize = 512;
 
 /// Generic OpenDAL byte adapter, shared by storage and provider services.
 #[derive(Clone, Debug)]
@@ -324,7 +327,7 @@ impl OpenDalReader {
                 if buffer.len() as u64 != expected {
                     return Err(short_read("read_ranges"));
                 }
-                Ok(buffer.to_bytes())
+                Ok(compact_range_buffer(buffer))
             })
             .collect()
     }
@@ -388,6 +391,15 @@ impl ByteReader for OpenDalReader {
             let mut end = start;
             let mut size = 0;
             while end < ranges.len() {
+                if end - start >= MAX_FETCH_RANGES {
+                    let previous = &ranges[end - 1];
+                    let next = &ranges[end];
+                    // Keep adjacent/overlapping runs together so limiting
+                    // scattered work does not split a coalesced backend read.
+                    if next.start > previous.end || next.end < previous.start {
+                        break;
+                    }
+                }
                 let length = ranges[end].end - ranges[end].start;
                 if length > MAX_FETCH_BATCH_SIZE - size {
                     break;
@@ -413,4 +425,18 @@ fn short_read(operation: &'static str) -> Error {
 fn map_error(operation: &'static str, path: &str, error: opendal::Error) -> Error {
     let kind = crate::opendal_error_kind(error.kind());
     Error::new(kind, operation, format!("object {path:?}")).with_source(error)
+}
+
+// Small range responses can retain entire network receive allocations. Copy
+// them out while each bounded fetch batch is consumed, so later batches do not
+// retain those oversized backing allocations through their returned slices.
+fn compact_range_buffer(buffer: opendal::Buffer) -> Bytes {
+    if buffer.len() > 4096 {
+        return buffer.to_bytes();
+    }
+    let mut output = Vec::with_capacity(buffer.len());
+    for chunk in buffer {
+        output.extend_from_slice(&chunk);
+    }
+    Bytes::from(output)
 }
