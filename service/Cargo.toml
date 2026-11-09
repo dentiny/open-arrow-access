@@ -17,6 +17,7 @@ dataverse = []
 default = []
 format-xml = ["dep:quick-xml"]
 gutenberg = ["dep:arrow-array", "dep:arrow-schema", "dep:chrono", "dep:xml-arrow"]
+hathifiles = []
 huggingface = [
     "dep:open-arrow-access-dataset",
     "dep:open-arrow-access-file-format",
@@ -126,3 +127,7 @@ required-features = ["internet-archive"]
 [[test]]
 name = "xml_metadata"
 required-features = ["format-xml"]
+
+[[test]]
+name = "hathifiles"
+required-features = ["hathifiles"]
