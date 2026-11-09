@@ -6,6 +6,7 @@ use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error,
     ErrorKind, ListRequest, ObjectRef, ObjectStream, ReadState, Reader, Result, async_trait,
+    validate_byte_range,
 };
 use opendal::{
     Execute, Executor, OperationContext, Operator,
@@ -265,22 +266,8 @@ impl OpenDalReader {
         Ok(opendal::Buffer::from(output).to_bytes())
     }
 
-    fn validate_range(&self, range: &Range<u64>) -> Result<()> {
-        if range.start > range.end || range.end > self.len {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "read_range",
-                format!(
-                    "range {}..{} is outside object length {}",
-                    range.start, range.end, self.len,
-                ),
-            ));
-        }
-        Ok(())
-    }
-
     async fn read_exact_range(&mut self, range: Range<u64>) -> Result<Bytes> {
-        self.validate_range(&range)?;
+        validate_byte_range(&range, self.len, "read_range")?;
         if range.is_empty() {
             return Ok(Bytes::new());
         }
@@ -386,7 +373,7 @@ impl ByteReader for OpenDalReader {
 
     async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
         for range in &ranges {
-            self.validate_range(range)?;
+            validate_byte_range(range, self.len, "read_range")?;
         }
         let mut output = Vec::with_capacity(ranges.len());
         let mut start = 0;

@@ -11,6 +11,13 @@ async fn seeks_clones_and_direct_ranges_preserve_independent_cursors() {
     let bytes = source.open("data".into()).await.unwrap();
     let mut input = into_async_seek(bytes, NonZeroUsize::new(3).unwrap(), "seek_test").unwrap();
     assert!(observed.ranges.lock().unwrap().is_empty());
+    for range in [11..11, 9..11, std::ops::Range { start: 3, end: 2 }] {
+        let error = input.read_range(range).await.unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(error.operation(), "seek_test");
+    }
+    assert!(observed.ranges.lock().unwrap().is_empty());
+    assert!(input.read_range(10..10).await.unwrap().is_empty());
     let mut head = [0; 2];
     input.read_exact(&mut head).await.unwrap();
     assert_eq!(&head, b"ab");
