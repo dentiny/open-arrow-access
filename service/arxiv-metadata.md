@@ -1,13 +1,5 @@
-# ArxivMetadata
+# arXiv metadata
 
-Enable `service-arxiv-metadata`. `ArxivMetadataService::new()?` selects `https://oaipmh.arxiv.org/oai`
-and the upstream `arXivRaw` metadata format. Use `records(from,until,set)` for
-one initial ListRecords page, then `resume(token)` until no token remains.
-Every page keeps exact XML and all returned fields, including deleted headers.
-`with_connection` supports mirrors, custom transports and deterministic tests.
-The protocol, parser, error handling and tests are shared through `oai`.
+Enable `service-arxiv` on the facade, or `arxiv` on the service crate. This single feature enables both bulk PDF/source TAR access through `arxiv::ArxivService` and OAI-PMH metadata harvesting through `arxiv_metadata::ArxivMetadataService`.
 
-Callers own pacing and Retry-After handling. arXiv requests must be spaced by at least three seconds.
-No records are filtered, deduplicated or normalized, and no Lance dataset is written.
-
-Source: [provider metadata documentation](https://info.arxiv.org/help/oa/index.html).
+Metadata harvesting uses the shared OAI-PMH protocol and our XML format reader, retains original XML pages and resumes using upstream tokens. It does not download PDF or source payloads.

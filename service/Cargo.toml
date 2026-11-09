@@ -7,8 +7,12 @@ repository.workspace = true
 description = "Dataset source providers for Open Arrow Access"
 
 [features]
-arxiv = ["format-xml", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
-arxiv-metadata = ["oai"]
+arxiv = [
+    "oai",
+    "format-xml",
+    "dep:open-arrow-access-decompression",
+    "open-arrow-access-decompression/tar",
+]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
@@ -152,4 +156,4 @@ required-features = ["doab"]
 
 [[test]]
 name = "arxiv_metadata"
-required-features = ["arxiv-metadata"]
+required-features = ["arxiv"]

@@ -95,10 +95,6 @@ format-xml = [
     "open-arrow-access-service?/format-xml",
 ]
 service-arxiv = ["dep:open-arrow-access-service", "open-arrow-access-service/arxiv"]
-service-arxiv-metadata = [
-    "dep:open-arrow-access-service",
-    "open-arrow-access-service/arxiv-metadata",
-]
 service-courtlistener = ["dep:open-arrow-access-service", "open-arrow-access-service/courtlistener"]
 service-dataverse = ["dep:open-arrow-access-service", "open-arrow-access-service/dataverse"]
 service-doab = ["dep:open-arrow-access-service", "open-arrow-access-service/doab"]
