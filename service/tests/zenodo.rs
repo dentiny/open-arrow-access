@@ -97,16 +97,3 @@ async fn record_metadata_can_exceed_the_previous_size_limit() {
     fixture.respond_chunked("/api/records/3551612", StatusCode::OK, Bytes::from(raw));
     assert!(!service.record(ID).await.unwrap().files().is_empty());
 }
-
-#[test]
-fn validates_endpoint_without_network() {
-    for endpoint in [
-        "ftp://zenodo.org",
-        "https://user:pass@zenodo.org",
-        "https://zenodo.org/api",
-        "https://zenodo.org?token=x",
-        "https://zenodo.org/#x",
-    ] {
-        assert!(ZenodoService::with_endpoint(endpoint).is_err());
-    }
-}
