@@ -17,7 +17,7 @@ pub(super) fn protocol(error: Option<ProtocolError>) -> Error {
         result
     }
 }
-#[derive(Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub(super) struct ProtocolError {
     #[serde(rename = "@code")]
     pub(super) code: String,

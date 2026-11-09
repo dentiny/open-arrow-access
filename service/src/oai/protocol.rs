@@ -1,4 +1,4 @@
-use super::{OaiPage, validation};
+use super::{OaiPage, parser, validation};
 use crate::common::Connection;
 use open_arrow_access_core::Result;
 
@@ -49,6 +49,6 @@ impl OaiService {
     async fn page(&self, query: &[(&str, &str)]) -> Result<OaiPage> {
         let url = self.connection.url(&self.path, query)?;
         let bytes = self.connection.bytes(url, "application/xml").await?;
-        validation::parse(bytes)
+        parser::parse_page(bytes)
     }
 }
