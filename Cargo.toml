@@ -28,19 +28,19 @@ datafusion = "55.2.0"
 opendal = "0.59.2"
 
 [workspace.dependencies]
-percent-encoding = "2"
+async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
+async_zip = { version = "0.0.19", default-features = false, features = ["deflate"] }
+http = "1"
 indexmap = "2"
+opendal-http-transport-reqwest = { version = "=0.59.2", default-features = false }
+opendal-service-http = "=0.59.2"
+percent-encoding = "2"
+quick-xml = { version = "0.41", features = ["serialize"] }
+reqwest = { version = "0.13.5", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
-http = "1"
-opendal-service-http = "=0.59.2"
-opendal-http-transport-reqwest = { version = "=0.59.2", default-features = false }
-reqwest = { version = "0.13.5", default-features = false }
-url = "2"
-async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
 tar = { version = "0.4.46", default-features = false }
-quick-xml = { version = "0.41", features = ["serialize"] }
-async_zip = { version = "0.0.19", default-features = false, features = ["deflate"] }
+url = "2"
 # Match the resolved Cargo.lock versions at the Lance revision above.
 # See docs/dependencies.md when updating this baseline.
 arrow-array = "59.3.0"
@@ -48,66 +48,73 @@ arrow-buffer = "59.3.0"
 arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
-chrono = { version = "0.4", default-features = false, features = ["std"] }
-xml-arrow = "0.2.2"
-atif-arrow = "0.4.0"
-warc = { package = "warc-rs", version = "=0.3.0", default-features = false }
 async-trait = "0.1.91"
+atif-arrow = "0.4.0"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+warc = { package = "warc-rs", version = "=0.3.0", default-features = false }
+xml-arrow = "0.2.2"
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
-datafusion = { version = "55.2.0", default-features = false }
 bytes = "1"
+datafusion = { version = "55.2.0", default-features = false }
+flate2 = "1"
 futures = "0.3"
 more-asserts = "0.3.1"
-thiserror = "2"
+open-arrow-access-core = { path = "core", version = "0.1.0" }
+open-arrow-access-decompression = { path = "decompression", version = "0.1.0", default-features = false }
+open-arrow-access-file-format = { path = "file-format", version = "0.1.0", default-features = false }
+open-arrow-access-storage = { path = "storage", version = "0.1.0", default-features = false }
+open-arrow-access-test-support = { path = "test-support" }
 opendal = { version = "0.59.2", default-features = false }
 parquet = { version = "59.3.0", default-features = false, features = ["arrow", "async", "snap"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tempfile = "3"
-flate2 = "1"
-open-arrow-access-core = { path = "core", version = "0.1.0" }
-open-arrow-access-storage = { path = "storage", version = "0.1.0", default-features = false }
-open-arrow-access-file-format = { path = "file-format", version = "0.1.0", default-features = false }
-open-arrow-access-decompression = { path = "decompression", version = "0.1.0", default-features = false }
-open-arrow-access-test-support = { path = "test-support" }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 open-arrow-access-dataset = { path = "dataset", version = "0.1.0", default-features = false }
 
 open-arrow-access-service = { path = "service", version = "0.1.0", default-features = false }
 
 [features]
-default = []
-service-courtlistener = ["dep:open-arrow-access-service", "open-arrow-access-service/courtlistener"]
-service-gutenberg = ["dep:open-arrow-access-service", "open-arrow-access-service/gutenberg"]
-service-dataverse = ["dep:open-arrow-access-service", "open-arrow-access-service/dataverse"]
-service-arxiv = ["dep:open-arrow-access-service", "open-arrow-access-service/arxiv"]
-service-internet-archive = ["dep:open-arrow-access-service", "open-arrow-access-service/internet-archive"]
-service-zenodo = ["dep:open-arrow-access-service", "open-arrow-access-service/zenodo"]
-service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
-service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
-service-warc = ["dep:open-arrow-access-service", "open-arrow-access-service/warc"]
-format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
-format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
-format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
-format-atif = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/atif"]
-format-xml = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/xml", "open-arrow-access-service?/format-xml"]
-format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
-decompression-gzip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip"]
 decompression-bz2 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
+decompression-gzip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip"]
 decompression-lz4 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/lz4"]
-decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zstd"]
 decompression-tar = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
 decompression-zip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zip"]
+decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zstd"]
+default = []
+format-atif = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/atif"]
+format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
+format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
+format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
+format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
+format-xml = [
+    "dep:open-arrow-access-file-format",
+    "open-arrow-access-file-format/xml",
+    "open-arrow-access-service?/format-xml",
+]
+service-arxiv = ["dep:open-arrow-access-service", "open-arrow-access-service/arxiv"]
+service-courtlistener = ["dep:open-arrow-access-service", "open-arrow-access-service/courtlistener"]
+service-dataverse = ["dep:open-arrow-access-service", "open-arrow-access-service/dataverse"]
+service-gutenberg = ["dep:open-arrow-access-service", "open-arrow-access-service/gutenberg"]
+service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
+service-internet-archive = [
+    "dep:open-arrow-access-service",
+    "open-arrow-access-service/internet-archive",
+]
+service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
+service-warc = ["dep:open-arrow-access-service", "open-arrow-access-service/warc"]
+service-zenodo = ["dep:open-arrow-access-service", "open-arrow-access-service/zenodo"]
 
 service-meca = ["dep:open-arrow-access-service", "open-arrow-access-service/meca"]
 
 [dependencies]
-open-arrow-access-service = { workspace = true, optional = true }
-open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
-open-arrow-access-storage.workspace = true
-open-arrow-access-file-format = { workspace = true, optional = true }
+open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
+open-arrow-access-file-format = { workspace = true, optional = true }
+open-arrow-access-service = { workspace = true, optional = true }
+open-arrow-access-storage.workspace = true
 
 [dev-dependencies]
 opendal = { workspace = true, features = ["services-fs"] }
