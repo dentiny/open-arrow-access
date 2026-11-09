@@ -1,5 +1,5 @@
 //! Default redirect handling for provider GET requests and origin-scoped credentials.
-use super::{download_url, error, url_util};
+use super::{error, resolve_download_url, url_util};
 use http::{HeaderMap, Request};
 use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext};
 use url::Url;
@@ -30,7 +30,7 @@ impl HttpTransport for RedirectTransport {
             .extensions_mut()
             .remove::<AuthScope>()
             .ok_or_else(error::missing_auth_scope)?;
-        let mut url = download_url(&request.uri().to_string()).map_err(error::transport)?;
+        let mut url = resolve_download_url(&request.uri().to_string()).map_err(error::transport)?;
         let mut authorized = url.origin() == scope.origin.origin();
         for _ in 0..=crate::http_client::MAX_REDIRECTS {
             if authorized {
