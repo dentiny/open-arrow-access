@@ -31,6 +31,7 @@ impl Connection {
                 continue;
             }
             if status != http::StatusCode::OK {
+                // TODO: Add a shared error translation function in core and use it here.
                 let kind = match status.as_u16() {
                     404 => opendal::ErrorKind::NotFound,
                     401 | 403 => opendal::ErrorKind::PermissionDenied,
