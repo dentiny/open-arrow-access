@@ -45,3 +45,6 @@ pub mod internet_archive;
 
 /// Common utilities shared by provider services.
 pub mod common;
+
+#[cfg(feature = "format-xml")]
+pub mod xml_metadata;
