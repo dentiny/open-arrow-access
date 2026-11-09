@@ -8,6 +8,26 @@ Arrow batches. The individual guide states exactly which representation it reads
 All service guides live directly in this `service/` directory; `src/` contains
 implementation code.
 
+### Directory layout
+
+```text
+service/
+  README.md                 Service catalogue, interaction model and setup
+  <provider>.md             Data, request/response and usage for one provider
+  response-schemas.md        Shared response families and schema references
+  src/
+    lib.rs                  Public modules and provider feature gates
+    <provider>/             Provider-specific requests, discovery and metadata mapping
+    common/                 Public Connection, ApiDocument and file-link helpers
+    http_client.rs          Shared HTTP requests over OpenDAL transport
+    http_body.rs            Shared response-body handling
+    resolved_files.rs       Metadata plus a lazy named-file accessor
+    oai/                    OAI-PMH protocol shared by several providers
+  tests/                    Provider and shared-contract tests
+```
+
+### Included services
+
 | Source | Data available through this library | Guide |
 | --- | --- | --- |
 | Hugging Face | Dataset repository files and Parquet config/split exports | [Hugging Face](huggingface.md) |
@@ -40,6 +60,63 @@ Each guide follows the same order: what the source contains, request/response
 formats, then a complete Rust usage example and an explanation of its result.
 
 ## Request and response
+
+### How services interact with OpenDAL
+
+OpenDAL supplies two parts of the I/O layer:
+
+- **Storage operators:** an `opendal::Operator` configures a backend such as Fs,
+  S3, HTTP or Hf. `storage::OpenDalAccessor` adapts its operations to our
+  `ByteAccessor` / `ByteReader` interfaces, including listing and exact ranges
+  when supported by the configured source.
+- **HTTP transport:** provider metadata requests and sequential downloads use
+  OpenDAL's `OperationContext` / `HttpTransporter`, with a reqwest transport by
+  default. Our shared HTTP client and `Connection` add provider request rules,
+  response parsing and origin-scoped credentials above that transport.
+
+The provider adds the source-specific meaning: which endpoint or manifest to
+read, which ID/version/split was selected, which files belong to that selection,
+and which metadata to retain. A logical filename returned by a provider maps to
+a backend object key or download URL; callers use that name with `open`.
+
+```mermaid
+flowchart TD
+    App[Application: select provider and source] --> Provider[Provider discovery or manifest selection]
+    Provider --> Selection[Metadata and selected file access]
+    Selection --> Managed[Provider-configured OpenDAL Operator]
+    Selection --> HTTP[Connection GET through OpenDAL HttpTransporter]
+    Caller[Caller-configured Operator: Fs / S3 / HTTP] --> Adapter[OpenDalAccessor]
+    Managed --> Adapter
+    Adapter --> Bytes[ByteReader]
+    HTTP --> Bytes
+    Bytes --> Decode[Explicit decompression / archive / format reader]
+    Decode --> Output[Member bytes, native records or Arrow batches]
+```
+
+| Integration pattern | Services / entry points | What the caller configures |
+| --- | --- | --- |
+| Caller supplies byte storage, usually an OpenDAL operator wrapped by `OpenDalAccessor` | PMC article/inventory, Gutenberg, CourtListener, arXiv bulk | Backend root, endpoint, credentials, region and any requester-pays settings; provider requests select keys/manifests |
+| Provider creates the operator for its file namespace | Hugging Face repository/dataset; Zenodo, Dataverse, Internet Archive | Provider ID/revision/version and supported endpoint/token options; the provider configures the Hf or HTTP backend |
+| Provider calls APIs and opens advertised URLs through `Connection` | Figshare, GovInfo, BHL, bioRxiv, LoC, OpenStax, Semantic Scholar, USPTO, Regulations.gov and other JSON/OAI providers | Provider API settings/keys; optional custom Connection/transport; downloads are sequential |
+| Caller supplies an already opened byte reader | MECA archive inspection | A ranged, known-length source reader; this can come from OpenDAL or another compatible accessor |
+
+Common Crawl provides an HTTP-operator helper and also accepts caller-supplied
+manifest/record accessors, so a local mirror or another byte backend can be used.
+The core accessor traits also allow application-defined storage implementations.
+
+A typical interaction has three stages:
+
+1. **Select/discover:** request a record, dataset version, crawl or manifest.
+   The provider returns metadata, file membership or an opened record reader,
+   according to its API.
+2. **Read bytes:** open an exact selected file name/object. OpenDAL operators or
+   the shared HTTP transport perform the I/O; provider metadata resolution does
+   not eagerly download every attachment.
+3. **Decode when needed:** compose decompression, archive or format readers.
+   Some providers already return Arrow metadata/dataset readers; their guides
+   identify the schema and what they read internally.
+
+### Enable an entry point
 
 Enable a concrete provider with its facade feature, for example
 `service-figshare`. On `open-arrow-access-service` directly, the corresponding
@@ -116,21 +193,42 @@ and reads at most one original byte chunk. `None` intentionally selects the
 current version; use an explicit version for repeatable selection. The bytes
 may still be compressed. The provider does not infer a format or extract text.
 
-For examples taking `opendal::Operator`, configure a backend first. A local mirror
-can use an additional dependency on the matching OpenDAL version:
+### Example with caller-configured OpenDAL storage
+
+For a provider backed by a local mirror, enable `service-pmc` on the facade and
+add OpenDAL's filesystem backend to the dependency configuration above:
 
 ```toml
 opendal = { version = "=0.59.2", default-features = false, features = ["services-fs"] }
 ```
 
 ```rust
-use open_arrow_access::storage::opendal;
+use open_arrow_access::{
+    Accessor, ReadRequest,
+    service::pmc::PmcAccessor,
+    storage::{OpenDalAccessor, opendal},
+};
 
-fn mirror_operator(root: &str) -> opendal::Result<opendal::Operator> {
-    opendal::Operator::new(opendal::services::Fs::default().root(root))
+async fn read_pmc_mirror(root: &str, metadata_key: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // OpenDAL owns the backend/root; the provider interprets the selected object.
+    let operator = opendal::Operator::new(opendal::services::Fs::default().root(root))?;
+    let bytes = OpenDalAccessor::new(operator);
+    let articles = PmcAccessor::with_default_decoder(bytes);
+    let mut reader = articles.open(ReadRequest::new(metadata_key)).await?;
+    println!("Arrow schema: {:?}", reader.metadata().schema);
+    if let Some(batch) = reader.next().await? {
+        println!("article metadata rows: {}", batch.num_rows());
+    }
+    Ok(())
 }
 ```
 
-Pass that operator and a key relative to its root to the selected guide's
-function. For S3/other backends, enable/configure the upstream OpenDAL backend
-instead. [Repository examples](../examples/) show complete command-line readers.
+With root `/data/pmc-mirror` and key `metadata/PMC123.2.json`, OpenDAL reads that
+mirror object and the PMC decoder emits one article-metadata row. Content URL
+fields remain metadata. To use S3 or another backend, configure its operator and
+retain the same `OpenDalAccessor` / provider composition.
+
+The Figshare example above demonstrates provider-managed HTTP access; this
+example demonstrates caller-managed storage. See each provider guide for its
+configuration boundary and return type. [Repository examples](../examples/) show
+complete command-line readers.
