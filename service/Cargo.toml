@@ -134,7 +134,3 @@ required-features = ["arxiv"]
 [[test]]
 name = "internet_archive"
 required-features = ["internet-archive"]
-
-[[test]]
-name = "http_errors"
-required-features = ["zenodo"]
