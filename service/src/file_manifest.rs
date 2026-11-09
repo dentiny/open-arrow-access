@@ -9,12 +9,6 @@ pub(crate) struct FileSpec {
     pub(crate) content_length: Option<u64>,
 }
 
-impl FileSpec {
-    pub(crate) fn into_mapping(self) -> (String, ObjectRef) {
-        (self.name, self.object)
-    }
-}
-
 impl From<crate::common::MetadataLink> for FileSpec {
     fn from(link: crate::common::MetadataLink) -> Self {
         Self {

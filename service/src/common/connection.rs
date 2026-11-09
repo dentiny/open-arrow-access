@@ -10,7 +10,6 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes,
     Capability, Result, StreamReader, async_trait,
 };
-use open_arrow_access_storage::NamedFileAccessor;
 use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext};
 use url::Url;
 
@@ -156,16 +155,12 @@ impl Connection {
     /// Bind a validated provider manifest to lazy byte reads. Logical names remain opaque.
     pub fn files<M>(&self, files: Vec<MetadataLink>, metadata: M) -> Result<RemoteFiles<M>> {
         validation::validate_downloads(&files)?;
-        let files = NamedFileAccessor::new(
+        ResolvedFileSet::from_files(
             self.clone(),
-            files
-                .into_iter()
-                .map(FileSpec::from)
-                .map(FileSpec::into_mapping)
-                .collect(),
+            files.into_iter().map(FileSpec::from),
+            metadata,
         )
-        .map_err(error::file_namespace)?;
-        Ok(ResolvedFileSet::new(files, metadata))
+        .map_err(error::file_namespace)
     }
 }
 
