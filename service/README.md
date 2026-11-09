@@ -418,6 +418,10 @@ See [OAI protocol](oai-protocol.md). Record counts and resumption tokens are dec
 
 See [OAI provider configuration](oai-provider.md).
 
+## doab
+
+See [doab service](doab.md).
+
 ## MECA
 
 See [storage-independent MECA archives](meca.md).
