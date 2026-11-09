@@ -1961,6 +1961,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "http",
+ "indexmap",
  "more-asserts",
  "open-arrow-access-core",
  "open-arrow-access-test-support",

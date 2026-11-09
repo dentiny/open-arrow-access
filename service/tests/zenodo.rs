@@ -152,3 +152,24 @@ fn validates_endpoint_without_network() {
         assert!(ZenodoService::with_endpoint(endpoint).is_err());
     }
 }
+
+#[tokio::test]
+async fn metadata_rate_limits_expose_retry_after() {
+    let fixture = HttpFixture::new();
+    fixture.handle(|_| {
+        Ok(http::Response::builder()
+            .status(429)
+            .header("retry-after", "30")
+            .body(opendal::HttpBody::new(futures::stream::empty(), Some(0)))
+            .unwrap())
+    });
+    let error = ZenodoService::with_endpoint(fixture.endpoint())
+        .unwrap()
+        .record(NonZeroU64::new(1).unwrap())
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::RateLimited);
+    assert_eq!(error.http_status(), Some(429));
+    assert_eq!(error.retry_after(), Some("30"));
+    assert_eq!(fixture.requests().len(), 1);
+}

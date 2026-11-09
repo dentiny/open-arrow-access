@@ -4,9 +4,9 @@ This document describes the library's access responses, not the upstream HTTP
 API responses. Services can return bytes, Arrow batches, or discovered object
 references; they do not share one provider-wide row schema.
 
-The implemented entries below are based on main at `3546e53`. Gutenberg and
-CourtListener are documented separately as pending PRs. Recheck their linked
-implementations when those interfaces change.
+This reference covers the core reader entry points below. For the full provider
+catalogue and metadata/file resolution APIs, see the
+[provider matrix](../docs/support.md#dataset-providers) and individual guides.
 
 ## Entry points
 
@@ -21,8 +21,8 @@ Feature names are facade features on `open-arrow-access`.
 | PMC `PmcInventoryAccessor::open(ReadRequest)` | `service-pmc` | `Box<dyn RecordReader>` | Manifest `fileSchema` |
 | Common Crawl `CommonCrawlWarcAccessor::open(...)` | `service-warc` | `Box<dyn RecordReader>` | Caller-supplied WARC-to-Arrow accessor |
 | Common Crawl `CommonCrawlSegmentAccessor::open(...)` | `service-warc` | `Box<dyn RecordReader>` | Same as crawl-wide access |
-| Gutenberg `GutenbergAccessor::open(GutenbergRequest)` — [PR #51](https://github.com/dentiny/open-arrow-access/pull/51) | `service-gutenberg` (pending) | `Box<dyn RecordReader>` | Fixed book schema, with selected file bytes |
-| CourtListener `CourtListenerBulkAccessor::open(ByteReadRequest)` — [PR #64](https://github.com/dentiny/open-arrow-access/pull/64) | `service-courtlistener` (pending) | `Box<dyn ByteReader>` | No Arrow row schema; decoded CSV bytes |
+| Gutenberg `GutenbergAccessor::open(ReadRequest)` | `service-gutenberg` | `Box<dyn RecordReader>` | Fixed book metadata schema; content URLs are not fetched |
+| CourtListener `CourtListenerBulkAccessor::open(ByteReadRequest)` | `service-courtlistener` | `Box<dyn ByteReader>` | No Arrow row schema; decoded CSV bytes |
 
 `CommonCrawl` and `create_http_accessor` configure source/storage access; they
 do not themselves produce a record response.
@@ -220,11 +220,10 @@ Sources: [crawl-wide accessor](src/warc/accessor.rs),
 [segment accessor](src/commoncrawl/segment/accessor.rs),
 [FileSet response](../dataset/src/file_set/request.rs).
 
-## Gutenberg — pending PR #51
+## Gutenberg
 
-This interface is not yet on main. The
-[reviewed implementation](https://github.com/dentiny/open-arrow-access/blob/998cc82a757a2281a874f5276646be78a077fdcd/service/src/gutenberg/mod.rs)
-declares one row per book RDF object, including selected related files:
+`GutenbergAccessor::open(ReadRequest)` reads one per-book RDF object and emits one
+metadata row. It does not fetch related files. The fixed schema is:
 
 ```text
 ebook_id: UInt64
@@ -238,31 +237,25 @@ subject: List<item: Struct<scheme: Utf8?, value: Utf8>>
 bookshelf: List<item: Utf8>
 issued: Date32?
 rights: LargeUtf8?
-metadata_rdf: LargeBinary
-files: LargeList<item: Struct<
-  uri: Utf8, format: List<item: Utf8>, extent: UInt64?,
-  modified: Utf8?, data: LargeBinary
+files: List<item: Struct<
+  uri: Utf8, format: List<item: Utf8>, extent: UInt64?, modified: Utf8?
 >>
 ```
 
-List containers, list items, and struct items above are non-nullable unless
-marked `?`. Missing repeated metadata produces empty lists. Birth/death dates
-are years; `issued` is a date stored as days since 1970-01-01. `extent` and
-`modified` are metadata declarations, not storage verification results.
+Missing repeated metadata produces empty lists. Birth/death dates are years;
+`issued` stores days since 1970-01-01. File entries retain RDF order; `uri`,
+`extent`, and `modified` are metadata, not fetched or verified file content.
+There are no `metadata_rdf` or `files[].data` columns.
 
-`metadata_rdf` contains original RDF bytes; `files[].data` contains original
-selected file bytes, including their encoding/compression. Files follow request
-order; an empty selection produces `files = []`. Projecting out `files` skips
-file-content reads while still validating selected URIs against the RDF.
+Reader metadata has `source = Some(request.object)`. The full schema has no
+service-added schema metadata. `gutenberg::schema()` exposes it. Projection
+preserves caller order; mapped fields are validated even when projected away.
 
-Reader metadata has `source = Some(request.metadata.object)`. The full schema
-has no service-added schema metadata. `gutenberg::schema()` exposes it.
+Sources: [decoder](src/gutenberg/mod.rs), [field mapping](src/gutenberg/metadata.rs).
 
-## CourtListener bulk snapshots — pending PR #64
+## CourtListener bulk snapshots
 
-This interface is not yet on main. The
-[reviewed implementation](https://github.com/dentiny/open-arrow-access/tree/b436fa08f7513b960708cfb1b4de03f3a4b446cf/service/src/courtlistener)
-returns **decoded CSV bytes, not Arrow batches**. Tables can have different
+`CourtListenerBulkAccessor::open(ByteReadRequest)` returns **decoded CSV bytes, not Arrow batches**. Tables can have different
 headers and types; the service defines no Arrow schema for `opinions`,
 `opinion-clusters`, `courts`, or other tables. A compatible consumer must
 interpret the CSV and its companion SQL schema.
