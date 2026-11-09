@@ -1,5 +1,7 @@
 use crate::{ByteReader, Error, ErrorKind, Result};
 
+const MAX_PREALLOCATION_BYTES: u64 = 64 * 1024 * 1024;
+
 /// Collect an owned byte reader, preserving source errors and rejecting empty chunks.
 ///
 /// A known length reserves up to 64 MiB after the first nonempty chunk, avoiding
@@ -15,7 +17,7 @@ where
         .metadata()
         .content_length
         .unwrap_or(0)
-        .min(64 * 1024 * 1024) as usize;
+        .min(MAX_PREALLOCATION_BYTES) as usize;
     let mut output = Vec::new();
     while let Some(bytes) = reader.next().await? {
         if bytes.is_empty() {
