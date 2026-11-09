@@ -103,6 +103,7 @@ service-federal-register = [
     "open-arrow-access-service/federal-register",
 ]
 service-figshare = ["dep:open-arrow-access-service", "open-arrow-access-service/figshare"]
+service-govinfo = ["dep:open-arrow-access-service", "open-arrow-access-service/govinfo"]
 service-gutenberg = ["dep:open-arrow-access-service", "open-arrow-access-service/gutenberg"]
 service-hathifiles = ["dep:open-arrow-access-service", "open-arrow-access-service/hathifiles"]
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]
@@ -110,6 +111,7 @@ service-internet-archive = [
     "dep:open-arrow-access-service",
     "open-arrow-access-service/internet-archive",
 ]
+service-oapen = ["dep:open-arrow-access-service", "open-arrow-access-service/oapen"]
 service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
 service-uspto = ["dep:open-arrow-access-service", "open-arrow-access-service/uspto"]
 service-warc = ["dep:open-arrow-access-service", "open-arrow-access-service/warc"]

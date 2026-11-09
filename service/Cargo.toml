@@ -19,6 +19,7 @@ default = []
 doab = ["oai"]
 federal-register = []
 figshare = []
+govinfo = []
 gutenberg = ["format-xml", "dep:chrono"]
 hathifiles = []
 huggingface = [
@@ -31,6 +32,7 @@ huggingface = [
     "open-arrow-access-file-format/parquet",
 ]
 internet-archive = []
+oapen = ["oai"]
 pmc = [
     "dep:arrow-array",
     "dep:arrow-schema",
@@ -168,6 +170,14 @@ required-features = ["hathifiles"]
 [[test]]
 name = "federal_register"
 required-features = ["federal-register"]
+
+[[test]]
+name = "govinfo"
+required-features = ["govinfo"]
+
+[[test]]
+name = "oapen"
+required-features = ["oapen"]
 
 [[test]]
 name = "figshare"

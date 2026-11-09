@@ -67,5 +67,11 @@ pub mod hathifiles;
 #[cfg(feature = "federal-register")]
 pub mod federal_register;
 
+#[cfg(feature = "govinfo")]
+pub mod govinfo;
+
+#[cfg(feature = "oapen")]
+pub mod oapen;
+
 #[cfg(feature = "figshare")]
 pub mod figshare;
