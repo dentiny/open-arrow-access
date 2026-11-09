@@ -12,8 +12,8 @@ fn checks_namespaced_envelopes_and_accepts_standard_xml_headers() {
 async fn document_uses_xml_engine_for_namespaces_entities_and_complete_input() {
     use arrow_array::cast::AsArray;
     use arrow_schema::DataType::Utf8;
+    use open_arrow_access_file_format::xml::XmlField;
     use open_arrow_access_service::xml_metadata::XmlDocument;
-    use xml_arrow::XmlField;
 
     let raw = b"<?xml version=\"1.0\"?><!DOCTYPE manifest SYSTEM \"https://invalid.example/never-fetch.dtd\"><x:manifest xmlns:x=\"urn:meca\"><x:title>A &amp; B</x:title></x:manifest>";
     let document = XmlDocument::new(raw, "manifest").unwrap();
