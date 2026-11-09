@@ -33,6 +33,13 @@ pub struct DocumentAccessor<B, D> {
     decoder: Arc<D>,
 }
 
+impl<B, D: Default> DocumentAccessor<B, D> {
+    /// Construct a document provider with its default decoder settings.
+    pub fn with_default_decoder(storage: B) -> Self {
+        Self::new(storage, D::default())
+    }
+}
+
 impl<B, D> Clone for DocumentAccessor<B, D> {
     fn clone(&self) -> Self {
         Self {

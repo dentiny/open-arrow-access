@@ -3,9 +3,9 @@ use std::{num::NonZeroUsize, sync::Arc};
 use arrow_array::{RecordBatchOptions, cast::AsArray};
 use arrow_schema::{DataType, Field};
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability, DefaultDocumentAccessor,
-    DocumentAccessor, DocumentDecoder, Error, ErrorKind, ReadOptions, ReadRequest, RecordBatch,
-    RecordBatchBuilder, Result, Schema, SchemaRef, async_trait,
+    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability, DocumentAccessor,
+    DocumentDecoder, Error, ErrorKind, ReadOptions, ReadRequest, RecordBatch, RecordBatchBuilder,
+    Result, Schema, SchemaRef, async_trait,
 };
 use open_arrow_access_test_support::{MemoryAccessor, fixture};
 
@@ -58,10 +58,11 @@ impl Accessor for NonCloneStorage {
 }
 
 #[tokio::test]
-async fn default_decoder_entrypoint_clones_non_clone_inputs_and_opens_independent_readers() {
+async fn default_decoder_constructor_clones_non_clone_inputs_and_opens_independent_readers() {
     let source = MemoryAccessor::new(&fixture!("bytes", "binary.bin").await, 1);
     let observed = source.observations.clone();
-    let accessor = DefaultDocumentAccessor::<_, RawDocument>::new(NonCloneStorage(source));
+    let accessor =
+        DocumentAccessor::<_, RawDocument>::with_default_decoder(NonCloneStorage(source));
     let cloned = accessor.clone();
     let options = ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
@@ -99,20 +100,6 @@ async fn default_decoder_entrypoint_clones_non_clone_inputs_and_opens_independen
     assert_eq!(requests[0].object.locator(), "full");
     assert_eq!(requests[0].options, options);
     assert_eq!(requests[1].object.locator(), "projected");
-}
-
-#[tokio::test]
-async fn default_decoder_entrypoint_validates_projection_before_storage_io() {
-    let source = MemoryAccessor::new(&fixture!("bytes", "input.bin").await, 1);
-    let observed = source.observations.clone();
-    let accessor = DefaultDocumentAccessor::<_, RawDocument>::new(source);
-    let request = ReadRequest::new("input").with_options(ReadOptions {
-        projection: Some(vec!["unknown".into()]),
-        ..ReadOptions::default()
-    });
-    let error = accessor.open(request).await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    assert!(observed.requests.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

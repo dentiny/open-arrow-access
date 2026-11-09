@@ -1,3 +1,5 @@
+use indexmap::{IndexMap, map::Entry};
+
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ListRequest,
     ObjectRef, ObjectStream, Result, async_trait,
@@ -8,23 +10,25 @@ use open_arrow_access_core::{
 #[derive(Clone, Debug)]
 pub struct NamedFileAccessor<A> {
     inner: A,
-    files: Vec<(String, ObjectRef)>,
+    files: IndexMap<String, ObjectRef>,
 }
 
 impl<A> NamedFileAccessor<A> {
     /// Names are opaque and must be nonempty and unique. Construction performs no I/O.
     pub fn new(inner: A, files: Vec<(String, ObjectRef)>) -> Result<Self> {
-        let mut seen = std::collections::HashSet::new();
-        if files
-            .iter()
-            .any(|(name, _)| name.is_empty() || !seen.insert(name))
-        {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "configure_named_files",
-                "empty or duplicate filename",
-            ));
+        let mut indexed = IndexMap::with_capacity(files.len());
+        for (name, object) in files {
+            if name.is_empty() {
+                return Err(invalid_names());
+            }
+            match indexed.entry(name) {
+                Entry::Vacant(entry) => {
+                    entry.insert(object);
+                }
+                Entry::Occupied(_) => return Err(invalid_names()),
+            }
         }
+        let files = indexed;
         Ok(Self { inner, files })
     }
 }
@@ -45,17 +49,13 @@ where
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        let (_, object) = self
-            .files
-            .iter()
-            .find(|(name, _)| name == request.object.locator())
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::NotFound,
-                    "open_named_file",
-                    "filename is absent from manifest",
-                )
-            })?;
+        let object = self.files.get(request.object.locator()).ok_or_else(|| {
+            Error::new(
+                ErrorKind::NotFound,
+                "open_named_file",
+                "filename is absent from manifest",
+            )
+        })?;
         self.inner
             .open(ByteReadRequest::new(object.clone()).with_options(request.options))
             .await
@@ -84,4 +84,12 @@ where
             .collect::<Vec<_>>();
         Ok(Box::pin(futures::stream::iter(files)))
     }
+}
+
+fn invalid_names() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "configure_named_files",
+        "empty or duplicate filename",
+    )
 }

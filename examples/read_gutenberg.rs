@@ -12,7 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .next()
         .unwrap_or_else(|| "testdata/gutenberg/book.rdf".into());
     let operator = opendal::Operator::new(opendal::services::Fs::default().root(&root))?;
-    let books = GutenbergAccessor::new(OpenDalAccessor::new(operator));
+    let books = GutenbergAccessor::with_default_decoder(OpenDalAccessor::new(operator));
     let mut reader = books.open(ReadRequest::new(metadata)).await?;
     println!("schema: {:?}", reader.metadata().schema);
     while let Some(batch) = reader.next().await? {
