@@ -6,3 +6,9 @@ pub use validation::{array, download_url, filename, segment, text};
 
 mod document;
 pub use document::ApiDocument;
+
+mod connection;
+mod request;
+mod response;
+pub use crate::HttpStatusError;
+pub use connection::Connection;
