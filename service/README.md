@@ -450,6 +450,14 @@ See [figshare service](figshare.md).
 
 See [library-of-congress service](library-of-congress.md) for its contract and usage.
 
+## MECA
+
+See [storage-independent MECA archives](meca.md).
+
+## biorxiv
+
+See [biorxiv service](biorxiv.md) for its contract and usage.
+
 ## openstax
 
 See [openstax service](openstax.md) for its contract and usage.
