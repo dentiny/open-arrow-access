@@ -15,7 +15,6 @@ arxiv = [
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
-format-xml = ["dep:quick-xml"]
 gutenberg = ["dep:arrow-array", "dep:arrow-schema", "dep:chrono", "dep:xml-arrow"]
 huggingface = [
     "dep:open-arrow-access-dataset",
@@ -38,6 +37,9 @@ pmc = [
 regulations = []
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 zenodo = []
+
+format-xml = ["dep:quick-xml"]
+oai = ["format-xml"]
 
 [dependencies]
 arrow-array = { workspace = true, optional = true }
@@ -131,3 +133,7 @@ required-features = ["format-xml"]
 [[test]]
 name = "regulations"
 required-features = ["regulations"]
+
+[[test]]
+name = "oai"
+required-features = ["oai"]

@@ -51,3 +51,6 @@ pub mod xml_metadata;
 
 #[cfg(feature = "regulations")]
 pub mod regulations;
+
+#[cfg(feature = "oai")]
+pub mod oai;
