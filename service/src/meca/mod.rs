@@ -1,5 +1,7 @@
 //! Storage-independent MECA manifests over the existing ranged ZIP reader.
 mod error;
+mod parser;
+mod resolver;
 mod validation;
 use open_arrow_access_core::{ByteReader, Bytes, Result, read_all};
 use open_arrow_access_decompression::zip::{ZipArchive, ZipLimits};
@@ -24,12 +26,13 @@ impl MecaArchive {
     /// Decode the directory and manifest; open individual payloads on demand.
     pub async fn open(input: Box<dyn ByteReader>, limits: ZipLimits) -> Result<Self> {
         let archive = ZipArchive::open(input, limits).await?;
-        let index = validation::manifest_index(archive.entries())?;
+        let index = resolver::resolve_manifest_index(archive.entries())?;
         let reader = archive
             .open_entry(index, NonZeroUsize::new(65536).unwrap())
             .await?;
         let manifest = Bytes::from(read_all(reader, "read_meca_manifest").await?);
-        let files = validation::files(&manifest, archive.entries())?;
+        let parsed = parser::parse_manifest(&manifest)?;
+        let files = resolver::resolve_files(parsed, archive.entries())?;
         Ok(Self {
             archive,
             manifest,
