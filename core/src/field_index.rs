@@ -7,6 +7,7 @@ use arrow_schema::{ArrowError, Fields};
 /// Duplicate names resolve to the first position, matching Schema::index_of.
 #[derive(Debug)]
 pub struct FieldNameIndex {
+    /// Maps field names to their first zero-based positions in the field list.
     indices: HashMap<String, usize>,
 }
 
