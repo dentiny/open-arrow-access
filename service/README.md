@@ -449,3 +449,11 @@ See [figshare service](figshare.md).
 ## library-of-congress
 
 See [library-of-congress service](library-of-congress.md) for its contract and usage.
+
+## MECA
+
+See [storage-independent MECA archives](meca.md).
+
+## biorxiv
+
+See [biorxiv service](biorxiv.md) for its contract and usage.
