@@ -32,7 +32,6 @@ impl AtifDecoder {
             let Some(bytes) = self.documents.try_next().await? else {
                 break;
             };
-            // Borrow shared line slices to avoid copying the document.
             let document = std::str::from_utf8(&bytes)
                 .map_err(|error| decode_error(self.source.as_ref(), self.record_index, error))?;
             if self.format == AtifFormat::JsonLines && document.trim().is_empty() {

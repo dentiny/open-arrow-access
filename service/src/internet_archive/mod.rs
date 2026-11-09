@@ -116,11 +116,9 @@ fn deserialize_size<'de, D: Deserializer<'de>>(
         .transpose()
 }
 
-/// Fixed item membership over independently owned HTTP byte readers.
-/// Listing the empty root returns exact names, including nested paths, in API order.
+/// List exact names, including nested paths, at the empty root in API order.
 pub type InternetArchiveAccessor = ResolvedFileSet<OpenDalAccessor, InternetArchiveMetadata>;
 
-/// Metadata retained from the resolved item.
 #[derive(Clone, Debug)]
 pub struct InternetArchiveMetadata {
     pub identifier: String,
