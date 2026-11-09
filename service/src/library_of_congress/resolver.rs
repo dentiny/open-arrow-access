@@ -1,6 +1,6 @@
 use super::{error::decode, validation};
 use crate::common::{
-    Connection, LinkField, MetadataLink, resolve_download_url, resolve_optional_links, segment,
+    Connection, LinkField, MetadataLink, encode_path, resolve_download_url, resolve_optional_links,
 };
 use open_arrow_access_core::Result;
 use serde_json::Value;
@@ -42,12 +42,7 @@ pub(super) fn resolve_metadata_url(
     } else if value.starts_with(&prefix) {
         connection.origin().join(value).map_err(super::error::url)?
     } else {
-        let id = value
-            .trim_end_matches('/')
-            .split('/')
-            .map(segment)
-            .collect::<Result<Vec<_>>>()?
-            .join("/");
+        let id = encode_path(value.trim_end_matches('/'))?;
         connection.url(&format!("{kind}/{id}/"), &[])?
     };
     validation::validate_metadata_endpoint(&url, &prefix)?;
