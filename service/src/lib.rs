@@ -64,5 +64,14 @@ pub mod arxiv_metadata;
 #[cfg(feature = "hathifiles")]
 pub mod hathifiles;
 
+#[cfg(feature = "federal-register")]
+pub mod federal_register;
+
+#[cfg(feature = "govinfo")]
+pub mod govinfo;
+
+#[cfg(feature = "oapen")]
+pub mod oapen;
+
 #[cfg(feature = "library-of-congress")]
 pub mod library_of_congress;
