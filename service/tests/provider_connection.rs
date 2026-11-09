@@ -1,12 +1,9 @@
 use http::{Response, StatusCode};
 use open_arrow_access_service::common::Connection;
 use open_arrow_access_test_support::http::HttpFixture;
-use opendal::{Buffer, HttpBody, OperationContext};
-fn connection(f: &HttpFixture) -> Connection {
-    Connection::new(f.endpoint())
-        .unwrap()
-        .with_context(OperationContext::new())
-}
+use opendal::{Buffer, HttpBody};
+mod providers;
+use providers::connection;
 #[tokio::test]
 async fn reads_one_page_and_strips_credentials_across_redirects() {
     let f = HttpFixture::new();
