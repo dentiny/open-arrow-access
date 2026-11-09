@@ -35,5 +35,9 @@
     "measured_rounds_per_trial": 15,
     "order": "baseline/optimized, optimized/baseline, baseline/optimized"
   },
-  "note": "CPU/RSS include process setup and warmup; only timed samples exclude setup. Any working-tree dirty metadata includes report files and temporary local dependency patches. Only the FS workload writes a payload to disk."
+  "note": "CPU/RSS include process setup and warmup; only timed samples exclude setup. Any working-tree dirty metadata includes report files and temporary local dependency patches. Only the FS workload writes a payload to disk.",
+  "comparison_main": "bd5f64f118928d6a53d72190d56c36d65611b83d",
+  "latest_matrix_main": "3190f53e4213112fc2bc7cf8c42f2fd1bf7f2c98",
+  "latest_matrix_binary_sha256": "5396a0d30d1c929979e4cf5887dfa6a5e4069de6c619694b5564da594866382a",
+  "latest_matrix_build_checkout": "a239ebecde2cb364f1ec84cd5f011ee460075ad1"
 }
