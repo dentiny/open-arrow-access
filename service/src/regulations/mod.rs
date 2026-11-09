@@ -62,11 +62,12 @@ impl RegulationsService {
             RegulationsResource::Dockets => &[],
             _ => &[("include", "attachments")],
         };
-        let doc = self
-            .connection
-            .json(&format!("v4/{}/{}", resource.name(), segment(id)?), query)
-            .await?;
-        let files = parser::parse_record_files(doc.value(), resource, id)?;
-        self.connection.files(files, doc)
+        self.connection
+            .resolve_json_files(
+                &format!("v4/{}/{}", resource.name(), segment(id)?),
+                query,
+                |doc| parser::parse_record_files(doc.value(), resource, id),
+            )
+            .await
     }
 }
