@@ -26,6 +26,7 @@ huggingface = [
     "open-arrow-access-file-format/parquet",
 ]
 internet-archive = []
+oapen = ["oai"]
 pmc = [
     "dep:arrow-array",
     "dep:arrow-schema",
@@ -136,3 +137,7 @@ required-features = ["oai"]
 [[test]]
 name = "oai_provider"
 required-features = ["oai"]
+
+[[test]]
+name = "oapen"
+required-features = ["oapen"]
