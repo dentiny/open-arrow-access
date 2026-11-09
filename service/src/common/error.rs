@@ -12,12 +12,6 @@ pub(super) fn io(error: opendal::Error) -> Error {
     crate::http_client::transport_error(OP, error)
 }
 
-pub(super) fn request(error: http::Error) -> Error {
-    crate::http_client::request_error(OP, error)
-}
-pub(super) fn json(error: serde_json::Error) -> Error {
-    crate::http_client::json_error(OP, error)
-}
 pub(super) fn download_url(error: url::ParseError) -> Error {
     decode("invalid download URL").with_source(error)
 }
@@ -41,20 +35,12 @@ pub(super) fn file_namespace(error: Error) -> Error {
     decode("invalid file namespace").with_source(error)
 }
 
-pub(super) fn http(status: http::StatusCode) -> Error {
-    Error::new(
-        ErrorKind::from_http_status(status.as_u16()),
-        OP,
-        format!("provider HTTP {status}"),
-    )
-}
-
 pub(super) fn transport(error: Error) -> opendal::Error {
     opendal::Error::new(opendal::ErrorKind::Unexpected, "provider redirect failed")
         .set_source(error)
 }
 pub(super) fn transport_request(error: http::Error) -> opendal::Error {
-    transport(request(error))
+    transport(crate::http_client::request_error(OP, error))
 }
 pub(super) fn missing_auth_scope() -> opendal::Error {
     opendal::Error::new(

@@ -213,7 +213,10 @@ Feature-specific APIs live in public modules, such as
 `dataset::file_set::FileSetAccessor`. The facade forwards the component crates,
 so these paths match their standalone crate APIs.
 
-Default features are empty. Only implemented capabilities have Cargo feature
+Default features are empty. Shared service utilities such as
+`service::common::Connection` and `ApiDocument` are always available, alongside
+core contracts and OpenDAL storage. This includes the HTTP/JSON/URL dependency
+baseline; concrete providers remain feature-gated. Only implemented capabilities have Cargo feature
 names. Parquet page compression currently supports uncompressed and Snappy
 pages through the Parquet dependency. External gzip, LZ4, bzip2, and Zstandard decoding are separately
 enabled by `decompression-gzip`, `decompression-lz4`, `decompression-bz2`, and `decompression-zstd`; see [streaming decompression](decompression/README.md).
