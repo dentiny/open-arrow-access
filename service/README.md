@@ -442,6 +442,10 @@ See [govinfo service](govinfo.md).
 
 See [oapen service](oapen.md).
 
+## figshare
+
+See [figshare service](figshare.md).
+
 ## regulations
 
 See [regulations service](regulations.md) for its contract and usage.
