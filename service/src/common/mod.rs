@@ -14,7 +14,6 @@ mod connection;
 mod transport;
 pub use connection::Connection;
 
-mod download;
 
 mod files;
 pub use files::{RemoteFiles, RemoteHttpAccessor};
