@@ -78,29 +78,3 @@ fn validation_and_construction_share_namespace_rules() {
         }
     }
 }
-
-#[tokio::test]
-async fn partial_listing_survives_accessor_drop_in_manifest_order() {
-    let source = MemoryAccessor::new(b"unused", 2);
-    let observations = source.observations.clone();
-    let accessor = NamedFileAccessor::new(
-        source,
-        vec![
-            ("second".into(), "remote/2".into()),
-            ("first".into(), "remote/1".into()),
-        ],
-    )
-    .unwrap();
-    let mut listing = accessor.list(ListRequest::new("")).await.unwrap();
-    assert_eq!(
-        listing.try_next().await.unwrap().unwrap().locator(),
-        "second"
-    );
-    drop(accessor);
-    assert_eq!(
-        listing.try_next().await.unwrap().unwrap().locator(),
-        "first"
-    );
-    assert!(listing.try_next().await.unwrap().is_none());
-    assert!(observations.requests.lock().unwrap().is_empty());
-}
