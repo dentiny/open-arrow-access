@@ -1,4 +1,4 @@
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::{Error, ErrorKind, Result, is_relative_path};
 
 pub(crate) fn validate_locator(path: &str, prefix: bool, operation: &'static str) -> Result<()> {
     let base = if prefix {
@@ -9,10 +9,7 @@ pub(crate) fn validate_locator(path: &str, prefix: bool, operation: &'static str
     if path.trim() != path
         || path.starts_with('/')
         || (!prefix && path.is_empty())
-        || (!base.is_empty()
-            && base
-                .split('/')
-                .any(|part| part.is_empty() || matches!(part, "." | "..")))
+        || (!base.is_empty() && !is_relative_path(base))
     {
         return Err(Error::new(
             ErrorKind::InvalidInput,
