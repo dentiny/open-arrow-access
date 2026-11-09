@@ -59,6 +59,17 @@ output order and do not enable multi-file parallel scans. Multiple independently
 opened readers have separate budgets. `OpenDalAccessor::with_chunk_size` controls
 emitted byte chunks, independently of both settings above.
 
+For heavily fragmented HTTP inputs, opt in to bounded sequential staging with
+`OpenDalAccessor::new(operator).with_streaming_reads(true)`. With the default
+single-reader concurrency and no explicit `io_chunk_size`, it consumes transport
+buffers directly rather than first assembling a multi-MiB I/O range. This can
+reduce retained fragment descriptors and improve time to the first chunk, but
+adds per-fragment polling: very small responses may use more CPU. Range reads,
+explicit I/O chunk sizes and concurrency above one keep the existing chunked
+path. The option is disabled by default; benchmark your workload before enabling
+it.
+
+
 To use a standard futures stream, pass an owned record reader to
 `open_arrow_access::into_stream(reader)`. It yields `Result<RecordBatch>` and
 terminates after EOF or the first error.

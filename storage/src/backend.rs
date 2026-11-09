@@ -29,6 +29,7 @@ pub struct OpenDalAccessor {
     operator: Operator,
     chunk_size: NonZeroUsize,
     content_lengths: Option<Arc<HashMap<String, u64>>>,
+    streaming_reads: bool,
 }
 
 impl OpenDalAccessor {
@@ -37,7 +38,19 @@ impl OpenDalAccessor {
             operator,
             chunk_size: DEFAULT_OUTPUT_CHUNK_SIZE,
             content_lengths: None,
+            streaming_reads: false,
         }
+    }
+
+    /// Stream sequential transport buffers instead of eagerly assembling I/O ranges.
+    ///
+    /// This reduces staging and time to the first output chunk on fragmented inputs,
+    /// at the cost of more per-fragment polling. It applies only when concurrency is
+    /// one and `io_chunk_size` is unset. Explicit splitting and parallel reads retain
+    /// the chunked path, as do range reads. Disabled by default.
+    pub fn with_streaming_reads(mut self, enabled: bool) -> Self {
+        self.streaming_reads = enabled;
+        self
     }
 
     pub fn with_content_lengths(
@@ -121,8 +134,27 @@ impl Accessor for OpenDalAccessor {
             )
             .gap(0);
         let inner = builder.await.map_err(|e| map_error("open", path, e))?;
+        // A chunk size selects OpenDAL's eager range assembler. Opt-in
+        // sequential reads consume transport buffers directly so a small output
+        // chunk does not first buffer a multi-MiB range and all its descriptors.
+        // Keep the existing reader for exact ranges, explicit splitting and
+        // parallel reads; both readers share the same per-open I/O budget.
+        let sequential_input = if self.streaming_reads
+            && options.io_chunk_size.is_none()
+            && options.io_concurrency.get() == 1
+        {
+            operator
+                .reader_with(path)
+                .content_length_hint(len)
+                .gap(0)
+                .await
+                .map_err(|e| map_error("open", path, e))?
+        } else {
+            inner.clone()
+        };
         Ok(Box::new(OpenDalReader {
             inner,
+            sequential_input,
             metadata: ByteMetadata {
                 source: Some(object),
                 content_length: Some(len),
@@ -207,6 +239,7 @@ impl Execute for ReaderExecutor {
 
 struct OpenDalReader {
     inner: opendal::Reader,
+    sequential_input: opendal::Reader,
     sequential: Option<opendal::BufferStream>,
     pending: opendal::Buffer,
     metadata: ByteMetadata,
@@ -221,7 +254,7 @@ impl OpenDalReader {
         let path = self.metadata.source.as_ref().unwrap().locator();
         if self.sequential.is_none() {
             self.sequential = Some(
-                self.inner
+                self.sequential_input
                     .clone()
                     .into_stream(0..self.len)
                     .await
@@ -257,11 +290,19 @@ impl OpenDalReader {
                 return Ok(self.pending.split_to(target).next().unwrap());
             }
             let count = (target - written).min(self.pending.len());
-            output.extend(self.pending.split_to(count));
+            // Copy fragmented input directly into the final output allocation.
+            // Retaining a Vec<Bytes> first costs one descriptor per fragment and
+            // keeps their backing allocations alive until the chunk is complete.
+            if output.is_empty() {
+                output.reserve_exact(target);
+            }
+            for fragment in self.pending.split_to(count) {
+                output.extend_from_slice(&fragment);
+            }
             self.offset += count as u64;
             written += count;
         }
-        Ok(opendal::Buffer::from(output).to_bytes())
+        Ok(Bytes::from(output))
     }
 
     async fn read_exact_range(&mut self, range: Range<u64>) -> Result<Bytes> {

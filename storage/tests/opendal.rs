@@ -470,3 +470,90 @@ async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor
         assert_eq!(reader.read_range(4..8).await.unwrap().as_ref(), b"efgh");
     }
 }
+
+#[tokio::test]
+async fn fragmented_http_chunks_keep_exact_boundaries_and_owned_output() {
+    use open_arrow_access_test_support::http::HttpFixture;
+    let fixture = HttpFixture::new();
+    // The HTTP fixture emits three-byte body fragments. Neither the I/O chunk
+    // nor the final object length is a multiple of the output chunk size.
+    let contents: Vec<_> = (0..200_003).map(|i| (i % 251) as u8).collect();
+    fixture.file("/data.bin", contents.clone());
+    for (concurrency, io_chunk_size) in [
+        (1, None),
+        (1, NonZeroUsize::new(4093)),
+        (4, NonZeroUsize::new(4093)),
+        (4, None),
+    ] {
+        let operator =
+            Operator::new(opendal_service_http::Http::default().endpoint(fixture.endpoint()))
+                .unwrap();
+        let accessor = OpenDalAccessor::new(operator)
+            .with_streaming_reads(true)
+            .with_chunk_size(NonZeroUsize::new(65_536).unwrap());
+        let mut reader = accessor
+            .open(
+                ByteReadRequest::new("data.bin").with_options(ByteReadOptions {
+                    io_concurrency: NonZeroUsize::new(concurrency).unwrap(),
+                    io_chunk_size,
+                }),
+            )
+            .await
+            .unwrap();
+        let first = reader.next().await.unwrap().unwrap();
+        assert_eq!(first.as_ref(), &contents[..65_536]);
+        let mut offset = first.len();
+        while let Some(bytes) = reader.next().await.unwrap() {
+            assert_eq!(bytes.len(), (contents.len() - offset).min(65_536));
+            assert_eq!(bytes.as_ref(), &contents[offset..offset + bytes.len()]);
+            offset += bytes.len();
+        }
+        assert_eq!(offset, contents.len());
+        assert!(reader.next().await.unwrap().is_none());
+        drop(reader);
+        assert_eq!(first.as_ref(), &contents[..65_536]);
+    }
+}
+
+#[tokio::test]
+async fn streaming_sequential_http_read_pulls_only_the_output_chunk() {
+    use open_arrow_access_test_support::http::{HttpFixture, file_response};
+    use opendal::{Buffer, HttpBody};
+    let fixture = HttpFixture::new();
+    let fragments = Arc::new(AtomicUsize::new(0));
+    let observed = fragments.clone();
+    let contents = open_arrow_access_core::Bytes::from(vec![b'x'; 4 * 1024 * 1024]);
+    fixture.handle(move |request| {
+        if request.method() == http::Method::HEAD {
+            return Ok(file_response(&request, contents.clone()));
+        }
+        let observed = observed.clone();
+        let len = contents.len();
+        let body = futures::StreamExt::inspect(
+            futures::stream::iter(Buffer::from(contents.clone()).chunks(4096).map(Ok)),
+            move |_| {
+                observed.fetch_add(1, Ordering::SeqCst);
+            },
+        );
+        Ok(http::Response::builder()
+            .status(http::StatusCode::PARTIAL_CONTENT)
+            .header("content-length", len)
+            .header("content-range", format!("bytes 0-{}/{}", len - 1, len))
+            .body(HttpBody::new(body, Some(len as u64)))
+            .unwrap())
+    });
+    let operator =
+        Operator::new(opendal_service_http::Http::default().endpoint(fixture.endpoint())).unwrap();
+    let mut reader = OpenDalAccessor::new(operator)
+        .with_streaming_reads(true)
+        .open("data.bin".into())
+        .await
+        .unwrap();
+    assert_eq!(fragments.load(Ordering::SeqCst), 0);
+    let first = reader.next().await.unwrap().unwrap();
+    assert_eq!(first.len(), 65_536);
+    assert_eq!(first.as_ref(), vec![b'x'; 65_536]);
+    assert_eq!(fragments.load(Ordering::SeqCst), 16);
+    drop(reader);
+    assert_eq!(fragments.load(Ordering::SeqCst), 16);
+}

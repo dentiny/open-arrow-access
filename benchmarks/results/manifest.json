@@ -1,0 +1,150 @@
+{
+  "date_local": "2026-11-09",
+  "timezone": "America/Los_Angeles",
+  "variants": {
+    "upstream-baseline": {
+      "source_commit": "b2c508eaae91244b632555ed50f3325ffe882085",
+      "description": "Unmodified production sources plus benchmark harness; no path overrides.",
+      "binary_sha256": "63434270ba3caa70d01028c72c8bf0fc79574a980f7fc21c30865b66305cd601"
+    },
+    "reviewed-optimizations": {
+      "description": "Storage direct copying and opt-in streaming; local ATIF and XML patches. Streaming false unless explicitly recorded true.",
+      "atif_commit": "aab4660148fd47e74b8ac3682ccc8d1c3555cdcc",
+      "xml_commit": "9505c9600dadfb8464e5d3237aaab0ce76af256d",
+      "binary_sha256": "161c975956f70659a0ce838777d8283bc09cf2de35566414b3c5139652ff1b1f"
+    },
+    "latency-baseline": {
+      "source_commit": "b2c508eaae91244b632555ed50f3325ffe882085",
+      "description": "Unmodified production sources; explicit 64-KiB I/O splitting and injected 5-ms latency.",
+      "binary_sha256": "bf219927b6a81b9330e772f9b9b230a229279977a09175f054eea22d7644d1f9"
+    }
+  },
+  "files": {
+    "default-after.jsonl": {
+      "variant": "reviewed-optimizations",
+      "sha256": "7511ee7efa1506b55182cb65a22a8581183451897a3fd6be445de3f3b6317ef8",
+      "independent_processes": 168
+    },
+    "default-before.jsonl": {
+      "variant": "upstream-baseline",
+      "sha256": "cc4c8c5da3074500e46cca84b85a6cea2b2ce6362c18d353990b411569a42030",
+      "independent_processes": 168
+    },
+    "latency-concurrency-1.jsonl": {
+      "variant": "latency-baseline",
+      "sha256": "10ae884b9a3bd3dbe10bf6137226c3c660a42e23cd8c967c9253bbb204cb8058",
+      "independent_processes": 6
+    },
+    "latency-concurrency-4.jsonl": {
+      "variant": "latency-baseline",
+      "sha256": "a9860940f6666ee7531124ecbc23342f46a70239d05d07601054556f5ec2e9fd",
+      "independent_processes": 6
+    },
+    "paired-s3-controls-after.jsonl": {
+      "variant": "reviewed-optimizations",
+      "sha256": "f6604ae61e36d0cce9d4066775abea0af0bbd47f32bbaaeec648ed69d943e03c",
+      "independent_processes": 10
+    },
+    "paired-s3-controls-before.jsonl": {
+      "variant": "upstream-baseline",
+      "sha256": "1fedc60e57c028b1685215e48608c5255603da73f7d1d20100982542a45d3eb6",
+      "independent_processes": 10
+    },
+    "paired-storage-copy-after.jsonl": {
+      "variant": "reviewed-optimizations",
+      "sha256": "3b4b01bcb6ec47d214baba274375cd0bd4b38f274c60216b8d50eb9843b123b4",
+      "independent_processes": 5
+    },
+    "paired-storage-copy-before.jsonl": {
+      "variant": "upstream-baseline",
+      "sha256": "e0f7482771f2f0b369d5041aa121508a0488a1053b8589a5bf810b7ab9b39d90",
+      "independent_processes": 5
+    },
+    "paired-tools-1024-after.jsonl": {
+      "variant": "reviewed-optimizations",
+      "sha256": "363acda8c75e8cdd38d5c299d3563ba5cd167cb7d168a530cef322c034a4e727",
+      "independent_processes": 5
+    },
+    "paired-tools-1024-before.jsonl": {
+      "variant": "upstream-baseline",
+      "sha256": "aae3377335610410c896d018d12446b63d44df39615304118a16014b12feb1a6",
+      "independent_processes": 5
+    },
+    "paired-tools-256-after.jsonl": {
+      "variant": "reviewed-optimizations",
+      "sha256": "0a6d5cd7ca80c2d1dfcc5b112883e9d8402eb0db01b7aea874be14e1d9cc8e78",
+      "independent_processes": 5
+    },
+    "paired-tools-256-before.jsonl": {
+      "variant": "upstream-baseline",
+      "sha256": "40249245de348791560bba816ce425c2d4c6086a32ae4ebe5fd51896bebfb46a",
+      "independent_processes": 5
+    },
+    "paired-tools-32-after.jsonl": {
+      "variant": "reviewed-optimizations",
+      "sha256": "23fb884ae31ec42e96e420e25dd0cbfbc0983a507f7358727d1006a72e170cd9",
+      "independent_processes": 5
+    },
+    "paired-tools-32-before.jsonl": {
+      "variant": "upstream-baseline",
+      "sha256": "2bab037213d73ad4f13411b70509748878b660bcc734af95fa6d971dff466c54",
+      "independent_processes": 5
+    },
+    "paired-tools-8-after.jsonl": {
+      "variant": "reviewed-optimizations",
+      "sha256": "ce7d2d8f53900dfe5e36ac032345ad8db3aa7a84103b36a80147e640fc135941",
+      "independent_processes": 5
+    },
+    "paired-tools-8-before.jsonl": {
+      "variant": "upstream-baseline",
+      "sha256": "1023453fd4a3d24415b6f698895455e0801eb00d422ca7cf2c77e8444666f883",
+      "independent_processes": 5
+    },
+    "paired-xml-after.jsonl": {
+      "variant": "reviewed-optimizations",
+      "sha256": "f5121400eca4ed69ede83d06d8e83e301c5e4dc101c928aa2283829cce526110",
+      "independent_processes": 20
+    },
+    "paired-xml-before.jsonl": {
+      "variant": "upstream-baseline",
+      "sha256": "1727ac8d0dcf486214c97a6ac2b9bfa9e15031224014fa803c2e1cb14f59b10b",
+      "independent_processes": 20
+    },
+    "stream-after-16384.jsonl": {
+      "variant": "reviewed-optimizations",
+      "sha256": "f9540874558298152b5fccb2bf4812f633d6d6781ccf9d63ad2bd8827a042358",
+      "independent_processes": 6
+    },
+    "stream-after-256.jsonl": {
+      "variant": "reviewed-optimizations",
+      "sha256": "b868af9cd308915f9ed9d8127f10ed1f95cf098bf13d5da6e4a114eac84c1091",
+      "independent_processes": 6
+    },
+    "stream-after-3.jsonl": {
+      "variant": "reviewed-optimizations",
+      "sha256": "a4548bf47e66d978b8aeea8c660f816e27caab46e4b0920005677dc7979161fa",
+      "independent_processes": 6
+    },
+    "stream-before-16384.jsonl": {
+      "variant": "upstream-baseline",
+      "sha256": "f033e6fabb7735aa238828ca275fa11721de73b61ac20238efa6e14168156030",
+      "independent_processes": 6
+    },
+    "stream-before-256.jsonl": {
+      "variant": "upstream-baseline",
+      "sha256": "d6a005df40b756898c4f137390d82aaf9f31a5ec59556a432a09756fec3408ca",
+      "independent_processes": 6
+    },
+    "stream-before-3.jsonl": {
+      "variant": "upstream-baseline",
+      "sha256": "204bfb31b44f44ce4a2f057d6a450740135410e566521825a02ff1e2564e6301",
+      "independent_processes": 6
+    }
+  },
+  "notes": [
+    "Only superseding broad and paired/focused runs are retained; preliminary exploratory runs were excluded.",
+    "The baseline was rebuilt successfully with the final harness against unmodified upstream production code.",
+    "Peak RSS/CPU counters cover the whole process, not just timed scans.",
+    "Actual toolchain: Homebrew Rust 1.97.1."
+  ]
+}

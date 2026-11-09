@@ -1,0 +1,24 @@
+{
+  "tool": "macOS sample",
+  "duration_seconds": 3,
+  "interval_ms": 1,
+  "case": "atif-tools",
+  "rows": 64,
+  "width": 1024,
+  "backend": "memory",
+  "method": "Sum exact validate_details frame nodes in the main-thread call graph; no embedded trajectories or recursive validation in this input.",
+  "profiles": {
+    "before": {
+      "main_thread_samples": 2477,
+      "samples_through_validate_details": 1688,
+      "fraction": 0.6814695195801372,
+      "raw_profile_sha256": "58765787988e2cb33cfdb8f56bb3d5889e4d5687e98dc10b03c7722483b6786e"
+    },
+    "after": {
+      "main_thread_samples": 2463,
+      "samples_through_validate_details": 159,
+      "fraction": 0.06455542021924482,
+      "raw_profile_sha256": "85c145d67b758708ced07e1d6f140c1ca9d2c65b3aaf903cbe22b350cb6e2075"
+    }
+  }
+}
