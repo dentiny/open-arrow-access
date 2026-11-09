@@ -83,6 +83,13 @@ impl XmlFormat {
         self
     }
 
+    fn bindings(&self) -> Vec<NamespaceBinding<'_>> {
+        self.namespaces
+            .iter()
+            .map(|(prefix, uri)| NamespaceBinding { prefix, uri })
+            .collect()
+    }
+
     fn options(&self) -> ReaderOptions {
         ReaderOptions {
             max_record_bytes: self.limits.max_record_bytes,
@@ -101,11 +108,7 @@ impl ReaderFactory for XmlFormat {
 
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
         let options = &request.options;
-        let bindings: Vec<_> = self
-            .namespaces
-            .iter()
-            .map(|(prefix, uri)| NamespaceBinding { prefix, uri })
-            .collect();
+        let bindings = self.bindings();
         let validation_schema = match &self.schema {
             Some(schema) => schema.clone(),
             None => {
@@ -153,11 +156,7 @@ impl ReaderFactory for XmlFormat {
         request: ReadRequest,
         (validation_schema, options, explicit_schema): Self::Prepared,
     ) -> Result<Box<dyn RecordReader>> {
-        let bindings: Vec<_> = self
-            .namespaces
-            .iter()
-            .map(|(prefix, uri)| NamespaceBinding { prefix, uri })
-            .collect();
+        let bindings = self.bindings();
         let input = into_async_read(input, "read_xml");
         let (reader, schema, projection) = if let Some(schema) = explicit_schema {
             let reader = XmlReader::new(input, validation_schema, &self.record_path, options)
