@@ -442,6 +442,10 @@ See [govinfo service](govinfo.md).
 
 See [oapen service](oapen.md).
 
+## figshare
+
+See [figshare service](figshare.md).
+
 ## library-of-congress
 
 See [library-of-congress service](library-of-congress.md) for its contract and usage.
