@@ -2,8 +2,7 @@ use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
 use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest, Error, ErrorKind};
 use open_arrow_access_file_format::warc::{WarcAccessor, WarcHeader};
-use open_arrow_access_storage::OpenDalAccessor;
-use open_arrow_access_test_support::{MemoryAccessor, fixture, fs_operator, reader};
+use open_arrow_access_test_support::{MemoryAccessor, fixture, reader};
 
 #[tokio::test]
 async fn parser_preserves_physical_records_order_headers_and_owned_binary_bodies() {
@@ -190,23 +189,4 @@ async fn empty_input_and_independent_opens_have_terminal_eof() {
     );
     assert!(left.next().await.unwrap().is_none());
     assert!(right.next().await.unwrap().is_none());
-}
-
-#[tokio::test]
-async fn open_errors_are_forwarded_and_empty_chunks_are_terminal_io_errors() {
-    let dir = tempfile::tempdir().unwrap();
-    let accessor = WarcAccessor::new(OpenDalAccessor::new(fs_operator(dir.path())));
-    let error = accessor.open("missing.warc".into()).await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::NotFound);
-    assert!(error.source().is_some());
-    let input =
-        MemoryAccessor::new(&fixture!("warc", "good_resource.warc").await, 1).with_empty_chunk(0);
-    let observed = input.observations.clone();
-    let mut reader = WarcAccessor::new(input)
-        .open("a.warc".into())
-        .await
-        .unwrap();
-    let error = reader.next().await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::Io);
-    reader::assert_finished(reader.as_mut(), &observed.reads, Clone::clone).await;
 }

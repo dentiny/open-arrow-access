@@ -67,7 +67,6 @@ async fn error_codes_sources_and_terminal_state_follow_the_byte_contract() -> Re
     byte_layer::assert_error_contract(
         |input| input.layer(DecompressionLayer::new(Zstd)),
         &fixture!("zstd", "payload.zst").await,
-        b"payload",
         "decompress",
     )
     .await

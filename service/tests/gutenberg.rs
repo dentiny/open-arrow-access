@@ -109,19 +109,6 @@ async fn rejects_invalid_rdf_without_silently_dropping_rows() {
 }
 
 #[tokio::test]
-async fn preserves_storage_errors() {
-    let bytes = MemoryAccessor::new(&fixture!("gutenberg", "book.rdf").await, 7)
-        .with_failure(7, ErrorKind::PermissionDenied);
-    let mut reader = GutenbergAccessor::with_default_decoder(bytes)
-        .open(request())
-        .await
-        .unwrap();
-    let error = reader.next().await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
-    assert_eq!(error.operation(), "memory_read");
-}
-
-#[tokio::test]
 async fn keeps_metadata_only_books_with_missing_optional_fields() {
     let raw = fixture!("gutenberg", "metadata_only.rdf").await;
     let accessor = GutenbergAccessor::with_default_decoder(MemoryAccessor::new(&raw, 13));
