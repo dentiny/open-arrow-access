@@ -6,7 +6,7 @@ use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
 use serde::de::DeserializeOwned;
 use url::Url;
 
-use super::{HttpClient, validation::validate_origin};
+use super::{HttpClient, resolve_origin};
 use crate::ResolvedFileSet;
 
 /// One download representation, addressed relative to the plan's `root`.
@@ -37,10 +37,10 @@ impl<M> ResolvedFilesPlan<M> {
         files: Vec<(String, ResolvedFile)>,
         metadata: M,
     ) -> Result<Self> {
-        let ordered = super::validation::order_files(files)?;
+        super::validation::validate_file_names(files.iter().map(|(name, _)| name.as_str()))?;
         Ok(Self {
             root: root.into(),
-            files: ordered,
+            files: files.into_iter().collect(),
             metadata,
             query: Vec::new(),
         })
@@ -76,7 +76,7 @@ impl HttpFileService {
         map_file_namespace_error: fn(Error) -> Error,
     ) -> Result<Self> {
         Ok(Self {
-            endpoint: validate_origin(endpoint, configure)?,
+            endpoint: resolve_origin(endpoint, configure)?,
             client: HttpClient::new()?,
             operation,
             map_file_namespace_error,
