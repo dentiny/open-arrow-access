@@ -3,7 +3,7 @@ use super::{
     transport::{self, AuthScope},
     url_util, validation,
 };
-use crate::{ResolvedFileSet, file_manifest::FileSpec};
+use crate::ResolvedFileSet;
 use futures::stream;
 use http::{HeaderMap, HeaderValue, Request, header::HeaderName};
 use open_arrow_access_core::{
@@ -13,6 +13,8 @@ use open_arrow_access_core::{
 use open_arrow_access_storage::NamedFileAccessor;
 use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext, raw::oio::ReadStream};
 use url::Url;
+
+use crate::file_manifest::FileSpec;
 
 const DEFAULT_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 

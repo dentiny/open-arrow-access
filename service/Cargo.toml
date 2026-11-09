@@ -72,7 +72,6 @@ arrow-array = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 futures.workspace = true
 http.workspace = true
-indexmap.workspace = true
 open-arrow-access-core.workspace = true
 open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
