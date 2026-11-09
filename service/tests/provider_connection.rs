@@ -198,3 +198,38 @@ async fn http_failures_preserve_retry_metadata() {
     assert_eq!(error.http_status(), Some(429));
     assert_eq!(error.retry_after(), None);
 }
+
+#[tokio::test]
+async fn buffered_bodies_preserve_single_and_fragmented_payloads_and_framing_errors() {
+    for (parts, declared, expected) in [
+        (vec!["payload"], Some(7), Some("payload")),
+        (vec!["pay", "load"], Some(7), Some("payload")),
+        (vec!["pay", "load"], None, Some("payload")),
+        (vec!["payload"], Some(8), None),
+        (vec!["pay", "load"], Some(8), None),
+        (vec!["payload"], Some(6), None),
+        (vec!["pay", "load"], Some(6), None),
+        (vec![], Some(0), Some("")),
+        (vec![], Some(1), None),
+    ] {
+        let fixture = HttpFixture::new();
+        fixture.handle(move |_| {
+            let mut response = Response::builder().status(200);
+            if let Some(length) = declared {
+                response = response.header("content-length", length);
+            }
+            Ok(response
+                .body(HttpBody::new(
+                    stream::iter(parts.clone().into_iter().map(|part| Ok(Buffer::from(part)))),
+                    None,
+                ))
+                .unwrap())
+        });
+        let client = connection(&fixture);
+        let result = client.bytes(client.url("body", &[]).unwrap(), "*/*").await;
+        match expected {
+            Some(expected) => assert_eq!(result.unwrap().as_ref(), expected.as_bytes()),
+            None => assert_eq!(result.unwrap_err().kind(), ErrorKind::Decode),
+        }
+    }
+}

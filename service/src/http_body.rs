@@ -8,7 +8,22 @@ pub(crate) async fn collect(
     operation: &'static str,
 ) -> Result<Bytes> {
     let mut body = BodyReader::new(response, operation)?;
-    let mut bytes = Vec::new();
+    let Some(first) = body.next().await? else {
+        return Ok(Bytes::new());
+    };
+    // Validate EOF before returning a single buffer, preserving framing errors.
+    let Some(second) = body.next().await? else {
+        return Ok(first.to_bytes());
+    };
+    // Content-Length is an allocation hint, never an unbounded reservation.
+    // Wait for actual data before reserving for a possibly stale large header.
+    let capacity = body.content_length().unwrap_or(0).min(64 * 1024 * 1024) as usize;
+    let mut bytes = Vec::with_capacity(capacity);
+    for buffer in [first, second] {
+        for part in buffer {
+            bytes.extend_from_slice(&part);
+        }
+    }
     while let Some(buffer) = body.next().await? {
         for part in buffer {
             bytes.extend_from_slice(&part);
