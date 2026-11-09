@@ -3,11 +3,13 @@
 mod error;
 pub(crate) mod files;
 mod query;
+mod transport;
+pub(crate) use transport::new_transport;
 pub(crate) mod validation;
 
-use error::transport_error;
-use http::{Request, StatusCode};
-use open_arrow_access_core::{Error, ErrorKind, Result};
+pub(crate) use error::{json_error, request_error, transport_error};
+use http::Request;
+use open_arrow_access_core::Result;
 use open_arrow_access_storage::OpenDalAccessor;
 use opendal::{Buffer, HttpTransporter, OperationContext, raw::oio::ReadStream};
 use serde::de::DeserializeOwned;
@@ -20,20 +22,7 @@ pub(crate) struct HttpClient {
 
 impl HttpClient {
     pub(crate) fn new() -> Result<Self> {
-        let client = reqwest::Client::builder()
-            .user_agent(concat!("open-arrow-access/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|error| {
-                Error::new(
-                    ErrorKind::Io,
-                    "configure_http",
-                    "failed to build HTTP client",
-                )
-                .with_source(error)
-            })?;
-        HttpTransporter::install_default(opendal_http_transport_reqwest::ReqwestTransport::new(
-            client,
-        ));
+        HttpTransporter::install_default(new_transport(true)?);
         opendal::install_default();
         Ok(Self {
             context: OperationContext::new(),
@@ -73,10 +62,9 @@ impl HttpClient {
         if let Some(token) = token {
             request = request.header("authorization", format!("Bearer {token}"));
         }
-        let request = request.body(Buffer::new()).map_err(|error| {
-            Error::new(ErrorKind::InvalidInput, operation, "invalid HTTP request")
-                .with_source(error)
-        })?;
+        let request = request
+            .body(Buffer::new())
+            .map_err(|error| request_error(operation, error))?;
         let response = self
             .context
             .http_transport()
@@ -84,7 +72,7 @@ impl HttpClient {
             .await
             .map_err(|error| transport_error(operation, error))?;
         let status = response.status();
-        if status != StatusCode::OK {
+        if status != http::StatusCode::OK {
             return Err(error::http_status_error(operation, status));
         }
         let mut body = response.into_body();
@@ -101,8 +89,6 @@ impl HttpClient {
                 bytes.extend_from_slice(&part);
             }
         }
-        serde_json::from_slice(&bytes).map_err(|error| {
-            Error::new(ErrorKind::Decode, operation, "invalid JSON metadata").with_source(error)
-        })
+        validation::json(&bytes, operation)
     }
 }
