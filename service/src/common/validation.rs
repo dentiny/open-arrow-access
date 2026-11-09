@@ -1,12 +1,9 @@
-use super::error;
+//! Input constraints and byte-stream invariants for shared provider utilities.
 use super::{decode, invalid};
 use open_arrow_access_core::Result;
-use serde_json::Value;
 use url::Url;
 
-/// Validate an absolute download URL without altering its signed query string.
-pub fn download_url(value: &str) -> Result<Url> {
-    let url = Url::parse(value).map_err(error::download_url)?;
+pub(super) fn download_url(url: &Url) -> Result<()> {
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || !url.username().is_empty()
@@ -15,39 +12,19 @@ pub fn download_url(value: &str) -> Result<Url> {
     {
         return Err(decode("expected credential-free HTTP(S) download URL"));
     }
-    Ok(url)
+    Ok(())
 }
 
-/// Encode one provider path component, including slashes in opaque IDs/tokens.
-pub fn segment(value: &str) -> Result<String> {
+pub(super) fn identifier(value: &str) -> Result<()> {
     if value.is_empty() || matches!(value, "." | "..") {
         return Err(invalid("empty or dot identifier"));
     }
-    let mut url = Url::parse("https://encode.invalid/").unwrap();
-    url.path_segments_mut().unwrap().push(value);
-    Ok(url.path()[1..].to_owned())
+    Ok(())
 }
 
-/// Required JSON field validation shared by provider-specific schema mappings.
-pub fn text<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
-    value
-        .get(field)
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| error::missing_field(field))
-}
-/// Required JSON array validation; missing and null are not silently treated as empty.
-pub fn array<'a>(value: &'a Value, field: &str) -> Result<&'a Vec<Value>> {
-    value
-        .get(field)
-        .and_then(Value::as_array)
-        .ok_or_else(|| error::missing_field(field))
-}
-
-/// Validate and encode one logical filename using the existing provider filename rules.
-pub fn filename(value: &str) -> Result<String> {
+pub(super) fn filename_component(value: &str) -> Result<()> {
     if !crate::filename::valid_filename_component(value) {
         return Err(invalid("invalid filename component"));
     }
-    segment(value)
+    Ok(())
 }
