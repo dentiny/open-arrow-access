@@ -64,6 +64,18 @@ async fn drain(mut reader: Box<dyn RecordReader>) -> usize {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let case = std::env::args().nth(1).unwrap_or_else(|| "--list".into());
+    if case == "--bench" {
+        // Cargo passes --bench even for a custom harness. Isolate every case in
+        // its own process, matching the documented Python runner's lifecycle.
+        for case in CASES {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .arg(case)
+                .status()
+                .unwrap();
+            assert!(status.success(), "benchmark {case} failed");
+        }
+        return;
+    }
     if case == "--list" {
         for case in CASES {
             println!("{case}");
