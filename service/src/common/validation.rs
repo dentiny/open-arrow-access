@@ -1,6 +1,5 @@
 //! Input constraints and byte-stream invariants for shared provider utilities.
 use super::{MetadataLink, decode, invalid};
-use http::HeaderMap;
 use open_arrow_access_core::Result;
 use url::Url;
 
@@ -23,7 +22,7 @@ pub(super) fn identifier(value: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn filename_component(value: &str) -> Result<()> {
+pub(crate) fn filename_component(value: &str) -> Result<()> {
     if !crate::filename::valid_filename_component(value) {
         return Err(invalid("invalid filename component"));
     }
@@ -54,44 +53,21 @@ pub(super) fn redirect(current: &Url, next: &Url) -> Result<()> {
     Ok(())
 }
 
-/// Validate body length for buffered metadata and streaming downloads alike.
-pub(super) struct BodyLength {
-    pub(super) expected: Option<u64>,
-    read: u64,
-}
-impl BodyLength {
-    pub(super) fn new(headers: &HeaderMap) -> Result<Self> {
-        let expected = headers
-            .get("content-length")
-            .map(|value| {
-                value
-                    .to_str()
-                    .ok()
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .ok_or_else(|| decode("invalid Content-Length"))
-            })
-            .transpose()?;
-        Ok(Self { expected, read: 0 })
+pub(super) fn validate_body_progress(expected: Option<u64>, read: u64) -> Result<()> {
+    if expected.is_some_and(|length| read > length) {
+        return Err(decode("HTTP body exceeds Content-Length"));
     }
-    pub(super) fn push(&mut self, bytes: usize) -> Result<()> {
-        self.read = self
-            .read
-            .checked_add(bytes as u64)
-            .ok_or_else(|| decode("body length overflow"))?;
-        if self.expected.is_some_and(|length| self.read > length) {
-            return Err(decode("HTTP body exceeds Content-Length"));
-        }
-        Ok(())
-    }
-    pub(super) fn finish(&self) -> Result<()> {
-        if self.expected.is_some_and(|length| self.read != length) {
-            return Err(decode("truncated HTTP body"));
-        }
-        Ok(())
-    }
+    Ok(())
 }
 
-pub(super) fn downloads(files: &[MetadataLink]) -> Result<()> {
+pub(super) fn validate_body_complete(expected: Option<u64>, read: u64) -> Result<()> {
+    if expected.is_some_and(|length| read != length) {
+        return Err(decode("truncated HTTP body"));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_downloads(files: &[MetadataLink]) -> Result<()> {
     for file in files {
         super::resolve_download_url(&file.url)?;
     }
