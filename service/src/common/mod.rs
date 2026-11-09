@@ -15,3 +15,5 @@ mod transport;
 pub use connection::{Connection, RemoteFiles};
 
 pub use json_util::{LinkField, MetadataLink, resolve_optional_links};
+
+pub(crate) use validation::filename_component as validate_filename;
