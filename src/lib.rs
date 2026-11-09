@@ -19,6 +19,7 @@ pub use open_arrow_access_core::*;
     feature = "service-uspto",
     feature = "service-doab",
     feature = "service-hathifiles",
+    feature = "service-federal-register",
 ))]
 pub use open_arrow_access_service as service;
 
