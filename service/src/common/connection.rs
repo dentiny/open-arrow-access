@@ -7,8 +7,8 @@ use crate::{ResolvedFileSet, http_body::BodyLength, http_client::HttpClient};
 use futures::stream;
 use http::{HeaderMap, HeaderValue, Request, header::HeaderName};
 use open_arrow_access_core::{
-    Accessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability,
-    Result, StreamReader, async_trait,
+    Accessor, ByteAccessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes,
+    Capability, Result, StreamReader, async_trait,
 };
 use open_arrow_access_storage::NamedFileAccessor;
 use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext, raw::oio::ReadStream};
@@ -197,3 +197,7 @@ impl Accessor for Connection {
         Connection::open(self, request.object.locator(), request.options).await
     }
 }
+
+// HTTP GET provides sequential bytes; listing uses the default Unsupported result.
+#[async_trait]
+impl ByteAccessor for Connection {}
