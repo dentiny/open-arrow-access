@@ -11,9 +11,8 @@ pub use opendal;
 mod named_files;
 pub use named_files::{NamedFileAccessor, validate_file_names};
 
-/// Classify OpenDAL I/O failures independently of operation and source context.
-/// Unrecognized categories are I/O errors; callers may handle configuration
-/// errors separately before using this fallback.
+/// Classify OpenDAL I/O failures; unrecognized categories map to `Io`.
+/// Callers handle configuration errors separately.
 pub fn opendal_error_kind(kind: opendal::ErrorKind) -> open_arrow_access_core::ErrorKind {
     use open_arrow_access_core::ErrorKind;
 

@@ -32,7 +32,6 @@ impl<M> ResolvedFilesPlan<M> {
         })
     }
 
-    /// Query parameters apply to file downloads, not the metadata request.
     pub(crate) fn with_query(mut self, query: &[(&str, &str)]) -> Self {
         self.query = query
             .iter()
@@ -72,7 +71,7 @@ impl HttpFileService {
         &self.endpoint
     }
 
-    /// Resolve a JSON manifest over the download transport without fetching file bodies.
+    /// Resolve a JSON manifest without fetching file bodies.
     pub(crate) async fn resolve_files<T: DeserializeOwned, M>(
         &self,
         metadata_url: &Url,

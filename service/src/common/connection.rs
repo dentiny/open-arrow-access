@@ -140,10 +140,8 @@ impl Connection {
             },
         )))
     }
-    /// Fetch one JSON manifest, resolve its file links, and bind lazy downloads.
-    ///
-    /// Retain the full document as metadata without opening attachments.
-    /// Provider identity/availability checks and errors belong to the resolver.
+    /// Resolve file links into lazy downloads, retaining the full JSON as metadata.
+    /// The resolver owns provider identity/availability checks.
     pub async fn resolve_json_files(
         &self,
         path: &str,
@@ -191,6 +189,5 @@ impl Accessor for Connection {
     }
 }
 
-// HTTP GET provides sequential bytes; listing uses the default Unsupported result.
 #[async_trait]
 impl ByteAccessor for Connection {}
