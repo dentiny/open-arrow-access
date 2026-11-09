@@ -7,33 +7,33 @@ repository.workspace = true
 description = "Arrow file-format readers for Open Arrow Access"
 
 [features]
-default = []
-warc = ["dep:warc", "dep:futures"]
 atif = ["dep:atif-arrow", "dep:futures"]
-parquet = ["dep:parquet", "dep:arrow-schema", "dep:futures"]
-json = ["dep:arrow-json", "dep:arrow-schema", "dep:futures"]
-xml = ["dep:xml-arrow", "dep:futures"]
 csv = ["dep:arrow-csv", "dep:arrow-schema", "dep:futures"]
+default = []
+json = ["dep:arrow-json", "dep:arrow-schema", "dep:futures"]
+parquet = ["dep:parquet", "dep:arrow-schema", "dep:futures"]
+warc = ["dep:warc", "dep:futures"]
+xml = ["dep:xml-arrow", "dep:futures"]
 
 [dependencies]
-warc = { workspace = true, optional = true }
-atif-arrow = { workspace = true, optional = true }
-xml-arrow = { workspace = true, optional = true }
-open-arrow-access-core.workspace = true
 arrow-csv = { workspace = true, optional = true }
-parquet = { workspace = true, optional = true }
 arrow-json = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
+atif-arrow = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
+open-arrow-access-core.workspace = true
+parquet = { workspace = true, optional = true }
+warc = { workspace = true, optional = true }
+xml-arrow = { workspace = true, optional = true }
 
 [dev-dependencies]
-tempfile.workspace = true
-futures.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
+futures.workspace = true
 more-asserts.workspace = true
-open-arrow-access-test-support.workspace = true
 open-arrow-access-storage.workspace = true
+open-arrow-access-test-support.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 
 [[test]]

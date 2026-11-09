@@ -6,12 +6,12 @@ license.workspace = true
 publish = false
 
 [dependencies]
-http.workspace = true
 arrow-array.workspace = true
-opendal = { workspace = true, features = ["services-fs"] }
-open-arrow-access-core.workspace = true
 futures.workspace = true
+http.workspace = true
 more-asserts.workspace = true
+open-arrow-access-core.workspace = true
+opendal = { workspace = true, features = ["services-fs"] }
 
 tokio = { workspace = true, features = ["fs"] }
 

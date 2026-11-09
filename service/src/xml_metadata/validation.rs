@@ -1,7 +1,6 @@
 use super::error;
 use open_arrow_access_core::Result;
 use quick_xml::{Reader, events::Event};
-
 /// Check the first document element's local name without rewriting input bytes.
 /// Declarations, comments, whitespace and a DTD are accepted. This does not
 /// replace full document parsing, schema validation or namespace validation.
