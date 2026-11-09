@@ -3,7 +3,7 @@ use crate::xml_metadata::XmlDocument;
 use arrow_array::{Array, cast::AsArray};
 use arrow_schema::DataType::Utf8;
 use open_arrow_access_core::{Bytes, Result};
-use xml_arrow::XmlField;
+use open_arrow_access_file_format::xml::XmlField;
 
 pub(super) struct Envelope {
     pub(super) records: Option<Records>,
