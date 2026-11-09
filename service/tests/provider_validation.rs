@@ -1,14 +1,14 @@
-use open_arrow_access_service::common::{array, download_url, filename, segment, text};
+use open_arrow_access_service::common::{array, filename, resolve_download_url, segment, text};
 #[test]
 fn validates_download_origins_without_changing_signed_queries() {
     let signed = "https://files.example/path%20one?sig=a%2Bb%2Fz";
-    assert_eq!(download_url(signed).unwrap().as_str(), signed);
+    assert_eq!(resolve_download_url(signed).unwrap().as_str(), signed);
     for url in [
         "file:///tmp/x",
         "https://u:p@example.com/x",
         "https://example.com/x#fragment",
     ] {
-        assert!(download_url(url).is_err());
+        assert!(resolve_download_url(url).is_err());
     }
 }
 #[test]
