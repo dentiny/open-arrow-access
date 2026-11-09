@@ -4,11 +4,14 @@ use super::{
     url_util,
     validation::{self, BodyLength},
 };
+use crate::ResolvedFileSet;
 use futures::stream;
 use http::{HeaderMap, HeaderValue, Request, header::HeaderName};
 use open_arrow_access_core::{
-    ByteMetadata, ByteReadOptions, ByteReader, Bytes, Result, StreamReader,
+    Accessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability,
+    Result, StreamReader, async_trait,
 };
+use open_arrow_access_storage::NamedFileAccessor;
 use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext, raw::oio::ReadStream};
 use url::Url;
 
@@ -165,5 +168,38 @@ impl Connection {
                 version,
             },
         )))
+    }
+    /// Bind a validated provider manifest to lazy byte reads. Logical names remain opaque.
+    pub fn files<M>(&self, files: Vec<(String, String)>, metadata: M) -> Result<RemoteFiles<M>> {
+        validation::downloads(&files)?;
+        let files = NamedFileAccessor::new(
+            self.clone(),
+            files
+                .into_iter()
+                .map(|(name, url)| (name, url.into()))
+                .collect(),
+        )
+        .map_err(error::file_namespace)?;
+        Ok(ResolvedFileSet::new(files, metadata))
+    }
+}
+
+/// A manifest's provider metadata alongside a fixed namespace of sequential files.
+pub type RemoteFiles<M = ApiDocument> = ResolvedFileSet<Connection, M>;
+
+#[async_trait]
+impl Accessor for Connection {
+    type Request = ByteReadRequest;
+    type Reader = dyn ByteReader;
+    fn capability(&self) -> Capability {
+        Capability {
+            read: true,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+    }
+    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        Connection::open(self, request.object.locator(), request.options).await
     }
 }

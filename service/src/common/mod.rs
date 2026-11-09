@@ -12,8 +12,4 @@ pub use document::ApiDocument;
 
 mod connection;
 mod transport;
-pub use connection::Connection;
-
-
-mod files;
-pub use files::{RemoteFiles, RemoteHttpAccessor};
+pub use connection::{Connection, RemoteFiles};
