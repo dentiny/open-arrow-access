@@ -66,3 +66,6 @@ pub mod hathifiles;
 
 #[cfg(feature = "federal-register")]
 pub mod federal_register;
+
+#[cfg(feature = "govinfo")]
+pub mod govinfo;
