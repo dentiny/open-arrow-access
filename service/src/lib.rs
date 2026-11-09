@@ -51,3 +51,6 @@ pub mod xml_metadata;
 
 #[cfg(feature = "library-of-congress")]
 pub mod library_of_congress;
+
+#[cfg(feature = "oai")]
+pub mod oai;
