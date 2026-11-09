@@ -263,9 +263,9 @@ checksum = "5d2050892d4691cf110586070786712b504985a4d37ed64a9cd8a402718e1706"
 
 [[package]]
 name = "atif-arrow"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53f95c173a6e0abdfd9ee27a3e152bd20ce613d237ee1ec4aea21cc3371af21a"
+checksum = "598a299ec6e1defb586f292efa162711f48dee4cd83613b90294c76eee1b5571"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -3897,9 +3897,9 @@ dependencies = [
 
 [[package]]
 name = "xml-arrow"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a243935f2faccb87357d7db5f3999b4cfc8537fb684be20717e7908feb5396d"
+checksum = "8fc6ecbc6876d2db1b5dd8f5c874b8f075164b8e3546b369000d76cd2c69b97c"
 dependencies = [
  "arrow-array",
  "arrow-schema",
