@@ -7,11 +7,17 @@ repository.workspace = true
 description = "Dataset source providers for Open Arrow Access"
 
 [features]
-arxiv = ["format-xml", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
+arxiv = [
+    "oai",
+    "format-xml",
+    "dep:open-arrow-access-decompression",
+    "open-arrow-access-decompression/tar",
+]
 bhl = ["figshare"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
+doab = ["oai"]
 figshare = []
 gutenberg = ["format-xml", "dep:chrono"]
 huggingface = [
@@ -141,6 +147,18 @@ required-features = ["uspto"]
 [[test]]
 name = "oai"
 required-features = ["oai"]
+
+[[test]]
+name = "oai_provider"
+required-features = ["oai"]
+
+[[test]]
+name = "doab"
+required-features = ["doab"]
+
+[[test]]
+name = "arxiv_metadata"
+required-features = ["arxiv"]
 
 [[test]]
 name = "figshare"
