@@ -11,7 +11,8 @@
       "description": "Storage direct copying and opt-in streaming; local ATIF and XML patches. Streaming false unless explicitly recorded true.",
       "atif_commit": "aab4660148fd47e74b8ac3682ccc8d1c3555cdcc",
       "xml_commit": "9505c9600dadfb8464e5d3237aaab0ce76af256d",
-      "binary_sha256": "161c975956f70659a0ce838777d8283bc09cf2de35566414b3c5139652ff1b1f"
+      "binary_sha256": "161c975956f70659a0ce838777d8283bc09cf2de35566414b3c5139652ff1b1f",
+      "storage_commit": "de61134bf0a4378e9807a329d4f7d622db68ab95"
     },
     "latency-baseline": {
       "source_commit": "b2c508eaae91244b632555ed50f3325ffe882085",
@@ -146,5 +147,13 @@
     "The baseline was rebuilt successfully with the final harness against unmodified upstream production code.",
     "Peak RSS/CPU counters cover the whole process, not just timed scans.",
     "Actual toolchain: Homebrew Rust 1.97.1."
-  ]
+  ],
+  "pull_requests": {
+    "umbrella": "https://github.com/dentiny/open-arrow-access/pull/218",
+    "storage": "https://github.com/dentiny/open-arrow-access/pull/220",
+    "atif": "https://github.com/dentiny/atif-arrow/pull/29",
+    "xml": "https://github.com/dentiny/xml-arrow-rs/pull/25"
+  },
+  "total_independent_processes": 494,
+  "total_timed_scans": 3698
 }

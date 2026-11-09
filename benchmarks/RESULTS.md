@@ -152,9 +152,11 @@ See [results/manifest.json](results/manifest.json) for binary hashes and variant
 mapping. The upstream microbenchmarks isolate fan-out validation and nested path
 conversion; this repository measures their end-to-end ingestion effects.
 
+[Umbrella benchmark PR](https://github.com/dentiny/open-arrow-access/pull/218).
+
 Optimization PRs:
 
 - [ATIF reference indexing](https://github.com/dentiny/atif-arrow/pull/29).
 - [XML nested selection](https://github.com/dentiny/xml-arrow-rs/pull/25).
-- Storage extraction: publication pending.
+- [Storage fragment staging](https://github.com/dentiny/open-arrow-access/pull/220).
 
