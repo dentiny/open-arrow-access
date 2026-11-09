@@ -45,6 +45,8 @@ meca = [
     "open-arrow-access-decompression/zip",
 ]
 
+oai = ["format-xml"]
+
 [dependencies]
 arrow-array = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
@@ -138,3 +140,7 @@ required-features = ["format-xml"]
 [[test]]
 name = "meca"
 required-features = ["meca"]
+
+[[test]]
+name = "oai"
+required-features = ["oai"]
