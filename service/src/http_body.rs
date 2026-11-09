@@ -1,39 +1,62 @@
 //! Response-body framing shared by buffered metadata and sequential downloads.
 use http::{HeaderMap, Response};
 use open_arrow_access_core::{Bytes, Error, ErrorKind, Result};
-use opendal::{HttpBody, raw::oio::ReadStream};
+use opendal::{Buffer, HttpBody, raw::oio::ReadStream};
 
 pub(crate) async fn collect(
     response: Response<HttpBody>,
     operation: &'static str,
 ) -> Result<Bytes> {
-    let mut length = BodyLength::new(response.headers(), operation)?;
-    let mut body = response.into_body();
+    let mut body = BodyReader::new(response, operation)?;
     let mut bytes = Vec::new();
-    loop {
-        let buffer = body
-            .read()
-            .await
-            .map_err(|error| crate::http_client::transport_error(operation, error))?;
-        if buffer.is_empty() {
-            break;
-        }
-        length.push(buffer.len())?;
+    while let Some(buffer) = body.next().await? {
         for part in buffer {
             bytes.extend_from_slice(&part);
         }
     }
-    length.finish()?;
     Ok(bytes.into())
 }
 
-pub(crate) struct BodyLength {
-    pub(crate) expected: Option<u64>,
+/// Read and validate response framing for both buffered and streaming consumers.
+pub(crate) struct BodyReader {
+    body: HttpBody,
+    length: BodyLength,
+}
+
+impl BodyReader {
+    pub(crate) fn new(response: Response<HttpBody>, operation: &'static str) -> Result<Self> {
+        let length = BodyLength::new(response.headers(), operation)?;
+        Ok(Self {
+            body: response.into_body(),
+            length,
+        })
+    }
+
+    pub(crate) fn content_length(&self) -> Option<u64> {
+        self.length.expected
+    }
+
+    pub(crate) async fn next(&mut self) -> Result<Option<Buffer>> {
+        let buffer =
+            self.body.read().await.map_err(|error| {
+                crate::http_client::transport_error(self.length.operation, error)
+            })?;
+        if buffer.is_empty() {
+            self.length.finish()?;
+            return Ok(None);
+        }
+        self.length.push(buffer.len())?;
+        Ok(Some(buffer))
+    }
+}
+
+struct BodyLength {
+    expected: Option<u64>,
     read: u64,
     operation: &'static str,
 }
 impl BodyLength {
-    pub(crate) fn new(headers: &HeaderMap, operation: &'static str) -> Result<Self> {
+    fn new(headers: &HeaderMap, operation: &'static str) -> Result<Self> {
         let expected = headers
             .get("content-length")
             .map(|value| {
@@ -55,7 +78,7 @@ impl BodyLength {
     fn error(&self, message: &str) -> Error {
         Error::new(ErrorKind::Decode, self.operation, message)
     }
-    pub(crate) fn push(&mut self, bytes: usize) -> Result<()> {
+    fn push(&mut self, bytes: usize) -> Result<()> {
         self.read = self
             .read
             .checked_add(bytes as u64)
@@ -65,7 +88,7 @@ impl BodyLength {
         }
         Ok(())
     }
-    pub(crate) fn finish(&self) -> Result<()> {
+    fn finish(&self) -> Result<()> {
         if self.expected.is_some_and(|length| self.read != length) {
             return Err(self.error("truncated HTTP body"));
         }

@@ -8,10 +8,6 @@ pub(crate) fn invalid(message: &str) -> Error {
 pub(crate) fn decode(message: &str) -> Error {
     Error::new(ErrorKind::Decode, OP, message)
 }
-pub(super) fn io(error: opendal::Error) -> Error {
-    crate::http_client::transport_error(OP, error)
-}
-
 pub(super) fn download_url(error: url::ParseError) -> Error {
     decode("invalid download URL").with_source(error)
 }
