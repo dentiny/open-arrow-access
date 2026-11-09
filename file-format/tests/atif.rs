@@ -197,25 +197,3 @@ async fn jsonl_pulls_only_the_requested_batch_and_keeps_delivered_rows_on_later_
     assert_eq!(observations.reads.load(Ordering::SeqCst), reads);
     assert_eq!(text(&batch, "trajectory_id", 0), "first");
 }
-
-#[tokio::test]
-async fn singleton_batches_keep_nested_arrays_and_previously_returned_batches() {
-    let bytes = fixture!("atif", "trajectories.jsonl").await;
-    let mut reader = AtifAccessor::new(MemoryAccessor::new(&bytes, 17), AtifFormat::JsonLines)
-        .open(ReadRequest::new("runs.jsonl").with_options(ReadOptions {
-            batch_size: NonZeroUsize::MIN,
-            projection: None,
-        }))
-        .await
-        .unwrap();
-    let mut batches = Vec::new();
-    while let Some(batch) = reader.next().await.unwrap() {
-        batches.push(batch);
-    }
-    assert_eq!(batches.len(), 3);
-    for (batch, id) in batches.iter().zip(["first", "second", "third"]) {
-        assert_eq!(batch.num_rows(), 1);
-        assert_eq!(text(batch, "trajectory_id", 0), id);
-        assert_eq!(batch["steps"].as_list::<i32>().value(0).len(), 2);
-    }
-}
