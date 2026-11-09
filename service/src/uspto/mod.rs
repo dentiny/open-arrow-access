@@ -21,12 +21,10 @@ impl UsptoService {
     }
 
     pub async fn search(&self, parameters: &[(&str, &str)]) -> Result<ApiDocument> {
-        let doc = self
-            .connection
+        self.connection
             .json("api/v1/datasets/products/search", parameters)
-            .await?;
-        validation::validate_products(doc.value())?;
-        Ok(doc)
+            .await?
+            .validated(validation::validate_products)
     }
 
     /// Resolve one product's file page. Total counts and release dates remain in metadata.

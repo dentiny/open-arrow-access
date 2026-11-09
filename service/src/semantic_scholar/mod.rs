@@ -29,12 +29,10 @@ impl SemanticScholarService {
     }
 
     pub async fn release(&self, id: &str) -> Result<ApiDocument> {
-        let doc = self
-            .connection
+        self.connection
             .json(&format!("datasets/v1/release/{}", segment(id)?), &[])
-            .await?;
-        validation::validate_release(doc.value(), id)?;
-        Ok(doc)
+            .await?
+            .validated(|value| validation::validate_release(value, id))
     }
 
     /// Resolve latest once, then obtain signed download URLs using the immutable release ID.
@@ -69,8 +67,7 @@ impl SemanticScholarService {
 
     /// Return one incremental diff manifest, preserving update and deletion semantics.
     pub async fn diffs(&self, dataset: &str, start: &str, end: &str) -> Result<ApiDocument> {
-        let doc = self
-            .connection
+        self.connection
             .json(
                 &format!(
                     "datasets/v1/diffs/{}/to/{}/{}",
@@ -80,8 +77,7 @@ impl SemanticScholarService {
                 ),
                 &[],
             )
-            .await?;
-        validation::validate_diffs(doc.value())?;
-        Ok(doc)
+            .await?
+            .validated(validation::validate_diffs)
     }
 }

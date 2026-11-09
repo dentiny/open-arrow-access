@@ -69,9 +69,10 @@ impl BhlService {
         validation::validate_parameters(parameters)?;
         let mut query = vec![("op", operation.name()), ("format", "json")];
         query.extend_from_slice(parameters);
-        let doc = self.connection.json("api3", &query).await?;
-        validation::validate_response(doc.value())?;
-        Ok(doc)
+        self.connection
+            .json("api3", &query)
+            .await?
+            .validated(validation::validate_response)
     }
 
     pub async fn item(&self, id: NonZeroU64) -> Result<RemoteFiles> {

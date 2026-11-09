@@ -45,14 +45,12 @@ impl FigshareService {
         validation::validate_pagination(page, page_size)?;
         let page = page.to_string();
         let page_size = page_size.to_string();
-        let doc = self
-            .connection
+        self.connection
             .json(
                 &format!("v2/collections/{id}/articles"),
                 &[("page", &page), ("page_size", &page_size)],
             )
-            .await?;
-        validation::validate_collection(doc.value())?;
-        Ok(doc)
+            .await?
+            .validated(validation::validate_collection)
     }
 }

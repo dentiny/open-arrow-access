@@ -49,12 +49,10 @@ impl RegulationsService {
         let size = page_size.to_string();
         let mut query = parameters.to_vec();
         query.extend_from_slice(&[("page[number]", &page), ("page[size]", &size)]);
-        let doc = self
-            .connection
+        self.connection
             .json(&format!("v4/{}", resource.name()), &query)
-            .await?;
-        validation::validate_search_response(doc.value())?;
-        Ok(doc)
+            .await?
+            .validated(validation::validate_search_response)
     }
 
     pub async fn record(&self, resource: RegulationsResource, id: &str) -> Result<RemoteFiles> {

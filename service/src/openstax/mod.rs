@@ -32,15 +32,13 @@ impl OpenStaxService {
         validation::validate_pagination(page, per_page)?;
         let page = page.to_string();
         let per_page = per_page.to_string();
-        let doc = self
-            .api
+        self.api
             .json(
                 "orgs/openstax/repos",
                 &[("type", "public"), ("page", &page), ("per_page", &per_page)],
             )
-            .await?;
-        validation::validate_repositories(doc.value())?;
-        Ok(doc)
+            .await?
+            .validated(validation::validate_repositories)
     }
 
     /// Resolve a branch/tag once; downloads always use the resolved commit SHA.
