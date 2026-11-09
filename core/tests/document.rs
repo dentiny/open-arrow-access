@@ -85,14 +85,20 @@ async fn default_decoder_constructor_clones_non_clone_inputs_and_opens_independe
     assert!(!accessor.capability().list);
     drop(accessor);
     drop(cloned);
+    let full_schema = full.metadata().schema.clone();
     let full_batch = full.next().await.unwrap().unwrap();
+    assert!(Arc::ptr_eq(&full_batch.schema(), &full_schema));
     assert_eq!(
         full_batch["data"].as_binary::<i64>().value(0),
         &[0, 255, 128]
     );
+    let projected_schema = projected.metadata().schema.clone();
     let empty_batch = projected.next().await.unwrap().unwrap();
+    assert!(Arc::ptr_eq(&empty_batch.schema(), &projected_schema));
     assert_eq!(empty_batch.num_rows(), 1);
     assert_eq!(empty_batch.num_columns(), 0);
+    assert!(full.next().await.unwrap().is_none());
+    assert!(projected.next().await.unwrap().is_none());
     assert!(full.next().await.unwrap().is_none());
     assert!(projected.next().await.unwrap().is_none());
     let requests = observed.requests.lock().unwrap();
@@ -100,45 +106,6 @@ async fn default_decoder_constructor_clones_non_clone_inputs_and_opens_independe
     assert_eq!(requests[0].object.locator(), "full");
     assert_eq!(requests[0].options, options);
     assert_eq!(requests[1].object.locator(), "projected");
-}
-
-#[tokio::test]
-async fn reads_once_lazily_with_byte_options_projection_and_owned_state() {
-    for projection in [None, Some(vec![])] {
-        let source = MemoryAccessor::new(&fixture!("bytes", "binary.bin").await, 1);
-        let observed = source.observations.clone();
-        let accessor = DocumentAccessor::new(source, RawDocument);
-        let options = ByteReadOptions {
-            io_concurrency: NonZeroUsize::new(2).unwrap(),
-            ..Default::default()
-        };
-        let mut reader = accessor
-            .open(
-                ReadRequest::new("book.rdf")
-                    .with_options(ReadOptions {
-                        projection,
-                        ..Default::default()
-                    })
-                    .with_byte_options(options),
-            )
-            .await
-            .unwrap();
-        assert!(observed.requests.lock().unwrap().is_empty());
-        let schema = reader.metadata().schema.clone();
-        drop(accessor);
-        let batch = reader.next().await.unwrap().unwrap();
-        assert_eq!(batch.num_rows(), 1);
-        assert!(Arc::ptr_eq(&batch.schema(), &schema));
-        if batch.num_columns() != 0 {
-            assert_eq!(batch.column(0).as_binary::<i64>().value(0), &[0, 255, 128]);
-        }
-        assert!(reader.next().await.unwrap().is_none());
-        assert!(reader.next().await.unwrap().is_none());
-        let requests = observed.requests.lock().unwrap();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].options, options);
-        assert_eq!(requests[0].object.locator(), "book.rdf");
-    }
 }
 
 #[tokio::test]

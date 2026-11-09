@@ -233,14 +233,3 @@ async fn decoder_configuration_errors_are_classified_before_opening_bytes() {
         assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
     }
 }
-
-#[tokio::test]
-async fn empty_source_chunks_are_io_errors_and_terminal() {
-    let (input, observed) = fixture("single.json", 1).await;
-    let accessor = JsonAccessor::new(input.with_empty_chunk(0), schema());
-    let mut reader = accessor.open(request(1, None)).await.unwrap();
-    let error =
-        format::assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Io).await;
-    assert_eq!(error.operation(), "read_json");
-    assert_eq!(observed.reads.load(Ordering::SeqCst), 1);
-}

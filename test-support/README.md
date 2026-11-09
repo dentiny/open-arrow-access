@@ -30,9 +30,9 @@ Use `fixture!(format, name)` to read committed fixtures relative to the calling
 crate. `fixture_path` and `read_fixture` also accept an explicit manifest directory.
 Use `collect_bytes` to
 consume a reader while asserting nonempty chunks. `byte_layer::assert_error_contract`
-accepts a layer factory, encoded input, expected output, and error operation. It
-checks source categories/causes, terminal reads, and removal of range support
-without depending on a concrete layer crate. `byte_layer::assert_fragmented_output`
+accepts a layer factory, encoded input and error operation. It checks source
+categories/causes and terminal reads without depending on a concrete layer crate.
+Range capability checks live with the shared layer tests. `byte_layer::assert_fragmented_output`
 runs a layer factory over caller-selected input chunk sizes and checks exact,
 bounded output. `byte_layer::assert_decode_error` feeds a malformed fixture one
 byte at a time and checks a decode error, source chain, terminal EOF, and no further
@@ -146,7 +146,7 @@ next call to fail; byte-layer helpers retain their drain-until-error behavior.
 | `assert_invalid_projection_before_open` | Missing and duplicate fields fail as `InvalidInput` before any byte open or read. Use with a valid fixed/explicit schema. |
 | `assert_finished` | After EOF/error, repeated reads return EOF with stable metadata and no new upstream polls. |
 | `assert_terminal_error` | The next read fails with the expected kind and terminates; returns the error for operation/parser checks. |
-| `assert_error_contract` | A format factory over `MemoryAccessor` preserves every shared source error category and cause, rejects empty chunks, forwards the object and byte options, and stops polling after read failures. |
+| `assert_error_contract` | A format factory over `MemoryAccessor` preserves representative source error categories and cause, rejects empty chunks, forwards the object and byte options, and stops polling after read failures. |
 
 Pass the expected full schema and row count to `assert_projection`; the helper
 derives expected fields using Arrow's schema API independently of the accessor.

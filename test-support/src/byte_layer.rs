@@ -88,27 +88,21 @@ pub async fn assert_terminal_error(
     error
 }
 
-/// Verify error categories, source chains, terminal reads, and removed range support
+/// Verify representative source errors, cause chains and terminal reads
 /// for a sequential byte layer built over the shared memory backend.
-/// `bytes` must encode `expected` in the representation accepted by the layer.
+/// `bytes` must be a valid representation accepted by the layer.
 pub async fn assert_error_contract<A>(
     make_layer: impl Fn(MemoryAccessor) -> A,
     bytes: &[u8],
-    expected: &[u8],
     operation: &str,
 ) -> Result<()>
 where
     A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
     use std::error::Error as _;
-    for kind in [
-        ErrorKind::InvalidInput,
-        ErrorKind::Unsupported,
-        ErrorKind::NotFound,
-        ErrorKind::PermissionDenied,
-        ErrorKind::Io,
-        ErrorKind::Decode,
-    ] {
+    // Keep each decoder's distinct failure offsets, using ordinary I/O and
+    // a non-I/O sentinel rather than a full error-kind cross product.
+    for kind in [ErrorKind::Io, ErrorKind::PermissionDenied] {
         // Fail before input, after its first byte, and while checking EOF.
         for offset in [0, 1, bytes.len()] {
             let input = MemoryAccessor::new(bytes, 1).with_failure(offset, kind);
@@ -128,14 +122,5 @@ where
             assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Io, operation).await;
         assert!(error.source().unwrap().to_string().contains("empty chunk"));
     }
-    let input = MemoryAccessor::new(bytes, 1);
-    let mut reader = make_layer(input).open("sequential".into()).await?;
-    let error = reader.read_range(0..1).await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::Unsupported);
-    assert_eq!(error.operation(), "read_range");
-    let error = reader.read_ranges(vec![0..1, 1..2]).await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::Unsupported);
-    assert!(reader.read_ranges(vec![]).await?.is_empty());
-    assert_eq!(collect_bytes(reader.as_mut()).await?, expected);
     Ok(())
 }

@@ -85,7 +85,7 @@ where
     error
 }
 
-/// Exercise all shared source-error categories and empty chunks at selected
+/// Exercise representative source-error categories and empty chunks at selected
 /// byte offsets, with one-byte input chunks. Errors may occur during opening
 /// (such as schema inference) or while reading. Open failures must not poll input.
 /// The request's byte conversion defines the expected forwarded object/options.
@@ -107,14 +107,9 @@ pub async fn assert_error_contract<A, M>(
     M: Debug + PartialEq,
 {
     assert!(!offsets.is_empty());
-    let kinds = [
-        ErrorKind::InvalidInput,
-        ErrorKind::Unsupported,
-        ErrorKind::NotFound,
-        ErrorKind::PermissionDenied,
-        ErrorKind::Io,
-        ErrorKind::Decode,
-    ];
+    // Ordinary I/O and a non-I/O sentinel catch category erasure without
+    // repeating the same adapter path for every enum variant.
+    let kinds = [ErrorKind::Io, ErrorKind::PermissionDenied];
     for kind in kinds {
         let input = MemoryAccessor::new(bytes, 1).with_open_failure(kind);
         let observed = input.observations.clone();

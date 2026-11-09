@@ -35,6 +35,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | Streaming and indexed TAR entries | [`decompression/tests/tar.rs`](../decompression/tests/tar.rs) |
 | Document accessor | [`core/tests/document.rs`](../core/tests/document.rs) |
 | Field-name index and wide projections | [`core/tests/field_index.rs`](../core/tests/field_index.rs) |
+| Shared HTTP status classification | [`core/tests/error.rs`](../core/tests/error.rs) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
 | Shared resource lifetime probe | [`test-support/src/drop_probe.rs`](../test-support/src/drop_probe.rs), used by core stream and TAR tests |
 | Generic file-format extension protocol | [`file-format/tests/accessor.rs`](../file-format/tests/accessor.rs), also runs with no format features |
@@ -66,6 +67,11 @@ crate whose behavior they exercise. The workspace root has no test directory.
   remain in `format`.
   Inferred schemas, native record formats and range-read faults retain their own
   specialized contracts; keep parsed-value and provider policy assertions local.
+- Test shared error classification once at its owning layer. Adapter contracts use
+  representative I/O and non-I/O failures at distinct parser stages, not every
+  error kind crossed with every offset. Providers retain domain validation and
+  a small HTTP wiring sample; keep late-failure, authentication, and malformed
+  parser cases that exercise different behavior.
 - Read all serialized test inputs, valid and invalid, from root
   `testdata/<format>/` with `fixture!` or `fixture_path!`. Reuse existing samples;
   add a named fixture and document its provenance and intended failure when a

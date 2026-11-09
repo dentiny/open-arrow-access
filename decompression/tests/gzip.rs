@@ -60,6 +60,15 @@ async fn layer_preserves_metadata_options_and_listing_but_removes_ranges() -> Re
         reader.read_range(0..1).await.unwrap_err().kind(),
         ErrorKind::Unsupported
     );
+    assert_eq!(
+        reader
+            .read_ranges(vec![0..1, 1..2])
+            .await
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Unsupported
+    );
+    assert!(reader.read_ranges(vec![]).await?.is_empty());
     assert_eq!(collect(reader.as_mut()).await?, b"payload");
     let objects = accessor
         .list("prefix".into())
@@ -124,7 +133,6 @@ async fn error_codes_sources_and_terminal_state_follow_the_byte_contract() -> Re
     byte_layer::assert_error_contract(
         |input| input.layer(DecompressionLayer::new(Gzip)),
         &fixture!("gzip", "payload.gz").await,
-        b"payload",
         "decompress",
     )
     .await

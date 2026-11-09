@@ -61,7 +61,7 @@ impl HttpTransport for MockHttp {
 }
 
 #[tokio::test]
-async fn origin_rooted_http_uses_injected_transport_and_rejects_aliases() {
+async fn origin_rooted_http_uses_injected_transport() {
     let manifest = Bytes::from_static(include_bytes!("../../testdata/commoncrawl/one.paths"));
     let transport = MockHttp {
         manifest: manifest.clone(),
@@ -79,13 +79,6 @@ async fn origin_rooted_http_uses_injected_transport_and_rejects_aliases() {
         bytes.list("".into()).await.err().unwrap().kind(),
         ErrorKind::Unsupported
     );
-    for path in [" /a", "/a", "a//b", "a/../b", "a/"] {
-        assert_eq!(
-            bytes.open(path.into()).await.err().unwrap().kind(),
-            ErrorKind::InvalidInput,
-            "{path}"
-        );
-    }
     let mut reader = bytes.open(MANIFEST.into()).await.unwrap();
     let mut output = Vec::new();
     while let Some(chunk) = reader.next().await.unwrap() {

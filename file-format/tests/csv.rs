@@ -223,26 +223,14 @@ async fn invalid_data_errors_are_terminal() {
 }
 
 #[tokio::test]
-async fn byte_options_are_forwarded_and_io_failures_preserve_kind_without_read_ahead() {
+async fn io_failure_after_a_delivered_row_does_not_read_ahead() {
     let bytes = MemoryAccessor::new(&fixture!("csv", "good_no_header.csv").await, 6)
         .with_failure(6, ErrorKind::Io);
     let accessor = CsvAccessor::new(bytes.clone(), schema());
-    let byte_options = ByteReadOptions {
-        io_concurrency: NonZeroUsize::new(3).unwrap(),
-        io_chunk_size: NonZeroUsize::new(7),
-    };
     let mut reader = accessor
-        .open(
-            ReadRequest::new("data.csv")
-                .with_options(options(1, None))
-                .with_byte_options(byte_options),
-        )
+        .open(ReadRequest::new("data.csv").with_options(options(1, None)))
         .await
         .unwrap();
-    assert_eq!(
-        bytes.observations.requests.lock().unwrap()[0].options,
-        byte_options
-    );
     assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 0);
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(collect_values::<Int64Type>(&[batch], 0), [1]);
