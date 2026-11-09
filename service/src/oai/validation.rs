@@ -1,5 +1,4 @@
 use super::{error, parser::Envelope};
-use crate::common::Connection;
 use open_arrow_access_core::Result;
 
 pub(super) fn validate_root(bytes: &[u8]) -> Result<()> {
@@ -14,11 +13,7 @@ pub(super) fn validate_response(envelope: &Envelope) -> Result<()> {
     }
 }
 
-pub(super) fn configuration(connection: &Connection, path: &str, prefix: &str) -> Result<()> {
-    connection.url(path, &[])?;
-    nonempty(prefix, "metadata prefix")
-}
-pub(super) fn nonempty(value: &str, field: &str) -> Result<()> {
+pub(super) fn validate_nonempty_text(value: &str, field: &str) -> Result<()> {
     if value.is_empty() {
         return Err(error::empty(field));
     }
