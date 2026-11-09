@@ -1,5 +1,4 @@
 use open_arrow_access_service::common::{array, filename, resolve_download_url, segment, text};
-
 #[test]
 fn validates_download_origins_without_changing_signed_queries() {
     let signed = "https://files.example/path%20one?sig=a%2Bb%2Fz";
@@ -12,7 +11,6 @@ fn validates_download_origins_without_changing_signed_queries() {
         assert!(resolve_download_url(url).is_err());
     }
 }
-
 #[test]
 fn shares_json_field_and_component_rules() {
     let value = serde_json::json!({"name":"a","files":[],"null":null});
