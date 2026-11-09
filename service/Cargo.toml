@@ -45,8 +45,10 @@ pmc = [
 ]
 
 xml-metadata = ["dep:quick-xml"]
+meca = ["xml-metadata", "dep:percent-encoding", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/zip"]
 
 [dependencies]
+percent-encoding = { workspace = true, optional = true }
 indexmap.workspace = true
 quick-xml = { workspace = true, optional = true }
 reqwest.workspace = true
@@ -134,3 +136,7 @@ required-features = ["internet-archive"]
 [[test]]
 name = "xml_metadata"
 required-features = ["xml-metadata"]
+
+[[test]]
+name = "meca"
+required-features = ["meca"]
