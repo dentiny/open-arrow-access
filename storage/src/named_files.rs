@@ -8,14 +8,7 @@ use open_arrow_access_core::{
 /// Validate an opaque file namespace without constructing an accessor or performing I/O.
 /// Empty names and duplicate names fail; order, paths and download locators are not interpreted.
 pub fn validate_file_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Result<()> {
-    let mut seen = std::collections::HashSet::new();
-    if names
-        .into_iter()
-        .any(|name| name.is_empty() || !seen.insert(name))
-    {
-        return Err(invalid_names());
-    }
-    Ok(())
+    index_files(names.into_iter().map(|name| (name, ()))).map(|_| ())
 }
 
 /// A fixed, ordered namespace of names mapped to caller-supplied byte objects.
@@ -29,19 +22,7 @@ pub struct NamedFileAccessor<A> {
 impl<A> NamedFileAccessor<A> {
     /// Names are opaque and must be nonempty and unique. Construction performs no I/O.
     pub fn new(inner: A, files: Vec<(String, ObjectRef)>) -> Result<Self> {
-        let mut indexed = IndexMap::with_capacity(files.len());
-        for (name, object) in files {
-            if name.is_empty() {
-                return Err(invalid_names());
-            }
-            match indexed.entry(name) {
-                Entry::Vacant(entry) => {
-                    entry.insert(object);
-                }
-                Entry::Occupied(_) => return Err(invalid_names()),
-            }
-        }
-        let files = indexed;
+        let files = index_files(files)?;
         Ok(Self { inner, files })
     }
 }
@@ -97,6 +78,28 @@ where
             .collect::<Vec<_>>();
         Ok(Box::pin(futures::stream::iter(files)))
     }
+}
+
+// Both borrowed-name validation and owned accessor construction use this path.
+// Build the ordered index while validating, without a second hash table/pass.
+fn index_files<K, V>(files: impl IntoIterator<Item = (K, V)>) -> Result<IndexMap<K, V>>
+where
+    K: AsRef<str> + Eq + std::hash::Hash,
+{
+    let files = files.into_iter();
+    let mut indexed = IndexMap::with_capacity(files.size_hint().0);
+    for (name, object) in files {
+        if name.as_ref().is_empty() {
+            return Err(invalid_names());
+        }
+        match indexed.entry(name) {
+            Entry::Vacant(entry) => {
+                entry.insert(object);
+            }
+            Entry::Occupied(_) => return Err(invalid_names()),
+        }
+    }
+    Ok(indexed)
 }
 
 fn invalid_names() -> Error {
