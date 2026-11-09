@@ -2,7 +2,7 @@ use crate::xml_metadata::XmlDocument;
 use arrow_array::{Array, StructArray, cast::AsArray};
 use arrow_schema::DataType::Utf8;
 use open_arrow_access_core::Result;
-use xml_arrow::XmlField;
+use open_arrow_access_file_format::xml::XmlField;
 
 pub(super) struct Manifest {
     pub(super) item: Vec<Item>,
