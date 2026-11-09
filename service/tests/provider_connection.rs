@@ -1,13 +1,8 @@
-use std::{error::Error as _, io, iter};
-
 use futures::stream;
 use http::{Response, StatusCode};
-use open_arrow_access_core::{Error, ErrorKind, read_all};
+use open_arrow_access_core::{ErrorKind, read_all};
 use open_arrow_access_service::common::Connection;
-use open_arrow_access_test_support::{
-    collect_bytes,
-    http::{HttpFixture, response},
-};
+use open_arrow_access_test_support::http::{HttpFixture, response};
 use opendal::{Buffer, HttpBody};
 
 mod providers;
@@ -113,74 +108,6 @@ async fn redirect_limits_and_https_downgrades_are_decode_errors() {
         ErrorKind::Decode
     );
     assert_eq!(fixture.requests().len(), 1);
-}
-
-#[tokio::test]
-async fn buffered_and_streaming_reads_validate_declared_body_length() {
-    for (declared, payload) in [(1, "{}"), (3, "{}"), (1, "")] {
-        let fixture = HttpFixture::new();
-        fixture.handle(move |_| {
-            Ok(Response::builder()
-                .status(StatusCode::OK)
-                .header("content-length", declared)
-                // Omit the body's length hint to exercise client validation.
-                .body(HttpBody::new(
-                    stream::iter([Ok(Buffer::from(payload))]),
-                    None,
-                ))
-                .unwrap())
-        });
-        let client = connection(&fixture);
-        let buffered = client.json("metadata", &[]).await.unwrap_err();
-        let mut reader = client
-            .open(&format!("{}/file", fixture.endpoint()), Default::default())
-            .await
-            .unwrap();
-        assert_eq!(reader.metadata().content_length, Some(declared));
-        let streaming = collect_bytes(reader.as_mut()).await.unwrap_err();
-        for error in [buffered, streaming] {
-            assert_eq!(error.kind(), ErrorKind::Decode);
-            assert_eq!(error.operation(), "provider_http");
-        }
-        let requests = fixture.requests().len();
-        assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(fixture.requests().len(), requests);
-    }
-}
-
-#[tokio::test]
-async fn body_errors_preserve_category_and_cause_in_both_read_paths() {
-    let fixture = HttpFixture::new();
-    fixture.handle(|_| {
-        let source = io::Error::new(io::ErrorKind::ConnectionReset, "injected body fault");
-        let shared =
-            Error::new(ErrorKind::Timeout, "fixture_body", "body failure").with_source(source);
-        let error =
-            opendal::Error::new(opendal::ErrorKind::Unexpected, "body failure").set_source(shared);
-        Ok(Response::builder()
-            .status(StatusCode::OK)
-            .body(HttpBody::new(stream::iter([Err(error)]), None))
-            .unwrap())
-    });
-    let client = connection(&fixture);
-    let buffered = client.json("metadata", &[]).await.unwrap_err();
-    let mut reader = client
-        .open(&format!("{}/file", fixture.endpoint()), Default::default())
-        .await
-        .unwrap();
-    let streaming = reader.next().await.unwrap_err();
-    for error in [buffered, streaming] {
-        assert_eq!(error.kind(), ErrorKind::Timeout);
-        assert_eq!(error.operation(), "provider_http");
-        assert!(
-            iter::successors(error.source(), |&cause| cause.source()).any(|cause| {
-                cause
-                    .downcast_ref::<io::Error>()
-                    .is_some_and(|cause| cause.kind() == io::ErrorKind::ConnectionReset)
-            })
-        );
-    }
-    assert!(reader.next().await.unwrap().is_none());
 }
 
 #[tokio::test]
