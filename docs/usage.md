@@ -241,7 +241,7 @@ exports fail unless `with_partial_exports()` explicitly permits fallback.
 
 Use `repository(...)` when you need original repository files and want to choose
 the format yourself. Floating repository revisions are not snapshots. See the
-[provider guide](../service/README.md#hugging-face).
+[provider guide](../service/huggingface.md).
 
 ## Work with archives and other providers
 

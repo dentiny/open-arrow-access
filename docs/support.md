@@ -101,15 +101,15 @@ and release metadata with your downstream corpus manifest.
 
 | Provider | Feature | Available access / output | Guide |
 | --- | --- | --- | --- |
-| Hugging Face | `service-huggingface` | Repository file bytes; Parquet config/split as Arrow | [Guide](../service/README.md#hugging-face) |
-| Common Crawl | `service-warc` | Crawl/segment membership; Arrow reads through a caller-supplied record accessor | [Guide](../service/README.md#common-crawl-configuration) |
-| PMC | `service-pmc` | Article-version metadata and inventory shards as Arrow; article content is separate | [Guide](../service/README.md#pmc-inventory-pmc) |
-| Gutenberg | `service-gutenberg` | Per-book RDF metadata as one Arrow row; content URIs remain metadata | [Guide](../service/README.md#gutenberg) |
-| CourtListener | `service-courtlistener` | Bulk snapshot discovery and decoded CSV bytes | [Guide](../service/README.md#courtlistener-bulk-snapshots) |
-| Zenodo | `service-zenodo` | Record metadata and lazy original-file bytes | [Guide](../service/README.md#zenodo-zenodo) |
-| Internet Archive | `service-internet-archive` | Item metadata and lazy original-file bytes | [Guide](../service/README.md#internet-archive-internet-archive) |
-| Dataverse | `service-dataverse` | Dataset-version metadata and lazy original-file bytes | [Guide](../service/README.md#dataverse-dataverse) |
-| arXiv | `service-arxiv` | OAI metadata pages, bulk manifests, and selected archive members | [Guide](../service/README.md#arxiv-service-arxiv) |
+| Hugging Face | `service-huggingface` | Repository file bytes; Parquet config/split as Arrow | [Guide](../service/huggingface.md) |
+| Common Crawl | `service-warc` | Crawl/segment membership; Arrow reads through a caller-supplied record accessor | [Guide](../service/commoncrawl.md) |
+| PMC | `service-pmc` | Article-version metadata and inventory shards as Arrow; article content is separate | [Article metadata](../service/pmc.md), [inventory](../service/pmc-inventory.md) |
+| Gutenberg | `service-gutenberg` | Per-book RDF metadata as one Arrow row; content URIs remain metadata | [Guide](../service/gutenberg.md) |
+| CourtListener | `service-courtlistener` | Bulk snapshot discovery and decoded CSV bytes | [Guide](../service/courtlistener.md) |
+| Zenodo | `service-zenodo` | Record metadata and lazy original-file bytes | [Guide](../service/zenodo.md) |
+| Internet Archive | `service-internet-archive` | Item metadata and lazy original-file bytes | [Guide](../service/internet-archive.md) |
+| Dataverse | `service-dataverse` | Dataset-version metadata and lazy original-file bytes | [Guide](../service/dataverse.md) |
+| arXiv | `service-arxiv` | OAI metadata pages, bulk manifests, and selected archive members | [Bulk archives](../service/arxiv.md), [metadata](../service/arxiv-metadata.md) |
 | bioRxiv / medRxiv | `service-biorxiv` | Metadata pages, lazy JATS bytes, and MECA archive support | [Guide](../service/biorxiv.md) |
 | MECA | `service-meca` | Transfer manifest and referenced ZIP entry bytes | [Guide](../service/meca.md) |
 | DOAB | `service-doab` | OAI metadata pages and continuation tokens | [Guide](../service/doab.md) |
