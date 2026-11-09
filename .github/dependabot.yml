@@ -10,10 +10,11 @@ updates:
     # lockfile, metadata, and docs together as described in docs/dependencies.md.
     # Ignore rules also exclude these families from Dependabot security updates.
     ignore:
-      - dependency-name: "arrow-*"
-      - dependency-name: "parquet"
+      - dependency-name: "arrow*"
+      - dependency-name: "parquet*"
       - dependency-name: "datafusion*"
       - dependency-name: "opendal*"
+      - dependency-name: "lance*"
     groups:
       minor-and-patch:
         patterns:
