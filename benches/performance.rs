@@ -70,6 +70,7 @@ async fn main() {
             let mut writer = parquet::arrow::ArrowWriter::try_new(&mut out, schema.clone(), None).unwrap();
             writer.write(&record).unwrap(); writer.close().unwrap(); out
         },
+        "named-list" | "named-first" => Vec::new(),
         _ => vec![b'x'; 8 * 1024 * 1024],
     };
     let memory = MemoryAccessor::new(&data, chunk).with_ranges();
