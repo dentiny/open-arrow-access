@@ -14,3 +14,7 @@ pub(super) fn download_url(error: url::ParseError) -> Error {
 pub(super) fn missing_field(field: &str) -> Error {
     decode(&format!("missing or invalid {field}"))
 }
+
+pub(super) fn json(error: serde_json::Error) -> Error {
+    crate::http_client::json_error(OP, error)
+}

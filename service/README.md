@@ -376,3 +376,7 @@ See [http-transport](http-transport.md) for this utility.
 ## Common provider-validation
 
 See [provider-validation](provider-validation.md) for this utility.
+
+## Common api-document
+
+See [api-document](api-document.md) for this utility.

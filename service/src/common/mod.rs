@@ -6,3 +6,6 @@ mod validation;
 pub(crate) use error::{decode, invalid};
 pub use json_util::{array, text};
 pub use url_util::{download_url, filename, segment};
+
+mod document;
+pub use document::ApiDocument;

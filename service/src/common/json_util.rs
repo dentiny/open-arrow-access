@@ -19,3 +19,7 @@ pub fn array<'a>(value: &'a Value, field: &str) -> Result<&'a Vec<Value>> {
         .and_then(Value::as_array)
         .ok_or_else(|| error::missing_field(field))
 }
+
+pub(super) fn parse(bytes: &[u8]) -> Result<Value> {
+    serde_json::from_slice(bytes).map_err(error::json)
+}
