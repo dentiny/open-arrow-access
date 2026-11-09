@@ -7,12 +7,8 @@ repository.workspace = true
 description = "Dataset source providers for Open Arrow Access"
 
 [features]
-arxiv = [
-    "dep:quick-xml",
-    "dep:open-arrow-access-decompression",
-    "open-arrow-access-decompression/tar",
-]
 biorxiv = ["meca", "dep:chrono"]
+arxiv = ["format-xml", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
@@ -38,13 +34,14 @@ pmc = [
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 zenodo = []
 
-format-xml = ["dep:quick-xml"]
+format-xml = ["dep:quick-xml", "dep:xml-arrow", "dep:arrow-array", "dep:arrow-schema"]
 meca = [
     "format-xml",
     "dep:percent-encoding",
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/zip",
 ]
+oai = ["format-xml"]
 
 [dependencies]
 arrow-array = { workspace = true, optional = true }
@@ -135,6 +132,10 @@ required-features = ["internet-archive"]
 [[test]]
 name = "xml_metadata"
 required-features = ["format-xml"]
+
+[[test]]
+name = "oai"
+required-features = ["oai"]
 
 [[test]]
 name = "meca"
