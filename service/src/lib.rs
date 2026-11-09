@@ -49,8 +49,11 @@ pub mod common;
 #[cfg(feature = "format-xml")]
 pub mod xml_metadata;
 
-#[cfg(feature = "semantic-scholar")]
-pub mod semantic_scholar;
+#[cfg(feature = "uspto")]
+pub mod uspto;
 
 #[cfg(feature = "oai")]
 pub mod oai;
+
+#[cfg(feature = "semantic-scholar")]
+pub mod semantic_scholar;
