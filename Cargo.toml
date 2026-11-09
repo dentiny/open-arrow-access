@@ -102,6 +102,7 @@ service-federal-register = [
     "dep:open-arrow-access-service",
     "open-arrow-access-service/federal-register",
 ]
+service-govinfo = ["dep:open-arrow-access-service", "open-arrow-access-service/govinfo"]
 service-gutenberg = ["dep:open-arrow-access-service", "open-arrow-access-service/gutenberg"]
 service-hathifiles = ["dep:open-arrow-access-service", "open-arrow-access-service/hathifiles"]
 service-huggingface = ["dep:open-arrow-access-service", "open-arrow-access-service/huggingface"]

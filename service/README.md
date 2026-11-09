@@ -434,6 +434,10 @@ See [hathifiles service](hathifiles.md).
 
 See [federal-register service](federal-register.md) for its contract and usage.
 
+## govinfo
+
+See [govinfo service](govinfo.md).
+
 ## semantic-scholar
 
 See [semantic-scholar service](semantic-scholar.md).
