@@ -4,6 +4,7 @@ use open_arrow_access_test_support::http::HttpFixture;
 use opendal::{Buffer, HttpBody};
 mod providers;
 use providers::connection;
+
 #[tokio::test]
 async fn reads_one_page_and_strips_credentials_across_redirects() {
     let f = HttpFixture::new();
@@ -34,6 +35,7 @@ async fn reads_one_page_and_strips_credentials_across_redirects() {
     assert_eq!(f.requests().len(), 1);
     assert_eq!(dest.requests().len(), 1);
 }
+
 #[tokio::test]
 async fn scoped_query_survives_redirect_and_cannot_duplicate_existing_key() {
     let f = HttpFixture::new();
@@ -60,6 +62,7 @@ async fn scoped_query_survives_redirect_and_cannot_duplicate_existing_key() {
         .unwrap();
     assert_eq!(f.requests().len(), 2);
 }
+
 #[tokio::test]
 async fn validates_endpoint_header_and_api_continuation() {
     assert!(Connection::new("https://u:p@example.com").is_err());

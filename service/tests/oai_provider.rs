@@ -9,6 +9,7 @@ impl OaiProvider for TestProvider {
     const PATH: &'static str = "harvest";
     const METADATA_PREFIX: &'static str = "xoai";
 }
+
 #[tokio::test]
 async fn shares_provider_configuration_without_duplicating_protocol_state() {
     let f = HttpFixture::new();
