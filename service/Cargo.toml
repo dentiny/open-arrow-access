@@ -44,8 +44,6 @@ pmc = [
     "open-arrow-access-decompression/gzip",
 ]
 
-
-
 [dependencies]
 indexmap.workspace = true
 quick-xml = { workspace = true, optional = true }
