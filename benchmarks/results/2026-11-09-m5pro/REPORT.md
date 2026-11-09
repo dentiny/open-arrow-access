@@ -237,4 +237,7 @@ upstream `atif-arrow` tests and Clippy, ATIF integration tests with the path
 candidate, and the full combined workspace all-feature release tests and Clippy.
 Changed TOML files pass Taplo 0.10.0; the original `storage/Cargo.toml` has an
 unrelated pre-existing key-order formatting failure in the repository-wide check.
+The independent final review heads are recorded in [review-branches.json](review-branches.json).
+Their production changes match the measured patches; only TOML formatting and
+the test-index row location differ in two final branches.
 All PRs are intended for review only; none is merged as part of this work.

@@ -97,8 +97,8 @@
       "failed": false,
       "test_results": [],
       "tail": [
-        "    Checking open-arrow-access-service v0.1.0 (/Users/haojiang/Documents/Codex/2026-11-09/https-github-com-dentiny-open-arrow-9/work/open-arrow-access/service)",
-        "    Checking open-arrow-access v0.1.0 (/Users/haojiang/Documents/Codex/2026-11-09/https-github-com-dentiny-open-arrow-9/work/open-arrow-access)",
+        "    Checking open-arrow-access-service v0.1.0 (<open-arrow-access>/service)",
+        "    Checking open-arrow-access v0.1.0 (<open-arrow-access>)",
         "    Finished `release` profile [optimized] target(s) in 1m 21s"
       ]
     },
@@ -215,7 +215,7 @@
       "failed": false,
       "command": "cargo check --workspace --no-default-features --release --locked",
       "tail": [
-        "    Checking open-arrow-access-benchmarks v0.1.0 (/Users/haojiang/Documents/Codex/2026-11-09/https-github-com-dentiny-open-arrow-9/work/open-arrow-access/benchmarks)",
+        "    Checking open-arrow-access-benchmarks v0.1.0 (<open-arrow-access>/benchmarks)",
         "    Finished `release` profile [optimized] target(s) in 6.36s"
       ]
     }

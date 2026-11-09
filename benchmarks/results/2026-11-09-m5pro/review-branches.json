@@ -1,0 +1,10 @@
+{
+  "open-arrow-access": {
+    "codex/perf-line-scan": "25809c50555e88be3280f71b8c455c44a4f2a698",
+    "codex/perf-atif-input-borrow": "3c170f2d4c4a9fcc124e24c42533446c68f62bad",
+    "codex/perf-read-all-reserve": "1bf064f604942716eeb5de732add0b52d764d2a9"
+  },
+  "atif-arrow": {
+    "codex/cache-trajectory-schema": "7224617262a8d486901529bdcb6d0e1adc0ea7fe"
+  }
+}
