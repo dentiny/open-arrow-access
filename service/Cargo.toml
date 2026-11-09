@@ -27,6 +27,7 @@ huggingface = [
     "open-arrow-access-file-format/parquet",
 ]
 internet-archive = []
+library-of-congress = []
 pmc = [
     "dep:arrow-array",
     "dep:arrow-schema",
@@ -126,3 +127,7 @@ required-features = ["internet-archive"]
 [[test]]
 name = "xml_metadata"
 required-features = ["format-xml"]
+
+[[test]]
+name = "library_of_congress"
+required-features = ["library-of-congress"]
