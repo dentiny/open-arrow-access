@@ -17,6 +17,8 @@ pub use open_arrow_access_core::*;
     feature = "service-warc",
     feature = "service-gutenberg",
     feature = "service-uspto",
+    feature = "service-doab",
+    feature = "service-hathifiles",
     feature = "service-regulations",
 ))]
 pub use open_arrow_access_service as service;
