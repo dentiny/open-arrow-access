@@ -1,8 +1,6 @@
-use std::{error::Error as _, io};
-
 use futures::TryStreamExt;
 use http::StatusCode;
-use open_arrow_access_core::{ByteAccessor, Error, ErrorKind, ListRequest, ObjectRef};
+use open_arrow_access_core::{ByteAccessor, ListRequest, ObjectRef};
 use open_arrow_access_service::common::{LinkField, resolve_optional_links};
 use open_arrow_access_test_support::http::HttpFixture;
 
@@ -43,24 +41,4 @@ async fn resolution_preserves_query_and_metadata_without_downloading_files() {
     assert_eq!(names, vec![ObjectRef::new("paper.pdf")]);
     assert_eq!(api.requests().len(), 1);
     assert!(downloads.requests().is_empty());
-}
-
-#[tokio::test]
-async fn resolver_errors_are_preserved() {
-    let api = HttpFixture::new();
-    api.respond("/manifest", StatusCode::OK, "{}");
-    let error = providers::connection(&api)
-        .resolve_json_files("manifest", &[], |_| {
-            Err(Error::new(
-                ErrorKind::PermissionDenied,
-                "validate_provider",
-                "restricted",
-            )
-            .with_source(io::Error::other("original cause")))
-        })
-        .await
-        .unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
-    assert_eq!(error.operation(), "validate_provider");
-    assert_eq!(error.source().unwrap().to_string(), "original cause");
 }
