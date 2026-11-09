@@ -434,6 +434,10 @@ See [hathifiles service](hathifiles.md).
 
 See [federal-register service](federal-register.md) for its contract and usage.
 
+## govinfo
+
+See [govinfo service](govinfo.md).
+
 ## MECA
 
 See [storage-independent MECA archives](meca.md).

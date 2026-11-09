@@ -20,6 +20,7 @@ pub use open_arrow_access_core::*;
     feature = "service-doab",
     feature = "service-hathifiles",
     feature = "service-federal-register",
+    feature = "service-govinfo",
     feature = "service-meca",
     feature = "service-biorxiv",
 ))]

@@ -19,6 +19,7 @@ dataverse = []
 default = []
 doab = ["oai"]
 federal-register = []
+govinfo = []
 gutenberg = ["format-xml", "dep:chrono"]
 hathifiles = []
 huggingface = [
@@ -175,6 +176,10 @@ required-features = ["hathifiles"]
 [[test]]
 name = "federal_register"
 required-features = ["federal-register"]
+
+[[test]]
+name = "govinfo"
+required-features = ["govinfo"]
 
 [[test]]
 name = "meca"
