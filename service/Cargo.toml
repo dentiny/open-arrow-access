@@ -45,6 +45,7 @@ pmc = [
 ]
 
 xml-metadata = ["dep:quick-xml"]
+oai = ["xml-metadata"]
 
 [dependencies]
 indexmap.workspace = true
@@ -134,3 +135,7 @@ required-features = ["internet-archive"]
 [[test]]
 name = "xml_metadata"
 required-features = ["xml-metadata"]
+
+[[test]]
+name = "oai"
+required-features = ["oai"]

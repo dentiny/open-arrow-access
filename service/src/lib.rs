@@ -48,3 +48,6 @@ pub mod common;
 
 #[cfg(feature = "xml-metadata")]
 pub mod xml_metadata;
+
+#[cfg(feature = "oai")]
+pub mod oai;
