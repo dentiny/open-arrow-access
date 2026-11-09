@@ -1,5 +1,8 @@
 # Source attributes and scan planning
 
+Status: design proposal. Source attributes, partition planning, parallel execution,
+and unordered emission are not implemented. See the [roadmap](roadmap.md#planning-parallelism-and-order).
+
 Status: design proposal for future planning/layer PRs. This document introduces
 no runtime attributes, partition planner, Cargo features or capability flags.
 The existing framework implements byte I/O concurrency, not parallel record scans.
