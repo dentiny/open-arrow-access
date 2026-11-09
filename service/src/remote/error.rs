@@ -36,3 +36,7 @@ pub(super) fn header_value(error: http::header::InvalidHeaderValue) -> Error {
 pub(super) fn missing_field(field: &str) -> Error {
     decode(&format!("missing or invalid {field}"))
 }
+
+pub(super) fn http(kind: opendal::ErrorKind, status: http::StatusCode) -> Error {
+    io(opendal::Error::new(kind, format!("provider HTTP {status}")))
+}

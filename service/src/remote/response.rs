@@ -1,4 +1,4 @@
-use super::error::{OP, decode, io};
+use super::error::{decode, io};
 use super::{
     ApiDocument, Connection, download_url,
     validation::{self, BodyLength},
@@ -30,7 +30,15 @@ impl Connection {
                 url = next;
                 continue;
             }
-            crate::http_client::check_status(status, response.headers(), OP)?;
+            if status != http::StatusCode::OK {
+                let kind = match status.as_u16() {
+                    404 => opendal::ErrorKind::NotFound,
+                    401 | 403 => opendal::ErrorKind::PermissionDenied,
+                    429 => opendal::ErrorKind::RateLimited,
+                    _ => opendal::ErrorKind::Unexpected,
+                };
+                return Err(super::error::http(kind, status));
+            }
             return Ok(response);
         }
         Err(decode("too many redirects"))
