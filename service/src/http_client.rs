@@ -14,7 +14,7 @@ pub(crate) use error::{json_error, request_error, transport_error};
 use http::Request;
 use open_arrow_access_core::Result;
 use open_arrow_access_storage::OpenDalAccessor;
-use opendal::{Buffer, HttpTransporter, OperationContext, raw::oio::ReadStream};
+use opendal::{Buffer, HttpTransporter, OperationContext};
 use serde::de::DeserializeOwned;
 use url::Url;
 
@@ -78,20 +78,7 @@ impl HttpClient {
         if status != http::StatusCode::OK {
             return Err(error::http_status_error(operation, status));
         }
-        let mut body = response.into_body();
-        let mut bytes = Vec::new();
-        loop {
-            let buffer = body
-                .read()
-                .await
-                .map_err(|error| transport_error(operation, error))?;
-            if buffer.is_empty() {
-                break;
-            }
-            for part in buffer {
-                bytes.extend_from_slice(&part);
-            }
-        }
+        let bytes = crate::http_body::collect(response, operation).await?;
         parser::parse_json(&bytes, operation)
     }
 }

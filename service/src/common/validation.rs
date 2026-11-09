@@ -53,20 +53,6 @@ pub(super) fn redirect(current: &Url, next: &Url) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn validate_body_progress(expected: Option<u64>, read: u64) -> Result<()> {
-    if expected.is_some_and(|length| read > length) {
-        return Err(decode("HTTP body exceeds Content-Length"));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_body_complete(expected: Option<u64>, read: u64) -> Result<()> {
-    if expected.is_some_and(|length| read != length) {
-        return Err(decode("truncated HTTP body"));
-    }
-    Ok(())
-}
-
 pub(super) fn validate_downloads(files: &[MetadataLink]) -> Result<()> {
     for file in files {
         super::resolve_download_url(&file.url)?;

@@ -152,3 +152,29 @@ fn validates_endpoint_without_network() {
         assert!(ZenodoService::with_endpoint(endpoint).is_err());
     }
 }
+
+#[tokio::test]
+async fn metadata_rejects_incorrect_declared_body_lengths() {
+    let raw = fixture!("zenodo", "empty.json").await;
+    for declared in [raw.len() - 1, raw.len() + 1] {
+        let fixture = HttpFixture::new();
+        let body = raw.clone();
+        fixture.handle(move |_| {
+            Ok(http::Response::builder()
+                .status(200)
+                .header("content-length", declared)
+                .body(opendal::HttpBody::new(
+                    futures::stream::iter([Ok(opendal::Buffer::from(body.clone()))]),
+                    None,
+                ))
+                .unwrap())
+        });
+        let error = ZenodoService::with_endpoint(fixture.endpoint())
+            .unwrap()
+            .record(ID)
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Decode);
+        assert_eq!(error.operation(), "resolve_zenodo");
+    }
+}
