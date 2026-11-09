@@ -1,4 +1,4 @@
-use open_arrow_access_service::remote::{array, download_url, filename, segment, text};
+use open_arrow_access_service::common::{array, download_url, filename, segment, text};
 #[test]
 fn validates_download_origins_without_changing_signed_queries() {
     let signed = "https://files.example/path%20one?sig=a%2Bb%2Fz";
