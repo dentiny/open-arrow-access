@@ -1,4 +1,4 @@
-//! Shared URL, filename and JSON field utilities for providers.
+//! Common utilities shared by provider services.
 mod error;
 mod validation;
 pub(crate) use error::{decode, invalid};

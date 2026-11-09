@@ -43,5 +43,5 @@ pub mod dataverse;
 #[cfg(feature = "internet-archive")]
 pub mod internet_archive;
 
-/// Shared provider protocol utilities.
-pub mod remote;
+/// Common utilities shared by provider services.
+pub mod common;
