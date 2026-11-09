@@ -177,13 +177,13 @@ impl Connection {
         )))
     }
     /// Bind a validated provider manifest to lazy byte reads. Logical names remain opaque.
-    pub fn files<M>(&self, files: Vec<(String, String)>, metadata: M) -> Result<RemoteFiles<M>> {
+    pub fn files<M>(&self, files: Vec<MetadataLink>, metadata: M) -> Result<RemoteFiles<M>> {
         validation::downloads(&files)?;
         let files = NamedFileAccessor::new(
             self.clone(),
             files
                 .into_iter()
-                .map(|(name, url)| (name, url.into()))
+                .map(|file| (file.file_name, file.url.into()))
                 .collect(),
         )
         .map_err(error::file_namespace)?;
