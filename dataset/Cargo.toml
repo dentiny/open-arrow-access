@@ -11,17 +11,17 @@ default = []
 directory = []
 
 [dependencies]
-open-arrow-access-core.workspace = true
 futures.workspace = true
+open-arrow-access-core.workspace = true
 
 [dev-dependencies]
-open-arrow-access-file-format = { workspace = true, features = ["atif", "parquet"] }
-open-arrow-access-storage.workspace = true
-tempfile.workspace = true
-more-asserts.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
+more-asserts.workspace = true
+open-arrow-access-file-format = { workspace = true, features = ["atif", "parquet"] }
+open-arrow-access-storage.workspace = true
 open-arrow-access-test-support.workspace = true
+tempfile.workspace = true
 tokio.workspace = true
 
 [[test]]
