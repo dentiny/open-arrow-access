@@ -38,14 +38,11 @@ pub(crate) fn json_error(operation: &'static str, error: serde_json::Error) -> E
     Error::new(ErrorKind::Decode, operation, "invalid JSON metadata").with_source(error)
 }
 
-// Preserve the existing metadata client's status policy at its call site.
-pub(super) fn metadata_http_error(
-    operation: &'static str,
-    kind: opendal::ErrorKind,
-    status: http::StatusCode,
-) -> Error {
-    transport_error(
+/// Translate metadata response failures directly into the shared core category.
+pub(super) fn http_status_error(operation: &'static str, status: http::StatusCode) -> Error {
+    Error::new(
+        ErrorKind::from_http_status(status.as_u16()),
         operation,
-        opendal::Error::new(kind, format!("metadata HTTP {status}")),
+        format!("metadata HTTP {status}"),
     )
 }
