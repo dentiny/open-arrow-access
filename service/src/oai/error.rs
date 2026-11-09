@@ -21,9 +21,8 @@ pub(super) fn protocol(error: Option<ProtocolError>) -> Error {
         result
     }
 }
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub(super) struct ProtocolError {
-    #[serde(rename = "@code")]
     pub(super) code: String,
 }
 impl std::fmt::Display for ProtocolError {

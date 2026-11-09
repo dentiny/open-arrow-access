@@ -1,0 +1,109 @@
+use super::{error, validation};
+use futures::io::Cursor;
+use open_arrow_access_core::{RecordBatch, Result};
+use quick_xml::{NsReader, events::Event, name::ResolveResult};
+use std::borrow::Cow;
+use xml_arrow::{NamespaceBinding, ReaderOptions, XmlField, XmlReader, XmlSchema};
+
+/// An XML metadata document whose element mappings use its root namespace.
+/// External DTD declarations are ignored, as in the previous metadata decoder;
+/// DTDs with internal subsets are rejected. No DTD or external entity is fetched.
+pub struct XmlDocument<'a> {
+    bytes: Cow<'a, [u8]>,
+    root: String,
+    namespace: Option<String>,
+}
+
+impl<'a> XmlDocument<'a> {
+    pub fn new(bytes: &'a [u8], expected_root: &str) -> Result<Self> {
+        let mut reader = NsReader::from_reader(bytes);
+        let mut doctype = None;
+        loop {
+            let start = reader.buffer_position() as usize;
+            let (namespace, event) = reader.read_resolved_event().map_err(error::parse)?;
+            match event {
+                Event::Start(element) | Event::Empty(element) => {
+                    validation::validate_root_name(element.local_name().as_ref(), expected_root)?;
+                    let namespace = match namespace {
+                        ResolveResult::Bound(namespace) => Some(
+                            std::str::from_utf8(namespace.as_ref())
+                                .map_err(error::utf8)?
+                                .to_owned(),
+                        ),
+                        ResolveResult::Unbound => None,
+                        ResolveResult::Unknown(_) => {
+                            return Err(error::invalid("unbound XML prefix"));
+                        }
+                    };
+                    let bytes = match doctype {
+                        Some((start, end)) => {
+                            let mut normalized = bytes[..start].to_vec();
+                            normalized.extend_from_slice(&bytes[end..]);
+                            Cow::Owned(normalized)
+                        }
+                        None => Cow::Borrowed(bytes),
+                    };
+                    return Ok(Self {
+                        bytes,
+                        root: expected_root.into(),
+                        namespace,
+                    });
+                }
+                Event::DocType(value) => {
+                    validation::validate_doctype(&value, doctype.is_some())?;
+                    doctype = Some((start, reader.buffer_position() as usize));
+                }
+                Event::Decl(_) | Event::Comment(_) | Event::PI(_) => {}
+                Event::Text(text) if text.iter().all(u8::is_ascii_whitespace) => {}
+                _ => return Err(error::root(expected_root)),
+            }
+        }
+    }
+
+    /// Qualify one element name for this document's namespace. Attribute paths
+    /// remain unprefixed unless the attribute itself has a namespace.
+    pub fn element(&self, local_name: &str) -> String {
+        if self.namespace.is_some() {
+            format!("m:{local_name}")
+        } else {
+            local_name.into()
+        }
+    }
+
+    /// Read one root record using our XML engine and validate the document tail.
+    pub async fn read(&self, fields: Vec<XmlField>) -> Result<RecordBatch> {
+        let bindings = self
+            .namespace
+            .as_deref()
+            .map(|uri| NamespaceBinding { prefix: "m", uri });
+        let schema = XmlSchema::with_namespaces(fields, bindings.as_slice()).map_err(error::xml)?;
+        // Metadata is already buffered. Preserve the previous document-size
+        // allowance while retaining the XML engine's default depth limit.
+        let budget = self.bytes.len().saturating_add(4096);
+        let mut reader = XmlReader::new(
+            Cursor::new(self.bytes.as_ref()),
+            schema,
+            &format!("/{}", self.element(&self.root)),
+            ReaderOptions {
+                max_record_bytes: budget,
+                max_batch_bytes: budget,
+                ..Default::default()
+            },
+        )
+        .map_err(error::xml)?;
+        let batch = reader
+            .next_batch()
+            .await
+            .map_err(error::xml)?
+            .ok_or_else(|| error::root(&self.root))?;
+        if batch.num_rows() != 1 || reader.next_batch().await.map_err(error::xml)?.is_some() {
+            return Err(error::invalid("expected one XML metadata document"));
+        }
+        Ok(batch)
+    }
+}
+
+/// Check the document root without fetching a DTD or decoding record values.
+pub fn validate_root(bytes: &[u8], expected: &str) -> Result<()> {
+    XmlDocument::new(bytes, expected).map(|_| ())
+}

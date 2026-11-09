@@ -1,31 +1,71 @@
 use super::{OaiPage, error, validation};
+use crate::xml_metadata::XmlDocument;
+use arrow_array::{Array, cast::AsArray};
+use arrow_schema::DataType::Utf8;
 use open_arrow_access_core::{Bytes, Result};
+use xml_arrow::XmlField;
 
-#[derive(serde::Deserialize)]
 pub(super) struct Envelope {
-    #[serde(rename = "ListRecords")]
     pub(super) records: Option<Records>,
     pub(super) error: Option<error::ProtocolError>,
 }
 
-#[derive(serde::Deserialize)]
 pub(super) struct Records {
-    #[serde(rename = "record", default)]
-    records: Vec<serde::de::IgnoredAny>,
-    #[serde(rename = "resumptionToken")]
+    count: usize,
     token: Option<String>,
 }
 
-pub(super) fn parse_page(bytes: Bytes) -> Result<OaiPage> {
-    validation::validate_root(&bytes)?;
-    let envelope: Envelope = quick_xml::de::from_reader(bytes.as_ref()).map_err(error::response)?;
+pub(super) async fn parse_page(bytes: Bytes) -> Result<OaiPage> {
+    let document = XmlDocument::new(&bytes, "OAI-PMH")?;
+    let batch = document
+        .read(vec![
+            XmlField::structure(
+                "records",
+                document.element("ListRecords"),
+                true,
+                vec![
+                    XmlField::list(
+                        "records",
+                        ".",
+                        false,
+                        XmlField::structure("record", document.element("record"), false, vec![]),
+                    ),
+                    XmlField::new("token", document.element("resumptionToken"), Utf8, true),
+                ],
+            ),
+            XmlField::structure(
+                "error",
+                document.element("error"),
+                true,
+                vec![XmlField::new("code", "@code", Utf8, false)],
+            ),
+        ])
+        .await
+        .map_err(error::response)?;
+    let records = batch.column(0).as_struct();
+    let failure = batch.column(1).as_struct();
+    let envelope = Envelope {
+        records: (!records.is_null(0)).then(|| Records {
+            count: records.column(0).as_list::<i32>().value_length(0) as usize,
+            token: records
+                .column(1)
+                .as_string::<i32>()
+                .iter()
+                .next()
+                .flatten()
+                .map(str::to_owned),
+        }),
+        error: (!failure.is_null(0)).then(|| error::ProtocolError {
+            code: failure.column(0).as_string::<i32>().value(0).to_owned(),
+        }),
+    };
     validation::validate_response(&envelope)?;
-    let records = envelope.records;
     Ok(OaiPage {
-        bytes,
-        record_count: records.as_ref().map_or(0, |records| records.records.len()),
-        resumption_token: records
+        record_count: envelope.records.as_ref().map_or(0, |records| records.count),
+        resumption_token: envelope
+            .records
             .and_then(|records| records.token)
             .filter(|token| !token.is_empty()),
+        bytes,
     })
 }
