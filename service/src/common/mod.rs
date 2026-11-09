@@ -12,4 +12,4 @@ pub use document::ApiDocument;
 
 mod connection;
 mod transport;
-pub use connection::{Connection, RemoteFiles, MetadataLink};
+pub use connection::{Connection, MetadataLink, RemoteFiles};
