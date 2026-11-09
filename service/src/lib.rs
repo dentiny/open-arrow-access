@@ -60,3 +60,6 @@ pub mod doab;
 
 #[cfg(feature = "arxiv")]
 pub mod arxiv_metadata;
+
+#[cfg(feature = "hathifiles")]
+pub mod hathifiles;

@@ -425,3 +425,7 @@ See [doab service](doab.md).
 ## arxiv-metadata
 
 See [arxiv-metadata service](arxiv-metadata.md).
+
+## hathifiles
+
+See [hathifiles service](hathifiles.md).

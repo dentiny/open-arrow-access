@@ -18,6 +18,7 @@ dataverse = []
 default = []
 doab = ["oai"]
 gutenberg = ["format-xml", "dep:chrono"]
+hathifiles = []
 huggingface = [
     "dep:open-arrow-access-dataset",
     "dep:open-arrow-access-file-format",
@@ -157,3 +158,7 @@ required-features = ["doab"]
 [[test]]
 name = "arxiv_metadata"
 required-features = ["arxiv"]
+
+[[test]]
+name = "hathifiles"
+required-features = ["hathifiles"]
