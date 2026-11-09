@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use indexmap::{IndexMap, map::Entry};
 
 use open_arrow_access_core::{
@@ -16,14 +18,17 @@ pub fn validate_file_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Resu
 #[derive(Clone, Debug)]
 pub struct NamedFileAccessor<A> {
     inner: A,
-    files: IndexMap<String, ObjectRef>,
+    files: Arc<IndexMap<String, ObjectRef>>,
 }
 
 impl<A> NamedFileAccessor<A> {
     /// Names are opaque and must be nonempty and unique. Construction performs no I/O.
     pub fn new(inner: A, files: Vec<(String, ObjectRef)>) -> Result<Self> {
         let files = index_files(files)?;
-        Ok(Self { inner, files })
+        Ok(Self {
+            inner,
+            files: Arc::new(files),
+        })
     }
 }
 
@@ -71,12 +76,14 @@ where
                 "expected an empty root prefix",
             ));
         }
-        let files = self
-            .files
-            .iter()
-            .map(|(name, _)| Ok(ObjectRef::new(name.clone())))
-            .collect::<Vec<_>>();
-        Ok(Box::pin(futures::stream::iter(files)))
+        let files = Arc::clone(&self.files);
+        let len = files.len();
+        Ok(Box::pin(futures::stream::iter((0..len).map(
+            move |index| {
+                let (name, _) = files.get_index(index).unwrap();
+                Ok(ObjectRef::new(name.clone()))
+            },
+        ))))
     }
 }
 
