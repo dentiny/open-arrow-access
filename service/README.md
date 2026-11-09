@@ -1,500 +1,234 @@
-# Dataset providers
+# Dataset services
 
-Providers connect corpus-specific discovery and metadata to the shared access
-interfaces used in pretraining data preparation. Use them to assemble source
-collections and open the original corpus files or metadata for your ingestion job. Choose a provider in the [support matrix](../docs/support.md#dataset-providers),
-then follow its guide for source identity, authentication, paging, and output type.
+## Service and data
 
-## Choose an entry point
+This crate connects external data sources to Open Arrow Access. A provider can
+return discovery metadata, a named set of original files, archive members, or
+Arrow batches. The individual guide states exactly which representation it reads.
+All service guides live directly in this `service/` directory; `src/` contains
+implementation code.
 
-| Need | Interface | Next step |
+### Directory layout
+
+```text
+service/
+  README.md                 Service catalogue, interaction model and setup
+  <provider>.md             Data, request/response and usage for one provider
+  response-schemas.md        Shared response families and schema references
+  src/
+    lib.rs                  Public modules and provider feature gates
+    <provider>/             Provider-specific requests, discovery and metadata mapping
+    common/                 Public Connection, ApiDocument and file-link helpers
+    http_client.rs          Shared HTTP requests over OpenDAL transport
+    http_body.rs            Shared response-body handling
+    resolved_files.rs       Metadata plus a lazy named-file accessor
+    oai/                    OAI-PMH protocol shared by several providers
+  tests/                    Provider and shared-contract tests
+```
+
+### Included services
+
+| Source | Data available through this library | Guide |
 | --- | --- | --- |
-| Ready-to-read Hugging Face Parquet split | `HuggingFaceService::dataset` → Arrow reader | [Hugging Face](#hugging-face) |
-| PMC inventory or article metadata | Inventory/article accessor → Arrow metadata rows | [PMC](#pmc-inventory-pmc) |
-| Gutenberg book metadata | RDF accessor → one Arrow row | [Gutenberg](#gutenberg) |
-| Common Crawl membership | Crawl/segment resolver → file selection | [Common Crawl](#common-crawl-configuration); supply a WARC-to-Arrow accessor for record reads |
-| CourtListener bulk table | Snapshot accessor → decoded CSV bytes | [CourtListener](#courtlistener-bulk-snapshots) |
-| Research repository files | Version/record resolver → metadata and lazy bytes | [Zenodo](#zenodo-zenodo), [Dataverse](#dataverse-dataverse), [Internet Archive](#internet-archive-internet-archive), [Figshare](figshare.md) |
-| Books, scholarly bulk data, government sources | Provider-specific discovery and file access | [Full provider matrix](../docs/support.md#dataset-providers) |
+| Hugging Face | Dataset repository files and Parquet config/split exports | [Hugging Face](huggingface.md) |
+| Zenodo | Attachments of a public published research record | [Zenodo](zenodo.md) |
+| Dataverse | Original files of an explicit released research dataset version | [Dataverse](dataverse.md) |
+| Internet Archive | Public item file membership and original files | [Internet Archive](internet-archive.md) |
+| Figshare | Versioned research article files and collection pages | [Figshare](figshare.md) |
+| PMC | One article-version metadata JSON as one Arrow row | [Article metadata](pmc.md) |
+| PMC inventory | Manifest-selected inventory CSV shards as Arrow rows | [Inventory](pmc-inventory.md) |
+| arXiv bulk | PDF/source TAR manifests and archive member bytes | [Bulk archives](arxiv.md) |
+| arXiv metadata | Raw OAI-PMH article metadata XML pages | [Metadata](arxiv-metadata.md) |
+| bioRxiv / medRxiv | Dated preprint metadata pages and JATS XML links | [Preprints](biorxiv.md) |
+| MECA | Scholarly ZIP package manifests and selected members | [MECA](meca.md) |
+| Semantic Scholar | Release-pinned bulk partitions and diff manifests | [Bulk datasets](semantic-scholar.md) |
+| Project Gutenberg | Per-book RDF metadata as one Arrow row | [Gutenberg](gutenberg.md) |
+| DOAB | Open-access book metadata via OAI-PMH | [DOAB](doab.md) |
+| OAPEN | Book metadata via OAI-PMH and selected hosted book bytes | [OAPEN](oapen.md) |
+| HathiTrust | Full/update Hathifiles catalogue exports | [Hathifiles](hathifiles.md) |
+| OpenStax | Commit-pinned textbook source ZIP archives | [OpenStax](openstax.md) |
+| BHL | Biodiversity literature metadata, item links and OCR export files | [BHL](bhl.md) |
+| Common Crawl | Crawl/segment WARC membership and separately composed record reads | [Common Crawl](commoncrawl.md) |
+| CourtListener | Dated bulk table exports as decompressed CSV bytes | [CourtListener](courtlistener.md) |
+| Federal Register | Rule/notice metadata and advertised document representations | [Federal Register](federal-register.md) |
+| GovInfo | Government bulk directories and package representations | [GovInfo](govinfo.md) |
+| Library of Congress | Digital-collection metadata, resource files and OCR JSON | [Library of Congress](library-of-congress.md) |
+| USPTO | Patent/trademark bulk product pages and original files | [USPTO](uspto.md) |
+| Regulations.gov | Documents, comments, dockets and attachment representations | [Regulations.gov](regulations.md) |
 
-A metadata row is not an article's full text. A file accessor preserves original
-bytes and needs a compatible decoder before it produces Arrow. File bodies
-usually remain lazy after discovery; consult the provider's contract.
+Each guide follows the same order: what the source contains, request/response
+formats, then a complete Rust usage example and an explanation of its result.
 
-Backend configuration stays caller-controlled. Generic object-store listing
-belongs to storage; providers handle API conventions, source membership, and
-metadata. Record the selected revision/release and upstream metadata in your
-pipeline manifest. Many providers expose one page at a time, leaving continuation,
-pacing, and retry policy to the caller.
+## Request and response
 
-See [response schemas](response-schemas.md) for the core Arrow/byte entry points,
-[usage](../docs/usage.md) for composition examples, and the individual provider
-guides below for their full contracts.
+### How services interact with OpenDAL
 
-## Hugging Face
+OpenDAL supplies two parts of the I/O layer:
 
-The default-off `huggingface` feature (`service-huggingface` on the facade)
-provides `HuggingFaceService::repository` for dataset repository files.
-The service owns repository ID, revision, root, endpoint and authentication.
-Its byte accessor reuses `storage::OpenDalAccessor`; format accessors decode records.
-Floating revisions are not snapshots.
-The same service exposes `dataset(HuggingFaceDatasetRequest)` and implements
-`Accessor` for that request. This opens one config/split as ordered Arrow batches
-from the HF Parquet export. A floating export revision is first pinned with a
-small `expand=sha` metadata request; membership and file
-reads then use that same commit. Explicit commit requests skip the metadata call.
-The selected directory is listed nonrecursively, Parquet paths are sorted, and
-existing `ParquetAccessor`/`FileSetAccessor` perform lazy sequential reading,
-projection, batching and schema validation. Only the shard list is collected.
+- **Storage operators:** an `opendal::Operator` configures a backend such as Fs,
+  S3, HTTP or Hf. `storage::OpenDalAccessor` adapts its operations to our
+  `ByteAccessor` / `ByteReader` interfaces, including listing and exact ranges
+  when supported by the configured source.
+- **HTTP transport:** provider metadata requests and sequential downloads use
+  OpenDAL's `OperationContext` / `HttpTransporter`, with a reqwest transport by
+  default. Our shared HTTP client and `Connection` add provider request rules,
+  response parsing and origin-scoped credentials above that transport.
 
-A missing complete split fails. `with_partial_exports()` explicitly permits
-fallback to `partial-<split>`; full exports take precedence, and permission or
-transport errors never trigger fallback. `with_revision` refers to the Parquet
-representation, not the original source branch. Native dataset-card parsing and
-Viewer row APIs are outside this entry point.
+The provider adds the source-specific meaning: which endpoint or manifest to
+read, which ID/version/split was selected, which files belong to that selection,
+and which metadata to retain. A logical filename returned by a provider maps to
+a backend object key or download URL; callers use that name with `open`.
 
-## Gutenberg
-
-Enable `gutenberg` (`service-gutenberg` on the facade) to convert one per-book
-RDF/XML object into one Arrow row. `GutenbergAccessor` accepts a standard
-`ReadRequest` and reuses `xml-arrow` for metadata extraction. File entries retain
-RDF order; their URIs are metadata and are never fetched.
-
-| Column | Arrow type |
-| --- | --- |
-| `ebook_id` | UInt64 |
-| `title`, `rights` | nullable LargeUtf8 |
-| `creator` | List of struct: nullable `uri`, `name` (Utf8), `alias` (List<Utf8>), nullable `birthdate`, `deathdate` (Int32 years) |
-| `language`, `bookshelf` | List<Utf8> |
-| `subject` | List of struct: nullable `scheme` (Utf8), `value` (Utf8) |
-| `issued` | nullable Date32; Gutenberg release date |
-| `files` | List of struct: `uri` (Utf8), `format` (List<Utf8>), nullable `extent` (UInt64), nullable `modified` (Utf8) |
-
-Missing optional metadata becomes null or an empty list. Only mapped RDF fields
-are emitted. Malformed RDF terminates the reader rather than dropping the book.
-Projection preserves caller order and zero-column row counts; mapped fields are
-validated even when projected away. Byte options are forwarded to the RDF read.
-
-One RDF emits one row,
-independently of the batch-size target. File downloading, catalogue discovery,
-archive expansion and writing remain with the caller.
-
-Run the [example](../examples/read_gutenberg.rs) against the synthetic metadata
-fixture, or supply a mirror root and RDF path:
-
-```sh
-cargo run --example read_gutenberg --features service-gutenberg
+```mermaid
+flowchart TD
+    App[Application: select provider and source] --> Provider[Provider discovery or manifest selection]
+    Provider --> Selection[Metadata and selected file access]
+    Selection --> Managed[Provider-configured OpenDAL Operator]
+    Selection --> HTTP[Connection GET through OpenDAL HttpTransporter]
+    Caller[Caller-configured Operator: Fs / S3 / HTTP] --> Adapter[OpenDalAccessor]
+    Managed --> Adapter
+    Adapter --> Bytes[ByteReader]
+    HTTP --> Bytes
+    Bytes --> Decode[Explicit decompression / archive / format reader]
+    Decode --> Output[Member bytes, native records or Arrow batches]
 ```
 
-## PMC inventory (`pmc`)
+| Integration pattern | Services / entry points | What the caller configures |
+| --- | --- | --- |
+| Caller supplies byte storage, usually an OpenDAL operator wrapped by `OpenDalAccessor` | PMC article/inventory, Gutenberg, CourtListener, arXiv bulk | Backend root, endpoint, credentials, region and any requester-pays settings; provider requests select keys/manifests |
+| Provider creates the operator for its file namespace | Hugging Face repository/dataset; Zenodo, Dataverse, Internet Archive | Provider ID/revision/version and supported endpoint/token options; the provider configures the Hf or HTTP backend |
+| Provider calls APIs and opens advertised URLs through `Connection` | Figshare, GovInfo, BHL, bioRxiv, LoC, OpenStax, Semantic Scholar, USPTO, Regulations.gov and other JSON/OAI providers | Provider API settings/keys; optional custom Connection/transport; downloads are sequential |
+| Caller supplies an already opened byte reader | MECA archive inspection | A ranged, known-length source reader; this can come from OpenDAL or another compatible accessor |
 
-Enable `service-pmc` for `service::pmc_inventory::PmcInventoryAccessor`.
-A `ReadRequest` selects one `manifest.json`; its `fileSchema` defines CSV columns
-and order. The reader reuses gzip and CSV adapters, opens shards lazily in
-manifest order, and forwards read options. It never fetches article objects.
+Common Crawl provides an HTTP-operator helper and also accepts caller-supplied
+manifest/record accessors, so a local mirror or another byte backend can be used.
+The core accessor traits also allow application-defined storage implementations.
 
-Original CSV fields and values are preserved without extra columns. Bucket and
-Key must be present even when projected away; Key values are not interpreted.
-Schema metadata records the manifest URI, version and creation timestamp.
-Empty inventories retain the declared schema and produce EOF.
+A typical interaction has three stages:
 
-Run the
-`read_pmc_inventory` example against a caller-configured inventory snapshot.
+1. **Select/discover:** request a record, dataset version, crawl or manifest.
+   The provider returns metadata, file membership or an opened record reader,
+   according to its API.
+2. **Read bytes:** open an exact selected file name/object. OpenDAL operators or
+   the shared HTTP transport perform the I/O; provider metadata resolution does
+   not eagerly download every attachment.
+3. **Decode when needed:** compose decompression, archive or format readers.
+   Some providers already return Arrow metadata/dataset readers; their guides
+   identify the schema and what they read internally.
 
-## PMC article-version metadata (`pmc`)
+### Enable an entry point
 
-Enable `service-pmc` for `service::pmc::PmcAccessor`. This service reads exactly
-one metadata JSON object named by a standard `ReadRequest`, and emits one row.
-It never lists a directory or opens a PDF, XML, text, or media URL. Inventory
-enumeration is a separate service. The input byte accessor requires sequential
-reads only; filesystem, SDK operators, and decompression layers are caller-owned.
+Enable a concrete provider with its facade feature, for example
+`service-figshare`. On `open-arrow-access-service` directly, the corresponding
+feature is `figshare`. Shared `service::common` utilities are available without a
+provider feature. Credentials, when required, are described in the provider guide;
+Hugging Face additionally supports its environment/cached-token settings.
 
-```rust,no_run
-use open_arrow_access::{Accessor, ReadRequest, service::pmc::PmcAccessor};
-use open_arrow_access_storage::{OpenDalAccessor, opendal};
+| Response family | How to consume it | What it contains |
+| --- | --- | --- |
+| `ApiDocument` | `document.value()` | Parsed upstream JSON, including unknown fields |
+| `RemoteFiles<M>` / `ResolvedFileSet<A, M>` | `metadata()`, `list("")`, `open(name)` | Provider metadata plus a fixed logical file namespace; file bodies are lazy |
+| `ByteReader` | `next().await` | Original or explicitly decoded byte chunks; a chunk is not a record |
+| `RecordReader` | `metadata().schema`, `next().await` | Arrow batches with the declared schema |
+| `OaiPage` | `bytes`, `record_count`, `resumption_token` | Exact XML response and continuation information |
+| Archive session | inspect entries, then open a member | Original member names/metadata and decoded member bytes |
 
-async fn read(operator: opendal::Operator) -> Result<(), Box<dyn std::error::Error>> {
-    let source = PmcAccessor::with_default_decoder(OpenDalAccessor::new(operator));
-    let mut reader = source.open(ReadRequest::new("metadata/PMC123.2.json")).await?;
-    while let Some(batch) = reader.next().await? {
-        assert_eq!(batch.num_rows(), 1);
+All fallible calls use the library's `Result<T>`. Readers return `Some(item)`
+until EOF (`None`); errors and EOF terminate them. Byte readers from public
+`Connection` are sequential; OpenDAL-backed providers can support exact ranges.
+ZIP/Parquet consumers need an appropriate ranged source, not just any HTTP reader.
+
+JSON-retaining providers expose parsed responses through `ApiDocument`.
+Zenodo, Dataverse and Internet Archive instead retain their documented typed
+metadata subsets. Arrow schemas are provider-specific or come from the selected
+file format; downloading a PDF/XML/ZIP does not automatically create Arrow rows.
+See [response shapes](response-schemas.md) for a common reference.
+
+Shared guides: [connections](provider-connection.md), [API metadata](api-document.md),
+[named files](remote-files.md), [downloads](http-downloads.md),
+[custom transport](http-transport.md), [validation helpers](provider-validation.md),
+[OAI-PMH](oai-protocol.md), [OAI provider configuration](oai-provider.md), and
+[development fixtures](provider-test-fixtures.md).
+
+## Usage and results
+
+### Example setup
+
+Examples use the root facade and ordinary async Rust functions. Add the feature
+listed in your provider guide. For the executable Figshare example below:
+
+```toml
+[dependencies]
+open-arrow-access = { git = "https://github.com/dentiny/open-arrow-access", features = ["service-figshare"] }
+futures = "0.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+```rust
+use futures::TryStreamExt;
+use open_arrow_access::{Accessor, ByteAccessor, Result, service::figshare::FigshareService};
+use std::num::NonZeroU64;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // BHL's public OCR export is published as this Figshare article.
+    let files = FigshareService::new()?
+        .article(NonZeroU64::new(21422193).unwrap(), None)
+        .await?;
+    println!("selected version: {}", files.metadata().value()["version"]);
+    let mut names = files.list("".into()).await?;
+    if let Some(name) = names.try_next().await? {
+        println!("available file: {}", name.locator());
+        let mut reader = files.open(name.into()).await?;
+        if let Some(chunk) = reader.next().await? {
+            println!("first original chunk: {} bytes", chunk.len());
+        }
     }
     Ok(())
 }
 ```
 
-Run `cargo run --example read_pmc_inventory --features service-pmc --
-/mirror/root <dated-manifest-key>` against a mirror preserving manifest/shard keys.
-See the [PMC dataset README](https://pmc-oa-opendata.s3.amazonaws.com/README.txt)
-and [S3 inventory manifest format](https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-inventory-location.html).
+This resolves one public article, prints its observed version and one file name,
+and reads at most one original byte chunk. `None` intentionally selects the
+current version; use an explicit version for repeatable selection. The bytes
+may still be compressed. The provider does not infer a format or extract text.
 
-Manifest byte collection uses core `read_object`. Shard iteration retains its
-provider state and uses `StreamReader` for metadata and terminal handling.
+### Example with caller-configured OpenDAL storage
 
-For a local mirror, run `cargo run --example read_pmc --features service-pmc --
-/data/pmc-mirror metadata/PMC123.2.json`. For multiple metadata objects, compose
-with the existing file-set dataset or open the explicit keys supplied by an
-inventory reader. There is no provider-specific `Files` or `Prefix` input.
+For a provider backed by a local mirror, enable `service-pmc` on the facade and
+add OpenDAL's filesystem backend to the dependency configuration above:
 
-### Article metadata contract
+```toml
+opendal = { version = "=0.59.2", default-features = false, features = ["services-fs"] }
+```
 
-The schema uses the upstream names: `pmcid`, `version`, `pmid`, `doi`, `title`,
-`citation`, `is_pmc_openaccess`, `is_manuscript`, `is_historical_ocr`,
-`is_retracted`, `license_code`, `xml_url`, `pdf_url`, `media_urls`, and `text_url`.
-Unknown fields are ignored; duplicate keys use their final value. Reader metadata
-records the input object as its source; schema metadata records
-`pmc.row_kind = article_metadata`.
+```rust
+use open_arrow_access::{
+    Accessor, ReadRequest,
+    service::pmc::PmcAccessor,
+    storage::{OpenDalAccessor, opendal},
+};
 
-`pmcid` is required and validated, but its source spelling is retained. `version`
-is nullable UInt32 and must be positive when present. `pmid` is nullable Utf8
-and requires a JSON string.
-`title` and `citation` are LargeUtf8, the four `is_*` fields are nullable Boolean,
-`media_urls` is a nullable List<Utf8>, and the other optional fields are nullable
-Utf8. A missing or null PDF URL is a normal row with a null `pdf_url`. No article
-is filtered by content availability, licence, language, or duplication. Content
-URL strings are retained as supplied and are never interpreted as read requests.
-
-Validation lives in `pmc/validation.rs`. Invalid JSON or mapped field types are
-terminal decode errors. Empty upstream byte chunks are
-I/O errors. `open` validates projection without starting a read; locator syntax
-is owned by the underlying byte accessor and passed through unchanged.
-`next` performs one metadata read. Errors and EOF are terminal; dropping a pending
-reader releases its input. Common byte options are forwarded unchanged.
-
-Projection supports caller field order and zero-column row counts. The schema
-is fixed before reading, and every valid metadata object produces one row.
-Known fields are validated even when omitted from the projection. Only selected
-Arrow columns are built directly from the source fields, without serializing or
-decoding an intermediate JSON object. The Arrow schema is the single field/type
-definition: conversion dispatches on its data types, with special rules only for
-PMCID and version. There is no intermediate article struct to maintain.
-The JSON file-format feature is not required.
-The row target is an upper bound; this single-object service emits at most one
-batch with one row. It does not fetch an inventory, choose a snapshot, filter
-licences, extract text, or write Lance datasets.
-
-The article reader uses core `read_object` and `StreamReader`
-for terminal handling. JSON conversion and article validation stay in PMC.
-
-## Common Crawl configuration
-
-Enable `service-warc` on the facade for `CommonCrawl`, which validates a
-crawl identity and HTTP(S) origin, and `create_http_accessor`, which configures
-an origin-rooted OpenDAL HTTP reader without fetching data. Gzip and record
-format decoding remain explicit caller-supplied layers.
-
-Enable `service-warc` for `CommonCrawlWarcRequest` and
-`CommonCrawlWarcAccessor`: resolve all WARC paths from a crawl's decoded
-`warc.paths.gz` inventory, preserving file order, then read through a supplied
-single-file format accessor and the existing sequential FileSet. `resolve`
-returns membership without opening record files. The caller supplies gzip for
-compressed inventories and file decompression/format parsing separately.
-Selected locators are held in memory.
-There is no index, batch planner or parallel execution.
-
-Enable `service-warc` for `CommonCrawlSegmentRequest` and
-`CommonCrawlSegmentAccessor`. Segment resolution reuses the WARC inventory
-parser and retains only exact `segments/<segment>/warc/` matches. It preserves
-manifest order and forwards existing read options to the same sequential
-FileSet. A neighboring segment with a longer numeric ID is a different selection.
-Construct a request from crawl/segment IDs, a segment URL, or a shared
-`CommonCrawl` source. No index, batch scheduler or parallel executor is added.
-
-Manifest byte framing uses core `read_lines`;
-path validation and selected-file duplicate checks remain in the provider.
-
-`format-warc` exposes native parser records through `WarcAccessor`. This service
-composes Arrow readers through FileSet, so its `format` argument requires a
-caller-provided WARC-to-Arrow accessor. Manifest-only `resolve` needs no conversion.
-
-## CourtListener bulk snapshots
-
-Enable `courtlistener` (`service-courtlistener` on the facade) for
-`service::courtlistener::{CourtListenerBulkAccessor, CourtListenerSnapshot}`.
-Configure storage at the bucket/mirror root, above `bulk-data/`. For public S3,
-enable OpenDAL `services-s3` and `http-transport-reqwest`, then configure
-`opendal::services::S3::default().bucket("com-courtlistener-storage")
-.region("us-west-2").skip_signature()`. No API token or account is required.
-
-```rust,no_run
-use open_arrow_access::{Accessor, Result, service::courtlistener::{CourtListenerBulkAccessor, CourtListenerSnapshot}};
-use open_arrow_access::storage::{OpenDalAccessor, opendal};
-
-async fn read(operator: opendal::Operator) -> Result<()> {
-    let source = CourtListenerBulkAccessor::new(OpenDalAccessor::new(operator));
-    let snapshots = source.snapshots("courts").await?;
-    let snapshot = CourtListenerSnapshot::new("courts", "2026-09-30")?;
-    let mut reader = source.open(snapshot.object().into()).await?;
-    while let Some(csv_bytes) = reader.next().await? {
-        // Original CSV bytes for a PostgreSQL COPY-compatible consumer.
+async fn read_pmc_mirror(root: &str, metadata_key: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // OpenDAL owns the backend/root; the provider interprets the selected object.
+    let operator = opendal::Operator::new(opendal::services::Fs::default().root(root))?;
+    let bytes = OpenDalAccessor::new(operator);
+    let articles = PmcAccessor::with_default_decoder(bytes);
+    let mut reader = articles.open(ReadRequest::new(metadata_key)).await?;
+    println!("Arrow schema: {:?}", reader.metadata().schema);
+    if let Some(batch) = reader.next().await? {
+        println!("article metadata rows: {}", batch.num_rows());
     }
     Ok(())
 }
 ```
 
-`snapshots(table)` lists `bulk-data/` nonrecursively and returns sorted, unique,
-valid dated CSV exports for that exact table. It reads only object names;
-listing failures propagate and no match returns an empty vector. Explicit
-snapshot reads require no listing, so HTTP-only storage can also be used.
-`schema_object()` identifies the companion SQL object without fetching it.
-Same-date tables are not an atomic database snapshot; dates do not pin versions.
-
-`open(ByteReadRequest)` validates the locator and forwards I/O settings through
-the existing `Bzip2` decoder. Output is pull-driven CSV bytes with unknown
-length, no range reads, and terminal errors. No Arrow schema, joins, REST/RECAP,
-or PDF access is added. CSV quoting and NULL/empty distinctions remain intact;
-the generic Arrow CSV reader does not preserve those distinctions by default.
-
-Sources: [bulk documentation](https://wiki.free.law/c/courtlistener/help/api/bulk-data/bulk-legal-data)
-and the [official exporter](https://github.com/freelawproject/courtlistener/blob/main/scripts/make_bulk_data.sh).
-
-## Zenodo (`zenodo`)
-
-Enable `service-zenodo` for `service::zenodo::{ZenodoService, ZenodoAccessor}`.
-`ZenodoService::new()?.record(record_id).await?` resolves one published record
-using `GET /api/records/{id}`. The ID is a `NonZeroU64`; use a specific record
-version, not a concept DOI. The returned ID must match the request. Sandbox or
-mirror origins can be selected with `ZenodoService::with_endpoint`.
-
-The resolved accessor caches attachment membership and exposes `files()` with
-key, size and checksum. It implements `ByteAccessor`: list the empty root to
-obtain exact attachment keys, then `open(ByteReadRequest::new(key))` to read one.
-Attachments form a flat namespace; both recursive modes list the same files.
-Unknown keys fail without file I/O. Readers use the canonical record content
-route through the shared OpenDAL HTTP accessor, forwarding byte read options.
-Each reader is independent and can outlive the resolved record. HTTP metadata
-and range support are required by that storage accessor.
-
-Empty files lists are valid; missing,
-malformed or duplicate membership fails. File bodies are fetched lazily, and
-existing decompression/format accessors can wrap the record accessor. Checksums
-are exposed as upstream metadata, not verified. Reader source locators refer to
-the HTTP content route relative to the record's files root.
-
-This entry point reads publicly accessible published records. Search, OAI-PMH,
-metadata dumps, concept DOI resolution, restricted files and deposit/upload APIs
-are outside its scope. No API credentials are loaded implicitly.
-See the [Zenodo Records API](https://developers.zenodo.org/#records).
-
-Run `cargo run --example read_zenodo --features service-zenodo -- 3551612`
-to list a record, or append an exact file key to stream its contents.
-
-## Internet Archive (`internet-archive`)
-
-Enable `service-internet-archive` for
-`service::internet_archive::InternetArchiveService`.
-`InternetArchiveService::new()?.item("xfetch").await?` resolves public item
-metadata once. `files()` exposes names, optional sizes, formats, source labels
-and MD5 values. Exact filenames, including nested paths, map to canonical
-`/download/{identifier}/{filename}` routes through the shared byte accessor.
-List the empty root to enumerate cached membership in API order; both recursion
-modes return the same names. Unknown names fail before file I/O. Byte read options,
-range reads and independent reader lifetime follow the shared storage contracts.
-
-Membership may change upstream;
-no snapshot guarantee is added. Collection/search, restricted borrowing, cookies,
-uploads and checksum verification are outside this entry point.
-See the [Internet Archive metadata API](https://archive.org/developers/md-read.html).
-Run `cargo run --example read_internet_archive --features service-internet-archive -- xfetch`
-to list files, or append an exact filename to stream it.
-
-## Dataverse (`dataverse`)
-
-Enable `service-dataverse` for `service::dataverse::DataverseService`.
-Configure an installation origin, then resolve an explicit published version:
-`DataverseService::new("https://dataverse.harvard.edu")?
-.dataset("doi:10.7910/DVN/27221", "1.0").await?`.
-DOI and Handle identifiers are supported. Response identity, version and RELEASED
-state are validated; DOI comparison follows ASCII case-insensitive equivalence.
-
-`files()` exposes logical names, file IDs and original byte lengths. Folder labels remain part of the logical filename. Empty-root listing
-uses cached API order in either recursive mode. Downloads request
-`format=original`, including ingested tabular files whose labels may end in
-`.tab`. Trusted manifest lengths avoid HEAD requests that can fail on URLs signed
-only for GET. Tabular files without an original byte length are unsupported.
-Existing byte read options, range reads and independently owned readers apply.
-
-This entry point covers public
-explicit versions, not search, latest/draft selection, authentication, guestbook
-submission or checksum verification. Datasets containing restricted files return an unsupported error
-before any file download. See the [Dataverse data access API](https://guides.dataverse.org/en/latest/api/dataaccess.html).
-Run `cargo run --example read_dataverse --features service-dataverse --
-https://dataverse.harvard.edu doi:10.7910/DVN/27221 1.0` to list the example dataset;
-append an exact logical filename to stream its original bytes.
-
-## arXiv (`service-arxiv`)
-
-Enable `service-arxiv` for `service::arxiv::{ArxivService, ArxivKind, ArxivArchive}`.
-Construct `ArxivService::new(storage)` with byte storage rooted above `pdf/` and
-`src/`. For the official S3 bucket, the caller configures `arxiv`, the us-east-1
-region, credentials and requester-pays behavior on their OpenDAL S3 operator.
-A local mirror preserving the same keys works without any network or credentials.
-The service does not configure S3, query paper APIs, or require bucket listing.
-
-`manifest(kind, Some(2410), byte_options).await` reads the selected PDF/source
-XML manifest, validates all rows, and returns matching TAR metadata in manifest
-order. `None` selects all months. An absent month is a valid empty result.
-Metadata
-includes shard filename, month, sequence, byte size, item count, first/last arXiv
-IDs and MD5 checksum. Checksums and item counts are exposed, not verified.
-
-`stream(&shard, byte_options).await` is the preferred bulk path. It opens the
-shard once and returns the incremental generic TarStream. Each entry body can
-be consumed before moving to the next header, avoiding thousands of serial
-header-only range GETs before the first PDF. Unknown-length sequential sources
-work here. The example uses this path by default.
-
-The optional `archive(&shard, byte_options).await` checks the advertised file length against
-the manifest and opens the shared TAR session. Use its entries/open_entry APIs
-to stream selected PDFs; source archives return raw entries (often nested tar.gz
-payloads). Both manifest and archive opens forward byte options. Archive members
-are not extracted to disk. Both TAR entry points share archive identity and
-known-length validation before delegating to the generic TAR readers.
-Service-specific validation is in validation.rs, and error construction is in
-error.rs.
-
-The bulk manifests can change upstream; this API supplies source-level version
-guarantees, not an atomic historical snapshot or concept-version resolver.
-No API key, credential, or live network access is needed by the automated tests.
-See https://github.com/arXiv/arxiv-docs/blob/develop/source/help/bulk_data_s3.md.
-
-Run `cargo run --example read_arxiv --features service-arxiv -- testdata/arxiv 2410 1 1`
-to inspect the fixture manifest and TAR and stream one PDF entry.
-
-## Common http-transport
-
-See [http-transport](http-transport.md) for this utility.
-
-## Common provider-validation
-
-See [provider-validation](provider-validation.md) for this utility.
-
-## Common api-document
-
-See [api-document](api-document.md) for this utility.
-
-## Common provider-connection
-
-See [provider-connection](provider-connection.md) for this utility.
-
-## Common provider-test-fixtures
-
-See [provider-test-fixtures](provider-test-fixtures.md) for this utility.
-
-## Common http-downloads
-
-See [http-downloads](http-downloads.md) for this utility.
-
-## Common remote-files
-
-See [remote-files](remote-files.md) for this utility.
-
-## Common metadata links
-
-`common::resolve_optional_links` maps provider-selected optional URL fields to logical file names without modifying parsed metadata.
-
-## uspto
-
-See [uspto service](uspto.md) for its contract and usage.
-
-## Common XML metadata
-
-Enable `format-xml` for `xml_metadata::XmlDocument`. Protocol metadata is decoded through our `file-format::xml::XmlFormat`, including its schema, limits, reader lifecycle and errors. The shared adapter resolves the root namespace, ignores external DTD declarations without fetching them, and rejects internal DTD subsets. Complete document parsing checks trailing content; callers retain original response bytes separately.
-
-## Common OAI protocol
-
-See [OAI protocol](oai-protocol.md). Record counts and resumption tokens are decoded through the shared XML metadata reader.
-
-## Common OAI provider configuration
-
-See [OAI provider configuration](oai-provider.md).
-
-## doab
-
-See [doab service](doab.md).
-
-## arxiv-metadata
-
-See [arxiv-metadata service](arxiv-metadata.md).
-
-## hathifiles
-
-See [hathifiles service](hathifiles.md).
-
-## federal-register
-
-See [federal-register service](federal-register.md) for its contract and usage.
-
-## govinfo
-
-See [govinfo service](govinfo.md).
-
-## oapen
-
-See [oapen service](oapen.md).
-
-## figshare
-
-See [figshare service](figshare.md).
-
-## library-of-congress
-
-See [library-of-congress service](library-of-congress.md) for its contract and usage.
-
-## MECA
-
-See [storage-independent MECA archives](meca.md).
-
-## biorxiv
-
-See [biorxiv service](biorxiv.md) for its contract and usage.
-
-## openstax
-
-See [openstax service](openstax.md) for its contract and usage.
-
-## semantic-scholar
-
-See [semantic-scholar service](semantic-scholar.md).
-
-## bhl
-
-See [bhl service](bhl.md).
-
-## regulations
-
-See [regulations service](regulations.md) for its contract and usage.
-
-## Provider implementation patterns
-
-`ResolvedFileSet<A, M>` combines a `storage::NamedFileAccessor<A>` with typed
-provider metadata. New providers resolve and validate membership, build the
-logical-name-to-object mapping, and return this shared accessor instead of
-implementing `open`, `list`, and capabilities again. `metadata()` borrows the
-provider metadata; readers own their state independently of the resolved set.
-Zenodo, Internet Archive, and Dataverse use provider-specific type aliases and retain their
-existing metadata getters.
-
-For a public HTTP provider backed by one JSON manifest, reuse the crate-internal
-`HttpFileService`, which validates the origin and owns the HTTP client and provider
-error context. Validate request parameters and build the metadata URL in the
-provider, then call `resolve_files(&url, callback)`. The callback validates the
-typed response and returns a `ResolvedFilesPlan` containing the canonical
-download root, ordered logical-name/object mappings and provider metadata. The
-shared flow fetches JSON once and constructs the HTTP storage, named namespace
-and resolved accessor.
-Pass the provider's configuration/resolve operations and file-namespace error mapper
-when constructing the service to retain its error context and cause.
-Zenodo and Internet Archive are examples; the plan does not follow download URLs
-from untrusted metadata. File bodies remain lazy and readers remain independent.
-`ResolvedFilesPlan::new` builds one insertion-ordered map from logical filenames to
-`ResolvedFile` values containing the download object and an optional trusted byte
-length. Empty and duplicate filenames fail before binding storage. `with_query`
-selects the download representation; lengths must describe that representation,
-as in Dataverse's original-file downloads. Omitted lengths use storage stat.
-
-The [source-attribute proposal](../docs/source-attributes.md) defines provider
-constraints and conditional planning. Sequential cursor-based file discovery
-can coexist with independent file reads; dependent API page requests require
-a different plan. Services retain their own ordering requirements while
-delegating discovered representations to dataset and format accessors.
+With root `/data/pmc-mirror` and key `metadata/PMC123.2.json`, OpenDAL reads that
+mirror object and the PMC decoder emits one article-metadata row. Content URL
+fields remain metadata. To use S3 or another backend, configure its operator and
+retain the same `OpenDalAccessor` / provider composition.
+
+The Figshare example above demonstrates provider-managed HTTP access; this
+example demonstrates caller-managed storage. See each provider guide for its
+configuration boundary and return type. [Repository examples](../examples/) show
+complete command-line readers.
