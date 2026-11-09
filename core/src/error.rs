@@ -16,6 +16,17 @@ pub enum ErrorKind {
 }
 
 impl ErrorKind {
+    /// Classify an HTTP failure without depending on a storage backend.
+    /// Callers handle successful responses and redirects before translating failures.
+    /// Rate limits and other HTTP failures retain the existing `Io` category.
+    pub fn from_http_status(status: u16) -> Self {
+        match status {
+            404 => Self::NotFound,
+            401 | 403 => Self::PermissionDenied,
+            _ => Self::Io,
+        }
+    }
+
     /// Find the first shared error category in a source chain, including boxed and shared I/O errors.
     pub fn from_source(mut source: &(dyn StdError + 'static)) -> Option<Self> {
         loop {

@@ -85,19 +85,7 @@ impl HttpClient {
             .map_err(|error| transport_error(operation, error))?;
         let status = response.status();
         if status != StatusCode::OK {
-            // TODO: Extract shared HTTP status-to-error translation.
-            let kind = match status {
-                StatusCode::NOT_FOUND => opendal::ErrorKind::NotFound,
-                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
-                    opendal::ErrorKind::PermissionDenied
-                }
-                StatusCode::TOO_MANY_REQUESTS => opendal::ErrorKind::RateLimited,
-                _ => opendal::ErrorKind::Unexpected,
-            };
-            return Err(transport_error(
-                operation,
-                opendal::Error::new(kind, format!("metadata HTTP {status}")),
-            ));
+            return Err(error::http_status_error(operation, status));
         }
         let mut body = response.into_body();
         let mut bytes = Vec::new();

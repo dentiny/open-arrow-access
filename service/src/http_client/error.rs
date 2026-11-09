@@ -22,3 +22,12 @@ pub(super) fn invalid_download_url(
     )
     .set_source(error)
 }
+
+/// Translate metadata response failures directly into the shared core category.
+pub(super) fn http_status_error(operation: &'static str, status: http::StatusCode) -> Error {
+    Error::new(
+        ErrorKind::from_http_status(status.as_u16()),
+        operation,
+        format!("metadata HTTP {status}"),
+    )
+}
