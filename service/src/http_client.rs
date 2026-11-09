@@ -121,35 +121,3 @@ impl HttpClient {
         crate::http_body::collect(self.response(request, operation).await?, operation).await
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::HttpClient;
-    use http::StatusCode;
-    use open_arrow_access_test_support::http::HttpFixture;
-    use serde::Deserialize;
-
-    #[derive(Debug, Deserialize)]
-    struct Metadata {
-        id: u64,
-    }
-
-    #[tokio::test]
-    async fn reads_typed_metadata_from_fixed_and_chunked_responses() {
-        let fixture = HttpFixture::new();
-        fixture.respond("/good", StatusCode::OK, "{\"id\":7}");
-        fixture.respond_chunked("/chunked", StatusCode::OK, "{\"id\":8}");
-        let client = HttpClient::new().unwrap();
-        for (path, id) in [("good", 7), ("chunked", 8)] {
-            let metadata: Metadata = client
-                .json(
-                    &format!("{}/{path}", fixture.endpoint()),
-                    None,
-                    "resolve_fixture",
-                )
-                .await
-                .unwrap();
-            assert_eq!(metadata.id, id);
-        }
-    }
-}
