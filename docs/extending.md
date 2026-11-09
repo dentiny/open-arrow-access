@@ -39,20 +39,21 @@ accessor shares storage and decoder without requiring either type to be `Clone`.
 Each opened reader has independent terminal state.
 
 `PmcAccessor::new(storage)` and `GutenbergAccessor::new(storage)` use this path.
-Their decoders can also be composed explicitly:
+With `service-pmc` enabled, its decoder can also be composed explicitly:
 
 ```rust,no_run
-# #[cfg(feature = "service-pmc")]
-# fn example<B>(storage: B) {
 use open_arrow_access::{DocumentAccessor, service::pmc::PmcDecoder};
 
-let articles = DocumentAccessor::new(storage, PmcDecoder);
-# }
+fn example<B>(storage: B) {
+    let _articles = DocumentAccessor::new(storage, PmcDecoder);
+}
 ```
 
 ## File formats
 
-Bind a format directly with `FileAccessor::from_format(storage, format)`. The
+Bind a format directly with `FileAccessor::from_format(storage, format)`. For an
+already-open `ByteReader`, call `format.open_input(input, request)` with
+`ReaderFactoryExt` in scope; see the [archive example](usage.md#work-with-archives-and-other-providers). The
 factory owns `prepare` and `create_reader`; the shared protocol prepares each
 request before opening bytes and forwards its locator and byte options. A
 format-specific accessor name can be a thin alias with convenience constructors,
@@ -62,7 +63,7 @@ Use `decode_batches` for incremental byte-to-Arrow decoders. Native streams can
 use `StreamReader`, applying `project_batch` when needed to restore declared
 schema metadata and caller column order. Schema inference, decoder finalization
 and range requirements remain format-specific. See the
-[format protocol](../README.md#adding-a-file-format) for the complete factory hooks.
+[factory and accessor protocol](contracts.md#accessor) for the complete factory hooks.
 
 Archive sessions also consume the existing `ByteReader` boundary. `TarStream`
 keeps sequential entry ownership and cancellation progress, while `TarArchive`
@@ -84,9 +85,9 @@ then wrap that operator once:
 ```rust,no_run
 use open_arrow_access::storage::{OpenDalAccessor, opendal};
 
-# fn example(operator: opendal::Operator) {
-let storage = OpenDalAccessor::new(operator);
-# }
+fn example(operator: opendal::Operator) {
+    let _storage = OpenDalAccessor::new(operator);
+}
 ```
 
 Enable the backend's features on the caller's OpenDAL dependency. The shared

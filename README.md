@@ -1,19 +1,89 @@
 # open-arrow-access
 
-Composable dataset access for Apache Arrow. Read diverse formats and storage
-backends into Arrow streams.
+**A Rust library for source access and decoding in pretraining data preparation.**
 
-Read local Parquet, CSV/TSV, JSON/JSONL, XML, or ATIF files asynchronously through **OpenDAL's filesystem
-service**, individually or as a sequential directory/file-set dataset. Output is
-an ordered stream of Arrow record batches. The project ends at that read interface.
+Built for pretraining data engineers and developers preparing raw corpora for
+model training. Read corpus files into Apache Arrow record batches through a
+consistent interface across storage backends, file formats, and dataset providers.
+
+Use it in corpus ingestion jobs to read local or object-store shards, stream
+compressed JSONL, or load a Hugging Face Parquet split. Provider adapters also
+expose original files and metadata for assembling source collections. Their output
+contracts are explicit: some return Arrow batches, others return bytes or discovery
+metadata.
+
+## Where it fits in data preparation
+
+```text
+Raw corpus sources
+  → open-arrow-access: discover → read → decompress / select entries → decode
+  → Arrow batches for downstream cleaning, filtering, deduplication, and tokenization
+  → training sample packing and prepared dataset output
+```
+
+The library supplies the source-access and decoding stages of this workflow.
+Your preparation pipeline consumes its output and owns the downstream processing
+and writing stages. For example, read compressed text records into Arrow, select
+the fields your preprocessing job needs, then pass batches to your quality filters
+or tokenizer. Provider metadata and original file bytes can be retained alongside
+the corpus for source tracking.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Backend["Local files / object stores / HTTP"] --> Storage["Storage: ByteReader"]
+    Storage --> Decode["Optional decompression / archive entry"]
+    Storage --> Format["File format decoder"]
+    Decode --> Format
+    Format --> Dataset["Optional ordered file set"]
+    Dataset --> Arrow["Arrow RecordBatch stream"]
+    Format --> Arrow
+    Provider["Provider: discovery, identity, metadata"] -. resolves inputs .-> Storage
+    Provider -. selects shards .-> Dataset
+```
+
+- **Storage** wraps a caller-configured OpenDAL operator. Formats consume byte
+  readers without knowing the backend or credentials.
+- **Decompression and archives** turn compressed objects or selected entries into
+  byte readers for the next stage.
+- **Formats** decode bytes into typed records. Arrow formats expose a fixed schema
+  before the first batch; WARC currently returns native parser records.
+- **Datasets and providers** select files, preserve source metadata, and reuse the
+  same storage and format components.
+- **Layers** wrap accessors through a common extension contract. Streaming
+  decompression is implemented; generated columns, metrics, and parallel scan
+  layers are planned.
+
+See [architecture](docs/architecture.md) for component boundaries and execution behavior.
+
+## Support at a glance
+
+| Area | Available today | Details |
+| --- | --- | --- |
+| Arrow formats | Parquet, CSV/TSV, JSON/JSONL, XML, ATIF | [Formats and schema requirements](docs/support.md#file-formats) |
+| WARC | Native WARC records; Arrow conversion planned | [WARC behavior](docs/formats.md#warc-parser) |
+| Storage | One OpenDAL adapter; configure filesystem, S3, HTTP, or other upstream backends | [Backend configuration and requirements](docs/support.md#storage) |
+| Compression | Gzip, bzip2, LZ4 frames, Zstandard | [Byte layers](decompression/README.md) |
+| Archives | ZIP Stored/Deflate entries; sequential or ranged TAR access | [Archive requirements](docs/support.md#compression-and-archives) |
+| Datasets | Ordered directory and explicit file-set reads; identical projected schemas | [Multi-file reads](docs/usage.md#read-multiple-shards) |
+| Providers | Hugging Face, Common Crawl, PMC, Gutenberg, research repositories, books, and government data | [Provider matrix and output types](docs/support.md#dataset-providers) |
+| Execution | Pull-based reads; per-reader storage I/O concurrency | [Ordering and concurrency](docs/architecture.md#execution-and-resource-ownership) |
+
+Default Cargo features are empty. Enable the formats and providers you need.
+A compiled backend still needs suitable read, metadata, and discovery capabilities;
+not every storage/decoder combination is valid.
 
 ## Quick start
 
-Enable `format-parquet`; OpenDAL storage is always available. The example
-enables OpenDAL's filesystem backend through its development dependencies:
+Add a Git dependency and enable the filesystem backend on OpenDAL. Pin `rev` to
+a commit in reproducible builds.
 
-```sh
-cargo run --example read_parquet --features format-parquet -- /absolute/data/root part.parquet
+```toml
+[dependencies]
+open-arrow-access = { git = "https://github.com/dentiny/open-arrow-access", features = ["format-parquet"] }
+opendal = { version = "0.59.2", default-features = false, features = ["services-fs"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ```rust,no_run
@@ -23,661 +93,71 @@ use open_arrow_access::{
     storage::{OpenDalAccessor, opendal},
 };
 
-async fn read() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let operator = opendal::Operator::new(
         opendal::services::Fs::default().root("/absolute/data/root"),
     )?;
-    let files = OpenDalAccessor::new(operator);
-    let parquet = ParquetAccessor::new(files);
-    let mut reader = parquet.open(ReadRequest::new("part.parquet")).await?;
-    let schema = reader.metadata().schema.clone();
+    let parquet = ParquetAccessor::new(OpenDalAccessor::new(operator));
+    let mut reader = parquet.open(ReadRequest::new("part-00000.parquet")).await?;
 
-    while let Some(batch) = reader.next().await? {
-        assert_eq!(batch.schema(), schema);
-        // Consume the batch here.
-    }
-    Ok(())
-}
-```
-
-`into_stream(reader)` adapts the reader to a standard
-`Stream<Item = Result<RecordBatch>>`. `ReadOptions` supports a nonzero target
-batch size and top-level field projection in the requested field order.
-
-`read_all(reader, operation).await` collects an owned `ByteReader` into a
-`Vec<u8>`. Parsing remains with the caller.
-
-`read_lines(reader, max_line_bytes, operation)` streams raw byte lines, retaining
-LF/CRLF endings and a final unterminated line. The optional per-line byte limit
-includes line endings and is checked before copying. UTF-8 decoding and blank-line
-handling remain with the caller.
-
-`read_chunks(input, chunk_size)` adapts a futures `AsyncRead` into nonempty byte
-chunks bounded by a `NonZeroUsize` size. Map its I/O errors to the shared error
-type, then wrap it in `StreamReader::new(stream, byte_metadata)` for a sequential
-`ByteReader`.
-
-Storage I/O settings are per open operation:
-
-```rust
-use std::num::NonZeroUsize;
-use open_arrow_access::{ByteReadOptions, ReadRequest};
-
-let request = ReadRequest::new("part.parquet").with_byte_options(ByteReadOptions {
-    io_concurrency: NonZeroUsize::new(4).unwrap(),
-    io_chunk_size: NonZeroUsize::new(4 * 1024 * 1024),
-});
-```
-
-The default I/O concurrency is one; the default I/O splitting size is backend
-defined. These settings preserve byte/record ordering and do not enable the
-future file/partition `ParallelReadLayer`. Each opened reader has its own limit.
-Sequential output reuses one OpenDAL stream; retained prefetch and range reads
-share that reader's I/O budget. Output chunk size does not create extra storage
-requests.
-`OpenDalAccessor::with_chunk_size` controls sequential output chunk size, while
-`ReadOptions::batch_size` controls Arrow rows per batch.
-
-`OpenDalAccessor` is the only storage accessor. Enable backend features on your
-own OpenDAL dependency; for the filesystem example above, use
-`opendal = { version = "0.59.2", default-features = false, features = ["services-fs"] }`.
-
-For other OpenDAL backends, depend on `open-arrow-access-storage` and the same
-OpenDAL version directly. Enable upstream features on that dependency; Cargo
-unifies them with storage's OpenDAL dependency. The generic `OpenDalAccessor`
-is always available in the storage crate. For example, a downstream crate can
-expose an `s3` feature:
-
-```toml
-[dependencies]
-open-arrow-access-storage = "0.1.0"
-opendal = { version = "0.59.2", default-features = false, features = ["http-transport-reqwest"] }
-
-[features]
-s3 = ["opendal/services-s3"]
-```
-
-Build that crate with `cargo build --features s3`, then wrap its configured
-operator:
-
-```rust
-use open_arrow_access_storage::OpenDalAccessor;
-
-let operator = opendal::Operator::new(
-    opendal::services::S3::default().bucket("my-bucket").region("us-east-1"),
-)?;
-let accessor = OpenDalAccessor::new(operator);
-```
-
-The same approach supports OpenDAL's other service, layer and transport
-features without adding matching features to this project. OpenDAL 0.59.2
-names its S3 feature `services-s3`.
-
-Enable `service-huggingface` for `HuggingFaceService::repository`. Repository ID,
-revision, root, endpoint and authentication are provider-owned. The returned byte
-accessor composes with existing format readers. Floating revisions are not snapshots.
-
-Use the same service for a complete Parquet dataset:
-
-```rust,no_run
-use open_arrow_access::{Result, service::huggingface::{HuggingFaceService, HuggingFaceOptions, HuggingFaceDatasetRequest}};
-
-async fn read() -> Result<()> {
-    let service = HuggingFaceService::new(HuggingFaceOptions::default()).await?;
-    let mut reader = service.dataset(HuggingFaceDatasetRequest::new(
-        "lhoestq/demo1", "default", "train",
-    )).await?;
+    println!("Schema: {:?}", reader.metadata().schema);
     while let Some(batch) = reader.next().await? {
         println!("{} rows", batch.num_rows());
+        // Send this batch to your next pipeline stage.
     }
     Ok(())
 }
 ```
 
-The dataset entry point pins `refs/convert/parquet` to a commit, lists the selected
-config/split, sorts its Parquet shards, and uses our Parquet/FileSet accessors for
-lazy sequential Arrow reading. `with_options` controls rows/projection and
-`with_byte_options` forwards per-file I/O settings. `with_revision` selects a
-revision of the Parquet export; it does not map an original source revision to
-a conversion. An absent full split fails by default. `with_partial_exports()`
-explicitly permits fallback to `partial-<split>`. The same request also works
-with `Accessor::open` on `HuggingFaceService`.
+To try the checked-in fixture from a repository checkout:
 
 ```sh
-cargo run --example read_huggingface --features service-huggingface -- lhoestq/demo1
+cargo run --example read_parquet --features format-parquet -- testdata/parquet ordered-snappy.parquet
 ```
 
-## CourtListener bulk snapshots
-
-Enable `service-courtlistener` for table/date discovery and decoded CSV byte
-access, reusing the existing bzip2 layer. Configure storage yourself through
-OpenDAL S3, HTTP, or a local mirror. See the
-[service contract](service/README.md#courtlistener-bulk-snapshots) for public
-access and the boundary with Arrow conversion.
-
-```sh
-cargo run --example read_courtlistener --features service-courtlistener -- /data/courtlistener courts
-cargo run --example read_courtlistener --features service-courtlistener -- /data/courtlistener courts 2026-09-30
-```
-
-## JSON and JSONL
-
-Enable `format-json` and construct `file_format::json::JsonAccessor::new(bytes, schema)`
-with a fixed `SchemaRef`, then open it with the same `ReadRequest` used for
-Parquet. `bytes` can be any sequential byte accessor; range reads and a known
-length are unnecessary. Use `format-json` and enable OpenDAL's
-`services-fs` backend on your OpenDAL dependency for local files.
-
-The reader uses Arrow JSON's incremental decoder for whitespace-separated JSON
-objects, including JSONL and pretty-printed object streams. Top-level arrays
-are not flattened into rows; arrays, null and scalar records are rejected.
-Empty or whitespace-only input emits no rows. Schema inference is not performed.
-Missing nullable fields become null and unknown fields are ignored; projected
-fields are decoded in the requested order. An empty projection retains row counts.
-The supplied schema, including metadata, is fixed before reading any bytes.
-
-Rows are decoded incrementally up to the requested batch size. Parsing follows
-Arrow JSON 59.3.0's permissive semantics; this adapter does not
-add a strict JSON validator. Errors reported by the decoder, including truncated
-records, terminate the reader with a decode error. Input I/O failures retain
-their original category. Memory includes one upstream chunk and the decoder's
-current batch; batch size does not bound the size of a single record.
-
-## CSV and TSV
-
-Enable `format-csv` for CSV/TSV with an explicit schema. `CsvAccessor` consumes
-sequential byte readers and reuses Arrow CSV's incremental decoder. Configure
-`CsvFormat::default().with_header(true)` for headers or `.with_delimiter(b'\t')`
-for TSV.
-
-## Supported components
-
-Enable `service-gutenberg` to convert a per-book RDF object into one Arrow row.
-The output contains mapped book and file metadata in RDF order. Use a standard
-`ReadRequest`; the reader fetches only the RDF object. See the
-[Gutenberg guide](service/README.md#gutenberg) for schema and limits.
-
-| Component | Implemented |
-| --- | --- |
-| `core/` | Shared `Reader`, `Accessor`, `Layer`, `Capability`, byte/record specializations, errors, options |
-| `storage/` | One OpenDAL accessor over caller-configured backends, recursive discovery, bounded chunks and exact ranges |
-| `file-format/` | Parquet schema inspection; CSV/TSV and JSON/JSONL with explicit schemas; XML with inferred or explicit schemas; ATIF with a fixed trajectory schema; WARC parser records with Arrow conversion deferred |
-| `dataset/` | Default-off directory and explicit file-set composition over supplied record accessors |
-| `service/` | Hugging Face datasets; PMC article metadata; PMC inventory snapshots; Gutenberg books; CourtListener bulk CSV byte access; Common Crawl WARC datasets |
-| `decompression/` | Streaming gzip, LZ4, bzip2, and Zstandard byte layers with concatenated-frame/member support; ZIP directory inspection and selected-entry decompression |
-| `test-support/` | Unpublished, dev-dependency-only byte backend shared by format and decompression tests |
-| `layers/` | Reserved; only the public layer contract and test-only wrappers exist |
-
-Feature-specific APIs live in public modules, such as
-`file_format::parquet::ParquetAccessor`, `decompression::gzip::Gzip`, and
-`dataset::file_set::FileSetAccessor`. The facade forwards the component crates,
-so these paths match their standalone crate APIs.
-
-Default features are empty. Only implemented capabilities have Cargo feature
-names. Parquet page compression currently supports uncompressed and Snappy
-pages through the Parquet dependency. External gzip, LZ4, bzip2, and Zstandard decoding are separately
-enabled by `decompression-gzip`, `decompression-lz4`, `decompression-bz2`, and `decompression-zstd`; see [streaming decompression](decompression/README.md).
-It produces sequential bytes and cannot directly satisfy Parquet's range reads.
-Parallel reads and unordered emission are not implemented.
-
-Enable `decompression-zip` for `decompression::zip::ZipAccessor`: inspect a ZIP's
-central directory and read a selected Stored/Deflate entry as sequential bytes.
-It supports ZIP64 and data descriptors over ranged, known-length storage.
-See [ZIP entries](decompression/README.md#zip-entries) for limits and composition.
-
-Enable `service-pmc` for `service::pmc::PmcAccessor`. Open one article-version
-metadata JSON with `ReadRequest`; every valid object yields one row, including
-articles without a PDF URL. Upstream field names, flags, content URLs, and raw
-JSON are preserved. Content objects are never opened. Inventory enumeration is
-a separate service; see the [service guide](service/README.md).
-
-Enable `dataset-directory` for `DirectoryAccessor` and `FileSetAccessor`. Directory
-selection uses a supplied byte accessor for discovery and a supplied format
-accessor for records. Files are sorted lexicographically; explicit file sets
-retain caller order. Readers open files sequentially and require identical
-projected schemas, including metadata.
-
-Discovery accepts `ListRequest`, with recursion enabled by default. Setting
-`DirectoryRequest::recursive` to `false` prevents descending into child directories.
-Repeated and trailing separators in directory prefixes are normalized before
-discovery and result matching.
+Continue with the [usage guide](docs/usage.md) for projection, batching, S3,
+compressed JSONL, multi-shard reads, and Hugging Face.
 
 ## Roadmap
 
-Planned schema inference and conversion will let callers read CSV/JSON without
-supplying a schema and combine files with different columns into one Arrow
-schema. This includes CSV header detection, schema merging, column alignment and
-null filling. See the [schema conversion roadmap](docs/roadmap.md#schema-inference-and-conversion)
-for scope and compatibility rules.
+The next planned capabilities focus on preparing consistent Arrow input for corpus
+pipelines:
 
-## Extension contracts
+- CSV/JSON schema inference, followed by opt-in cross-file schema merging and alignment.
+- Generated columns with dependency-aware projection and a stable output schema.
+- Metrics, timeout, and read-budget layers.
+- Source-aware partition planning, parallel scans, and optional unordered emission.
+- WARC-to-Arrow conversion and format-specific indexing/splitting.
 
-```text
-Accessor::open(request).await -> Reader
-Accessor::capability() -> effective operation support
-Reader::capability()   -> opened representation's operation support
-Reader::metadata()      -> stable typed metadata
-Reader::next().await    -> next Bytes or RecordBatch
-Layer::layer(accessor)  -> accessor with the same request/reader contract
+These are planned capabilities, with no release-date commitment. The
+[roadmap](docs/roadmap.md) separates implemented foundations from proposed work
+and records dependencies between workstreams.
 
-OpenDAL Fs -> ByteReader -> ParquetAccessor -> RecordReader -> Arrow stream
-```
+## Documentation
 
-The same generic accessor/layer protocol applies to bytes and records. Their
-associated types keep compressed bytes distinct from decoded Arrow batches.
-I/O methods (`open`, `list`, `next`, `read_range`, `read_ranges`) use `async fn`; implementations
-apply the re-exported `#[async_trait]` attribute to preserve `dyn` compatibility
-and Send futures. Capability, metadata and configuration-only methods remain
-synchronous. Construct the OpenDAL operator before wrapping it with
-`OpenDalAccessor::new(operator)`. Backend initialization and configuration belong
-to the caller; complete synchronous backend setup before entering an async task.
-
-`capability()` follows OpenDAL's reporting pattern, with `read`,
-`read_with_range`, `read_parallel`, and accessor-only `list` flags. Layers forward or update
-them to match the operations they actually expose. `ByteReader::read_range`
-is optional; sequential-only inputs do not have to emulate seeking. The initial
-Parquet adapter requires range reads and a known length. Runtime capabilities
-describe a composed instance; Cargo features make implementations available.
-
-`read_parallel` declares support for reading multiple files or partitions
-concurrently within an interface, independently of range access and output
-ordering. Existing concrete implementations report `false`; transparent
-wrappers forward the flag. This declaration does not schedule work or change
-per-reader byte I/O concurrency.
-
-Byte accessors accept `ByteReadRequest`, which carries an `ObjectRef` and
-`ByteReadOptions`. Existing string locators can still use `open("path".into())`.
-`read_ranges` preserves request order and has a sequential fallback for custom
-readers; the OpenDAL backend uses batched fetches. Byte layers can delegate the
-bulk method or use its fallback to intercept each individual range.
-Small ranges are fetched in batches totaling at most 2 MiB, with adjacent and
-overlapping ranges coalesced within each batch; unrequested gaps are not read.
-Larger ranges stream into their final contiguous allocation. The adapter uses
-2 MiB I/O chunks unless overridden, avoiding a full fragmented copy of every
-requested range alongside its contiguous output. Returned bytes and decoder
-memory are still proportional to the requested data.
-
-Third-party crates can implement these public contracts directly. A format
-does not receive an OpenDAL operator or switch on storage schemes. One
-`OpenDalAccessor` wraps caller-configured filesystem, S3, and other OpenDAL
-operators. See [architecture](docs/architecture.md) for the contracts
-and [roadmap](docs/roadmap.md) for the independent follow-up PRs.
-
-`ReadOptionsProvider` lets record layers inspect or adjust projection settings
-on file, dataset or service request types. Generated-column evaluation is a
-required follow-up feature; its [design](docs/generated-columns.md) specifies
-expression dependencies and augmented output schema without adding an expression
-engine to the initial framework.
-
-The [source-attribute design](docs/source-attributes.md) describes future
-partition planning and ordering constraints across formats, datasets and provider
-services, including globally ordered ATIF inputs and conditional WARC indexing.
-
-## Runtime behavior
-
-- Read and emit in input order. Storage I/O concurrency is opt-in and defaults
-  to one. There is no library-managed file/partition concurrency.
-- Schema, including schema metadata, is available before the first batch and
-  matches every returned batch. Batch boundaries may differ from row groups.
-- Errors and EOF terminate record reading. Input error categories and source
-  chains survive the Parquet bridge; transparent replay is not performed.
-- Drop the reader to stop work. After cancelling an in-flight decoder call,
-  drop that reader rather than assuming it can resume.
-- Filesystem objects must remain unchanged during a read. This version does
-  not provide object snapshots. Object paths are root-relative; the configured
-  root follows normal host symlink semantics.
-- The byte chunk size and Arrow row target bound those units, not total decoder
-  memory or the size of an individual value/Parquet row group.
+| Task | Start here |
+| --- | --- |
+| Choose components and features | [Support matrix](docs/support.md) |
+| Build an ingestion reader | [Usage guide](docs/usage.md) |
+| Understand composition and runtime behavior | [Architecture](docs/architecture.md) |
+| Check decoder semantics and limits | [Format reference](docs/formats.md) |
+| Integrate a source provider | [Provider guide](service/README.md) |
+| Implement a format, provider, or wrapper | [Extension guide](docs/extending.md) |
+| Explore future capabilities | [Roadmap](docs/roadmap.md) |
+| Work on the library | [Documentation index](docs/README.md#contributing) |
 
 ## Development
 
-Dependency versions track a recorded latest upstream Lance commit, including
-resolved patch versions. See [dependency alignment](docs/dependencies.md) for
-the baseline and update procedure. DataFusion is declared for the future layer
-but is not part of the current dependency graph.
-
-Use rustup so `rust-toolchain.toml` selects the pinned compiler, rustfmt and Clippy.
-Install the pinned TOML formatter/linter once:
+Use rustup to select the toolchain pinned in `rust-toolchain.toml`. Install
+`taplo-cli` 0.10.0 for TOML checks, then run:
 
 ```sh
 cargo install taplo-cli --version 0.10.0 --locked
-```
-
-```sh
-make lint       # Rust/TOML formatting, TOML validation, manifest validation and Clippy
-make fmt        # Apply Rust and TOML formatting fixes
+make lint
 cargo check --workspace --no-default-features
 cargo test --workspace --all-features --locked
 ```
 
-`make lint-rust` runs Clippy for every workspace member, target and feature, with
-warnings denied. `make lint-toml` checks TOML syntax and duplicate keys with
-[Taplo](https://taplo.tamasfe.dev/cli/usage/validation.html), then validates Cargo
-workspace and feature definitions with `cargo metadata`. These checks do not
-download JSON schemas. `make fmt-check` checks formatting without changing files.
-The shared `.taplo.toml` covers all TOML files, including every `Cargo.toml`, and
-sorts dependency and feature names within blank-line groups. It excludes build
-output and leaves `Cargo.lock` to Cargo.
-
-Start at the [test index and placement rules](docs/testing.md) to find or add a
-suite. Each crate owns tests in its `tests/` directory; the root `tests/` covers
-facade wiring and cross-crate composition. CSV/TSV, JSON/JSONL, XML and ATIF suites
-live together in `file-format/tests/`. Private implementation tests, when needed,
-belong in the owning crate's `tests/unit/`, explicitly included by its library.
-Optional test targets declare `required-features` in `Cargo.toml`.
-HF dataset tests use `service/tests/huggingface.rs`, with mock transports under
-`service/tests/huggingface/`.
-
-Tests read checked-in Parquet, CSV/TSV, and JSON/JSONL files from `testdata/`. They verify ordered rows and
-nulls across row groups, schema metadata, projection, storage-independent
-reading, wrapper composition, exact/batched ranges, per-open I/O options,
-bounded backend concurrency, and terminal error/drop behavior.
-Tests may copy fixtures into temporary roots to exercise storage behavior.
-The library exposes no writer or sink API.
-
-## XML
-
-Enable `format-xml` and supply the input accessor and absolute record element path.
-The output schema is inferred automatically:
-
-```rust,no_run
-# async fn example() -> Result<(), Box<dyn std::error::Error>> {
-use open_arrow_access::{
-    Accessor, ReadRequest, file_format::xml::XmlAccessor,
-    storage::{OpenDalAccessor, opendal},
-};
-
-let root = std::env::current_dir()?.join("testdata/xml");
-let operator = opendal::Operator::new(
-    opendal::services::Fs::default().root(root.to_str().ok_or("root must be valid UTF-8")?),
-)?;
-let xml = XmlAccessor::new(OpenDalAccessor::new(operator), "/inventory/warehouse");
-let mut reader = xml.open(ReadRequest::new("inventory.xml")).await?;
-while let Some(batch) = reader.next().await? { /* consume batch */ }
-# Ok(())
-# }
-```
-
-Each `open` samples at most 128 records and 8 MiB of serialized XML by default,
-fixes the schema, then replays sampled records before continuing the same stream.
-Configure these bounds with `with_inference_options(XmlInferenceOptions { .. })`.
-Opening an inferred reader performs input I/O; sampling errors are returned by
-`open`. Attributes become `@name` columns, repeated elements become lists, and
-nested elements become structs. Fields absent from the sample are not added
-later; later values incompatible with inferred types produce a terminal error.
-Schemas are inferred independently for each opened file.
-
-Explicit mappings remain available through `.with_schema(schema)` when column
-names or types must be fixed by the caller. For inference with namespace-prefixed
-record paths, use `.with_namespaces(&[NamespaceBinding { prefix, uri }])`;
-explicit schemas carry their own namespace bindings. Namespace URIs in inferred
-fields use the supplied prefixes, with generated prefixes for other namespaces.
-
-`XmlField::structure`, `XmlField::list`, and URI-based `NamespaceBinding` mappings
-support nested records and namespaces. Paths select direct children, terminal
-attributes (`@id`), or direct scalar text (`.`); they are not XPath. Unprefixed
-paths select elements with no namespace. Types are Utf8, Boolean, Int64, finite
-Float64, Struct and List. Missing nullable elements and `xsi:nil` map to null;
-empty strings and empty lists remain distinct. Mixed text and child elements
-cannot be mapped to scalar/struct/list fields as rich text.
-
-The shared `ReadRequest` controls row targets, projection in caller order
-(including zero columns), and byte I/O options. The schema is fixed across batches.
-`XmlLimits` defaults to 8 MiB per record/event, 64 MiB of serialized records per
-batch, and depth 128. These are XML limits, not a bound on total Arrow memory;
-one lookahead record and an upstream byte chunk may also remain buffered.
-Skipped content is only tokenized by quick-xml and remains subject to event/depth
-limits; attribute/entity errors outside selected records may go unreported. Inputs
-must be UTF-8; DTDs and custom entities are rejected. Errors are terminal.
-
-External compression remains independent: compose `XmlAccessor` over an accessor
-with `DecompressionLayer::new(Gzip)` for `.xml.gz`. FileSet and directory reading
-reuse the same format accessor and preserve file/record order. No format
-auto-detection, index or parallel scheduler is added by this adapter.
-With explicit mappings, projection avoids conversion of omitted fields. In
-inference mode, projection names are resolved after sampling and output columns
-are selected after conversion. Selected records are read and parsed in full in
-both modes. Run the example on the project-authored inventory fixture with
-`cargo run --features format-xml --example read_xml`.
-
-## ATIF trajectories
-
-Enable `format-atif` and select the document layout explicitly:
-
-```rust,no_run
-# async fn example() -> Result<(), Box<dyn std::error::Error>> {
-use open_arrow_access::{
-    Accessor, ReadRequest,
-    file_format::atif::{AtifAccessor, AtifFormat},
-    storage::{OpenDalAccessor, opendal},
-};
-
-let root = std::env::current_dir()?;
-let operator = opendal::Operator::new(
-    opendal::services::Fs::default().root(root.to_str().ok_or("root must be valid UTF-8")?),
-)?;
-let bytes = OpenDalAccessor::new(operator);
-let atif = AtifAccessor::new(bytes, AtifFormat::JsonLines);
-let mut reader = atif.open(ReadRequest::new("testdata/atif/trajectories.jsonl")).await?;
-while let Some(batch) = reader.next().await? { /* one trajectory per row */ }
-# Ok(())
-# }
-```
-
-`AtifFormat::Json` reads one whole document, including pretty-printed JSON.
-`JsonLines` reads one complete trajectory per nonblank line, accepts CRLF and
-a final line without a newline, and emits no rows for empty/blank input.
-Whole-document JSON requires one valid document; arrays and concatenated documents
-are rejected. Extensions do not select a format or compression.
-
-The converter validates ATIF v1.0–v1.8 and uses the fixed
-[`atif-arrow` schema](https://github.com/dentiny/atif-arrow/blob/v0.4.0/docs/schema.md).
-The schema is available at `open`, before input bytes are read. Each trajectory
-is one row with ordered nested steps, calls, observations and supplied metrics.
-`raw_json` retains the verbatim document (including its JSONL line ending and
-unknown fields). `source_uri` is the request's opaque object locator;
-`source_record_index` is the one-based nonblank document index within that object,
-reset on each open. Neither field is a synthesized trajectory identifier.
-Content text uses UTF-8 bytes in `LargeBinary`; media paths remain strings.
-Embedded subagents remain JSON, and external references are not fetched.
-
-`ReadOptions` controls rows per batch and top-level projection in caller order,
-including zero-column rows. All ATIF fields are validated, including unselected
-fields, but only projected columns are built into Arrow arrays. Omitting `steps`
-or `raw_json` avoids accumulating their payloads across the batch. Documents are
-buffered in full, and full-schema output retains raw JSON. The row target does not bound document
-bytes or total memory. A JSONL read buffers the current document, batch and
-one upstream chunk; it does not collect the whole input.
-
-Records retain global input order. Reads are sequential with no detached tasks,
-range reads, partition splitting or unordered emission. Dropping the reader stops
-work; drop it after cancelling an in-flight decoder call. Decode/validation errors
-include the locator and record index, discard the current batch, and terminate
-the reader. Input I/O errors retain their category and source chain.
-
-Any sequential byte accessor works, including storage or
-`DecompressionLayer::new(Gzip)` for ATIF `.jsonl.gz` objects. The format does not
-open OpenDAL operators or implement Harbor Hub discovery. `FileSetAccessor` and
-`DirectoryAccessor` compose through their existing ordered read interfaces.
-
-Run the example with either explicit layout:
-
-```sh
-cargo run --example read_atif --features format-atif
-cargo run --example read_atif --features format-atif -- testdata/atif/trajectories.jsonl jsonl
-```
-
-The adapter uses published `atif-arrow 0.4.0` with Arrow 59; see
-[dependency alignment](docs/dependencies.md#atif-parser).
-
-## Adding a file format
-
-See [extension entry points](docs/extending.md) for the shared format, document
-provider and OpenDAL storage paths, including default-decoder provider aliases.
-
-`FileAccessor<B, F>` binds a byte accessor to a core `ReaderFactory`. Built-in
-configuration types are `JsonFormat`, `CsvFileFormat`, `ParquetFormat`,
-`XmlFormat`, `WarcFormat` and the existing `AtifFormat` enum. For example,
-`FileAccessor::from_format(bytes, JsonFormat::new(schema))` is equivalent to
-`JsonAccessor::new(bytes, schema)`. Existing accessor constructors and builders
-remain available as type aliases over the shared accessor. `CsvFormat` continues
-to configure Arrow CSV delimiter/header options.
-
-Implement `ReaderFactory` for a new single-input format:
-
-1. Set `Request = ReadRequest`, `Reader = dyn RecordReader`, and a typed
-   `Prepared` state for an Arrow format. Other output types can use their own
-   request and reader interfaces.
-2. Implement `prepare(&ReadRequest)` to validate fixed schemas/projections and
-   construct per-open decoder state before storage I/O. Formats that inspect
-   their input can use `()` as their prepared state.
-3. Implement async `create_reader(token, input, request, prepared)` to inspect
-   owned input and return a reader with metadata available. Keep format-specific
-   batching, projection pushdown and errors in the format.
-4. Override `capability(input)` when the default sequential behavior needs more
-   input operations, such as exact ranges. Validate actual input capabilities
-   and metadata during `create_reader`.
-
-`ReaderFactoryExt::open_reader` runs preparation, opens storage, and invokes
-`create_reader`. One blanket implementation supplies it for every factory;
-individual factory types cannot override it. Both `FileAccessor` and
-decompression invoke this implementation explicitly. Direct factory callers
-import `ReaderFactoryExt` to use `factory.open_reader(&storage, request)`.
-Conversion from `&Request` to `ByteReadRequest` forwards the exact object and
-byte options; the built-in
-record and byte requests already support it. A custom single-input request can
-implement `From<&CustomRequest> for ByteReadRequest`.
-
-The protocol lives in `open-arrow-access-core` and is re-exported by the facade.
-`file_format::FileFormat` remains another name for `ReaderFactory`. Existing
-implementations must add the request/reader associated types, change `prepare`
-to accept the full request, and rename factory `open` to `create_reader`,
-accepting a borrowed `FactoryToken`.
-Accessor constructors and builders keep their existing API.
-
-`FactoryToken` is public so other crates can implement the creation hook, but
-its construction is private. The blanket `open_reader` implementation supplies
-a borrowed token after opening storage. No public constructor, `Default`, or
-`Clone` is provided,
-so callers without a token cannot directly invoke `create_reader` in safe Rust.
-
-Use `StreamReader` for existing streams, `into_async_read` for futures I/O
-parsers, and the [shared format assertions](test-support/README.md#format-contracts)
-to test a new Arrow format. Decompression implements the same protocol through
-`DecompressionFactory<C>`, while `Codec` supplies the native decoder.
-
-## Caller-configured storage
-
-`storage::{OpenDalAccessor, opendal}` is always available, including with
-`--no-default-features`. Wrap a caller-configured SDK operator independently of
-any dataset provider. Backend features and credentials stay under the caller's
-control.
-
-Generic listing accepts implicit object-store directory prefixes without first
-requiring a directory object or `stat` support. The empty prefix selects the
-root, and `ListRequest::recursive` controls traversal. Prefix existence and
-backend listing errors follow the configured OpenDAL service. In particular, Fs
-listing yields no files for a nonexistent or non-directory prefix.
-Object and prefix locators must be canonical root-relative paths; aliases such
-as leading slashes, dot components, and repeated separators are rejected.
-
-### WARC parser
-
-Enable `format-warc` for `file_format::warc::WarcAccessor`, a thin adapter over the
-published `warc-rs` parser. It accepts `ByteReadRequest` and returns one owned
-`WarcRecord` per `next()` call, preserving physical record order, record types,
-headers and binary bodies. Reader metadata is the input `ObjectRef`.
-
-`WarcAccessor<B>` aliases `FileAccessor<B, WarcFormat>`. `WarcFormat` implements
-the same core `ReaderFactory` contract as Arrow formats, using byte requests and
-native WARC records. Shared opening handles request forwarding and preparation;
-the parser retains its own record conversion and errors.
-
-This stage provides parser records, without an Arrow schema, Arrow batches,
-projection, or batch-size controls. Arrow conversion, record locators and generated
-columns are deferred. Supply external decompression separately. The parser buffers
-one complete body per record, so this is not a maximum-record-size or memory bound.
-
-## PMC inventory
-
-Enable `service-pmc` to read a caller-selected inventory manifest with
-`service::pmc_inventory::PmcInventoryAccessor` and a standard `ReadRequest`.
-It streams the declared gzip CSV shards in order, preserves upstream columns
-and snapshot identity without adding columns. It does not list the
-bucket or open article JSON/content. See the [service guide](service/README.md).
-
-## Common Crawl configuration
-
-Enable `service-warc` for `service::commoncrawl::CommonCrawl` and
-`service::commoncrawl::create_http_accessor`. A source identifies a crawl release
-and optional mirror origin. HTTP configuration is lazy; gzip and record decoding are composed
-explicitly by the caller. The always-available storage facade wraps
-caller-configured SDK operators.
-
-Enable `service-warc` for crawl-wide WARC membership and sequential
-reading through a supplied format accessor. The manifest accessor must provide
-decoded inventory bytes; gzip remains an explicit byte layer. `resolve` exposes
-the ordered file set without opening record files.
-
-Enable `service-warc` to select one segment using the same WARC
-inventory parser and sequential reader. Segment selection occurs during manifest
-streaming, so only the selected segment's file locators are retained.
-
-### Zenodo
-
-Enable `service-zenodo` for `service::zenodo::ZenodoService`. Resolve a published
-record ID once, list its attachments, and read selected files through the shared
-byte contracts. Compose the result with existing format and decompression
-accessors. See [service documentation](service/README.md#zenodo-zenodo) and the
-`read_zenodo` example. This entry point supports public records, not repository
-search or restricted-file authentication.
-
-### Internet Archive
-
-Enable `service-internet-archive` for `service::internet_archive` public file discovery and
-byte access. See [service documentation](service/README.md) and the
-`read_internet_archive` example.
-
-### Dataverse
-
-Enable `service-dataverse` for `service::dataverse` public file discovery and
-byte access. See [service documentation](service/README.md) and the
-`read_dataverse` example.
-
-## TAR (`decompression-tar`)
-
-Enable `decompression-tar` for `decompression::tar::{TarStream, TarArchive, TarEntry, TarLimits}`.
-For remote bulk consumption, construct `TarStream::new(input, limits)` and call
-`next_entry().await` to obtain metadata and a bounded sequential ByteReader. The
-first entry is available after its header, with no full index scan or range reads.
-Consume or drop each body before advancing; dropped bodies are drained on the
-next call. Readers can outlive the stream. The stream retains pending input,
-partial headers and skip progress across cancelled next_entry calls. A cancelled
-body reader must be dropped. Malformed input and source errors terminate the
-stream. Unknown-length and sequential-only sources are supported.
-
-For independent selected-entry readers, use the optional indexed `TarArchive`.
-Open a caller-provided `ByteReader` using `TarArchive::open(input, limits).await`.
-Input must support exact ranges and expose a known content length. Inspection
-reads only 512-byte headers plus the two end blocks, skipping file bodies. TAR
-has no central directory, so inspection requires one dependent header read per
-entry. Open once and reuse the session for multiple files to avoid rescanning.
-
-`entries()` iterates headers in archive order, retaining directories and duplicate
-names as distinct indices. `open_entry(index, chunk_size)` creates an independent
-sequential `ByteReader` without fetching its body yet. Body fetches stay within
-the selected entry and requested chunk size; readers can outlive the session.
-The default limits are 65,536 entries and 1 GiB per entry. Header checksums,
-checked offsets, padding bounds and two zero end blocks are validated. Underlying
-source errors and version metadata are retained; no filesystem extraction occurs.
-
-Supported: regular USTAR and GNU header files and directories. Unsupported:
-links, sparse files, PAX/GNU extension headers including long names. Compressed
-TAR does not satisfy the ranged input contract through a sequential gzip layer.
-Run `cargo run --example read_tar --features decompression-tar -- testdata/tar mixed.tar 1`.
-
-### arXiv
-
-Enable `service-arxiv` for `service::arxiv` public file discovery and
-byte access. See [service documentation](service/README.md) and the
-`read_arxiv` example.
+See [testing](docs/testing.md) for suite placement and [dependency alignment](docs/dependencies.md)
+for the Arrow, Parquet, and OpenDAL version baseline.
