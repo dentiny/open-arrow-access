@@ -393,3 +393,12 @@ See [provider-test-fixtures](provider-test-fixtures.md) for this utility.
 ## Common http-downloads
 
 See [http-downloads](http-downloads.md) for this utility.
+
+## Common http-downloads
+
+See [http-downloads](http-downloads.md) for this utility.
+
+
+## Common remote-files
+
+See [remote-files](remote-files.md) for this utility.
