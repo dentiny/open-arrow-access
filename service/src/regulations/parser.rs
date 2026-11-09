@@ -1,5 +1,5 @@
-use super::{RegulationsResource, error::decode, validation};
-use crate::common::{MetadataLink, text};
+use super::{RegulationsResource, validation};
+use crate::common::{MetadataLink, decode, text};
 use open_arrow_access_core::Result;
 use serde_json::Value;
 

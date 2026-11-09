@@ -56,6 +56,12 @@ async fn pages_expose_truncation_metadata_and_validate_limits() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn record_rejects_mismatched_identity() {
+    let f = HttpFixture::new();
+    let s = RegulationsService::with_connection(providers::connection(&f));
     f.respond(
         "/v4/dockets/DOC-1",
         StatusCode::OK,

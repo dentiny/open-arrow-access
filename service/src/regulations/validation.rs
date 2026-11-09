@@ -1,17 +1,7 @@
-use super::{
-    RegulationsResource,
-    error::{decode, invalid},
-};
-use crate::common::{array, text};
+use super::RegulationsResource;
+use crate::common::{array, decode, invalid, text};
 use open_arrow_access_core::Result;
 use serde_json::Value;
-
-pub(super) fn validate_key(value: &str) -> Result<()> {
-    if value.is_empty() {
-        return Err(invalid("Regulations.gov requires an API key"));
-    }
-    Ok(())
-}
 
 pub(super) fn validate_pagination(parameters: &[(&str, &str)], page: u8, size: u16) -> Result<()> {
     if !(1..=20).contains(&page) || !(5..=250).contains(&size) {

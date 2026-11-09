@@ -1,8 +1,7 @@
 //! Read-only Regulations.gov API v4 discovery, metadata and attachments.
-mod error;
 mod parser;
 mod validation;
-use crate::common::{ApiDocument, Connection, RemoteFiles, segment};
+use crate::common::{ApiDocument, Connection, RemoteFiles, invalid, segment};
 use open_arrow_access_core::Result;
 #[derive(Clone, Copy, Debug)]
 pub enum RegulationsResource {
@@ -25,7 +24,9 @@ pub struct RegulationsService {
 }
 impl RegulationsService {
     pub fn new(key: &str) -> Result<Self> {
-        validation::validate_key(key)?;
+        if key.is_empty() {
+            return Err(invalid("Regulations.gov requires an API key"));
+        }
         Ok(Self::with_connection(
             Connection::new("https://api.regulations.gov")?.with_header("X-Api-Key", key)?,
         ))
@@ -57,13 +58,13 @@ impl RegulationsService {
     }
 
     pub async fn record(&self, resource: RegulationsResource, id: &str) -> Result<RemoteFiles> {
-        let query = match resource {
-            RegulationsResource::Dockets => vec![],
-            _ => vec![("include", "attachments")],
+        let query: &[(&str, &str)] = match resource {
+            RegulationsResource::Dockets => &[],
+            _ => &[("include", "attachments")],
         };
         let doc = self
             .connection
-            .json(&format!("v4/{}/{}", resource.name(), segment(id)?), &query)
+            .json(&format!("v4/{}/{}", resource.name(), segment(id)?), query)
             .await?;
         let files = parser::parse_record_files(doc.value(), resource, id)?;
         self.connection.files(files, doc)
