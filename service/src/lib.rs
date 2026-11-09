@@ -51,3 +51,6 @@ pub mod xml_metadata;
 
 #[cfg(feature = "semantic-scholar")]
 pub mod semantic_scholar;
+
+#[cfg(feature = "oai")]
+pub mod oai;
