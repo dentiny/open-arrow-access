@@ -35,7 +35,7 @@ pub(super) fn ordered_files<T>(files: Vec<(String, T)>) -> Result<indexmap::Inde
     let mut ordered = indexmap::IndexMap::with_capacity(files.len());
     for (name, file) in files {
         if name.is_empty() || ordered.insert(name, file).is_some() {
-            return Err(super::error::file_namespace());
+            return Err(super::error::empty_or_dup_filename());
         }
     }
     Ok(ordered)

@@ -48,7 +48,7 @@ pub(super) fn http_status_error(operation: &'static str, status: http::StatusCod
     )
 }
 
-pub(super) fn file_namespace() -> Error {
+pub(super) fn empty_or_dup_filename() -> Error {
     Error::new(
         ErrorKind::InvalidInput,
         "configure_resolved_files",
