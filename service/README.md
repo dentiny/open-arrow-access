@@ -402,6 +402,10 @@ See [remote-files](remote-files.md) for this utility.
 
 `common::resolve_optional_links` maps provider-selected optional URL fields to logical file names without modifying parsed metadata.
 
+## uspto
+
+See [uspto service](uspto.md) for its contract and usage.
+
 ## Common XML metadata
 
 Enable `format-xml` for `xml_metadata::XmlDocument`. Protocol metadata is decoded through our `file-format::xml::XmlFormat`, including its schema, limits, reader lifecycle and errors. The shared adapter resolves the root namespace, ignores external DTD declarations without fetching them, and rejects internal DTD subsets. Complete document parsing checks trailing content; callers retain original response bytes separately.

@@ -108,6 +108,7 @@ service-internet-archive = [
     "open-arrow-access-service/internet-archive",
 ]
 service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
+service-uspto = ["dep:open-arrow-access-service", "open-arrow-access-service/uspto"]
 service-warc = ["dep:open-arrow-access-service", "open-arrow-access-service/warc"]
 service-zenodo = ["dep:open-arrow-access-service", "open-arrow-access-service/zenodo"]
 
