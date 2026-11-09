@@ -93,7 +93,7 @@ impl BodyLength {
 
 pub(super) fn downloads(files: &[(String, String)]) -> Result<()> {
     for (_, url) in files {
-        super::download_url(url)?;
+        super::resolve_download_url(url)?;
     }
     Ok(())
 }

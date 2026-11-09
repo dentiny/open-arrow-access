@@ -1,6 +1,6 @@
 use super::error::io;
 use super::validation::BodyLength;
-use super::{Connection, download_url};
+use super::{Connection, resolve_download_url};
 use futures::stream;
 use open_arrow_access_core::{ByteMetadata, ByteReader, Bytes, Result, StreamReader};
 use opendal::raw::oio::ReadStream;
@@ -12,7 +12,7 @@ impl Connection {
         url: &str,
         options: open_arrow_access_core::ByteReadOptions,
     ) -> Result<Box<dyn ByteReader>> {
-        let response = self.response(download_url(url)?, "*/*").await?;
+        let response = self.response(resolve_download_url(url)?, "*/*").await?;
         let length = BodyLength::new(response.headers())?;
         let content_length = length.expected;
         let version = response
