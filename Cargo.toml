@@ -94,6 +94,7 @@ format-xml = [
     "open-arrow-access-service?/format-xml",
 ]
 service-arxiv = ["dep:open-arrow-access-service", "open-arrow-access-service/arxiv"]
+service-biorxiv = ["dep:open-arrow-access-service", "open-arrow-access-service/biorxiv"]
 service-courtlistener = ["dep:open-arrow-access-service", "open-arrow-access-service/courtlistener"]
 service-dataverse = ["dep:open-arrow-access-service", "open-arrow-access-service/dataverse"]
 service-gutenberg = ["dep:open-arrow-access-service", "open-arrow-access-service/gutenberg"]

@@ -17,6 +17,7 @@ pub use open_arrow_access_core::*;
     feature = "service-warc",
     feature = "service-gutenberg",
     feature = "service-meca",
+    feature = "service-biorxiv",
 ))]
 pub use open_arrow_access_service as service;
 

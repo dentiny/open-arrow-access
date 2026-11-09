@@ -51,3 +51,6 @@ pub mod xml_metadata;
 
 #[cfg(feature = "meca")]
 pub mod meca;
+
+#[cfg(feature = "biorxiv")]
+pub mod biorxiv;
