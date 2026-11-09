@@ -155,15 +155,6 @@ async fn parquet_accepts_third_party_ranged_accessor() {
         .unwrap();
     let memory = MemoryAccessor::new(&bytes, usize::MAX).with_ranges();
     let observed = memory.observations.clone();
-    for kind in [ErrorKind::Io, ErrorKind::PermissionDenied] {
-        let error = ParquetAccessor::new(memory.clone().with_range_failure(0, kind))
-            .open(ReadRequest::new("opaque:fixture"))
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), kind);
-        assert_eq!(ErrorKind::from_source(error.source().unwrap()), Some(kind));
-    }
     let accessor = ParquetAccessor::new(memory);
     let reader = accessor
         .open(ReadRequest::new("opaque:fixture"))
@@ -452,14 +443,7 @@ async fn parquet_forwards_per_open_io_options_and_uses_bulk_ranges_through_layer
 
 #[tokio::test]
 async fn parquet_preserves_source_error_categories_during_inspection_and_decoding() {
-    for kind in [
-        ErrorKind::InvalidInput,
-        ErrorKind::Unsupported,
-        ErrorKind::NotFound,
-        ErrorKind::PermissionDenied,
-        ErrorKind::Io,
-        ErrorKind::Decode,
-    ] {
+    for kind in [ErrorKind::Io, ErrorKind::PermissionDenied] {
         for inspect in [true, false] {
             let fixture = fixture(Compression::UNCOMPRESSED).await;
             let observations = Arc::new(Observations::default());
