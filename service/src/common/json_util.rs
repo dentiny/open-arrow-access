@@ -51,7 +51,7 @@ pub fn optional_links(value: &Value, fields: &[LinkField<'_>]) -> Result<Vec<Met
     for field in fields {
         match value.get(field.json_field) {
             Some(Value::String(url)) if !url.is_empty() => {
-                super::download_url(url)?;
+                super::resolve_download_url(url)?;
                 files.push(MetadataLink {
                     file_name: field.file_name.into(),
                     url: url.clone(),
