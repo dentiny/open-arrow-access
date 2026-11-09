@@ -36,11 +36,22 @@ fn crawl_identity_and_mirror_urls_are_canonical() {
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
         assert_eq!(error.operation(), operation);
     }
-    for crawl in ["../CC-MAIN-2022-40", "CC-MAIN-22-40", "CC-MAIN-2022-400"] {
-        assert_eq!(
-            CommonCrawl::new(crawl).unwrap_err().kind(),
-            ErrorKind::InvalidInput
-        );
+    for crawl in [
+        "../CC-MAIN-2022-40",
+        "CC-MAIN-22-40",
+        "CC-MAIN-2022-400",
+        "",
+        "cc-main-2022-40",
+        "CC-MAIN-202-40",
+        "CC-MAIN-2022-4",
+        "CC-MAIN-202x-40",
+        "CC-MAIN-2022-4x",
+        "CC-MAIN-2022-40-extra",
+        "CC-MAIN-2022-40 ",
+    ] {
+        let error = CommonCrawl::new(crawl).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput, "{crawl:?}");
+        assert_eq!(error.operation(), "configure_commoncrawl");
     }
     for value in [
         "https://host/crawl-data/CC-MAIN-2022-40/?x=1",

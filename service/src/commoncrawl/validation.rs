@@ -17,7 +17,3 @@ pub(super) fn validate_crawl(crawl: &str) -> Result<()> {
 fn is_digits(value: &str, len: usize) -> bool {
     value.len() == len && value.bytes().all(|byte| byte.is_ascii_digit())
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/commoncrawl_validation.rs"]
-mod tests;
