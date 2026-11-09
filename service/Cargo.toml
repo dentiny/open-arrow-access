@@ -16,6 +16,7 @@ courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decom
 dataverse = []
 default = []
 format-xml = ["dep:quick-xml"]
+govinfo = []
 gutenberg = ["dep:arrow-array", "dep:arrow-schema", "dep:chrono", "dep:xml-arrow"]
 huggingface = [
     "dep:open-arrow-access-dataset",
@@ -126,3 +127,7 @@ required-features = ["internet-archive"]
 [[test]]
 name = "xml_metadata"
 required-features = ["format-xml"]
+
+[[test]]
+name = "govinfo"
+required-features = ["govinfo"]

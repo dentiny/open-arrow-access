@@ -48,3 +48,6 @@ pub mod common;
 
 #[cfg(feature = "format-xml")]
 pub mod xml_metadata;
+
+#[cfg(feature = "govinfo")]
+pub mod govinfo;
