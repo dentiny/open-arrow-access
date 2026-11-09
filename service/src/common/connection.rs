@@ -160,6 +160,22 @@ impl Connection {
             },
         )))
     }
+    /// Fetch one JSON manifest, resolve its file links, and bind lazy downloads.
+    ///
+    /// The resolver owns provider identity and availability checks. Its errors
+    /// are returned unchanged. The original document, including unknown fields,
+    /// is retained as metadata; resolution never opens attachment bodies.
+    pub async fn resolve_json_files(
+        &self,
+        path: &str,
+        query: &[(&str, &str)],
+        resolve: impl FnOnce(&ApiDocument) -> Result<Vec<MetadataLink>> + Send,
+    ) -> Result<RemoteFiles> {
+        let document = self.json(path, query).await?;
+        let files = resolve(&document)?;
+        self.files(files, document)
+    }
+
     /// Bind a validated provider manifest to lazy byte reads. Logical names remain opaque.
     pub fn files<M>(&self, files: Vec<MetadataLink>, metadata: M) -> Result<RemoteFiles<M>> {
         validation::validate_downloads(&files)?;

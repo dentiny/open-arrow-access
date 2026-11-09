@@ -118,3 +118,14 @@ common behavior, and keep parser values, domain validation and backend-specific
 capability/scheduling tests with their owning suite.
 
 The former `DefaultDocumentAccessor` forwarding wrapper has been removed. Migrate its type aliases to `DocumentAccessor<B, D>` and its one-argument `new(storage)` calls to `with_default_decoder(storage)`. Explicit decoder construction remains `DocumentAccessor::new(storage, decoder)`.
+
+## HTTP manifest providers
+
+`common::Connection::resolve_json_files(path, query, resolve)` is available even
+with service default features disabled. Supply a resolver that validates source
+identity and maps the fetched `ApiDocument` to `MetadataLink` values. The helper
+retains the original document, validates the file namespace and URLs through
+`Connection::files`, and returns lazy sequential downloads. Resolver errors keep
+their original category, operation and source. Figshare and Federal Register use
+this path. Multi-request discovery and custom metadata can continue composing
+`json` and `files` explicitly; ranged downloads retain the OpenDAL path.

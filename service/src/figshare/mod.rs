@@ -29,10 +29,11 @@ impl FigshareService {
         if let Some(version) = version {
             path.push_str(&format!("/versions/{version}"));
         }
-        let doc = self.connection.json(&path, &[]).await?;
-        let files =
-            parser::parse_article_files(doc.value(), id.get(), version.map(NonZeroU32::get))?;
-        self.connection.files(files, doc)
+        self.connection
+            .resolve_json_files(&path, &[], |doc| {
+                parser::parse_article_files(doc.value(), id.get(), version.map(NonZeroU32::get))
+            })
+            .await
     }
 
     pub async fn collection_articles(
