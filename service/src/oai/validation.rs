@@ -1,10 +1,6 @@
 use super::{error, parser::Envelope};
 use open_arrow_access_core::Result;
 
-pub(super) fn validate_root(bytes: &[u8]) -> Result<()> {
-    crate::xml_metadata::validate_root(bytes, "OAI-PMH")
-}
-
 pub(super) fn validate_response(envelope: &Envelope) -> Result<()> {
     match (envelope.records.as_ref(), envelope.error.as_ref()) {
         (Some(_), None) => Ok(()),
