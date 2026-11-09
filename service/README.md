@@ -400,24 +400,16 @@ See [remote-files](remote-files.md) for this utility.
 
 ## Common metadata links
 
-`common::optional_links` maps provider-selected optional URL fields to logical file names without modifying parsed metadata. It is shared by BHL and Federal Register.
+`common::resolve_optional_links` maps provider-selected optional URL fields to logical file names without modifying parsed metadata.
 
 ## semantic-scholar
 
 See [semantic-scholar service](semantic-scholar.md).
 
-## Common XML metadata envelopes
+## Common XML metadata
 
-Enable `format-xml` for `xml_metadata::validate_root(bytes,name)`. OAI and MECA use this shared envelope check before their own complete parsing and schema checks; original bytes remain unchanged.
+Enable `format-xml` for `xml_metadata::XmlDocument`. Protocol metadata uses the same `xml-arrow` engine as the XML file reader. The shared adapter resolves the root namespace, ignores external DTD declarations without fetching them, and rejects internal DTD subsets. Complete document parsing checks trailing content; callers retain original response bytes separately.
 
 ## Common OAI protocol
 
-See [OAI protocol](oai-protocol.md). XML envelope checks reuse `xml_metadata::validate_root`.
-
-## Common remote-files
-
-See [remote-files](remote-files.md) for this utility.
-
-## Common metadata links
-
-`common::resolve_optional_links` maps provider-selected optional URL fields to logical file names without modifying parsed metadata. It is shared by BHL and Federal Register.
+See [OAI protocol](oai-protocol.md). Record counts and resumption tokens are decoded through the shared XML metadata reader.

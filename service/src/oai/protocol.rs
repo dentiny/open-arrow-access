@@ -55,6 +55,6 @@ impl OaiService {
         let mut url = self.endpoint.clone();
         url.query_pairs_mut().extend_pairs(query.iter().copied());
         let bytes = self.connection.bytes(url, "application/xml").await?;
-        parser::parse_page(bytes)
+        parser::parse_page(bytes).await
     }
 }

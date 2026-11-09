@@ -7,11 +7,7 @@ repository.workspace = true
 description = "Dataset source providers for Open Arrow Access"
 
 [features]
-arxiv = [
-    "dep:quick-xml",
-    "dep:open-arrow-access-decompression",
-    "open-arrow-access-decompression/tar",
-]
+arxiv = ["format-xml", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
@@ -38,7 +34,7 @@ semantic-scholar = []
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 zenodo = []
 
-format-xml = ["dep:quick-xml"]
+format-xml = ["dep:quick-xml", "dep:xml-arrow", "dep:arrow-array", "dep:arrow-schema"]
 oai = ["format-xml"]
 
 [dependencies]
