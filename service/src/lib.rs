@@ -54,3 +54,6 @@ pub mod figshare;
 
 #[cfg(feature = "bhl")]
 pub mod bhl;
+
+#[cfg(feature = "oai")]
+pub mod oai;
