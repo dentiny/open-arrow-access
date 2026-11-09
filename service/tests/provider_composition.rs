@@ -3,7 +3,7 @@ mod providers;
 use arrow_array::{Array, cast::AsArray};
 use arrow_schema::DataType;
 use http::StatusCode;
-use open_arrow_access_core::{Accessor, ReadRequest, ReaderFactoryExt, read_all};
+use open_arrow_access_core::{Accessor, AccessorExt, ReadRequest, ReaderFactoryExt, read_all};
 use open_arrow_access_decompression::zip::ZipLimits;
 use open_arrow_access_file_format::xml::{XmlField, XmlFormat, XmlSchema};
 use open_arrow_access_service::{
@@ -14,7 +14,18 @@ use open_arrow_access_test_support::{MemoryAccessor, fixture, http::HttpFixture}
 #[tokio::test]
 async fn govinfo_bulk_download_preserves_and_decodes_a_real_issue() {
     let http = HttpFixture::new();
-    let original = fixture!("govinfo", "fr-2026-01-02.xml").await;
+    let compressed = fixture!("govinfo", "fr-2026-01-02.xml.gz").await;
+    let bytes = MemoryAccessor::new(&compressed, 64 * 1024).layer(
+        open_arrow_access_decompression::DecompressionLayer::new(
+            open_arrow_access_decompression::gzip::Gzip,
+        ),
+    );
+    let original = read_all(
+        bytes.open("issue.xml.gz".into()).await.unwrap(),
+        "decode_fixture",
+    )
+    .await
+    .unwrap();
     http.respond(
         "/bulkdata/json/FR/2026/01",
         StatusCode::OK,
