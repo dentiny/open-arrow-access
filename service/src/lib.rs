@@ -51,3 +51,6 @@ pub mod xml_metadata;
 
 #[cfg(feature = "oai")]
 pub mod oai;
+
+#[cfg(feature = "doab")]
+pub mod doab;
