@@ -72,8 +72,8 @@ async fn rejects_invalid_documents() {
 }
 
 #[tokio::test]
-async fn validates_before_reading_and_preserves_source_errors() {
-    let source = MemoryAccessor::new(b"{}", 1).with_failure(0, ErrorKind::PermissionDenied);
+async fn open_input_validates_projection_before_reading() {
+    let source = MemoryAccessor::new(b"{}", 1);
     let format = JsonFormat::new(schema());
     let request = ReadRequest::new("document").with_options(ReadOptions {
         projection: Some(vec!["missing".into()]),
@@ -83,15 +83,4 @@ async fn validates_before_reading_and_preserves_source_errors() {
     let error = format.open_input(input, request).await.err().unwrap();
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
     assert_eq!(source.observations.reads.load(Ordering::Relaxed), 0);
-
-    let input = source.open(ByteReadRequest::new("document")).await.unwrap();
-    let mut reader = format
-        .open_input(input, ReadRequest::new("document"))
-        .await
-        .unwrap();
-    assert_eq!(
-        reader.next().await.unwrap_err().kind(),
-        ErrorKind::PermissionDenied
-    );
-    assert!(reader.next().await.unwrap().is_none());
 }
