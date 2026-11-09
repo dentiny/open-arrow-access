@@ -7,6 +7,7 @@ repository.workspace = true
 description = "Dataset source providers for Open Arrow Access"
 
 [features]
+format-xml = ["dep:quick-xml"]
 default = []
 zenodo = []
 dataverse = []
@@ -43,8 +44,6 @@ pmc = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/gzip",
 ]
-
-format-xml = ["dep:quick-xml"]
 
 [dependencies]
 indexmap.workspace = true

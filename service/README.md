@@ -184,6 +184,7 @@ licences, extract text, or write Lance datasets.
 
 The article reader uses core `read_object` and `StreamReader`
 for terminal handling. JSON conversion and article validation stay in PMC.
+
 ## Common Crawl configuration
 
 Enable `service-warc` on the facade for `CommonCrawl`, which validates a
@@ -385,10 +386,13 @@ See [api-document](api-document.md) for this utility.
 
 See [provider-connection](provider-connection.md) for this utility.
 
+## Common provider-test-fixtures
+
+See [provider-test-fixtures](provider-test-fixtures.md) for this utility.
+
 ## Common metadata links
 
 `common::optional_links` maps provider-selected optional URL fields to logical file names without modifying parsed metadata. It is shared by BHL and Federal Register.
-
 
 ## Common XML metadata envelopes
 
