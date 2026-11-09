@@ -28,6 +28,9 @@ use the same IDs/payloads; ATIF and WARC add their required structure. Parquet h
 representative corpus: repeat with production-shaped data before changing
 defaults. Generated shards belong under `target/`, not in `testdata/`.
 
+The checked-in [M5 Pro baseline and independent optimizations](results/2026-11-09-m5pro/REPORT.md)
+include raw samples, allocation counts and reproducible comparisons.
+
 ## Separate bottlenecks
 
 Vary one dimension at a time, using the same generated files and binary:
@@ -91,6 +94,8 @@ not physical disk bandwidth. Fixture hashing also warms the input cache.
 * `http` counts actual HEAD/GET requests and body bytes at the loopback server.
   Delay is applied once per request before headers; network bandwidth, TLS,
   authentication, throttling and cloud topology are not simulated.
+* Summary input-equivalent throughput uses whole file size, even when a projected
+  scan reads fewer bytes; it is not physical transfer bandwidth.
 * `output_bytes` sums Arrow array memory sizes across batches (or returned byte
   lengths). It is not retained/peak memory. Byte and WARC controls consume and
   discard results; the direct raw sequential control does not touch every byte,

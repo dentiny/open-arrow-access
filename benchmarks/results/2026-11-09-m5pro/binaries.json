@@ -1,0 +1,47 @@
+{
+  "atif-borrow": {
+    "sha256": "470344145073720b482acfc8414eccf1fba457e70ab9bdf2a74a90191aac412d",
+    "source": "5b07659",
+    "allocation_instrumented": false
+  },
+  "atif-borrow-alloc": {
+    "sha256": "d0f0b0da9898b1474907f7cea657d0e2fd3c1e967c971b6e984fba8c12132133",
+    "source": "5b07659",
+    "allocation_instrumented": true
+  },
+  "baseline": {
+    "sha256": "22467d9bc7e6fca4bcb89fa73e1f23fb112cbaae7d767c2443455af7a9ed63f4",
+    "source": "328a012f683893fea37d79f77eca0618c93ee30e",
+    "allocation_instrumented": false
+  },
+  "baseline-alloc": {
+    "sha256": "30c17febd21ee91f4155d7e645a7aef5d0719ef2e78a8a74f0bbacab8c0a19a4",
+    "source": "328a012f683893fea37d79f77eca0618c93ee30e",
+    "allocation_instrumented": true
+  },
+  "memchr": {
+    "sha256": "91c00f3a15614143a47cd669049bbcbab5b07c4941a9bbce15bb505d4ad1944c",
+    "source": "b9da239",
+    "allocation_instrumented": false
+  },
+  "read-all": {
+    "sha256": "974071fc71332828918f2c200397dd3fd53d8488ee9a019cdcf8e3cc422c9cf5",
+    "source": "e52b68a",
+    "allocation_instrumented": false
+  },
+  "read-all-alloc": {
+    "sha256": "acb54fdfbe5959c05cbe4b38b7b2f1c377e044e51f8fff2f2930a7830d44472f",
+    "source": "e52b68a",
+    "allocation_instrumented": true
+  },
+  "upstream-atif": {
+    "sha256": "fcbb8f3b42fe35db8c65a3aece8e3b6fbc377fb2f520f32422375791fe6912cc",
+    "source": "328a012f683893fea37d79f77eca0618c93ee30e + atif-arrow 7224617",
+    "allocation_instrumented": false
+  },
+  "upstream-atif-alloc": {
+    "sha256": "6896d927ee90d9a3835ed1af7a9438abdf395f75a7f758a8591dbee1b958505b",
+    "source": "328a012f683893fea37d79f77eca0618c93ee30e + atif-arrow 7224617",
+    "allocation_instrumented": true
+  }
+}

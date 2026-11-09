@@ -1,0 +1,146 @@
+diff --git a/core/src/read_all.rs b/core/src/read_all.rs
+index 6abe952..562bfa6 100644
+--- a/core/src/read_all.rs
++++ b/core/src/read_all.rs
+@@ -1,10 +1,21 @@
+ use crate::{ByteReader, Error, ErrorKind, Result};
+ 
+ /// Collect an owned byte reader, preserving source errors and rejecting empty chunks.
++///
++/// A known length reserves up to 64 MiB after the first nonempty chunk, avoiding
++/// repeated buffer growth for common whole-object reads. This is an allocation
++/// hint only: unknown or stale lengths never truncate or reject actual input.
+ pub async fn read_all<R>(mut reader: Box<R>, operation: &'static str) -> Result<Vec<u8>>
+ where
+     R: ByteReader + ?Sized,
+ {
++    // Do not let an inaccurate/untrusted length request an unbounded allocation.
++    // Delay reservation so empty inputs and initial failures allocate nothing.
++    let initial_capacity = reader
++        .metadata()
++        .content_length
++        .unwrap_or(0)
++        .min(64 * 1024 * 1024) as usize;
+     let mut output = Vec::new();
+     while let Some(bytes) = reader.next().await? {
+         if bytes.is_empty() {
+@@ -14,6 +25,9 @@ where
+                 "byte reader returned an empty chunk",
+             ));
+         }
++        if output.is_empty() {
++            output.reserve_exact(initial_capacity);
++        }
+         output.extend_from_slice(&bytes);
+     }
+     Ok(output)
+diff --git a/core/tests/read_all.rs b/core/tests/read_all.rs
+new file mode 100644
+index 0000000..1405ebc
+--- /dev/null
++++ b/core/tests/read_all.rs
+@@ -0,0 +1,92 @@
++use open_arrow_access_core::{
++    Accessor, ByteMetadata, ByteReader, Bytes, Capability, ErrorKind, Reader, Result, async_trait,
++    read_all,
++};
++use open_arrow_access_test_support::{MemoryAccessor, fixture};
++
++struct LengthHint {
++    inner: Box<dyn ByteReader>,
++    metadata: ByteMetadata,
++}
++
++#[async_trait]
++impl Reader for LengthHint {
++    type Item = Bytes;
++    type Metadata = ByteMetadata;
++    fn capability(&self) -> Capability {
++        Capability {
++            read: true,
++            read_with_range: false,
++            read_parallel: false,
++            list: false,
++        }
++    }
++    fn metadata(&self) -> &ByteMetadata {
++        &self.metadata
++    }
++    async fn next(&mut self) -> Result<Option<Bytes>> {
++        self.inner.next().await
++    }
++}
++#[async_trait]
++impl ByteReader for LengthHint {}
++
++#[tokio::test]
++async fn unknown_zero_underestimated_and_oversized_hints_do_not_change_bytes() {
++    let bytes = fixture!("bytes", "alphabet.bin").await;
++    for hint in [
++        None,
++        Some(0),
++        Some(1),
++        Some(bytes.len() as u64),
++        Some(u64::MAX),
++    ] {
++        let inner = MemoryAccessor::new(&bytes, 3)
++            .open("input".into())
++            .await
++            .unwrap();
++        let mut metadata = inner.metadata().clone();
++        metadata.content_length = hint;
++        let output = read_all(Box::new(LengthHint { inner, metadata }), "test_all")
++            .await
++            .unwrap();
++        assert_eq!(output, bytes);
++        // A forged enormous length cannot trigger an enormous upfront allocation.
++        assert!(output.capacity() <= 64 * 1024 * 1024);
++    }
++}
++
++#[tokio::test]
++async fn empty_input_stays_unallocated_and_source_contract_errors_are_preserved() {
++    let bytes = fixture!("bytes", "empty.bin").await;
++    let inner = MemoryAccessor::new(&bytes, 1)
++        .open("input".into())
++        .await
++        .unwrap();
++    let mut metadata = inner.metadata().clone();
++    metadata.content_length = Some(u64::MAX);
++    let output = read_all(Box::new(LengthHint { inner, metadata }), "test_all")
++        .await
++        .unwrap();
++    assert!(output.is_empty());
++    assert_eq!(output.capacity(), 0);
++    let bytes = fixture!("bytes", "input.bin").await;
++    let inner = MemoryAccessor::new(&bytes, 1)
++        .with_empty_chunk(0)
++        .open("input".into())
++        .await
++        .unwrap();
++    let error = read_all(inner, "test_all").await.unwrap_err();
++    assert_eq!(error.kind(), ErrorKind::Io);
++    assert_eq!(error.operation(), "test_all");
++    for offset in [0, 1] {
++        let inner = MemoryAccessor::new(&bytes, 1)
++            .with_failure(offset, ErrorKind::PermissionDenied)
++            .open("input".into())
++            .await
++            .unwrap();
++        let error = read_all(inner, "test_all").await.unwrap_err();
++        assert_eq!(error.kind(), ErrorKind::PermissionDenied);
++        assert_eq!(error.operation(), "memory_read");
++    }
++}
+diff --git a/docs/testing.md b/docs/testing.md
+index 6c79e07..ee3d614 100644
+--- a/docs/testing.md
++++ b/docs/testing.md
+@@ -40,6 +40,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
+ | Document accessor | [`core/tests/document.rs`](../core/tests/document.rs) |
+ | Field-name index and wide projections | [`core/tests/field_index.rs`](../core/tests/field_index.rs) |
+ | Shared HTTP status classification | [`core/tests/error.rs`](../core/tests/error.rs) |
++| Whole-object collection and length hints | [`core/tests/read_all.rs`](../core/tests/read_all.rs) |
+ | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
+ | Shared resource lifetime probe | [`test-support/src/drop_probe.rs`](../test-support/src/drop_probe.rs), used by core stream and TAR tests |
+ | Generic file-format extension protocol | [`file-format/tests/accessor.rs`](../file-format/tests/accessor.rs), also runs with no format features |

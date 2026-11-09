@@ -1,0 +1,139 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 6f31e4d..30098b2 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1972,6 +1972,7 @@ dependencies = [
+  "async-trait",
+  "bytes",
+  "futures",
++ "memchr",
+  "open-arrow-access-test-support",
+  "thiserror",
+  "tokio",
+diff --git a/Cargo.toml b/Cargo.toml
+index f586ebb..369f1e5 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -69,6 +69,7 @@ datafusion = { version = "55.2.0", default-features = false }
+ bytes = "1"
+ flate2 = "1"
+ futures = "0.3"
++memchr = "2"
+ more-asserts = "0.3.1"
+ open-arrow-access-core = { path = "core", version = "0.1.0" }
+ open-arrow-access-decompression = { path = "decompression", version = "0.1.0", default-features = false }
+diff --git a/core/Cargo.toml b/core/Cargo.toml
+index 1ae8648..9a274ea 100644
+--- a/core/Cargo.toml
++++ b/core/Cargo.toml
+@@ -12,6 +12,7 @@ arrow-schema.workspace = true
+ async-trait.workspace = true
+ bytes.workspace = true
+ futures.workspace = true
++memchr.workspace = true
+ thiserror.workspace = true
+ 
+ [dev-dependencies]
+diff --git a/core/src/read_lines.rs b/core/src/read_lines.rs
+index 9aee620..b3a5081 100644
+--- a/core/src/read_lines.rs
++++ b/core/src/read_lines.rs
+@@ -82,7 +82,7 @@ impl<R: ByteReader + ?Sized> LineState<R> {
+                     }
+                 }
+             }
+-            let newline = self.pending.iter().position(|byte| *byte == b'\n');
++            let newline = memchr::memchr(b'\n', &self.pending);
+             let consumed = newline.map_or(self.pending.len(), |index| index + 1);
+             if let Some(limit) = max_line_bytes
+                 && consumed > limit - line.len()
+diff --git a/core/tests/read_lines.rs b/core/tests/read_lines.rs
+new file mode 100644
+index 0000000..29404b9
+--- /dev/null
++++ b/core/tests/read_lines.rs
+@@ -0,0 +1,56 @@
++use futures::TryStreamExt;
++use open_arrow_access_core::{Accessor, ErrorKind, read_lines};
++use open_arrow_access_test_support::{MemoryAccessor, fixture};
++
++#[tokio::test]
++async fn line_endings_binary_tail_and_chunk_boundaries() {
++    let bytes = fixture!("bytes", "line_endings.bin").await;
++    for chunk in [1, 2, 3, 16, 31, 32, 33, 63, 64, 65, 4096, 65536] {
++        let input = MemoryAccessor::new(&bytes, chunk)
++            .open("lines".into())
++            .await
++            .unwrap();
++        let lines: Vec<_> = read_lines(input, Some(4097), "test_lines")
++            .try_collect()
++            .await
++            .unwrap();
++        assert_eq!(lines.len(), 4, "chunk={chunk}");
++        assert_eq!(lines[0].as_ref(), b"\n");
++        assert_eq!(lines[1].as_ref(), b"\r\n");
++        assert_eq!(lines[2].as_ref(), &bytes[3..4100]);
++        assert_eq!(lines[3].as_ref(), b"last\xff");
++    }
++}
++
++#[tokio::test]
++async fn line_limit_includes_terminator_across_chunks_and_errors_are_terminal() {
++    let bytes = fixture!("bytes", "line_endings.bin").await;
++    for chunk in [1, 31, 65536] {
++        let input = MemoryAccessor::new(&bytes, chunk)
++            .open("lines".into())
++            .await
++            .unwrap();
++        let lines = read_lines(input, Some(4096), "test_lines");
++        futures::pin_mut!(lines);
++        assert_eq!(lines.try_next().await.unwrap().unwrap().as_ref(), b"\n");
++        assert_eq!(lines.try_next().await.unwrap().unwrap().as_ref(), b"\r\n");
++        let error = lines.try_next().await.unwrap_err();
++        assert_eq!(error.kind(), ErrorKind::Decode);
++        assert_eq!(error.operation(), "test_lines");
++        assert!(lines.try_next().await.unwrap().is_none());
++    }
++}
++
++#[tokio::test]
++async fn empty_input_has_no_line() {
++    let bytes = fixture!("bytes", "empty.bin").await;
++    let input = MemoryAccessor::new(&bytes, 64)
++        .open("lines".into())
++        .await
++        .unwrap();
++    let lines: Vec<_> = read_lines(input, Some(0), "test_lines")
++        .try_collect()
++        .await
++        .unwrap();
++    assert!(lines.is_empty());
++}
+diff --git a/docs/testing.md b/docs/testing.md
+index 6c79e07..d8cc835 100644
+--- a/docs/testing.md
++++ b/docs/testing.md
+@@ -40,6 +40,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
+ | Document accessor | [`core/tests/document.rs`](../core/tests/document.rs) |
+ | Field-name index and wide projections | [`core/tests/field_index.rs`](../core/tests/field_index.rs) |
+ | Shared HTTP status classification | [`core/tests/error.rs`](../core/tests/error.rs) |
++| Byte line streaming and limits | [`core/tests/read_lines.rs`](../core/tests/read_lines.rs) |
+ | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
+ | Shared resource lifetime probe | [`test-support/src/drop_probe.rs`](../test-support/src/drop_probe.rs), used by core stream and TAR tests |
+ | Generic file-format extension protocol | [`file-format/tests/accessor.rs`](../file-format/tests/accessor.rs), also runs with no format features |
+diff --git a/testdata/bytes/README.md b/testdata/bytes/README.md
+index d543b93..47db3b3 100644
+--- a/testdata/bytes/README.md
++++ b/testdata/bytes/README.md
+@@ -5,6 +5,7 @@ layer-composition tests. They preserve the original byte offsets and values.
+ 
+ | Fixture | Contents and purpose |
+ | --- | --- |
++| `line_endings.bin` | Project-authored LF, CRLF, a 4096-byte ASCII line plus LF, and a non-UTF-8 final line without a terminator; scalar/SIMD boundary and line-limit checks. |
+ | `alphabet.bin` | `abcdefghij`, without a newline; seek and range cursors. |
+ | `data.bin` | `data`, without a newline; capability checks. |
+ | `input.bin` | `input`, without a newline; document limits and source errors. |
+diff --git a/testdata/bytes/line_endings.bin b/testdata/bytes/line_endings.bin
+new file mode 100644
+index 0000000..a7bfb15
+Binary files /dev/null and b/testdata/bytes/line_endings.bin differ

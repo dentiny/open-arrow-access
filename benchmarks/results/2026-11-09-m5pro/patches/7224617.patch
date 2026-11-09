@@ -1,0 +1,61 @@
+diff --git a/crates/atif-arrow/src/schema.rs b/crates/atif-arrow/src/schema.rs
+index 2f71634..0431090 100644
+--- a/crates/atif-arrow/src/schema.rs
++++ b/crates/atif-arrow/src/schema.rs
+@@ -1,13 +1,23 @@
+-use std::{collections::HashMap, sync::Arc};
++use std::{
++    collections::HashMap,
++    sync::{Arc, LazyLock},
++};
+ 
+ use arrow_schema::{DataType, Field, Schema, SchemaRef};
+ use DataType::{Boolean, Float64, Int64, UInt64, Utf8};
+ 
++static TRAJECTORY_SCHEMA: LazyLock<SchemaRef> = LazyLock::new(build_trajectory_schema);
++
+ /// One row per input trajectory document.
+ ///
+ /// List elements are non-null; optional lists preserve null versus empty.
+ /// The schema is independent of which optional fields appear in the input.
++/// Calls share an immutable schema, initialized once for the process.
+ pub fn trajectory_schema() -> SchemaRef {
++    Arc::clone(&TRAJECTORY_SCHEMA)
++}
++
++fn build_trajectory_schema() -> SchemaRef {
+     Arc::new(Schema::new(vec![
+         Field::new("source_uri", Utf8, true),
+         Field::new("source_record_index", UInt64, false),
+diff --git a/crates/atif-arrow/tests/schema.rs b/crates/atif-arrow/tests/schema.rs
+index 0681cfa..1304548 100644
+--- a/crates/atif-arrow/tests/schema.rs
++++ b/crates/atif-arrow/tests/schema.rs
+@@ -1,3 +1,5 @@
++use std::sync::Arc;
++
+ use arrow_schema::{DataType, Field};
+ use atif_arrow::trajectory_schema;
+ 
+@@ -33,3 +35,21 @@ fn check_field(field: &Field) {
+         other => panic!("unsupported schema type: {other:?}"),
+     }
+ }
++
++#[test]
++fn schema_is_shared_across_threads_and_copy_on_write_stays_isolated() {
++    let original = trajectory_schema();
++    let handles: Vec<_> = (0..8)
++        .map(|_| std::thread::spawn(trajectory_schema))
++        .collect();
++    for handle in handles {
++        assert!(Arc::ptr_eq(&original, &handle.join().unwrap()));
++    }
++    let mut customized = trajectory_schema();
++    Arc::make_mut(&mut customized)
++        .metadata
++        .insert("caller".into(), "custom".into());
++    assert_eq!(customized.metadata()["caller"], "custom");
++    assert!(!trajectory_schema().metadata().contains_key("caller"));
++    assert_eq!(original.fields(), customized.fields());
++}

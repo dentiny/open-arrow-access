@@ -69,7 +69,7 @@ def main():
         print("| --- | ---: | ---: | ---: | ---: | ---: |")
     else:
         print(
-            "| Workload (backend/case/chunk/batch/concurrency/I/O chunk/projection/iterations/instrumented) | n | Median ms (min–max) | Input MiB/s | Process CPU ms | Peak RSS MiB | Logical MiB | HTTP GET/HEAD |"
+            "| Workload (backend/case/chunk/batch/concurrency/I/O chunk/projection/iterations/instrumented) | n | Median ms (min–max) | Input-equivalent MiB/s | Process CPU ms | Peak RSS MiB | Logical MiB | HTTP GET/HEAD |"
         )
         print("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     for key, samples in sorted(baseline.items()):
