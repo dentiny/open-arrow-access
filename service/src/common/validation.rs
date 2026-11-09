@@ -1,5 +1,5 @@
 //! Input constraints and byte-stream invariants for shared provider utilities.
-use super::{decode, invalid};
+use super::{MetadataLink, decode, invalid};
 use http::HeaderMap;
 use open_arrow_access_core::Result;
 use url::Url;
@@ -89,4 +89,11 @@ impl BodyLength {
         }
         Ok(())
     }
+}
+
+pub(super) fn downloads(files: &[MetadataLink]) -> Result<()> {
+    for file in files {
+        super::resolve_download_url(&file.url)?;
+    }
+    Ok(())
 }
