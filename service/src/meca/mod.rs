@@ -36,12 +36,15 @@ impl MecaArchive {
             files,
         })
     }
+
     pub fn archive(&self) -> &ZipArchive {
         &self.archive
     }
+
     pub fn manifest(&self) -> &Bytes {
         &self.manifest
     }
+
     pub fn files(&self) -> &[MecaFile] {
         &self.files
     }

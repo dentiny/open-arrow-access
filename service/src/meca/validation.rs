@@ -23,6 +23,7 @@ struct Instance {
     #[serde(rename = "@media-type")]
     media_type: Option<String>,
 }
+
 fn unique(entries: &[ZipEntry], name: &[u8]) -> Result<usize> {
     let mut matches = entries.iter().filter(|entry| entry.name == name);
     let index = matches
@@ -34,9 +35,11 @@ fn unique(entries: &[ZipEntry], name: &[u8]) -> Result<usize> {
     }
     Ok(index)
 }
+
 pub(super) fn manifest_index(entries: &[ZipEntry]) -> Result<usize> {
     unique(entries, b"manifest.xml")
 }
+
 fn path(href: &str) -> Result<String> {
     if url::Url::parse(href).is_ok() || href.contains(['?', '#']) {
         return Err(error::decode("MECA href must be a relative member URI"));
@@ -49,6 +52,7 @@ fn path(href: &str) -> Result<String> {
     }
     Ok(path.into_owned())
 }
+
 pub(super) fn files(bytes: &[u8], entries: &[ZipEntry]) -> Result<Vec<MecaFile>> {
     crate::xml_metadata::validate_root(bytes, "manifest")?;
     let manifest: Manifest = quick_xml::de::from_reader(bytes).map_err(error::xml)?;
