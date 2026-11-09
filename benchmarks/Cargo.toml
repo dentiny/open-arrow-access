@@ -1,0 +1,31 @@
+[package]
+name = "open-arrow-access-benchmarks"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+arrow-array.workspace = true
+arrow-schema.workspace = true
+cpu-time = "1"
+futures.workspace = true
+open-arrow-access-core.workspace = true
+open-arrow-access-file-format = { workspace = true, features = [
+    "atif",
+    "csv",
+    "json",
+    "parquet",
+    "warc",
+    "xml",
+] }
+open-arrow-access-storage.workspace = true
+opendal = { workspace = true, features = ["services-fs", "services-s3"] }
+opendal-http-transport-reqwest.workspace = true
+opendal-service-http.workspace = true
+parquet.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

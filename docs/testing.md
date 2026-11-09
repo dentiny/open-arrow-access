@@ -113,3 +113,12 @@ cargo test -p open-arrow-access-storage --locked
 
 Plain `cargo test` does not select every workspace member or enable optional
 formats. Use the workspace command above for complete coverage.
+
+## Performance measurements
+
+The non-published [`benchmarks`](../benchmarks/README.md) workspace package covers
+all supported formats and local filesystem/HTTP/S3 storage paths. It records scan
+wall/CPU time, first-output latency, I/O counts, batch memory and per-process RSS.
+See the [investigation report](../benchmarks/REPORT.md) for baseline data, confirmed
+optimizations and measurement limits. Run benchmarks in release mode, separately
+from correctness tests and builds.

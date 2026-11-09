@@ -1,0 +1,89 @@
+{
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "samples": 11,
+  "seed": 42,
+  "cases": [
+    [
+      "xml",
+      16384,
+      65536,
+      1,
+      "all",
+      "memory"
+    ],
+    [
+      "xml",
+      16384,
+      65536,
+      1024,
+      "all",
+      "memory"
+    ],
+    [
+      "xml",
+      16384,
+      65536,
+      1,
+      "project",
+      "memory"
+    ],
+    [
+      "xml",
+      16384,
+      65536,
+      1024,
+      "project",
+      "memory"
+    ],
+    [
+      "xml",
+      16384,
+      127,
+      1024,
+      "all",
+      "memory"
+    ],
+    [
+      "xml-infer",
+      16384,
+      65536,
+      1,
+      "all",
+      "memory"
+    ],
+    [
+      "xml-infer",
+      16384,
+      65536,
+      1024,
+      "all",
+      "memory"
+    ],
+    [
+      "xml-infer",
+      16384,
+      65536,
+      1,
+      "project",
+      "memory"
+    ],
+    [
+      "xml-infer",
+      16384,
+      65536,
+      1024,
+      "project",
+      "memory"
+    ],
+    [
+      "xml-infer",
+      16384,
+      127,
+      1024,
+      "all",
+      "memory"
+    ]
+  ],
+  "before_sha256": "4537304eb0b8ff9ea262fa2d2bb560b5d3e88325ea013e0dbf2ebcdff88ea44f",
+  "after_sha256": "a250b680eb386c63a411eecfcafb8d05c794295d22ff58f696336800ba6adc8d"
+}
