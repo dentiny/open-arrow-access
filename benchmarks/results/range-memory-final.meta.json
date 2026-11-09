@@ -100,6 +100,12 @@
       "s3"
     ]
   ],
-  "before_sha256": "4537304eb0b8ff9ea262fa2d2bb560b5d3e88325ea013e0dbf2ebcdff88ea44f",
-  "after_sha256": "fc99e911c629f3040d2d7787d5369996cbe37ecf3ebed7077f9539be80ca38a9"
+  "before_sha256": "f7e1dff92fd71b9b17ed2cbce97da563033ab8cf445b11062e425ff891ef730e",
+  "after_sha256": "c0dd6053d7ce1b2b7a33b025d7c3d1fcaea486153bfe8f2831b9d5c03508348a",
+  "upstream_main": "25875d501b314f052ad4dbe6d9636d8fc1e6e05b",
+  "storage_empty_commit": "2080e84a90a8441eb761ec1daf2d75277ecfb4d9",
+  "storage_memory_commit": "e4d7285c046b4fd656b58f9a12124d7d73f95cdd",
+  "atif_commit": "bc727ffef27f7f3fcb663b8310f4a38f21a7bbbe",
+  "xml_commit": "b55e8301547a2ea0e2e440da1e9305abbc265ab0",
+  "extracted_from": "paired.jsonl"
 }

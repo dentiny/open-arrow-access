@@ -8,7 +8,7 @@ no cloud accounts, credentials, or public datasets are needed.
 
 ## Run
 
-From the workspace root, on macOS or Linux with Python 3:
+From the workspace root, on macOS or Linux with Python 3.9 or newer:
 
 ```sh
 cargo build -p open-arrow-access-benchmarks --release --locked

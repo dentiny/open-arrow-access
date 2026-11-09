@@ -10,8 +10,8 @@ description = "Storage adapters for Open Arrow Access"
 default = []
 
 [dependencies]
-indexmap.workspace = true
 futures.workspace = true
+indexmap.workspace = true
 open-arrow-access-core.workspace = true
 opendal = { workspace = true, features = ["executors-tokio"] }
 tokio = { workspace = true, features = ["sync"] }

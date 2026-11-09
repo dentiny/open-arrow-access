@@ -1,10 +1,10 @@
 {
   "platform": "macOS-26.5.2-arm64-arm-64bit",
   "processor": "arm",
-  "commit": "f7871a798e938ea6cea455b84f903fa3384bb7cf",
+  "commit": "23dea3a23f59c2b67a2de6a7c279da513f5fcbef",
   "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14) (Homebrew)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.8\n",
-  "binary_sha256": "4537304eb0b8ff9ea262fa2d2bb560b5d3e88325ea013e0dbf2ebcdff88ea44f",
-  "samples": 7,
+  "binary_sha256": "f7e1dff92fd71b9b17ed2cbce97da563033ab8cf445b11062e425ff891ef730e",
+  "samples": 11,
   "cases": [
     [
       "csv",
@@ -407,5 +407,6 @@
       "s3"
     ]
   ],
-  "dirty": true
+  "dirty": false,
+  "upstream_main": "25875d501b314f052ad4dbe6d9636d8fc1e6e05b"
 }
