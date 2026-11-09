@@ -43,3 +43,6 @@ pub mod arxiv;
 pub mod dataverse;
 #[cfg(feature = "internet-archive")]
 pub mod internet_archive;
+
+/// Shared transport and raw responses for paged providers.
+pub mod remote;

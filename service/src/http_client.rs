@@ -5,7 +5,7 @@ pub(crate) mod files;
 mod query;
 pub(crate) mod validation;
 
-use error::transport_error;
+pub(crate) use error::transport_error;
 use http::{Request, StatusCode};
 use open_arrow_access_core::{Error, ErrorKind, Result};
 use open_arrow_access_storage::OpenDalAccessor;
@@ -20,20 +20,7 @@ pub(crate) struct HttpClient {
 
 impl HttpClient {
     pub(crate) fn new() -> Result<Self> {
-        let client = reqwest::Client::builder()
-            .user_agent(concat!("open-arrow-access/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|error| {
-                Error::new(
-                    ErrorKind::Io,
-                    "configure_http",
-                    "failed to build HTTP client",
-                )
-                .with_source(error)
-            })?;
-        HttpTransporter::install_default(opendal_http_transport_reqwest::ReqwestTransport::new(
-            client,
-        ));
+        HttpTransporter::install_default(new_transport(true)?);
         opendal::install_default();
         Ok(Self {
             context: OperationContext::new(),
@@ -84,21 +71,7 @@ impl HttpClient {
             .await
             .map_err(|error| transport_error(operation, error))?;
         let status = response.status();
-        if status != StatusCode::OK {
-            // TODO: Extract shared HTTP status-to-error translation.
-            let kind = match status {
-                StatusCode::NOT_FOUND => opendal::ErrorKind::NotFound,
-                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
-                    opendal::ErrorKind::PermissionDenied
-                }
-                StatusCode::TOO_MANY_REQUESTS => opendal::ErrorKind::RateLimited,
-                _ => opendal::ErrorKind::Unexpected,
-            };
-            return Err(transport_error(
-                operation,
-                opendal::Error::new(kind, format!("metadata HTTP {status}")),
-            ));
-        }
+        check_status(status, response.headers(), operation)?;
         let mut body = response.into_body();
         let mut bytes = Vec::new();
         loop {
@@ -118,3 +91,69 @@ impl HttpClient {
         })
     }
 }
+
+/// Build an isolated transport; callers decide whether to install it as a default.
+pub(crate) fn new_transport(follow_redirects: bool) -> Result<impl opendal::HttpTransport> {
+    let redirect = if follow_redirects {
+        reqwest::redirect::Policy::limited(10)
+    } else {
+        reqwest::redirect::Policy::none()
+    };
+    let client = reqwest::Client::builder()
+        .redirect(redirect)
+        .user_agent(concat!("open-arrow-access/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|e| {
+            Error::new(
+                ErrorKind::Io,
+                "configure_http",
+                "failed to build HTTP client",
+            )
+            .with_source(e)
+        })?;
+    Ok(opendal_http_transport_reqwest::ReqwestTransport::new(
+        client,
+    ))
+}
+
+pub(crate) fn check_status(
+    status: StatusCode,
+    headers: &http::HeaderMap,
+    operation: &'static str,
+) -> Result<()> {
+    if status == StatusCode::OK {
+        return Ok(());
+    }
+    let kind = match status {
+        StatusCode::NOT_FOUND => opendal::ErrorKind::NotFound,
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => opendal::ErrorKind::PermissionDenied,
+        StatusCode::TOO_MANY_REQUESTS => opendal::ErrorKind::RateLimited,
+        _ => opendal::ErrorKind::Unexpected,
+    };
+    Err(Error::new(
+        crate::opendal_error::error_kind(kind),
+        operation,
+        format!("provider HTTP {status}"),
+    )
+    .with_source(HttpStatusError {
+        status,
+        retry_after: headers
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned),
+    }))
+}
+
+/// Status error retained in the shared Error source chain. No URL or credential is stored.
+#[derive(Debug)]
+pub struct HttpStatusError {
+    pub status: StatusCode,
+    /// Upstream Retry-After value (seconds or HTTP date), unchanged.
+    pub retry_after: Option<String>,
+}
+impl std::fmt::Display for HttpStatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HTTP {}", self.status)
+    }
+}
+impl std::error::Error for HttpStatusError {}

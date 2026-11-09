@@ -20,18 +20,15 @@ gutenberg = [
     "dep:arrow-array",
     "dep:arrow-schema",
     "dep:chrono",
-    "dep:futures",
     "dep:xml-arrow",
 ]
 warc = [
     "dep:open-arrow-access-dataset",
-    "dep:futures",
     "open-arrow-access-dataset/directory",
 ]
 huggingface = [
     "dep:open-arrow-access-dataset",
     "dep:open-arrow-access-file-format",
-    "dep:futures",
     "opendal/services-hf",
     "dep:tokio",
     "tokio/fs",
@@ -39,7 +36,6 @@ huggingface = [
     "open-arrow-access-file-format/parquet",
 ]
 pmc = [
-    "dep:futures",
     "dep:arrow-array",
     "dep:arrow-schema",
     "dep:open-arrow-access-file-format",
@@ -60,7 +56,7 @@ arrow-array = { workspace = true, optional = true }
 xml-arrow = { workspace = true, optional = true }
 open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-file-format = { workspace = true, optional = true }
-futures = { workspace = true, optional = true }
+futures.workspace = true
 open-arrow-access-core.workspace = true
 open-arrow-access-storage.workspace = true
 opendal = { workspace = true, features = ["services-http", "http-transport-reqwest"] }

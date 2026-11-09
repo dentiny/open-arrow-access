@@ -368,3 +368,21 @@ See https://github.com/arXiv/arxiv-docs/blob/develop/source/help/bulk_data_s3.md
 
 Run `cargo run --example read_arxiv --features service-arxiv -- testdata/arxiv 2410 1 1`
 to inspect the fixture manifest and TAR and stream one PDF entry.
+
+## Shared HTTP providers
+
+`remote::Connection` handles origin-scoped headers/query authentication, custom
+`OperationContext`, and redirects that strip credentials when the origin changes.
+`json` returns exact upstream bytes in `ApiDocument::bytes` and an unmodified
+parsed JSON view in `value`; `reader` adapts those raw bytes to `ByteReader`.
+Each call fetches one page. The caller owns pacing, continuation, retries, and
+snapshot selection. There are no automatic retries or background downloads.
+
+`Connection::files` returns `RemoteFiles` using the existing named-file namespace
+and resolved-file metadata wrapper. Resolution and listing never download files.
+Files use one lazy GET and sequential chunks, allowing GET-only endpoints,
+unknown lengths, encoded paths, and signed URLs without a HEAD request. Download
+readers are independent and terminal on failure/EOF; they advertise no range or
+parallel-read support. `ByteReadOptions::io_chunk_size` bounds returned chunks;
+I/O concurrency does not create concurrent requests for a sequential stream.
+Use the existing OpenDAL accessor when a source needs true range reads.
