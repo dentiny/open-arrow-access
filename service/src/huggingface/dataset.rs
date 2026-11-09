@@ -13,8 +13,7 @@ use super::{
 impl HuggingFaceService {
     /// Open one split as ordered Arrow batches from HF's published Parquet shards.
     /// Pin the export before listing so membership and reads use the same commit.
-    /// Shards are sorted by path; record decoding and multi-file schema validation
-    /// use the existing Parquet and file-set accessors, with lazy sequential reads.
+    /// Read shards lazily in path order, validating schemas across files.
     pub async fn dataset(
         &self,
         request: HuggingFaceDatasetRequest,

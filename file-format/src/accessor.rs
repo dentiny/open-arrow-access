@@ -5,11 +5,8 @@ use open_arrow_access_core::{
 
 /// Compose byte storage with a [`ReaderFactory`] using the common read protocol.
 ///
-/// Owns storage and format configuration. Each open prepares independent format
-/// state, forwards the object and byte options unchanged, and transfers ownership
-/// of the byte reader to the factory. Request and output types come from the factory.
-/// Built-in accessor names are aliases with their existing constructors;
-/// [`Self::from_format`] also accepts application-defined formats.
+/// Each open prepares independent format state and forwards the object and byte
+/// options unchanged. [`Self::from_format`] also accepts application-defined formats.
 ///
 /// ```no_run
 /// # #[cfg(feature = "json")]

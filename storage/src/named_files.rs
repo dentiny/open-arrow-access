@@ -87,8 +87,7 @@ where
     }
 }
 
-// Both borrowed-name validation and owned accessor construction use this path.
-// Build the ordered index while validating, without a second hash table/pass.
+// Validate while indexing to avoid a second hash table.
 fn index_files<K, V>(files: impl IntoIterator<Item = (K, V)>) -> Result<IndexMap<K, V>>
 where
     K: AsRef<str> + Eq + std::hash::Hash,

@@ -142,9 +142,8 @@ impl Connection {
     }
     /// Fetch one JSON manifest, resolve its file links, and bind lazy downloads.
     ///
-    /// The resolver owns provider identity and availability checks. Its errors
-    /// are returned unchanged. The original document, including unknown fields,
-    /// is retained as metadata; resolution never opens attachment bodies.
+    /// Retain the full document as metadata without opening attachments.
+    /// Provider identity/availability checks and errors belong to the resolver.
     pub async fn resolve_json_files(
         &self,
         path: &str,

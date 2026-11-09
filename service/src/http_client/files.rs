@@ -13,10 +13,7 @@ use crate::{ResolvedFileSet, file_manifest::FileSpec};
 pub(crate) struct ResolvedFilesPlan<M> {
     /// Download path prefix relative to the service's HTTP origin.
     root: String,
-    /// Logical names, download objects and optional trusted representation lengths.
-    /// Insertion order is manifest/listing order; empty and duplicate names fail.
     files: Vec<FileSpec>,
-    /// Provider metadata retained alongside the resolved file namespace.
     metadata: M,
     /// (Query parameter name, value) pairs appended to download requests and
     /// URL-encoded by the transport; metadata requests keep their own query.
@@ -50,10 +47,9 @@ impl<M> ResolvedFilesPlan<M> {
 pub(crate) struct HttpFileService {
     endpoint: Url,
     client: HttpClient,
-    /// Provider resolve operation (e.g. `resolve_zenodo`) for metadata HTTP/JSON errors.
+    /// Provider operation for metadata HTTP/JSON errors.
     operation: &'static str,
-    /// Maps empty/duplicate filenames to provider-specific decode errors,
-    /// retaining the underlying namespace error as the source.
+    /// Wrap namespace errors with provider context.
     map_file_namespace_error: fn(Error) -> Error,
 }
 
@@ -76,9 +72,7 @@ impl HttpFileService {
         &self.endpoint
     }
 
-    /// Fetch one public JSON manifest, validate/map it, and bind the fixed file
-    /// namespace over the same transport. Resolving and listing fetch no file bodies;
-    /// namespace errors use the provider's existing context and source chain.
+    /// Resolve a JSON manifest over the download transport without fetching file bodies.
     pub(crate) async fn resolve_files<T: DeserializeOwned, M>(
         &self,
         metadata_url: &Url,
