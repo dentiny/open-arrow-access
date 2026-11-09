@@ -21,7 +21,7 @@ pub fn segment(value: &str) -> Result<String> {
 
 /// Validate and encode one logical filename using the existing provider filename rules.
 pub fn filename(value: &str) -> Result<String> {
-    validation::filename_component(value)?;
+    super::validate_filename(value)?;
     segment(value)
 }
 
