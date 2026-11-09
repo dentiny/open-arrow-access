@@ -7,8 +7,8 @@ use crate::xml_metadata::XmlDocument;
 use arrow_array::{Array, StructArray, cast::AsArray};
 use arrow_schema::DataType::Utf8;
 use open_arrow_access_core::Result;
+use open_arrow_access_file_format::xml::XmlField;
 use std::{collections::HashSet, str::FromStr};
-use xml_arrow::XmlField;
 
 pub(super) async fn parse_manifest(
     bytes: &[u8],

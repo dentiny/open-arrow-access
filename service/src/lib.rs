@@ -49,8 +49,11 @@ pub mod common;
 #[cfg(feature = "format-xml")]
 pub mod xml_metadata;
 
-#[cfg(feature = "govinfo")]
-pub mod govinfo;
+#[cfg(feature = "uspto")]
+pub mod uspto;
 
 #[cfg(feature = "oai")]
 pub mod oai;
+
+#[cfg(feature = "govinfo")]
+pub mod govinfo;
