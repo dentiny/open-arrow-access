@@ -61,5 +61,11 @@ pub mod doab;
 #[cfg(feature = "arxiv")]
 pub mod arxiv_metadata;
 
+#[cfg(feature = "hathifiles")]
+pub mod hathifiles;
+
+#[cfg(feature = "federal-register")]
+pub mod federal_register;
+
 #[cfg(feature = "semantic-scholar")]
 pub mod semantic_scholar;

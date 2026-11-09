@@ -426,6 +426,14 @@ See [doab service](doab.md).
 
 See [arxiv-metadata service](arxiv-metadata.md).
 
+## hathifiles
+
+See [hathifiles service](hathifiles.md).
+
+## federal-register
+
+See [federal-register service](federal-register.md) for its contract and usage.
+
 ## semantic-scholar
 
 See [semantic-scholar service](semantic-scholar.md).
