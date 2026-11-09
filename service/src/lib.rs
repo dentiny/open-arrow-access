@@ -87,3 +87,6 @@ pub mod biorxiv;
 
 #[cfg(feature = "openstax")]
 pub mod openstax;
+
+#[cfg(feature = "semantic-scholar")]
+pub mod semantic_scholar;
