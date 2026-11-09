@@ -27,9 +27,7 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Value> {
 /// Map a JSON URL field to a logical file name.
 #[derive(Clone, Copy, Debug)]
 pub struct LinkField<'a> {
-    /// JSON metadata key containing the URL.
     pub json_field: &'a str,
-    /// Logical file name exposed by the provider.
     pub file_name: &'a str,
 }
 
@@ -61,9 +59,8 @@ pub fn resolve_named_links(
         .collect()
 }
 
-/// Resolve optional HTTP representations in caller-selected field order.
-/// Missing/null/empty links mean that representation is unavailable; wrong types fail.
-/// Logical-name uniqueness remains the responsibility of the shared file accessor.
+/// Resolve optional HTTP links in selector order, omitting missing/null/empty links.
+/// Invalid types/URLs fail; namespace binding checks logical-name uniqueness.
 pub fn resolve_optional_links(
     value: &Value,
     fields: &[LinkField<'_>],
