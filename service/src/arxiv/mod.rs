@@ -58,8 +58,7 @@ pub struct ArxivArchive {
 }
 
 /// Read an arXiv bulk mirror rooted above `pdf/` and `src/`.
-/// Callers configure storage credentials, S3 requester-pays and region. No
-/// listing permission or arXiv API requests are required. Manifest order is kept.
+/// Callers configure credentials, region and S3 requester-pays; no listing or API calls are needed.
 #[derive(Clone, Debug)]
 pub struct ArxivService<A> {
     storage: A,
@@ -81,8 +80,8 @@ impl<A> ArxivService<A> {
 }
 
 impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivService<A> {
-    /// Resolve a PDF/source manifest, optionally filtering one YYMM month.
-    /// An absent month is a valid empty selection. All manifest rows are validated.
+    /// Resolve shards in manifest order, optionally filtering one YYMM month.
+    /// Unmatched months return no shards; all manifest rows are validated.
     pub async fn manifest(
         &self,
         kind: ArxivKind,
@@ -101,9 +100,8 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivServi
         parse_manifest(&bytes, kind, month).await
     }
 
-    /// Consume a shard incrementally over its sequential byte stream. This is
-    /// the preferred bulk path: the first entry is available after its header,
-    /// without scanning every archive header or issuing per-entry range reads.
+    /// Stream a shard sequentially, yielding the first entry after its header
+    /// without a full archive scan or per-entry range reads.
     pub async fn stream(
         &self,
         archive: &ArxivArchive,
@@ -113,9 +111,8 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivServi
         Ok(TarStream::new(input, self.tar_limits.clone()))
     }
 
-    /// Inspect a selected TAR using exact ranges. Each entry can be streamed
-    /// independently, and readers can outlive the archive/service. This requires
-    /// a ranged, known-length input. The source's version guarantees are retained.
+    /// Open a known-length, ranged TAR for independent entry reads.
+    /// Readers can outlive the archive/service and retain source version guarantees.
     pub async fn archive(
         &self,
         archive: &ArxivArchive,
