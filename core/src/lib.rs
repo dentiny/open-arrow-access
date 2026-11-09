@@ -53,7 +53,7 @@ pub use request::{
     ReadOptionsProvider, ReadRequest,
 };
 pub use stream_reader::StreamReader;
-pub use validation::validate_byte_range;
+pub use validation::{is_relative_path, validate_byte_range};
 
 pub use arrow_array::RecordBatch;
 pub use arrow_schema::{Schema, SchemaRef};
