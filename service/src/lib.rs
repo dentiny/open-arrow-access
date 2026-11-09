@@ -54,3 +54,6 @@ pub mod meca;
 
 #[cfg(feature = "biorxiv")]
 pub mod biorxiv;
+
+#[cfg(feature = "oai")]
+pub mod oai;

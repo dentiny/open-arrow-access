@@ -1,0 +1,1 @@
+<?xml version="1.0"?><OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/"><ListRecords><record><header status="deleted"><identifier>id1</identifier></header></record><record><header><identifier>id2</identifier></header><metadata><raw><license>all rights</license></raw></metadata></record><resumptionToken>next+token&amp;x</resumptionToken></ListRecords></OAI-PMH>

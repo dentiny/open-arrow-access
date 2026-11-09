@@ -46,6 +46,8 @@ meca = [
     "open-arrow-access-decompression/zip",
 ]
 
+oai = ["format-xml"]
+
 [dependencies]
 arrow-array = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
@@ -143,3 +145,7 @@ required-features = ["meca"]
 [[test]]
 name = "biorxiv"
 required-features = ["biorxiv"]
+
+[[test]]
+name = "oai"
+required-features = ["oai"]
