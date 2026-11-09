@@ -430,6 +430,18 @@ See [arxiv-metadata service](arxiv-metadata.md).
 
 See [hathifiles service](hathifiles.md).
 
+## federal-register
+
+See [federal-register service](federal-register.md) for its contract and usage.
+
+## govinfo
+
+See [govinfo service](govinfo.md).
+
+## oapen
+
+See [oapen service](oapen.md).
+
 ## regulations
 
 See [regulations service](regulations.md) for its contract and usage.
