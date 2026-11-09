@@ -1,7 +1,10 @@
-use super::{error, url_util};
+use super::{
+    ApiDocument, download_url, error, url_util,
+    validation::{self, BodyLength},
+};
 use http::{HeaderMap, HeaderValue, Request, header::HeaderName};
-use open_arrow_access_core::Result;
-use opendal::{Buffer, HttpTransporter, OperationContext};
+use open_arrow_access_core::{Bytes, Result};
+use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext, raw::oio::ReadStream};
 use url::Url;
 
 /// HTTP settings. Debug output never includes keys or signed URLs.
@@ -79,5 +82,64 @@ impl Connection {
             request.headers_mut().extend(self.headers.clone());
         }
         Ok(request)
+    }
+
+    pub(super) async fn response(
+        &self,
+        url: Url,
+        accept: &str,
+    ) -> Result<http::Response<HttpBody>> {
+        let mut url = download_url(url.as_str())?;
+        let mut authorized = url.origin() == self.origin.origin();
+        for _ in 0..=10 {
+            let request = self.request(&mut url, accept, authorized)?;
+            let response = self
+                .context
+                .http_transport()
+                .fetch(request)
+                .await
+                .map_err(error::io)?;
+            let status = response.status();
+            if matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308) {
+                let next = url_util::redirect(&url, response.headers())?;
+                authorized = authorized && next.origin() == url.origin();
+                url = next;
+                continue;
+            }
+            if status != http::StatusCode::OK {
+                return Err(error::http(status));
+            }
+            return Ok(response);
+        }
+        Err(error::decode("too many redirects"))
+    }
+    /// Fetch one API page as parsed JSON metadata.
+    pub async fn json(&self, path: &str, query: &[(&str, &str)]) -> Result<ApiDocument> {
+        self.json_url(self.url(path, query)?).await
+    }
+    /// Fetch an API continuation URL only if it remains within the configured origin.
+    pub async fn json_url(&self, url: Url) -> Result<ApiDocument> {
+        validation::same_origin(&self.origin, &url)?;
+        let bytes = self.bytes(url, "application/json").await?;
+        ApiDocument::from_bytes(bytes)
+    }
+    /// Read small XML/catalogue metadata; large file content should use `open`.
+    pub async fn bytes(&self, url: Url, accept: &str) -> Result<Bytes> {
+        let response = self.response(url, accept).await?;
+        let mut length = BodyLength::new(response.headers())?;
+        let mut body = response.into_body();
+        let mut bytes = Vec::new();
+        loop {
+            let buffer = body.read().await.map_err(error::io)?;
+            if buffer.is_empty() {
+                break;
+            }
+            length.push(buffer.len())?;
+            for part in buffer {
+                bytes.extend_from_slice(&part);
+            }
+        }
+        length.finish()?;
+        Ok(bytes.into())
     }
 }
