@@ -133,59 +133,6 @@ async fn projection_rejects_unknown_and_duplicate_fields() {
 }
 
 #[tokio::test]
-async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
-    let dir = tempfile::tempdir().unwrap();
-    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
-    let error = fs.open("missing.parquet".into()).await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::NotFound);
-    assert!(error.source().is_some());
-    for locator in ["", "../outside", "/absolute", "."] {
-        let error = fs.open(locator.into()).await.err().unwrap();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    }
-    tokio::fs::create_dir(dir.path().join("subdir"))
-        .await
-        .unwrap();
-    assert_eq!(
-        fs.open("subdir/".into()).await.err().unwrap().kind(),
-        ErrorKind::InvalidInput
-    );
-    assert!(fs.capability().list);
-    assert!(
-        fs.list("".into())
-            .await
-            .unwrap()
-            .try_collect::<Vec<_>>()
-            .await
-            .unwrap()
-            .is_empty()
-    );
-}
-
-#[tokio::test]
-async fn empty_file_and_invalid_ranges_have_explicit_behavior() {
-    let dir = tempfile::tempdir().unwrap();
-    tokio::fs::copy(
-        open_arrow_access_test_support::fixture_path!("bytes", "empty.bin"),
-        dir.path().join("empty"),
-    )
-    .await
-    .unwrap();
-    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
-    let mut reader = fs.open("empty".into()).await.unwrap();
-    assert!(reader.next().await.unwrap().is_none());
-    assert!(reader.read_range(0..0).await.unwrap().is_empty());
-    for range in [0..1, std::ops::Range { start: 2, end: 1 }] {
-        assert_eq!(
-            reader.read_range(range).await.err().unwrap().kind(),
-            ErrorKind::InvalidInput
-        );
-    }
-    let mut bytes = fs.open("empty".into()).await.unwrap();
-    assert!(bytes.next().await.unwrap().is_none());
-}
-
-#[tokio::test]
 async fn malformed_parquet_returns_contextual_decode_error() {
     let accessor = ParquetAccessor::new(OpenDalAccessor::new(
         open_arrow_access_test_support::fs_operator(fixture_path("")),
@@ -459,63 +406,6 @@ async fn listing_capability_survives_transparent_layer_and_shared_accessor() {
         .unwrap();
     assert!(reader.capability().read_with_range);
     assert!(!reader.capability().list);
-}
-
-#[tokio::test]
-async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor() {
-    let dir = tempfile::tempdir().unwrap();
-    tokio::fs::copy(
-        open_arrow_access_test_support::fixture_path!("bytes", "alphabet.bin"),
-        dir.path().join("data.bin"),
-    )
-    .await
-    .unwrap();
-    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()))
-        .with_chunk_size(NonZeroUsize::new(3).unwrap());
-    for concurrency in [1, 4] {
-        let mut reader = fs
-            .open(
-                ByteReadRequest::new("data.bin").with_options(ByteReadOptions {
-                    io_concurrency: NonZeroUsize::new(concurrency).unwrap(),
-                    io_chunk_size: NonZeroUsize::new(2),
-                }),
-            )
-            .await
-            .unwrap();
-        assert_eq!(reader.metadata().content_length, Some(10));
-        assert!(reader.capability().read_with_range);
-        assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"abc");
-        let buffers = reader
-            .read_ranges(vec![7..10, 0..3, 5..5, 2..6, 7..10])
-            .await
-            .unwrap();
-        let actual = buffers
-            .iter()
-            .map(|buffer| buffer.as_ref())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            actual,
-            vec![
-                &b"hij"[..],
-                &b"abc"[..],
-                &b""[..],
-                &b"cdef"[..],
-                &b"hij"[..]
-            ]
-        );
-        assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"def");
-        assert!(reader.read_ranges(vec![]).await.unwrap().is_empty());
-        assert_eq!(
-            reader
-                .read_ranges(vec![0..2, 0..11])
-                .await
-                .err()
-                .unwrap()
-                .kind(),
-            ErrorKind::InvalidInput
-        );
-        assert_eq!(reader.read_range(4..8).await.unwrap().as_ref(), b"efgh");
-    }
 }
 
 #[tokio::test]

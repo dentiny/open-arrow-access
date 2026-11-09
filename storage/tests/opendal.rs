@@ -2,9 +2,11 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
+use std::{error::Error as _, num::NonZeroUsize};
 
+use futures::TryStreamExt;
 use more_asserts::{assert_gt, assert_le};
-use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest, ErrorKind};
+use open_arrow_access_core::{Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, ErrorKind};
 use opendal::{
     Execute, Executor, OperationContext, Operator,
     raw::{BoxedStaticFuture, Layer, Servicer},
@@ -25,13 +27,20 @@ async fn filesystem_read_contract() {
             OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
         let end = contents.len() as u64;
         byte_accessor::assert_ranged_read_contract(
-            accessor,
+            accessor.clone(),
             "data.bin".into(),
             contents,
             &[0..end, end..end, 0..end],
         )
         .await
         .unwrap();
+        let mut reader = accessor.open("data.bin".into()).await.unwrap();
+        for range in [end..end + 1, std::ops::Range { start: 2, end: 1 }] {
+            assert_eq!(
+                reader.read_range(range).await.unwrap_err().kind(),
+                ErrorKind::InvalidInput
+            );
+        }
     }
 }
 
@@ -338,5 +347,92 @@ async fn io_options_enable_bounded_backend_concurrency_for_single_and_bulk_reads
         if concurrency > 1 {
             assert_gt!(peak, 1, "configured reads did not execute concurrently");
         }
+    }
+}
+
+#[tokio::test]
+async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
+    let dir = tempfile::tempdir().unwrap();
+    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
+    let error = fs.open("missing.bin".into()).await.err().unwrap();
+    assert_eq!(error.kind(), ErrorKind::NotFound);
+    assert!(error.source().is_some());
+    for locator in ["", "../outside", "/absolute", "."] {
+        let error = fs.open(locator.into()).await.err().unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+    tokio::fs::create_dir(dir.path().join("subdir"))
+        .await
+        .unwrap();
+    assert_eq!(
+        fs.open("subdir/".into()).await.err().unwrap().kind(),
+        ErrorKind::InvalidInput
+    );
+    assert!(fs.capability().list);
+    assert!(
+        fs.list("".into())
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor() {
+    let dir = tempfile::tempdir().unwrap();
+    tokio::fs::copy(
+        open_arrow_access_test_support::fixture_path!("bytes", "alphabet.bin"),
+        dir.path().join("data.bin"),
+    )
+    .await
+    .unwrap();
+    let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()))
+        .with_chunk_size(NonZeroUsize::new(3).unwrap());
+    for concurrency in [1, 4] {
+        let mut reader = fs
+            .open(
+                ByteReadRequest::new("data.bin").with_options(ByteReadOptions {
+                    io_concurrency: NonZeroUsize::new(concurrency).unwrap(),
+                    io_chunk_size: NonZeroUsize::new(2),
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reader.metadata().content_length, Some(10));
+        assert!(reader.capability().read_with_range);
+        assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"abc");
+        let buffers = reader
+            .read_ranges(vec![7..10, 0..3, 5..5, 2..6, 7..10])
+            .await
+            .unwrap();
+        let actual = buffers
+            .iter()
+            .map(|buffer| buffer.as_ref())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            vec![
+                &b"hij"[..],
+                &b"abc"[..],
+                &b""[..],
+                &b"cdef"[..],
+                &b"hij"[..]
+            ]
+        );
+        assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"def");
+        assert!(reader.read_ranges(vec![]).await.unwrap().is_empty());
+        assert_eq!(
+            reader
+                .read_ranges(vec![0..2, 0..11])
+                .await
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::InvalidInput
+        );
+        assert_eq!(reader.read_range(4..8).await.unwrap().as_ref(), b"efgh");
     }
 }
