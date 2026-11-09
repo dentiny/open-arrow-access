@@ -12,8 +12,8 @@ pub(super) fn validate_item_id(id: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn validate_href(href: &str) -> Result<()> {
-    if url::Url::parse(href).is_ok() || href.contains(['?', '#']) {
+pub(super) fn validate_href(href: &str, is_absolute: bool) -> Result<()> {
+    if is_absolute || href.contains(['?', '#']) {
         return Err(error::decode("MECA href must be a relative member URI"));
     }
     Ok(())

@@ -19,7 +19,8 @@ pub(super) fn resolve_manifest_index(entries: &[ZipEntry]) -> Result<usize> {
 }
 
 fn resolve_path(href: &str) -> Result<String> {
-    validation::validate_href(href)?;
+    let is_absolute = url::Url::parse(href).is_ok();
+    validation::validate_href(href, is_absolute)?;
     let path = percent_encoding::percent_decode_str(href)
         .decode_utf8()
         .map_err(error::utf8)?;
