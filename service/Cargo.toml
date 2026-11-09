@@ -18,6 +18,7 @@ dataverse = []
 default = []
 doab = ["oai"]
 federal-register = []
+figshare = []
 govinfo = []
 gutenberg = ["format-xml", "dep:chrono"]
 hathifiles = []
@@ -31,6 +32,7 @@ huggingface = [
     "open-arrow-access-file-format/parquet",
 ]
 internet-archive = []
+oapen = ["oai"]
 openstax = []
 pmc = [
     "dep:arrow-array",
@@ -173,6 +175,14 @@ required-features = ["federal-register"]
 [[test]]
 name = "govinfo"
 required-features = ["govinfo"]
+
+[[test]]
+name = "oapen"
+required-features = ["oapen"]
+
+[[test]]
+name = "figshare"
+required-features = ["figshare"]
 
 [[test]]
 name = "openstax"

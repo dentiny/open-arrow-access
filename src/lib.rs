@@ -21,6 +21,8 @@ pub use open_arrow_access_core::*;
     feature = "service-hathifiles",
     feature = "service-federal-register",
     feature = "service-govinfo",
+    feature = "service-oapen",
+    feature = "service-figshare",
     feature = "service-openstax",
 ))]
 pub use open_arrow_access_service as service;
