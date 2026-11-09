@@ -1,5 +1,5 @@
 use open_arrow_access_core::{Bytes, ErrorKind};
-use open_arrow_access_service::remote::ApiDocument;
+use open_arrow_access_service::common::ApiDocument;
 use open_arrow_access_test_support::collect_bytes;
 #[tokio::test]
 async fn retains_exact_raw_bytes_and_unrecognized_fields() {
