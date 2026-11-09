@@ -3,7 +3,7 @@ use super::{
     transport::{self, AuthScope},
     url_util, validation,
 };
-use crate::ResolvedFileSet;
+use crate::{ResolvedFileSet, http_body::BodyLength};
 use futures::stream;
 use http::{HeaderMap, HeaderValue, Request, header::HeaderName};
 use open_arrow_access_core::{
@@ -117,26 +117,12 @@ impl Connection {
     /// Read small XML/catalogue metadata; large file content should use `open`.
     pub async fn bytes(&self, url: Url, accept: &str) -> Result<Bytes> {
         let response = self.response(url, accept).await?;
-        let mut length = BodyLength::new(response.headers())?;
-        let mut body = response.into_body();
-        let mut bytes = Vec::new();
-        loop {
-            let buffer = body.read().await.map_err(error::io)?;
-            if buffer.is_empty() {
-                break;
-            }
-            length.push(buffer.len())?;
-            for part in buffer {
-                bytes.extend_from_slice(&part);
-            }
-        }
-        length.finish()?;
-        Ok(bytes.into())
+        crate::http_body::collect(response, error::OP).await
     }
     /// Open an absolute URL, preserving encoded paths and signatures byte-for-byte.
     pub async fn open(&self, url: &str, options: ByteReadOptions) -> Result<Box<dyn ByteReader>> {
         let response = self.response(resolve_download_url(url)?, "*/*").await?;
-        let length = BodyLength::new(response.headers())?;
+        let length = BodyLength::new(response.headers(), error::OP)?;
         let content_length = length.expected;
         let version = response
             .headers()
@@ -204,36 +190,5 @@ impl Accessor for Connection {
     }
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         Connection::open(self, request.object.locator(), request.options).await
-    }
-}
-
-/// Track response length while buffered and streaming reads consume the body.
-struct BodyLength {
-    expected: Option<u64>,
-    read: u64,
-}
-impl BodyLength {
-    fn new(headers: &HeaderMap) -> Result<Self> {
-        let expected = headers
-            .get("content-length")
-            .map(|value| {
-                value
-                    .to_str()
-                    .ok()
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .ok_or_else(|| error::decode("invalid Content-Length"))
-            })
-            .transpose()?;
-        Ok(Self { expected, read: 0 })
-    }
-    fn push(&mut self, bytes: usize) -> Result<()> {
-        self.read = self
-            .read
-            .checked_add(bytes as u64)
-            .ok_or_else(|| error::decode("body length overflow"))?;
-        validation::validate_body_progress(self.expected, self.read)
-    }
-    fn finish(&self) -> Result<()> {
-        validation::validate_body_complete(self.expected, self.read)
     }
 }
