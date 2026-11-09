@@ -30,7 +30,6 @@ pub mod pmc;
 #[cfg(feature = "zenodo")]
 pub mod zenodo;
 
-#[cfg(any(feature = "zenodo", feature = "dataverse"))]
 mod filename;
 
 // Individual providers may use only part of the shared HTTP utilities.
@@ -46,3 +45,6 @@ pub mod internet_archive;
 
 /// Shared provider HTTP status errors, including upstream Retry-After.
 pub use http_client::HttpStatusError;
+
+/// Shared provider protocol utilities.
+pub mod remote;
