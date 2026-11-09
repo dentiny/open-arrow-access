@@ -3,6 +3,8 @@ use http::{HeaderMap, Response};
 use open_arrow_access_core::{Bytes, Error, ErrorKind, Result};
 use opendal::{Buffer, HttpBody, raw::oio::ReadStream};
 
+const MAX_INITIAL_BODY_CAPACITY: u64 = 64 * 1024 * 1024;
+
 pub(crate) async fn collect(
     response: Response<HttpBody>,
     operation: &'static str,
@@ -17,7 +19,10 @@ pub(crate) async fn collect(
     };
     // Content-Length is an allocation hint, never an unbounded reservation.
     // Wait for actual data before reserving for a possibly stale large header.
-    let capacity = body.content_length().unwrap_or(0).min(64 * 1024 * 1024) as usize;
+    let capacity = body
+        .content_length()
+        .unwrap_or(0)
+        .min(MAX_INITIAL_BODY_CAPACITY) as usize;
     let mut bytes = Vec::with_capacity(capacity);
     for buffer in [first, second] {
         for part in buffer {
