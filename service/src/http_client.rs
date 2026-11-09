@@ -4,7 +4,7 @@ mod error;
 pub(crate) mod files;
 mod query;
 mod transport;
-pub(crate) use transport::new_transport;
+pub(crate) use transport::{MAX_REDIRECTS, new_single_hop_transport, new_transport};
 pub(crate) mod validation;
 
 pub(crate) use error::{json_error, request_error, transport_error};
@@ -22,7 +22,7 @@ pub(crate) struct HttpClient {
 
 impl HttpClient {
     pub(crate) fn new() -> Result<Self> {
-        HttpTransporter::install_default(new_transport(true)?);
+        HttpTransporter::install_default(new_transport()?);
         opendal::install_default();
         Ok(Self {
             context: OperationContext::new(),

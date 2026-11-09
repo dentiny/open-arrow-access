@@ -14,6 +14,7 @@ async fn reads_one_page_and_strips_credentials_across_redirects() {
     let location = format!("{}/page?sig=a%2Bb", dest.endpoint());
     f.handle(move |r| {
         assert_eq!(r.headers()["x-api-key"], "secret");
+        assert_eq!(r.uri().query(), Some("api_key=secret"));
         Ok(Response::builder()
             .status(302)
             .header("location", &location)
@@ -25,7 +26,10 @@ async fn reads_one_page_and_strips_credentials_across_redirects() {
         StatusCode::OK,
         Buffer::from(" { \"records\": [] } ").to_bytes(),
     );
-    let c = connection(&f).with_header("x-api-key", "secret").unwrap();
+    let c = connection(&f)
+        .with_header("x-api-key", "secret")
+        .unwrap()
+        .with_query("api_key", "secret");
     let doc = c.json("start", &[]).await.unwrap();
     assert!(doc.value()["records"].is_array());
     assert!(!dest.requests()[0].headers.contains_key("x-api-key"));
@@ -72,4 +76,37 @@ async fn validates_endpoint_header_and_api_continuation() {
             .is_err()
     );
     assert!(f.requests().is_empty());
+}
+
+#[tokio::test]
+async fn redirect_limits_and_https_downgrades_are_decode_errors() {
+    use open_arrow_access_core::ErrorKind;
+    let f = HttpFixture::new();
+    f.handle(|_| {
+        Ok(Response::builder()
+            .status(302)
+            .header("location", "/loop")
+            .body(HttpBody::new(futures::stream::empty(), Some(0)))
+            .unwrap())
+    });
+    assert_eq!(
+        connection(&f).json("loop", &[]).await.unwrap_err().kind(),
+        ErrorKind::Decode
+    );
+    assert_eq!(f.requests().len(), 11);
+
+    let f = HttpFixture::new();
+    let location = format!("{}/plain", f.endpoint().replacen("https://", "http://", 1));
+    f.handle(move |_| {
+        Ok(Response::builder()
+            .status(302)
+            .header("location", &location)
+            .body(HttpBody::new(futures::stream::empty(), Some(0)))
+            .unwrap())
+    });
+    assert_eq!(
+        connection(&f).json("secure", &[]).await.unwrap_err().kind(),
+        ErrorKind::Decode
+    );
+    assert_eq!(f.requests().len(), 1);
 }

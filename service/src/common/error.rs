@@ -44,3 +44,17 @@ pub(super) fn http(status: http::StatusCode) -> Error {
         format!("provider HTTP {status}"),
     )
 }
+
+pub(super) fn transport(error: Error) -> opendal::Error {
+    opendal::Error::new(opendal::ErrorKind::Unexpected, "provider redirect failed")
+        .set_source(error)
+}
+pub(super) fn transport_request(error: http::Error) -> opendal::Error {
+    transport(request(error))
+}
+pub(super) fn missing_auth_scope() -> opendal::Error {
+    opendal::Error::new(
+        opendal::ErrorKind::ConfigInvalid,
+        "missing provider authentication scope",
+    )
+}

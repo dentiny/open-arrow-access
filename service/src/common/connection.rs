@@ -1,5 +1,7 @@
 use super::{
-    ApiDocument, download_url, error, url_util,
+    ApiDocument, download_url, error,
+    transport::{self, AuthScope},
+    url_util,
     validation::{self, BodyLength},
 };
 use http::{HeaderMap, HeaderValue, Request, header::HeaderName};
@@ -25,9 +27,8 @@ impl std::fmt::Debug for Connection {
 impl Connection {
     pub fn new(origin: &str) -> Result<Self> {
         let origin = crate::http_client::validation::validate_origin(origin, error::OP)?;
-        // Handle redirects here so arbitrary API-key headers cannot escape their origin.
-        let context = OperationContext::new().with_http_transport(HttpTransporter::new(
-            crate::http_client::new_transport(false)?,
+        let context = transport::follow_redirects(OperationContext::new().with_http_transport(
+            HttpTransporter::new(crate::http_client::new_single_hop_transport()?),
         ));
         Ok(Self {
             origin,
@@ -37,9 +38,9 @@ impl Connection {
         })
     }
     /// Override transport, for custom TLS/proxy configuration or deterministic tests.
-    /// Its redirect policy must leave redirects visible to this connection.
+    /// The inner transport must return single-hop responses; redirects are followed by the provider transport.
     pub fn with_context(mut self, context: OperationContext) -> Self {
-        self.context = context;
+        self.context = transport::follow_redirects(context);
         self
     }
     pub fn origin(&self) -> &Url {
@@ -61,26 +62,16 @@ impl Connection {
         url_util::provider_url(&self.origin, path, query)
     }
 
-    pub(super) fn request(
-        &self,
-        url: &mut Url,
-        accept: &str,
-        authorized: bool,
-    ) -> Result<Request<Buffer>> {
-        if authorized {
-            for (name, value) in &self.query {
-                if !url.query_pairs().any(|(key, _)| key == name.as_str()) {
-                    url.query_pairs_mut().append_pair(name, value);
-                }
-            }
-        }
+    fn request(&self, url: &Url, accept: &str) -> Result<Request<Buffer>> {
         let mut request = Request::get(url.as_str())
             .header("accept", accept)
             .body(Buffer::new())
             .map_err(error::request)?;
-        if authorized {
-            request.headers_mut().extend(self.headers.clone());
-        }
+        request.extensions_mut().insert(AuthScope {
+            origin: self.origin.clone(),
+            headers: self.headers.clone(),
+            query: self.query.clone(),
+        });
         Ok(request)
     }
 
@@ -89,29 +80,18 @@ impl Connection {
         url: Url,
         accept: &str,
     ) -> Result<http::Response<HttpBody>> {
-        let mut url = download_url(url.as_str())?;
-        let mut authorized = url.origin() == self.origin.origin();
-        for _ in 0..=10 {
-            let request = self.request(&mut url, accept, authorized)?;
-            let response = self
-                .context
-                .http_transport()
-                .fetch(request)
-                .await
-                .map_err(error::io)?;
-            let status = response.status();
-            if matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308) {
-                let next = url_util::redirect(&url, response.headers())?;
-                authorized = authorized && next.origin() == url.origin();
-                url = next;
-                continue;
-            }
-            if status != http::StatusCode::OK {
-                return Err(error::http(status));
-            }
-            return Ok(response);
+        let url = download_url(url.as_str())?;
+        let request = self.request(&url, accept)?;
+        let response = self
+            .context
+            .http_transport()
+            .fetch(request)
+            .await
+            .map_err(error::io)?;
+        if response.status() != http::StatusCode::OK {
+            return Err(error::http(response.status()));
         }
-        Err(error::decode("too many redirects"))
+        Ok(response)
     }
     /// Fetch one API page as parsed JSON metadata.
     pub async fn json(&self, path: &str, query: &[(&str, &str)]) -> Result<ApiDocument> {
