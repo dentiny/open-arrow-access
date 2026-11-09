@@ -37,7 +37,7 @@ impl<M> ResolvedFilesPlan<M> {
         files: Vec<(String, ResolvedFile)>,
         metadata: M,
     ) -> Result<Self> {
-        let ordered = super::validation::ordered_files(files)?;
+        let ordered = super::validation::order_files(files)?;
         Ok(Self {
             root: root.into(),
             files: ordered,
