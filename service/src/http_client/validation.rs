@@ -29,3 +29,14 @@ pub(crate) fn json<T: serde::de::DeserializeOwned>(
 ) -> Result<T> {
     serde_json::from_slice(bytes).map_err(|error| super::json_error(operation, error))
 }
+
+/// Preserve source order while rejecting invalid logical namespaces once.
+pub(super) fn ordered_files<T>(files: Vec<(String, T)>) -> Result<indexmap::IndexMap<String, T>> {
+    let mut ordered = indexmap::IndexMap::with_capacity(files.len());
+    for (name, file) in files {
+        if name.is_empty() || ordered.insert(name, file).is_some() {
+            return Err(super::error::file_namespace());
+        }
+    }
+    Ok(ordered)
+}

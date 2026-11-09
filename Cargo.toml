@@ -28,6 +28,7 @@ datafusion = "55.2.0"
 opendal = "0.59.2"
 
 [workspace.dependencies]
+percent-encoding = "2"
 indexmap = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
@@ -97,6 +98,8 @@ decompression-lz4 = ["dep:open-arrow-access-decompression", "open-arrow-access-d
 decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zstd"]
 decompression-tar = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
 decompression-zip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zip"]
+
+service-meca = ["dep:open-arrow-access-service", "open-arrow-access-service/meca"]
 
 [dependencies]
 open-arrow-access-service = { workspace = true, optional = true }

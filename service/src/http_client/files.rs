@@ -1,7 +1,7 @@
 //! Bind a provider's validated manifest to lazy HTTP file access.
 
 use indexmap::IndexMap;
-use open_arrow_access_core::{Error, ErrorKind, ObjectRef, Result};
+use open_arrow_access_core::{Error, ObjectRef, Result};
 use open_arrow_access_storage::{NamedFileAccessor, OpenDalAccessor};
 use serde::de::DeserializeOwned;
 use url::Url;
@@ -37,16 +37,7 @@ impl<M> ResolvedFilesPlan<M> {
         files: Vec<(String, ResolvedFile)>,
         metadata: M,
     ) -> Result<Self> {
-        let mut ordered = IndexMap::with_capacity(files.len());
-        for (name, file) in files {
-            if name.is_empty() || ordered.insert(name, file).is_some() {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "configure_resolved_files",
-                    "empty or duplicate filename",
-                ));
-            }
-        }
+        let ordered = super::validation::ordered_files(files)?;
         Ok(Self {
             root: root.into(),
             files: ordered,

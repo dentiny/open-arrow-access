@@ -2,7 +2,7 @@
 
 mod opendal_error;
 mod resolved_files;
-#[cfg(any(feature = "internet-archive", feature = "pmc"))]
+#[cfg(any(feature = "internet-archive", feature = "pmc", feature = "meca"))]
 mod validation;
 pub use resolved_files::ResolvedFileSet;
 
@@ -45,3 +45,12 @@ pub mod internet_archive;
 
 /// Common utilities shared by provider services.
 pub mod common;
+
+#[cfg(feature = "xml-metadata")]
+pub mod xml_metadata;
+
+#[cfg(feature = "oai")]
+pub mod oai;
+
+#[cfg(feature = "meca")]
+pub mod meca;

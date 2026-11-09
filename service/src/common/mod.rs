@@ -13,3 +13,10 @@ pub use document::ApiDocument;
 mod connection;
 mod transport;
 pub use connection::Connection;
+
+mod download;
+
+mod files;
+pub use files::{RemoteFiles, RemoteHttpAccessor};
+
+pub use json_util::optional_links;

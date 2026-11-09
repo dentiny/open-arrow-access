@@ -23,3 +23,24 @@ pub fn array<'a>(value: &'a Value, field: &str) -> Result<&'a Vec<Value>> {
 pub(super) fn parse(bytes: &[u8]) -> Result<Value> {
     serde_json::from_slice(bytes).map_err(error::json)
 }
+
+/// Resolve optional HTTP representations in caller-selected field order.
+/// Missing/null/empty links mean that representation is unavailable; wrong types fail.
+/// Logical-name uniqueness remains the responsibility of the shared file accessor.
+pub fn optional_links(value: &Value, fields: &[(&str, &str)]) -> Result<Vec<(String, String)>> {
+    if !value.is_object() {
+        return Err(error::decode("expected metadata object"));
+    }
+    let mut files = Vec::new();
+    for (field, name) in fields {
+        match value.get(*field) {
+            Some(Value::String(url)) if !url.is_empty() => {
+                super::download_url(url)?;
+                files.push(((*name).into(), url.clone()));
+            }
+            None | Some(Value::Null) | Some(Value::String(_)) => {}
+            _ => return Err(error::missing_field(field)),
+        }
+    }
+    Ok(files)
+}

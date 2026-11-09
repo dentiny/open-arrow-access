@@ -47,3 +47,11 @@ pub(super) fn http_status_error(operation: &'static str, status: http::StatusCod
         format!("metadata HTTP {status}"),
     )
 }
+
+pub(super) fn file_namespace() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "configure_resolved_files",
+        "empty or duplicate filename",
+    )
+}

@@ -44,7 +44,12 @@ pmc = [
     "open-arrow-access-decompression/gzip",
 ]
 
+xml-metadata = ["dep:quick-xml"]
+oai = ["xml-metadata"]
+meca = ["xml-metadata", "dep:percent-encoding", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/zip"]
+
 [dependencies]
+percent-encoding = { workspace = true, optional = true }
 indexmap.workspace = true
 quick-xml = { workspace = true, optional = true }
 reqwest.workspace = true
@@ -128,3 +133,19 @@ required-features = ["arxiv"]
 [[test]]
 name = "internet_archive"
 required-features = ["internet-archive"]
+
+[[test]]
+name = "xml_metadata"
+required-features = ["xml-metadata"]
+
+[[test]]
+name = "oai"
+required-features = ["oai"]
+
+[[test]]
+name = "oai_provider"
+required-features = ["oai"]
+
+[[test]]
+name = "meca"
+required-features = ["meca"]
