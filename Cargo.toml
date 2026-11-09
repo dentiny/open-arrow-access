@@ -53,9 +53,11 @@ atif-arrow = "0.4.0"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 warc = { package = "warc-rs", version = "=0.3.0", default-features = false }
 xml-arrow = "0.2.2"
+
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
-bytes = "1"
 datafusion = { version = "55.2.0", default-features = false }
+
+bytes = "1"
 flate2 = "1"
 futures = "0.3"
 more-asserts = "0.3.1"
@@ -103,11 +105,11 @@ service-internet-archive = [
     "dep:open-arrow-access-service",
     "open-arrow-access-service/internet-archive",
 ]
+service-meca = ["dep:open-arrow-access-service", "open-arrow-access-service/meca"]
 service-pmc = ["dep:open-arrow-access-service", "open-arrow-access-service/pmc"]
+service-uspto = ["dep:open-arrow-access-service", "open-arrow-access-service/uspto"]
 service-warc = ["dep:open-arrow-access-service", "open-arrow-access-service/warc"]
 service-zenodo = ["dep:open-arrow-access-service", "open-arrow-access-service/zenodo"]
-
-service-meca = ["dep:open-arrow-access-service", "open-arrow-access-service/meca"]
 
 [dependencies]
 open-arrow-access-core.workspace = true

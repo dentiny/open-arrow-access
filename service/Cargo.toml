@@ -12,7 +12,7 @@ biorxiv = ["meca", "dep:chrono"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
-gutenberg = ["dep:arrow-array", "dep:arrow-schema", "dep:chrono", "dep:xml-arrow"]
+gutenberg = ["format-xml", "dep:chrono"]
 huggingface = [
     "dep:open-arrow-access-dataset",
     "dep:open-arrow-access-file-format",
@@ -34,9 +34,11 @@ pmc = [
     "dep:arrow-schema",
     "dep:open-arrow-access-file-format",
     "open-arrow-access-file-format/csv",
+    "open-arrow-access-file-format/json",
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/gzip",
 ]
+uspto = []
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 zenodo = []
 
@@ -70,7 +72,6 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, optional = true }
 url.workspace = true
-xml-arrow = { workspace = true, optional = true }
 
 arrow-schema = { workspace = true, optional = true }
 
@@ -138,6 +139,10 @@ required-features = ["internet-archive"]
 [[test]]
 name = "xml_metadata"
 required-features = ["format-xml"]
+
+[[test]]
+name = "uspto"
+required-features = ["uspto"]
 
 [[test]]
 name = "oai"

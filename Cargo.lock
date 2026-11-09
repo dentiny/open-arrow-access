@@ -1930,6 +1930,7 @@ dependencies = [
 name = "open-arrow-access-service"
 version = "0.1.0"
 dependencies = [
+ "percent-encoding",
  "arrow-array",
  "arrow-schema",
  "chrono",
@@ -1945,7 +1946,6 @@ dependencies = [
  "opendal",
  "opendal-http-transport-reqwest",
  "opendal-service-http",
- "percent-encoding",
  "quick-xml",
  "reqwest",
  "serde",
@@ -1953,7 +1953,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "url",
- "xml-arrow",
 ]
 
 [[package]]
