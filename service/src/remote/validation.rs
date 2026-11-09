@@ -51,3 +51,7 @@ pub fn filename(value: &str) -> Result<String> {
     }
     segment(value)
 }
+
+pub(super) fn json(bytes: &[u8]) -> Result<Value> {
+    serde_json::from_slice(bytes).map_err(error::json)
+}
