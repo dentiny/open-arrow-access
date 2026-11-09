@@ -328,3 +328,11 @@ pub fn array<'a>(value: &'a Value, field: &str) -> Result<&'a Vec<Value>> {
         .and_then(Value::as_array)
         .ok_or_else(|| decode(&format!("missing or invalid {field}")))
 }
+
+/// Validate and encode one logical filename using the existing provider filename rules.
+pub fn filename(value: &str) -> Result<String> {
+    if !crate::filename::valid_filename_component(value) {
+        return Err(invalid("invalid filename component"));
+    }
+    segment(value)
+}
