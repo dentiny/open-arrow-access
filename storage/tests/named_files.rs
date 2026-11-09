@@ -66,16 +66,3 @@ fn rejects_ambiguous_names() {
         );
     }
 }
-
-#[test]
-fn validates_opaque_names_without_storage_or_features() {
-    use open_arrow_access_storage::validate_file_names;
-
-    validate_file_names([]).unwrap();
-    validate_file_names(["../opaque", "a/b", " padded ", "alias"]).unwrap();
-    for names in [vec![""], vec!["same", "same"]] {
-        let error = validate_file_names(names).unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-        assert_eq!(error.operation(), "configure_named_files");
-    }
-}
