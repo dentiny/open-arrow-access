@@ -37,6 +37,10 @@ pub(super) fn missing_field(field: &str) -> Error {
     decode(&format!("missing or invalid {field}"))
 }
 
+pub(super) fn file_namespace(error: Error) -> Error {
+    decode("invalid file namespace").with_source(error)
+}
+
 pub(super) fn http(status: http::StatusCode) -> Error {
     Error::new(
         ErrorKind::from_http_status(status.as_u16()),

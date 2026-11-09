@@ -336,12 +336,28 @@ resolved patch versions. See [dependency alignment](docs/dependencies.md) for
 the baseline and update procedure. DataFusion is declared for the future layer
 but is not part of the current dependency graph.
 
+Use rustup so `rust-toolchain.toml` selects the pinned compiler, rustfmt and Clippy.
+Install the pinned TOML formatter/linter once:
+
 ```sh
-cargo fmt --all -- --check
+cargo install taplo-cli --version 0.10.0 --locked
+```
+
+```sh
+make lint       # Rust/TOML formatting, TOML validation, manifest validation and Clippy
+make fmt        # Apply Rust and TOML formatting fixes
 cargo check --workspace --no-default-features
 cargo test --workspace --all-features --locked
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 ```
+
+`make lint-rust` runs Clippy for every workspace member, target and feature, with
+warnings denied. `make lint-toml` checks TOML syntax and duplicate keys with
+[Taplo](https://taplo.tamasfe.dev/cli/usage/validation.html), then validates Cargo
+workspace and feature definitions with `cargo metadata`. These checks do not
+download JSON schemas. `make fmt-check` checks formatting without changing files.
+The shared `.taplo.toml` covers all TOML files, including every `Cargo.toml`, and
+sorts dependency and feature names within blank-line groups. It excludes build
+output and leaves `Cargo.lock` to Cargo.
 
 Start at the [test index and placement rules](docs/testing.md) to find or add a
 suite. Each crate owns tests in its `tests/` directory; the root `tests/` covers

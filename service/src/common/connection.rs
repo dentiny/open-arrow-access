@@ -1,14 +1,16 @@
 use super::{
-    ApiDocument, error, resolve_download_url,
+    ApiDocument, MetadataLink, error, resolve_download_url,
     transport::{self, AuthScope},
-    url_util,
-    validation::{self, BodyLength},
+    url_util, validation,
 };
+use crate::ResolvedFileSet;
 use futures::stream;
 use http::{HeaderMap, HeaderValue, Request, header::HeaderName};
 use open_arrow_access_core::{
-    ByteMetadata, ByteReadOptions, ByteReader, Bytes, Result, StreamReader,
+    Accessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability,
+    Result, StreamReader, async_trait,
 };
+use open_arrow_access_storage::NamedFileAccessor;
 use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext, raw::oio::ReadStream};
 use url::Url;
 
@@ -31,7 +33,7 @@ impl std::fmt::Debug for Connection {
 }
 impl Connection {
     pub fn new(origin: &str) -> Result<Self> {
-        let origin = crate::http_client::validation::validate_origin(origin, error::OP)?;
+        let origin = crate::http_client::resolve_origin(origin, error::OP)?;
         let context = transport::follow_redirects(OperationContext::new().with_http_transport(
             HttpTransporter::new(crate::http_client::new_single_hop_transport()?),
         ));
@@ -165,5 +167,69 @@ impl Connection {
                 version,
             },
         )))
+    }
+    /// Bind a validated provider manifest to lazy byte reads. Logical names remain opaque.
+    pub fn files<M>(&self, files: Vec<MetadataLink>, metadata: M) -> Result<RemoteFiles<M>> {
+        validation::validate_downloads(&files)?;
+        let files = NamedFileAccessor::new(
+            self.clone(),
+            files
+                .into_iter()
+                .map(|file| (file.file_name, file.url.into()))
+                .collect(),
+        )
+        .map_err(error::file_namespace)?;
+        Ok(ResolvedFileSet::new(files, metadata))
+    }
+}
+
+/// A manifest's provider metadata alongside a fixed namespace of sequential files.
+pub type RemoteFiles<M = ApiDocument> = ResolvedFileSet<Connection, M>;
+
+#[async_trait]
+impl Accessor for Connection {
+    type Request = ByteReadRequest;
+    type Reader = dyn ByteReader;
+    fn capability(&self) -> Capability {
+        Capability {
+            read: true,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+    }
+    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        Connection::open(self, request.object.locator(), request.options).await
+    }
+}
+
+/// Track response length while buffered and streaming reads consume the body.
+struct BodyLength {
+    expected: Option<u64>,
+    read: u64,
+}
+impl BodyLength {
+    fn new(headers: &HeaderMap) -> Result<Self> {
+        let expected = headers
+            .get("content-length")
+            .map(|value| {
+                value
+                    .to_str()
+                    .ok()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .ok_or_else(|| error::decode("invalid Content-Length"))
+            })
+            .transpose()?;
+        Ok(Self { expected, read: 0 })
+    }
+    fn push(&mut self, bytes: usize) -> Result<()> {
+        self.read = self
+            .read
+            .checked_add(bytes as u64)
+            .ok_or_else(|| error::decode("body length overflow"))?;
+        validation::validate_body_progress(self.expected, self.read)
+    }
+    fn finish(&self) -> Result<()> {
+        validation::validate_body_complete(self.expected, self.read)
     }
 }
