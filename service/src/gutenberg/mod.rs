@@ -1,15 +1,17 @@
 //! One book per row, using the fields mapped from RDF.
 
+mod error;
 mod metadata;
+use error::{decode, decode_source};
 
 use std::sync::{Arc, OnceLock};
 
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
-    DefaultDocumentAccessor, DocumentDecoder, Error, ErrorKind, FieldValue, ReadRequest,
-    RecordBatch, Result, SchemaRef, async_trait,
+    DefaultDocumentAccessor, DocumentDecoder, FieldValue, ReadRequest, RecordBatch, Result,
+    SchemaRef, async_trait,
 };
-use xml_arrow::{NamespaceBinding, XmlField, XmlSchema};
+use open_arrow_access_file_format::xml::{NamespaceBinding, XmlField, XmlSchema};
 
 /// Read per-book RDF metadata through caller-configured storage.
 pub type GutenbergAccessor<A> = DefaultDocumentAccessor<A, GutenbergDecoder>;
@@ -30,10 +32,10 @@ impl DocumentDecoder for GutenbergDecoder {
     async fn decode(
         &self,
         raw: &[u8],
-        _request: ReadRequest,
+        request: ReadRequest,
         schema: SchemaRef,
     ) -> Result<RecordBatch> {
-        metadata::read_metadata(raw, schema).await
+        metadata::read_metadata(raw, request, schema).await
     }
 }
 
@@ -188,12 +190,4 @@ pub fn schema() -> SchemaRef {
 
 fn mapping() -> XmlSchema {
     definitions().xml.clone()
-}
-
-fn decode(message: impl Into<String>) -> Error {
-    Error::new(ErrorKind::Decode, "read_gutenberg", message)
-}
-
-fn decode_source(error: impl std::error::Error + Send + Sync + 'static) -> Error {
-    decode(error.to_string()).with_source(error)
 }
