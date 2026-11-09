@@ -12,10 +12,8 @@ pub use document::ApiDocument;
 
 mod connection;
 mod transport;
-pub use connection::Connection;
+pub use connection::{Connection, RemoteFiles};
 
 
-mod files;
-pub use files::{RemoteFiles, RemoteHttpAccessor};
 
 pub use json_util::{LinkField, MetadataLink, resolve_optional_links};
