@@ -1,4 +1,5 @@
 [package]
+autobenches = false
 name = "open-arrow-access"
 version.workspace = true
 edition.workspace = true
@@ -138,6 +139,14 @@ open-arrow-access-service.workspace = true
 open-arrow-access-storage.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
+arrow-array.workspace = true
+arrow-schema.workspace = true
+futures.workspace = true
+http.workspace = true
+parquet.workspace = true
+serde_json.workspace = true
+open-arrow-access-test-support.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
 tokio.workspace = true
 
@@ -202,3 +211,8 @@ required-features = ["service-arxiv"]
 [[example]]
 name = "read_internet_archive"
 required-features = ["service-internet-archive"]
+
+[[bench]]
+name = "performance"
+harness = false
+required-features = ["format-atif", "format-csv", "format-json", "format-parquet", "format-warc", "format-xml"]
