@@ -30,9 +30,14 @@ Pass the provider's configuration/resolve operations and file-namespace error ma
 when constructing the service to retain its error context and cause.
 Zenodo and Internet Archive are examples; the plan does not follow download URLs
 from untrusted metadata. File bodies remain lazy and readers remain independent.
-`ResolvedFilesPlan::new` builds one insertion-ordered map from logical filenames to
-`ResolvedFile` values containing the download object and an optional trusted byte
-length. Empty and duplicate filenames fail before binding storage. `with_query`
+`ResolvedFilesPlan::new` retains an ordered `Vec<FileSpec>`; each descriptor
+contains a logical name, download object and optional trusted representation
+length. `Connection::files` converts public `MetadataLink` values into the same
+descriptor. Shared descriptions compile without provider features and retain
+provider-specific metadata in `ResolvedFileSet<A, M>`. Names remain opaque;
+multiple names may alias one object. Storage's `validate_file_names` owns the
+nonempty/unique-name rule, used both by plans before backend construction and by
+`NamedFileAccessor`. Provider error context remains attached. `with_query`
 selects the download representation; lengths must describe that representation,
 as in Dataverse's original-file downloads. Omitted lengths use storage stat.
 

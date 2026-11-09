@@ -10,8 +10,8 @@ use open_arrow_access_storage::OpenDalAccessor;
 
 use serde::Deserialize;
 
-use crate::ResolvedFileSet;
-use crate::http_client::files::{HttpFileService, ResolvedFile, ResolvedFilesPlan};
+use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
+use crate::{ResolvedFileSet, file_manifest::FileSpec};
 use error::map_file_namespace_error;
 use validation::validate_record;
 
@@ -56,14 +56,10 @@ impl ZenodoService {
                     record
                         .files
                         .iter()
-                        .map(|file| {
-                            (
-                                file.key.clone(),
-                                ResolvedFile {
-                                    object: format!("{}/content", file.key).into(),
-                                    content_length: None,
-                                },
-                            )
+                        .map(|file| FileSpec {
+                            name: file.key.clone(),
+                            object: format!("{}/content", file.key).into(),
+                            content_length: None,
                         })
                         .collect(),
                     ZenodoMetadata {

@@ -3,6 +3,23 @@ use open_arrow_access_core::{
     ObjectRef, ObjectStream, Result, async_trait,
 };
 
+/// Validate an opaque file namespace without constructing an accessor or performing I/O.
+/// Empty names and duplicate names fail; order, paths and download locators are not interpreted.
+pub fn validate_file_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Result<()> {
+    let mut seen = std::collections::HashSet::new();
+    if names
+        .into_iter()
+        .any(|name| name.is_empty() || !seen.insert(name))
+    {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "configure_named_files",
+            "empty or duplicate filename",
+        ));
+    }
+    Ok(())
+}
+
 /// A fixed, ordered namespace of names mapped to caller-supplied byte objects.
 /// Useful for provider manifests whose filenames differ from download locators.
 #[derive(Clone, Debug)]
@@ -14,17 +31,7 @@ pub struct NamedFileAccessor<A> {
 impl<A> NamedFileAccessor<A> {
     /// Names are opaque and must be nonempty and unique. Construction performs no I/O.
     pub fn new(inner: A, files: Vec<(String, ObjectRef)>) -> Result<Self> {
-        let mut seen = std::collections::HashSet::new();
-        if files
-            .iter()
-            .any(|(name, _)| name.is_empty() || !seen.insert(name))
-        {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "configure_named_files",
-                "empty or duplicate filename",
-            ));
-        }
+        validate_file_names(files.iter().map(|(name, _)| name.as_str()))?;
         Ok(Self { inner, files })
     }
 }

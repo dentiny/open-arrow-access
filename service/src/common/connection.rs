@@ -3,7 +3,7 @@ use super::{
     transport::{self, AuthScope},
     url_util, validation,
 };
-use crate::ResolvedFileSet;
+use crate::{ResolvedFileSet, file_manifest::FileSpec};
 use futures::stream;
 use http::{HeaderMap, HeaderValue, Request, header::HeaderName};
 use open_arrow_access_core::{
@@ -175,7 +175,8 @@ impl Connection {
             self.clone(),
             files
                 .into_iter()
-                .map(|file| (file.file_name, file.url.into()))
+                .map(FileSpec::from)
+                .map(FileSpec::into_mapping)
                 .collect(),
         )
         .map_err(error::file_namespace)?;

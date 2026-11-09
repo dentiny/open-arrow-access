@@ -7,8 +7,8 @@ use open_arrow_access_core::Result;
 use open_arrow_access_storage::OpenDalAccessor;
 use serde::Deserialize;
 
-use crate::ResolvedFileSet;
-use crate::http_client::files::{HttpFileService, ResolvedFile, ResolvedFilesPlan};
+use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
+use crate::{ResolvedFileSet, file_manifest::FileSpec};
 use error::map_file_namespace_error;
 use validation::{validate_dataset, validate_request};
 
@@ -69,14 +69,10 @@ impl DataverseService {
                     .collect();
                 let mappings = files
                     .iter()
-                    .map(|file| {
-                        (
-                            file.name.clone(),
-                            ResolvedFile {
-                                object: file.id.to_string().into(),
-                                content_length: Some(file.size),
-                            },
-                        )
+                    .map(|file| FileSpec {
+                        name: file.name.clone(),
+                        object: file.id.to_string().into(),
+                        content_length: Some(file.size),
                     })
                     .collect();
                 Ok(ResolvedFilesPlan::new(
