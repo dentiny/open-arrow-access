@@ -11,7 +11,7 @@ arxiv = ["format-xml", "dep:open-arrow-access-decompression", "open-arrow-access
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
-gutenberg = ["dep:arrow-array", "dep:arrow-schema", "dep:chrono", "dep:xml-arrow"]
+gutenberg = ["format-xml", "dep:chrono"]
 huggingface = [
     "dep:open-arrow-access-dataset",
     "dep:open-arrow-access-file-format",
@@ -62,7 +62,6 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, optional = true }
 url.workspace = true
-xml-arrow = { workspace = true, optional = true }
 
 arrow-schema = { workspace = true, optional = true }
 
