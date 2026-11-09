@@ -20,19 +20,18 @@ impl FederalRegisterService {
     }
 
     pub async fn search(&self, parameters: &[(&str, &str)]) -> Result<ApiDocument> {
-        let doc = self
-            .connection
+        self.connection
             .json("api/v1/documents.json", parameters)
-            .await?;
-        validation::validate_search(doc.value())?;
-        Ok(doc)
+            .await?
+            .validated(validation::validate_search)
     }
 
     /// Follow the supplied next_page_url intact, including cursor query parameters.
     pub async fn next_page(&self, url: &str) -> Result<ApiDocument> {
-        let doc = self.connection.json_url(resolve_download_url(url)?).await?;
-        validation::validate_search(doc.value())?;
-        Ok(doc)
+        self.connection
+            .json_url(resolve_download_url(url)?)
+            .await?
+            .validated(validation::validate_search)
     }
 
     pub async fn document(&self, number: &str) -> Result<RemoteFiles> {

@@ -39,9 +39,10 @@ impl GovInfoService {
     }
 
     pub async fn collections(&self) -> Result<ApiDocument> {
-        let doc = self.api.json("collections", &[]).await?;
-        validation::validate_collections(doc.value())?;
-        Ok(doc)
+        self.api
+            .json("collections", &[])
+            .await?
+            .validated(validation::validate_collections)
     }
 
     /// Fetch one last-modified interval page. `nextPage` is preserved verbatim.
@@ -60,25 +61,21 @@ impl GovInfoService {
             path.push_str(&segment(end)?);
         }
         let page_size = page_size.to_string();
-        let doc = self
-            .api
+        self.api
             .json(
                 &path,
                 &[("offsetMark", offset_mark), ("pageSize", &page_size)],
             )
-            .await?;
-        validation::validate_packages(doc.value())?;
-        Ok(doc)
+            .await?
+            .validated(validation::validate_packages)
     }
 
     /// Follow the API's returned nextPage link without allowing an origin change.
     pub async fn next_page(&self, next: &str) -> Result<ApiDocument> {
-        let doc = self
-            .api
+        self.api
             .json_url(crate::common::resolve_download_url(next)?)
-            .await?;
-        validation::validate_packages(doc.value())?;
-        Ok(doc)
+            .await?
+            .validated(validation::validate_packages)
     }
 
     /// Resolve all content and metadata representations advertised by a package.

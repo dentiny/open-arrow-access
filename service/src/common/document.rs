@@ -13,6 +13,16 @@ impl ApiDocument {
         Ok(Self { value })
     }
 
+    /// Apply provider checks and return the original document on success.
+    /// Unknown fields are retained; validation errors pass through unchanged.
+    pub fn validated(
+        self,
+        validate: impl FnOnce(&Value) -> open_arrow_access_core::Result<()>,
+    ) -> open_arrow_access_core::Result<Self> {
+        validate(&self.value)?;
+        Ok(self)
+    }
+
     pub fn value(&self) -> &Value {
         &self.value
     }

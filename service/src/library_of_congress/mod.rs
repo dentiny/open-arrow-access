@@ -32,26 +32,26 @@ impl LibraryOfCongressService {
         let count = count.to_string();
         let mut query = vec![("fo", "json"), ("sp", &page), ("c", &count)];
         query.extend_from_slice(parameters);
-        let doc = self.api.json("search/", &query).await?;
-        validation::validate_search_response(doc.value())?;
-        Ok(doc)
+        self.api
+            .json("search/", &query)
+            .await?
+            .validated(validation::validate_search_response)
     }
 
     pub async fn next_page(&self, url: &str) -> Result<ApiDocument> {
         let url = resolver::resolve_continuation_url(&self.api, url)?;
-        let doc = self.api.json_url(url).await?;
-        validation::validate_search_response(doc.value())?;
-        Ok(doc)
+        self.api
+            .json_url(url)
+            .await?
+            .validated(validation::validate_search_response)
     }
 
     /// Accept a local item ID or the upstream item.id URL, including historical HTTP IDs.
     pub async fn item(&self, id: &str) -> Result<ApiDocument> {
-        let doc = self
-            .api
+        self.api
             .json_url(resolver::resolve_metadata_url(&self.api, "item", id)?)
-            .await?;
-        validation::validate_item_response(doc.value())?;
-        Ok(doc)
+            .await?
+            .validated(validation::validate_item_response)
     }
 
     pub async fn resource(&self, id: &str) -> Result<RemoteFiles> {
@@ -66,14 +66,12 @@ impl LibraryOfCongressService {
     /// Request full_text=1 and retain the entire text-services JSON response unchanged.
     pub async fn ocr(&self, segment: &str, format: &str) -> Result<ApiDocument> {
         validation::validate_ocr_request(segment, format)?;
-        let doc = self
-            .text
+        self.text
             .json(
                 "text-services/word-coordinates-service",
                 &[("segment", segment), ("format", format), ("full_text", "1")],
             )
-            .await?;
-        validation::validate_ocr_response(doc.value(), segment)?;
-        Ok(doc)
+            .await?
+            .validated(|value| validation::validate_ocr_response(value, segment))
     }
 }
