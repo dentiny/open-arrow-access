@@ -123,7 +123,7 @@ use open_arrow_access::{Accessor, ReadRequest, service::pmc::PmcAccessor};
 use open_arrow_access_storage::{OpenDalAccessor, opendal};
 
 async fn read(operator: opendal::Operator) -> Result<(), Box<dyn std::error::Error>> {
-    let source = PmcAccessor::new(OpenDalAccessor::new(operator));
+    let source = PmcAccessor::with_default_decoder(OpenDalAccessor::new(operator));
     let mut reader = source.open(ReadRequest::new("metadata/PMC123.2.json")).await?;
     while let Some(batch) = reader.next().await? {
         assert_eq!(batch.num_rows(), 1);

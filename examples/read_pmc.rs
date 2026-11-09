@@ -11,7 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = args.next().expect("expected PMC mirror root");
     let request = ReadRequest::new(args.next().expect("expected metadata object"));
     let operator = opendal::Operator::new(opendal::services::Fs::default().root(&root))?;
-    let source = PmcAccessor::new(OpenDalAccessor::new(operator));
+    let source = PmcAccessor::with_default_decoder(OpenDalAccessor::new(operator));
     let mut reader = source.open(request).await?;
     println!("{:?}", reader.metadata().schema);
     while let Some(batch) = reader.next().await? {

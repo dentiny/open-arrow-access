@@ -8,13 +8,13 @@ use std::sync::{Arc, OnceLock};
 
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
-    DefaultDocumentAccessor, DocumentDecoder, FieldValue, ReadRequest, RecordBatch, Result,
-    SchemaRef, async_trait,
+    DocumentAccessor, DocumentDecoder, FieldValue, ReadRequest, RecordBatch, Result, SchemaRef,
+    async_trait,
 };
 use open_arrow_access_file_format::xml::{NamespaceBinding, XmlField, XmlSchema};
 
 /// Read per-book RDF metadata through caller-configured storage.
-pub type GutenbergAccessor<A> = DefaultDocumentAccessor<A, GutenbergDecoder>;
+pub type GutenbergAccessor<A> = DocumentAccessor<A, GutenbergDecoder>;
 
 /// Convert one Gutenberg RDF document into its projected book metadata row.
 /// Use with [`open_arrow_access_core::DocumentAccessor`] for explicit composition.

@@ -9,7 +9,7 @@ configuration, source identity checks and domain mappings in the extension.
 | Incremental Arrow decoder | `BatchDecoder` inside its factory | `decode_batches(input, decoder, metadata)` |
 | Native asynchronous parser | Map its items/errors inside its factory | `StreamReader::new(stream, metadata)` |
 | One whole document to one Arrow row | `DocumentDecoder` | `DocumentAccessor::new(storage, decoder)` |
-| Document provider with default decoder settings | `DocumentDecoder + Default` and a type alias | `DefaultDocumentAccessor::new(storage)` |
+| Document provider with default decoder settings | `DocumentDecoder + Default` and a type alias | `DocumentAccessor::with_default_decoder(storage)` |
 | OpenDAL storage backend | Configure an OpenDAL `Operator` | `OpenDalAccessor::new(operator)` |
 
 ## Document providers
@@ -22,23 +22,23 @@ including zero-column projections. See the PMC and Gutenberg decoder mappings.
 For a provider with default settings, expose an alias:
 
 ```rust,ignore
-pub type CatalogAccessor<B> = DefaultDocumentAccessor<B, CatalogDecoder>;
+pub type CatalogAccessor<B> = DocumentAccessor<B, CatalogDecoder>;
 
 #[derive(Default)]
 pub struct CatalogDecoder;
 
 // Implement DocumentDecoder for CatalogDecoder: prepare + decode.
-// Callers construct CatalogAccessor::new(storage).
+// Callers construct CatalogAccessor::with_default_decoder(storage).
 ```
 
 The shared accessor validates projection before input I/O, reports the output
 schema at `open`, and opens/reads bytes only on the first `next`. It forwards byte
 options, owns the storage/decoder needed by each reader, and checks that decoding
-returns exactly one row with the declared schema. Cloning either document
+returns exactly one row with the declared schema. Cloning the document
 accessor shares storage and decoder without requiring either type to be `Clone`.
 Each opened reader has independent terminal state.
 
-`PmcAccessor::new(storage)` and `GutenbergAccessor::new(storage)` use this path.
+`PmcAccessor::with_default_decoder(storage)` and `GutenbergAccessor::with_default_decoder(storage)` use this path.
 Their decoders can also be composed explicitly:
 
 ```rust,no_run
@@ -98,3 +98,5 @@ reader implementation in this workspace.
 Use the existing [test-support contracts](../test-support/README.md) for the
 common behavior, and keep parser values, domain validation and backend-specific
 capability/scheduling tests with their owning suite.
+
+The former `DefaultDocumentAccessor` forwarding wrapper has been removed. Migrate its type aliases to `DocumentAccessor<B, D>` and its one-argument `new(storage)` calls to `with_default_decoder(storage)`. Explicit decoder construction remains `DocumentAccessor::new(storage, decoder)`.
