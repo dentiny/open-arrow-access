@@ -88,11 +88,9 @@ pub struct ZenodoFile {
     pub checksum: String,
 }
 
-/// A resolved record's flat attachment namespace. Compose with existing format
-/// and decompression accessors to decode selected files.
+/// A resolved record's flat attachment namespace.
 pub type ZenodoAccessor = ResolvedFileSet<OpenDalAccessor, ZenodoMetadata>;
 
-/// Metadata retained from the resolved record.
 #[derive(Clone, Debug)]
 pub struct ZenodoMetadata {
     pub id: NonZeroU64,

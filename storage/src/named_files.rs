@@ -7,13 +7,12 @@ use open_arrow_access_core::{
     ObjectRef, ObjectStream, Result, async_trait,
 };
 
-/// Validate an opaque file namespace without constructing an accessor or performing I/O.
-/// Empty names and duplicate names fail; order, paths and download locators are not interpreted.
+/// Reject empty or duplicate opaque names without interpreting them as paths.
 pub fn validate_file_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Result<()> {
     index_files(names.into_iter().map(|name| (name, ()))).map(|_| ())
 }
 
-/// A fixed, ordered namespace of names mapped to caller-supplied byte objects.
+/// A fixed, ordered namespace of opaque, nonempty, unique names mapped to byte objects.
 /// Useful for provider manifests whose filenames differ from download locators.
 #[derive(Clone, Debug)]
 pub struct NamedFileAccessor<A> {
@@ -22,7 +21,7 @@ pub struct NamedFileAccessor<A> {
 }
 
 impl<A> NamedFileAccessor<A> {
-    /// Names are opaque and must be nonempty and unique. Construction performs no I/O.
+    /// Construction performs no I/O.
     pub fn new(inner: A, files: Vec<(String, ObjectRef)>) -> Result<Self> {
         let files = index_files(files)?;
         Ok(Self {
