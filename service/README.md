@@ -372,3 +372,7 @@ to inspect the fixture manifest and TAR and stream one PDF entry.
 ## Common http-transport
 
 See [http-transport](http-transport.md) for this utility.
+
+## Common provider-validation
+
+See [provider-validation](provider-validation.md) for this utility.

@@ -30,7 +30,6 @@ pub mod pmc;
 #[cfg(feature = "zenodo")]
 pub mod zenodo;
 
-#[cfg(any(feature = "zenodo", feature = "dataverse"))]
 mod filename;
 
 // Individual providers may use only part of the shared HTTP utilities.
@@ -43,3 +42,6 @@ pub mod arxiv;
 pub mod dataverse;
 #[cfg(feature = "internet-archive")]
 pub mod internet_archive;
+
+/// Common utilities shared by provider services.
+pub mod common;
