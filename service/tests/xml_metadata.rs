@@ -1,11 +1,16 @@
 use open_arrow_access_service::xml_metadata::validate_root;
+use open_arrow_access_test_support::fixture;
 
-#[test]
-fn checks_namespaced_envelopes_and_accepts_standard_xml_headers() {
-    validate_root(b"<?xml version=\"1.0\"?><!-- header --><!DOCTYPE manifest SYSTEM \"manifest.dtd\"><m:manifest xmlns:m=\"urn:meca\"/>","manifest").unwrap();
-    validate_root(b"<OAI-PMH><ListRecords/></OAI-PMH>", "OAI-PMH").unwrap();
-    assert!(validate_root(b"<html/>", "manifest").is_err());
-    assert!(validate_root(b"", "manifest").is_err());
+#[tokio::test]
+async fn checks_namespaced_envelopes_and_accepts_standard_xml_headers() {
+    let manifest = fixture!("xml-metadata", "namespaced-header.xml").await;
+    validate_root(&manifest, "manifest").unwrap();
+    let oai = fixture!("xml-metadata", "oai.xml").await;
+    validate_root(&oai, "OAI-PMH").unwrap();
+    for name in ["wrong-root.xml", "empty.xml"] {
+        let raw = fixture!("xml-metadata", name).await;
+        assert!(validate_root(&raw, "manifest").is_err(), "{name}");
+    }
 }
 
 #[tokio::test]
@@ -15,8 +20,8 @@ async fn document_uses_xml_engine_for_namespaces_entities_and_complete_input() {
     use open_arrow_access_file_format::xml::XmlField;
     use open_arrow_access_service::xml_metadata::XmlDocument;
 
-    let raw = b"<?xml version=\"1.0\"?><!DOCTYPE manifest SYSTEM \"https://invalid.example/never-fetch.dtd\"><x:manifest xmlns:x=\"urn:meca\"><x:title>A &amp; B</x:title></x:manifest>";
-    let document = XmlDocument::new(raw, "manifest").unwrap();
+    let raw = fixture!("xml-metadata", "namespaces-entities.xml").await;
+    let document = XmlDocument::new(&raw, "manifest").unwrap();
     let batch = document
         .read(vec![XmlField::new(
             "title",
@@ -29,19 +34,11 @@ async fn document_uses_xml_engine_for_namespaces_entities_and_complete_input() {
     assert_eq!(batch.column(0).as_string::<i32>().value(0), "A & B");
     assert!(raw.windows(9).any(|part| part == b"<!DOCTYPE"));
 
-    for raw in [
-        b"<manifest/><manifest/>".as_slice(),
-        b"<manifest>truncated",
-        b"<manifest/>&unknown;",
-    ] {
-        let document = XmlDocument::new(raw, "manifest").unwrap();
-        assert!(document.read(vec![]).await.is_err());
+    for name in ["multiple-roots.xml", "truncated.xml", "trailing-entity.xml"] {
+        let raw = fixture!("xml-metadata", name).await;
+        let document = XmlDocument::new(&raw, "manifest").unwrap();
+        assert!(document.read(vec![]).await.is_err(), "{name}");
     }
-    assert!(
-        XmlDocument::new(
-            b"<!DOCTYPE manifest [<!ENTITY custom 'value'>]><manifest/>",
-            "manifest"
-        )
-        .is_err()
-    );
+    let raw = fixture!("xml-metadata", "internal-dtd.xml").await;
+    assert!(XmlDocument::new(&raw, "manifest").is_err());
 }
