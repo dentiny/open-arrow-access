@@ -8,8 +8,8 @@ use quick_xml::{NsReader, events::Event, name::ResolveResult};
 use std::borrow::Cow;
 
 /// An XML metadata document whose element mappings use its root namespace.
-/// External DTD declarations are ignored, as in the previous metadata decoder;
-/// DTDs with internal subsets are rejected. No DTD or external entity is fetched.
+/// External DTD declarations are ignored; internal subsets are rejected.
+/// No DTD or external entity is fetched.
 pub struct XmlDocument<'a> {
     bytes: Cow<'a, [u8]>,
     root: String,
@@ -75,8 +75,7 @@ impl<'a> XmlDocument<'a> {
             .as_deref()
             .map(|uri| NamespaceBinding { prefix: "m", uri });
         let schema = XmlSchema::with_namespaces(fields, bindings.as_slice()).map_err(error::xml)?;
-        // Metadata is already buffered. Preserve the previous document-size
-        // allowance while retaining the XML engine's default depth limit.
+        // Allow buffered metadata plus namespace overhead; retain the default depth limit.
         let budget = self.bytes.len().saturating_add(4096);
         let format = XmlFormat::new(format!("/{}", self.element(&self.root)))
             .with_schema(schema)
