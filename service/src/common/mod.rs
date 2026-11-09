@@ -13,3 +13,5 @@ pub use document::ApiDocument;
 mod connection;
 mod transport;
 pub use connection::Connection;
+
+pub use json_util::{LinkField, MetadataLink, resolve_optional_links};
