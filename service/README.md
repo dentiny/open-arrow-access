@@ -421,3 +421,7 @@ See [OAI provider configuration](oai-provider.md).
 ## doab
 
 See [doab service](doab.md).
+
+## arxiv-metadata
+
+See [arxiv-metadata service](arxiv-metadata.md).
