@@ -5,7 +5,6 @@ layer-composition tests. They preserve the original byte offsets and values.
 
 | Fixture | Contents and purpose |
 | --- | --- |
-| `line_endings.bin` | Project-authored LF, CRLF, a 4096-byte ASCII line plus LF, and a non-UTF-8 final line without a terminator; scalar/SIMD boundary and line-limit checks. |
 | `alphabet.bin` | `abcdefghij`, without a newline; seek and range cursors. |
 | `data.bin` | `data`, without a newline; capability checks. |
 | `input.bin` | `input`, without a newline; document limits and source errors. |
