@@ -1,4 +1,5 @@
 use super::error::{decode, invalid};
+use crate::common::is_commit_sha;
 use open_arrow_access_core::Result;
 use serde_json::Value;
 
@@ -10,7 +11,7 @@ pub(super) fn validate_repository(value: &str) -> Result<()> {
 }
 
 pub(super) fn validate_commit_sha(sha: &str) -> Result<()> {
-    if sha.len() != 40 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if !is_commit_sha(sha) {
         return Err(decode("invalid GitHub commit SHA"));
     }
     Ok(())

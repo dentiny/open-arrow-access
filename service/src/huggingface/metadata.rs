@@ -1,6 +1,8 @@
 use open_arrow_access_core::{Error, ErrorKind, Result};
 use serde::Deserialize;
 
+use crate::common::is_commit_sha;
+
 use super::{HuggingFaceRepository, HuggingFaceService, client::endpoint};
 
 #[derive(Deserialize)]
@@ -55,8 +57,4 @@ impl HuggingFaceService {
         }
         Ok(metadata)
     }
-}
-
-fn is_commit_sha(revision: &str) -> bool {
-    revision.len() == 40 && revision.bytes().all(|b| b.is_ascii_hexdigit())
 }
