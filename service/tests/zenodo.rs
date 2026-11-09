@@ -77,7 +77,52 @@ async fn rejects_invalid_metadata_and_maps_http_errors() {
                 ErrorKind::PermissionDenied,
             ),
             ("empty.json", StatusCode::NOT_FOUND, ErrorKind::NotFound),
-            ("empty.json", StatusCode::TOO_MANY_REQUESTS, ErrorKind::Io),
+            (
+                "empty.json",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ErrorKind::Io,
+            ),
+            (
+                "empty.json",
+                StatusCode::BAD_REQUEST,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                "empty.json",
+                StatusCode::UNAUTHORIZED,
+                ErrorKind::Unauthenticated,
+            ),
+            (
+                "empty.json",
+                StatusCode::METHOD_NOT_ALLOWED,
+                ErrorKind::Unsupported,
+            ),
+            (
+                "empty.json",
+                StatusCode::REQUEST_TIMEOUT,
+                ErrorKind::Timeout,
+            ),
+            ("empty.json", StatusCode::CONFLICT, ErrorKind::Conflict),
+            (
+                "empty.json",
+                StatusCode::PRECONDITION_FAILED,
+                ErrorKind::ConditionNotMet,
+            ),
+            (
+                "empty.json",
+                StatusCode::TOO_MANY_REQUESTS,
+                ErrorKind::RateLimited,
+            ),
+            (
+                "empty.json",
+                StatusCode::SERVICE_UNAVAILABLE,
+                ErrorKind::Unavailable,
+            ),
+            (
+                "empty.json",
+                StatusCode::INSUFFICIENT_STORAGE,
+                ErrorKind::ResourceExhausted,
+            ),
         ],
         |endpoint| async move { ZenodoService::with_endpoint(&endpoint)?.record(ID).await },
     )

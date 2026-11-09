@@ -73,14 +73,7 @@ impl HttpClient {
             .map_err(|error| transport_error(operation, error))?;
         let status = response.status();
         if status != http::StatusCode::OK {
-            // TODO: Add a shared error translation function in core and use it here.
-            let kind = match status.as_u16() {
-                404 => opendal::ErrorKind::NotFound,
-                401 | 403 => opendal::ErrorKind::PermissionDenied,
-                429 => opendal::ErrorKind::RateLimited,
-                _ => opendal::ErrorKind::Unexpected,
-            };
-            return Err(error::metadata_http_error(operation, kind, status));
+            return Err(error::http_status_error(operation, status));
         }
         let mut body = response.into_body();
         let mut bytes = Vec::new();
