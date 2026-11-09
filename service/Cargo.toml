@@ -7,6 +7,7 @@ repository.workspace = true
 description = "Dataset source providers for Open Arrow Access"
 
 [features]
+format-xml = ["dep:quick-xml"]
 default = []
 zenodo = []
 dataverse = []
@@ -128,3 +129,7 @@ required-features = ["arxiv"]
 [[test]]
 name = "internet_archive"
 required-features = ["internet-archive"]
+
+[[test]]
+name = "xml_metadata"
+required-features = ["format-xml"]
