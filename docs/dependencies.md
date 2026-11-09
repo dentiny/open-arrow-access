@@ -45,7 +45,7 @@ do not query upstream or automatically change dependency versions.
 
 ## XML parser
 
-`format-xml` uses the published [`xml-arrow 0.2.5`](https://crates.io/crates/xml-arrow/0.2.5)
+`format-xml` uses the published [`xml-arrow 0.2.6`](https://crates.io/crates/xml-arrow/0.2.6)
 parser for Arrow 59 compatibility and configuration validation before I/O.
 Its companion `xml-io` storage crate is not used, so storage remains on this
 workspace's OpenDAL 0.59.2 baseline. Arrow family versions remain 59.3.0 in the
@@ -55,7 +55,7 @@ and checksum recorded in Cargo.lock.
 ## ATIF parser
 
 `format-atif` uses the published
-[`atif-arrow 0.4.4`](https://crates.io/crates/atif-arrow/0.4.4) converter, including
+[`atif-arrow 0.4.5`](https://crates.io/crates/atif-arrow/0.4.5) converter, including
 projection-aware batch builders. The resolved registry version and checksum are
 recorded in Cargo.lock.
 
