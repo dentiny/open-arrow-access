@@ -32,6 +32,7 @@ huggingface = [
     "open-arrow-access-file-format/parquet",
 ]
 internet-archive = []
+library-of-congress = []
 oapen = ["oai"]
 pmc = [
     "dep:arrow-array",
@@ -182,3 +183,7 @@ required-features = ["oapen"]
 [[test]]
 name = "figshare"
 required-features = ["figshare"]
+
+[[test]]
+name = "library_of_congress"
+required-features = ["library-of-congress"]
