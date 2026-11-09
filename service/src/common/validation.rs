@@ -56,7 +56,7 @@ pub(super) fn validate_downloads(files: &[MetadataLink]) -> Result<()> {
 }
 
 /// Recognize a complete SHA-1 Git object ID, without accepting branch names or short IDs.
-#[cfg(any(feature = "huggingface", feature = "openstax"))]
+#[allow(dead_code, reason = "used by optional providers")]
 pub(crate) fn is_commit_sha(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
