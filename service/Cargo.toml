@@ -139,3 +139,7 @@ required-features = ["uspto"]
 [[test]]
 name = "oai"
 required-features = ["oai"]
+
+[[test]]
+name = "oai_provider"
+required-features = ["oai"]

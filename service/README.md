@@ -413,3 +413,7 @@ Enable `format-xml` for `xml_metadata::XmlDocument`. Protocol metadata is decode
 ## Common OAI protocol
 
 See [OAI protocol](oai-protocol.md). Record counts and resumption tokens are decoded through the shared XML metadata reader.
+
+## Common OAI provider configuration
+
+See [OAI provider configuration](oai-provider.md).
