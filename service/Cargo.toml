@@ -223,3 +223,7 @@ required-features = ["bhl"]
 [[test]]
 name = "regulations"
 required-features = ["regulations"]
+
+[[test]]
+name = "provider_composition"
+required-features = ["govinfo", "meca"]

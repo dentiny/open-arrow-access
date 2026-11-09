@@ -18,6 +18,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | ATIF and file-set composition | [`dataset/tests/atif.rs`](../dataset/tests/atif.rs) |
 | pmc-inventory | [`service/tests/pmc_inventory.rs`](../service/tests/pmc_inventory.rs) |
 
+| Provider-to-format/archive composition | [`service/tests/provider_composition.rs`](../service/tests/provider_composition.rs) |
 | pmc | [`service/tests/pmc.rs`](../service/tests/pmc.rs) |
 | arXiv bulk manifests and TAR composition | [`service/tests/arxiv.rs`](../service/tests/arxiv.rs) |
 | Hugging Face Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
