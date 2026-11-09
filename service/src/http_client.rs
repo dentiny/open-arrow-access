@@ -5,9 +5,10 @@ pub(crate) mod files;
 mod query;
 pub(crate) mod validation;
 
-use error::transport_error;
-use http::{Request, StatusCode};
-use open_arrow_access_core::{Error, ErrorKind, Result};
+pub use error::HttpStatusError;
+pub(crate) use error::{check_status, json_error, request_error, transport_error};
+use http::Request;
+use open_arrow_access_core::Result;
 use open_arrow_access_storage::OpenDalAccessor;
 use opendal::{Buffer, HttpTransporter, OperationContext, raw::oio::ReadStream};
 use serde::de::DeserializeOwned;
@@ -23,14 +24,7 @@ impl HttpClient {
         let client = reqwest::Client::builder()
             .user_agent(concat!("open-arrow-access/", env!("CARGO_PKG_VERSION")))
             .build()
-            .map_err(|error| {
-                Error::new(
-                    ErrorKind::Io,
-                    "configure_http",
-                    "failed to build HTTP client",
-                )
-                .with_source(error)
-            })?;
+            .map_err(error::client_error)?;
         HttpTransporter::install_default(opendal_http_transport_reqwest::ReqwestTransport::new(
             client,
         ));
@@ -73,10 +67,9 @@ impl HttpClient {
         if let Some(token) = token {
             request = request.header("authorization", format!("Bearer {token}"));
         }
-        let request = request.body(Buffer::new()).map_err(|error| {
-            Error::new(ErrorKind::InvalidInput, operation, "invalid HTTP request")
-                .with_source(error)
-        })?;
+        let request = request
+            .body(Buffer::new())
+            .map_err(|error| request_error(operation, error))?;
         let response = self
             .context
             .http_transport()
@@ -84,21 +77,7 @@ impl HttpClient {
             .await
             .map_err(|error| transport_error(operation, error))?;
         let status = response.status();
-        if status != StatusCode::OK {
-            // TODO: Extract shared HTTP status-to-error translation.
-            let kind = match status {
-                StatusCode::NOT_FOUND => opendal::ErrorKind::NotFound,
-                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
-                    opendal::ErrorKind::PermissionDenied
-                }
-                StatusCode::TOO_MANY_REQUESTS => opendal::ErrorKind::RateLimited,
-                _ => opendal::ErrorKind::Unexpected,
-            };
-            return Err(transport_error(
-                operation,
-                opendal::Error::new(kind, format!("metadata HTTP {status}")),
-            ));
-        }
+        check_status(status, response.headers(), operation)?;
         let mut body = response.into_body();
         let mut bytes = Vec::new();
         loop {
@@ -113,8 +92,6 @@ impl HttpClient {
                 bytes.extend_from_slice(&part);
             }
         }
-        serde_json::from_slice(&bytes).map_err(|error| {
-            Error::new(ErrorKind::Decode, operation, "invalid JSON metadata").with_source(error)
-        })
+        validation::json(&bytes, operation)
     }
 }

@@ -43,3 +43,6 @@ pub mod arxiv;
 pub mod dataverse;
 #[cfg(feature = "internet-archive")]
 pub mod internet_archive;
+
+/// Shared provider HTTP status errors, including upstream Retry-After.
+pub use http_client::HttpStatusError;
