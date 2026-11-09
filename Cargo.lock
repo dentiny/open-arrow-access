@@ -1870,6 +1870,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "memchr",
  "open-arrow-access-test-support",
  "thiserror",
  "tokio",
