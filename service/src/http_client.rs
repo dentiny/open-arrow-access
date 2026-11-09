@@ -3,6 +3,8 @@
 mod error;
 pub(crate) mod files;
 mod query;
+mod transport;
+pub(crate) use transport::new_transport;
 pub(crate) mod validation;
 
 pub use error::HttpStatusError;
@@ -21,13 +23,7 @@ pub(crate) struct HttpClient {
 
 impl HttpClient {
     pub(crate) fn new() -> Result<Self> {
-        let client = reqwest::Client::builder()
-            .user_agent(concat!("open-arrow-access/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(error::client_error)?;
-        HttpTransporter::install_default(opendal_http_transport_reqwest::ReqwestTransport::new(
-            client,
-        ));
+        HttpTransporter::install_default(new_transport(true)?);
         opendal::install_default();
         Ok(Self {
             context: OperationContext::new(),
