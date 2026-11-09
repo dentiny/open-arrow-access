@@ -211,6 +211,17 @@ async fn large_single_and_bulk_ranges_preserve_values_and_cursor() {
         byte_accessor::assert_ranges(reader.as_mut(), &contents, &ranges)
             .await
             .unwrap();
+        // Cross several staging batches with unsorted, duplicate and empty
+        // ranges, then confirm that random reads leave the sequential cursor.
+        let scattered: Vec<_> = (0..1537usize)
+            .map(|i| {
+                let start = ((i % 1009) * 7919 % (contents.len() - 8)) as u64;
+                start..start + if i % 17 == 0 { 0 } else { 8 }
+            })
+            .collect();
+        byte_accessor::assert_ranges(reader.as_mut(), &contents, &scattered)
+            .await
+            .unwrap();
         assert_eq!(
             reader.next().await.unwrap().unwrap().as_ref(),
             &contents[..64 * 1024]
@@ -328,6 +339,15 @@ async fn filesystem_bulk_reads_do_not_merge_across_unrequested_gaps() {
     // With no I/O splitting, each disjoint range uses one backend task. Nearby
     // ranges must stay separate while adjacent/overlapping ranges still merge.
     assert_eq!(counts.started.load(Ordering::SeqCst), 3);
+    // A long adjacent run must still coalesce to one request across the
+    // scattered-range staging threshold.
+    let adjacent: Vec<_> = (0..2048u64).map(|offset| offset..offset + 1).collect();
+    let buffers = reader.read_ranges(adjacent).await.unwrap();
+    assert_eq!(buffers.len(), 2048);
+    for (offset, buffer) in buffers.iter().enumerate() {
+        assert_eq!(buffer.as_ref(), &contents[offset..offset + 1]);
+    }
+    assert_eq!(counts.started.load(Ordering::SeqCst), 4);
 }
 
 #[tokio::test]
