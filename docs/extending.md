@@ -8,6 +8,7 @@ configuration, source identity checks and domain mappings in the extension.
 | Single-file format | `ReaderFactory` | `FileAccessor::from_format(storage, format)` |
 | Incremental Arrow decoder | `BatchDecoder` inside its factory | `decode_batches(input, decoder, metadata)` |
 | Native asynchronous parser | Map its items/errors inside its factory | `StreamReader::new(stream, metadata)` |
+| Native Arrow batch stream | Map parser errors inside its factory | `record_stream_reader(stream, metadata, projection)` |
 | One whole document to one Arrow row | `DocumentDecoder` | `DocumentAccessor::new(storage, decoder)` |
 | Document provider with default decoder settings | `DocumentDecoder + Default` and a type alias | `DefaultDocumentAccessor::new(storage)` |
 | OpenDAL storage backend | Configure an OpenDAL `Operator` | `OpenDalAccessor::new(operator)` |
@@ -58,9 +59,12 @@ request before opening bytes and forwards its locator and byte options. A
 format-specific accessor name can be a thin alias with convenience constructors,
 as the built-in CSV, JSON and Parquet accessors demonstrate.
 
-Use `decode_batches` for incremental byte-to-Arrow decoders. Native streams can
-use `StreamReader`, applying `project_batch` when needed to restore declared
-schema metadata and caller column order. Schema inference, decoder finalization
+Use `decode_batches` for incremental byte-to-Arrow decoders. Native Arrow batch
+streams can use the always-available core `record_stream_reader` helper to apply
+an optional projection/reordering and restore the declared schema metadata.
+Map format-specific errors before passing the stream; the helper shares
+`StreamReader`'s lazy polling and terminal/error lifecycle. Other item streams
+can use `StreamReader` directly. Schema inference, decoder finalization
 and range requirements remain format-specific. See the
 [format protocol](../README.md#adding-a-file-format) for the complete factory hooks.
 

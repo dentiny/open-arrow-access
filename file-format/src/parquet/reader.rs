@@ -1,5 +1,5 @@
 use futures::StreamExt;
-use open_arrow_access_core::{RecordMetadata, RecordReader, StreamReader, project_batch};
+use open_arrow_access_core::{RecordMetadata, RecordReader, record_stream_reader};
 use parquet::arrow::async_reader::ParquetRecordBatchStream;
 
 use super::{decode_error, input::ParquetInput};
@@ -12,10 +12,6 @@ pub(super) fn parquet_reader(
     metadata: RecordMetadata,
     reorder: Option<Vec<usize>>,
 ) -> impl RecordReader {
-    let schema = metadata.schema.clone();
-    let stream = stream.map(move |result| {
-        let batch = result.map_err(|error| decode_error("decode_parquet", error))?;
-        project_batch(batch, reorder.as_deref(), schema.clone())
-    });
-    StreamReader::new(stream, metadata)
+    let stream = stream.map(|result| result.map_err(|error| decode_error("decode_parquet", error)));
+    record_stream_reader(stream, metadata, reorder)
 }
