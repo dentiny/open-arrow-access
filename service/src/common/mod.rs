@@ -18,5 +18,4 @@ pub use json_util::{LinkField, MetadataLink, resolve_named_links, resolve_option
 
 pub(crate) use validation::filename_component as validate_filename;
 
-#[allow(unused_imports, reason = "used by optional providers")]
 pub(crate) use validation::is_commit_sha;
