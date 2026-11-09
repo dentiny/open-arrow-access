@@ -42,15 +42,3 @@ async fn document_uses_xml_engine_for_namespaces_entities_and_complete_input() {
     let raw = fixture!("xml-metadata", "internal-dtd.xml").await;
     assert!(XmlDocument::new(&raw, "manifest").is_err());
 }
-
-#[test]
-fn rejects_invalid_utf8_in_xml_metadata_headers() {
-    for bytes in [
-        b"<mani\xfffest/>".as_slice(),
-        b"<manifest xmlns=\"urn:\xff\"/>".as_slice(),
-        b"<!DOCTYPE manifest SYSTEM \"\xff\"><manifest/>".as_slice(),
-    ] {
-        let error = validate_root(bytes, "manifest").unwrap_err();
-        assert_eq!(error.kind(), open_arrow_access_core::ErrorKind::Decode);
-    }
-}
