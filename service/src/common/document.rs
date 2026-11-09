@@ -11,7 +11,7 @@ pub struct ApiDocument {
 impl ApiDocument {
     /// Keep exact upstream bytes and decode a JSON view without normalizing the raw response.
     pub fn from_bytes(bytes: Bytes) -> open_arrow_access_core::Result<Self> {
-        let value = super::validation::json(&bytes)?;
+        let value = super::json_util::parse(&bytes)?;
         Ok(Self { bytes, value })
     }
 
