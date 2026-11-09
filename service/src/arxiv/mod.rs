@@ -26,12 +26,14 @@ impl ArxivKind {
             Self::Source => "src",
         }
     }
+
     fn root(self) -> &'static str {
         match self {
             Self::Pdf => "arXivPDF",
             Self::Source => "arXivSRC",
         }
     }
+
     pub fn manifest_key(self) -> &'static str {
         match self {
             Self::Pdf => "pdf/arXiv_pdf_manifest.xml",
@@ -71,6 +73,7 @@ impl<A> ArxivService<A> {
             tar_limits: TarLimits::default(),
         }
     }
+
     pub fn with_tar_limits(mut self, limits: TarLimits) -> Self {
         self.tar_limits = limits;
         self
@@ -95,7 +98,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivServi
             "read_arxiv_manifest",
         )
         .await?;
-        parse_manifest(&bytes, kind, month)
+        parse_manifest(&bytes, kind, month).await
     }
 
     /// Consume a shard incrementally over its sequential byte stream. This is
