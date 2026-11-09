@@ -18,3 +18,10 @@ pub fn validate_byte_range(range: &Range<u64>, len: u64, operation: &'static str
     }
     Ok(())
 }
+
+/// Check slash-separated relative path components without normalizing them.
+/// Empty, dot and parent components (including leading/trailing slashes) fail.
+/// Whitespace, backslashes, control characters and URL syntax are left to callers.
+pub fn is_relative_path(path: &str) -> bool {
+    path.split('/').all(|part| !matches!(part, "" | "." | ".."))
+}

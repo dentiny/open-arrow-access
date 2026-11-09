@@ -3,7 +3,6 @@ use open_arrow_access_core::{RecordMetadata, RecordReader, record_stream_reader}
 
 use super::xml_error;
 
-/// Adapt native XML batches while retaining format-specific projection and errors.
 pub(super) fn xml_reader(
     reader: xml_arrow::XmlReader<'static>,
     metadata: RecordMetadata,

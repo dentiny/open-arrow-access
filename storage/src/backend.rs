@@ -1,4 +1,4 @@
-//! Shared OpenDAL byte access. New backend constructors reuse this implementation.
+//! Shared OpenDAL byte access.
 
 use std::{collections::HashMap, num::NonZeroUsize, ops::Range, sync::Arc};
 
@@ -32,7 +32,6 @@ pub struct OpenDalAccessor {
 }
 
 impl OpenDalAccessor {
-    /// Wrap an operator without changing its backend configuration.
     pub fn new(operator: Operator) -> Self {
         Self {
             operator,
@@ -91,12 +90,10 @@ impl Accessor for OpenDalAccessor {
             .as_ref()
             .is_some_and(|lengths| !lengths.is_empty());
         let read = upstream.read && (upstream.stat || has_lengths);
-        // Length comes from trusted metadata or stat; range reads follow OpenDAL's contract.
         Capability {
             read,
             read_with_range: read,
             read_parallel: false,
-            // OpenDAL can walk nonrecursive backend listings.
             list: upstream.list,
         }
     }
@@ -106,15 +103,13 @@ impl Accessor for OpenDalAccessor {
         let path = object.locator();
         validate_locator(path, false, "open")?;
         let len = self.content_length(path).await?;
-        // OpenDAL gives each stream/fetch its own task queue. Share a budget
-        // across those queues so retained sequential prefetch cannot multiply
-        // the reader's I/O concurrency when a range read is interleaved.
+        // Share a budget across OpenDAL's stream/fetch queues so interleaved
+        // range reads cannot multiply sequential prefetch concurrency.
         let mut operator = self.operator.clone();
         if options.io_concurrency.get() > 1 {
             operator = operator.layer(ReaderBudget(options.io_concurrency.get()));
         }
-        // Preserve projection savings: coalesce adjacent/overlapping ranges,
-        // without reading unrequested bytes between separated ranges.
+        // Coalesce adjacent ranges without fetching unrequested gaps.
         let builder = operator
             .reader_with(path)
             .content_length_hint(len)
@@ -378,8 +373,6 @@ impl ByteReader for OpenDalReader {
         for range in &ranges {
             validate_byte_range(range, self.len, "read_range")?;
         }
-        // Empty ranges need no fetch/coalescing plan. Preserve one output per
-        // range after validating the entire request, including empty offsets.
         if ranges.iter().all(Range::is_empty) {
             return Ok(vec![Bytes::new(); ranges.len()]);
         }
@@ -432,9 +425,7 @@ fn map_error(operation: &'static str, path: &str, error: opendal::Error) -> Erro
     Error::new(kind, operation, format!("object {path:?}")).with_source(error)
 }
 
-// Small range responses can retain entire network receive allocations. Copy
-// them out while each bounded fetch batch is consumed, so later batches do not
-// retain those oversized backing allocations through their returned slices.
+// Copy small responses so returned slices do not retain large network allocations.
 fn compact_range_buffer(buffer: opendal::Buffer) -> Bytes {
     if buffer.len() > 4096 {
         return buffer.to_bytes();
