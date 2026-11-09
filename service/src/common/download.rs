@@ -5,6 +5,8 @@ use futures::stream;
 use open_arrow_access_core::{ByteMetadata, ByteReader, Bytes, Result, StreamReader};
 use opendal::raw::oio::ReadStream;
 
+const DEFAULT_CHUNK_SIZE: usize = 2 * 1024 * 1024;
+
 impl Connection {
     /// Open an absolute URL, preserving encoded paths and signatures byte-for-byte.
     pub async fn open(
@@ -20,7 +22,9 @@ impl Connection {
             .get("etag")
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
-        let chunk_size = options.io_chunk_size.map_or(64 * 1024, |s| s.get());
+        let chunk_size = options
+            .io_chunk_size
+            .map_or(DEFAULT_CHUNK_SIZE, |s| s.get());
         let state = (response.into_body(), Bytes::new(), length);
         let chunks = stream::try_unfold(
             state,
