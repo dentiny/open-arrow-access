@@ -33,7 +33,13 @@ pmc = [
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 zenodo = []
 
-format-xml = ["dep:quick-xml", "dep:xml-arrow", "dep:arrow-array", "dep:arrow-schema"]
+format-xml = [
+    "dep:quick-xml",
+    "dep:open-arrow-access-file-format",
+    "open-arrow-access-file-format/xml",
+    "dep:arrow-array",
+    "dep:arrow-schema",
+]
 oai = ["format-xml"]
 
 [dependencies]
