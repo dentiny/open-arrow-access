@@ -11,7 +11,7 @@ use open_arrow_access_core::{
 
 use open_arrow_access_file_format::csv::{CsvAccessor, CsvFormat};
 use open_arrow_access_test_support::{
-    MemoryAccessor, fixture, fixture_path,
+    MemoryAccessor, fixture,
     format::{self, collect_batches as collect},
     record::collect_values,
 };
@@ -82,6 +82,7 @@ async fn fragmented_csv_preserves_values_nulls_order_schema_and_source() {
     assert!(title(0).is_null(1));
     assert_eq!(title(1).value(0), "two\nlines");
     assert_eq!(title(1).value(1), "say \"yes\"");
+    assert_eq!(title(2).value(0), "last");
     assert_eq!(batches[0].schema().metadata(), schema().metadata());
 }
 
@@ -261,56 +262,4 @@ async fn header_validation_and_truncated_row_policy_are_explicit() {
     let batches = collect(&accessor, ReadRequest::new("short.csv")).await;
     assert_eq!(collect_values::<Int64Type>(&batches, 0), [1, 2]);
     assert!(batches[0].column(1).is_null(0));
-}
-
-#[tokio::test]
-async fn filesystem_csv_preserves_values_across_chunks_and_batches() {
-    use open_arrow_access_storage::OpenDalAccessor;
-
-    for chunk_size in [1, 7, 4096] {
-        let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
-            fixture_path!("csv", ""),
-        ))
-        .with_chunk_size(NonZeroUsize::new(chunk_size).unwrap());
-        let accessor = CsvAccessor::new(bytes, schema()).with_format(
-            CsvFormat::default()
-                .with_header(true)
-                .with_header_validation(true),
-        );
-        let batches = collect(
-            &accessor,
-            ReadRequest::new("good.csv").with_options(options(2, None)),
-        )
-        .await;
-        assert_eq!(
-            batches
-                .iter()
-                .map(RecordBatch::num_rows)
-                .collect::<Vec<_>>(),
-            [2, 2, 1]
-        );
-        assert_eq!(collect_values::<Int64Type>(&batches, 0), [1, 2, 3, 4, 5]);
-        let titles = batches
-            .iter()
-            .flat_map(|batch| {
-                batch
-                    .column(1)
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .unwrap()
-                    .iter()
-                    .map(|value| value.map(str::to_owned))
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            titles,
-            [
-                Some("hello,world".into()),
-                None,
-                Some("two\nlines".into()),
-                Some("say \"yes\"".into()),
-                Some("last".into()),
-            ]
-        );
-    }
 }
