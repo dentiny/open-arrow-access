@@ -24,6 +24,8 @@ pub use open_arrow_access_core::*;
     feature = "service-oapen",
     feature = "service-figshare",
     feature = "service-library-of-congress",
+    feature = "service-meca",
+    feature = "service-biorxiv",
     feature = "service-semantic-scholar",
 ))]
 pub use open_arrow_access_service as service;

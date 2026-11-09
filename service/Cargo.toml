@@ -13,6 +13,7 @@ arxiv = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/tar",
 ]
+biorxiv = ["meca", "dep:chrono"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
@@ -33,6 +34,12 @@ huggingface = [
 ]
 internet-archive = []
 library-of-congress = []
+meca = [
+    "format-xml",
+    "dep:percent-encoding",
+    "dep:open-arrow-access-decompression",
+    "open-arrow-access-decompression/zip",
+]
 oapen = ["oai"]
 pmc = [
     "dep:arrow-array",
@@ -71,6 +78,7 @@ open-arrow-access-storage.workspace = true
 opendal = { workspace = true, features = ["services-http", "http-transport-reqwest"] }
 opendal-http-transport-reqwest.workspace = true
 opendal-service-http.workspace = true
+percent-encoding = { workspace = true, optional = true }
 quick-xml = { workspace = true, optional = true }
 reqwest.workspace = true
 serde.workspace = true
@@ -188,6 +196,14 @@ required-features = ["figshare"]
 [[test]]
 name = "library_of_congress"
 required-features = ["library-of-congress"]
+
+[[test]]
+name = "meca"
+required-features = ["meca"]
+
+[[test]]
+name = "biorxiv"
+required-features = ["biorxiv"]
 
 [[test]]
 name = "semantic_scholar"
