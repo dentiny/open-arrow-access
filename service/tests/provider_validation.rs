@@ -24,3 +24,28 @@ fn shares_json_field_and_component_rules() {
         assert!(filename(name).is_err());
     }
 }
+
+#[test]
+fn optional_representations_keep_selector_order_and_reject_invalid_links() {
+    use open_arrow_access_service::common::optional_links;
+    let raw = serde_json::json!({"pdf":"https://files.example/paper?sig=a%2Bb","text":null,"other":"retained"});
+    assert_eq!(
+        optional_links(
+            &raw,
+            &[("text", "text"), ("pdf", "paper"), ("missing", "none")]
+        )
+        .unwrap(),
+        vec![(
+            "paper".into(),
+            "https://files.example/paper?sig=a%2Bb".into()
+        )]
+    );
+    assert!(optional_links(&serde_json::json!({"pdf":123}), &[("pdf", "paper")]).is_err());
+    assert!(
+        optional_links(
+            &serde_json::json!({"pdf":"file:///private"}),
+            &[("pdf", "paper")]
+        )
+        .is_err()
+    );
+}
