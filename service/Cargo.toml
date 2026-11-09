@@ -8,6 +8,7 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 default = []
+oai = ["dep:quick-xml"]
 zenodo = []
 dataverse = []
 arxiv = ["dep:quick-xml", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
@@ -130,3 +131,7 @@ required-features = ["arxiv"]
 [[test]]
 name = "internet_archive"
 required-features = ["internet-archive"]
+
+[[test]]
+name = "oai"
+required-features = ["oai"]

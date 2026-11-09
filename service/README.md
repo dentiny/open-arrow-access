@@ -386,3 +386,16 @@ readers are independent and terminal on failure/EOF; they advertise no range or
 parallel-read support. `ByteReadOptions::io_chunk_size` bounds returned chunks;
 I/O concurrency does not create concurrent requests for a sequential stream.
 Use the existing OpenDAL accessor when a source needs true range reads.
+
+## OAI-PMH protocol (`oai`)
+
+`oai::OaiService` implements shared ListRecords and resumption requests for
+provider adapters. `OaiPage` keeps exact XML, including deleted records and all
+metadata fields, and exposes its record count and continuation token. A token
+request includes only `verb` and `resumptionToken`; dates, sets and metadata
+prefixes are never accidentally carried into a continuation. `noRecordsMatch`
+is an empty final page; other protocol errors and truncated XML fail.
+Callers control pacing and retries, including HTTP 503 Retry-After. Metadata
+formats and provider endpoints remain adapter-owned. This module does not fetch
+book/paper content or silently remove deleted or restricted metadata.
+See the [OAI-PMH protocol](https://www.openarchives.org/OAI/openarchivesprotocol.html).
