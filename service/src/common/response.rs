@@ -37,7 +37,7 @@ impl Connection {
         }
         Err(decode("too many redirects"))
     }
-    /// Exact upstream JSON bytes plus a parsed view. One call performs one page request.
+    /// Fetch one API page as parsed JSON metadata.
     pub async fn json(&self, path: &str, query: &[(&str, &str)]) -> Result<ApiDocument> {
         self.json_url(self.url(path, query)?).await
     }

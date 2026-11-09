@@ -1,3 +1,8 @@
-Add exact raw API document and byte-reader utility
+# API metadata
 
-This component is shared across provider services. Error construction and translation live in error.rs; validation lives in validation.rs.
+`ApiDocument::from_bytes(bytes)` parses an API response into a single
+`serde_json::Value`. `value()` exposes all parsed fields, including unknown fields.
+The input buffer is released after parsing.
+
+Provider file content uses the existing byte-reader contracts. JSON metadata
+uses its parsed representation; callers can serialize that value if needed.

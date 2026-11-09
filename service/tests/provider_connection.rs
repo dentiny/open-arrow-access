@@ -8,7 +8,7 @@ fn connection(f: &HttpFixture) -> Connection {
         .with_context(OperationContext::new())
 }
 #[tokio::test]
-async fn reads_one_raw_page_and_strips_credentials_across_redirects() {
+async fn reads_one_page_and_strips_credentials_across_redirects() {
     let f = HttpFixture::new();
     let dest = HttpFixture::new();
     let location = format!("{}/page?sig=a%2Bb", dest.endpoint());
@@ -27,7 +27,6 @@ async fn reads_one_raw_page_and_strips_credentials_across_redirects() {
     );
     let c = connection(&f).with_header("x-api-key", "secret").unwrap();
     let doc = c.json("start", &[]).await.unwrap();
-    assert!(doc.bytes().starts_with(b" { "));
     assert!(doc.value()["records"].is_array());
     assert!(!dest.requests()[0].headers.contains_key("x-api-key"));
     assert!(!format!("{c:?}").contains("secret"));
