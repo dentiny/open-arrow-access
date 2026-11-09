@@ -56,7 +56,10 @@ own format rules.
 
 ## Generated columns and observation
 
-Generated columns are the first planned functional record layer. The existing
+[`TypeConversionLayer`](../layers/README.md) is implemented and enabled by default.
+It uses the existing layer contract for explicit Arrow output casts.
+
+Generated columns remain a planned functional record layer. The existing
 `ReadOptionsProvider` contract allows a layer to widen an inner projection for
 expression dependencies, then apply the caller's final selection. Expression
 execution and DataFusion integration are not implemented. See the
