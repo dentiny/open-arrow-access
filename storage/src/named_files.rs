@@ -5,6 +5,19 @@ use open_arrow_access_core::{
     ObjectRef, ObjectStream, Result, async_trait,
 };
 
+/// Validate an opaque file namespace without constructing an accessor or performing I/O.
+/// Empty names and duplicate names fail; order, paths and download locators are not interpreted.
+pub fn validate_file_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Result<()> {
+    let mut seen = std::collections::HashSet::new();
+    if names
+        .into_iter()
+        .any(|name| name.is_empty() || !seen.insert(name))
+    {
+        return Err(invalid_names());
+    }
+    Ok(())
+}
+
 /// A fixed, ordered namespace of names mapped to caller-supplied byte objects.
 /// Useful for provider manifests whose filenames differ from download locators.
 #[derive(Clone, Debug)]

@@ -78,6 +78,22 @@ ZIP. Each entry reader retains archive identity and sets its own decoded length.
 Keep format-specific parsing, limits and entry ownership in their respective
 modules.
 
+## Provider file manifests
+
+The crate-internal `HttpFileService::resolve_files` binds a validated typed JSON
+manifest to lazy HTTP downloads. Its callback supplies a `ResolvedFilesPlan`
+with a canonical download root, ordered `FileSpec` descriptors and provider
+metadata. Zenodo, Dataverse and Internet Archive use this path.
+
+Each `FileSpec` holds an opaque logical name, a download object and an optional
+trusted representation length. `Connection::files` converts public `MetadataLink`
+values into the same descriptor. Multiple names may alias one object; lengths
+are keyed by that object and must describe the selected download representation.
+Omitted lengths use storage stat. Both plans and `NamedFileAccessor` reuse
+storage's `validate_file_names` rule for nonempty, unique names. Provider error
+context and generic metadata in `ResolvedFileSet<A, M>` are retained. These shared
+descriptions compile without provider features.
+
 ## OpenDAL backends
 
 Configure backend credentials, endpoint, root and transport on its operator,

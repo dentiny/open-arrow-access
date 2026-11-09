@@ -19,13 +19,3 @@ pub(crate) fn is_http_endpoint(url: &Url) -> bool {
         && url.query().is_none()
         && url.fragment().is_none()
 }
-
-pub(super) fn validate_file_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Result<()> {
-    let mut seen = std::collections::HashSet::new();
-    for name in names {
-        if name.is_empty() || !seen.insert(name) {
-            return Err(super::error::empty_or_dup_filename());
-        }
-    }
-    Ok(())
-}

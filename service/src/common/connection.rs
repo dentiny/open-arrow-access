@@ -14,6 +14,8 @@ use open_arrow_access_storage::NamedFileAccessor;
 use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext, raw::oio::ReadStream};
 use url::Url;
 
+use crate::file_manifest::FileSpec;
+
 const DEFAULT_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 
 /// HTTP settings. Debug output never includes keys or signed URLs.
@@ -165,7 +167,8 @@ impl Connection {
             self.clone(),
             files
                 .into_iter()
-                .map(|file| (file.file_name, file.url.into()))
+                .map(FileSpec::from)
+                .map(FileSpec::into_mapping)
                 .collect(),
         )
         .map_err(error::file_namespace)?;

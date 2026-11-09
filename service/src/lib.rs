@@ -1,5 +1,6 @@
 //! Provider services resolve source semantics into shared object/reader contracts.
 
+mod file_manifest;
 mod opendal_error;
 mod resolved_files;
 #[cfg(any(feature = "internet-archive", feature = "pmc", feature = "meca"))]
