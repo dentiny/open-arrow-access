@@ -51,3 +51,6 @@ pub mod xml_metadata;
 
 #[cfg(feature = "hathifiles")]
 pub mod hathifiles;
+
+#[cfg(feature = "oai")]
+pub mod oai;
