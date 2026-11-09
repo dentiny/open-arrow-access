@@ -1,5 +1,5 @@
 use super::{Connection, error};
-use http::Request;
+use http::{HeaderValue, Request, header::HeaderName};
 use open_arrow_access_core::Result;
 use opendal::Buffer;
 use url::Url;
@@ -27,4 +27,11 @@ impl Connection {
         }
         Ok(request)
     }
+}
+
+pub(super) fn header(name: &str, value: &str) -> Result<(HeaderName, HeaderValue)> {
+    let name = HeaderName::from_bytes(name.as_bytes()).map_err(error::header_name)?;
+    let mut value = HeaderValue::from_str(value).map_err(error::header_value)?;
+    value.set_sensitive(true);
+    Ok((name, value))
 }

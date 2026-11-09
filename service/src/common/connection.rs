@@ -1,4 +1,4 @@
-use super::{error::OP, validation};
+use super::{error::OP, request, url_util};
 use http::HeaderMap;
 use open_arrow_access_core::Result;
 use opendal::{HttpTransporter, OperationContext};
@@ -43,7 +43,7 @@ impl Connection {
         &self.origin
     }
     pub fn with_header(mut self, name: &str, value: &str) -> Result<Self> {
-        let (name, value) = validation::header(name, value)?;
+        let (name, value) = request::header(name, value)?;
         self.headers.insert(name, value);
         Ok(self)
     }
@@ -53,6 +53,6 @@ impl Connection {
         self
     }
     pub fn url(&self, path: &str, query: &[(&str, &str)]) -> Result<Url> {
-        validation::provider_url(&self.origin, path, query)
+        url_util::provider_url(&self.origin, path, query)
     }
 }

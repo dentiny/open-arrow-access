@@ -1,6 +1,6 @@
 use super::error::{decode, io};
 use super::{
-    ApiDocument, Connection, download_url,
+    ApiDocument, Connection, download_url, url_util,
     validation::{self, BodyLength},
 };
 use open_arrow_access_core::{Bytes, Result};
@@ -25,7 +25,7 @@ impl Connection {
                 .map_err(io)?;
             let status = response.status();
             if matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308) {
-                let next = validation::redirect(&url, response.headers())?;
+                let next = url_util::redirect(&url, response.headers())?;
                 authorized = authorized && next.origin() == url.origin();
                 url = next;
                 continue;
