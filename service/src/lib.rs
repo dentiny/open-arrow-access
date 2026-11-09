@@ -61,6 +61,12 @@ pub mod doab;
 #[cfg(feature = "arxiv")]
 pub mod arxiv_metadata;
 
+#[cfg(feature = "hathifiles")]
+pub mod hathifiles;
+
+#[cfg(feature = "federal-register")]
+pub mod federal_register;
+
 #[cfg(feature = "meca")]
 pub mod meca;
 
