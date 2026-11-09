@@ -36,6 +36,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | Document accessor | [`core/tests/document.rs`](../core/tests/document.rs) |
 | Field-name index and wide projections | [`core/tests/field_index.rs`](../core/tests/field_index.rs) |
 | Shared HTTP status classification | [`core/tests/error.rs`](../core/tests/error.rs) |
+| Byte line streaming and limits | [`core/tests/read_lines.rs`](../core/tests/read_lines.rs) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
 | Shared resource lifetime probe | [`test-support/src/drop_probe.rs`](../test-support/src/drop_probe.rs), used by core stream and TAR tests |
 | Generic file-format extension protocol | [`file-format/tests/accessor.rs`](../file-format/tests/accessor.rs), also runs with no format features |

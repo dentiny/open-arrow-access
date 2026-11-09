@@ -60,6 +60,7 @@ datafusion = { version = "55.2.0", default-features = false }
 bytes = "1"
 flate2 = "1"
 futures = "0.3"
+memchr = "2"
 more-asserts = "0.3.1"
 open-arrow-access-core = { path = "core", version = "0.1.0" }
 open-arrow-access-decompression = { path = "decompression", version = "0.1.0", default-features = false }
@@ -101,28 +102,20 @@ service-biorxiv = ["open-arrow-access-service/biorxiv"]
 service-courtlistener = ["open-arrow-access-service/courtlistener"]
 service-dataverse = ["open-arrow-access-service/dataverse"]
 service-doab = ["open-arrow-access-service/doab"]
-service-federal-register = [
-    "open-arrow-access-service/federal-register",
-]
+service-federal-register = ["open-arrow-access-service/federal-register"]
 service-figshare = ["open-arrow-access-service/figshare"]
 service-govinfo = ["open-arrow-access-service/govinfo"]
 service-gutenberg = ["open-arrow-access-service/gutenberg"]
 service-hathifiles = ["open-arrow-access-service/hathifiles"]
 service-huggingface = ["open-arrow-access-service/huggingface"]
-service-internet-archive = [
-    "open-arrow-access-service/internet-archive",
-]
-service-library-of-congress = [
-    "open-arrow-access-service/library-of-congress",
-]
+service-internet-archive = ["open-arrow-access-service/internet-archive"]
+service-library-of-congress = ["open-arrow-access-service/library-of-congress"]
 service-meca = ["open-arrow-access-service/meca"]
 service-oapen = ["open-arrow-access-service/oapen"]
 service-openstax = ["open-arrow-access-service/openstax"]
 service-pmc = ["open-arrow-access-service/pmc"]
 service-regulations = ["open-arrow-access-service/regulations"]
-service-semantic-scholar = [
-    "open-arrow-access-service/semantic-scholar",
-]
+service-semantic-scholar = ["open-arrow-access-service/semantic-scholar"]
 service-uspto = ["open-arrow-access-service/uspto"]
 service-warc = ["open-arrow-access-service/warc"]
 service-zenodo = ["open-arrow-access-service/zenodo"]

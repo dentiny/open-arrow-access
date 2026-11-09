@@ -12,6 +12,7 @@ arrow-schema.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 futures.workspace = true
+memchr.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
