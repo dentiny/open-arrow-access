@@ -24,6 +24,7 @@ impl OaiService {
             metadata_prefix: metadata_prefix.into(),
         })
     }
+
     pub async fn records(
         &self,
         from: Option<&str>,
@@ -42,12 +43,14 @@ impl OaiService {
         }
         self.page(&query).await
     }
+
     /// Resumption requests contain only verb and token, as required by OAI-PMH.
     pub async fn resume(&self, token: &str) -> Result<OaiPage> {
         validation::validate_nonempty_text(token, "resumption token")?;
         self.page(&[("verb", "ListRecords"), ("resumptionToken", token)])
             .await
     }
+
     async fn page(&self, query: &[(&str, &str)]) -> Result<OaiPage> {
         let mut url = self.endpoint.clone();
         url.query_pairs_mut().extend_pairs(query.iter().copied());

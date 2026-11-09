@@ -4,6 +4,7 @@ use open_arrow_access_core::{Bytes, ErrorKind};
 use open_arrow_access_service::oai::OaiService;
 use open_arrow_access_test_support::{collect_bytes, fixture, http::HttpFixture};
 use providers::connection;
+
 #[tokio::test]
 async fn raw_records_tokens_and_deleted_headers() {
     let f = HttpFixture::new();
@@ -33,6 +34,7 @@ async fn raw_records_tokens_and_deleted_headers() {
     );
     assert_eq!(f.requests().len(), 2);
 }
+
 #[tokio::test]
 async fn protocol_errors_and_truncated_xml() {
     let f = HttpFixture::new();

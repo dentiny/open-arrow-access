@@ -44,15 +44,18 @@ impl Connection {
             context,
         })
     }
+
     /// Override transport, for custom TLS/proxy configuration or deterministic tests.
     /// The inner transport must return single-hop responses; redirects are followed by the provider transport.
     pub fn with_context(mut self, context: OperationContext) -> Self {
         self.context = transport::follow_redirects(context);
         self
     }
+
     pub fn origin(&self) -> &Url {
         &self.origin
     }
+
     pub fn with_header(mut self, name: &str, value: &str) -> Result<Self> {
         let name = HeaderName::from_bytes(name.as_bytes()).map_err(error::header_name)?;
         let mut value = HeaderValue::from_str(value).map_err(error::header_value)?;
@@ -60,11 +63,13 @@ impl Connection {
         self.headers.insert(name, value);
         Ok(self)
     }
+
     /// Scoped query authentication, e.g. GovInfo's `api_key`.
     pub fn with_query(mut self, name: &str, value: &str) -> Self {
         self.query.push((name.into(), value.into()));
         self
     }
+
     pub fn url(&self, path: &str, query: &[(&str, &str)]) -> Result<Url> {
         url_util::provider_url(&self.origin, path, query)
     }
@@ -100,16 +105,19 @@ impl Connection {
         }
         Ok(response)
     }
+
     /// Fetch one API page as parsed JSON metadata.
     pub async fn json(&self, path: &str, query: &[(&str, &str)]) -> Result<ApiDocument> {
         self.json_url(self.url(path, query)?).await
     }
+
     /// Fetch an API continuation URL only if it remains within the configured origin.
     pub async fn json_url(&self, url: Url) -> Result<ApiDocument> {
         validation::same_origin(&self.origin, &url)?;
         let bytes = self.bytes(url, "application/json").await?;
         ApiDocument::from_bytes(bytes)
     }
+
     /// Read small XML/catalogue metadata; large file content should use `open`.
     pub async fn bytes(&self, url: Url, accept: &str) -> Result<Bytes> {
         let response = self.response(url, accept).await?;
@@ -129,6 +137,7 @@ impl Connection {
         length.finish()?;
         Ok(bytes.into())
     }
+
     /// Open an absolute URL, preserving encoded paths and signatures byte-for-byte.
     pub async fn open(&self, url: &str, options: ByteReadOptions) -> Result<Box<dyn ByteReader>> {
         let response = self.response(resolve_download_url(url)?, "*/*").await?;
@@ -168,6 +177,7 @@ impl Connection {
             },
         )))
     }
+
     /// Bind a validated provider manifest to lazy byte reads. Logical names remain opaque.
     pub fn files<M>(&self, files: Vec<MetadataLink>, metadata: M) -> Result<RemoteFiles<M>> {
         validation::validate_downloads(&files)?;
@@ -190,6 +200,7 @@ pub type RemoteFiles<M = ApiDocument> = ResolvedFileSet<Connection, M>;
 impl Accessor for Connection {
     type Request = ByteReadRequest;
     type Reader = dyn ByteReader;
+
     fn capability(&self) -> Capability {
         Capability {
             read: true,
@@ -198,6 +209,7 @@ impl Accessor for Connection {
             list: false,
         }
     }
+
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         Connection::open(self, request.object.locator(), request.options).await
     }
@@ -222,6 +234,7 @@ impl BodyLength {
             .transpose()?;
         Ok(Self { expected, read: 0 })
     }
+
     fn push(&mut self, bytes: usize) -> Result<()> {
         self.read = self
             .read
@@ -229,6 +242,7 @@ impl BodyLength {
             .ok_or_else(|| error::decode("body length overflow"))?;
         validation::validate_body_progress(self.expected, self.read)
     }
+
     fn finish(&self) -> Result<()> {
         validation::validate_body_complete(self.expected, self.read)
     }

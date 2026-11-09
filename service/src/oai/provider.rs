@@ -18,15 +18,18 @@ impl<P: OaiProvider> OaiProviderService<P> {
     pub fn new() -> Result<Self> {
         Self::with_connection(Connection::new(P::ORIGIN)?)
     }
+
     pub fn with_connection(connection: Connection) -> Result<Self> {
         Ok(Self {
             protocol: OaiService::new(connection, P::PATH, P::METADATA_PREFIX)?,
             provider: std::marker::PhantomData,
         })
     }
+
     pub fn connection(&self) -> &Connection {
         self.protocol.connection()
     }
+
     pub async fn records(
         &self,
         from: Option<&str>,
@@ -35,6 +38,7 @@ impl<P: OaiProvider> OaiProviderService<P> {
     ) -> Result<OaiPage> {
         self.protocol.records(from, until, set).await
     }
+
     pub async fn resume(&self, token: &str) -> Result<OaiPage> {
         self.protocol.resume(token).await
     }
