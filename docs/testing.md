@@ -1,6 +1,10 @@
 # Test locations
 
 This is the starting point for finding and adding tests across the workspace.
+
+For reproducible format/storage CPU, I/O and memory measurements, see the
+[local benchmark harness](../benchmarks/README.md). Its generated performance
+shards are separate from the committed correctness fixtures.
 Each crate owns its tests under `<crate>/tests/`. Composition tests live in the
 crate whose behavior they exercise. The workspace root has no test directory.
 
