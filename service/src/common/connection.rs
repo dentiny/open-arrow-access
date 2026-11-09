@@ -1,5 +1,5 @@
 use super::{
-    ApiDocument, error, resolve_download_url,
+    ApiDocument, MetadataLink, error, resolve_download_url,
     transport::{self, AuthScope},
     url_util,
     validation::{self, BodyLength},
@@ -16,13 +16,6 @@ use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext, raw::oio::Rea
 use url::Url;
 
 const DEFAULT_CHUNK_SIZE: usize = 2 * 1024 * 1024;
-
-/// A logical file name and its absolute download URL.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MetadataLink {
-    pub file_name: String,
-    pub url: String,
-}
 
 /// HTTP settings. Debug output never includes keys or signed URLs.
 #[derive(Clone)]

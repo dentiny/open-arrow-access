@@ -1,5 +1,5 @@
 //! JSON parsing and borrowed field access shared by providers.
-use super::{MetadataLink, error};
+use super::error;
 use open_arrow_access_core::Result;
 use serde_json::Value;
 
@@ -31,6 +31,13 @@ pub struct LinkField<'a> {
     pub json_field: &'a str,
     /// Logical file name exposed by the provider.
     pub file_name: &'a str,
+}
+
+/// An available metadata representation and its download URL.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MetadataLink {
+    pub file_name: String,
+    pub url: String,
 }
 
 /// Resolve optional HTTP representations in caller-selected field order.
