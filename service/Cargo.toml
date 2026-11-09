@@ -12,6 +12,7 @@ arxiv = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/tar",
 ]
+arxiv-metadata = ["oai"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
@@ -136,3 +137,7 @@ required-features = ["oai"]
 [[test]]
 name = "oai_provider"
 required-features = ["oai"]
+
+[[test]]
+name = "arxiv_metadata"
+required-features = ["arxiv-metadata"]
