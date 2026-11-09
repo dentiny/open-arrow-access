@@ -7,8 +7,7 @@ mod transport;
 pub(crate) use transport::new_transport;
 pub(crate) mod validation;
 
-pub use error::HttpStatusError;
-pub(crate) use error::{check_status, json_error, request_error, transport_error};
+pub(crate) use error::{json_error, request_error, transport_error};
 use http::Request;
 use open_arrow_access_core::Result;
 use open_arrow_access_storage::OpenDalAccessor;
@@ -73,7 +72,15 @@ impl HttpClient {
             .await
             .map_err(|error| transport_error(operation, error))?;
         let status = response.status();
-        check_status(status, response.headers(), operation)?;
+        if status != http::StatusCode::OK {
+            let kind = match status.as_u16() {
+                404 => opendal::ErrorKind::NotFound,
+                401 | 403 => opendal::ErrorKind::PermissionDenied,
+                429 => opendal::ErrorKind::RateLimited,
+                _ => opendal::ErrorKind::Unexpected,
+            };
+            return Err(error::metadata_http_error(operation, kind, status));
+        }
         let mut body = response.into_body();
         let mut bytes = Vec::new();
         loop {
