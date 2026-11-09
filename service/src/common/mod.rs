@@ -9,3 +9,7 @@ pub use url_util::{download_url, filename, segment};
 
 mod document;
 pub use document::ApiDocument;
+
+mod connection;
+mod transport;
+pub use connection::Connection;

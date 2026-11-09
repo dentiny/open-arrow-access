@@ -1,5 +1,6 @@
 //! URL parsing, construction and component encoding shared by providers.
 use super::{error, validation};
+use http::HeaderMap;
 use open_arrow_access_core::Result;
 use url::Url;
 
@@ -22,4 +23,24 @@ pub fn segment(value: &str) -> Result<String> {
 pub fn filename(value: &str) -> Result<String> {
     validation::filename_component(value)?;
     segment(value)
+}
+
+pub(super) fn provider_url(origin: &Url, path: &str, query: &[(&str, &str)]) -> Result<Url> {
+    validation::provider_path(path)?;
+    let mut url = origin.join(path).map_err(error::provider_path)?;
+    validation::same_origin(origin, &url)?;
+    if !query.is_empty() {
+        url.query_pairs_mut().extend_pairs(query.iter().copied());
+    }
+    Ok(url)
+}
+
+pub(super) fn redirect(url: &Url, headers: &HeaderMap) -> Result<Url> {
+    let location = headers
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| error::decode("redirect lacks Location"))?;
+    let next = download_url(url.join(location).map_err(error::redirect)?.as_str())?;
+    validation::redirect(url, &next)?;
+    Ok(next)
 }
