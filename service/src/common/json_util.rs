@@ -40,6 +40,27 @@ pub struct MetadataLink {
     pub url: String,
 }
 
+/// Resolve a list of files with required name and download URL string fields.
+/// Names use provider filename-component rules. Order and URL strings are
+/// preserved; URL and namespace validation happen when binding downloads.
+pub fn resolve_named_links(
+    files: &[Value],
+    name_field: &str,
+    url_field: &str,
+) -> Result<Vec<MetadataLink>> {
+    files
+        .iter()
+        .map(|file| {
+            let name = text(file, name_field)?;
+            super::validate_filename(name)?;
+            Ok(MetadataLink {
+                file_name: name.into(),
+                url: text(file, url_field)?.into(),
+            })
+        })
+        .collect()
+}
+
 /// Resolve optional HTTP representations in caller-selected field order.
 /// Missing/null/empty links mean that representation is unavailable; wrong types fail.
 /// Logical-name uniqueness remains the responsibility of the shared file accessor.

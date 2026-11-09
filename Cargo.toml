@@ -58,7 +58,7 @@ arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
 async-trait = "0.1.91"
-atif-arrow = "0.4.0"
+atif-arrow = "0.4.1"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 warc = { package = "warc-rs", version = "=0.3.0", default-features = false }
 xml-arrow = "0.2.2"
@@ -69,6 +69,7 @@ datafusion = { version = "55.2.0", default-features = false }
 bytes = "1"
 flate2 = "1"
 futures = "0.3"
+memchr = "2"
 more-asserts = "0.3.1"
 open-arrow-access-core = { path = "core", version = "0.1.0" }
 open-arrow-access-decompression = { path = "decompression", version = "0.1.0", default-features = false }

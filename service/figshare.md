@@ -1,17 +1,68 @@
 # Figshare
 
-Enable `service-figshare`. `FigshareService::new()?.article(id,Some(version))`
-resolves a specific published article version into lazy sequential file access.
-Pass `None` only when latest-version semantics are intended. Parsed metadata keeps
-all original fields, license details, checksums, sizes and download URLs.
-Files keep upstream names and original bytes. Resolution and cached listing
-perform no file downloads. Embargoed articles fail rather than appearing empty.
-`collection_articles(id,page,page_size)` returns one discovery metadata page; callers
-own pagination, pacing and retry policy. No API key is needed for public articles.
+## Service and data
 
-For BHL's monthly OCR export, article ID is `21422193`; select and record a version.
-The BHL API service composes with this shared provider instead of duplicating its
-Figshare parsing or downloads. Gzip/text decoding remains separately composable.
+Figshare publishes research articles with attached datasets, documents and other
+research files. This provider resolves public article versions and lists articles
+in a collection. File contents remain in their published formats.
 
-Sources: [Figshare API](https://docs.figshare.com/v2/),
-[BHL export announcement](https://blog.biodiversitylibrary.org/2023/01/bhl-technical-development-year-in-review).
+Enable facade feature `service-figshare`. See [example setup](README.md#example-setup) for dependencies and the async runtime.
+
+## Request and response
+
+| Library request | Upstream GET | Library response |
+| --- | --- | --- |
+| `article(id: NonZeroU64, version: Option<NonZeroU32>)` | `/v2/articles/{id}` or `/v2/articles/{id}/versions/{version}` | `RemoteFiles<ApiDocument>` |
+| `collection_articles(id, page: u32, page_size: u16)` | `/v2/collections/{id}/articles?page=…&page_size=…` | One `ApiDocument` array page |
+
+Article metadata contains `id`, `version`, license information and
+`files[]` entries with `name` and `download_url`. `metadata().value()` retains the
+parsed response. Empty-root listing yields original file names in response order;
+`open(name)` returns a sequential `ByteReader`. Resolution does not download files.
+`Some(version)` selects an explicit version; `None` selects the current article.
+Embargoed articles fail. Public requests need no API key; pagination is explicit.
+
+Illustrative upstream response shape (values are examples;
+additional fields may be present):
+
+```json
+{
+  "id": 21422193,
+  "version": 4,
+  "license": {
+    "name": "example-license"
+  },
+  "files": [
+    {
+      "name": "ocr.txt.gz",
+      "download_url": "https://files.example.org/ocr.txt.gz"
+    }
+  ]
+}
+```
+
+## Usage and results
+
+```rust
+use futures::TryStreamExt;
+use open_arrow_access::{Accessor, ByteAccessor, Result, service::figshare::FigshareService};
+
+async fn inspect_article(id: std::num::NonZeroU64, version: std::num::NonZeroU32) -> Result<()> {
+    let files = FigshareService::new()?.article(id, Some(version)).await?;
+    println!("license: {}", files.metadata().value()["license"]);
+    let mut names = files.list("".into()).await?;
+    if let Some(name) = names.try_next().await? {
+        println!("file: {}", name.locator());
+        let mut reader = files.open(name.into()).await?;
+        if let Some(chunk) = reader.next().await? {
+            println!("first chunk: {} bytes", chunk.len());
+        }
+    }
+    Ok(())
+}
+```
+
+The example prints the article's license metadata, an available file name and
+the size of its first original byte chunk. It does not decode the file into Arrow.
+
+Source: [Figshare API](https://docs.figshare.com/v2/).

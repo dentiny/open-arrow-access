@@ -82,7 +82,7 @@ impl<R: ByteReader + ?Sized> LineState<R> {
                     }
                 }
             }
-            let newline = self.pending.iter().position(|byte| *byte == b'\n');
+            let newline = memchr::memchr(b'\n', &self.pending);
             let consumed = newline.map_or(self.pending.len(), |index| index + 1);
             if let Some(limit) = max_line_bytes
                 && consumed > limit - line.len()

@@ -1,5 +1,5 @@
 use super::{error::decode, validation};
-use crate::common::{Connection, MetadataLink, array, filename, segment, text};
+use crate::common::{Connection, MetadataLink, array, encode_path, filename, text};
 use open_arrow_access_core::Result;
 use serde_json::Value;
 
@@ -7,11 +7,7 @@ pub(super) fn resolve_prefix(value: &str) -> Result<String> {
     if value.is_empty() {
         return Ok(String::new());
     }
-    value
-        .split('/')
-        .map(segment)
-        .collect::<Result<Vec<_>>>()
-        .map(|parts| parts.join("/"))
+    encode_path(value)
 }
 
 pub(super) fn resolve_bulk_files(
