@@ -384,3 +384,12 @@ See [api-document](api-document.md) for this utility.
 ## Common provider-connection
 
 See [provider-connection](provider-connection.md) for this utility.
+
+## Common provider-test-fixtures
+
+See [provider-test-fixtures](provider-test-fixtures.md) for this utility.
+
+
+## Common http-downloads
+
+See [http-downloads](http-downloads.md) for this utility.
