@@ -5,6 +5,8 @@ fn validates_download_origins_without_changing_signed_queries() {
     assert_eq!(resolve_download_url(signed).unwrap().as_str(), signed);
     for url in [
         "file:///tmp/x",
+        "ftp://files.example/x",
+        "https://u@example.com/x",
         "https://u:p@example.com/x",
         "https://example.com/x#fragment",
     ] {

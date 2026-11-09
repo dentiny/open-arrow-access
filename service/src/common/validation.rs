@@ -4,12 +4,7 @@ use open_arrow_access_core::Result;
 use url::Url;
 
 pub(super) fn download_url(url: &Url) -> Result<()> {
-    if !matches!(url.scheme(), "http" | "https")
-        || url.host_str().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.fragment().is_some()
-    {
+    if !crate::http_client::validation::is_http_resource_url(url) {
         return Err(decode("expected credential-free HTTP(S) download URL"));
     }
     Ok(())
