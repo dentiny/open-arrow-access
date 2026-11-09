@@ -23,6 +23,8 @@ All in-memory format scans have CPU time approximately equal to wall time. These
 
 ## Measured optimizations
 
+Review PRs: [ATIF #25](https://github.com/dentiny/atif-arrow/pull/25), [XML #21](https://github.com/dentiny/xml-arrow-rs/pull/21), [empty-range planning #195](https://github.com/dentiny/open-arrow-access/pull/195), [small-range retained memory #194](https://github.com/dentiny/open-arrow-access/pull/194).
+
 All optimization branches target their own upstream main independently; none is merged. Production dependency versions are unchanged in the benchmark PR. The upstream changes were injected only through local Cargo patches.
 
 | Change | Before ms | After ms | Wall-time reduction |
