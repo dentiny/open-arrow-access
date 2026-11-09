@@ -64,5 +64,11 @@ pub mod arxiv_metadata;
 #[cfg(feature = "hathifiles")]
 pub mod hathifiles;
 
+#[cfg(feature = "federal-register")]
+pub mod federal_register;
+
 #[cfg(feature = "meca")]
 pub mod meca;
+
+#[cfg(feature = "biorxiv")]
+pub mod biorxiv;

@@ -13,10 +13,12 @@ arxiv = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/tar",
 ]
+biorxiv = ["meca", "dep:chrono"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
 doab = ["oai"]
+federal-register = []
 gutenberg = ["format-xml", "dep:chrono"]
 hathifiles = []
 huggingface = [
@@ -171,5 +173,13 @@ name = "hathifiles"
 required-features = ["hathifiles"]
 
 [[test]]
+name = "federal_register"
+required-features = ["federal-register"]
+
+[[test]]
 name = "meca"
 required-features = ["meca"]
+
+[[test]]
+name = "biorxiv"
+required-features = ["biorxiv"]
