@@ -15,7 +15,7 @@ fn request() -> ReadRequest {
 
 #[tokio::test]
 async fn keeps_mapped_book_and_file_metadata_in_rdf_order() {
-    let accessor = GutenbergAccessor::new(MemoryAccessor::new(
+    let accessor = GutenbergAccessor::with_default_decoder(MemoryAccessor::new(
         &fixture!("gutenberg", "book.rdf").await,
         17,
     ));
@@ -56,7 +56,7 @@ async fn projection_reads_only_rdf_and_preserves_zero_column_rows() {
     ] {
         let bytes = MemoryAccessor::new(&fixture!("gutenberg", "book.rdf").await, 11);
         let observations = bytes.observations.clone();
-        let accessor = GutenbergAccessor::new(bytes);
+        let accessor = GutenbergAccessor::with_default_decoder(bytes);
         let options = ByteReadOptions {
             io_concurrency: NonZeroUsize::new(2).unwrap(),
             ..Default::default()
@@ -101,7 +101,7 @@ async fn rejects_invalid_rdf_without_silently_dropping_rows() {
         "bad_multiple_books.rdf",
     ] {
         let raw = fixture!("gutenberg", name).await;
-        let accessor = GutenbergAccessor::new(MemoryAccessor::new(&raw, 19));
+        let accessor = GutenbergAccessor::with_default_decoder(MemoryAccessor::new(&raw, 19));
         let mut reader = accessor.open(request()).await.unwrap();
         assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
         assert!(reader.next().await.unwrap().is_none());
@@ -112,7 +112,10 @@ async fn rejects_invalid_rdf_without_silently_dropping_rows() {
 async fn preserves_storage_errors() {
     let bytes = MemoryAccessor::new(&fixture!("gutenberg", "book.rdf").await, 7)
         .with_failure(7, ErrorKind::PermissionDenied);
-    let mut reader = GutenbergAccessor::new(bytes).open(request()).await.unwrap();
+    let mut reader = GutenbergAccessor::with_default_decoder(bytes)
+        .open(request())
+        .await
+        .unwrap();
     let error = reader.next().await.unwrap_err();
     assert_eq!(error.kind(), ErrorKind::PermissionDenied);
     assert_eq!(error.operation(), "memory_read");
@@ -121,7 +124,7 @@ async fn preserves_storage_errors() {
 #[tokio::test]
 async fn keeps_metadata_only_books_with_missing_optional_fields() {
     let raw = fixture!("gutenberg", "metadata_only.rdf").await;
-    let accessor = GutenbergAccessor::new(MemoryAccessor::new(&raw, 13));
+    let accessor = GutenbergAccessor::with_default_decoder(MemoryAccessor::new(&raw, 13));
     let mut reader = accessor.open(ReadRequest::new("book.rdf")).await.unwrap();
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch.num_rows(), 1);
@@ -133,7 +136,7 @@ async fn keeps_metadata_only_books_with_missing_optional_fields() {
 async fn rdf_metadata_can_exceed_the_previous_size_limit() {
     let mut raw = fixture!("gutenberg", "book.rdf").await;
     raw.extend(std::iter::repeat_n(b' ', 4 * 1024 * 1024));
-    let mut reader = GutenbergAccessor::new(MemoryAccessor::new(&raw, 64 * 1024))
+    let mut reader = GutenbergAccessor::with_default_decoder(MemoryAccessor::new(&raw, 64 * 1024))
         .open(request())
         .await
         .unwrap();

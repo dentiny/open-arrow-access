@@ -3,10 +3,7 @@ use super::{
     transport::{self, AuthScope},
     url_util, validation,
 };
-use crate::{
-    ResolvedFileSet,
-    http_client::{BodyLength, HttpClient},
-};
+use crate::{ResolvedFileSet, http_body::BodyLength, http_client::HttpClient};
 use futures::stream;
 use http::{HeaderMap, HeaderValue, Request, header::HeaderName};
 use open_arrow_access_core::{
@@ -16,6 +13,8 @@ use open_arrow_access_core::{
 use open_arrow_access_storage::NamedFileAccessor;
 use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext, raw::oio::ReadStream};
 use url::Url;
+
+use crate::file_manifest::FileSpec;
 
 const DEFAULT_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 
@@ -112,7 +111,7 @@ impl Connection {
     pub async fn open(&self, url: &str, options: ByteReadOptions) -> Result<Box<dyn ByteReader>> {
         let response = self.response(resolve_download_url(url)?, "*/*").await?;
         let length = BodyLength::new(response.headers(), error::OP)?;
-        let content_length = length.expected();
+        let content_length = length.expected;
         let version = response
             .headers()
             .get("etag")
@@ -154,7 +153,8 @@ impl Connection {
             self.clone(),
             files
                 .into_iter()
-                .map(|file| (file.file_name, file.url.into()))
+                .map(FileSpec::from)
+                .map(FileSpec::into_mapping)
                 .collect(),
         )
         .map_err(error::file_namespace)?;

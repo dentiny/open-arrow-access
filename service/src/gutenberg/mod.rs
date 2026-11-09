@@ -8,13 +8,13 @@ use std::sync::{Arc, OnceLock};
 
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
-    DefaultDocumentAccessor, DocumentDecoder, FieldValue, ReadRequest, RecordBatch, Result,
-    SchemaRef, async_trait,
+    DocumentAccessor, DocumentDecoder, FieldNameIndex, FieldValue, ReadRequest, RecordBatch,
+    Result, SchemaRef, async_trait,
 };
 use open_arrow_access_file_format::xml::{NamespaceBinding, XmlField, XmlSchema};
 
 /// Read per-book RDF metadata through caller-configured storage.
-pub type GutenbergAccessor<A> = DefaultDocumentAccessor<A, GutenbergDecoder>;
+pub type GutenbergAccessor<A> = DocumentAccessor<A, GutenbergDecoder>;
 
 /// Convert one Gutenberg RDF document into its projected book metadata row.
 /// Use with [`open_arrow_access_core::DocumentAccessor`] for explicit composition.
@@ -112,6 +112,7 @@ struct Definitions {
     schema: SchemaRef,
     xml: XmlSchema,
     fields: Vec<Mapping>,
+    field_index: FieldNameIndex,
 }
 
 fn definitions() -> &'static Definitions {
@@ -175,8 +176,11 @@ fn definitions() -> &'static Definitions {
             &bindings,
         )
         .expect("valid Gutenberg XML mapping");
+        let schema = Arc::new(Schema::new(fields));
+        let field_index = FieldNameIndex::new(schema.fields());
         Definitions {
-            schema: Arc::new(Schema::new(fields)),
+            schema,
+            field_index,
             xml,
             fields: mappings,
         }

@@ -9,4 +9,4 @@ pub use backend::OpenDalAccessor;
 pub use opendal;
 
 mod named_files;
-pub use named_files::NamedFileAccessor;
+pub use named_files::{NamedFileAccessor, validate_file_names};

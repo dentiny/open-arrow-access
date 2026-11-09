@@ -9,7 +9,7 @@ configuration, source identity checks and domain mappings in the extension.
 | Incremental Arrow decoder | `BatchDecoder` inside its factory | `decode_batches(input, decoder, metadata)` |
 | Native asynchronous parser | Map its items/errors inside its factory | `StreamReader::new(stream, metadata)` |
 | One whole document to one Arrow row | `DocumentDecoder` | `DocumentAccessor::new(storage, decoder)` |
-| Document provider with default decoder settings | `DocumentDecoder + Default` and a type alias | `DefaultDocumentAccessor::new(storage)` |
+| Document provider with default decoder settings | `DocumentDecoder + Default` and a type alias | `DocumentAccessor::with_default_decoder(storage)` |
 | OpenDAL storage backend | Configure an OpenDAL `Operator` | `OpenDalAccessor::new(operator)` |
 
 ## Document providers
@@ -22,23 +22,24 @@ including zero-column projections. See the PMC and Gutenberg decoder mappings.
 For a provider with default settings, expose an alias:
 
 ```rust,ignore
-pub type CatalogAccessor<B> = DefaultDocumentAccessor<B, CatalogDecoder>;
+pub type CatalogAccessor<B> = DocumentAccessor<B, CatalogDecoder>;
 
 #[derive(Default)]
 pub struct CatalogDecoder;
 
 // Implement DocumentDecoder for CatalogDecoder: prepare + decode.
-// Callers construct CatalogAccessor::new(storage).
+// Callers construct CatalogAccessor::with_default_decoder(storage).
 ```
 
 The shared accessor validates projection before input I/O, reports the output
 schema at `open`, and opens/reads bytes only on the first `next`. It forwards byte
 options, owns the storage/decoder needed by each reader, and checks that decoding
-returns exactly one row with the declared schema. Cloning either document
+returns exactly one row with the declared schema. Cloning the document
 accessor shares storage and decoder without requiring either type to be `Clone`.
 Each opened reader has independent terminal state.
 
-`PmcAccessor::new(storage)` and `GutenbergAccessor::new(storage)` use this path.
+`PmcAccessor::with_default_decoder(storage)` and
+`GutenbergAccessor::with_default_decoder(storage)` use this path.
 With `service-pmc` enabled, its decoder can also be composed explicitly:
 
 ```rust,no_run
@@ -77,6 +78,22 @@ ZIP. Each entry reader retains archive identity and sets its own decoded length.
 Keep format-specific parsing, limits and entry ownership in their respective
 modules.
 
+## Provider file manifests
+
+The crate-internal `HttpFileService::resolve_files` binds a validated typed JSON
+manifest to lazy HTTP downloads. Its callback supplies a `ResolvedFilesPlan`
+with a canonical download root, ordered `FileSpec` descriptors and provider
+metadata. Zenodo, Dataverse and Internet Archive use this path.
+
+Each `FileSpec` holds an opaque logical name, a download object and an optional
+trusted representation length. `Connection::files` converts public `MetadataLink`
+values into the same descriptor. Multiple names may alias one object; lengths
+are keyed by that object and must describe the selected download representation.
+Omitted lengths use storage stat. Both plans and `NamedFileAccessor` reuse
+storage's `validate_file_names` rule for nonempty, unique names. Provider error
+context and generic metadata in `ResolvedFileSet<A, M>` are retained. These shared
+descriptions compile without provider features.
+
 ## OpenDAL backends
 
 Configure backend credentials, endpoint, root and transport on its operator,
@@ -99,3 +116,5 @@ reader implementation in this workspace.
 Use the existing [test-support contracts](../test-support/README.md) for the
 common behavior, and keep parser values, domain validation and backend-specific
 capability/scheduling tests with their owning suite.
+
+The former `DefaultDocumentAccessor` forwarding wrapper has been removed. Migrate its type aliases to `DocumentAccessor<B, D>` and its one-argument `new(storage)` calls to `with_default_decoder(storage)`. Explicit decoder construction remains `DocumentAccessor::new(storage, decoder)`.

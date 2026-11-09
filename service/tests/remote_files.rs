@@ -66,3 +66,55 @@ fn invalid_or_duplicate_membership_fails_before_network_io() {
     );
     assert!(f.requests().is_empty());
 }
+
+#[tokio::test]
+async fn opaque_aliases_keep_metadata_and_download_locator() {
+    let f = HttpFixture::new();
+    f.file("/content?sig=a%2Bb", Bytes::from_static(b"original"));
+    let c = providers::connection(&f);
+    let url = format!("{}/content?sig=a%2Bb", f.endpoint());
+    let files = c
+        .files(
+            ["../opaque", "alias"]
+                .into_iter()
+                .map(|name| MetadataLink {
+                    file_name: name.into(),
+                    url: url.clone(),
+                })
+                .collect(),
+            ("version", 4),
+        )
+        .unwrap();
+    assert_eq!(files.metadata(), &("version", 4));
+    let listed = files
+        .list(ListRequest::new(""))
+        .await
+        .unwrap()
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    assert_eq!(
+        listed
+            .iter()
+            .map(|object| object.locator())
+            .collect::<Vec<_>>(),
+        ["../opaque", "alias"]
+    );
+    assert!(f.requests().is_empty());
+    for name in ["../opaque", "alias"] {
+        let reader = files.open(name.into()).await.unwrap();
+        assert!(!reader.capability().read_with_range);
+        assert_eq!(
+            open_arrow_access_core::read_all(reader, "test")
+                .await
+                .unwrap(),
+            b"original"
+        );
+    }
+    assert_eq!(f.requests().len(), 2);
+    assert!(
+        f.requests()
+            .iter()
+            .all(|request| request.path == "/content?sig=a%2Bb")
+    );
+}

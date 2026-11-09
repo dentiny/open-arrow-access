@@ -92,6 +92,8 @@ pub struct Error {
     message: String,
     #[source]
     source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    http_status: Option<u16>,
+    retry_after: Option<String>,
 }
 
 impl Error {
@@ -101,6 +103,8 @@ impl Error {
             operation,
             message: message.into(),
             source: None,
+            http_status: None,
+            retry_after: None,
         }
     }
 
@@ -112,6 +116,25 @@ impl Error {
         self
     }
 
+    /// Retain HTTP failure metadata without imposing a retry policy.
+    pub fn with_http_response(mut self, status: u16, retry_after: Option<String>) -> Self {
+        self.http_status = Some(status);
+        self.retry_after = retry_after;
+        self
+    }
+
+    /// Original HTTP response status, when this error came from a response.
+    pub fn http_status(&self) -> Option<u16> {
+        self.http_status
+    }
+
+    /// Original Retry-After header: delta-seconds or an HTTP-date. The caller
+    /// interprets the value and decides whether and when to retry. Invalid values
+    /// are retained; this library does not silently replace them with a delay.
+    pub fn retry_after(&self) -> Option<&str> {
+        self.retry_after.as_deref()
+    }
+
     pub fn kind(&self) -> ErrorKind {
         self.kind
     }
@@ -119,4 +142,12 @@ impl Error {
     pub fn operation(&self) -> &'static str {
         self.operation
     }
+}
+
+pub(crate) fn invalid_output_schema() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "build_record_batch",
+        "output schema must contain unique fields from the full schema",
+    )
 }

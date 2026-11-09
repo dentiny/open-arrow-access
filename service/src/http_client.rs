@@ -1,7 +1,5 @@
 //! Provider JSON requests over the same transport used for file reads.
 
-mod body;
-pub(crate) use body::{BodyLength, collect_body};
 mod error;
 pub(crate) mod files;
 mod parser;
@@ -106,7 +104,11 @@ impl HttpClient {
             .await
             .map_err(|error| transport_error(operation, error))?;
         if response.status() != http::StatusCode::OK {
-            return Err(error::http_status_error(operation, response.status()));
+            return Err(error::http_status_error(
+                operation,
+                response.status(),
+                response.headers(),
+            ));
         }
         Ok(response)
     }
@@ -116,7 +118,7 @@ impl HttpClient {
         request: Request<Buffer>,
         operation: &'static str,
     ) -> Result<open_arrow_access_core::Bytes> {
-        collect_body(self.response(request, operation).await?, operation).await
+        crate::http_body::collect(self.response(request, operation).await?, operation).await
     }
 }
 

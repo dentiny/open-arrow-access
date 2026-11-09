@@ -1,5 +1,6 @@
 //! Provider services resolve source semantics into shared object/reader contracts.
 
+mod file_manifest;
 mod opendal_error;
 mod resolved_files;
 #[cfg(any(feature = "internet-archive", feature = "pmc", feature = "meca"))]
@@ -33,6 +34,7 @@ pub mod zenodo;
 mod filename;
 
 // Individual providers may use only part of the shared HTTP utilities.
+mod http_body;
 #[allow(dead_code)]
 mod http_client;
 

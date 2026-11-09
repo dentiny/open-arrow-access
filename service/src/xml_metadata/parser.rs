@@ -27,11 +27,7 @@ impl<'a> XmlDocument<'a> {
                 Event::Start(element) | Event::Empty(element) => {
                     validation::validate_root_name(element.local_name().as_ref(), expected_root)?;
                     let namespace = match namespace {
-                        ResolveResult::Bound(namespace) => Some(
-                            std::str::from_utf8(namespace.as_ref())
-                                .map_err(error::utf8)?
-                                .to_owned(),
-                        ),
+                        ResolveResult::Bound(namespace) => Some(namespace.as_ref().to_owned()),
                         ResolveResult::Unbound => None,
                         ResolveResult::Unknown(_) => {
                             return Err(error::invalid("unbound XML prefix"));
@@ -52,11 +48,11 @@ impl<'a> XmlDocument<'a> {
                     });
                 }
                 Event::DocType(value) => {
-                    validation::validate_doctype(&value, doctype.is_some())?;
+                    validation::validate_doctype(value.as_ref(), doctype.is_some())?;
                     doctype = Some((start, reader.buffer_position() as usize));
                 }
                 Event::Decl(_) | Event::Comment(_) | Event::PI(_) => {}
-                Event::Text(text) if text.iter().all(u8::is_ascii_whitespace) => {}
+                Event::Text(text) if text.as_ref().trim_ascii().is_empty() => {}
                 _ => return Err(error::root(expected_root)),
             }
         }
