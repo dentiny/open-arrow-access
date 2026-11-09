@@ -7,11 +7,11 @@ repository.workspace = true
 description = "Dataset source providers for Open Arrow Access"
 
 [features]
+doab = ["oai"]
 arxiv = ["format-xml", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
-doab = ["oai"]
 gutenberg = ["dep:arrow-array", "dep:arrow-schema", "dep:chrono", "dep:xml-arrow"]
 huggingface = [
     "dep:open-arrow-access-dataset",
@@ -34,7 +34,13 @@ pmc = [
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 zenodo = []
 
-format-xml = ["dep:quick-xml", "dep:xml-arrow", "dep:arrow-array", "dep:arrow-schema"]
+format-xml = [
+    "dep:quick-xml",
+    "dep:open-arrow-access-file-format",
+    "open-arrow-access-file-format/xml",
+    "dep:arrow-array",
+    "dep:arrow-schema",
+]
 oai = ["format-xml"]
 
 [dependencies]

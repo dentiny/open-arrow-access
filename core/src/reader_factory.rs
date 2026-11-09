@@ -1,6 +1,6 @@
 use crate::{Accessor, ByteReadRequest, ByteReader, Capability, Reader, Result, async_trait};
 
-/// Supplied by [`ReaderFactoryExt::open_reader`] to creation hooks.
+/// Supplied by [`ReaderFactoryExt::open_reader`] or [`ReaderFactoryExt::open_input`] to creation hooks.
 /// Public so other crates can implement hooks; only this module can construct it.
 pub struct FactoryToken {
     _private: (),
@@ -32,7 +32,7 @@ pub trait ReaderFactory: Send + Sync {
 
     /// Inspect opened bytes and return an owned reader with metadata available.
     /// Preserve source errors and lifecycle; inspection may perform I/O.
-    /// `token` is supplied by [`ReaderFactoryExt::open_reader`].
+    /// `token` is supplied by the shared [`ReaderFactoryExt`] opening methods.
     async fn create_reader(
         &self,
         token: &FactoryToken,
@@ -45,6 +45,14 @@ pub trait ReaderFactory: Send + Sync {
 /// Shared opening flow provided by one blanket implementation for all factories.
 #[async_trait]
 pub trait ReaderFactoryExt: ReaderFactory {
+    /// Prepare a format and decode an already-open byte reader. Preparation
+    /// finishes before the factory can poll the supplied input.
+    async fn open_input(
+        &self,
+        input: Box<dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<Box<Self::Reader>>;
+
     /// Prepare, open storage, and create a reader; implementations cannot override it.
     async fn open_reader(
         &self,
@@ -57,6 +65,16 @@ pub trait ReaderFactoryExt: ReaderFactory {
 
 #[async_trait]
 impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
+    async fn open_input(
+        &self,
+        input: Box<dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<Box<Self::Reader>> {
+        let prepared = self.prepare(&request)?;
+        self.create_reader(&FactoryToken { _private: () }, input, request, prepared)
+            .await
+    }
+
     async fn open_reader(
         &self,
         storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
