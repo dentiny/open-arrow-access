@@ -20,3 +20,5 @@ HTTP transports may select, paginate, and serialize entries loaded from fixtures
 
 Format and provider directories contain their own samples. `bytes/` contains
 format-independent inputs for byte-reader, storage, and decoder contracts.
+
+`openstax/book.zip` is a project-authored minimal GitHub source ZIP layout with one CNXML module, used to verify provider-to-ZIP composition. It contains no upstream book content.
