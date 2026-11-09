@@ -38,6 +38,7 @@ impl ZipArchive {
             .iter()
             .enumerate()
             .map(|(index, entry)| {
+                super::validation::validate_offset(entry)?;
                 Ok(ZipEntry {
                     index,
                     name: entry.insecure_file_name.as_bytes().to_vec(),

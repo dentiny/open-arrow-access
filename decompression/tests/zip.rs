@@ -284,10 +284,13 @@ async fn ranged_input_contract_and_entry_failures() {
 }
 
 #[tokio::test]
-#[should_panic(expected = "called `Option::unwrap()` on a `None` value")]
-async fn malformed_zip64_offset_uses_upstream_panic() {
+async fn malformed_zip64_offset_is_a_decode_error() {
     let data = fixture!("zip", "bad-offset.zip").await;
-    let _ = ZipAccessor::new(memory(&data), 0)
+    let error = ZipAccessor::new(memory(&data), 0)
         .open(ByteReadRequest::new("bad-offset.zip"))
-        .await;
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert_eq!(error.operation(), "read_zip");
 }
