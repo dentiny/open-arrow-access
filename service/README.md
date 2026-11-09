@@ -369,10 +369,6 @@ See https://github.com/arXiv/arxiv-docs/blob/develop/source/help/bulk_data_s3.md
 Run `cargo run --example read_arxiv --features service-arxiv -- testdata/arxiv 2410 1 1`
 to inspect the fixture manifest and TAR and stream one PDF entry.
 
-## Common http-errors
-
-See [http-errors](http-errors.md) for this utility.
-
 ## Common http-transport
 
 See [http-transport](http-transport.md) for this utility.
