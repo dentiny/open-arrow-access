@@ -1,7 +1,7 @@
 use super::{decode_error, input::ParquetInput, reader::parquet_reader};
 use open_arrow_access_core::{
-    ByteReader, Capability, Error, ErrorKind, FactoryToken, ReadRequest, ReaderFactory,
-    RecordMetadata, RecordReader, Result, async_trait,
+    ByteReader, Capability, Error, ErrorKind, FactoryToken, FieldNameIndex, ReadRequest,
+    ReaderFactory, RecordMetadata, RecordReader, Result, async_trait,
 };
 use parquet::arrow::{ProjectionMask, async_reader::ParquetRecordBatchStreamBuilder};
 
@@ -63,9 +63,10 @@ impl ReaderFactory for ParquetFormat {
             .projection
             .as_ref()
             .map(|columns| {
+                let field_index = FieldNameIndex::new(stream.schema().fields());
                 columns
                     .iter()
-                    .map(|name| stream.schema().index_of(name))
+                    .map(|name| field_index.index_of(name))
                     .collect::<std::result::Result<Vec<_>, _>>()
             })
             .transpose()

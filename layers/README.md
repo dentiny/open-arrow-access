@@ -1,17 +1,30 @@
-# Enhancement layers
+# Accessor layers
 
-The public `Layer<A>` and `AccessorExt` contracts are in `core/`. The initial
-PR validates them with test-only wrappers; it exposes no production layer.
+`core::Layer<A>` and `AccessorExt::layer` compose wrappers while preserving an
+accessor's request and reader types. The newest wrapper is outermost. Wrappers
+must forward optional operations or remove their advertised capabilities.
 
-The required first functional layer is GeneratedColumnsLayer, described in
-`docs/generated-columns.md`; expression evaluation belongs to a follow-up PR.
-The framework includes `ReadOptionsProvider` for generic record-request settings.
-MetricsLayer can follow separately. Later execution and emission
-layers remain independent: ParallelReadLayer controls concurrency and
-UnorderedEmissionLayer relaxes output ordering. Both stay default-off and use
-the common accessor/reader protocol with optional planning extensions.
+## Available today
 
-The [source-attribute proposal](../docs/source-attributes.md) defines policy
-admission: ATIF requires global order and rejects UnorderedEmissionLayer.
-Planning-aware layers also wrap the partition accessor returned by the planner
-so that partition execution retains generated columns, observation and budgets.
+- The public layer contract, verified by test wrappers for byte and record accessors.
+- `decompression::DecompressionLayer<C>` for gzip, bzip2, LZ4, and Zstandard byte
+  transformations. See the [decompression guide](../decompression/README.md).
+- Caller-configured OpenDAL policies on the storage operator. These belong to
+  OpenDAL's layer system, independently of this library's accessor layers.
+
+This directory contains no production record or execution layer.
+
+## Planned
+
+| Layer | Purpose | Design / dependency |
+| --- | --- | --- |
+| Generated columns | Derived Arrow fields with dependency-aware projection | [Proposal](../docs/generated-columns.md); core already exposes `ReadOptionsProvider` |
+| Metrics | Count byte operations, batches, rows, failures, and latency | Preserve values, metadata, and ordering |
+| Timeout / read budgets | Bound operations and resource use | Cover sequential and ranged paths |
+| Parallel reads | Concurrent files/partitions with bounded ordered merging | Validated source/partition plans |
+| Unordered emission | Emit ready results when source order permits | Independent opt-in policy; ATIF requires global order |
+
+See the [roadmap](../docs/roadmap.md) and
+[source-attribute proposal](../docs/source-attributes.md). Planning-aware layers
+must also wrap partition accessors so observation, generated columns, and budgets
+remain active during execution.

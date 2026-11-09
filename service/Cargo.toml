@@ -52,6 +52,7 @@ pmc = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/gzip",
 ]
+regulations = []
 semantic-scholar = []
 uspto = []
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
@@ -97,7 +98,7 @@ arrow-schema.workspace = true
 futures.workspace = true
 open-arrow-access-test-support.workspace = true
 
-open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
+open-arrow-access-decompression = { workspace = true, features = ["gzip", "zip"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 [[test]]
@@ -218,3 +219,7 @@ required-features = ["semantic-scholar"]
 [[test]]
 name = "bhl"
 required-features = ["bhl"]
+
+[[test]]
+name = "regulations"
+required-features = ["regulations"]

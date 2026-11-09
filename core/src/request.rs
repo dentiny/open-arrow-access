@@ -1,6 +1,6 @@
 use std::{collections::HashSet, num::NonZeroUsize, sync::Arc};
 
-use crate::{Error, ErrorKind, Result, SchemaRef};
+use crate::{Error, ErrorKind, FieldNameIndex, Result, SchemaRef};
 
 /// An opaque object locator interpreted by an accessor, not by a format reader.
 /// Filesystem accessors interpret this as a path relative to their configured root.
@@ -165,7 +165,7 @@ impl ReadOptions {
         };
         let mut seen = HashSet::new();
         let mut indices = Vec::with_capacity(columns.len());
-        // TODO: Index schema field names once to avoid repeated linear lookups for wide schemas.
+        let field_index = FieldNameIndex::new(schema.fields());
         for name in columns {
             if !seen.insert(name) {
                 return Err(Error::new(
@@ -174,7 +174,7 @@ impl ReadOptions {
                     format!("duplicate field {name:?}"),
                 ));
             }
-            indices.push(schema.index_of(name).map_err(|error| {
+            indices.push(field_index.index_of(name).map_err(|error| {
                 Error::new(
                     ErrorKind::InvalidInput,
                     "project",

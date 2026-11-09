@@ -1,46 +1,37 @@
-# Dataset source providers
+# Dataset providers
 
-Provider-specific discovery and schema conventions live in this crate. Each provider adds its own default-off feature and facade exports.
+Providers connect corpus-specific discovery and metadata to the shared access
+interfaces used in pretraining data preparation. Use them to assemble source
+collections and open the original corpus files or metadata for your ingestion job. Choose a provider in the [support matrix](../docs/support.md#dataset-providers),
+then follow its guide for source identity, authentication, paging, and output type.
 
-See [service response schemas](response-schemas.md) for each entry point's return
-type, Arrow fields and nullability, reader metadata, and example response shapes.
+## Choose an entry point
 
-Providers use the shared object/reader contracts and existing byte, format,
-and decompression accessors. Backend configuration stays caller-controlled.
-Generic storage access and object-store prefix listing belong in `storage`,
-not in a provider.
+| Need | Interface | Next step |
+| --- | --- | --- |
+| Ready-to-read Hugging Face Parquet split | `HuggingFaceService::dataset` → Arrow reader | [Hugging Face](#hugging-face) |
+| PMC inventory or article metadata | Inventory/article accessor → Arrow metadata rows | [PMC](#pmc-inventory-pmc) |
+| Gutenberg book metadata | RDF accessor → one Arrow row | [Gutenberg](#gutenberg) |
+| Common Crawl membership | Crawl/segment resolver → file selection | [Common Crawl](#common-crawl-configuration); supply a WARC-to-Arrow accessor for record reads |
+| CourtListener bulk table | Snapshot accessor → decoded CSV bytes | [CourtListener](#courtlistener-bulk-snapshots) |
+| Research repository files | Version/record resolver → metadata and lazy bytes | [Zenodo](#zenodo-zenodo), [Dataverse](#dataverse-dataverse), [Internet Archive](#internet-archive-internet-archive), [Figshare](figshare.md) |
+| Books, scholarly bulk data, government sources | Provider-specific discovery and file access | [Full provider matrix](../docs/support.md#dataset-providers) |
 
-`ResolvedFileSet<A, M>` combines a `storage::NamedFileAccessor<A>` with typed
-provider metadata. New providers resolve and validate membership, build the
-logical-name-to-object mapping, and return this shared accessor instead of
-implementing `open`, `list`, and capabilities again. `metadata()` borrows the
-provider metadata; readers own their state independently of the resolved set.
-Zenodo, Internet Archive, and Dataverse use provider-specific type aliases and retain their
-existing metadata getters.
+A metadata row is not an article's full text. A file accessor preserves original
+bytes and needs a compatible decoder before it produces Arrow. File bodies
+usually remain lazy after discovery; consult the provider's contract.
 
-For a public HTTP provider backed by one JSON manifest, reuse the crate-internal
-`HttpFileService`, which validates the origin and owns the HTTP client and provider
-error context. Validate request parameters and build the metadata URL in the
-provider, then call `resolve_files(&url, callback)`. The callback validates the
-typed response and returns a `ResolvedFilesPlan` containing the canonical
-download root, ordered logical-name/object mappings and provider metadata. The
-shared flow fetches JSON once and constructs the HTTP storage, named namespace
-and resolved accessor.
-Pass the provider's configuration/resolve operations and file-namespace error mapper
-when constructing the service to retain its error context and cause.
-Zenodo and Internet Archive are examples; the plan does not follow download URLs
-from untrusted metadata. File bodies remain lazy and readers remain independent.
-`ResolvedFilesPlan::new` builds one insertion-ordered map from logical filenames to
-`ResolvedFile` values containing the download object and an optional trusted byte
-length. Empty and duplicate filenames fail before binding storage. `with_query`
-selects the download representation; lengths must describe that representation,
-as in Dataverse's original-file downloads. Omitted lengths use storage stat.
+Backend configuration stays caller-controlled. Generic object-store listing
+belongs to storage; providers handle API conventions, source membership, and
+metadata. Record the selected revision/release and upstream metadata in your
+pipeline manifest. Many providers expose one page at a time, leaving continuation,
+pacing, and retry policy to the caller.
 
-The [source-attribute proposal](../docs/source-attributes.md) defines provider
-constraints and conditional planning. Sequential cursor-based file discovery
-can coexist with independent file reads; dependent API page requests require
-a different plan. Services retain their own ordering requirements while
-delegating discovered representations to dataset and format accessors.
+See [response schemas](response-schemas.md) for the core Arrow/byte entry points,
+[usage](../docs/usage.md) for composition examples, and the individual provider
+guides below for their full contracts.
+
+## Hugging Face
 
 The default-off `huggingface` feature (`service-huggingface` on the facade)
 provides `HuggingFaceService::repository` for dataset repository files.
@@ -123,7 +114,7 @@ use open_arrow_access::{Accessor, ReadRequest, service::pmc::PmcAccessor};
 use open_arrow_access_storage::{OpenDalAccessor, opendal};
 
 async fn read(operator: opendal::Operator) -> Result<(), Box<dyn std::error::Error>> {
-    let source = PmcAccessor::new(OpenDalAccessor::new(operator));
+    let source = PmcAccessor::with_default_decoder(OpenDalAccessor::new(operator));
     let mut reader = source.open(ReadRequest::new("metadata/PMC123.2.json")).await?;
     while let Some(batch) = reader.next().await? {
         assert_eq!(batch.num_rows(), 1);
@@ -469,3 +460,41 @@ See [semantic-scholar service](semantic-scholar.md).
 ## bhl
 
 See [bhl service](bhl.md).
+
+## regulations
+
+See [regulations service](regulations.md) for its contract and usage.
+
+## Provider implementation patterns
+
+`ResolvedFileSet<A, M>` combines a `storage::NamedFileAccessor<A>` with typed
+provider metadata. New providers resolve and validate membership, build the
+logical-name-to-object mapping, and return this shared accessor instead of
+implementing `open`, `list`, and capabilities again. `metadata()` borrows the
+provider metadata; readers own their state independently of the resolved set.
+Zenodo, Internet Archive, and Dataverse use provider-specific type aliases and retain their
+existing metadata getters.
+
+For a public HTTP provider backed by one JSON manifest, reuse the crate-internal
+`HttpFileService`, which validates the origin and owns the HTTP client and provider
+error context. Validate request parameters and build the metadata URL in the
+provider, then call `resolve_files(&url, callback)`. The callback validates the
+typed response and returns a `ResolvedFilesPlan` containing the canonical
+download root, ordered logical-name/object mappings and provider metadata. The
+shared flow fetches JSON once and constructs the HTTP storage, named namespace
+and resolved accessor.
+Pass the provider's configuration/resolve operations and file-namespace error mapper
+when constructing the service to retain its error context and cause.
+Zenodo and Internet Archive are examples; the plan does not follow download URLs
+from untrusted metadata. File bodies remain lazy and readers remain independent.
+`ResolvedFilesPlan::new` builds one insertion-ordered map from logical filenames to
+`ResolvedFile` values containing the download object and an optional trusted byte
+length. Empty and duplicate filenames fail before binding storage. `with_query`
+selects the download representation; lengths must describe that representation,
+as in Dataverse's original-file downloads. Omitted lengths use storage stat.
+
+The [source-attribute proposal](../docs/source-attributes.md) defines provider
+constraints and conditional planning. Sequential cursor-based file discovery
+can coexist with independent file reads; dependent API page requests require
+a different plan. Services retain their own ordering requirements while
+delegating discovered representations to dataset and format accessors.

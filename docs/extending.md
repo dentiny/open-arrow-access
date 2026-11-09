@@ -9,7 +9,7 @@ configuration, source identity checks and domain mappings in the extension.
 | Incremental Arrow decoder | `BatchDecoder` inside its factory | `decode_batches(input, decoder, metadata)` |
 | Native asynchronous parser | Map its items/errors inside its factory | `StreamReader::new(stream, metadata)` |
 | One whole document to one Arrow row | `DocumentDecoder` | `DocumentAccessor::new(storage, decoder)` |
-| Document provider with default decoder settings | `DocumentDecoder + Default` and a type alias | `DefaultDocumentAccessor::new(storage)` |
+| Document provider with default decoder settings | `DocumentDecoder + Default` and a type alias | `DocumentAccessor::with_default_decoder(storage)` |
 | OpenDAL storage backend | Configure an OpenDAL `Operator` | `OpenDalAccessor::new(operator)` |
 
 ## Document providers
@@ -22,37 +22,39 @@ including zero-column projections. See the PMC and Gutenberg decoder mappings.
 For a provider with default settings, expose an alias:
 
 ```rust,ignore
-pub type CatalogAccessor<B> = DefaultDocumentAccessor<B, CatalogDecoder>;
+pub type CatalogAccessor<B> = DocumentAccessor<B, CatalogDecoder>;
 
 #[derive(Default)]
 pub struct CatalogDecoder;
 
 // Implement DocumentDecoder for CatalogDecoder: prepare + decode.
-// Callers construct CatalogAccessor::new(storage).
+// Callers construct CatalogAccessor::with_default_decoder(storage).
 ```
 
 The shared accessor validates projection before input I/O, reports the output
 schema at `open`, and opens/reads bytes only on the first `next`. It forwards byte
 options, owns the storage/decoder needed by each reader, and checks that decoding
-returns exactly one row with the declared schema. Cloning either document
+returns exactly one row with the declared schema. Cloning the document
 accessor shares storage and decoder without requiring either type to be `Clone`.
 Each opened reader has independent terminal state.
 
-`PmcAccessor::new(storage)` and `GutenbergAccessor::new(storage)` use this path.
-Their decoders can also be composed explicitly:
+`PmcAccessor::with_default_decoder(storage)` and
+`GutenbergAccessor::with_default_decoder(storage)` use this path.
+With `service-pmc` enabled, its decoder can also be composed explicitly:
 
 ```rust,no_run
-# #[cfg(feature = "service-pmc")]
-# fn example<B>(storage: B) {
 use open_arrow_access::{DocumentAccessor, service::pmc::PmcDecoder};
 
-let articles = DocumentAccessor::new(storage, PmcDecoder);
-# }
+fn example<B>(storage: B) {
+    let _articles = DocumentAccessor::new(storage, PmcDecoder);
+}
 ```
 
 ## File formats
 
-Bind a format directly with `FileAccessor::from_format(storage, format)`. The
+Bind a format directly with `FileAccessor::from_format(storage, format)`. For an
+already-open `ByteReader`, call `format.open_input(input, request)` with
+`ReaderFactoryExt` in scope; see the [archive example](usage.md#work-with-archives-and-other-providers). The
 factory owns `prepare` and `create_reader`; the shared protocol prepares each
 request before opening bytes and forwards its locator and byte options. A
 format-specific accessor name can be a thin alias with convenience constructors,
@@ -62,7 +64,7 @@ Use `decode_batches` for incremental byte-to-Arrow decoders. Native streams can
 use `StreamReader`, applying `project_batch` when needed to restore declared
 schema metadata and caller column order. Schema inference, decoder finalization
 and range requirements remain format-specific. See the
-[format protocol](../README.md#adding-a-file-format) for the complete factory hooks.
+[factory and accessor protocol](contracts.md#accessor) for the complete factory hooks.
 
 Archive sessions also consume the existing `ByteReader` boundary. `TarStream`
 keeps sequential entry ownership and cancellation progress, while `TarArchive`
@@ -84,9 +86,9 @@ then wrap that operator once:
 ```rust,no_run
 use open_arrow_access::storage::{OpenDalAccessor, opendal};
 
-# fn example(operator: opendal::Operator) {
-let storage = OpenDalAccessor::new(operator);
-# }
+fn example(operator: opendal::Operator) {
+    let _storage = OpenDalAccessor::new(operator);
+}
 ```
 
 Enable the backend's features on the caller's OpenDAL dependency. The shared
@@ -98,3 +100,5 @@ reader implementation in this workspace.
 Use the existing [test-support contracts](../test-support/README.md) for the
 common behavior, and keep parser values, domain validation and backend-specific
 capability/scheduling tests with their owning suite.
+
+The former `DefaultDocumentAccessor` forwarding wrapper has been removed. Migrate its type aliases to `DocumentAccessor<B, D>` and its one-argument `new(storage)` calls to `with_default_decoder(storage)`. Explicit decoder construction remains `DocumentAccessor::new(storage, decoder)`.

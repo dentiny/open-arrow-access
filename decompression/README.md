@@ -1,7 +1,8 @@
 # Streaming decompression
 
 Features are default-off. Apply a codec explicitly; file extensions do not
-select a decoder.
+select a decoder. Use streaming codecs for a decoded byte stream, or the
+[ZIP](#zip-entries) and [TAR](#tar-entries) APIs to select archive members.
 
 | Codec | Facade feature | Crate feature | Marker |
 | --- | --- | --- | --- |
@@ -203,3 +204,42 @@ For an already opened ByteReader, use `ZipArchive::open(input, limits).await`.
 Existing `ZipAccessor::entries` and `open` convenience methods remain available;
 use a session when reading multiple entries to avoid repeated storage opens and
 directory parsing. The `read_zip` example demonstrates this session path.
+
+## TAR entries
+
+Enable `decompression-tar` for two access patterns over regular GNU/USTAR files
+and directories. Links, sparse files, and extension headers are unsupported.
+Entry names remain raw metadata; neither API extracts paths to the filesystem.
+
+| API | Input | Use when |
+| --- | --- | --- |
+| `TarStream::new(input, limits)` | Any sequential `ByteReader` | Reading an archive once in physical entry order, including after gzip for `.tar.gz` |
+| `TarArchive::open(input, limits).await` | Exact ranges and known length | Inspecting headers once and opening selected entries independently |
+
+`TarStream::next_entry().await` returns a header and lazy body reader without
+building an upfront index. Consume or drop the active body before advancing;
+unread bytes from a dropped body are drained by the next call. If a body read is
+cancelled, drop that body reader. Header/skip progress is retained across
+cancellation of archive advancement.
+
+`TarArchive::entries()` borrows cached headers; `open_entry(index, chunk_size)`
+returns an owned sequential byte reader. Entry readers have independent cursors
+and can outlive the archive. Header inspection uses range requests rather than
+collecting entry bodies. The current implementation issues one header request
+per entry, so use `TarStream` for a sequential bulk scan.
+
+`TarLimits` defaults to 65,536 entries and 1 GiB per entry. Entry metadata retains
+the archive's source/version and declares the selected entry's byte length.
+Selected entry readers are sequential; they do not provide Parquet-compatible
+range access. No checksum metadata supplied by a provider is automatically
+verified by TAR reading.
+
+Run the [TAR example](../examples/read_tar.rs) against an uncompressed archive:
+
+```sh
+cargo run --example read_tar --features decompression-tar -- /absolute/data/root archive.tar
+```
+
+For a compressed archive, open it through `DecompressionLayer::new(Gzip)` and
+pass the decoded byte reader to `TarStream`. Ranged `TarArchive` cannot consume
+that sequential decoded representation directly.

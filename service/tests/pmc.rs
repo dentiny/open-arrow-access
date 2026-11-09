@@ -9,7 +9,7 @@ use open_arrow_access_test_support::{MemoryAccessor, fixture};
 const RAW: &str = include_str!("../../testdata/pmc/metadata.json");
 
 async fn read(raw: &[u8], projection: Option<Vec<String>>) -> Result<RecordBatch> {
-    let mut reader = PmcAccessor::new(MemoryAccessor::new(raw, 1))
+    let mut reader = PmcAccessor::with_default_decoder(MemoryAccessor::new(raw, 1))
         .open(ReadRequest::new("a.json").with_options(ReadOptions {
             projection,
             ..ReadOptions::default()
@@ -25,7 +25,7 @@ async fn read(raw: &[u8], projection: Option<Vec<String>>) -> Result<RecordBatch
 async fn maps_metadata_without_fetching_content() {
     let source = MemoryAccessor::new(RAW.as_bytes(), 1);
     let observed = source.observations.clone();
-    let mut reader = PmcAccessor::new(source)
+    let mut reader = PmcAccessor::with_default_decoder(source)
         .open(ReadRequest::new("a.json"))
         .await
         .unwrap();
@@ -109,14 +109,15 @@ async fn validates_metadata_even_when_all_fields_are_projected_away() {
 #[tokio::test]
 async fn reads_decoded_metadata_without_a_byte_limit() {
     let compressed = MemoryAccessor::new(include_bytes!("../../testdata/pmc/metadata.json.gz"), 1);
-    let mut reader = PmcAccessor::new(compressed.layer(DecompressionLayer::new(Gzip)))
-        .open(ReadRequest::new("a.json"))
-        .await
-        .unwrap();
+    let mut reader =
+        PmcAccessor::with_default_decoder(compressed.layer(DecompressionLayer::new(Gzip)))
+            .open(ReadRequest::new("a.json"))
+            .await
+            .unwrap();
     assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
     let mut large = vec![b' '; 4 * 1024 * 1024 + 1];
     large.extend_from_slice(RAW.as_bytes());
-    let mut reader = PmcAccessor::new(MemoryAccessor::new(&large, 64 * 1024))
+    let mut reader = PmcAccessor::with_default_decoder(MemoryAccessor::new(&large, 64 * 1024))
         .open(ReadRequest::new("large.json"))
         .await
         .unwrap();

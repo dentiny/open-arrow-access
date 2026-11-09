@@ -29,6 +29,7 @@ pub use open_arrow_access_core::*;
     feature = "service-openstax",
     feature = "service-semantic-scholar",
     feature = "service-bhl",
+    feature = "service-regulations",
 ))]
 pub use open_arrow_access_service as service;
 

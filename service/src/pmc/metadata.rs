@@ -1,6 +1,9 @@
 use super::{schema, validation};
-use open_arrow_access_core::{Bytes, ReadRequest, RecordBatch, Result, SchemaRef, project_batch};
+use open_arrow_access_core::{
+    Bytes, FieldNameIndex, ReadRequest, RecordBatch, Result, SchemaRef, project_batch,
+};
 use open_arrow_access_file_format::{json::JsonFormat, read_document};
+use std::sync::OnceLock;
 
 pub(super) async fn decode_batch(
     raw: &[u8],
@@ -16,11 +19,13 @@ pub(super) async fn decode_batch(
     )
     .await?;
     validation::validate_metadata(&batch, path)?;
+    static FIELD_INDEX: OnceLock<FieldNameIndex> = OnceLock::new();
+    let field_index = FIELD_INDEX.get_or_init(|| FieldNameIndex::new(schema.fields()));
     let projection = output_schema
         .fields()
         .iter()
         .map(|field| {
-            schema
+            field_index
                 .index_of(field.name())
                 .expect("validated PMC projection")
         })
