@@ -263,9 +263,9 @@ checksum = "5d2050892d4691cf110586070786712b504985a4d37ed64a9cd8a402718e1706"
 
 [[package]]
 name = "atif-arrow"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "598a299ec6e1defb586f292efa162711f48dee4cd83613b90294c76eee1b5571"
+checksum = "6ceeb12227b3f13fdac00d2772db211ec7f872b9f974ce173591264742e615dc"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -3343,12 +3343,13 @@ dependencies = [
 
 [[package]]
 name = "warc-rs"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30525093d0c074fb781c37a896bb03cc7e1c277bbc6953658fa673ce29333315"
+checksum = "ae663dc1278a5b8cb655494b948c73de3ce467d9773bb09576e6af630d415bf5"
 dependencies = [
  "chrono",
  "futures-util",
+ "memchr",
  "nom",
  "uuid",
 ]
@@ -3897,9 +3898,9 @@ dependencies = [
 
 [[package]]
 name = "xml-arrow"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fc6ecbc6876d2db1b5dd8f5c874b8f075164b8e3546b369000d76cd2c69b97c"
+checksum = "6f71c56f70e82230e4927878668dc0a2ba639c6eb136261855a1d53eb36594da"
 dependencies = [
  "arrow-array",
  "arrow-schema",
