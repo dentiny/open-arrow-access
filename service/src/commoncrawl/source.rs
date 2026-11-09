@@ -1,6 +1,9 @@
 use open_arrow_access_core::{Error, ErrorKind, Result};
 
-use super::{url::parse_url, validation::validate_crawl};
+use super::{
+    url::{parse_origin, parse_url},
+    validation::validate_crawl,
+};
 
 /// One Common Crawl release and the origin hosting its objects.
 #[derive(Clone, Debug)]
@@ -36,14 +39,7 @@ impl CommonCrawl {
     }
 
     pub fn with_origin(mut self, origin: &str) -> Result<Self> {
-        let url = parse_url(origin)?;
-        if url.path() != "/" {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "configure_commoncrawl",
-                "expected an HTTP(S) origin without a path",
-            ));
-        }
+        let url = parse_origin(origin, "configure_commoncrawl")?;
         self.origin = url.origin().ascii_serialization();
         Ok(self)
     }
