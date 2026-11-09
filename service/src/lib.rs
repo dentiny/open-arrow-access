@@ -49,11 +49,14 @@ pub mod common;
 #[cfg(feature = "format-xml")]
 pub mod xml_metadata;
 
+#[cfg(feature = "uspto")]
+pub mod uspto;
+
+#[cfg(feature = "oai")]
+pub mod oai;
+
 #[cfg(feature = "figshare")]
 pub mod figshare;
 
 #[cfg(feature = "bhl")]
 pub mod bhl;
-
-#[cfg(feature = "oai")]
-pub mod oai;

@@ -1,36 +1,36 @@
 use arrow_array::{Array, StructArray, cast::AsArray};
 use arrow_schema::DataType;
 use chrono::NaiveDate;
-use futures::io::Cursor;
 use open_arrow_access_core::{
-    FieldValue, RecordBatch, RecordBatchBuilder, RecordBatchRow, Result, SchemaRef,
+    Bytes, FieldValue, ReadRequest, RecordBatch, RecordBatchBuilder, RecordBatchRow, Result,
+    SchemaRef,
 };
-use xml_arrow::{ReaderOptions, XmlReader};
+use open_arrow_access_file_format::{
+    read_document,
+    xml::{XmlFormat, XmlLimits},
+};
 
 use super::{Mapping, decode, decode_source};
 
 /// Validate all mapped fields and build one projected row.
-pub(super) async fn read_metadata(raw: &[u8], schema: SchemaRef) -> Result<RecordBatch> {
-    let mut reader = XmlReader::new(
-        Cursor::new(raw),
-        super::mapping(),
-        /*record_path=*/ "/r:RDF",
-        ReaderOptions {
+pub(super) async fn read_metadata(
+    raw: &[u8],
+    request: ReadRequest,
+    schema: SchemaRef,
+) -> Result<RecordBatch> {
+    let format = XmlFormat::new("/r:RDF")
+        .with_schema(super::mapping())
+        .with_limits(XmlLimits {
             max_record_bytes: usize::MAX - 1,
             max_batch_bytes: usize::MAX,
             max_depth: 65534,
-            ..Default::default()
-        },
+        });
+    let batch = read_document(
+        Bytes::copy_from_slice(raw),
+        format,
+        ReadRequest::new(request.object),
     )
-    .map_err(decode_source)?;
-    let batch = reader
-        .next_batch()
-        .await
-        .map_err(decode_source)?
-        .ok_or_else(|| decode("expected an RDF document containing one ebook"))?;
-    if batch.num_rows() != 1 || reader.next_batch().await.map_err(decode_source)?.is_some() {
-        return Err(decode("expected one RDF document"));
-    }
+    .await?;
     let source = batch.column(0).as_struct();
     let definitions = super::definitions();
     convert_fields(&definitions.fields, source, 0, None)?;

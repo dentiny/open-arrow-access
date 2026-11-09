@@ -402,6 +402,18 @@ See [remote-files](remote-files.md) for this utility.
 
 `common::resolve_optional_links` maps provider-selected optional URL fields to logical file names without modifying parsed metadata.
 
+## uspto
+
+See [uspto service](uspto.md) for its contract and usage.
+
+## Common XML metadata
+
+Enable `format-xml` for `xml_metadata::XmlDocument`. Protocol metadata is decoded through our `file-format::xml::XmlFormat`, including its schema, limits, reader lifecycle and errors. The shared adapter resolves the root namespace, ignores external DTD declarations without fetching them, and rejects internal DTD subsets. Complete document parsing checks trailing content; callers retain original response bytes separately.
+
+## Common OAI protocol
+
+See [OAI protocol](oai-protocol.md). Record counts and resumption tokens are decoded through the shared XML metadata reader.
+
 ## figshare
 
 See [figshare service](figshare.md).
@@ -409,11 +421,3 @@ See [figshare service](figshare.md).
 ## bhl
 
 See [bhl service](bhl.md).
-
-## Common XML metadata
-
-Enable `format-xml` for `xml_metadata::XmlDocument`. Protocol metadata uses the same `xml-arrow` engine as the XML file reader. The shared adapter resolves the root namespace, ignores external DTD declarations without fetching them, and rejects internal DTD subsets. Complete document parsing checks trailing content; callers retain original response bytes separately.
-
-## Common OAI protocol
-
-See [OAI protocol](oai-protocol.md). Record counts and resumption tokens are decoded through the shared XML metadata reader.
