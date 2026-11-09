@@ -40,11 +40,22 @@ pub(crate) fn json_error(operation: &'static str, error: serde_json::Error) -> E
 }
 
 /// Translate metadata response failures directly into the shared core category.
-pub(super) fn http_status_error(operation: &'static str, status: http::StatusCode) -> Error {
+pub(crate) fn http_status_error(
+    operation: &'static str,
+    status: http::StatusCode,
+    headers: &http::HeaderMap,
+) -> Error {
     Error::new(
         ErrorKind::from_http_status(status.as_u16()),
         operation,
-        format!("metadata HTTP {status}"),
+        format!("HTTP {status}"),
+    )
+    .with_http_response(
+        status.as_u16(),
+        headers
+            .get(http::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned),
     )
 }
 

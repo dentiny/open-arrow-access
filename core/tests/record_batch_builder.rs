@@ -135,3 +135,137 @@ fn nested_append_errors_prevent_emitting_partial_rows() {
         ErrorKind::InvalidInput
     );
 }
+
+#[test]
+fn wide_projected_rows_and_nested_lists_reuse_correct_field_positions() {
+    let names = (0..1024).map(|i| format!("c{i}")).collect::<Vec<_>>();
+    let nested_names = (0..512).map(|i| format!("n{i}")).collect::<Vec<_>>();
+    let mut fields = names
+        .iter()
+        .map(|name| Field::new(name, DataType::UInt64, false))
+        .collect::<Vec<_>>();
+    fields.push(Field::new(
+        "nested",
+        list(
+            DataType::Struct(
+                nested_names
+                    .iter()
+                    .map(|name| Field::new(name, DataType::UInt64, false))
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
+            false,
+        ),
+        false,
+    ));
+    let schema = Arc::new(Schema::new(fields));
+    let mut builder = RecordBatchBuilder::new(
+        schema,
+        Some(vec!["c1023".into(), "nested".into(), "c0".into()]),
+    )
+    .unwrap();
+    for row_number in 0..3u64 {
+        builder
+            .push(|row| {
+                for (i, name) in names.iter().enumerate() {
+                    row.append(name, row_number * 10_000 + i as u64)?;
+                }
+                row.append_structs("nested", 0..2u64, |row, entry| {
+                    for (i, name) in nested_names.iter().enumerate().rev() {
+                        row.append(name, row_number * 10_000 + entry * 1000 + i as u64)?;
+                    }
+                    Ok(())
+                })
+            })
+            .unwrap();
+    }
+    let batch = builder.finish().unwrap();
+    assert_eq!(batch.num_rows(), 3);
+    for row in 0..3 {
+        assert_eq!(
+            batch
+                .column(0)
+                .as_primitive::<arrow_array::types::UInt64Type>()
+                .value(row),
+            row as u64 * 10_000 + 1023
+        );
+        assert_eq!(
+            batch
+                .column(2)
+                .as_primitive::<arrow_array::types::UInt64Type>()
+                .value(row),
+            row as u64 * 10_000
+        );
+        let entries = batch.column(1).as_list::<i32>().value(row);
+        let entries = entries.as_struct();
+        for i in [0, 511] {
+            let values = entries
+                .column(i)
+                .as_primitive::<arrow_array::types::UInt64Type>();
+            for entry in 0..2 {
+                assert_eq!(
+                    values.value(entry),
+                    row as u64 * 10_000 + entry as u64 * 1000 + i as u64
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn resolved_output_schema_must_contain_unique_unchanged_fields() {
+    let field = Field::new("id", DataType::UInt64, false);
+    let schema = Arc::new(Schema::new(vec![field.clone()]));
+    for fields in [
+        vec![field.clone(), field.clone()],
+        vec![Field::new("unknown", DataType::UInt64, false)],
+        vec![Field::new("id", DataType::Utf8, false)],
+        vec![
+            field
+                .clone()
+                .with_metadata(HashMap::from([("changed".into(), "yes".into())])),
+        ],
+    ] {
+        let error =
+            RecordBatchBuilder::build_row(schema.clone(), Arc::new(Schema::new(fields)), |_| {
+                panic!("invalid schema reached the writer")
+            })
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+    for projection in [None, Some(vec![])] {
+        let mut builder = RecordBatchBuilder::new(schema.clone(), projection).unwrap();
+        let error = builder.push(|row| row.append("unknown", 1u64)).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Decode);
+        assert_eq!(
+            builder.finish().unwrap_err().kind(),
+            ErrorKind::InvalidInput
+        );
+    }
+}
+
+#[test]
+fn cached_nested_layouts_preserve_null_parents_and_required_children() {
+    let inner = DataType::Struct(vec![Field::new("id", DataType::UInt64, false)].into());
+    let group = DataType::Struct(vec![Field::new("inner", inner, false)].into());
+    let schema = Arc::new(Schema::new(vec![Field::new("group", group, true)]));
+    let mut builder = RecordBatchBuilder::new(schema, None).unwrap();
+    builder.push(|_| Ok(())).unwrap();
+    builder
+        .push(|row| {
+            row.append_struct("group", |row| {
+                row.append_struct("inner", |row| row.append("id", 7u64))
+            })
+        })
+        .unwrap();
+    let batch = builder.finish().unwrap();
+    let groups = batch["group"].as_struct();
+    assert!(groups.is_null(0));
+    assert!(!groups.is_null(1));
+    let ids = groups
+        .column(0)
+        .as_struct()
+        .column(0)
+        .as_primitive::<arrow_array::types::UInt64Type>();
+    assert_eq!(ids.value(1), 7);
+}

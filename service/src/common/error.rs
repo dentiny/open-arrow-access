@@ -41,14 +41,6 @@ pub(super) fn file_namespace(error: Error) -> Error {
     decode("invalid file namespace").with_source(error)
 }
 
-pub(super) fn http(status: http::StatusCode) -> Error {
-    Error::new(
-        ErrorKind::from_http_status(status.as_u16()),
-        OP,
-        format!("provider HTTP {status}"),
-    )
-}
-
 pub(super) fn transport(error: Error) -> opendal::Error {
     opendal::Error::new(opendal::ErrorKind::Unexpected, "provider redirect failed")
         .set_source(error)

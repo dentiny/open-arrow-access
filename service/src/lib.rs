@@ -34,6 +34,7 @@ pub mod zenodo;
 mod filename;
 
 // Individual providers may use only part of the shared HTTP utilities.
+mod http_body;
 #[allow(dead_code)]
 mod http_client;
 
