@@ -51,3 +51,6 @@ pub mod xml_metadata;
 
 #[cfg(feature = "govinfo")]
 pub mod govinfo;
+
+#[cfg(feature = "oai")]
+pub mod oai;
