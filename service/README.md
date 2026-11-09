@@ -402,3 +402,12 @@ Enable `xml-metadata` for `xml_metadata::validate_root(bytes,name)`. OAI and MEC
 ## Common OAI protocol
 
 See [OAI protocol](oai-protocol.md). XML envelope checks reuse `xml_metadata::validate_root`.
+
+## Common OAI protocol
+
+See [OAI protocol](oai-protocol.md). XML envelope checks reuse `xml_metadata::validate_root`.
+
+
+## Common OAI provider configuration
+
+See [OAI provider configuration](oai-provider.md).
