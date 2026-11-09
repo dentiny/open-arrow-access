@@ -11,6 +11,5 @@ mod document;
 pub use document::ApiDocument;
 
 mod connection;
-mod request;
 mod response;
 pub use connection::Connection;
