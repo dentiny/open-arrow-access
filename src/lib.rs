@@ -26,6 +26,7 @@ pub use open_arrow_access_core::*;
     feature = "service-library-of-congress",
     feature = "service-meca",
     feature = "service-biorxiv",
+    feature = "service-openstax",
 ))]
 pub use open_arrow_access_service as service;
 
