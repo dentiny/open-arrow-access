@@ -13,6 +13,7 @@ arxiv = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/tar",
 ]
+bhl = ["figshare"]
 biorxiv = ["meca", "dep:chrono"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
@@ -213,3 +214,7 @@ required-features = ["openstax"]
 [[test]]
 name = "semantic_scholar"
 required-features = ["semantic-scholar"]
+
+[[test]]
+name = "bhl"
+required-features = ["bhl"]

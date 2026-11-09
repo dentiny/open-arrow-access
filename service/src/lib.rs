@@ -90,3 +90,6 @@ pub mod openstax;
 
 #[cfg(feature = "semantic-scholar")]
 pub mod semantic_scholar;
+
+#[cfg(feature = "bhl")]
+pub mod bhl;

@@ -465,3 +465,7 @@ See [openstax service](openstax.md) for its contract and usage.
 ## semantic-scholar
 
 See [semantic-scholar service](semantic-scholar.md).
+
+## bhl
+
+See [bhl service](bhl.md).
