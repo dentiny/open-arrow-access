@@ -15,10 +15,11 @@ use arrow_array::{ArrayRef, Int64Array, types::Int64Type};
 use arrow_schema::{DataType, Field};
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ListRequest,
-    ObjectRef, ObjectStream, ReadOptionsProvider, ReadRequest, Reader, RecordBatch, RecordMetadata,
-    RecordReader, Result, Schema, SchemaRef, async_trait,
+    Accessor, AccessorExt, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind,
+    ListRequest, ObjectRef, ObjectStream, ReadOptionsProvider, ReadRequest, Reader, RecordBatch,
+    RecordMetadata, RecordReader, Result, ScanPlanner, Schema, SchemaRef, async_trait,
 };
+use open_arrow_access_layers::ParallelReadLayer;
 
 fn schema(label: &str) -> SchemaRef {
     Arc::new(Schema::new_with_metadata(
@@ -409,8 +410,6 @@ async fn directory_rejects_traversal_entries() {
 
 #[tokio::test]
 async fn parallel_file_plan_is_lazy_and_preserves_options_order_and_duplicates() {
-    use open_arrow_access_core::{AccessorExt, ScanPlanner};
-    use open_arrow_access_layers::ParallelReadLayer;
     let schema = schema("parallel");
     let files = Files::new([
         (
@@ -459,8 +458,6 @@ async fn parallel_file_plan_is_lazy_and_preserves_options_order_and_duplicates()
 
 #[tokio::test]
 async fn parallel_directory_keeps_discovery_filter_sort_and_validation() {
-    use open_arrow_access_core::AccessorExt;
-    use open_arrow_access_layers::ParallelReadLayer;
     let schema = schema("parallel-directory");
     let files = Files::new([
         (
