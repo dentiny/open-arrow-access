@@ -1,7 +1,11 @@
+use std::{io::Write, num::NonZeroUsize};
+
 use arrow_array::cast::AsArray;
-use open_arrow_access_core::{Accessor, ReadOptions, ReadRequest};
+use open_arrow_access_core::{Accessor, AccessorExt, ReadOptions, ReadRequest};
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
+use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::atif::{AtifAccessor, AtifFormat};
+use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_storage::OpenDalAccessor;
 
 #[tokio::test]
@@ -49,9 +53,6 @@ async fn reads_atif_jsonl_and_ordered_file_sets() {
 
 #[tokio::test]
 async fn parallel_atif_matches_sequential_values_and_source_context() {
-    use open_arrow_access_core::AccessorExt;
-    use open_arrow_access_layers::ParallelReadLayer;
-    use std::num::NonZeroUsize;
     let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
         open_arrow_access_test_support::fixture_path!("atif", ""),
     ));
@@ -78,10 +79,6 @@ async fn parallel_atif_matches_sequential_values_and_source_context() {
 
 #[tokio::test]
 async fn parallel_atif_composes_with_independent_gzip_readers() {
-    use open_arrow_access_core::AccessorExt;
-    use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
-    use open_arrow_access_layers::ParallelReadLayer;
-    use std::{io::Write, num::NonZeroUsize};
     let root = tempfile::tempdir().unwrap();
     let original = std::fs::read(open_arrow_access_test_support::fixture_path!(
         "atif",
