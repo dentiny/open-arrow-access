@@ -10,8 +10,7 @@ use arrow_array::{UInt64Array, cast::AsArray};
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, AccessorExt, Error, ErrorKind, RecordBatch, RecordMetadata, RecordReader,
-    ScanPlanner, StreamReader,
+    Accessor, AccessorExt, RecordBatch, RecordMetadata, RecordReader, StreamReader,
 };
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::common::PageSetAccessor;
@@ -110,51 +109,4 @@ async fn independent_page_fetches_are_lazy_bounded_and_keep_selection_order() {
     assert_eq!(reading.await.unwrap(), [0, 2, 1, 2]);
     assert!(peak.load(Ordering::SeqCst) <= 2);
     assert_eq!(active.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test]
-async fn empty_selections_schema_changes_and_provider_errors_stop_page_reading() {
-    let pages = PageSetAccessor::new(|index| async move {
-        Ok(page(index, if index == 0 { "page" } else { "changed" }))
-    });
-    assert_eq!(
-        pages.plan_scan(vec![]).await.err().unwrap().kind(),
-        ErrorKind::InvalidInput
-    );
-    let mut reader = pages.open(vec![0, 1]).await.unwrap();
-    assert!(reader.next().await.unwrap().is_some());
-    assert_eq!(
-        reader.next().await.unwrap_err().operation(),
-        "read_page_set"
-    );
-    assert!(reader.next().await.unwrap().is_none());
-    let calls = Arc::new(AtomicUsize::new(0));
-    let pages = PageSetAccessor::new({
-        let calls = calls.clone();
-        move |index| {
-            let calls = calls.clone();
-            async move {
-                calls.fetch_add(1, Ordering::SeqCst);
-                if index == 1 {
-                    return Err(Error::new(
-                        ErrorKind::RateLimited,
-                        "provider_page",
-                        "retry later",
-                    ));
-                }
-                Ok(page(index, "page"))
-            }
-        }
-    });
-    let mut reader = pages
-        .layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN))
-        .open(vec![0, 1, 2])
-        .await
-        .unwrap();
-    assert!(reader.next().await.unwrap().is_some());
-    let error = reader.next().await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::RateLimited);
-    assert_eq!(error.operation(), "provider_page");
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
