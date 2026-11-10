@@ -17,6 +17,7 @@ use open_arrow_access_core::{
 use open_arrow_access_layers::{
     ColumnTypeSpec, GeneratedColumnSpec, GeneratedColumnsLayer, TypeConversionLayer,
 };
+use open_arrow_access_test_support::reader::assert_finished;
 
 fn layer(specs: &[(&str, &str)]) -> GeneratedColumnsLayer {
     GeneratedColumnsLayer::try_new(
@@ -34,14 +35,6 @@ fn layer(specs: &[(&str, &str)]) -> GeneratedColumnsLayer {
 struct MemoryAccessor {
     batches: Vec<RecordBatch>,
     polls: Arc<AtomicUsize>,
-    drops: Arc<AtomicUsize>,
-}
-
-struct DropGuard(Arc<AtomicUsize>);
-impl Drop for DropGuard {
-    fn drop(&mut self) {
-        self.0.fetch_add(1, Ordering::SeqCst);
-    }
 }
 
 impl MemoryAccessor {
@@ -49,7 +42,6 @@ impl MemoryAccessor {
         Self {
             batches,
             polls: Arc::default(),
-            drops: Arc::default(),
         }
     }
 }
@@ -72,9 +64,7 @@ impl Accessor for MemoryAccessor {
             .resolve_projection(&self.batches[0].schema())?;
         let mut batches = self.batches.clone().into_iter().map(Ok);
         let polls = self.polls.clone();
-        let guard = DropGuard(self.drops.clone());
         let stream = stream::poll_fn(move |_| {
-            let _ = &guard;
             polls.fetch_add(1, Ordering::SeqCst);
             Poll::Ready(batches.next())
         });
@@ -182,9 +172,10 @@ async fn expressions_preserve_order_metadata_nulls_and_source_buffers() {
         }
     }
     assert!(reader.next().await.unwrap().is_none());
-    let polls_at_eof = polls.load(Ordering::SeqCst);
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(polls.load(Ordering::SeqCst), polls_at_eof);
+    assert_finished(reader.as_mut(), &polls, |m| {
+        (m.schema.clone(), m.source.clone())
+    })
+    .await;
 }
 
 #[tokio::test]

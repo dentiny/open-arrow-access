@@ -89,9 +89,9 @@ where
         request.read_options_mut().projection = None;
         let inner = self.inner.open(request).await?;
         let source = &inner.metadata().schema;
-        let context = SessionContext::new();
-        let state = context.state();
+        let state = SessionContext::new().state();
         let mut fields = source.fields().to_vec();
+        let mut schema = Arc::clone(source);
         let mut column_names: HashSet<&str> = source
             .fields()
             .iter()
@@ -100,11 +100,7 @@ where
         let mut steps = Vec::with_capacity(self.specs.len());
         for spec in self.specs.iter() {
             validate_generated_column_name(&spec.column, &mut column_names)?;
-            let input = Arc::new(Schema::new_with_metadata(
-                fields.clone(),
-                source.metadata().clone(),
-            ));
-            let (expression, output) = plan_expression(&context, &state, &spec.expression, &input)
+            let (expression, output) = plan_expression(&state, &spec.expression, &schema)
                 .map_err(|error| generated_plan_error(&spec.column, error))?;
             let mut metadata = output.metadata().clone();
             metadata.insert(
@@ -118,14 +114,17 @@ where
                     .with_name(&spec.column)
                     .with_metadata(metadata),
             ));
+            schema = Arc::new(Schema::new_with_metadata(
+                fields.clone(),
+                source.metadata().clone(),
+            ));
             steps.push(GeneratedStep {
-                input,
+                output: Arc::clone(&schema),
                 expression,
                 column: spec.column.clone(),
             });
         }
-        let full_schema = Arc::new(Schema::new_with_metadata(fields, source.metadata().clone()));
-        let (schema, projection) = output_options.resolve_projection(&full_schema)?;
+        let (schema, projection) = output_options.resolve_projection(&schema)?;
         let metadata = RecordMetadata {
             schema,
             source: inner.metadata().source.clone(),
@@ -148,13 +147,12 @@ where
 /// functions consistent across declarations. Returns the physical expression and
 /// its inferred output field.
 fn plan_expression(
-    context: &SessionContext,
     state: &SessionState,
     expression: &str,
     input: &SchemaRef,
 ) -> datafusion::error::Result<(Arc<dyn PhysicalExpr>, FieldRef)> {
     let df_schema = DFSchema::try_from(Arc::clone(input))?;
-    let logical = context.parse_sql_expr(expression, &df_schema)?;
+    let logical = state.create_logical_expr(expression, &df_schema)?;
     // Validate before simplification: a dead branch must not hide an
     // aggregate, subquery, or volatile function.
     validate_expression(&logical)?;
@@ -166,7 +164,7 @@ fn plan_expression(
     let simplifier = ExprSimplifier::new(simplify_context);
     let logical = simplifier.coerce(logical, &df_schema)?;
     let logical = simplifier.simplify(logical)?;
-    let physical = context.create_physical_expr(logical, &df_schema)?;
+    let physical = state.create_physical_expr(logical, &df_schema)?;
     let output = physical.return_field(input)?;
     Ok((physical, output))
 }
@@ -181,7 +179,7 @@ fn record_capability(inner: Capability) -> Capability {
 }
 
 struct GeneratedStep {
-    input: SchemaRef,
+    output: SchemaRef,
     expression: Arc<dyn PhysicalExpr>,
     column: String,
 }
@@ -198,34 +196,21 @@ impl GeneratedColumnsReader {
     fn generate(&self, mut batch: RecordBatch) -> Result<RecordBatch> {
         let rows = batch.num_rows();
         let options = RecordBatchOptions::new().with_row_count(Some(rows));
-        let mut columns = batch.columns().to_vec();
-        columns.reserve(self.steps.len());
-        for (index, step) in self.steps.iter().enumerate() {
+        for step in &self.steps {
             let array = step
                 .expression
                 .evaluate(&batch)
                 .and_then(|value| value.into_array(rows))
                 .map_err(|error| generated_column_error(&step.column, error))?;
+            let (_, mut columns, _) = batch.into_parts();
             columns.push(array);
-            // Only materialize an intermediate batch if a later expression needs
-            // it. Cloning ArrayRefs preserves the original buffers.
-            if let Some(next) = self.steps.get(index + 1) {
-                batch = RecordBatch::try_new_with_options(
-                    Arc::clone(&next.input),
-                    columns.clone(),
-                    &options,
-                )
+            batch = RecordBatch::try_new_with_options(Arc::clone(&step.output), columns, &options)
                 .map_err(generated_batch_error)?;
-            }
         }
-        if let Some(indices) = &self.projection {
-            columns = indices
-                .iter()
-                .map(|&index| Arc::clone(&columns[index]))
-                .collect();
+        match &self.projection {
+            Some(indices) => batch.project(indices).map_err(generated_batch_error),
+            None => Ok(batch),
         }
-        RecordBatch::try_new_with_options(Arc::clone(&self.metadata.schema), columns, &options)
-            .map_err(generated_batch_error)
     }
 }
 
