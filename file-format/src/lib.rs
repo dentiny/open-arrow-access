@@ -1,6 +1,8 @@
 //! File-format adapters consume a ByteReader, never a storage-specific handle.
 
 mod accessor;
+mod scan;
+pub use scan::DecodePartitionOptions;
 #[cfg(any(feature = "parquet", feature = "warc", feature = "xml"))]
 mod error;
 

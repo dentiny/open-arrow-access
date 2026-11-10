@@ -7,7 +7,6 @@ repository.workspace = true
 description = "Dataset source providers for Open Arrow Access"
 
 [features]
-record-files = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory", "dep:open-arrow-access-file-format"]
 arxiv = [
     "oai",
     "format-xml",
@@ -20,18 +19,15 @@ courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decom
 dataverse = []
 default = []
 doab = ["oai"]
-federal-register = ["record-files"]
+federal-register = []
 figshare = []
 govinfo = []
 gutenberg = ["format-xml", "dep:chrono"]
 hathifiles = []
 huggingface = [
-    "dep:open-arrow-access-dataset",
-    "dep:open-arrow-access-file-format",
     "opendal/services-hf",
     "dep:tokio",
     "tokio/fs",
-    "open-arrow-access-dataset/directory",
     "open-arrow-access-file-format/parquet",
 ]
 internet-archive = []
@@ -47,7 +43,6 @@ openstax = []
 pmc = [
     "dep:arrow-array",
     "dep:arrow-schema",
-    "dep:open-arrow-access-file-format",
     "open-arrow-access-file-format/csv",
     "open-arrow-access-file-format/json",
     "dep:open-arrow-access-decompression",
@@ -56,12 +51,11 @@ pmc = [
 regulations = []
 semantic-scholar = []
 uspto = []
-warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory", "dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
+warc = ["open-arrow-access-file-format/warc"]
 zenodo = []
 
 format-xml = [
     "dep:quick-xml",
-    "dep:open-arrow-access-file-format",
     "open-arrow-access-file-format/xml",
     "dep:arrow-array",
     "dep:arrow-schema",
@@ -74,9 +68,9 @@ chrono = { workspace = true, optional = true }
 futures.workspace = true
 http.workspace = true
 open-arrow-access-core.workspace = true
-open-arrow-access-dataset = { workspace = true, optional = true }
+open-arrow-access-dataset = { workspace = true, features = ["directory"] }
 open-arrow-access-decompression = { workspace = true, optional = true }
-open-arrow-access-file-format = { workspace = true, optional = true }
+open-arrow-access-file-format.workspace = true
 open-arrow-access-storage.workspace = true
 opendal = { workspace = true, features = ["services-http", "http-transport-reqwest"] }
 opendal-http-transport-reqwest.workspace = true
@@ -219,9 +213,5 @@ name = "regulations"
 required-features = ["regulations"]
 
 [[test]]
-name = "record_files"
-required-features = ["record-files"]
-
-[[test]]
 name = "record_pages"
-required-features = ["record-files", "oai"]
+required-features = ["oai"]
