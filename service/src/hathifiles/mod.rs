@@ -1,9 +1,6 @@
 //! HathiTrust's published full and incremental catalogue files.
 //!
-//! Resolved files expose `records(format)` for explicit Arrow decoding and scan
-//! planning. The adapter retains catalogue filenames and declared file metadata;
-//! metadata links are not followed automatically. API pages can bind an explicit
-//! JSON record selection with `ApiDocument::records_at`.
+//! Preserves catalogue filenames and declared file metadata.
 use crate::common::{Connection, RemoteFiles};
 mod error;
 mod resolver;

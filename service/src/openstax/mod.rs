@@ -1,9 +1,6 @@
 //! OpenStax book repositories pinned to Git commit snapshots.
 //!
-//! Resolved files expose `records(format)` for explicit Arrow decoding and scan
-//! planning. The adapter retains resolved Git commit identity and commit-bound archive URLs;
-//! metadata links are not followed automatically. API pages can bind an explicit
-//! JSON record selection with `ApiDocument::records_at`.
+//! Preserves resolved Git commit identity and commit-bound archive URLs.
 mod error;
 mod parser;
 mod resolver;

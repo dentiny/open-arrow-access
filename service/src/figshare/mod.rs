@@ -1,9 +1,6 @@
 //! Figshare public versioned articles, including BHL's Smithsonian OCR export.
 //!
-//! Resolved files expose `records(format)` for explicit Arrow decoding and scan
-//! planning. The adapter retains article identity, published version and embargo validation;
-//! metadata links are not followed automatically. API pages can bind an explicit
-//! JSON record selection with `ApiDocument::records_at`.
+//! Preserves article identity, published version and embargo validation.
 mod error;
 mod parser;
 mod validation;
