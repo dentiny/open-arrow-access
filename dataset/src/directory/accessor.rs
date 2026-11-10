@@ -27,6 +27,15 @@ impl<B, A> DirectoryAccessor<B, A> {
             files: FileSetAccessor::new(format),
         }
     }
+
+    /// Use each selected format's native partitions under the shared executor budget.
+    pub fn with_file_planning(mut self) -> Self
+    where
+        A: ScanPlanner<Request = ReadRequest> + 'static,
+    {
+        self.files = self.files.with_file_planning();
+        self
+    }
 }
 
 #[async_trait]

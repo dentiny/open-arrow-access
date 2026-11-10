@@ -66,7 +66,7 @@ impl HuggingFaceService {
             Err(error) => return Err(error),
         };
         Ok((
-            FileSetAccessor::new(ParquetAccessor::new(accessor)),
+            FileSetAccessor::new(ParquetAccessor::new(accessor)).with_file_planning(),
             FileSetRequest::new(objects)
                 .with_options(request.options)
                 .with_byte_options(request.byte_options),

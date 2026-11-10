@@ -7,3 +7,11 @@ pub(super) fn schema_mismatch() -> Error {
         "file or batch schema differs from the fixed dataset schema",
     )
 }
+
+pub(super) fn empty_selection(operation: &'static str) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        operation,
+        "file selection is empty",
+    )
+}

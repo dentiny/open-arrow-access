@@ -21,6 +21,15 @@ impl<M, F> CommonCrawlWarcAccessor<M, F> {
             files: FileSetAccessor::new(format),
         }
     }
+
+    /// Compose native file partitions under the scan's shared executor budget.
+    pub fn with_file_planning(mut self) -> Self
+    where
+        F: ScanPlanner<Request = ReadRequest> + 'static,
+    {
+        self.files = self.files.with_file_planning();
+        self
+    }
 }
 
 impl<M: ByteAccessor, F> CommonCrawlWarcAccessor<M, F> {

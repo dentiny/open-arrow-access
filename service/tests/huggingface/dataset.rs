@@ -1,6 +1,7 @@
 use std::num::NonZeroUsize;
 
 use arrow_array::{cast::AsArray, types::Int64Type};
+use futures::TryStreamExt;
 use http::StatusCode;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteReadOptions, Bytes, ErrorKind, ReadOptions, ScanPlanner,
@@ -140,9 +141,10 @@ async fn parallel_dataset_preserves_pinned_shard_order_and_partial_admission() {
     let hub = ExportHub::new("paginated.json").await;
     let service = hub.service().await;
     let plan = service.plan_scan(request()).await.unwrap();
-    assert_eq!(plan.partitions.size_hint().0, 2);
     assert!(!hub.requested("0001.parquet"));
-    drop(plan);
+    let partitions: Vec<_> = plan.partitions.try_collect().await.unwrap();
+    assert_eq!(partitions.len(), 2);
+    drop(partitions);
     hub.clear_requests();
     let mut reader = service
         .layer(ParallelReadLayer::new(
