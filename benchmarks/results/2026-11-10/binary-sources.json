@@ -1,0 +1,66 @@
+{
+  "platform": "Apple M5 Pro, 18 CPUs, 24 GiB RAM, macOS 26.5.2 arm64",
+  "production_base": "6154485ad282c24f96ac2e2643cf1951779e50a7",
+  "submission_base": "dabc4c9e9534eb1346f6dc5a313bd0b5cbb5fb67",
+  "cargo_lock_sha256": "99caf8b75099d41c22ab8f1c31cd57bd240f3b43a20f6a01495d0f9f1735da96",
+  "note": "Hashes identify measured executables. The working benchmark harness was developed during the session. Source heads identify the production code for each executable; optimized branches were subsequently rebased across a reserved-query validation refactor. Format/storage/core changes are identical after rebasing. Published environment paths are reduced to basenames; sample metrics are unchanged.",
+  "samples": 1302,
+  "binaries": {
+    "latest-baseline-benchmark": {
+      "sha256": "f2a3b40f0b13c9acd9119aa68d9293bce1755a54f7eae6afe47b397d255240e1",
+      "production_source_head": "6154485ad282c24f96ac2e2643cf1951779e50a7",
+      "benchmark_features": "full",
+      "equivalent_submitted_branch": null,
+      "submitted_head": null
+    },
+    "latest-baseline-alloc": {
+      "sha256": "f336036519111851742171c5a6c25142d6136f453e938ab01f0321894d5bafc7",
+      "production_source_head": "6154485ad282c24f96ac2e2643cf1951779e50a7",
+      "benchmark_features": "allocations",
+      "equivalent_submitted_branch": null,
+      "submitted_head": null
+    },
+    "latest-xml-optimized": {
+      "sha256": "064777edb2aa8d4f2b574f0cbf999b6524c357b94ca6ce7d73c02bdcdc8b6485",
+      "production_source_head": "60fb9ba4cee8d2630ff8fa191916ca02089ea018",
+      "benchmark_features": "full",
+      "equivalent_submitted_branch": "perf/xml-batch-partitions",
+      "submitted_head": "26a04e29a6d83ffb78a6517c8acee5dcf2577855"
+    },
+    "latest-xml-alloc": {
+      "sha256": "fc04f5c1c73206fc6c636e9955b4b0d12da698436160d4e762f993372351cd6b",
+      "production_source_head": "60fb9ba4cee8d2630ff8fa191916ca02089ea018",
+      "benchmark_features": "allocations",
+      "equivalent_submitted_branch": "perf/xml-batch-partitions",
+      "submitted_head": "26a04e29a6d83ffb78a6517c8acee5dcf2577855"
+    },
+    "latest-atif-optimized": {
+      "sha256": "f3aa7f5a7c9abdf4b938b6d8c063210bca8323f3e71b20cc282588d016fda412",
+      "production_source_head": "1ffb3fa2ee1c4a69b7ecfb85dfa131363cc5845d",
+      "benchmark_features": "full",
+      "equivalent_submitted_branch": "perf/atif-frame-copy",
+      "submitted_head": "81b15c3d250130b2a7f44939985a1ae1d81a97bb"
+    },
+    "latest-core-optimized": {
+      "sha256": "2dd3b8ba874c1947abf4874fb5e92010cc9d815b66336b697d362b8206a22ea2",
+      "production_source_head": "98d7476167449d3671b85b3912dd37f95f64f809",
+      "benchmark_features": "full",
+      "equivalent_submitted_branch": "perf/inline-row-presence",
+      "submitted_head": "18f604a509333876d94e0519b9ecad45afe0d28f"
+    },
+    "latest-core-alloc": {
+      "sha256": "2808a57e55dad500966e2ba10071d867590c07e96872f17b626946c1141efca2",
+      "production_source_head": "98d7476167449d3671b85b3912dd37f95f64f809",
+      "benchmark_features": "allocations",
+      "equivalent_submitted_branch": "perf/inline-row-presence",
+      "submitted_head": "18f604a509333876d94e0519b9ecad45afe0d28f"
+    },
+    "final-baseline-benchmark": {
+      "sha256": "0a0bf8ebadf7e7e44920aa6eb48868ef2c2defd1c551ba75e7bba87e9fc25cf6",
+      "production_source_head": "dabc4c9e9534eb1346f6dc5a313bd0b5cbb5fb67",
+      "benchmark_features": "full",
+      "equivalent_submitted_branch": null,
+      "submitted_head": null
+    }
+  }
+}

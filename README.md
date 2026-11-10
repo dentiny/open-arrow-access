@@ -163,6 +163,9 @@ cargo check --workspace --no-default-features
 cargo test --workspace --all-features --locked
 ```
 
+For repeatable CPU, I/O, memory and parallel-read measurements, see the
+[performance benchmark harness](benchmarks/README.md).
+
 See [testing](docs/testing.md) for suite placement and [dependency alignment](docs/dependencies.md)
 for the Arrow, Parquet, and OpenDAL version baseline.
 

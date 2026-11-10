@@ -1,0 +1,77 @@
+[package]
+name = "open-arrow-access-benchmarks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+allocations = ["full", "dep:stats_alloc"]
+default = []
+full = [
+    "dep:opendal-service-s3",
+    "dep:open-arrow-access-decompression",
+    "dep:open-arrow-access-file-format",
+    "dep:open-arrow-access-service",
+]
+
+[[bin]]
+name = "open-arrow-access-benchmarks"
+path = "src/main.rs"
+required-features = ["full"]
+test = false
+bench = false
+
+[dependencies]
+arrow-array.workspace = true
+arrow-schema.workspace = true
+futures.workspace = true
+http.workspace = true
+open-arrow-access-core.workspace = true
+open-arrow-access-dataset.workspace = true
+open-arrow-access-decompression = { workspace = true, optional = true, features = ["zip"] }
+open-arrow-access-file-format = { workspace = true, optional = true, features = [
+    "atif",
+    "csv",
+    "json",
+    "parquet",
+    "warc",
+    "xml",
+] }
+open-arrow-access-layers.workspace = true
+open-arrow-access-service = { workspace = true, optional = true, features = [
+    "arxiv",
+    "bhl",
+    "biorxiv",
+    "courtlistener",
+    "dataverse",
+    "doab",
+    "federal-register",
+    "figshare",
+    "govinfo",
+    "gutenberg",
+    "hathifiles",
+    "huggingface",
+    "internet-archive",
+    "library-of-congress",
+    "meca",
+    "oapen",
+    "openstax",
+    "pmc",
+    "regulations",
+    "semantic-scholar",
+    "uspto",
+    "warc",
+    "zenodo",
+] }
+open-arrow-access-storage.workspace = true
+opendal = { workspace = true, features = ["services-fs"] }
+opendal-service-http.workspace = true
+opendal-service-s3 = { version = "=0.59.2", optional = true, default-features = false }
+parquet.workspace = true
+serde_json.workspace = true
+stats_alloc = { version = "=0.1.10", optional = true, default-features = false }
+tokio.workspace = true
+
+[lints]
+workspace = true

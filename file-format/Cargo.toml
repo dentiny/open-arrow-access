@@ -16,27 +16,27 @@ warc = ["dep:warc", "dep:arrow-schema"]
 xml = ["dep:xml-arrow"]
 
 [dependencies]
-csv = { workspace = true, optional = true }
-csv-async = { workspace = true, optional = true }
 arrow-csv = { workspace = true, optional = true }
 arrow-json = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
 atif-arrow = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
+csv = { workspace = true, optional = true }
+csv-async = { workspace = true, optional = true }
 futures.workspace = true
-serde_json = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 parquet = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 warc = { workspace = true, optional = true }
 xml-arrow = { workspace = true, optional = true }
 
 [dev-dependencies]
-flate2.workspace = true
-open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
-open-arrow-access-layers.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
+flate2.workspace = true
 more-asserts.workspace = true
+open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
+open-arrow-access-layers.workspace = true
 open-arrow-access-storage.workspace = true
 open-arrow-access-test-support.workspace = true
 tempfile.workspace = true

@@ -16,6 +16,7 @@ members = [
     "test-support",
     "service",
     "layers",
+    "benchmarks",
 ]
 resolver = "3"
 
