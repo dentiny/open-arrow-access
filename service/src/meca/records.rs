@@ -53,11 +53,9 @@ impl ReadOptionsProvider for MecaReadRequest {
     }
 }
 
-/// One native Arrow row per manifest instance, preserving manifest order and
-/// unmodified embedded bytes. Independent entry readers share the ZIP source;
-/// parallel decoding does not imply concurrent underlying range I/O.
-/// Each batch contains exactly one complete entry, so multiple payloads never
-/// accumulate in one batch. Existing ZipLimits still bound entry decoding.
+/// One row and batch per manifest instance, in manifest order, with unmodified bytes.
+/// Entry readers share the ZIP source; parallel decoding does not imply concurrent
+/// range I/O. ZipLimits bound entry decoding.
 pub struct MecaRecords {
     archive: Arc<Mutex<MecaArchive>>,
 }
