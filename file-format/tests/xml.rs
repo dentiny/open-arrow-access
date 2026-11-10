@@ -4,10 +4,14 @@ use arrow_array::{
     types::{Float64Type, Int64Type},
 };
 use arrow_schema::DataType::{Float64, Int64, Utf8};
-use open_arrow_access_core::{Accessor, ErrorKind, ReadOptions, ReadRequest};
+use futures::TryStreamExt;
+use open_arrow_access_core::{
+    Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, ScanPlanner,
+};
 use open_arrow_access_file_format::xml::{
     NamespaceBinding, XmlAccessor, XmlField, XmlInferenceOptions, XmlLimits, XmlSchema,
 };
+use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_test_support::{
     MemoryAccessor,
     format::{self, collect_batches as batches},
@@ -386,4 +390,135 @@ async fn input_failures_keep_their_category_during_sampling_and_later_reads() {
         ErrorKind::PermissionDenied
     );
     assert!(reader.next().await.unwrap().is_none());
+}
+
+async fn planned_rows(
+    mut reader: Box<dyn open_arrow_access_core::RecordReader>,
+) -> Vec<RecordBatch> {
+    let mut rows = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        rows.extend((0..batch.num_rows()).map(|row| batch.slice(row, 1)));
+    }
+    rows
+}
+
+#[tokio::test]
+async fn parallel_explicit_xml_preserves_namespace_envelopes_and_projection() {
+    let bytes = br#"<?xml version="1.0"?><r:catalog xmlns:r="urn:open-arrow-access:catalog">
+      <r:product><r:name>one</r:name><r:price>1</r:price></r:product>
+      <x:product xmlns:x="urn:wrong"><x:name>wrong</x:name><x:price>9</x:price></x:product>
+      <product xmlns="urn:open-arrow-access:catalog"><name>two</name><price>2</price></product>
+    </r:catalog>"#;
+    for projection in [None, Some(&["price", "name"][..]), Some(&[][..])] {
+        let mut input = b"\xEF\xBB\xBF".to_vec();
+        input.extend_from_slice(bytes);
+        let accessor = XmlAccessor::new(MemoryAccessor::new(&input, 1), CATALOG_PATH)
+            .with_schema(catalog_schema());
+        let request = request("namespace.xml", 2, projection);
+        let plan = accessor.plan_scan(request.clone()).await.unwrap();
+        // Local-name framing includes the wrong-URI candidate; the original XML
+        // decoder remains authoritative and filters it out in its own worker.
+        assert_eq!(
+            plan.partitions.try_collect::<Vec<_>>().await.unwrap().len(),
+            3
+        );
+        let expected = planned_rows(accessor.open(request.clone()).await.unwrap()).await;
+        assert_eq!(expected.len(), 2);
+        let actual = planned_rows(
+            accessor
+                .layer(ParallelReadLayer::new(
+                    NonZeroUsize::new(2).unwrap(),
+                    NonZeroUsize::new(1).unwrap(),
+                ))
+                .open(request)
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(actual, expected);
+    }
+}
+
+#[tokio::test]
+async fn inferred_xml_plan_retains_one_fixed_sample_replay_reader() {
+    let accessor =
+        XmlAccessor::new(source("catalog.xml").await, CATALOG_PATH).with_namespaces(NAMESPACES);
+    let request = request("catalog.xml", 1, None);
+    let mut plan = accessor.plan_scan(request.clone()).await.unwrap();
+    assert_eq!(plan.partitions.size_hint().0, 1);
+    let actual = planned_rows(
+        plan.partitions
+            .try_next()
+            .await
+            .unwrap()
+            .unwrap()
+            .await
+            .unwrap(),
+    )
+    .await;
+    let expected = planned_rows(accessor.open(request).await.unwrap()).await;
+    assert_eq!(actual, expected);
+}
+
+#[tokio::test]
+async fn parallel_xml_rejects_invalid_document_tails_and_dtds() {
+    let field = XmlField::new("id", "@id", Int64, false);
+    for raw in [
+        b"<rows><row id='1'/></rows><extra/>".as_slice(),
+        b"<rows><row id='1'/>".as_slice(),
+        b"<!DOCTYPE rows><rows><row id='1'/></rows>".as_slice(),
+        b"<rows><row id='1'/></rows>junk".as_slice(),
+    ] {
+        let accessor = XmlAccessor::new(MemoryAccessor::new(raw, 1), "/rows/row")
+            .with_schema(XmlSchema::new(vec![field.clone()]).unwrap());
+        let mut reader = accessor
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::new(1).unwrap(),
+            ))
+            .open(ReadRequest::new("bad.xml"))
+            .await
+            .unwrap();
+        loop {
+            match reader.next().await {
+                Err(error) => {
+                    assert_eq!(error.kind(), ErrorKind::Decode);
+                    break;
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => panic!("invalid XML was accepted"),
+            }
+        }
+        assert!(reader.next().await.unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn parallel_xml_bounds_event_context_and_depth() {
+    let oversized = format!("<rows note='{}'><row id='1'/></rows>", "x".repeat(80));
+    for (raw, max_depth) in [
+        (oversized.as_bytes(), 8),
+        (b"<rows><row id='1'><child/></row></rows>".as_slice(), 2),
+    ] {
+        let accessor = XmlAccessor::new(MemoryAccessor::new(raw, 1), "/rows/row")
+            .with_schema(XmlSchema::new(vec![XmlField::new("id", "@id", Int64, false)]).unwrap())
+            .with_limits(XmlLimits {
+                max_record_bytes: 64,
+                max_batch_bytes: 128,
+                max_depth,
+            });
+        let mut reader = accessor
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::new(1).unwrap(),
+            ))
+            .open(ReadRequest::new("limits.xml"))
+            .await
+            .unwrap();
+        assert_eq!(
+            reader.next().await.unwrap_err().kind(),
+            ErrorKind::ResourceExhausted
+        );
+        assert!(reader.next().await.unwrap().is_none());
+    }
 }

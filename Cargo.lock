@@ -1937,8 +1937,10 @@ dependencies = [
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
  "parquet",
+ "quick-xml",
  "tempfile",
  "tokio",
+ "tokio-util",
  "warc-rs",
  "xml-arrow",
 ]
