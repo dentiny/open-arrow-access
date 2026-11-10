@@ -467,6 +467,31 @@ async fn csv_and_parallel_reads_share_one_generation_context() {
 }
 
 #[tokio::test]
+async fn cast_function_rewrites_preserve_values_and_nulls() {
+    for expression in [
+        r#"CAST("Count" AS INT)"#,
+        r#"TRY_CAST("Count" AS INT)"#,
+        r#"arrow_cast("Count", 'Int32')"#,
+        r#"arrow_try_cast("Count", 'Int32')"#,
+        r#"cast_to_type("Count", CAST(NULL AS INT))"#,
+        r#"try_cast_to_type("Count", CAST(NULL AS INT))"#,
+        r#"arrow_cast(cast_to_type("Count", CAST(NULL AS INT)), 'Int32')"#,
+    ] {
+        let mut reader = MemoryAccessor::new(vec![input()])
+            .layer(layer(&[("x", expression)]))
+            .open(request(&["x"]))
+            .await
+            .unwrap();
+        let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(
+            batch.column(0).to_data(),
+            arrow_array::Int32Array::from(vec![Some(2), None, Some(4)]).to_data(),
+            "{expression}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn unsafe_decimal_rescaling_fails_before_evaluation() {
     use arrow_array::Decimal256Array;
     let batch = RecordBatch::try_from_iter([(
@@ -486,6 +511,9 @@ async fn unsafe_decimal_rescaling_fails_before_evaluation() {
         "cast_to_type(n, arrow_cast(1, 'Decimal256(76, 60)'))",
         "try_cast_to_type(n, arrow_cast(1, 'Decimal256(76, 60)'))",
         "CAST(CAST(1 AS DECIMAL(76, 0)) AS DECIMAL(76, 60))",
+        "arrow_cast(arrow_cast(1, 'Decimal256(76, 0)'), 'Decimal256(76, 60)')",
+        "arrow_try_cast(arrow_cast(1, 'Decimal256(76, 0)'), 'Decimal256(76, 60)')",
+        "coalesce(n, arrow_cast(n, 'Decimal256(76, 60)'))",
     ] {
         let source = MemoryAccessor::new(vec![batch.clone()]);
         let polls = source.polls.clone();
