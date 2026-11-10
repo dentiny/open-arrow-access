@@ -1,9 +1,8 @@
 mod error;
 
-use futures::stream;
 use open_arrow_access_core::{
-    ByteMetadata, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt, RecordBatch, RecordReader,
-    Result, StreamReader,
+    Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt, RecordBatch, RecordReader, Result,
+    bytes_reader,
 };
 
 /// Decode one buffered document through a configured file format. Exactly one
@@ -13,15 +12,7 @@ pub async fn read_document<F>(bytes: Bytes, format: F, request: ReadRequest) -> 
 where
     F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader>,
 {
-    let metadata = ByteMetadata {
-        source: Some(request.object.clone()),
-        content_length: Some(bytes.len() as u64),
-        version: None,
-    };
-    let input = StreamReader::new(
-        stream::iter((!bytes.is_empty()).then_some(Ok(bytes))),
-        metadata,
-    );
+    let input = bytes_reader(bytes, Some(request.object.clone()));
     let mut reader = format.open_input(Box::new(input), request).await?;
     let batch = reader.next().await?.ok_or_else(error::row_count)?;
     if batch.num_rows() != 1 || reader.next().await?.is_some() {

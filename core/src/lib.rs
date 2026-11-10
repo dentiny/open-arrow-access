@@ -52,7 +52,7 @@ pub use request::{
     ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ListRequest, ObjectRef, ReadOptions,
     ReadOptionsProvider, ReadRequest,
 };
-pub use stream_reader::StreamReader;
+pub use stream_reader::{StreamReader, bytes_reader};
 pub use validation::{is_relative_path, validate_byte_range};
 
 pub use arrow_array::RecordBatch;
