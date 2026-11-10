@@ -52,8 +52,8 @@ flowchart LR
 - **Datasets and providers** select files, preserve source metadata, and reuse the
   same storage and format components.
 - **Layers** wrap accessors through a common extension contract. Streaming
-  decompression and Arrow type conversion are implemented; generated columns, metrics, and parallel scan
-  layers are planned.
+  decompression, Arrow type conversion, and [ordered file-level parallel reads](docs/parallel-read.md)
+  are implemented; generated columns and metrics are planned.
 
 See [architecture](docs/architecture.md) for component boundaries and execution behavior.
 
@@ -131,7 +131,7 @@ pipelines:
 - CSV/JSON schema inference, followed by opt-in cross-file schema merging and alignment.
 - Generated columns with dependency-aware projection and a stable output schema.
 - Metrics, timeout, and read-budget layers.
-- Source-aware partition planning, parallel scans, and optional unordered emission.
+- File-internal partition planning and optional unordered emission.
 - WARC-to-Arrow conversion and format-specific indexing/splitting.
 
 These are planned capabilities, with no release-date commitment. The

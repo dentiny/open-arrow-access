@@ -406,3 +406,94 @@ async fn directory_rejects_traversal_entries() {
         assert!(files.opens.lock().unwrap().is_empty());
     }
 }
+
+#[tokio::test]
+async fn parallel_file_plan_is_lazy_and_preserves_options_order_and_duplicates() {
+    use open_arrow_access_core::{AccessorExt, ScanPlanner};
+    use open_arrow_access_layers::ParallelReadLayer;
+    let schema = schema("parallel");
+    let files = Files::new([
+        (
+            "a",
+            FileData::new(schema.clone(), vec![batch(schema.clone(), &[1, 2])]),
+        ),
+        (
+            "b",
+            FileData::new(schema.clone(), vec![batch(schema.clone(), &[3])]),
+        ),
+        ("empty", FileData::new(schema, vec![])),
+    ]);
+    let opens = files.opens.clone();
+    let accessor = FileSetAccessor::new(files);
+    let mut request = FileSetRequest::new(["b", "empty", "a", "b"]);
+    request.options.batch_size = NonZeroUsize::new(2).unwrap();
+    request.byte_options.io_concurrency = NonZeroUsize::new(3).unwrap();
+    let plan = accessor.plan_scan(request.clone()).await.unwrap();
+    assert_eq!(plan.partitions.len(), 4);
+    assert_eq!(opens.lock().unwrap().len(), 1);
+    drop(plan);
+    for p in [1, 3] {
+        let parallel = accessor.clone().layer(ParallelReadLayer::new(
+            NonZeroUsize::new(p).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ));
+        assert_eq!(
+            values(parallel.open(request.clone()).await.unwrap()).await,
+            [3, 1, 2, 3]
+        );
+    }
+    assert!(
+        opens
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|r| r.options.batch_size.get() == 2 && r.byte_options.io_concurrency.get() == 3)
+    );
+    assert!(
+        accessor
+            .plan_scan(FileSetRequest::new(Vec::<ObjectRef>::new()))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn parallel_directory_keeps_discovery_filter_sort_and_validation() {
+    use open_arrow_access_core::AccessorExt;
+    use open_arrow_access_layers::ParallelReadLayer;
+    let schema = schema("parallel-directory");
+    let files = Files::new([
+        (
+            "data/a",
+            FileData::new(schema.clone(), vec![batch(schema.clone(), &[1])]),
+        ),
+        (
+            "data/b",
+            FileData::new(schema.clone(), vec![batch(schema, &[2])]),
+        ),
+    ]);
+    let layer =
+        ParallelReadLayer::new(NonZeroUsize::new(2).unwrap(), NonZeroUsize::new(1).unwrap());
+    let directory = DirectoryAccessor::new(
+        Listing {
+            objects: vec!["data/b", "data/a", "data/b", "data/sub/c"],
+            fail: false,
+        },
+        files.clone(),
+    )
+    .layer(layer);
+    let mut request = DirectoryRequest::new("data");
+    request.recursive = false;
+    assert_eq!(values(directory.open(request).await.unwrap()).await, [1, 2]);
+    let calls = files.opens.lock().unwrap().len();
+    let invalid = DirectoryAccessor::new(
+        Listing {
+            objects: vec!["../bad"],
+            fail: false,
+        },
+        files.clone(),
+    )
+    .layer(layer);
+    assert!(invalid.open(DirectoryRequest::new("")).await.is_err());
+    assert_eq!(files.opens.lock().unwrap().len(), calls);
+}

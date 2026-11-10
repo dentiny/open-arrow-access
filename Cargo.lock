@@ -1894,10 +1894,13 @@ version = "0.1.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
+ "flate2",
  "futures",
  "more-asserts",
  "open-arrow-access-core",
+ "open-arrow-access-decompression",
  "open-arrow-access-file-format",
+ "open-arrow-access-layers",
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
  "tempfile",
