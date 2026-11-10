@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use futures::{
-    StreamExt,
+    StreamExt, TryStreamExt,
     future::BoxFuture,
     stream::{self, BoxStream},
 };
 
-use crate::{Accessor, RecordMetadata, RecordReader, Result, async_trait};
+use crate::{
+    Accessor, RecordMetadata, RecordReader, Result, StreamReader, async_trait, into_stream,
+};
 
 /// A lazy, independently owned partition opener. Partition stream order defines logical order.
 /// Each opener must create its own reader/decoder state and preserve order within it.
@@ -21,6 +23,16 @@ pub struct ScanPlan {
 }
 
 impl ScanPlan {
+    /// Read partitions sequentially in plan order, opening each on demand.
+    /// Discovery, opening, or reading errors end the reader without opening later partitions.
+    pub fn into_reader(self) -> impl RecordReader {
+        let batches = self
+            .partitions
+            .and_then(|partition| async { partition.await.map(into_stream) })
+            .try_flatten();
+        StreamReader::new(batches, self.metadata)
+    }
+
     /// Plan an already known ordered partition list without opening its readers.
     pub fn new(metadata: RecordMetadata, partitions: Vec<ScanPartition>) -> Self {
         Self::from_stream(metadata, stream::iter(partitions.into_iter().map(Ok)))
@@ -36,6 +48,16 @@ impl ScanPlan {
             metadata,
             partitions: partitions.boxed(),
         }
+    }
+
+    /// Open and drain partitions sequentially in plan order, stopping at the first error.
+    /// Partition discovery and opening remain lazy until the reader is polled.
+    pub fn into_reader(self) -> impl RecordReader {
+        let batches = self
+            .partitions
+            .and_then(|partition| async { partition.await.map(into_stream) })
+            .try_flatten();
+        StreamReader::new(batches, self.metadata)
     }
 
     /// Keep a stateful or indivisible input in one partition. The reader's schema

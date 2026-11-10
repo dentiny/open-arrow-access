@@ -74,8 +74,9 @@ where
     A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,
     M: Send + Sync + 'static,
 {
-    /// Bind an explicit Arrow format. FileSetRequest selects names in order,
-    /// retaining duplicates; scans open independent readers only for selected files.
+    /// Bind an explicit Arrow format for sequential reads or scan planning.
+    /// [`FileSetAccessor`] selects logical names in caller order, including duplicates;
+    /// each selected file opens an independent byte reader on demand.
     pub fn records<F>(self, format: F) -> FileSetAccessor<FileAccessor<Self, F>>
     where
         F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader> + 'static,

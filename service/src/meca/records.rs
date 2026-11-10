@@ -4,11 +4,11 @@ use std::{
 };
 
 use arrow_schema::{DataType, Field, Schema};
-use futures::{TryStreamExt, lock::Mutex, stream};
+use futures::{lock::Mutex, stream};
 use open_arrow_access_core::{
     Accessor, Bytes, Capability, ReadOptions, ReadOptionsProvider, RecordBatchBuilder,
     RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef,
-    StreamReader, async_trait, into_stream, read_all,
+    StreamReader, async_trait, read_all,
 };
 
 use super::MecaArchive;
@@ -53,11 +53,9 @@ impl ReadOptionsProvider for MecaReadRequest {
     }
 }
 
-/// One native Arrow row per manifest instance, preserving manifest order and
-/// unmodified embedded bytes. Independent entry readers share the ZIP source;
-/// parallel decoding does not imply concurrent underlying range I/O.
-/// Each batch contains exactly one complete entry, so multiple payloads never
-/// accumulate in one batch. Existing ZipLimits still bound entry decoding.
+/// One Arrow row and batch per manifest instance, in manifest order, with unchanged payloads.
+/// Entry readers share the ZIP source without implying concurrent range I/O.
+/// ZipLimits bound entry decoding.
 pub struct MecaRecords {
     archive: Arc<Mutex<MecaArchive>>,
 }
@@ -99,12 +97,7 @@ impl Accessor for MecaRecords {
         }
     }
     async fn open(&self, request: MecaReadRequest) -> Result<Box<dyn RecordReader>> {
-        let plan = self.plan_scan(request).await?;
-        let batches = plan
-            .partitions
-            .and_then(|partition| async { partition.await.map(into_stream) })
-            .try_flatten();
-        Ok(Box::new(StreamReader::new(batches, plan.metadata)))
+        Ok(Box::new(self.plan_scan(request).await?.into_reader()))
     }
 }
 
