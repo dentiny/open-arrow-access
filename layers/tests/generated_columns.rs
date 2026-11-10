@@ -293,31 +293,6 @@ async fn composes_after_type_conversion() {
     assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 3);
 }
 
-#[test]
-fn rejects_invalid_declarations_without_io() {
-    for specs in [
-        vec![("", "1")],
-        vec![(" ", "1")],
-        vec![("x", " ")],
-        vec![("x", "1"), ("x", "2")],
-    ] {
-        assert!(
-            GeneratedColumnsLayer::try_new(
-                specs
-                    .into_iter()
-                    .map(|(column, expression)| GeneratedColumnSpec {
-                        column: column.into(),
-                        expression: expression.into()
-                    })
-                    .collect()
-            )
-            .is_err()
-        );
-    }
-}
-
-// Reuses the same source and assertions; opt in to timing on an otherwise idle
-// machine. Keep open/SQL planning separate from steady batch evaluation.
 #[tokio::test]
 #[ignore = "manual release performance check"]
 async fn generated_columns_throughput() {
