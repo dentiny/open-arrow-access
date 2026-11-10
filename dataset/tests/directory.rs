@@ -650,6 +650,21 @@ async fn native_file_plans_share_one_budget_and_preserve_lazy_ordered_selection(
             )
         );
     }
+    let nested = FileSetAccessor::new(
+        PlannedFiles {
+            files: files.clone(),
+            plans: plans.clone(),
+        }
+        .layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN)),
+    )
+    .with_file_planning();
+    let error = nested
+        .plan_scan(FileSetRequest::new(["a"]))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.operation(), "plan_file_set");
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
     let mut plan = accessor
         .plan_scan(FileSetRequest::new(["empty", "mismatch", "a"]))
         .await

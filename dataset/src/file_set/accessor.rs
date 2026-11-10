@@ -11,7 +11,7 @@ use super::{
     FileSetRequest,
     error::{empty_selection, schema_mismatch},
     reader::create_reader,
-    validation::validate_file_ordering,
+    validation::{validate_file_ordering, validate_file_policy},
 };
 
 type FilePlanner<A> = fn(Arc<A>, ReadRequest) -> BoxFuture<'static, Result<ScanPlan>>;
@@ -114,6 +114,7 @@ where
             Some(plan_file) => plan_file(self.inner.clone(), first).await?,
             None => ScanPlan::whole_input(self.inner.open(first).await?),
         };
+        validate_file_policy(&first)?;
         let ordering = self.ordering.combine(first.ordering);
         let metadata = RecordMetadata {
             schema: first.metadata.schema,
@@ -127,6 +128,7 @@ where
                 let schema = schema.clone();
                 async move {
                     let plan = plan_file(inner, request).await?;
+                    validate_file_policy(&plan)?;
                     validate_file_ordering(ordering, plan.ordering)?;
                     if plan.metadata.schema != schema {
                         return Err(schema_mismatch());

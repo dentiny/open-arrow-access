@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{num::NonZeroUsize, sync::Arc};
 
 use futures::{
     StreamExt, TryStreamExt,
@@ -31,6 +31,23 @@ impl OrderRequirement {
     }
 }
 
+/// Requested output policy; permission still comes from `ScanPlan::ordering`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EmissionPolicy {
+    #[default]
+    Ordered,
+    Unordered,
+}
+
+/// One scan-wide partition budget, independent of storage byte I/O concurrency.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParallelReadOptions {
+    /// Maximum resident partitions, including completed queues awaiting consumption.
+    pub partitions: NonZeroUsize,
+    /// Maximum queued batches per partition; does not bound total bytes.
+    pub prefetch: NonZeroUsize,
+}
+
 /// A lazy, independently owned partition opener. Partition stream order defines logical order.
 /// Each opener must create its own reader/decoder state and preserve order within it.
 pub type ScanPartition = BoxFuture<'static, Result<Box<dyn RecordReader>>>;
@@ -42,6 +59,12 @@ pub struct ScanPlan {
     pub metadata: RecordMetadata,
     /// Resolved requirement for the entire selected input, before execution.
     pub ordering: OrderRequirement,
+    /// Execution layers collect settings here before any partition worker starts.
+    pub parallel_read: Option<ParallelReadOptions>,
+    /// Caller's requested output policy, distinct from the source's `ordering`
+    /// requirement. Unordered emission is allowed only for a reorderable source;
+    /// a reorderable source may still be read with ordered emission.
+    pub emission: EmissionPolicy,
     pub partitions: BoxStream<'static, Result<ScanPartition>>,
 }
 
@@ -49,6 +72,8 @@ impl ScanPlan {
     /// Read partitions sequentially in plan order, opening each on demand.
     /// Validate partition metadata and batches against the fixed scan schema.
     /// Discovery, opening, or reading errors end the reader without opening later partitions.
+    /// This sequential primitive does not execute collected layer policies; open the
+    /// composed accessor to validate and execute those policies.
     pub fn into_reader(self) -> impl RecordReader {
         let schema = self.metadata.schema.clone();
         let batch_schema = schema.clone();
@@ -89,6 +114,8 @@ impl ScanPlan {
         Self {
             metadata,
             ordering: OrderRequirement::PreserveGlobal,
+            parallel_read: None,
+            emission: EmissionPolicy::Ordered,
             partitions: partitions.boxed(),
         }
     }
@@ -123,8 +150,9 @@ impl ScanPlan {
 #[async_trait]
 pub trait ScanPlanner: Accessor<Reader = dyn RecordReader> {
     /// Requirement covering every selection accepted by this accessor, without I/O.
-    /// A mixed/unknown source must retain the conservative default. A resolved plan
-    /// may strengthen this declaration for a particular selection.
+    /// `Reorderable` guarantees every accepted selection is reorderable, including
+    /// empty inputs. Keep the conservative default when selection-specific inspection
+    /// is required; `plan_scan` resolves the selected source's own requirements.
     fn order_requirement(&self) -> OrderRequirement {
         OrderRequirement::PreserveGlobal
     }

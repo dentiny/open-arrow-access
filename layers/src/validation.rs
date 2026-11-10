@@ -6,9 +6,39 @@ use arrow_array::types::{
 };
 use arrow_cast::can_cast_types;
 use arrow_schema::{ArrowError, DataType, Field, TimeUnit};
-use open_arrow_access_core::{Error, ErrorKind, FieldNameIndex, Result};
+use open_arrow_access_core::{
+    EmissionPolicy, Error, ErrorKind, FieldNameIndex, OrderRequirement, ParallelReadOptions, Result,
+};
 
 use crate::{ColumnTypeSpec, error::column_error};
+
+pub(crate) fn validate_emission_policy(
+    emission: EmissionPolicy,
+    ordering: OrderRequirement,
+) -> Result<()> {
+    if emission == EmissionPolicy::Unordered && ordering != OrderRequirement::Reorderable {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "unordered_emission",
+            "source requires global record order",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_parallel_read_settings(
+    previous: Option<ParallelReadOptions>,
+    settings: ParallelReadOptions,
+) -> Result<()> {
+    if previous.is_some_and(|previous| previous != settings) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "parallel_read",
+            "conflicting parallel read settings on one scan",
+        ));
+    }
+    Ok(())
+}
 
 pub(crate) fn validate_specs(specs: &[ColumnTypeSpec]) -> Result<()> {
     let mut names = HashSet::with_capacity(specs.len());
