@@ -17,7 +17,7 @@
       "sha256": "6ece3cba2e34296f3f7ff9978cdacf0314d62acd2665f9c15c19aac4452090e1"
     },
     "chunks_candidate": {
-      "sha256": "241095113d056ede4614f9a568c0cbc6fb4ce199f9d69f70697f36c8a3f909dc"
+      "sha256": "dfccb30bd6a41098c2b63bf829604ee049d7f1786a12bd6ed139209a61322638"
     },
     "atif_baseline": {
       "sha256": "e1379440a16b2ffd41f8e524368bcbb13e70f98381eb13c100404a8826c918a2"
@@ -31,5 +31,11 @@
     "xml_candidate": {
       "sha256": "672426293935646faa87d03588ea05b20740e0ca386356551316ea2972a829a9"
     }
+  },
+  "candidate_commits": {
+    "core": "78881e0",
+    "http": "b87eebb",
+    "atif": "83be5d8",
+    "xml": "2623dc7"
   }
 }

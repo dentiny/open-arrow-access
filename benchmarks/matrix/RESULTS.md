@@ -95,7 +95,7 @@ manifest/decoder, not zero parser work.
 | Follow-up | Before median ms | After median ms | Before/after median RSS MiB |
 | --- | ---: | ---: | ---: |
 | Provider scatter buffer | 0.2529 | 0.0293 | 75.8 / 59.8 |
-| 128 retained short reads | 0.2082 | 0.2092 | 14.1 / 11.2 |
+| 128 retained short reads | 0.2082 | 0.1783 | 14.1 / 11.1 |
 
 The core/provider numbers are independent-process medians, not alternating pairs;
 CPU frequency, shared host load and allocator caches add noise. Raw process CPU,
@@ -124,9 +124,13 @@ refactor `13572ef`. Native tests were rerun after rebasing.
 - No measured WARC optimization was identified in this follow-up. Its baseline
   is retained; no speculative upstream WARC PR is submitted.
 
-Validation: the current-main umbrella workspace test suite passes; independent
-core/provider regressions and both native parser suites pass. No merge or
+Validation: 249 current-main umbrella tests/doctests and 251 combined candidate
+tests/doctests pass. Native parser suites pass 18 ATIF and 39 XML tests/doctests.
+Strict workspace/all-targets Clippy and Rustfmt pass, as does strict Clippy for
+both native parser packages. No merge or
 auto-merge has been requested. Links to the focused PRs are added below.
 
+- [Core: compact short reads](https://github.com/dentiny/open-arrow-access/pull/232).
+- [Provider: share HTTP body parts](https://github.com/dentiny/open-arrow-access/pull/233).
 - [ATIF: append raw JSON directly](https://github.com/dentiny/atif-arrow/pull/35).
 - [XML: eliminate direct-child list staging](https://github.com/dentiny/xml-arrow-rs/pull/31).
