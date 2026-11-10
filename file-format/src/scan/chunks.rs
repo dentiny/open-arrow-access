@@ -1,5 +1,5 @@
 use futures::{
-    Stream, TryStreamExt,
+    TryStreamExt,
     stream::{self, BoxStream},
 };
 use open_arrow_access_core::{RecordMetadata, Result, ScanPartition, ScanPlan};
@@ -49,6 +49,7 @@ impl<T> RecordChunks<T> {
 
 impl<T: Send + 'static> RecordChunks<T> {
     /// Bind shared metadata while discovering format partitions lazily.
+    /// Constructing a partition does not run its decoder.
     pub(crate) fn into_plan(
         self,
         metadata: RecordMetadata,
@@ -58,28 +59,13 @@ impl<T: Send + 'static> RecordChunks<T> {
         partition: impl Fn(Vec<T>, RecordMetadata) -> ScanPartition + Send + 'static,
     ) -> ScanPlan {
         let output = metadata.clone();
-        let partitions = self.into_partitions(rows, target_bytes, size, move |records| {
-            partition(records, output.clone())
-        });
+        let partitions = stream::try_unfold((self, size), move |(mut chunks, size)| async move {
+            Ok(chunks
+                .next_chunk(rows, target_bytes, &size)
+                .await?
+                .map(|records| (records, (chunks, size))))
+        })
+        .map_ok(move |records| partition(records, output.clone()));
         ScanPlan::from_stream(metadata, partitions)
-    }
-
-    /// Discover chunks lazily; constructing a partition does not run its decoder.
-    pub(crate) fn into_partitions(
-        self,
-        rows: usize,
-        target_bytes: usize,
-        size: impl Fn(&T) -> usize + Send + Sync + 'static,
-        partition: impl FnMut(Vec<T>) -> ScanPartition + Send + 'static,
-    ) -> impl Stream<Item = Result<ScanPartition>> + Send {
-        stream::try_unfold(
-            (self, size, partition),
-            move |(mut chunks, size, mut partition)| async move {
-                Ok(chunks
-                    .next_chunk(rows, target_bytes, &size)
-                    .await?
-                    .map(|records| (partition(records), (chunks, size, partition))))
-            },
-        )
     }
 }
