@@ -233,18 +233,29 @@ impl<'a, T: Into<FieldValue<'a>>> From<Option<T>> for FieldValue<'a> {
 pub struct RecordBatchRow<'a> {
     builder: &'a mut StructBuilder,
     layout: &'a StructLayout,
-    seen: Vec<bool>,
+    seen: u64,
+    seen_overflow: Vec<bool>,
     failed: bool,
 }
 
 impl<'a> RecordBatchRow<'a> {
     fn new(builder: &'a mut StructBuilder, layout: &'a StructLayout) -> Self {
-        let seen = vec![false; builder.num_fields()];
+        let seen_overflow = vec![false; builder.num_fields().saturating_sub(64)];
         Self {
             builder,
             layout,
-            seen,
+            seen: 0,
+            seen_overflow,
             failed: false,
+        }
+    }
+
+    // Most metadata rows fit inline; wide schemas retain arbitrary field counts.
+    fn was_written(&self, index: usize) -> bool {
+        if index < 64 {
+            self.seen & (1u64 << index) != 0
+        } else {
+            self.seen_overflow[index - 64]
         }
     }
 
@@ -299,7 +310,7 @@ impl<'a> RecordBatchRow<'a> {
             let Some(index) = self.layout.output_indices[source_index] else {
                 return Ok(());
             };
-            if self.seen[index] {
+            if self.was_written(index) {
                 return Err(decode(format!("field {name:?} was already written")));
             }
             let field = self.builder.fields()[index].clone();
@@ -308,7 +319,11 @@ impl<'a> RecordBatchRow<'a> {
                 field: &field,
                 layout: &self.layout.values[index],
             })?;
-            self.seen[index] = true;
+            if index < 64 {
+                self.seen |= 1u64 << index;
+            } else {
+                self.seen_overflow[index - 64] = true;
+            }
             Ok(())
         })();
         self.failed |= result.is_err();
@@ -321,7 +336,7 @@ impl<'a> RecordBatchRow<'a> {
         }
         let fields = self.builder.fields().clone();
         for (index, field) in fields.iter().enumerate() {
-            if !self.seen[index] {
+            if !self.was_written(index) {
                 FieldWriter {
                     builder: self.builder.field_builders_mut()[index].as_mut(),
                     field,
