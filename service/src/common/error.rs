@@ -56,11 +56,3 @@ pub(super) fn empty_page_selection() -> Error {
         "empty page selection",
     )
 }
-
-pub(super) fn page_schema_mismatch() -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "read_page_set",
-        "page schema differs from the first selected page",
-    )
-}

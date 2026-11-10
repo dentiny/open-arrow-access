@@ -10,6 +10,8 @@ use crate::{
     Accessor, RecordMetadata, RecordReader, Result, StreamReader, async_trait, into_stream,
 };
 
+use crate::error::scan_schema_mismatch;
+
 /// A lazy, independently owned partition opener. Partition stream order defines logical order.
 /// Each opener must create its own reader/decoder state and preserve order within it.
 pub type ScanPartition = BoxFuture<'static, Result<Box<dyn RecordReader>>>;
@@ -24,12 +26,31 @@ pub struct ScanPlan {
 
 impl ScanPlan {
     /// Read partitions sequentially in plan order, opening each on demand.
+    /// Validate partition metadata and batches against the fixed scan schema.
     /// Discovery, opening, or reading errors end the reader without opening later partitions.
     pub fn into_reader(self) -> impl RecordReader {
+        let schema = self.metadata.schema.clone();
+        let batch_schema = schema.clone();
         let batches = self
             .partitions
-            .and_then(|partition| async { partition.await.map(into_stream) })
-            .try_flatten();
+            .and_then(move |partition| {
+                let schema = schema.clone();
+                async move {
+                    let reader = partition.await?;
+                    if reader.metadata().schema != schema {
+                        return Err(scan_schema_mismatch());
+                    }
+                    Ok(into_stream(reader))
+                }
+            })
+            .try_flatten()
+            .map(move |result| {
+                let batch = result?;
+                if batch.schema() != batch_schema {
+                    return Err(scan_schema_mismatch());
+                }
+                Ok(batch)
+            });
         StreamReader::new(batches, self.metadata)
     }
 

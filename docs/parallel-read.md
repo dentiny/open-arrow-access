@@ -45,8 +45,10 @@ WARC and segment accessors expose the same builder when their supplied format
 supports native planning.
 
 All partition metadata and batches must match the fixed schema, including
-metadata. Format-specific discovery may retain an input reader, framing state
-and buffers separately from partition workers.
+schema metadata. Both `ParallelReadLayer` and sequential `ScanPlan::into_reader()`
+reject mismatches, including empty partitions with different schemas. Partition
+source identifiers may differ. Format-specific discovery may retain an input
+reader, framing state and buffers separately from partition workers.
 
 With P resident partitions and Q queue slots per partition, at most P partition
 readers are active and P * Q batches are queued. A worker reserves queue capacity before

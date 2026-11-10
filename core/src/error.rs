@@ -151,3 +151,11 @@ pub(crate) fn invalid_output_schema() -> Error {
         "output schema must contain unique fields from the full schema",
     )
 }
+
+pub(crate) fn scan_schema_mismatch() -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "read_scan",
+        "partition schema differs from scan schema",
+    )
+}
