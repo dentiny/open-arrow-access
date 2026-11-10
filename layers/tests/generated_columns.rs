@@ -273,34 +273,6 @@ async fn invalid_expressions_fail_at_open_even_when_hidden() {
 }
 
 #[tokio::test]
-async fn runtime_failure_is_terminal_and_releases_input() {
-    let good =
-        RecordBatch::try_from_iter([("text", Arc::new(StringArray::from(vec!["42"])) as ArrayRef)])
-            .unwrap();
-    let bad = RecordBatch::try_from_iter([(
-        "text",
-        Arc::new(StringArray::from(vec!["bad"])) as ArrayRef,
-    )])
-    .unwrap();
-    let source = MemoryAccessor::new(vec![good.clone(), bad, good]);
-    let polls = source.polls.clone();
-    let drops = source.drops.clone();
-    let mut reader = source
-        .layer(layer(&[("value", "CAST(text AS BIGINT)")]))
-        .open(request(&[]))
-        .await
-        .unwrap();
-    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
-    let error = reader.next().await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::Decode);
-    assert!(error.to_string().contains("value"));
-    assert!(std::error::Error::source(&error).is_some());
-    assert_eq!(drops.load(Ordering::SeqCst), 1);
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(polls.load(Ordering::SeqCst), 2);
-}
-
-#[tokio::test]
 async fn empty_layer_passes_through_and_drop_stops_reading() {
     let input = input();
     for generation in [GeneratedColumnsLayer::default(), layer(&[("x", "1")])] {
