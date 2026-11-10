@@ -1,4 +1,9 @@
 //! Federal Register public API pages and original document representations.
+//!
+//! Resolved files expose `records(format)` for explicit Arrow decoding and scan
+//! planning. The adapter retains validated document numbers and available representation links;
+//! metadata links are not followed automatically. API pages can bind an explicit
+//! JSON record selection with `ApiDocument::records_at`.
 mod error;
 mod resolver;
 mod validation;
