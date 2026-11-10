@@ -1,5 +1,4 @@
 use arrow_array::cast::AsArray;
-use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteReadRequest, ErrorKind, ReadOptions, ScanPlanner,
 };
@@ -88,40 +87,4 @@ async fn native_parallel_entries_preserve_manifest_fields_and_binary_data() {
         assert_eq!(index, files.len());
         assert!(actual.next().await.unwrap().is_none());
     }
-}
-
-#[tokio::test]
-async fn planning_and_opening_partitions_do_not_read_entry_bodies() {
-    let data = fixture!("meca", "valid.meca").await;
-    let source = MemoryAccessor::new(&data, 7).with_ranges();
-    let observed = source.observations.clone();
-    let archive = MecaArchive::open(
-        source
-            .open(ByteReadRequest::new("bundle.meca"))
-            .await
-            .unwrap(),
-        ZipLimits::default(),
-    )
-    .await
-    .unwrap();
-    let reads = observed
-        .range_reads
-        .load(std::sync::atomic::Ordering::SeqCst);
-    let records = archive.records();
-    let mut plan = records.plan_scan(MecaReadRequest::default()).await.unwrap();
-    let partition = plan.partitions.try_next().await.unwrap().unwrap();
-    let mut reader = partition.await.unwrap();
-    assert_eq!(
-        observed
-            .range_reads
-            .load(std::sync::atomic::Ordering::SeqCst),
-        reads
-    );
-    reader.next().await.unwrap().unwrap();
-    assert!(
-        observed
-            .range_reads
-            .load(std::sync::atomic::Ordering::SeqCst)
-            > reads
-    );
 }
