@@ -25,3 +25,18 @@ exceed the byte target and is never rejected for its size. The resident task win
 bounds the number of retained chunks, with one pending lookahead record plus the
 upstream input buffer. This is not a cap on input bytes, Arrow allocations, or decoder state. Scalar/array top-level inputs
 remain unsupported. Output stays ordered and batch boundaries may change.
+
+### CSV decode partitions
+
+The default CSV configuration and explicit `CsvDialect` configurations support
+file-internal parallel decoding. `csv-async` reads complete byte records using the
+source dialect, including quoted multiline fields. The `csv` writer serializes
+partition records as canonical CSV with every field quoted, retaining field bytes
+and replaying headers where required. Arrow workers convert these partitions to
+batches in input order. This adds sequential record parsing and re-encoding before
+parallel Arrow conversion; original CSV spelling and line endings are not retained.
+
+For opaque Arrow `CsvFormat` configurations installed through `with_format`,
+planning keeps the input whole because their private dialect settings cannot be
+inspected safely. Use `with_dialect` for supported parallel parsing. No storage
+range access is required. Soft byte targets apply to the encoded partition bytes.
