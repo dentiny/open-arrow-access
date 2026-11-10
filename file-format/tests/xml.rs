@@ -6,7 +6,7 @@ use arrow_array::{
 use arrow_schema::DataType::{Float64, Int64, Utf8};
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, ScanPlanner,
+    Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, Reader, ScanPlanner,
 };
 use open_arrow_access_file_format::xml::{
     NamespaceBinding, XmlAccessor, XmlField, XmlInferenceOptions, XmlLimits, XmlSchema,
@@ -461,4 +461,103 @@ async fn parallel_inferred_xml_replays_bounded_sample_and_keeps_nested_mappings(
     }
     assert!(actual.next().await.unwrap().is_none());
     assert!(expected.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn native_xml_groups_records_by_rows_and_soft_byte_target() {
+    use open_arrow_access_file_format::DecodePartitionOptions;
+    for (row_target, byte_target, expected) in [(2, 4096, vec![2, 2, 1]), (10, 1, vec![1; 5])] {
+        let accessor = XmlAccessor::new(source("catalog.xml").await, CATALOG_PATH)
+            .with_schema(catalog_schema())
+            .with_partition_options(DecodePartitionOptions {
+                target_bytes: NonZeroUsize::new(byte_target).unwrap(),
+            });
+        let request = request("catalog.xml", row_target, Some(&["price", "name"]));
+        let mut reader = accessor
+            .plan_scan(request.clone())
+            .await
+            .unwrap()
+            .into_reader();
+        let mut actual = Vec::new();
+        let mut names = Vec::new();
+        while let Some(batch) = reader.next().await.unwrap() {
+            actual.push(batch.num_rows());
+            names.extend(
+                batch["name"]
+                    .as_string::<i32>()
+                    .iter()
+                    .map(|v| v.unwrap().to_owned()),
+            );
+        }
+        assert_eq!(actual, expected);
+        let sequential = batches(&accessor, request).await;
+        let expected_names = sequential
+            .iter()
+            .flat_map(|batch| {
+                batch["name"]
+                    .as_string::<i32>()
+                    .iter()
+                    .map(|v| v.unwrap().to_owned())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(names, expected_names);
+    }
+}
+
+#[tokio::test]
+async fn native_xml_grouping_respects_batch_byte_limit_and_empty_projection() {
+    let input = format!("<rows>{}</rows>", "<row><id>1</id></row>".repeat(7));
+    for projection in [None, Some(vec![])] {
+        let accessor = XmlAccessor::new(MemoryAccessor::new(input.as_bytes(), 7), "/rows/row")
+            .with_schema(XmlSchema::new(vec![XmlField::new("id", "id", Int64, false)]).unwrap())
+            .with_limits(XmlLimits {
+                max_record_bytes: 64,
+                max_batch_bytes: 64,
+                ..Default::default()
+            });
+        let mut reader = accessor
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::MIN,
+            ))
+            .open(ReadRequest::new("rows.xml").with_options(ReadOptions {
+                batch_size: NonZeroUsize::new(10).unwrap(),
+                projection: projection.clone(),
+            }))
+            .await
+            .unwrap();
+        let mut sizes = Vec::new();
+        while let Some(batch) = reader.next().await.unwrap() {
+            sizes.push(batch.num_rows());
+            assert_eq!(
+                batch.num_columns(),
+                if projection.is_some() { 0 } else { 1 }
+            );
+        }
+        assert_eq!(sizes, [3, 3, 1]);
+    }
+}
+
+#[tokio::test]
+async fn native_xml_group_errors_keep_global_record_index_and_offset() {
+    let prefix = "<rows><row><id>1</id></row><row><id>2</id></row>";
+    let input = format!("{prefix}<row><id>bad</id></row></rows>");
+    let accessor = XmlAccessor::new(MemoryAccessor::new(input.as_bytes(), 11), "/rows/row")
+        .with_schema(XmlSchema::new(vec![XmlField::new("id", "id", Int64, false)]).unwrap());
+    let mut reader = accessor
+        .plan_scan(request("rows.xml", 2, None))
+        .await
+        .unwrap()
+        .into_reader();
+    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 2);
+    let error = reader.next().await.unwrap_err();
+    // The outer conversion error carries identity even if its scalar cause does not.
+    let chain = format!("{error:?}");
+    assert!(chain.contains("record_index: 3"), "{chain}");
+    assert!(
+        chain.contains(&format!("byte_offset: {}", prefix.len())),
+        "{chain}"
+    );
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert!(reader.next().await.unwrap().is_none());
 }

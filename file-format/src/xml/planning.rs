@@ -1,12 +1,13 @@
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, ReadRequest, ReaderFactory, RecordMetadata,
-    RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, into_async_read,
+    RecordReader, Result, ScanPlan, ScanPlanner, async_trait, into_async_read,
     record_stream_reader,
 };
 use xml_arrow::{XmlBatchBuilder, infer_records, read_records};
 
 use super::{XmlAccessor, error};
+use crate::scan::chunks::RecordChunks;
 
 #[async_trait]
 impl<B> ScanPlanner for XmlAccessor<B>
@@ -51,33 +52,58 @@ where
             source: Some(request.object),
         };
         let projection = options.projection;
-        let output = metadata.clone();
-        let partitions = records.enumerate().map(move |(index, record)| {
-            let schema = schema.clone();
-            let projection = projection.clone();
-            let metadata = output.clone();
-            record.map_err(error::xml_error).map(move |record| {
-                let partition: ScanPartition = Box::pin(async move {
-                    let convert_error =
-                        |source| error::conversion(source, index as u64 + 1, record.byte_offset);
+        // One decode partition owns a bounded group of complete records. A task
+        // per record would rebuild Arrow arrays and schedule a worker for every row.
+        let rows = request.options.batch_size.get();
+        let target_bytes = self
+            .partition_options
+            .target_bytes
+            .get()
+            .min(options.max_batch_bytes);
+        let records = records
+            .enumerate()
+            .map(|(index, record)| {
+                record
+                    .map(|record| (index, record))
+                    .map_err(error::xml_error)
+            })
+            .boxed();
+        Ok(RecordChunks::new(records).into_plan(
+            metadata,
+            rows,
+            target_bytes,
+            |(_, record)| record.xml.len(),
+            move |records, metadata| {
+                let schema = schema.clone();
+                let projection = projection.clone();
+                Box::pin(async move {
+                    let first = &records[0];
+                    let configure_error =
+                        |source| error::conversion(source, first.0 as u64 + 1, first.1.byte_offset);
                     let mut builder = match projection {
-                        Some(indices) => {
-                            XmlBatchBuilder::new_projected(schema, /*batch_size=*/ 1, &indices)
-                        }
-                        None => XmlBatchBuilder::new(schema, /*batch_size=*/ 1),
+                        Some(indices) => XmlBatchBuilder::new_projected(schema, rows, &indices),
+                        None => XmlBatchBuilder::new(schema, rows),
                     }
-                    .map_err(convert_error)?;
-                    builder.append_xml(&record.xml).map_err(convert_error)?;
-                    let batch = builder.flush().map_err(convert_error)?;
+                    .map_err(configure_error)?;
+                    let mut last_offset = 0;
+                    let mut last_index = 0;
+                    for (index, record) in records {
+                        last_index = index as u64 + 1;
+                        last_offset = record.byte_offset;
+                        builder
+                            .append_xml(&record.xml)
+                            .map_err(|source| error::conversion(source, last_index, last_offset))?;
+                    }
+                    let batch = builder
+                        .flush()
+                        .map_err(|source| error::conversion(source, last_index, last_offset))?;
                     Ok(Box::new(record_stream_reader(
                         stream::iter(batch.map(Ok)),
                         metadata,
                         None,
                     )) as Box<dyn RecordReader>)
-                });
-                partition
-            })
-        });
-        Ok(ScanPlan::from_stream(metadata, partitions))
+                })
+            },
+        ))
     }
 }

@@ -45,8 +45,11 @@ range access is required. Soft byte targets apply to the encoded partition bytes
 
 XML scan planning infers native mappings once from the configured bounded sample,
 then replays sampled records before unread input. Both inferred and explicit
-schemas use independent record conversion partitions, retaining namespace mappings,
-record order and source offsets. Projection names are resolved after inference.
+schemas group complete records into independent conversion partitions, bounded by
+`ReadOptions::batch_size` and the smaller of `DecodePartitionOptions::target_bytes`
+and `XmlLimits::max_batch_bytes`. One record may exceed the soft partition target.
+Partitions retain namespace mappings, record order and source offsets. Projection
+names are resolved after inference.
 
 ### ATIF trajectory partitions
 
