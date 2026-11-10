@@ -1,25 +1,24 @@
-use std::{sync::Arc, vec::IntoIter};
+use std::sync::Arc;
 
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ObjectRef, ReadOptions, ReadRequest, RecordBatch, RecordMetadata,
-    RecordReader, Result, SchemaRef, StreamReader,
+    Accessor, ReadRequest, RecordBatch, RecordMetadata, RecordReader, Result, SchemaRef,
+    StreamReader,
 };
 
 use super::error::schema_mismatch;
 
-struct FileSetState<A> {
+struct FileSetState<A, I> {
     accessor: Arc<A>,
     current: Option<Box<dyn RecordReader>>,
-    remaining: IntoIter<ObjectRef>,
-    options: ReadOptions,
-    byte_options: ByteReadOptions,
+    remaining: I,
     schema: SchemaRef,
 }
 
-impl<A> FileSetState<A>
+impl<A, I> FileSetState<A, I>
 where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader>,
+    I: Iterator<Item = ReadRequest>,
 {
     async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
         loop {
@@ -32,17 +31,10 @@ where
                 }
                 self.current = None;
             }
-            let Some(object) = self.remaining.next() else {
+            let Some(request) = self.remaining.next() else {
                 return Ok(None);
             };
-            let next = self
-                .accessor
-                .open(
-                    ReadRequest::new(object)
-                        .with_options(self.options.clone())
-                        .with_byte_options(self.byte_options),
-                )
-                .await?;
+            let next = self.accessor.open(request).await?;
             if next.metadata().schema != self.schema {
                 return Err(schema_mismatch());
             }
@@ -52,23 +44,20 @@ where
 }
 
 /// Create an ordered file-set reader with shared lifecycle handling.
-pub(super) fn create_reader<A>(
+pub(super) fn create_reader<A, I>(
     accessor: Arc<A>,
     current: Box<dyn RecordReader>,
-    remaining: IntoIter<ObjectRef>,
-    options: ReadOptions,
-    byte_options: ByteReadOptions,
+    remaining: I,
     metadata: RecordMetadata,
 ) -> impl RecordReader
 where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
+    I: Iterator<Item = ReadRequest> + Send + 'static,
 {
     let state = FileSetState {
         accessor,
         current: Some(current),
         remaining,
-        options,
-        byte_options,
         schema: metadata.schema.clone(),
     };
     let stream = stream::try_unfold(state, |mut state| async move {

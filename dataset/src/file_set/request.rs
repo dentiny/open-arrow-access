@@ -1,4 +1,6 @@
-use open_arrow_access_core::{ByteReadOptions, ObjectRef, ReadOptions, ReadOptionsProvider};
+use open_arrow_access_core::{
+    ByteReadOptions, ObjectRef, ReadOptions, ReadOptionsProvider, ReadRequest,
+};
 
 /// Files in the caller's declared order. Duplicate selections are retained.
 #[derive(Clone, Debug)]
@@ -15,6 +17,14 @@ impl FileSetRequest {
             options: ReadOptions::default(),
             byte_options: ByteReadOptions::default(),
         }
+    }
+
+    pub(super) fn into_requests(self) -> impl Iterator<Item = ReadRequest> + Send {
+        self.objects.into_iter().map(move |object| {
+            ReadRequest::new(object)
+                .with_options(self.options.clone())
+                .with_byte_options(self.byte_options)
+        })
     }
 
     pub fn with_options(mut self, options: ReadOptions) -> Self {

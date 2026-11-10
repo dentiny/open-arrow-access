@@ -3,11 +3,15 @@ use std::sync::Arc;
 use futures::{StreamExt, TryStreamExt, future::BoxFuture, stream};
 
 use open_arrow_access_core::{
-    Accessor, Capability, Error, ErrorKind, ReadRequest, RecordMetadata, RecordReader, Result,
-    ScanPartition, ScanPlan, ScanPlanner, async_trait,
+    Accessor, Capability, ReadRequest, RecordMetadata, RecordReader, Result, ScanPartition,
+    ScanPlan, ScanPlanner, async_trait,
 };
 
-use super::{FileSetRequest, error::schema_mismatch, reader::create_reader};
+use super::{
+    FileSetRequest,
+    error::{empty_selection, schema_mismatch},
+    reader::create_reader,
+};
 
 type FilePlanner<A> = fn(Arc<A>, ReadRequest) -> BoxFuture<'static, Result<ScanPlan>>;
 
@@ -69,22 +73,11 @@ where
     }
 
     async fn open(&self, request: FileSetRequest) -> Result<Box<dyn RecordReader>> {
-        let mut objects = request.objects.into_iter();
-        let first = objects.next().ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidInput,
-                "open_file_set",
-                "file selection is empty",
-            )
-        })?;
-        let reader = self
-            .inner
-            .open(
-                ReadRequest::new(first)
-                    .with_options(request.options.clone())
-                    .with_byte_options(request.byte_options),
-            )
-            .await?;
+        let mut requests = request.into_requests();
+        let first = requests
+            .next()
+            .ok_or_else(|| empty_selection("open_file_set"))?;
+        let reader = self.inner.open(first).await?;
         let metadata = RecordMetadata {
             schema: reader.metadata().schema.clone(),
             source: None,
@@ -92,9 +85,7 @@ where
         Ok(Box::new(create_reader(
             self.inner.clone(),
             reader,
-            objects,
-            request.options,
-            request.byte_options,
+            requests,
             metadata,
         )))
     }
@@ -106,67 +97,46 @@ where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
 {
     async fn plan_scan(&self, request: FileSetRequest) -> Result<ScanPlan> {
-        let mut objects = request.objects.into_iter();
-        let first = objects.next().ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidInput,
-                "plan_file_set",
-                "file selection is empty",
-            )
-        })?;
+        let mut requests = request.into_requests();
+        let first = requests
+            .next()
+            .ok_or_else(|| empty_selection("plan_file_set"))?;
+        let first = match self.file_planner {
+            Some(plan_file) => plan_file(self.inner.clone(), first).await?,
+            None => ScanPlan::whole_input(self.inner.open(first).await?),
+        };
+        let metadata = RecordMetadata {
+            schema: first.metadata.schema,
+            source: None,
+        };
+        let inner = self.inner.clone();
         if let Some(plan_file) = self.file_planner {
-            let first = plan_file(
-                self.inner.clone(),
-                ReadRequest::new(first)
-                    .with_options(request.options.clone())
-                    .with_byte_options(request.byte_options),
-            )
-            .await?;
-            let metadata = RecordMetadata {
-                schema: first.metadata.schema,
-                source: None,
-            };
             let schema = metadata.schema.clone();
-            let inner = self.inner.clone();
-            let later = stream::iter(objects).then(move |object| {
+            let later = stream::iter(requests).then(move |request| {
                 let inner = inner.clone();
                 let schema = schema.clone();
-                let read_request = ReadRequest::new(object)
-                    .with_options(request.options.clone())
-                    .with_byte_options(request.byte_options);
                 async move {
-                    let plan = plan_file(inner, read_request).await?;
+                    let plan = plan_file(inner, request).await?;
                     if plan.metadata.schema != schema {
                         return Err(schema_mismatch());
                     }
                     Ok(plan.partitions)
                 }
             });
-            return Ok(ScanPlan::from_stream(
+            Ok(ScanPlan::from_stream(
                 metadata,
                 first.partitions.chain(later.try_flatten()),
-            ));
+            ))
+        } else {
+            let later = requests.map(move |request| {
+                let inner = inner.clone();
+                let partition: ScanPartition = Box::pin(async move { inner.open(request).await });
+                Ok(partition)
+            });
+            Ok(ScanPlan::from_stream(
+                metadata,
+                first.partitions.chain(stream::iter(later)),
+            ))
         }
-        let first = self
-            .inner
-            .open(
-                ReadRequest::new(first)
-                    .with_options(request.options.clone())
-                    .with_byte_options(request.byte_options),
-            )
-            .await?;
-        let metadata = RecordMetadata {
-            schema: first.metadata().schema.clone(),
-            source: None,
-        };
-        let mut partitions: Vec<ScanPartition> = vec![Box::pin(async move { Ok(first) })];
-        for object in objects {
-            let inner = self.inner.clone();
-            let read_request = ReadRequest::new(object)
-                .with_options(request.options.clone())
-                .with_byte_options(request.byte_options);
-            partitions.push(Box::pin(async move { inner.open(read_request).await }));
-        }
-        Ok(ScanPlan::new(metadata, partitions))
     }
 }
