@@ -1,4 +1,9 @@
 //! Public Internet Archive item metadata and attached file bytes.
+//!
+//! Resolved files expose `records(format)` for explicit Arrow decoding and scan
+//! planning. The adapter retains validated public item membership and canonical download namespace;
+//! metadata links are not followed automatically. API pages can bind an explicit
+//! JSON record selection with `ApiDocument::records_at`.
 
 mod error;
 mod validation;
