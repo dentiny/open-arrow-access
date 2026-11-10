@@ -43,6 +43,8 @@ where
         let frames = CsvFrames {
             input,
             pending_input: Bytes::new(),
+            next_input: None,
+            prefix_checked: false,
             eof: false,
             parser: dialect.parser(),
             options: self.partition_options,
@@ -92,6 +94,8 @@ fn synthetic_header(dialect: CsvDialect, columns: usize) -> Vec<u8> {
 struct CsvFrames {
     input: Box<dyn ByteReader>,
     pending_input: Bytes,
+    next_input: Option<Bytes>,
+    prefix_checked: bool,
     eof: bool,
     parser: csv_core::Reader,
     options: DecodePartitionOptions,
@@ -103,11 +107,49 @@ struct CsvFrames {
 }
 
 impl CsvFrames {
+    async fn read_input(&mut self) -> Result<Option<Bytes>> {
+        match self.next_input.take() {
+            Some(bytes) => Ok(Some(bytes)),
+            None => self.input.next().await,
+        }
+    }
+
+    async fn read_prefix(&mut self) -> Result<()> {
+        let mut prefix = Vec::new();
+        while prefix.len() < 3 {
+            match self.input.next().await? {
+                Some(bytes) if bytes.is_empty() => {
+                    return Err(error::invalid_frame("frame_csv", "empty byte chunk"));
+                }
+                Some(mut bytes) => {
+                    prefix.extend_from_slice(&bytes.split_to((3 - prefix.len()).min(bytes.len())));
+                    if !bytes.is_empty() {
+                        self.next_input = Some(bytes);
+                    }
+                }
+                None => {
+                    self.eof = true;
+                    break;
+                }
+            }
+        }
+        // Strip only a source-start BOM, before any synthetic header is added.
+        // Buffering three bytes also handles a BOM fragmented by storage chunks.
+        if prefix != b"\xef\xbb\xbf" {
+            self.pending_input = prefix.into();
+        }
+        self.prefix_checked = true;
+        Ok(())
+    }
+
     async fn next_record(&mut self) -> Result<Option<Vec<u8>>> {
+        if !self.prefix_checked {
+            self.read_prefix().await?;
+        }
         let mut raw = Vec::new();
         loop {
             if self.pending_input.is_empty() && !self.eof {
-                match self.input.next().await? {
+                match self.read_input().await? {
                     Some(bytes) if bytes.is_empty() => {
                         return Err(error::invalid_frame("frame_csv", "empty byte chunk"));
                     }
@@ -123,9 +165,6 @@ impl CsvFrames {
                 self.parser
                     .read_record(&self.pending_input, &mut output, &mut ends);
             raw.extend_from_slice(&self.pending_input.split_to(consumed));
-            if raw.len() > self.options.max_record_bytes.get() {
-                return Err(error::record_too_large("frame_csv"));
-            }
             match result {
                 ReadRecordResult::Record => return Ok(Some(raw)),
                 ReadRecordResult::End => return Ok(None),

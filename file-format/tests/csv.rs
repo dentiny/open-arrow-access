@@ -326,3 +326,31 @@ async fn csv_without_header_preserves_all_rows_and_custom_formats_remain_unsplit
     let plan = custom.plan_scan(request).await.unwrap();
     assert_eq!(plan.partitions.size_hint().0, 1);
 }
+
+#[tokio::test]
+async fn parallel_csv_strips_only_the_source_start_bom() {
+    for raw in [
+        b"\xef\xbb\xbf1,one\n2,two\n".as_slice(),
+        b"1,one\n2,\xef\xbb\xbftwo\n",
+    ] {
+        // Use a complete source-start BOM for the native reference decoder.
+        let expected = CsvAccessor::new(MemoryAccessor::new(raw, 4096), schema());
+        let selection = ReadRequest::new("bom.csv").with_options(options(1, None));
+        let expected = collect(&expected, selection.clone()).await;
+        for chunk in [1, 2, 4096] {
+            let mut actual = CsvAccessor::new(MemoryAccessor::new(raw, chunk), schema())
+                .layer(ParallelReadLayer::new(
+                    NonZeroUsize::new(2).unwrap(),
+                    NonZeroUsize::new(1).unwrap(),
+                ))
+                .open(selection.clone())
+                .await
+                .unwrap();
+            let mut batches = Vec::new();
+            while let Some(batch) = actual.next().await.unwrap() {
+                batches.push(batch);
+            }
+            assert_eq!(batches, expected);
+        }
+    }
+}
