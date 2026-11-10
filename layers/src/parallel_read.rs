@@ -56,13 +56,6 @@ impl<A: ScanPlanner> Accessor for ParallelReadAccessor<A> {
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
-        tokio::runtime::Handle::try_current().map_err(|_| {
-            Error::new(
-                ErrorKind::InvalidInput,
-                "parallel_read",
-                "an active Tokio runtime is required",
-            )
-        })?;
         let plan = self.inner.plan_scan(request).await?;
         Ok(Box::new(ParallelReader::new(plan, self.settings)))
     }
