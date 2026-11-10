@@ -130,17 +130,54 @@ async fn overlaps_without_replacing_completed_buffered_partitions() {
     assert_eq!(values, (0..4).collect::<Vec<_>>());
 }
 
-#[tokio::test]
-async fn later_error_interrupts_blocked_first_partition() {
-    for panic in [false, true] {
-        let first: ScanPartition = Box::pin(std::future::pending());
-        let second: ScanPartition = Box::pin(async move {
-            assert!(!panic, "injected worker panic");
-            Err(Error::new(ErrorKind::Io, "test", "later open failed"))
-        });
-        let mut r = open(vec![first, second], 2).await;
-        assert!(r.next().await.is_err());
-        assert!(r.next().await.unwrap().is_none());
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn partition_failures_cancel_started_workers_and_end_the_scan() {
+    for during_read in [false, true] {
+        for panic in [false, true] {
+            let (lifetime, dropped) = oneshot::channel::<()>();
+            let (start, started) = oneshot::channel();
+            let first: ScanPartition = Box::pin(async move {
+                let _lifetime = lifetime;
+                start.send(()).unwrap();
+                std::future::pending().await
+            });
+            let failed: ScanPartition = Box::pin(async move {
+                // Ensure cancellation is tested against a running worker, even
+                // when the failing worker wins the runtime's scheduling race.
+                started.await.unwrap();
+                let fail = move || {
+                    assert!(!panic, "injected worker panic");
+                    Error::new(ErrorKind::Io, "partition", "injected failure")
+                };
+                if !during_read {
+                    return Err(fail());
+                }
+                Ok(Box::new(StreamReader::new(
+                    stream::iter([Ok(batch(2))]).chain(stream::once(async move { Err(fail()) })),
+                    metadata(),
+                )) as Box<dyn RecordReader>)
+            });
+            let opened = Arc::new(AtomicUsize::new(0));
+            let count = opened.clone();
+            let unopened: ScanPartition = Box::pin(async move {
+                count.fetch_add(1, Ordering::SeqCst);
+                std::future::pending().await
+            });
+            // Allow the later reader to queue output before reaching its failure.
+            let plan = ScanPlan::new(metadata(), vec![first, failed, unopened]);
+            let mut reader = open_plan(plan, 2, 2).await;
+
+            let error = reader.next().await.unwrap_err();
+            assert_eq!(
+                error.operation(),
+                if panic { "parallel_read" } else { "partition" }
+            );
+            assert!(dropped.await.is_err());
+            assert_eq!(opened.load(Ordering::SeqCst), 0);
+            for _ in 0..2 {
+                assert!(reader.next().await.unwrap().is_none());
+            }
+        }
     }
 }
 
@@ -220,27 +257,4 @@ async fn discovery_errors_interrupt_a_blocked_partition() {
     let mut reader = open_plan(ScanPlan::from_stream(metadata(), partitions), 2, 1).await;
     assert_eq!(reader.next().await.unwrap_err().operation(), "discover");
     assert!(reader.next().await.unwrap().is_none());
-}
-
-#[tokio::test]
-async fn read_error_cancels_blocked_workers_and_keeps_reader_at_eof() {
-    let (lifetime, dropped) = oneshot::channel::<()>();
-    let first: ScanPartition = Box::pin(async move {
-        let _lifetime = lifetime;
-        std::future::pending().await
-    });
-    let failed: ScanPartition = Box::pin(async {
-        Ok(Box::new(StreamReader::new(
-            stream::iter([Err(Error::new(ErrorKind::Io, "read", "injected failure"))]),
-            metadata(),
-        )) as Box<dyn RecordReader>)
-    });
-    let unopened: ScanPartition = Box::pin(async { panic!("opened after failure") });
-    let mut reader = open(vec![first, failed, unopened], 2).await;
-
-    assert_eq!(reader.next().await.unwrap_err().operation(), "read");
-    assert!(dropped.await.is_err());
-    for _ in 0..2 {
-        assert!(reader.next().await.unwrap().is_none());
-    }
 }
