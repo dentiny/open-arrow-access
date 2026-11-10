@@ -56,7 +56,7 @@ pmc = [
 regulations = []
 semantic-scholar = ["record-files"]
 uspto = []
-warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
+warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory", "dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
 zenodo = []
 
 format-xml = [
