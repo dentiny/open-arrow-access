@@ -90,7 +90,11 @@ async fn fixed_schema_contract_preserves_projection_and_source_failures() {
             request: request(1, Some(vec!["title", "id"])),
             schema: schema(),
             rows: 2,
-            fault_offsets: &[0, 5],
+            fault_offsets: &[
+                0,
+                5,
+                input.iter().position(|&byte| byte == b'\n').unwrap() + 1,
+            ],
         },
     )
     .await;
@@ -142,18 +146,6 @@ async fn malformed_truncated_and_non_object_inputs_fail_terminally() {
             format::assert_finished(reader.as_mut(), &observed.reads).await;
         }
     }
-}
-
-#[tokio::test]
-async fn io_errors_keep_their_category_after_a_successful_batch() {
-    let (input, observed) = fixture("io-failure.jsonl", 9).await;
-    let input = input.with_failure(9, ErrorKind::Io);
-    let accessor = JsonAccessor::new(input, schema());
-    let mut reader = accessor.open(request(1, None)).await.unwrap();
-    assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
-    let error =
-        format::assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Io).await;
-    assert_eq!(error.operation(), "memory_read");
 }
 
 #[tokio::test]
