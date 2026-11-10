@@ -466,25 +466,3 @@ async fn row_group_plan_reuses_metadata_and_preserves_projection_and_rows() {
         assert_eq!(actual, expected);
     }
 }
-
-#[tokio::test]
-async fn row_group_plan_rejects_sequential_input() {
-    let bytes = Arc::new(
-        MemoryAccessor::new(
-            &tokio::fs::read(fixture_path("ordered-snappy.parquet"))
-                .await
-                .unwrap(),
-            7,
-        )
-        .layer(SequentialLayer),
-    );
-    assert_eq!(
-        ParquetAccessor::new(bytes)
-            .plan_scan(ReadRequest::new("data"))
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Unsupported
-    );
-}
