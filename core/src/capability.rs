@@ -4,8 +4,8 @@
 /// current interface, not every operation supported by its underlying backend.
 /// Transparent layers forward them; transforming layers must update them to
 /// match the operations they actually expose. Unset flags mean unsupported.
-/// Construct values by explicitly assigning every flag instead of using defaults
-/// or struct update syntax.
+/// Use [`Capability::sequential`] for sequential-only interfaces; otherwise
+/// assign flags explicitly to describe the exposed operations.
 ///
 /// Accessors report supported operations before opening. Readers report the
 /// abilities of the opened representation, which can be more specific. `read`
@@ -33,4 +33,16 @@ pub struct Capability {
     /// Can discover object references through [`crate::ByteAccessor::list`].
     /// Always false for readers and interfaces that do not expose discovery.
     pub list: bool,
+}
+
+impl Capability {
+    /// Capabilities of an interface that exposes only sequential reads.
+    pub const fn sequential(read: bool) -> Self {
+        Self {
+            read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+    }
 }

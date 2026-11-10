@@ -55,12 +55,7 @@ where
     type Request = CommonCrawlWarcRequest;
     type Reader = dyn RecordReader;
     fn capability(&self) -> Capability {
-        Capability {
-            read: self.manifests.capability().read && self.files.capability().read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        Capability::sequential(self.manifests.capability().read && self.files.capability().read)
     }
     async fn open(&self, request: CommonCrawlWarcRequest) -> Result<Box<dyn RecordReader>> {
         self.files.open(self.resolve(request).await?).await

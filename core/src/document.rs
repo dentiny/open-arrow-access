@@ -69,12 +69,7 @@ where
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> Capability {
-        Capability {
-            read: self.storage.capability().read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        Capability::sequential(self.storage.capability().read)
     }
 
     async fn open(&self, request: D::Request) -> Result<Box<dyn RecordReader>> {
