@@ -59,6 +59,7 @@ pub(super) fn create_reader(
     batch_size: usize,
     projection: Option<Vec<usize>>,
     metadata: RecordMetadata,
+    first_index: u64,
 ) -> impl RecordReader {
     let documents = match format {
         AtifFormat::Json => {
@@ -73,7 +74,7 @@ pub(super) fn create_reader(
         projection,
         builder: None,
         source: metadata.source.clone(),
-        record_index: 1,
+        record_index: first_index,
     };
     let stream = stream::try_unfold(decoder, |mut decoder| async move {
         Ok(decoder.read_batch().await?.map(|batch| (batch, decoder)))
