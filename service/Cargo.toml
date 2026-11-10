@@ -57,7 +57,7 @@ regulations = []
 semantic-scholar = []
 uspto = []
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
-zenodo = []
+zenodo = ["record-files"]
 
 format-xml = [
     "dep:quick-xml",
