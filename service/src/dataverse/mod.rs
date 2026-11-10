@@ -1,9 +1,6 @@
 //! A published Dataverse dataset version exposed as independently readable files.
 //!
-//! Resolved files expose `records(format)` for explicit Arrow decoding and scan
-//! planning. The adapter retains published persistent ID/version and original-download representation;
-//! metadata links are not followed automatically. API pages can bind an explicit
-//! JSON record selection with `ApiDocument::records_at`.
+//! Preserves published persistent ID/version and original-download representation.
 
 mod error;
 mod validation;

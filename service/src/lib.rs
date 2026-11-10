@@ -1,4 +1,8 @@
 //! Provider services resolve source semantics into shared object/reader contracts.
+//!
+//! Decode resolved files and plan scans with [`ResolvedFileSet::records`], or bind
+//! selected JSON records with [`common::ApiDocument::records_at`]. Formats are
+//! explicit; metadata links are never followed automatically.
 
 mod file_manifest;
 mod opendal_error;

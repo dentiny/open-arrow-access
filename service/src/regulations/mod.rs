@@ -1,9 +1,6 @@
 //! Read-only Regulations.gov API v4 discovery, metadata and attachments.
 //!
-//! Resolved files expose `records(format)` for explicit Arrow decoding and scan
-//! planning. The adapter retains validated resource identity and attachment membership;
-//! metadata links are not followed automatically. API pages can bind an explicit
-//! JSON record selection with `ApiDocument::records_at`.
+//! Preserves validated resource identity and attachment membership.
 mod parser;
 mod validation;
 use crate::common::{ApiDocument, Connection, RemoteFiles, invalid, segment};
