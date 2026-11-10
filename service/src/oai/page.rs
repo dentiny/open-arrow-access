@@ -1,4 +1,4 @@
-use open_arrow_access_core::{ByteMetadata, ByteReader, Bytes, StreamReader};
+use open_arrow_access_core::{ByteReader, Bytes, bytes_reader};
 
 /// One page. Deleted records and all provider metadata remain in `bytes`.
 #[derive(Clone, Debug)]
@@ -9,13 +9,6 @@ pub struct OaiPage {
 }
 impl OaiPage {
     pub fn reader(&self) -> Box<dyn ByteReader> {
-        Box::new(StreamReader::new(
-            futures::stream::iter([Ok(self.bytes.clone())]),
-            ByteMetadata {
-                source: None,
-                content_length: Some(self.bytes.len() as u64),
-                version: None,
-            },
-        ))
+        Box::new(bytes_reader(self.bytes.clone(), None))
     }
 }
