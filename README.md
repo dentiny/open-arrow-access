@@ -165,3 +165,5 @@ cargo test --workspace --all-features --locked
 
 See [testing](docs/testing.md) for suite placement and [dependency alignment](docs/dependencies.md)
 for the Arrow, Parquet, and OpenDAL version baseline.
+
+For local CPU, I/O and memory workloads, see [performance benchmarks](benchmarks/README.md).

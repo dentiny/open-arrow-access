@@ -1,0 +1,70 @@
+{
+  "baseline_source": "2dc1ac0f6e99868c67b1dcd9ac221bcc66ba8ddc",
+  "baseline_dependencies": {
+    "atif-arrow": "0.4.5",
+    "xml-arrow": "0.2.6",
+    "warc-rs": "0.3.2",
+    "arrow": "59.3.0",
+    "opendal": "0.59.2"
+  },
+  "candidates": {
+    "atif-arrow": "c14f9005e1620f5752b22ee673db192a53dc04be",
+    "xml-arrow-rs": "655d3f57871fbadcb1108441909726aaea5b0152"
+  },
+  "compiler": "rustc 1.97.1 (8bab26f4f 2026-07-14) (Homebrew)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.8\n",
+  "hardware": {
+    "cpu": "Apple M5 Pro",
+    "logical_cpus": 18,
+    "ram_bytes": 25769803776,
+    "os": "macOS 26.5.2 (25F84)"
+  },
+  "profile": "release (Cargo bench), Tokio 2 worker threads",
+  "hashes": {
+    "pipeline-before": "47cab816461ea541c7b7ea92498a62d55e520369d441cb18d5f026fe6afccaba",
+    "pipeline-after": "b60bfb89adcd5d417d11fd5a2f48e98b473fae6155308c5980e3f3bf82dd992b",
+    "open-arrow-access/Cargo.lock": "af10f61f0c36bc515940066a92a776f36a972e024c2378a64cf3abf15776eb80",
+    "open-arrow-access/benchmarks/pipeline.rs": "5f5585cf2f57c017198527dc2032c9739b1cf0d3225a26b119c19d7c08eeb16d",
+    "open-arrow-access/benchmarks/transport.rs": "e8d93baaf376889dd3e9f9c52b1b2da3aa90aacf13d26442221902c4d3762c6a"
+  },
+  "build_method": "Identical benchmark source on baseline main; optimized build uses temporary path patches to the two candidate commits. Manifest and lockfile restored to registry dependencies before final measurements/publication.",
+  "limits": "Local synthetic corpus, warm FS, in-process HTTP/S3 replay. CPU/RSS include setup and warmup; timings exclude setup. No actual cloud/TLS/socket or cold-disk measurements.",
+  "validation": {
+    "baseline_workspace_release_tests": 249,
+    "combined_workspace_release_tests": 249,
+    "atif_native_release_tests": 18,
+    "xml_native_release_tests_including_doctests": 38,
+    "latest_main_workspace_release_tests": 249
+  },
+  "pull_requests": {
+    "atif": "https://github.com/dentiny/atif-arrow/pull/33",
+    "xml": "https://github.com/dentiny/xml-arrow-rs/pull/29"
+  },
+  "trial_schedule": {
+    "paired": "case-major; five alternating process pairs/case; 15 timed scans/process",
+    "atif-confirm": "repeat-major; ATIF and CSV case pairs interleaved; five alternating pairs/case; 31 timed scans/process"
+  },
+  "retained_process_measurements": 294,
+  "retained_timing_samples": 3074,
+  "cpu_profiles": {
+    "atif": "0da0036ea1b10829e215eb74ba367fe0ea00e5f6324222f43ac663d1a7ce6763",
+    "xml": "0f1ca7af8c4af679b107e3d2d38d5897b2f8fcc3d7deb0bd103ff837836d2e1b"
+  },
+  "latest_main_baseline": {
+    "source": "e08ae08d8521bee11eadf8b7f28707f3b49ccf09",
+    "binary_sha256": "620bce472b08240de5020a977c9e93050b346a06d594df011642a111540565b0",
+    "file": "baseline.jsonl",
+    "processes": 87,
+    "timing_samples": 609
+  },
+  "paired_main_baseline_file": "baseline-paired-main.jsonl",
+  "published_pr_heads": {
+    "atif": "bc9669f778d308af42f92229fd5b9cd485eaf5d8",
+    "xml": "1f1d406b3905facfd4f63b48bf97b695fda5549f"
+  },
+  "external_xml_merge": {
+    "merge_commit": "1bf4fce9ea73ecd275a7ce1a11987c3c5d5c6bec",
+    "actor": "dentiny",
+    "at": "2026-11-10T05:25:48Z",
+    "note": "Merged externally; this audit issued no merge or auto-merge. Cleanup removed only benchmark/Cargo target; measured production code unchanged."
+  }
+}

@@ -129,7 +129,16 @@ open-arrow-access-service.workspace = true
 open-arrow-access-storage.workspace = true
 
 [dev-dependencies]
-opendal = { workspace = true, features = ["services-fs"] }
+arrow-array.workspace = true
+arrow-schema.workspace = true
+futures.workspace = true
+http.workspace = true
+open-arrow-access-test-support.workspace = true
+opendal = { workspace = true, features = ["services-fs", "services-s3"] }
+opendal-service-http.workspace = true
+parquet.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
 tokio.workspace = true
 
 [[example]]
@@ -193,3 +202,16 @@ required-features = ["service-arxiv"]
 [[example]]
 name = "read_internet_archive"
 required-features = ["service-internet-archive"]
+
+[[bench]]
+name = "pipeline"
+path = "benchmarks/pipeline.rs"
+harness = false
+required-features = [
+    "format-atif",
+    "format-csv",
+    "format-json",
+    "format-parquet",
+    "format-warc",
+    "format-xml",
+]
