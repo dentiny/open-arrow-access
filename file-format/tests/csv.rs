@@ -212,39 +212,63 @@ async fn empty_and_header_only_inputs_emit_no_batches() {
 
 #[tokio::test]
 async fn invalid_data_errors_are_terminal() {
-    for chunk_size in [1, 4096] {
-        for name in BAD_FILES {
-            let bytes = MemoryAccessor::new(&fixture!("csv", name).await, chunk_size);
-            let accessor = CsvAccessor::new(bytes.clone(), schema());
-            let mut reader = accessor.open(ReadRequest::new(name)).await.unwrap();
-            let error = format::assert_terminal_error(
-                reader.as_mut(),
-                &bytes.observations.reads,
-                ErrorKind::Decode,
-            )
-            .await;
-            assert_eq!(error.operation(), "decode_csv");
-            assert!(std::error::Error::source(&error).is_some());
+    for parallel in [false, true] {
+        for chunk_size in [1, 4096] {
+            for name in BAD_FILES {
+                let bytes = MemoryAccessor::new(&fixture!("csv", name).await, chunk_size);
+                let accessor = CsvAccessor::new(bytes.clone(), schema());
+                let mut reader = if parallel {
+                    accessor
+                        .layer(ParallelReadLayer::new(
+                            NonZeroUsize::new(1).unwrap(),
+                            NonZeroUsize::new(1).unwrap(),
+                        ))
+                        .open(ReadRequest::new(name))
+                        .await
+                        .unwrap()
+                } else {
+                    accessor.open(ReadRequest::new(name)).await.unwrap()
+                };
+                let error = format::assert_terminal_error(
+                    reader.as_mut(),
+                    &bytes.observations.reads,
+                    ErrorKind::Decode,
+                )
+                .await;
+                assert_eq!(error.operation(), "decode_csv");
+                assert!(std::error::Error::source(&error).is_some());
+            }
         }
     }
 }
 
 #[tokio::test]
 async fn io_failure_after_a_delivered_row_does_not_read_ahead() {
-    let bytes = MemoryAccessor::new(&fixture!("csv", "good_no_header.csv").await, 6)
-        .with_failure(6, ErrorKind::Io);
-    let accessor = CsvAccessor::new(bytes.clone(), schema());
-    let mut reader = accessor
-        .open(ReadRequest::new("data.csv").with_options(options(1, None)))
-        .await
-        .unwrap();
-    assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 0);
-    let batch = reader.next().await.unwrap().unwrap();
-    assert_eq!(collect_values::<Int64Type>(&[batch], 0), [1]);
-    assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 1);
-    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Io);
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 2);
+    for parallel in [false, true] {
+        let bytes = MemoryAccessor::new(&fixture!("csv", "good_no_header.csv").await, 6)
+            .with_failure(6, ErrorKind::Io);
+        let accessor = CsvAccessor::new(bytes.clone(), schema());
+        let request = ReadRequest::new("data.csv").with_options(options(1, None));
+        let mut reader = if parallel {
+            accessor
+                .layer(ParallelReadLayer::new(
+                    NonZeroUsize::new(1).unwrap(),
+                    NonZeroUsize::new(1).unwrap(),
+                ))
+                .open(request)
+                .await
+                .unwrap()
+        } else {
+            accessor.open(request).await.unwrap()
+        };
+        assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 0);
+        let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(collect_values::<Int64Type>(&[batch], 0), [1]);
+        assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 1);
+        assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Io);
+        assert!(reader.next().await.unwrap().is_none());
+        assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 2);
+    }
 }
 
 #[tokio::test]

@@ -50,16 +50,18 @@ impl CsvDialect {
         format
     }
 
-    pub(super) fn parser(self) -> csv_core::Reader {
-        let mut builder = csv_core::ReaderBuilder::new();
+    pub(super) fn reader_builder(self) -> csv_async::AsyncReaderBuilder {
+        let mut builder = csv_async::AsyncReaderBuilder::new();
         builder
+            .has_headers(false)
+            .flexible(true)
             .delimiter(self.delimiter)
             .quote(self.quote)
             .escape(self.escape)
             .comment(self.comment);
         if let Some(terminator) = self.terminator {
-            builder.terminator(csv_core::Terminator::Any(terminator));
+            builder.terminator(csv_async::Terminator::Any(terminator));
         }
-        builder.build()
+        builder
     }
 }

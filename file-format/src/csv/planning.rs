@@ -1,11 +1,11 @@
-use csv_core::ReadRecordResult;
 use futures::{
     StreamExt, TryStreamExt,
-    stream::{self, BoxStream, Fuse},
+    io::{AsyncReadExt, Cursor},
+    stream::{self, BoxStream},
 };
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt,
-    RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
+    RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, into_async_read,
 };
 
 use super::{CsvAccessor, CsvDialect, error};
@@ -31,10 +31,17 @@ where
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
+        // Workers read canonical CSV, regardless of the source dialect.
+        let format = format.with_dialect(CsvDialect {
+            has_header: dialect.has_header,
+            validate_header: dialect.validate_header,
+            allow_truncated_rows: dialect.allow_truncated_rows,
+            ..CsvDialect::default()
+        });
         let target_bytes = self.partition_options.target_bytes.get();
         // Initialization runs on first poll, keeping partition discovery lazy.
         let partitions = stream::once(async move {
-            let frames = CsvFrames::new(input, dialect).await?;
+            let frames = CsvChunks::new(input, dialect).await?;
             Ok(stream::try_unfold(frames, move |mut frames| {
                 let format = format.clone();
                 let request = request.clone();
@@ -58,93 +65,80 @@ where
     }
 }
 
-struct CsvFrames {
-    input: Fuse<BoxStream<'static, Result<Bytes>>>,
-    pending_input: Bytes,
-    parser: csv_core::Reader,
-    prefix: Vec<u8>,
-    // Emit a header-only input once so Arrow can validate it even without rows.
+struct CsvChunks {
+    records: BoxStream<'static, Result<csv_async::ByteRecord>>,
+    header: Option<csv_async::ByteRecord>,
+    // Validate a header-only input once even when there are no data records.
     emitted: bool,
 }
 
-impl CsvFrames {
+impl CsvChunks {
     async fn new(input: Box<dyn ByteReader>, dialect: CsvDialect) -> Result<Self> {
-        let mut input = stream::try_unfold(input, |mut input| async move {
-            match input.next().await? {
-                Some(bytes) if bytes.is_empty() => {
-                    Err(error::invalid_frame("frame_csv", "empty byte chunk"))
-                }
-                bytes => Ok(bytes.map(|bytes| (bytes, input))),
-            }
-        })
-        .boxed()
-        .fuse();
-        // Gather only a possible source-start BOM; stop as soon as it is ruled out.
-        // Retain the rest of the first chunk in the ordinary input buffer.
-        let mut pending_input = Bytes::new();
-        while pending_input.len() < 3 && b"\xef\xbb\xbf".starts_with(&pending_input) {
-            let Some(bytes) = input.try_next().await? else {
+        let mut input = into_async_read(input, "frame_csv");
+        // csv-async's parser does not recognize a BOM split across input chunks.
+        // Normalize only the source prefix, stopping as soon as a BOM is ruled out.
+        let mut prefix = Vec::new();
+        while prefix.len() < 3 && b"\xef\xbb\xbf".starts_with(&prefix) {
+            let mut byte = [0];
+            if input.read(&mut byte).await.map_err(error::input_error)? == 0 {
                 break;
-            };
-            pending_input = if pending_input.is_empty() {
-                bytes
-            } else {
-                [pending_input.as_ref(), bytes.as_ref()].concat().into()
-            };
+            }
+            prefix.push(byte[0]);
         }
-        if pending_input.starts_with(b"\xef\xbb\xbf") {
-            let _ = pending_input.split_to(3);
+        if prefix == b"\xef\xbb\xbf" {
+            prefix.clear();
         }
-        let mut frames = Self {
-            input,
-            pending_input,
-            parser: dialect.parser(),
-            // A skipped blank line prevents fresh Arrow parsers from stripping
-            // a BOM that belongs to a later data record. Replay real headers only.
-            prefix: vec![dialect.terminator.unwrap_or(b'\n')],
-            emitted: false,
+        // A skipped blank line disables the parser's own source-start BOM removal.
+        prefix.insert(0, dialect.terminator.unwrap_or(b'\n'));
+        let mut records = dialect
+            .reader_builder()
+            .create_reader(Cursor::new(prefix).chain(input))
+            .into_byte_records()
+            .map_err(error::record_error)
+            .boxed();
+        let header = if dialect.has_header {
+            records.try_next().await?
+        } else {
+            None
         };
-        if dialect.has_header {
-            let header = frames.next_record().await?.unwrap_or_default();
-            frames.prefix.extend_from_slice(&header);
-        }
-        Ok(frames)
-    }
-
-    async fn next_record(&mut self) -> Result<Option<Vec<u8>>> {
-        let mut raw = Vec::new();
-        loop {
-            if self.pending_input.is_empty() {
-                self.pending_input = self.input.try_next().await?.unwrap_or_default();
-            }
-            // Discard decoded fields: csv-core is used only to identify safe raw
-            // record boundaries with the same quoting/escape rules as Arrow CSV.
-            let mut output = [0; 8192];
-            let mut ends = [0; 128];
-            let (result, consumed, _, _) =
-                self.parser
-                    .read_record(&self.pending_input, &mut output, &mut ends);
-            raw.extend_from_slice(&self.pending_input.split_to(consumed));
-            match result {
-                ReadRecordResult::Record => return Ok(Some(raw)),
-                ReadRecordResult::End => return Ok(None),
-                _ => {}
-            }
-        }
+        Ok(Self {
+            records,
+            header,
+            emitted: false,
+        })
     }
 
     async fn next_chunk(&mut self, row_target: usize, byte_target: usize) -> Result<Option<Bytes>> {
-        let mut output = self.prefix.clone();
+        let mut output = Vec::new();
         let mut rows = 0;
-        // The byte target is soft: stop after a complete record reaches it.
-        while rows < row_target && (rows == 0 || output.len() < byte_target) {
-            let Some(record) = self.next_record().await? else {
-                break;
-            };
-            output.extend_from_slice(&record);
-            rows += 1;
+        {
+            // Quoting every field preserves data BOMs and arbitrary field bytes.
+            // Leave row-length and UTF-8 validation to the Arrow worker.
+            let mut writer = csv::WriterBuilder::new()
+                .flexible(true)
+                .quote_style(csv::QuoteStyle::Always)
+                .from_writer(&mut output);
+            if let Some(header) = &self.header {
+                writer
+                    .write_record(header.iter())
+                    .map_err(error::write_error)?;
+            }
+            while rows < row_target {
+                let Some(record) = self.records.try_next().await? else {
+                    break;
+                };
+                writer
+                    .write_record(record.iter())
+                    .map_err(error::write_error)?;
+                writer.flush().map_err(error::input_error)?;
+                rows += 1;
+                if writer.get_ref().len() >= byte_target {
+                    break;
+                }
+            }
+            writer.flush().map_err(error::input_error)?;
         }
-        if rows == 0 && self.emitted {
+        if rows == 0 && (self.emitted || output.is_empty()) {
             return Ok(None);
         }
         self.emitted = true;
