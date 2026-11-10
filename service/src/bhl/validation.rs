@@ -11,15 +11,11 @@ pub(super) fn validate_key(value: &str) -> Result<()> {
 }
 
 pub(super) fn validate_parameters(parameters: &[(&str, &str)]) -> Result<()> {
-    if parameters
-        .iter()
-        .any(|(name, _)| matches!(*name, "op" | "format" | "apikey" | "callback"))
-    {
-        return Err(invalid(
-            "BHL control/auth parameters are configured by the service",
-        ));
-    }
-    Ok(())
+    crate::common::reject_reserved_parameters(
+        parameters,
+        &["op", "format", "apikey", "callback"],
+        "BHL control/auth parameters are configured by the service",
+    )
 }
 
 pub(super) fn validate_response(value: &Value) -> Result<()> {

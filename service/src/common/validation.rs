@@ -60,3 +60,19 @@ pub(super) fn validate_downloads(files: &[MetadataLink]) -> Result<()> {
 pub(crate) fn is_commit_sha(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
+
+#[cfg(any(
+    feature = "bhl",
+    feature = "library-of-congress",
+    feature = "regulations"
+))]
+pub(crate) fn reject_reserved_parameters(
+    parameters: &[(&str, &str)],
+    reserved: &[&str],
+    message: &str,
+) -> Result<()> {
+    if parameters.iter().any(|(name, _)| reserved.contains(name)) {
+        return Err(invalid(message));
+    }
+    Ok(())
+}
