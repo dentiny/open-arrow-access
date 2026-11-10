@@ -149,27 +149,6 @@ async fn malformed_parquet_returns_contextual_decode_error() {
 }
 
 #[tokio::test]
-async fn parquet_accepts_third_party_ranged_accessor() {
-    let fixture = fixture(Compression::UNCOMPRESSED).await;
-    let bytes = tokio::fs::read(fixture.dir.path().join("data.parquet"))
-        .await
-        .unwrap();
-    let memory = MemoryAccessor::new(&bytes, usize::MAX).with_ranges();
-    let observed = memory.observations.clone();
-    let accessor = ParquetAccessor::new(memory);
-    let reader = accessor
-        .open(ReadRequest::new("opaque:fixture"))
-        .await
-        .unwrap();
-    let batches = into_stream(reader).try_collect::<Vec<_>>().await.unwrap();
-    assert_eq!(
-        batches.iter().flat_map(ids).collect::<Vec<_>>(),
-        (0..7).collect::<Vec<_>>()
-    );
-    assert!(observed.range_reads.load(Ordering::SeqCst) > 0);
-}
-
-#[tokio::test]
 async fn dropping_reader_does_not_start_background_reads_and_errors_are_terminal() {
     let fixture = fixture(Compression::UNCOMPRESSED).await;
     let observations = Arc::new(Observations::default());
@@ -334,13 +313,14 @@ async fn capability_downgrade_matches_operations_and_blocks_parquet() {
 }
 
 #[tokio::test]
-async fn parquet_forwards_per_open_io_options_and_uses_bulk_ranges_through_layers() {
-    let fixture = fixture(Compression::UNCOMPRESSED).await;
+async fn parquet_forwards_io_options_and_bulk_ranges_through_third_party_layers() {
+    let data = tokio::fs::read(fixture_path("ordered-uncompressed.parquet"))
+        .await
+        .unwrap();
     let observations = Arc::new(Observations::default());
-    let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
-        fixture.dir.path(),
-    ))
-    .layer(ByteObserverLayer(observations.clone()));
+    let bytes = MemoryAccessor::new(&data, usize::MAX)
+        .with_ranges()
+        .layer(ByteObserverLayer(observations.clone()));
     let records = ParquetAccessor::new(bytes);
     for concurrency in [1, 3] {
         let options = ByteReadOptions {
@@ -348,7 +328,7 @@ async fn parquet_forwards_per_open_io_options_and_uses_bulk_ranges_through_layer
             io_chunk_size: NonZeroUsize::new(64),
         };
         let reader = records
-            .open(ReadRequest::new("data.parquet").with_byte_options(options))
+            .open(ReadRequest::new("opaque:fixture").with_byte_options(options))
             .await
             .unwrap();
         let batches = into_stream(reader).try_collect::<Vec<_>>().await.unwrap();
