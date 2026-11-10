@@ -56,6 +56,8 @@ fn validation_and_construction_share_namespace_rules() {
     for (names, valid) in [
         (vec![], true),
         (vec!["../opaque", " padded ", "雪"], true),
+        (vec!["/", ".", "..", "a\\b", "a\nb", "a\0b"], true),
+        (vec!["name", " name", "name ", "./name"], true),
         (vec![""], false),
         (vec!["same", "same"], false),
         (vec!["a", "b", "a"], false),
@@ -73,6 +75,8 @@ fn validation_and_construction_share_namespace_rules() {
         if !valid {
             let expected = validation.unwrap_err();
             let actual = construction.err().unwrap();
+            assert_eq!(expected.kind(), ErrorKind::InvalidInput);
+            assert_eq!(expected.operation(), "configure_named_files");
             assert_eq!(actual.kind(), expected.kind());
             assert_eq!(actual.operation(), expected.operation());
         }

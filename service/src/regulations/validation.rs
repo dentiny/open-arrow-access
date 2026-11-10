@@ -38,3 +38,10 @@ pub(super) fn validate_record(
     }
     Ok(())
 }
+
+pub(super) fn validate_key(key: &str) -> Result<()> {
+    if key.is_empty() {
+        return Err(invalid("Regulations.gov requires an API key"));
+    }
+    Ok(())
+}

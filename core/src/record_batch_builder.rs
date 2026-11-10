@@ -1,10 +1,8 @@
-use std::collections::HashSet;
-
 use arrow_array::{RecordBatchOptions, builder::*};
 use arrow_schema::{DataType, Field, Fields};
 
-use crate::error::invalid_output_schema;
 use crate::{Error, ErrorKind, FieldNameIndex, ReadOptions, RecordBatch, Result, SchemaRef};
+use crate::{error::invalid_output_schema, validation::validate_record_batch_fields};
 
 /// Build metadata batches using Arrow's native builders and named fields.
 ///
@@ -48,7 +46,7 @@ impl RecordBatchBuilder {
             ..Default::default()
         }
         .resolve_projection(&schema)?;
-        Self::validate_fields(&fields)?;
+        validate_record_batch_fields(&fields)?;
         Self::from_fields(fields, schema)
     }
 
@@ -59,7 +57,7 @@ impl RecordBatchBuilder {
         output_schema: SchemaRef,
         write: impl FnOnce(&mut RecordBatchRow<'_>) -> Result<()>,
     ) -> Result<RecordBatch> {
-        Self::validate_fields(schema.fields())?;
+        validate_record_batch_fields(schema.fields())?;
         let mut builder = Self::from_fields(schema.fields().clone(), output_schema)?;
         builder.push(write)?;
         builder.finish()
@@ -113,43 +111,6 @@ impl RecordBatchBuilder {
             &RecordBatchOptions::new().with_row_count(Some(self.rows)),
         )
         .map_err(|error| decode(error.to_string()).with_source(error))
-    }
-    fn validate_fields(fields: &Fields) -> Result<()> {
-        let mut seen = HashSet::new();
-        for field in fields {
-            if !seen.insert(field.name()) {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "build_record_batch",
-                    "duplicate schema field name",
-                ));
-            }
-            Self::validate_type(field.data_type())?;
-        }
-        Ok(())
-    }
-
-    fn validate_type(data_type: &DataType) -> Result<()> {
-        match data_type {
-            DataType::Boolean
-            | DataType::Int32
-            | DataType::Date32
-            | DataType::UInt32
-            | DataType::UInt64
-            | DataType::Utf8
-            | DataType::LargeUtf8
-            | DataType::Binary
-            | DataType::LargeBinary => Ok(()),
-            DataType::Struct(fields) => Self::validate_fields(fields),
-            DataType::List(field) | DataType::LargeList(field) => {
-                Self::validate_type(field.data_type())
-            }
-            _ => Err(Error::new(
-                ErrorKind::Unsupported,
-                "build_record_batch",
-                format!("unsupported metadata type {data_type}"),
-            )),
-        }
     }
 }
 

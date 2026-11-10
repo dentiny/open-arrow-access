@@ -1,10 +1,7 @@
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::Result;
 use opendal::OperationContext;
-use url::Url;
 
-use super::{
-    HuggingFaceAccessor, HuggingFaceOptions, HuggingFaceRepository, validation::validate_repository,
-};
+use super::{HuggingFaceAccessor, HuggingFaceOptions, HuggingFaceRepository, validation};
 
 /// Provider entry point for repository access and dataset selection.
 #[derive(Clone, Debug)]
@@ -18,17 +15,7 @@ impl HuggingFaceService {
     /// Does not contact the Hub until discovery or file reading is requested.
     pub async fn new(mut options: HuggingFaceOptions) -> Result<Self> {
         options.resolve_environment().await;
-        endpoint(options.endpoint())?;
-        if let Some(token) = &options.token
-            && (token.is_empty()
-                || http::HeaderValue::from_str(&format!("Bearer {token}")).is_err())
-        {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "configure_huggingface",
-                "invalid Hub authentication token",
-            ));
-        }
+        validation::validate_options(&options)?;
         let client = crate::http_client::HttpClient::new()?;
         Ok(Self {
             options,
@@ -43,7 +30,7 @@ impl HuggingFaceService {
         &self,
         repository: HuggingFaceRepository,
     ) -> Result<HuggingFaceAccessor> {
-        validate_repository(&repository)?;
+        validation::validate_repository(&repository)?;
         let mut builder = opendal::services::Hf::default()
             .repo_type("dataset")
             .repo_id(&repository.repository)
@@ -55,19 +42,4 @@ impl HuggingFaceService {
         }
         HuggingFaceAccessor::new(builder, self.context.clone())
     }
-}
-
-pub(super) fn endpoint(value: &str) -> Result<Url> {
-    let invalid = || {
-        Error::new(
-            ErrorKind::InvalidInput,
-            "configure_huggingface",
-            "expected an HTTP(S) Hub endpoint without credentials, query or fragment",
-        )
-    };
-    let url = Url::parse(value).map_err(|_| invalid())?;
-    if !crate::http_client::validation::is_http_endpoint(&url) {
-        return Err(invalid());
-    }
-    Ok(url)
 }

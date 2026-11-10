@@ -1,8 +1,10 @@
-use super::{decode_error, input::ParquetInput};
+use super::{
+    decode_error, error::parquet_input_error, input::ParquetInput, validation::validate_input,
+};
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    ByteReader, Capability, Error, ErrorKind, FactoryToken, FieldNameIndex, ReadRequest,
-    ReaderFactory, RecordMetadata, RecordReader, Result, async_trait, record_stream_reader,
+    ByteReader, Capability, FactoryToken, FieldNameIndex, ReadRequest, ReaderFactory,
+    RecordMetadata, RecordReader, Result, async_trait, record_stream_reader,
 };
 use parquet::arrow::{ProjectionMask, async_reader::ParquetRecordBatchStreamBuilder};
 
@@ -36,13 +38,7 @@ impl ReaderFactory for ParquetFormat {
         request: ReadRequest,
         (): (),
     ) -> Result<Box<dyn RecordReader>> {
-        if !input.capability().read_with_range || input.metadata().content_length.is_none() {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "open_parquet",
-                "Parquet requires range reads and a known byte length; materialize sequential input first",
-            ));
-        }
+        validate_input(input.as_ref(), parquet_input_error)?;
         let builder = ParquetRecordBatchStreamBuilder::new(ParquetInput::new(input))
             .await
             .map_err(|e| decode_error("inspect_parquet", e))?;

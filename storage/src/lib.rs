@@ -1,6 +1,7 @@
 //! Storage adapters use OpenDAL and expose only the shared read contracts.
 
 mod backend;
+mod validation;
 
 pub use backend::OpenDalAccessor;
 
@@ -8,7 +9,8 @@ pub use backend::OpenDalAccessor;
 pub use opendal;
 
 mod named_files;
-pub use named_files::{NamedFileAccessor, validate_file_names};
+pub use named_files::NamedFileAccessor;
+pub use validation::validate_file_names;
 
 /// Classify OpenDAL I/O failures; unrecognized categories map to `Io`.
 /// Callers handle configuration errors separately.

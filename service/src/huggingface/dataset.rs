@@ -7,7 +7,7 @@ use open_arrow_access_file_format::parquet::ParquetAccessor;
 
 use super::{
     HuggingFaceAccessor, HuggingFaceDatasetRequest, HuggingFaceRepository, HuggingFaceService,
-    validation::validate_repository,
+    validation::validate_dataset_request,
 };
 
 impl HuggingFaceService {
@@ -31,14 +31,7 @@ impl HuggingFaceService {
     )> {
         let repository =
             HuggingFaceRepository::new(&request.repository).with_revision(&request.revision);
-        validate_repository(&repository)?;
-        if request.split.starts_with("partial-") && !request.allow_partial {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "open_huggingface_dataset",
-                "partial exports require explicit opt-in",
-            ));
-        }
+        validate_dataset_request(&request, &repository)?;
         let repository = self.pin_revision(repository).await?;
         let accessor = self.repository(repository).await?;
         let prefix = format!("{}/{}", request.config, request.split);
