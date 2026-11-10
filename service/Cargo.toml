@@ -221,3 +221,7 @@ required-features = ["regulations"]
 [[test]]
 name = "record_files"
 required-features = ["record-files"]
+
+[[test]]
+name = "record_pages"
+required-features = ["record-files", "oai"]

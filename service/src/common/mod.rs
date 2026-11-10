@@ -20,3 +20,8 @@ pub(crate) use validation::filename_component as validate_filename;
 
 #[cfg(any(feature = "huggingface", feature = "openstax"))]
 pub(crate) use validation::is_commit_sha;
+
+#[cfg(feature = "record-files")]
+mod record_page;
+#[cfg(feature = "record-files")]
+pub use record_page::RecordPage;
