@@ -1,5 +1,8 @@
-use futures::{TryStreamExt, stream::BoxStream};
-use open_arrow_access_core::Result;
+use futures::{
+    TryStreamExt,
+    stream::{self, BoxStream},
+};
+use open_arrow_access_core::{RecordMetadata, Result, ScanPartition, ScanPlan};
 
 /// Batches complete records with one-record lookahead and a soft byte target.
 /// The row limit is strict; an oversized first record is emitted on its own.
@@ -14,6 +17,37 @@ impl<T> RecordChunks<T> {
             records,
             pending: None,
         }
+    }
+
+    /// Discover bounded chunks lazily; conversion stays inside each partition future.
+    pub(crate) fn into_plan(
+        self,
+        metadata: RecordMetadata,
+        rows: usize,
+        target_bytes: usize,
+        size: impl Fn(&T) -> usize + Send + Sync + 'static,
+        partition: impl Fn(Vec<T>, RecordMetadata) -> ScanPartition + Send + 'static,
+    ) -> ScanPlan
+    where
+        T: Send + 'static,
+    {
+        let output = metadata.clone();
+        let partitions = stream::try_unfold(
+            (self, size, partition),
+            move |(mut chunks, size, partition)| {
+                let metadata = output.clone();
+                async move {
+                    let Some(records) = chunks.next_chunk(rows, target_bytes, &size).await? else {
+                        return Ok(None);
+                    };
+                    Ok(Some((
+                        partition(records, metadata),
+                        (chunks, size, partition),
+                    )))
+                }
+            },
+        );
+        ScanPlan::from_stream(metadata, partitions)
     }
 
     pub(crate) async fn next_chunk(
