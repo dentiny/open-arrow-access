@@ -1,8 +1,9 @@
 use arrow_array::cast::AsArray;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability, Error,
-    ErrorKind, ReadOptions, ReadRequest, Result, async_trait,
+    Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability,
+    Error, ErrorKind, ReadOptions, ReadRequest, Result, ScanPlanner, async_trait,
 };
+use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::pmc_inventory::PmcInventoryAccessor;
 use open_arrow_access_test_support::{MemoryAccessor, fixture};
 use std::{
@@ -211,4 +212,56 @@ async fn manifest_metadata_can_exceed_the_previous_size_limit() {
             .await
             .is_ok()
     );
+}
+
+#[tokio::test]
+async fn parallel_inventory_matches_order_metadata_projection_and_validation() {
+    for projection in [None, Some(vec!["ETag", "Key"]), Some(vec![])] {
+        let source = Objects::fixture().await;
+        let accessor = PmcInventoryAccessor::new(source.clone());
+        let plan = accessor
+            .plan_scan(request(projection.clone()))
+            .await
+            .unwrap();
+        assert_eq!(plan.partitions.len(), 2);
+        assert_eq!(source.opened.lock().unwrap().len(), 1);
+        drop(plan);
+        let mut expected = accessor.open(request(projection.clone())).await.unwrap();
+        let mut actual = accessor
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::new(1).unwrap(),
+            ))
+            .open(request(projection))
+            .await
+            .unwrap();
+        assert_eq!(actual.metadata().schema, expected.metadata().schema);
+        loop {
+            let e = expected.next().await.unwrap();
+            assert_eq!(actual.next().await.unwrap(), e);
+            if e.is_none() {
+                break;
+            }
+        }
+    }
+    let mut source = Objects::fixture().await;
+    source.insert(
+        SECOND,
+        &fixture!("pmc/inventory", "bad_bucket.csv.gz").await,
+    );
+    let mut reader = PmcInventoryAccessor::new(source)
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ))
+        .open(request(Some(vec![])))
+        .await
+        .unwrap();
+    loop {
+        match reader.next().await {
+            Err(_) => break,
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("invalid bucket bypassed validation"),
+        }
+    }
 }

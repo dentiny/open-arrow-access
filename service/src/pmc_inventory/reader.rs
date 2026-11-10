@@ -11,6 +11,7 @@ use open_arrow_access_file_format::csv::CsvAccessor;
 
 use super::validation;
 
+#[derive(Clone)]
 pub(super) struct InventoryTransform {
     pub(super) csv_schema: SchemaRef,
     pub(super) output_projection: Option<Vec<usize>>,
