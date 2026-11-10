@@ -234,7 +234,7 @@ directories. `OpenDalAccessor` passes that policy to OpenDAL, and transparent wr
 complete request. Other byte accessors can supply their own implementation. Input locators
 remain backend-owned. Directory datasets consume those file
 references and compose any shared single-file record accessor. Directory prefixes
-normalize repeated and trailing slash separators before discovery and matching.
+and listed locators are backend-defined and passed through unchanged.
 
 `ByteReadRequest` carries an `ObjectRef` and `ByteReadOptions`. `io_concurrency`
 defaults to one and `io_chunk_size` defaults to the backend's choice. Record-file

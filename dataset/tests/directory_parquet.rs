@@ -81,30 +81,6 @@ mod filesystem {
         }
     }
 
-    #[tokio::test]
-    async fn directory_normalizes_prefix_before_listing_and_matching() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("data/sub")).unwrap();
-        copy_fixture("a.parquet", &dir.path().join("data/sub/a.parquet"));
-        let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
-        let accessor = DirectoryAccessor::new(fs.clone(), ParquetAccessor::new(fs));
-        for prefix in ["data/sub", "data//sub", "data///sub//"] {
-            let request = DirectoryRequest::new(prefix);
-            assert_eq!(values(accessor.open(request).await.unwrap()).await, [1, 2]);
-        }
-        for prefix in ["/data/sub", "data//./sub", "data//../sub"] {
-            assert_eq!(
-                accessor
-                    .open(DirectoryRequest::new(prefix))
-                    .await
-                    .err()
-                    .unwrap()
-                    .kind(),
-                ErrorKind::InvalidInput
-            );
-        }
-    }
-
     #[cfg(unix)]
     #[tokio::test]
     async fn nonrecursive_directory_does_not_enter_unreadable_subdirectories() {

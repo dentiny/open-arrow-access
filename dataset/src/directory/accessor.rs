@@ -1,12 +1,9 @@
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, Capability, Error, ErrorKind, ListRequest, ReadRequest, RecordReader,
-    Result, ScanPlan, ScanPlanner, async_trait, list_files,
+    Accessor, ByteAccessor, Capability, ListRequest, ReadRequest, RecordReader, Result, ScanPlan,
+    ScanPlanner, async_trait, list_files,
 };
 
-use super::{
-    DirectoryRequest,
-    path::{is_root_relative, normalize_prefix},
-};
+use super::DirectoryRequest;
 use crate::file_set::{FileSetAccessor, FileSetRequest};
 
 /// Discover files through a byte accessor and read them through a supplied format.
@@ -66,24 +63,10 @@ where
     B: ByteAccessor,
 {
     async fn resolve(&self, request: DirectoryRequest) -> Result<FileSetRequest> {
-        let prefix = normalize_prefix(request.prefix.locator()).ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidInput,
-                "open_directory",
-                "expected a root-relative directory prefix without dot components",
-            )
-        })?;
         let objects = list_files(
             &self.discovery,
-            ListRequest::new(prefix).with_recursive(request.recursive),
+            ListRequest::new(request.prefix).with_recursive(request.recursive),
             |relative| {
-                if !is_root_relative(relative) {
-                    return Err(Error::new(
-                        ErrorKind::InvalidInput,
-                        "open_directory",
-                        "listing returned a rooted or dot-component locator",
-                    ));
-                }
                 Ok(!relative.is_empty()
                     && !relative.ends_with('/')
                     && request
