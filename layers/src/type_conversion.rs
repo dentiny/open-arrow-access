@@ -112,7 +112,10 @@ where
                     .clone()
                     .with_data_type(spec.data_type.clone()),
             );
-            casts.push((index, spec.data_type.clone()));
+            casts.push(ColumnCast {
+                source_index: index,
+                target_type: spec.data_type.clone(),
+            });
         }
         let schema = Arc::new(Schema::new_with_metadata(fields, source.metadata().clone()));
         let (schema, projection) = output_options.resolve_projection(&schema)?;
@@ -135,10 +138,19 @@ where
     }
 }
 
+struct ColumnCast {
+    /// Position in the inner reader's batch, before the final projection.
+    source_index: usize,
+    target_type: DataType,
+}
+
 struct TypeConversionReader {
     inner: Box<dyn RecordReader>,
     metadata: RecordMetadata,
-    casts: Vec<(usize, DataType)>,
+    /// Casts planned at open, including configured columns omitted from the output.
+    casts: Vec<ColumnCast>,
+    /// Inner-batch column indices in output order. None keeps all columns;
+    /// Some([]) preserves row counts with zero columns.
     projection: Option<Vec<usize>>,
     done: bool,
 }
@@ -150,16 +162,18 @@ impl TypeConversionReader {
             safe: false,
             ..CastOptions::default()
         };
-        for (index, target) in &self.casts {
-            columns[*index] = cast_with_options(columns[*index].as_ref(), target, &options)
-                .map_err(|error| {
+        for cast in &self.casts {
+            let index = cast.source_index;
+            let target = &cast.target_type;
+            columns[index] =
+                cast_with_options(columns[index].as_ref(), target, &options).map_err(|error| {
                     Error::new(
                         ErrorKind::Decode,
                         "cast",
                         format!(
                             "column {:?}: {} to {target}: {error}",
-                            batch.schema().field(*index).name(),
-                            columns[*index].data_type(),
+                            batch.schema().field(index).name(),
+                            columns[index].data_type(),
                         ),
                     )
                     .with_source(error)
