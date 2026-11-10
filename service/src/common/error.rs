@@ -1,4 +1,7 @@
-use open_arrow_access_core::{Error, ErrorKind};
+use futures::StreamExt;
+use open_arrow_access_core::{
+    Error, ErrorKind, RecordMetadata, RecordReader, Result, StreamReader, into_stream,
+};
 
 pub(super) const OP: &str = "provider_http";
 
@@ -47,4 +50,39 @@ pub(super) fn missing_auth_scope() -> opendal::Error {
 
 pub(super) fn serialize_metadata(source: serde_json::Error) -> Error {
     decode("failed to serialize selected API records").with_source(source)
+}
+
+pub(super) fn empty_page_selection() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "plan_page_set",
+        "empty page selection",
+    )
+}
+
+fn page_schema_mismatch() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "read_page_set",
+        "page schema differs from the first selected page",
+    )
+}
+
+pub(super) fn checked_page_reader(
+    reader: Box<dyn RecordReader>,
+    output: &RecordMetadata,
+) -> Result<Box<dyn RecordReader>> {
+    if reader.metadata().schema != output.schema {
+        return Err(page_schema_mismatch());
+    }
+    let metadata = reader.metadata().clone();
+    let schema = output.schema.clone();
+    let batches = into_stream(reader).map(move |result| {
+        let batch = result?;
+        if batch.schema() != schema {
+            return Err(page_schema_mismatch());
+        }
+        Ok(batch)
+    });
+    Ok(Box::new(StreamReader::new(batches, metadata)))
 }

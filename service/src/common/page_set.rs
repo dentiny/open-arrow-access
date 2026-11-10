@@ -2,9 +2,11 @@ use std::{future::Future, marker::PhantomData, sync::Arc};
 
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, Capability, Error, ErrorKind, RecordMetadata, RecordReader, Result, ScanPartition,
-    ScanPlan, ScanPlanner, StreamReader, async_trait, into_stream,
+    Accessor, Capability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan,
+    ScanPlanner, async_trait,
 };
+
+use super::error::{checked_page_reader, empty_page_selection};
 
 /// An ordered selection of independently fetchable API requests.
 /// The opener owns provider validation, authentication and record decoding.
@@ -61,19 +63,13 @@ where
 {
     async fn plan_scan(&self, requests: Vec<R>) -> Result<ScanPlan> {
         let mut requests = requests.into_iter();
-        let first = requests.next().ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidInput,
-                "plan_page_set",
-                "empty page selection",
-            )
-        })?;
+        let first = requests.next().ok_or_else(empty_page_selection)?;
         let first = (self.open)(first).await?;
         let metadata = RecordMetadata {
             schema: first.metadata().schema.clone(),
             source: None,
         };
-        let first = checked_reader(first, &metadata)?;
+        let first = checked_page_reader(first, &metadata)?;
         let first: ScanPartition = Box::pin(async move { Ok(first) });
         let open = self.open.clone();
         let output = metadata.clone();
@@ -82,38 +78,11 @@ where
             let output = output.clone();
             let partition: ScanPartition = Box::pin(async move {
                 let reader = open(request).await?;
-                checked_reader(reader, &output)
+                checked_page_reader(reader, &output)
             });
             Ok(partition)
         });
         let partitions = stream::iter([Ok(first)]).chain(stream::iter(rest));
         Ok(ScanPlan::from_stream(metadata, partitions))
     }
-}
-
-fn schema_mismatch() -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "read_page_set",
-        "page schema differs from the first selected page",
-    )
-}
-
-fn checked_reader(
-    reader: Box<dyn RecordReader>,
-    output: &RecordMetadata,
-) -> Result<Box<dyn RecordReader>> {
-    if reader.metadata().schema != output.schema {
-        return Err(schema_mismatch());
-    }
-    let metadata = reader.metadata().clone();
-    let schema = output.schema.clone();
-    let batches = into_stream(reader).map(move |result| {
-        let batch = result?;
-        if batch.schema() != schema {
-            return Err(schema_mismatch());
-        }
-        Ok(batch)
-    });
-    Ok(Box::new(StreamReader::new(batches, metadata)))
 }
