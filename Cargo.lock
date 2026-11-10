@@ -1948,7 +1948,6 @@ dependencies = [
  "arrow-schema",
  "futures",
  "open-arrow-access-core",
- "open-arrow-access-test-support",
  "tokio",
 ]
 

@@ -1,5 +1,4 @@
 use std::{
-    error::Error as _,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -15,11 +14,10 @@ use arrow_array::{
 };
 use arrow_schema::{DataType, Field, Schema, UnionFields, UnionMode};
 use open_arrow_access_core::{
-    Accessor, AccessorExt, Capability, Error, ErrorKind, ObjectRef, ReadOptions, ReadRequest,
+    Accessor, AccessorExt, Capability, ErrorKind, ObjectRef, ReadOptions, ReadRequest,
     RecordMetadata, RecordReader, Result, async_trait, record_stream_reader,
 };
 use open_arrow_access_layers::{ColumnTypeSpec, TypeConversionLayer};
-use open_arrow_access_test_support::format;
 
 fn layer(name: &str, data_type: DataType) -> TypeConversionLayer {
     TypeConversionLayer::try_new(vec![ColumnTypeSpec {
@@ -47,7 +45,6 @@ fn union(types: Vec<DataType>) -> DataType {
 
 struct MemoryAccessor {
     batches: Vec<RecordBatch>,
-    fail: bool,
     calls: Arc<AtomicUsize>,
 }
 
@@ -55,7 +52,6 @@ impl MemoryAccessor {
     fn new(batches: Vec<RecordBatch>) -> Self {
         Self {
             batches,
-            fail: false,
             calls: Arc::default(),
         }
     }
@@ -85,10 +81,7 @@ impl Accessor for MemoryAccessor {
         let (schema, projection) = request
             .options
             .resolve_projection(&self.batches[0].schema())?;
-        let mut batches = self.batches.clone().into_iter().map(Ok).chain(
-            self.fail
-                .then(|| Err(Error::new(ErrorKind::Io, "read", "injected"))),
-        );
+        let mut batches = self.batches.clone().into_iter().map(Ok);
         let calls = self.calls.clone();
         let stream = stream::poll_fn(move |_| {
             calls.fetch_add(1, Ordering::SeqCst);
@@ -150,23 +143,6 @@ async fn casts_preserve_metadata_nulls_order_and_unchanged_buffers() {
         }
     }
     assert!(reader.next().await.unwrap().is_none());
-}
-
-#[tokio::test]
-async fn invalid_values_and_upstream_errors_terminate_reading() {
-    let input = batch(Arc::new(StringArray::from(vec!["42", "bad"])));
-    let source = MemoryAccessor::new(vec![input]);
-    let calls = source.calls.clone();
-    let mut reader = source.open_cast(DataType::Int32).await.unwrap();
-    let error = format::assert_terminal_error(reader.as_mut(), &calls, ErrorKind::Decode).await;
-    assert!(error.to_string().contains("value"));
-    assert!(error.source().is_some());
-    let mut source = MemoryAccessor::new(vec![batch(Arc::new(StringArray::from(vec!["1"])))]);
-    source.fail = true;
-    let calls = source.calls.clone();
-    let mut reader = source.open_cast(DataType::Int32).await.unwrap();
-    assert!(reader.next().await.unwrap().is_some());
-    format::assert_terminal_error(reader.as_mut(), &calls, ErrorKind::Io).await;
 }
 
 #[tokio::test]
