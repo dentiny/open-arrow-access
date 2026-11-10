@@ -55,7 +55,7 @@ pmc = [
 ]
 regulations = []
 semantic-scholar = []
-uspto = []
+uspto = ["record-files"]
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 zenodo = []
 
