@@ -10,30 +10,6 @@ pub(super) fn download_url(url: &Url) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn identifier(value: &str) -> Result<()> {
-    if value.is_empty() || matches!(value, "." | "..") {
-        return Err(invalid("empty or dot identifier"));
-    }
-    Ok(())
-}
-
-pub(crate) fn filename_component(value: &str) -> Result<()> {
-    if !crate::filename::valid_filename_component(value) {
-        return Err(invalid("invalid filename component"));
-    }
-    Ok(())
-}
-
-pub(super) fn provider_path(path: &str) -> Result<()> {
-    if path.starts_with('/')
-        || path.contains(['?', '#', '\\'])
-        || path.split('/').any(|s| matches!(s, "." | ".."))
-    {
-        return Err(invalid("expected relative provider path"));
-    }
-    Ok(())
-}
-
 pub(super) fn same_origin(origin: &Url, url: &Url) -> Result<()> {
     if url.origin() != origin.origin() {
         return Err(invalid("API continuation changed origin"));

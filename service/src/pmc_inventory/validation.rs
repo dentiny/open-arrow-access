@@ -2,7 +2,6 @@ use super::{
     error::decode,
     manifest::{InventoryFormat, Manifest},
 };
-use crate::validation::valid_relative_file_path;
 use arrow_schema::Fields;
 use open_arrow_access_core::{Error, ErrorKind, Result};
 use std::collections::HashSet;
@@ -27,7 +26,7 @@ pub(super) fn validate_manifest(manifest: &Manifest) -> Result<()> {
     }
     validate_fields(manifest.file_schema.fields())?;
     for file in &manifest.files {
-        if !valid_path(&file.key) || !file.key.ends_with(".csv.gz") {
+        if !file.key.ends_with(".csv.gz") {
             return Err(decode("invalid inventory shard entry"));
         }
     }
@@ -56,8 +55,4 @@ pub(super) fn validate_row(bucket: Option<&str>, key: Option<&str>) -> Result<()
         return Err(decode("inventory row has no Key"));
     }
     Ok(())
-}
-
-fn valid_path(path: &str) -> bool {
-    valid_relative_file_path(path) && !path.contains(['?', '#']) && !path.contains("://")
 }

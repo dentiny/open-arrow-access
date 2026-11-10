@@ -70,7 +70,6 @@ async fn rejects_invalid_metadata_and_maps_http_errors() {
             ("wrong-id.json", StatusCode::OK, ErrorKind::Decode),
             ("missing-files.json", StatusCode::OK, ErrorKind::Decode),
             ("duplicate.json", StatusCode::OK, ErrorKind::Decode),
-            ("traversal.json", StatusCode::OK, ErrorKind::Decode),
             (
                 "empty.json",
                 StatusCode::FORBIDDEN,
@@ -96,4 +95,12 @@ async fn record_metadata_can_exceed_the_previous_size_limit() {
     raw.extend(std::iter::repeat_n(b' ', 4 * 1024 * 1024));
     fixture.respond_chunked("/api/records/3551612", StatusCode::OK, Bytes::from(raw));
     assert!(!service.record(ID).await.unwrap().files().is_empty());
+}
+
+#[tokio::test]
+async fn preserves_attachment_keys_without_path_validation() {
+    let (http, service) = fixture_service("traversal").await;
+    let record = service.record(ID).await.unwrap();
+    assert_eq!(record.files()[0].key, "../paper.pdf");
+    assert_eq!(http.requests().len(), 1);
 }

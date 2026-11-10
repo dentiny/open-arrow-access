@@ -14,8 +14,6 @@ use opendal::{
 };
 use tokio::sync::Semaphore;
 
-use crate::validation::validate_locator;
-
 const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
 const DEFAULT_IO_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 const MAX_FETCH_BATCH_SIZE: u64 = 2 * 1024 * 1024;
@@ -101,7 +99,6 @@ impl Accessor for OpenDalAccessor {
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let ByteReadRequest { object, options } = request;
         let path = object.locator();
-        validate_locator(path, false, "open")?;
         let len = self.content_length(path).await?;
         // Share a budget across OpenDAL's stream/fetch queues so interleaved
         // range reads cannot multiply sequential prefetch concurrency.
@@ -149,7 +146,6 @@ impl ByteAccessor for OpenDalAccessor {
             ));
         }
         let path = request.prefix.locator();
-        validate_locator(path, true, "list")?;
         let path = if path.is_empty() {
             String::new()
         } else {

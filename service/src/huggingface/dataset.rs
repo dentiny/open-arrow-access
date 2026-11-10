@@ -7,7 +7,7 @@ use open_arrow_access_file_format::parquet::ParquetAccessor;
 
 use super::{
     HuggingFaceAccessor, HuggingFaceDatasetRequest, HuggingFaceRepository, HuggingFaceService,
-    validation::{validate_path, validate_repository},
+    validation::validate_repository,
 };
 
 impl HuggingFaceService {
@@ -32,16 +32,6 @@ impl HuggingFaceService {
         let repository =
             HuggingFaceRepository::new(&request.repository).with_revision(&request.revision);
         validate_repository(&repository)?;
-        for component in [&request.config, &request.split] {
-            validate_path(component, false)?;
-            if component.contains('/') {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "open_huggingface_dataset",
-                    "config and split must be individual path components",
-                ));
-            }
-        }
         if request.split.starts_with("partial-") && !request.allow_partial {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -98,10 +88,7 @@ impl HuggingFaceAccessor {
         let objects = list_files(
             self,
             ListRequest::new(prefix).with_recursive(false),
-            |relative| {
-                validate_path(relative, false)?;
-                Ok(!relative.contains('/') && relative.ends_with(".parquet"))
-            },
+            |relative| Ok(!relative.contains('/') && relative.ends_with(".parquet")),
         )
         .await?;
         if objects.is_empty() {

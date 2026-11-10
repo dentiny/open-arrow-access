@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use futures::TryStreamExt;
 use open_arrow_access_core::{ByteReader, Error, ErrorKind, ObjectRef, Result, read_lines};
 
-use super::{error::invalid_line, validation::validate_manifest_path};
+use super::error::invalid_line;
 
 pub(super) async fn read_manifest(
     input: Box<dyn ByteReader>,
@@ -42,7 +42,6 @@ fn append_line(
     if path.is_empty() {
         return Ok(());
     }
-    validate_manifest_path(path, number)?;
     if path.starts_with(prefix) {
         if !seen.insert(path.to_owned()) {
             return Err(invalid_line(number, "duplicate selected file"));

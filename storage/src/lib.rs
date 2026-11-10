@@ -1,7 +1,6 @@
 //! Storage adapters use OpenDAL and expose only the shared read contracts.
 
 mod backend;
-mod validation;
 
 pub use backend::OpenDalAccessor;
 

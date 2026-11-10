@@ -2,8 +2,8 @@
 
 ## Service and data
 
-The common helpers validate/encode identifiers, filenames, download URLs and
-JSON fields used by provider adapters. They operate on caller-supplied metadata;
+The common helpers encode identifiers and filenames, and validate download URLs
+and JSON fields used by provider adapters. They operate on caller-supplied metadata;
 they are not discovery APIs or independent storage services.
 
 Available without a provider feature. See [example setup](README.md#example-setup) for dependencies and the async runtime.
@@ -13,14 +13,14 @@ Available without a provider feature. See [example setup](README.md#example-setu
 | Input / helper | Response |
 | --- | --- |
 | `segment(&str)` | One encoded URL path component, including encoded `/` inside opaque IDs |
-| `filename(&str)` | Validated/encoded single filename component |
+| `filename(&str)` | Encoded single filename component |
 | `resolve_download_url(&str)` | HTTP(S) URL without embedded credentials/fragment; signed query retained |
 | `text(value, field)` / `array(value, field)` | Required nonempty string / array borrowed from JSON |
 | `resolve_optional_links(value, &[LinkField])` | Ordered `Vec<MetadataLink>` for available string URLs |
 
 Missing/null/empty optional links are unavailable; a wrong JSON type is an error.
 These utilities do not replace provider-specific identity, version or permission
-checks. Logical namespace names and filesystem locators have different rules.
+checks. Locators are interpreted by the supplying accessor.
 
 ## Usage and results
 

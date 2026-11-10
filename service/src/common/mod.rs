@@ -16,8 +16,6 @@ pub use connection::{Connection, RemoteFiles};
 
 pub use json_util::{LinkField, MetadataLink, resolve_named_links, resolve_optional_links};
 
-pub(crate) use validation::filename_component as validate_filename;
-
 #[allow(
     unused_imports,
     reason = "Shared utilities are available to every provider build."
