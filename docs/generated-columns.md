@@ -59,8 +59,8 @@ implements `ReadOptionsProvider`; it does not depend on formats or storage.
 4. Expose the fixed augmented/projected schema before reading a batch.
 5. Evaluate physical expressions on Arrow arrays, then apply the final projection.
 
-Source arrays share their buffers. Only later declarations need intermediate
-batches; a single generated column avoids that allocation. Memory is bounded by
+Source arrays share their buffers. Each declaration appends its array by moving
+the batch's column vector, without cloning earlier arrays. Memory is bounded by
 one input batch, its generated arrays and expression/kernel state. There is no
 DataFrame execution plan, materialized table, dependency graph or per-row SQL.
 
@@ -97,4 +97,5 @@ virtual-field requests together with a real reader, coordinate semantics and tes
 
 Integration tests cover expressions, dependent columns, constants, nulls, quoting,
 metadata/buffer sharing, zero rows/columns, projection, invalid and hidden
-expressions, SQL casts, type conversion, and CSV with parallel reads.
+expressions, SQL casts, type conversion, CSV with parallel reads, stable functions
+across declarations, and terminal cleanup after runtime errors in hidden columns.
