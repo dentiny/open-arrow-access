@@ -122,9 +122,6 @@ impl<A: ByteAccessor + 'static> ScanPlanner for PmcInventoryAccessor<A> {
                 }) as ScanPartition
             })
             .collect();
-        Ok(ScanPlan {
-            metadata,
-            partitions,
-        })
+        Ok(ScanPlan::new(metadata, partitions))
     }
 }

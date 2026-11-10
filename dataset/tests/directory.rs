@@ -428,7 +428,7 @@ async fn parallel_file_plan_is_lazy_and_preserves_options_order_and_duplicates()
     request.options.batch_size = NonZeroUsize::new(2).unwrap();
     request.byte_options.io_concurrency = NonZeroUsize::new(3).unwrap();
     let plan = accessor.plan_scan(request.clone()).await.unwrap();
-    assert_eq!(plan.partitions.len(), 4);
+    assert_eq!(plan.partitions.size_hint().0, 4);
     assert_eq!(opens.lock().unwrap().len(), 1);
     drop(plan);
     for p in [1, 3] {

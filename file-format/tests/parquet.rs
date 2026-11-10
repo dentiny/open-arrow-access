@@ -13,7 +13,7 @@ use std::{
 };
 
 use arrow_array::{StringArray, types::Int64Type};
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteReadOptions, Capability, ErrorKind, Layer,
@@ -440,15 +440,15 @@ async fn row_group_plan_reuses_metadata_and_preserves_projection_and_rows() {
         .layer(ByteObserverLayer(observations.clone())),
     );
     let accessor = ParquetAccessor::new(bytes);
-    let plan = accessor
+    let mut plan = accessor
         .plan_scan(ReadRequest::new("data.parquet"))
         .await
         .unwrap();
-    assert!(plan.partitions.len() > 1);
+    assert!(plan.partitions.size_hint().0 > 1);
     assert_eq!(observations.byte_options.lock().unwrap().len(), 1);
     let reads = observations.range_reads.load(Ordering::SeqCst);
-    for partition in plan.partitions {
-        let reader = partition.await.unwrap();
+    while let Some(partition) = plan.partitions.next().await {
+        let reader = partition.unwrap().await.unwrap();
         assert_eq!(reader.metadata().schema, fixture.schema);
     }
     assert_eq!(observations.range_reads.load(Ordering::SeqCst), reads);

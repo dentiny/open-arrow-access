@@ -140,7 +140,7 @@ async fn parallel_dataset_preserves_pinned_shard_order_and_partial_admission() {
     let hub = ExportHub::new("paginated.json").await;
     let service = hub.service().await;
     let plan = service.plan_scan(request()).await.unwrap();
-    assert_eq!(plan.partitions.len(), 2);
+    assert_eq!(plan.partitions.size_hint().0, 2);
     assert!(!hub.requested("0001.parquet"));
     drop(plan);
     hub.clear_requests();

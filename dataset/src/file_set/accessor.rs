@@ -116,9 +116,6 @@ where
                 .with_byte_options(request.byte_options);
             partitions.push(Box::pin(async move { inner.open(read_request).await }));
         }
-        Ok(ScanPlan {
-            metadata,
-            partitions,
-        })
+        Ok(ScanPlan::new(metadata, partitions))
     }
 }

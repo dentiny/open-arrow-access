@@ -187,7 +187,7 @@ async fn parallel_manifest_plan_preserves_membership_order_and_options() {
     let accessor = CommonCrawlWarcAccessor::new(manifest("good.paths", 1), Records::default());
     let selection = request();
     let plan = accessor.plan_scan(selection.clone()).await.unwrap();
-    assert!(!plan.partitions.is_empty());
+    assert!(plan.partitions.size_hint().0 > 0);
     drop(plan);
     let expected =
         commoncrawl_support::paths(accessor.open(selection.clone()).await.unwrap()).await;
