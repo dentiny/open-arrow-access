@@ -1,12 +1,15 @@
 #[path = "commoncrawl/support.rs"]
 mod commoncrawl_support;
 
+use arrow_array::cast::AsArray;
 use commoncrawl_support::{Records, entry, manifest};
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadOptionsProvider, into_stream,
+    Accessor, AccessorExt, ByteReadOptions, ErrorKind, ReadOptions, ReadOptionsProvider,
+    ScanPlanner, into_stream,
 };
 use open_arrow_access_service::warc::{CommonCrawlWarcAccessor, CommonCrawlWarcRequest};
+use open_arrow_access_test_support::{MemoryAccessor, fixture};
 use std::num::NonZeroUsize;
 
 const SEGMENT: &str = "1664030338280.51";
@@ -177,4 +180,66 @@ async fn manifest_paths_can_exceed_the_previous_line_limit() {
         .unwrap();
     assert_eq!(resolved.objects.len(), 1);
     assert_eq!(resolved.objects[0].locator(), path);
+}
+
+#[tokio::test]
+async fn parallel_manifest_plan_preserves_membership_order_and_options() {
+    let accessor = CommonCrawlWarcAccessor::new(manifest("good.paths", 1), Records::default());
+    let selection = request();
+    let plan = accessor.plan_scan(selection.clone()).await.unwrap();
+    assert!(plan.partitions.size_hint().0 > 0);
+    drop(plan);
+    let expected =
+        commoncrawl_support::paths(accessor.open(selection.clone()).await.unwrap()).await;
+    let parallel = accessor.layer(open_arrow_access_layers::ParallelReadLayer::new(
+        NonZeroUsize::new(2).unwrap(),
+        NonZeroUsize::new(1).unwrap(),
+    ));
+    let actual = commoncrawl_support::paths(parallel.open(selection).await.unwrap()).await;
+    assert_eq!(actual, expected);
+}
+
+#[tokio::test]
+async fn native_parallel_warc_view_keeps_source_urls_and_binary_bodies() {
+    let bytes = fixture!("warc", "good_physical_records.warc").await;
+    let accessor = CommonCrawlWarcAccessor::from_warc_bytes(
+        manifest("good.paths", 1),
+        MemoryAccessor::new(&bytes, 1),
+    );
+    let expected = accessor.resolve(request()).await.unwrap().objects;
+    let mut reader = accessor
+        .layer(open_arrow_access_layers::ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ))
+        .open(request())
+        .await
+        .unwrap();
+    let mut sources = Vec::new();
+    let mut bodies = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        sources.extend(
+            batch["source_uri"]
+                .as_string::<i64>()
+                .iter()
+                .map(|value| value.unwrap().to_owned()),
+        );
+        bodies.extend(
+            batch["body"]
+                .as_binary::<i64>()
+                .iter()
+                .map(|value| value.unwrap().to_vec()),
+        );
+    }
+    assert_eq!(
+        sources,
+        expected
+            .iter()
+            .flat_map(|source| std::iter::repeat_n(source.locator().to_owned(), 3))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(bodies.len(), expected.len() * 3);
+    for chunk in bodies.chunks(3) {
+        assert_eq!(chunk, &[vec![], vec![0, 255, 13, 10], b"end".to_vec()]);
+    }
 }
