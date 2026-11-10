@@ -235,7 +235,7 @@ complete command-line readers.
 
 ### Planning resolved files and API pages
 
-The `record-files` feature adds `ResolvedFileSet::records(format)`: bind an explicit
+`ResolvedFileSet::records(format)` is always available: bind an explicit
 Arrow format/schema, select logical names with `FileSetRequest`, then install
 `ParallelReadLayer` or call `plan_scan`. Provider resolution still validates the
 revision, membership, names and availability before planning; no file extension
