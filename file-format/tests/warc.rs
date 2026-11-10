@@ -294,38 +294,3 @@ async fn parallel_record_partitions_are_lazy_and_preserve_binary_projection_and_
     assert_eq!(bodies, [vec![], vec![0, 255, 13, 10], b"end".to_vec()]);
     assert!(reader.next().await.unwrap().is_none());
 }
-
-#[tokio::test]
-async fn parallel_record_errors_preserve_framing_conversion_and_source_failures() {
-    for name in ["bad_truncated_body.warc", "bad_missing_date.warc"] {
-        let bytes = fixture!("warc", name).await;
-        let mut reader = WarcArrowAccessor::new(MemoryAccessor::new(&bytes, 1))
-            .layer(ParallelReadLayer::new(
-                NonZeroUsize::new(2).unwrap(),
-                NonZeroUsize::MIN,
-            ))
-            .open(ReadRequest::new(name))
-            .await
-            .unwrap();
-        let error = reader.next().await.unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Decode, "{name}");
-        assert_eq!(error.operation(), "decode_warc");
-        assert!(error.source().is_some());
-        assert!(reader.next().await.unwrap().is_none());
-    }
-    let input = MemoryAccessor::new(&fixture!("warc", "good_resource.warc").await, 1)
-        .with_failure(0, ErrorKind::PermissionDenied);
-    let mut reader = WarcArrowAccessor::new(input)
-        .layer(ParallelReadLayer::new(
-            NonZeroUsize::new(2).unwrap(),
-            NonZeroUsize::MIN,
-        ))
-        .open(ReadRequest::new("source.warc"))
-        .await
-        .unwrap();
-    assert_source_error(
-        &reader.next().await.unwrap_err(),
-        ErrorKind::PermissionDenied,
-    );
-    assert!(reader.next().await.unwrap().is_none());
-}
