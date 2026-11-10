@@ -1,7 +1,10 @@
 use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
-use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest, Error, ErrorKind};
-use open_arrow_access_file_format::warc::{WarcAccessor, WarcHeader};
+use arrow_array::cast::AsArray;
+use open_arrow_access_core::{
+    Accessor, ByteReadOptions, ByteReadRequest, Error, ErrorKind, ReadOptions, ReadRequest,
+};
+use open_arrow_access_file_format::warc::{WarcAccessor, WarcArrowAccessor, WarcHeader};
 use open_arrow_access_test_support::{MemoryAccessor, fixture, reader};
 
 #[tokio::test]
@@ -172,4 +175,69 @@ async fn empty_input_and_independent_opens_have_terminal_eof() {
     );
     assert!(left.next().await.unwrap().is_none());
     assert!(right.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn arrow_records_preserve_binary_bodies_source_and_projection() {
+    let input = fixture!("warc", "good_physical_records.warc").await;
+    for projection in [
+        None,
+        Some(vec!["body".into(), "record_id".into()]),
+        Some(vec![]),
+    ] {
+        let mut reader = WarcArrowAccessor::new(MemoryAccessor::new(&input, 1))
+            .open(ReadRequest::new("records.warc").with_options(ReadOptions {
+                batch_size: NonZeroUsize::new(2).unwrap(),
+                projection: projection.clone(),
+            }))
+            .await
+            .unwrap();
+        let mut bodies = Vec::new();
+        let mut ids = Vec::new();
+        let mut rows = 0;
+        while let Some(batch) = reader.next().await.unwrap() {
+            assert_eq!(batch.schema(), reader.metadata().schema);
+            rows += batch.num_rows();
+            if let Some(body) = batch.column_by_name("body") {
+                bodies.extend(
+                    body.as_binary::<i64>()
+                        .iter()
+                        .map(|value| value.unwrap().to_vec()),
+                );
+                ids.extend(
+                    batch["record_id"]
+                        .as_string::<i32>()
+                        .iter()
+                        .map(|value| value.unwrap().to_owned()),
+                );
+            }
+            if let Some(source) = batch.column_by_name("source_uri") {
+                assert!(
+                    source
+                        .as_string::<i64>()
+                        .iter()
+                        .all(|value| value == Some("records.warc"))
+                );
+            }
+        }
+        assert_eq!(rows, 3);
+        if projection.as_ref().is_none_or(|fields| !fields.is_empty()) {
+            assert_eq!(bodies, [vec![], vec![0, 255, 13, 10], b"end".to_vec()]);
+            assert_eq!(
+                ids,
+                ["<urn:test:first>", "<urn:test:second>", "<urn:test:third>"]
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn arrow_records_propagate_parser_errors() {
+    let bytes = fixture!("warc", "bad_truncated_body.warc").await;
+    let mut reader = WarcArrowAccessor::new(MemoryAccessor::new(&bytes, 1))
+        .open(ReadRequest::new("bad.warc"))
+        .await
+        .unwrap();
+    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
+    assert!(reader.next().await.unwrap().is_none());
 }
