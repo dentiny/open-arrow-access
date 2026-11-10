@@ -26,7 +26,6 @@ pub(crate) fn partition_task_error(error: tokio::task::JoinError) -> Error {
     )
 }
 
-#[cfg(feature = "generated-columns")]
 pub(crate) fn invalid_generated_column(column: &str, message: impl std::fmt::Display) -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -35,12 +34,10 @@ pub(crate) fn invalid_generated_column(column: &str, message: impl std::fmt::Dis
     )
 }
 
-#[cfg(feature = "generated-columns")]
 pub(crate) fn invalid_generated_expression(message: &str) -> datafusion::error::DataFusionError {
     datafusion::error::DataFusionError::Plan(message.into())
 }
 
-#[cfg(feature = "generated-columns")]
 pub(crate) fn generated_plan_error(
     column: &str,
     error: datafusion::error::DataFusionError,
@@ -48,7 +45,6 @@ pub(crate) fn generated_plan_error(
     invalid_generated_column(column, &error).with_source(error)
 }
 
-#[cfg(feature = "generated-columns")]
 pub(crate) fn generated_column_error(
     column: &str,
     error: datafusion::error::DataFusionError,
@@ -61,7 +57,6 @@ pub(crate) fn generated_column_error(
     .with_source(error)
 }
 
-#[cfg(feature = "generated-columns")]
 pub(crate) fn generated_batch_error(error: ArrowError) -> Error {
     Error::new(ErrorKind::Decode, "generate_column", error.to_string()).with_source(error)
 }

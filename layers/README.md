@@ -9,8 +9,8 @@ must forward optional operations or remove their advertised capabilities.
 - The public layer contract, verified by test wrappers for byte and record accessors.
 - [`ParallelReadLayer`](../docs/parallel-read.md) for bounded concurrent partition execution with ordered output.
 - `TypeConversionLayer` for explicit Arrow column casts; it is always exported by the facade.
-- `GeneratedColumnsLayer` for ordered row-level SQL expressions, behind
-  `layer-generated-columns` on the facade. See the [design and usage](../docs/generated-columns.md).
+- `GeneratedColumnsLayer` for ordered row-level SQL expressions; it is always exported by the facade.
+  See the [design and usage](../docs/generated-columns.md).
 - `decompression::DecompressionLayer<C>` for gzip, bzip2, LZ4, and Zstandard byte
   transformations. See the [decompression guide](../decompression/README.md).
 - Caller-configured OpenDAL policies on the storage operator. These belong to

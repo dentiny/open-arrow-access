@@ -1,9 +1,9 @@
 # Generated columns
 
 `GeneratedColumnsLayer` appends Arrow fields using row-level DataFusion SQL
-expressions. Enable the facade's default-off `layer-generated-columns` feature,
-or `generated-columns` on `open-arrow-access-layers`. Core remains Arrow-only;
-DataFusion is absent from the default dependency graph.
+expressions. It is always available through `open_arrow_access::layers` and
+`open-arrow-access-layers`, including with `default-features = false`.
+Core remains Arrow-only; the layers crate depends on DataFusion.
 
 ```rust,ignore
 use open_arrow_access::{AccessorExt, layers::{GeneratedColumnSpec, GeneratedColumnsLayer}};
@@ -102,7 +102,7 @@ expressions, runtime failures, drop, type conversion, and CSV with parallel read
 Run the manual release timing check on an otherwise idle machine:
 
 ```sh
-cargo test -p open-arrow-access-layers --features generated-columns --release \
+cargo test -p open-arrow-access-layers --release \
   --test generated_columns generated_columns_throughput -- --ignored --nocapture
 ```
 

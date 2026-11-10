@@ -59,7 +59,7 @@ own format rules.
 [`TypeConversionLayer`](../layers/README.md) is implemented and always available.
 It uses the existing layer contract for explicit Arrow output casts.
 
-`GeneratedColumnsLayer` is implemented behind `layer-generated-columns`, with
+`GeneratedColumnsLayer` is implemented and always available, with
 ordered row-level SQL expressions, a fixed output schema, and final projection.
 It currently reads all source columns for complete schema validation;
 dependency-aware pushdown remains planned. See the

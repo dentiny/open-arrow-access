@@ -64,7 +64,7 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 warc = { package = "warc-rs", version = "0.3.3", default-features = false }
 xml-arrow = "0.2.8"
 
-# Enabled only by the generated-column layer.
+# Used by the generated-column layer.
 datafusion = { version = "55.2.0", default-features = false }
 
 bytes = "1"
@@ -91,7 +91,6 @@ open-arrow-access-dataset = { path = "dataset", version = "0.1.0", default-featu
 open-arrow-access-service = { path = "service", version = "0.1.0", default-features = false }
 
 [features]
-layer-generated-columns = ["open-arrow-access-layers/generated-columns"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 decompression-bz2 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 decompression-gzip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip"]

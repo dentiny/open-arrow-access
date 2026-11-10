@@ -242,7 +242,6 @@ fn has_extension_type(data_type: &DataType) -> bool {
     }
 }
 
-#[cfg(feature = "generated-columns")]
 pub(crate) fn validate_generated_specs(specs: &[crate::GeneratedColumnSpec]) -> Result<()> {
     let mut names = HashSet::with_capacity(specs.len());
     for spec in specs {
@@ -262,7 +261,6 @@ pub(crate) fn validate_generated_specs(specs: &[crate::GeneratedColumnSpec]) -> 
     Ok(())
 }
 
-#[cfg(feature = "generated-columns")]
 pub(crate) fn validate_generated_column_name<'a>(
     column: &'a str,
     names: &mut HashSet<&'a str>,
@@ -276,7 +274,6 @@ pub(crate) fn validate_generated_column_name<'a>(
     Ok(())
 }
 
-#[cfg(feature = "generated-columns")]
 pub(crate) fn validate_expression(
     expression: &datafusion::logical_expr::Expr,
 ) -> datafusion::error::Result<()> {
