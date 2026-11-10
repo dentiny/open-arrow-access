@@ -17,7 +17,6 @@ open-arrow-access-core.workspace = true
 [dev-dependencies]
 arrow-array.workspace = true
 arrow-schema.workspace = true
-flate2.workspace = true
 more-asserts.workspace = true
 open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-file-format = { workspace = true, features = ["atif", "parquet"] }

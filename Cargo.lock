@@ -1905,7 +1905,6 @@ version = "0.1.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
- "flate2",
  "futures",
  "more-asserts",
  "open-arrow-access-core",

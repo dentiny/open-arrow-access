@@ -1,4 +1,4 @@
-use std::{io::Write, num::NonZeroUsize};
+use std::num::NonZeroUsize;
 
 use arrow_array::cast::AsArray;
 use open_arrow_access_core::{Accessor, AccessorExt, ReadOptions, ReadRequest};
@@ -80,16 +80,12 @@ async fn parallel_atif_matches_sequential_values_and_source_context() {
 #[tokio::test]
 async fn parallel_atif_composes_with_independent_gzip_readers() {
     let root = tempfile::tempdir().unwrap();
-    let original = std::fs::read(open_arrow_access_test_support::fixture_path!(
-        "atif",
-        "trajectories.jsonl"
-    ))
-    .unwrap();
     for name in ["a.gz", "b.gz"] {
-        let file = std::fs::File::create(root.path().join(name)).unwrap();
-        let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
-        encoder.write_all(&original).unwrap();
-        encoder.finish().unwrap();
+        std::fs::copy(
+            open_arrow_access_test_support::fixture_path!("atif", "trajectories.jsonl.gz"),
+            root.path().join(name),
+        )
+        .unwrap();
     }
     let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(root.path()))
         .layer(DecompressionLayer::new(Gzip));

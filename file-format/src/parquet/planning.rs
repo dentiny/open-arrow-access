@@ -1,6 +1,7 @@
+use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteMetadata, ByteReadRequest, ByteReader, ReadRequest, RecordMetadata, Result,
-    ScanPartition, ScanPlan, ScanPlanner, async_trait,
+    Accessor, ByteReadRequest, ByteReader, ReadRequest, RecordMetadata, Result, ScanPartition,
+    ScanPlan, ScanPlanner, async_trait,
 };
 use parquet::arrow::{
     arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions},
@@ -21,7 +22,7 @@ where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + Clone + 'static,
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        let storage = self.binding.storage();
+        let storage = self.binding.storage().clone();
         let input = storage.open(ByteReadRequest::from(&request)).await?;
         validate_input(input.as_ref(), parquet_partition_input_error)?;
         let identity = input.metadata().clone();
@@ -36,36 +37,25 @@ where
             schema,
             source: Some(request.object.clone()),
         };
-        let partitions = (0..metadata.metadata().num_row_groups())
-            .map(|index| {
-                let storage = storage.clone();
-                let metadata = metadata.clone();
-                let request = request.clone();
-                let identity = identity.clone();
-                Box::pin(async move {
-                    let input = open_partition_input(&storage, &request, &identity).await?;
-                    let builder = ParquetRecordBatchStreamBuilder::new_with_metadata(
-                        ParquetInput::new(input),
-                        metadata,
-                    )
-                    .with_row_groups(vec![index]);
-                    create_reader(builder, request)
-                }) as ScanPartition
-            })
-            .collect();
-        Ok(ScanPlan::new(output, partitions))
+        let partitions = (0..metadata.metadata().num_row_groups()).map(move |index| {
+            let storage = storage.clone();
+            let metadata = metadata.clone();
+            let request = request.clone();
+            let identity = identity.clone();
+            Box::pin(async move {
+                let input = storage.open(ByteReadRequest::from(&request)).await?;
+                validate_partition_input(input.as_ref(), &identity)?;
+                let builder = ParquetRecordBatchStreamBuilder::new_with_metadata(
+                    ParquetInput::new(input),
+                    metadata,
+                )
+                .with_row_groups(vec![index]);
+                create_reader(builder, request)
+            }) as ScanPartition
+        });
+        Ok(ScanPlan::from_stream(
+            output,
+            stream::iter(partitions.map(Ok)),
+        ))
     }
-}
-
-async fn open_partition_input<B>(
-    storage: &B,
-    request: &ReadRequest,
-    identity: &ByteMetadata,
-) -> Result<Box<dyn ByteReader>>
-where
-    B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
-{
-    let input = storage.open(ByteReadRequest::from(request)).await?;
-    validate_partition_input(input.as_ref(), identity)?;
-    Ok(input)
 }
