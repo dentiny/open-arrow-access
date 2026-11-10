@@ -4,6 +4,13 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_storage::NamedFileAccessor;
 
+#[cfg(feature = "record-files")]
+use open_arrow_access_core::{ReadRequest, ReaderFactory, RecordReader};
+#[cfg(feature = "record-files")]
+use open_arrow_access_dataset::file_set::FileSetAccessor;
+#[cfg(feature = "record-files")]
+use open_arrow_access_file_format::FileAccessor;
+
 use crate::file_manifest::FileSpec;
 
 /// A fixed file namespace with provider-defined metadata and independently owned readers.
@@ -64,5 +71,24 @@ where
 {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
         self.accessor.list(request).await
+    }
+}
+
+#[cfg(feature = "record-files")]
+impl<A, M> ResolvedFileSet<A, M>
+where
+    A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,
+    M: Send + Sync + 'static,
+{
+    /// Bind an explicit Arrow format to this validated file namespace.
+    /// Select logical file names using FileSetRequest, preserving order and duplicates.
+    /// The returned accessor implements ScanPlanner and uses independent byte readers
+    /// for each file; normal open remains sequential. No format is guessed and no
+    /// attachment is fetched until it is explicitly selected for a scan.
+    pub fn records<F>(self, format: F) -> FileSetAccessor<FileAccessor<Self, F>>
+    where
+        F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
+    {
+        FileSetAccessor::new(FileAccessor::from_format(self, format))
     }
 }
