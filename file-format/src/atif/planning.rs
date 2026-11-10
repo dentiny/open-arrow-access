@@ -32,12 +32,7 @@ where
             .open(ByteReadRequest::from(&request))
             .await?;
         let frames = AtifFrames {
-            lines: read_lines(
-                input,
-                Some(self.partition_options.max_record_bytes.get()),
-                "frame_atif",
-            )
-            .boxed(),
+            lines: read_lines(input, None, "frame_atif").boxed(),
             pending: None,
             next_index: 1,
             options: self.partition_options,
