@@ -11,9 +11,11 @@ use validation::{parse_object, validate_snapshot, validate_table};
 
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectRef,
-    ReaderFactoryExt, Result, async_trait, list_files,
+    ReadRequest, ReaderFactory, ReaderFactoryExt, RecordReader, Result, async_trait, list_files,
 };
+use open_arrow_access_dataset::file_set::FileSetAccessor;
 use open_arrow_access_decompression::{DecompressionFactory, bz2::Bzip2};
+use open_arrow_access_file_format::FileAccessor;
 
 /// One table export and its UTC generation date, not an atomic database snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -120,3 +122,16 @@ impl<A: ByteAccessor> Accessor for CourtListenerBulkAccessor<A> {
 
 #[async_trait]
 impl<A: ByteAccessor> ByteAccessor for CourtListenerBulkAccessor<A> {}
+
+impl<A: ByteAccessor + 'static> CourtListenerBulkAccessor<A> {
+    /// Bind an explicit Arrow format/schema to selected snapshot objects.
+    /// Selection still validates CourtListener's snapshot keys before storage I/O;
+    /// each FileSet partition owns an independent Bzip2 reader. Table-specific
+    /// schemas and CSV dialect options remain explicit with the caller.
+    pub fn records<F>(self, format: F) -> FileSetAccessor<FileAccessor<Self, F>>
+    where
+        F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
+    {
+        FileSetAccessor::new(FileAccessor::from_format(self, format))
+    }
+}

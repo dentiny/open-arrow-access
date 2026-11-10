@@ -232,3 +232,30 @@ The Figshare example above demonstrates provider-managed HTTP access; this
 example demonstrates caller-managed storage. See each provider guide for its
 configuration boundary and return type. [Repository examples](../examples/) show
 complete command-line readers.
+
+### Planning resolved files and API pages
+
+`ResolvedFileSet::records(format)` is always available: bind an explicit
+Arrow format/schema, select logical names with `FileSetRequest`, then install
+`ParallelReadLayer` or call `plan_scan`. Provider resolution still validates the
+revision, membership, names and availability before planning; no file extension
+or content decoder is guessed. Explicit duplicate selections retain their order.
+
+For already fetched JSON API metadata, `ApiDocument::records_at(pointer, format)`
+selects one object or an ordered array at a JSON pointer. OAI pages expose
+`page.records(format)` for an explicit XML record path/schema. These page plans do
+not follow continuation URLs or make cursor-dependent page requests independent.
+Use provider protocol methods to discover subsequent pages in the required order.
+
+These are explicit decoding bindings, not new per-provider metadata schemas.
+Referenced PDF/HTML links remain URL fields under the selected schema and are
+never followed automatically. Already embedded document bodies require a native
+content mapping to `LargeBinary`; an ordinary JSON string is not silently treated
+as Arrow's hexadecimal binary representation. The binding does not perform that
+source-specific content mapping.
+
+`RecordPage::into_file_accessor()` exposes the owned page bytes through the selected
+native format accessor. After the format-specific planners are enabled, install
+`ParallelReadLayer` on this accessor to use JSON/XML file-internal framing. The
+RecordPage wrapper retains its conservative whole-page plan for compatibility;
+this explicit path changes decode planning, not API cursor acquisition.

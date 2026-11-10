@@ -4,12 +4,11 @@ use std::{
 };
 
 use arrow_schema::{DataType, Field, Schema};
-use futures::{TryStreamExt, stream};
+use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, ObjectRef,
     ReadOptions, ReadOptionsProvider, RecordBatchBuilder, RecordMetadata, RecordReader, Result,
-    ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, into_stream,
-    read_all,
+    ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, read_all,
 };
 
 use super::{ArxivKind, ArxivService};
@@ -66,8 +65,8 @@ impl ReadOptionsProvider for ArxivReadRequest {
 }
 
 /// Native Arrow rows for regular TAR entries, preserving names and payloads as LargeBinary.
-/// Each partition owns one TAR stream. TarLimits bound entry sizes; the batch byte
-/// target is soft and never splits an entry.
+/// Each partition owns one sequential TAR stream; TarLimits apply.
+/// See [`ArxivReadRequest::target_bytes`] for batch payload sizing.
 pub struct ArxivRecords<A> {
     service: Arc<ArxivService<A>>,
 }
@@ -112,12 +111,7 @@ where
     }
 
     async fn open(&self, request: ArxivReadRequest) -> Result<Box<dyn RecordReader>> {
-        let plan = self.plan_scan(request).await?;
-        let batches = plan
-            .partitions
-            .and_then(|partition| async { partition.await.map(into_stream) })
-            .try_flatten();
-        Ok(Box::new(StreamReader::new(batches, plan.metadata)))
+        Ok(Box::new(self.plan_scan(request).await?.into_reader()))
     }
 }
 
