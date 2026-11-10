@@ -67,6 +67,7 @@ struct ParallelReader {
     queues: VecDeque<mpsc::Receiver<RecordBatch>>,
     tasks: JoinSet<Result<()>>,
     settings: ParallelReadLayer,
+    // Set after EOF or an error so later next() calls return EOF without restarting work.
     terminal: bool,
 }
 
