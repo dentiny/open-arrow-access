@@ -112,3 +112,11 @@ timing results. No portable speedup or cloud throughput guarantee is implied.
 The ATIF confirmation interleaves case pairs across repeats; the main comparison
 originally grouped pairs by case. The current comparison runner interleaves cases.
 On macOS, CPU sampling may need to run outside a restricted sandbox.
+
+## Per-provider follow-up
+
+The [isolated provider/allocation matrix](matrix/README.md) adds all 23 service
+feature families plus arXiv metadata, retained short-read capacity and scatter-body
+ownership probes. Its [results](matrix/RESULTS.md) refresh the baseline to main
+`29b5687` and document four new independent proposals without production changes
+in this umbrella PR.

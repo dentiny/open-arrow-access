@@ -1,0 +1,26 @@
+[package]
+name = "oaa-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+arrow-array.workspace = true
+arrow-schema.workspace = true
+futures.workspace = true
+http.workspace = true
+open-arrow-access-core.workspace = true
+open-arrow-access-file-format = { workspace = true, features = ["atif", "csv", "json", "parquet", "warc", "xml"] }
+open-arrow-access-storage.workspace = true
+open-arrow-access-service = { workspace = true, features = ["arxiv", "bhl", "biorxiv", "courtlistener", "dataverse", "doab", "federal-register", "figshare", "govinfo", "gutenberg", "hathifiles", "huggingface", "internet-archive", "library-of-congress", "meca", "oapen", "openstax", "pmc", "regulations", "semantic-scholar", "uspto", "warc", "zenodo"] }
+open-arrow-access-test-support.workspace = true
+opendal = { workspace = true, features = ["services-fs"] }
+opendal-service-http.workspace = true
+parquet.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

@@ -1855,6 +1855,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "oaa-bench"
+version = "0.1.0"
+dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "futures",
+ "http",
+ "open-arrow-access-core",
+ "open-arrow-access-file-format",
+ "open-arrow-access-service",
+ "open-arrow-access-storage",
+ "open-arrow-access-test-support",
+ "opendal",
+ "opendal-service-http",
+ "parquet",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "objc2"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

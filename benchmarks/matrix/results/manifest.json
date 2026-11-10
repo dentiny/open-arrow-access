@@ -1,0 +1,35 @@
+{
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "rust_toolchain": "1.97.0",
+  "oaa_main": "29b5687a05104a37418fcccdf18cdbd06df39df1",
+  "atif_measured_base": "87345d73b60a12602194b2b2091f0cfc3dde080e",
+  "atif_pr_base": "0a54d93",
+  "xml_measured_base": "1bf4fce9ea73ecd275a7ce1a11987c3c5d5c6bec",
+  "xml_pr_base": "13572ef",
+  "samples_per_case": 5,
+  "cases": 46,
+  "measurement_date_local": "2026-11-09",
+  "binaries": {
+    "baseline": {
+      "sha256": "f3d60ed3306f15b31d6ef2013f0c4d02220d010a7fee8241187da79d21eb66e0"
+    },
+    "http_candidate": {
+      "sha256": "6ece3cba2e34296f3f7ff9978cdacf0314d62acd2665f9c15c19aac4452090e1"
+    },
+    "chunks_candidate": {
+      "sha256": "241095113d056ede4614f9a568c0cbc6fb4ce199f9d69f70697f36c8a3f909dc"
+    },
+    "atif_baseline": {
+      "sha256": "e1379440a16b2ffd41f8e524368bcbb13e70f98381eb13c100404a8826c918a2"
+    },
+    "atif_candidate": {
+      "sha256": "9a4ad803b979cd0c753f0a4c1df44d0750147b7fdf7340851d22a85a6034b928"
+    },
+    "xml_baseline": {
+      "sha256": "7fb63d0346a6b876d8a3aa49d845595b308b866ed5771885898b04e3a445b649"
+    },
+    "xml_candidate": {
+      "sha256": "672426293935646faa87d03588ea05b20740e0ca386356551316ea2972a829a9"
+    }
+  }
+}
