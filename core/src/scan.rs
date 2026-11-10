@@ -8,7 +8,7 @@ use futures::{
 
 use crate::{Accessor, RecordMetadata, RecordReader, Result, async_trait};
 
-/// A lazy, independently owned partition opener. Vector position defines logical order.
+/// A lazy, independently owned partition opener. Partition stream order defines logical order.
 /// Each opener must create its own reader/decoder state and preserve order within it.
 pub type ScanPartition = BoxFuture<'static, Result<Box<dyn RecordReader>>>;
 
@@ -26,8 +26,8 @@ impl ScanPlan {
         Self::from_stream(metadata, stream::iter(partitions.into_iter().map(Ok)))
     }
 
-    /// Discover partitions lazily. Producers must bound each pending input chunk;
-    /// the executor polls discovery only while its resident partition window has room.
+    /// Discover complete input units incrementally. The executor polls discovery
+    /// only while its resident partition window has room.
     pub fn from_stream(
         metadata: RecordMetadata,
         partitions: impl futures::Stream<Item = Result<ScanPartition>> + Send + 'static,
