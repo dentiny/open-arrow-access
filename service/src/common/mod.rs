@@ -22,4 +22,4 @@ pub(crate) use validation::filename_component as validate_filename;
 pub(crate) use validation::is_commit_sha;
 
 mod record_page;
-pub use record_page::RecordPage;
+pub use record_page::{RecordPage, RecordPageInput};

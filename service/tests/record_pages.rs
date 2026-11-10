@@ -51,6 +51,13 @@ async fn selected_json_records_preserve_order_and_links_without_fetching_them() 
         "https://example.invalid/paper.pdf"
     );
     assert!(reader.next().await.unwrap().is_none());
+    let native = document
+        .records_at("/results", JsonFormat::new(schema.clone()))
+        .unwrap()
+        .into_file_accessor();
+    let mut native_reader = native.open(ReadRequest::new("api-page")).await.unwrap();
+    assert_eq!(native_reader.next().await.unwrap().unwrap(), batch);
+    assert!(native_reader.next().await.unwrap().is_none());
     assert!(
         document
             .records_at("/missing", JsonFormat::new(schema))
