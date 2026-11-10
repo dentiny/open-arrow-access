@@ -2,7 +2,7 @@ use std::{collections::VecDeque, num::NonZeroUsize};
 
 use futures::{
     StreamExt,
-    stream::{self, BoxStream},
+    stream::{self, BoxStream, Fuse, FusedStream},
 };
 
 use open_arrow_access_core::{
@@ -76,8 +76,7 @@ impl<A: ScanPlanner> Accessor for ParallelReadAccessor<A> {
 
 struct ParallelReader {
     metadata: RecordMetadata,
-    remaining: BoxStream<'static, Result<ScanPartition>>,
-    discovery_finished: bool,
+    remaining: Fuse<BoxStream<'static, Result<ScanPartition>>>,
     partition_receivers: VecDeque<mpsc::Receiver<RecordBatch>>,
     tasks: JoinSet<Result<()>>,
     settings: ParallelReadLayer,
@@ -89,8 +88,7 @@ impl ParallelReader {
     fn new(plan: ScanPlan, settings: ParallelReadLayer) -> Self {
         Self {
             metadata: plan.metadata,
-            remaining: plan.partitions,
-            discovery_finished: false,
+            remaining: plan.partitions.fuse(),
             partition_receivers: VecDeque::new(),
             tasks: JoinSet::new(),
             settings,
@@ -127,20 +125,19 @@ impl ParallelReader {
         self.terminal = true;
         self.tasks.abort_all();
         self.partition_receivers.clear();
-        self.remaining = stream::empty().boxed();
-        self.discovery_finished = true;
+        self.remaining = stream::empty().boxed().fuse();
     }
 
     async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
         loop {
-            if self.discovery_finished
+            if self.remaining.is_terminated()
                 && self.partition_receivers.is_empty()
                 && self.tasks.is_empty()
             {
                 return Ok(None);
             }
             let has_front = !self.partition_receivers.is_empty();
-            let can_discover = !self.discovery_finished
+            let can_discover = !self.remaining.is_terminated()
                 && self.partition_receivers.len() < self.settings.partitions.get();
             let front = self.partition_receivers.front_mut();
             tokio::select! {
@@ -151,9 +148,8 @@ impl ParallelReader {
                     }
                 }
                 partition = self.remaining.next(), if can_discover => {
-                    match partition {
-                        Some(partition) => self.spawn_partition(partition?),
-                        None => self.discovery_finished = true,
+                    if let Some(partition) = partition {
+                        self.spawn_partition(partition?);
                     }
                 }
                 batch = async { front.unwrap().recv().await }, if has_front => {
