@@ -18,5 +18,5 @@ impl Default for DecodePartitionOptions {
     }
 }
 
-#[cfg(any(feature = "atif", feature = "json"))]
+#[cfg(any(feature = "atif", feature = "csv", feature = "json"))]
 pub(crate) mod input;
