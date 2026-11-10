@@ -9,6 +9,7 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
+    task::Poll,
 };
 use tokio::sync::{Notify, Semaphore};
 
@@ -53,13 +54,13 @@ impl ScanPlanner for Source {
     }
 }
 async fn open(parts: Vec<ScanPartition>, p: usize) -> Box<dyn RecordReader> {
-    open_plan(ScanPlan::new(metadata(), parts), p).await
+    open_plan(ScanPlan::new(metadata(), parts), p, 1).await
 }
-async fn open_plan(plan: ScanPlan, p: usize) -> Box<dyn RecordReader> {
+async fn open_plan(plan: ScanPlan, p: usize, prefetch: usize) -> Box<dyn RecordReader> {
     Source
         .layer(ParallelReadLayer::new(
             NonZeroUsize::new(p).unwrap(),
-            NonZeroUsize::new(1).unwrap(),
+            NonZeroUsize::new(prefetch).unwrap(),
         ))
         .open(plan)
         .await
@@ -97,19 +98,22 @@ async fn overlaps_without_replacing_completed_buffered_partitions() {
     let ready = Arc::new(Semaphore::new(0));
     let opened = Arc::new(AtomicUsize::new(0));
     let mut parts: Vec<ScanPartition> = vec![];
-    for n in 0..20 {
+    for n in 0..4 {
         let (release, ready, opened) = (release.clone(), ready.clone(), opened.clone());
         parts.push(Box::pin(async move {
             opened.fetch_add(1, Ordering::SeqCst);
             if n == 0 {
                 release.notified().await;
-            } else {
-                ready.add_permits(1);
             }
-            part(vec![n]).await
+            let batches = stream::iter([Ok(batch(n))]).chain(stream::poll_fn(move |_| {
+                ready.add_permits(1);
+                Poll::Ready(None)
+            }));
+            Ok(Box::new(StreamReader::new(batches, metadata())) as Box<dyn RecordReader>)
         }));
     }
-    let mut r = open(parts, 3).await;
+    // Two slots let each later worker queue its batch and reach EOF.
+    let mut r = open_plan(ScanPlan::new(metadata(), parts), 3, 2).await;
     let task = tokio::spawn(async move {
         let b = r.next().await.unwrap().unwrap();
         (b, r)
@@ -123,7 +127,7 @@ async fn overlaps_without_replacing_completed_buffered_partitions() {
     while let Some(batch) = r.next().await.unwrap() {
         values.push(value(&batch));
     }
-    assert_eq!(values, (0..20).collect::<Vec<_>>());
+    assert_eq!(values, (0..4).collect::<Vec<_>>());
 }
 
 #[tokio::test]
@@ -209,7 +213,7 @@ async fn full_later_queue_stops_decoding_before_next_batch() {
 #[tokio::test]
 async fn pending_partition_discovery_does_not_block_ready_output() {
     let partitions = stream::iter([Ok(part(vec![7]))]).chain(stream::pending());
-    let mut reader = open_plan(ScanPlan::from_stream(metadata(), partitions), 2).await;
+    let mut reader = open_plan(ScanPlan::from_stream(metadata(), partitions), 2, 1).await;
     assert_eq!(value(&reader.next().await.unwrap().unwrap()), 7);
 }
 
@@ -219,7 +223,7 @@ async fn discovery_errors_interrupt_a_blocked_partition() {
         Ok(Box::pin(std::future::pending()) as ScanPartition),
         Err(Error::new(ErrorKind::Io, "discover", "injected failure")),
     ]);
-    let mut reader = open_plan(ScanPlan::from_stream(metadata(), partitions), 2).await;
+    let mut reader = open_plan(ScanPlan::from_stream(metadata(), partitions), 2, 1).await;
     assert_eq!(reader.next().await.unwrap_err().operation(), "discover");
     assert!(reader.next().await.unwrap().is_none());
 }

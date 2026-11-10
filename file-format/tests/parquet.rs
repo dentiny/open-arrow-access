@@ -664,18 +664,26 @@ async fn row_group_plan_reuses_metadata_and_preserves_projection_and_rows() {
         ))
         .layer(ByteObserverLayer(observations.clone())),
     );
-    let accessor = ParquetAccessor::new(bytes);
+    let accessor = ParquetAccessor::new(bytes.clone());
+    let owners = Arc::strong_count(&bytes);
     let mut plan = accessor
         .plan_scan(ReadRequest::new("data.parquet"))
         .await
         .unwrap();
     assert!(plan.partitions.size_hint().0 > 1);
+    // A plan retains one storage handle, rather than one opener per row group.
+    assert_eq!(Arc::strong_count(&bytes), owners + 1);
     assert_eq!(observations.byte_options.lock().unwrap().len(), 1);
     let reads = observations.range_reads.load(Ordering::SeqCst);
     while let Some(partition) = plan.partitions.next().await {
-        let reader = partition.unwrap().await.unwrap();
+        let partition = partition.unwrap();
+        assert_eq!(Arc::strong_count(&bytes), owners + 2);
+        let reader = partition.await.unwrap();
         assert_eq!(reader.metadata().schema, fixture.schema);
+        assert_eq!(Arc::strong_count(&bytes), owners + 1);
     }
+    drop(plan);
+    assert_eq!(Arc::strong_count(&bytes), owners);
     assert_eq!(observations.range_reads.load(Ordering::SeqCst), reads);
     for projection in [None, Some(vec!["title".into(), "id".into()]), Some(vec![])] {
         let request = ReadRequest::new("data.parquet").with_options(ReadOptions {

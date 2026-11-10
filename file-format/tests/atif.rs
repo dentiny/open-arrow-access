@@ -1,7 +1,7 @@
 use futures::TryStreamExt;
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_layers::ParallelReadLayer;
-use std::{error::Error as _, io::Write, num::NonZeroUsize, sync::atomic::Ordering};
+use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
 use arrow_array::{RecordBatch, cast::AsArray};
 use atif_arrow::trajectory_schema;
@@ -202,14 +202,7 @@ async fn jsonl_pulls_only_the_requested_batch_and_keeps_delivered_rows_on_later_
 
 #[tokio::test]
 async fn parallel_gzip_trajectories_keep_global_indices_raw_json_and_projection() {
-    let mut bytes = b" \r\n".to_vec();
-    let source = fixture!("atif", "trajectories.jsonl").await;
-    bytes.extend_from_slice(&source);
-    bytes.extend_from_slice(b"\n\t\n");
-    bytes.extend_from_slice(&source);
-    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    gzip.write_all(&bytes).unwrap();
-    let bytes = gzip.finish().unwrap();
+    let bytes = fixture!("atif", "repeated-trajectories.jsonl.gz").await;
     for projection in [
         None,
         Some(vec!["source_record_index".into(), "raw_json".into()]),
