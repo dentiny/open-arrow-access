@@ -154,6 +154,12 @@ where
     }
 }
 
+/// Plans one row-level SQL expression against the source and earlier generated fields.
+///
+/// Rejects non-row-level and volatile expressions before DataFusion coerces,
+/// simplifies, and compiles the expression. The shared session state keeps stable
+/// functions consistent across declarations. Returns the physical expression and
+/// its inferred output field.
 fn plan_expression(
     context: &SessionContext,
     state: &SessionState,
