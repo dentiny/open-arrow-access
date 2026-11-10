@@ -1,11 +1,7 @@
 use crate::Result;
 
-/// Format-independent lifecycle for a sequential reader.
-///
-/// Input EOF and output completion are separate: a decoder may still emit
-/// buffered items after its input ends. Errors and output EOF are terminal.
-/// This helper tracks state only; readers still own their input, buffers,
-/// decoder, metadata and any resources that need releasing at completion.
+/// Sequential reader state. Input EOF can precede output completion while a
+/// decoder drains buffered items; output EOF and errors are terminal.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ReadState {
     input_eof: bool,
@@ -28,14 +24,12 @@ impl ReadState {
         self.finished
     }
 
-    /// Finish output explicitly, including when emitting a known final item.
-    /// Does not imply that the upstream input reached EOF.
+    /// Mark output terminal without changing input EOF.
     pub fn finish(&mut self) {
         self.finished = true;
     }
 
-    /// Record an output result. An item preserves the current state; EOF or an
-    /// error finishes output permanently. Callers return the result unchanged.
+    /// Mark output terminal on EOF or error.
     pub fn observe<T>(&mut self, result: &Result<Option<T>>) {
         if !matches!(result, Ok(Some(_))) {
             self.finish();
