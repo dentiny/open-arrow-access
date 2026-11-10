@@ -103,9 +103,14 @@ where
         let context = SessionContext::new();
         let state = context.state();
         let mut fields = source.fields().to_vec();
+        let mut column_names: HashSet<&str> = source
+            .fields()
+            .iter()
+            .map(|field| field.name().as_str())
+            .collect();
         let mut steps = Vec::with_capacity(self.specs.len());
         for spec in self.specs.iter() {
-            if fields.iter().any(|field| field.name() == &spec.column) {
+            if !column_names.insert(spec.column.as_str()) {
                 return Err(invalid(&spec.column, "column already exists"));
             }
             let input = Arc::new(Schema::new_with_metadata(
