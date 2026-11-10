@@ -5,7 +5,9 @@ use open_arrow_access_service::commoncrawl::{
 mod commoncrawl_support;
 
 use commoncrawl_support::{Records, entry, manifest, paths};
-use open_arrow_access_core::{Accessor, ByteReadOptions, ErrorKind, ReadOptionsProvider};
+use open_arrow_access_core::{
+    Accessor, AccessorExt, ByteReadOptions, ErrorKind, ReadOptionsProvider, ScanPlanner,
+};
 use std::num::NonZeroUsize;
 
 const SEGMENT: &str = "1664030338280.51";
@@ -109,4 +111,21 @@ async fn neighboring_segments_do_not_satisfy_an_empty_selection() {
         accessor.resolve(request()).await.unwrap_err().kind(),
         ErrorKind::InvalidInput
     );
+}
+
+#[tokio::test]
+async fn parallel_manifest_plan_preserves_membership_order_and_options() {
+    let accessor = CommonCrawlSegmentAccessor::new(manifest("good.paths", 1), Records::default());
+    let selection = request();
+    let plan = accessor.plan_scan(selection.clone()).await.unwrap();
+    assert!(plan.partitions.size_hint().0 > 0);
+    drop(plan);
+    let expected =
+        commoncrawl_support::paths(accessor.open(selection.clone()).await.unwrap()).await;
+    let parallel = accessor.layer(open_arrow_access_layers::ParallelReadLayer::new(
+        NonZeroUsize::new(2).unwrap(),
+        NonZeroUsize::new(1).unwrap(),
+    ));
+    let actual = commoncrawl_support::paths(parallel.open(selection).await.unwrap()).await;
+    assert_eq!(actual, expected);
 }
