@@ -1,10 +1,12 @@
 use std::{collections::VecDeque, num::NonZeroUsize, vec::IntoIter};
 
 use open_arrow_access_core::{
-    Accessor, Capability, Error, ErrorKind, Layer, Reader, RecordBatch, RecordMetadata,
-    RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
+    Accessor, Capability, Layer, Reader, RecordBatch, RecordMetadata, RecordReader, Result,
+    ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 use tokio::{sync::mpsc, task::JoinSet};
+
+use crate::error::{partition_task_error, schema_error};
 
 /// Execute independent partitions concurrently, emitting them in logical order.
 /// Requires an active Tokio runtime. Each partition has at most `prefetch` queued
@@ -129,11 +131,7 @@ impl ParallelReader {
                     match joined {
                         Ok(result) => result?,
                         Err(error) => {
-                            return Err(Error::new(
-                                ErrorKind::Decode,
-                                "parallel_read",
-                                format!("partition task failed: {error}"),
-                            ));
+                            return Err(partition_task_error(error));
                         }
                     }
                 }
@@ -144,8 +142,7 @@ impl ParallelReader {
                 joined = self.tasks.join_next(), if !self.tasks.is_empty() => {
                     match joined {
                         Some(Ok(result)) => result?,
-                        Some(Err(error)) => return Err(Error::new(ErrorKind::Decode,
-                            "parallel_read", format!("partition task failed: {error}"))),
+                        Some(Err(error)) => return Err(partition_task_error(error)),
                         None => {},
                     }
                 }
@@ -157,14 +154,6 @@ impl ParallelReader {
             }
         }
     }
-}
-
-fn schema_error() -> Error {
-    Error::new(
-        ErrorKind::Decode,
-        "parallel_read",
-        "partition schema differs from scan schema",
-    )
 }
 
 #[async_trait]
