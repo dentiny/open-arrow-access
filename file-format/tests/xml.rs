@@ -4,10 +4,14 @@ use arrow_array::{
     types::{Float64Type, Int64Type},
 };
 use arrow_schema::DataType::{Float64, Int64, Utf8};
-use open_arrow_access_core::{Accessor, ErrorKind, ReadOptions, ReadRequest};
+use futures::TryStreamExt;
+use open_arrow_access_core::{
+    Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, ScanPlanner,
+};
 use open_arrow_access_file_format::xml::{
     NamespaceBinding, XmlAccessor, XmlField, XmlInferenceOptions, XmlLimits, XmlSchema,
 };
+use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_test_support::{
     MemoryAccessor,
     format::{self, collect_batches as batches},
@@ -386,4 +390,39 @@ async fn input_failures_keep_their_category_during_sampling_and_later_reads() {
         ErrorKind::PermissionDenied
     );
     assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn parallel_xml_uses_native_namespace_selection_and_preserves_order() {
+    let input =
+        b"\xef\xbb\xbf<?xml version='1.0'?><r:catalog xmlns:r='urn:open-arrow-access:catalog'>
+      <r:product><r:name>one</r:name><r:price>1</r:price></r:product>
+      <x:product xmlns:x='urn:wrong'><x:name>wrong</x:name><x:price>9</x:price></x:product>
+      <product xmlns='urn:open-arrow-access:catalog'><name>two</name><price>2</price></product>
+    </r:catalog>";
+    let accessor =
+        XmlAccessor::new(MemoryAccessor::new(input, 1), CATALOG_PATH).with_schema(catalog_schema());
+    let request = request("namespace.xml", 1, Some(&["price", "name"]));
+    let plan = accessor.plan_scan(request.clone()).await.unwrap();
+    // Namespace filtering happens in the native parser before partition creation.
+    assert_eq!(
+        plan.partitions.try_collect::<Vec<_>>().await.unwrap().len(),
+        2
+    );
+    let mut expected = accessor.open(request.clone()).await.unwrap();
+    let mut actual = accessor
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::MIN,
+        ))
+        .open(request)
+        .await
+        .unwrap();
+    for name in ["one", "two"] {
+        let batch = actual.next().await.unwrap().unwrap();
+        assert_eq!(batch, expected.next().await.unwrap().unwrap());
+        assert_eq!(batch["name"].as_string::<i32>().value(0), name);
+    }
+    assert!(actual.next().await.unwrap().is_none());
+    assert!(expected.next().await.unwrap().is_none());
 }

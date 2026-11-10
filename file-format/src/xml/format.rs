@@ -33,8 +33,8 @@ impl Default for XmlLimits {
 /// Use [`Self::with_schema`] for explicit field mappings.
 #[derive(Clone, Debug)]
 pub struct XmlFormat {
-    schema: Option<XmlSchema>,
-    record_path: String,
+    pub(super) schema: Option<XmlSchema>,
+    pub(super) record_path: String,
     limits: XmlLimits,
     namespaces: Vec<(String, String)>,
     inference: InferenceOptions,

@@ -16,8 +16,8 @@ warc = ["dep:warc", "dep:futures", "dep:arrow-schema"]
 xml = ["dep:xml-arrow", "dep:futures"]
 
 [dependencies]
-csv = { version = "1.4", optional = true }
-csv-async = { version = "1.3", default-features = false, optional = true }
+csv = { workspace = true, optional = true }
+csv-async = { workspace = true, optional = true }
 arrow-csv = { workspace = true, optional = true }
 arrow-json = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
