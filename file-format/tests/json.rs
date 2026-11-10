@@ -293,3 +293,40 @@ async fn parallel_json_framing_handles_nested_values_and_rejects_invalid_syntax(
         assert_eq!(error.kind(), ErrorKind::Decode);
     }
 }
+
+#[tokio::test]
+async fn parallel_json_contiguous_chunks_preserve_boundaries_and_whitespace() {
+    let raw = b" \n{\"id\":1}{\"id\":2,\"title\":\"brace } and \\\"\"}\n {\"id\":3}\t\r\n";
+    for chunk_size in [1, 7, raw.len()] {
+        for batch_rows in [1, 2, 8] {
+            for target_bytes in [1, 9, 20, 4096] {
+                let accessor = JsonAccessor::new(MemoryAccessor::new(raw, chunk_size), schema())
+                    .with_partition_options(DecodePartitionOptions {
+                        target_bytes: NonZeroUsize::new(target_bytes).unwrap(),
+                    });
+                let mut reader = accessor
+                    .layer(ParallelReadLayer::new(
+                        NonZeroUsize::new(3).unwrap(),
+                        NonZeroUsize::MIN,
+                    ))
+                    .open(request(batch_rows, None))
+                    .await
+                    .unwrap();
+                let mut actual = Vec::new();
+                while let Some(batch) = reader.next().await.unwrap() {
+                    assert!(batch.num_rows() <= batch_rows);
+                    actual.extend_from_slice(ids(&batch));
+                }
+                assert_eq!(actual, [1, 2, 3]);
+            }
+        }
+    }
+    for raw in [b"".as_slice(), b" \n\t\r\n"] {
+        let mut reader = JsonAccessor::new(MemoryAccessor::new(raw, 1), schema())
+            .layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN))
+            .open(request(8, None))
+            .await
+            .unwrap();
+        assert!(reader.next().await.unwrap().is_none());
+    }
+}
