@@ -1953,11 +1953,9 @@ dependencies = [
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
  "parquet",
- "quick-xml",
  "serde_json",
  "tempfile",
  "tokio",
- "tokio-util",
  "warc-rs",
  "xml-arrow",
 ]
@@ -3961,8 +3959,7 @@ dependencies = [
 [[package]]
 name = "xml-arrow"
 version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85d00985af8bdad4c50372ed6ee93f9e265d6fd12fd457bafe65d1dc42fbda71"
+source = "git+https://github.com/dentiny/xml-arrow-rs?rev=76dca0f3a6939afde7af76e2fb73fea1cf772e44#76dca0f3a6939afde7af76e2fb73fea1cf772e44"
 dependencies = [
  "arrow-array",
  "arrow-schema",

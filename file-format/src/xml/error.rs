@@ -1,4 +1,4 @@
-use open_arrow_access_core::{Error, ErrorKind};
+use open_arrow_access_core::Error;
 
 pub(super) fn xml_error(error: xml_arrow::ReadError) -> open_arrow_access_core::Error {
     use open_arrow_access_core::ErrorKind;
@@ -9,18 +9,13 @@ pub(super) fn xml_error(error: xml_arrow::ReadError) -> open_arrow_access_core::
     crate::error::source_error("read_xml", fallback, error)
 }
 
-pub(super) fn framing(source: impl std::error::Error + Send + Sync + 'static) -> Error {
-    crate::error::source_error("frame_xml", ErrorKind::Decode, source)
-}
-
-pub(super) fn invalid(message: &'static str) -> Error {
-    Error::new(ErrorKind::Decode, "frame_xml", message)
-}
-
-pub(super) fn limit(kind: xml_arrow::Limit, limit: usize, byte_offset: u64) -> Error {
-    xml_error(xml_arrow::ReadError::LimitExceeded {
-        kind,
-        limit,
-        byte_offset,
+pub(super) fn conversion(source: xml_arrow::Error, record_index: u64, byte_offset: u64) -> Error {
+    xml_error(match source {
+        xml_arrow::Error::Configuration(message) => xml_arrow::ReadError::Configuration(message),
+        source => xml_arrow::ReadError::Conversion {
+            record_index,
+            byte_offset,
+            source,
+        },
     })
 }

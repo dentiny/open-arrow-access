@@ -62,7 +62,7 @@ async-trait = "0.1.91"
 atif-arrow = "0.4.5"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 warc = { package = "warc-rs", version = "=0.3.2", default-features = false }
-xml-arrow = "0.2.6"
+xml-arrow = { git = "https://github.com/dentiny/xml-arrow-rs", rev = "76dca0f3a6939afde7af76e2fb73fea1cf772e44" }
 
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
 datafusion = { version = "55.2.0", default-features = false }
@@ -85,7 +85,6 @@ parquet = { version = "59.3.0", default-features = false, features = ["arrow", "
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-tokio-util = "0.7"
 
 open-arrow-access-dataset = { path = "dataset", version = "0.1.0", default-features = false }
 

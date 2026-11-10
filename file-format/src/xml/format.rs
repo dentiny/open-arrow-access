@@ -35,7 +35,7 @@ impl Default for XmlLimits {
 pub struct XmlFormat {
     pub(super) schema: Option<XmlSchema>,
     pub(super) record_path: String,
-    pub(super) limits: XmlLimits,
+    limits: XmlLimits,
     namespaces: Vec<(String, String)>,
     inference: InferenceOptions,
 }

@@ -13,7 +13,7 @@ default = []
 json = ["dep:arrow-json", "dep:arrow-schema", "dep:bytes", "dep:futures", "dep:serde_json"]
 parquet = ["dep:parquet", "dep:arrow-schema", "dep:futures"]
 warc = ["dep:warc", "dep:futures", "dep:arrow-schema"]
-xml = ["dep:xml-arrow", "dep:futures", "dep:quick-xml", "dep:tokio-util"]
+xml = ["dep:xml-arrow", "dep:futures"]
 
 [dependencies]
 csv = { workspace = true, optional = true }
@@ -27,8 +27,6 @@ futures = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 parquet = { workspace = true, optional = true }
-quick-xml = { workspace = true, optional = true, features = ["async-tokio"] }
-tokio-util = { workspace = true, optional = true, features = ["compat"] }
 warc = { workspace = true, optional = true }
 xml-arrow = { workspace = true, optional = true }
 

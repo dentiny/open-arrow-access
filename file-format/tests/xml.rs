@@ -393,7 +393,7 @@ async fn input_failures_keep_their_category_during_sampling_and_later_reads() {
 }
 
 #[tokio::test]
-async fn parallel_xml_preserves_namespace_envelopes_and_record_order() {
+async fn parallel_xml_uses_native_namespace_selection_and_preserves_order() {
     let input =
         b"\xef\xbb\xbf<?xml version='1.0'?><r:catalog xmlns:r='urn:open-arrow-access:catalog'>
       <r:product><r:name>one</r:name><r:price>1</r:price></r:product>
@@ -404,10 +404,10 @@ async fn parallel_xml_preserves_namespace_envelopes_and_record_order() {
         XmlAccessor::new(MemoryAccessor::new(input, 1), CATALOG_PATH).with_schema(catalog_schema());
     let request = request("namespace.xml", 1, Some(&["price", "name"]));
     let plan = accessor.plan_scan(request.clone()).await.unwrap();
-    // The native decoder filters the wrong-URI candidate within its partition.
+    // Namespace filtering happens in the native parser before partition creation.
     assert_eq!(
         plan.partitions.try_collect::<Vec<_>>().await.unwrap().len(),
-        3
+        2
     );
     let mut expected = accessor.open(request.clone()).await.unwrap();
     let mut actual = accessor
