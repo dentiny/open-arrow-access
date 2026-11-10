@@ -113,43 +113,43 @@ impl ScanPlanner for MecaRecords {
         let files = session.files.clone();
         let archive = session.archive.clone();
         drop(session);
-        let partitions = files
-            .into_iter()
-            .map(|file| {
-                let archive = archive.clone();
-                let request = request.clone();
-                let schema = schema.clone();
-                Box::pin(async move {
-                    let metadata = RecordMetadata {
-                        schema,
-                        source: None,
+        let partitions = files.into_iter().map(move |file| {
+            let archive = archive.clone();
+            let request = request.clone();
+            let schema = schema.clone();
+            Box::pin(async move {
+                let metadata = RecordMetadata {
+                    schema,
+                    source: None,
+                };
+                let batches = stream::once(async move {
+                    let mut body = archive
+                        .open_entry(file.entry_index, request.chunk_size)
+                        .await?;
+                    let mut builder =
+                        RecordBatchBuilder::new(record_schema(), request.options.projection)?;
+                    let data = if builder.schema().column_with_name("data").is_some() {
+                        Bytes::from(read_all(body, "read_meca_entry").await?)
+                    } else {
+                        while body.next().await?.is_some() {}
+                        Bytes::new()
                     };
-                    let batches = stream::once(async move {
-                        let mut body = archive
-                            .open_entry(file.entry_index, request.chunk_size)
-                            .await?;
-                        let mut builder =
-                            RecordBatchBuilder::new(record_schema(), request.options.projection)?;
-                        let data = if builder.schema().column_with_name("data").is_some() {
-                            Bytes::from(read_all(body, "read_meca_entry").await?)
-                        } else {
-                            while body.next().await?.is_some() {}
-                            Bytes::new()
-                        };
-                        builder.push(|row| {
-                            row.append("item_id", file.item_id.as_str())?;
-                            row.append("item_type", file.item_type.as_deref())?;
-                            row.append("href", file.href.as_str())?;
-                            row.append("media_type", file.media_type.as_deref())?;
-                            row.append("entry_index", file.entry_index as u64)?;
-                            row.append("data", data.as_ref())
-                        })?;
-                        builder.finish()
-                    });
-                    Ok(Box::new(StreamReader::new(batches, metadata)) as Box<dyn RecordReader>)
-                }) as ScanPartition
-            })
-            .collect();
-        Ok(ScanPlan::new(metadata, partitions))
+                    builder.push(|row| {
+                        row.append("item_id", file.item_id.as_str())?;
+                        row.append("item_type", file.item_type.as_deref())?;
+                        row.append("href", file.href.as_str())?;
+                        row.append("media_type", file.media_type.as_deref())?;
+                        row.append("entry_index", file.entry_index as u64)?;
+                        row.append("data", data.as_ref())
+                    })?;
+                    builder.finish()
+                });
+                Ok(Box::new(StreamReader::new(batches, metadata)) as Box<dyn RecordReader>)
+            }) as ScanPartition
+        });
+        Ok(ScanPlan::from_stream(
+            metadata,
+            stream::iter(partitions.map(Ok)),
+        ))
     }
 }
