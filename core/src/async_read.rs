@@ -6,15 +6,13 @@ use crate::{ByteReader, Error, ErrorKind};
 
 /// Adapt an owned byte reader to the futures I/O traits used by streaming parsers.
 ///
-/// Construction performs no I/O. The adapter retains each input chunk until it
-/// is consumed, without collecting the input or starting a background task.
-/// Dropping it drops the owned reader. Only sequential reads are exposed.
+/// Lazily consumes one chunk at a time without read-ahead or background tasks.
+/// Dropping the adapter drops its reader; only sequential reads are exposed.
+/// EOF, source errors and empty chunks terminate input.
 ///
-/// EOF and errors are terminal, including an empty input chunk, which violates
-/// the [`ByteReader`] contract. Upstream errors are retained inside
-/// [`io::Error::other`] so their categories and source chains can be recovered
-/// with [`ErrorKind::from_source`]. `operation` supplies context for empty-chunk
-/// errors; upstream errors keep their original context.
+/// Source errors retain their context inside [`io::Error::other`]; recover their
+/// categories and chains with [`ErrorKind::from_source`]. `operation` supplies
+/// context for empty-chunk errors.
 ///
 /// ```no_run
 /// use futures::io::AsyncBufReadExt;
