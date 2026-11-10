@@ -1,7 +1,5 @@
-#[cfg(feature = "record-files")]
 use super::RecordPage;
 use open_arrow_access_core::Bytes;
-#[cfg(feature = "record-files")]
 use open_arrow_access_core::{ReadRequest, ReaderFactory, RecordReader, Result};
 use serde_json::Value;
 
@@ -32,7 +30,6 @@ impl ApiDocument {
     }
 }
 
-#[cfg(feature = "record-files")]
 impl ApiDocument {
     /// Bind selected, already fetched JSON metadata to an Arrow format/schema.
     /// An array at the JSON pointer becomes an ordered JSON object stream; an
