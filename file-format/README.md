@@ -41,6 +41,13 @@ planning keeps the input whole because their private dialect settings cannot be
 inspected safely. Use `with_dialect` for supported parallel parsing. No storage
 range access is required. Soft byte targets apply to the encoded partition bytes.
 
+### XML inferred-schema partitions
+
+XML scan planning infers native mappings once from the configured bounded sample,
+then replays sampled records before unread input. Both inferred and explicit
+schemas use independent record conversion partitions, retaining namespace mappings,
+record order and source offsets. Projection names are resolved after inference.
+
 ### ATIF trajectory partitions
 
 ATIF JSON Lines plans frame bounded groups of complete nonblank trajectories,
