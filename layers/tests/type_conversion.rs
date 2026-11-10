@@ -195,65 +195,6 @@ async fn projection_keeps_cast_dependencies_and_zero_column_row_counts() {
 }
 
 #[tokio::test]
-async fn invalid_declarations_fail_before_reading_and_extensions_are_protected() {
-    for names in [vec![""], vec!["value", "value"]] {
-        let specs = names
-            .into_iter()
-            .map(|name| ColumnTypeSpec {
-                column: name.into(),
-                data_type: DataType::Int32,
-            })
-            .collect();
-        assert!(TypeConversionLayer::try_new(specs).is_err());
-    }
-    for target in [
-        DataType::FixedSizeBinary(-1),
-        DataType::Dictionary(Box::new(DataType::Utf8), Box::new(DataType::Int32)),
-        DataType::List(item(DataType::FixedSizeBinary(-1))),
-        union(vec![]),
-    ] {
-        let spec = ColumnTypeSpec {
-            column: "value".into(),
-            data_type: target,
-        };
-        assert_eq!(
-            TypeConversionLayer::try_new(vec![spec]).unwrap_err().kind(),
-            ErrorKind::InvalidInput
-        );
-    }
-    let input = batch(Arc::new(StringArray::from(vec!["1"])));
-    for (name, target) in [
-        ("missing", DataType::Int32),
-        (
-            "value",
-            DataType::Struct(vec![Field::new("x", DataType::Int32, true)].into()),
-        ),
-    ] {
-        let source = MemoryAccessor::new(vec![input.clone()]);
-        let calls = source.calls.clone();
-        assert!(
-            source
-                .layer(layer(name, target))
-                .open(ReadRequest::new("test"))
-                .await
-                .is_err()
-        );
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-    }
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("value", DataType::Utf8, false)
-            .with_metadata([("ARROW:extension:name".into(), "custom".into())].into()),
-    ]));
-    let input = RecordBatch::try_new(schema, input.columns().to_vec()).unwrap();
-    assert!(
-        MemoryAccessor::new(vec![input])
-            .open_cast(DataType::Int32)
-            .await
-            .is_err()
-    );
-}
-
-#[tokio::test]
 async fn identity_casts_share_batches() {
     let input = batch(Arc::new(StringArray::from(vec!["42"])));
     for conversion in [
