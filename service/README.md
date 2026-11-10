@@ -233,6 +233,47 @@ example demonstrates caller-managed storage. See each provider guide for its
 configuration boundary and return type. [Repository examples](../examples/) show
 complete command-line readers.
 
+### Independent API page requests
+
+`common::PageSetAccessor::new(open_page)` binds an async provider callback to an
+ordered `Vec<Request>`. The callback returns a record reader using the existing
+provider methods and explicit format/schema. Planning fetches only the first page
+to fix the output schema. Install `ParallelReadLayer` to fetch and decode remaining
+pages concurrently under the same resident-partition and batch-queue budget.
+Request order and duplicates are preserved; page and batch schemas must match.
+
+Supply independently addressable requests, such as explicit offsets, IDs or
+separate time windows. The adapter does not guess offsets, totals, snapshot
+consistency or rate limits, and never follows continuation links. Cursor chains
+must still be discovered in protocol order. Dropping the parallel reader cancels
+owned page futures; callbacks must not spawn detached background requests.
+
+```no_run
+# use std::num::NonZeroUsize;
+# use open_arrow_access_core::{Accessor, AccessorExt, ReadRequest, Result};
+# use open_arrow_access_file_format::json::JsonFormat;
+# use open_arrow_access_layers::ParallelReadLayer;
+# use open_arrow_access_service::common::{Connection, PageSetAccessor};
+# async fn example(connection: Connection, schema: open_arrow_access_core::SchemaRef) -> Result<()> {
+let pages = PageSetAccessor::new(move |offset: u64| {
+    let connection = connection.clone();
+    let schema = schema.clone();
+    async move {
+        let offset_text = offset.to_string();
+        let document = connection.json("search", &[("offset", &offset_text)]).await?;
+        document.records_at("/results", JsonFormat::new(schema))?
+            .open(ReadRequest::new(format!("page-{offset}"))).await
+    }
+});
+let mut reader = pages.layer(ParallelReadLayer::new(
+    NonZeroUsize::new(4).unwrap(), NonZeroUsize::MIN,
+)).open(vec![0, 100, 200]).await?;
+while let Some(batch) = reader.next().await? { /* consume in selection order */ }
+# Ok(())
+# }
+```
+
+
 ### Planning resolved files and API pages
 
 `ResolvedFileSet::records(format)` is always available: bind an explicit
@@ -259,43 +300,3 @@ native format accessor. After the format-specific planners are enabled, install
 `ParallelReadLayer` on this accessor to use JSON/XML file-internal framing. The
 RecordPage wrapper retains its conservative whole-page plan for compatibility;
 this explicit path changes decode planning, not API cursor acquisition.
-
-### Independent API page requests
-
-`common::PageSetAccessor::new(open_page)` binds an async provider callback to an
-ordered `Vec<Request>`. The callback returns a record reader using the existing
-provider methods and explicit format/schema. Planning fetches only the first page
-to fix the output schema. Install `ParallelReadLayer` to fetch and decode remaining
-pages concurrently under the same resident-partition and batch-queue budget.
-Request order and duplicates are preserved; page and batch schemas must match.
-
-Supply independently addressable requests, such as explicit offsets, IDs or
-separate time windows. The adapter does not guess offsets, totals, snapshot
-consistency or rate limits, and never follows continuation links. Cursor chains
-must still be discovered in protocol order. Dropping the parallel reader cancels
-owned page futures; callbacks must not spawn detached background requests.
-
-```no_run
-# use std::{num::NonZeroUsize, sync::Arc};
-# use open_arrow_access_core::{Accessor, AccessorExt, ReadRequest, RecordReader, Result};
-# use open_arrow_access_file_format::json::JsonFormat;
-# use open_arrow_access_layers::ParallelReadLayer;
-# use open_arrow_access_service::common::{Connection, PageSetAccessor};
-# async fn example(connection: Connection, schema: open_arrow_access_core::SchemaRef) -> Result<()> {
-let pages = PageSetAccessor::new(move |offset: u64| {
-    let connection = connection.clone();
-    let schema = schema.clone();
-    async move {
-        let offset_text = offset.to_string();
-        let document = connection.json("search", &[("offset", &offset_text)]).await?;
-        document.records_at("/results", JsonFormat::new(schema))?
-            .open(ReadRequest::new(format!("page-{offset}"))).await
-    }
-});
-let mut reader = pages.layer(ParallelReadLayer::new(
-    NonZeroUsize::new(4).unwrap(), NonZeroUsize::MIN,
-)).open(vec![0, 100, 200]).await?;
-while let Some(batch) = reader.next().await? { /* consume in selection order */ }
-# Ok(())
-# }
-```
