@@ -45,7 +45,7 @@ do not query upstream or automatically change dependency versions.
 
 ## XML parser
 
-`format-xml` uses the published [`xml-arrow 0.2.7`](https://crates.io/crates/xml-arrow/0.2.7)
+`format-xml` uses the published [`xml-arrow 0.2.8`](https://crates.io/crates/xml-arrow/0.2.8)
 parser for Arrow 59 compatibility and configuration validation before I/O.
 Its companion `xml-io` storage crate is not used, so storage remains on this
 workspace's OpenDAL 0.59.2 baseline. Arrow family versions remain 59.3.0 in the
