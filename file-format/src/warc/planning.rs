@@ -1,7 +1,4 @@
-use futures::{
-    StreamExt, TryStreamExt,
-    stream::{self, BoxStream},
-};
+use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, ReadRequest, ReaderFactory, RecordMetadata,
     RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, StreamReader, async_trait,
@@ -13,6 +10,8 @@ use super::{
     arrow::{append_record, new_batch},
     decode_error,
 };
+
+use crate::scan::RecordChunks;
 
 type RawRecord = (warc::RawRecordHeader, Vec<u8>);
 
@@ -42,17 +41,15 @@ where
                 .map(|record| (record, records)))
         })
         .boxed();
-        let chunks = WarcChunks {
-            records,
-            pending: None,
-        };
+        let chunks = RecordChunks::new(records);
         let rows = request.options.batch_size.get();
         let target_bytes = self.partition_options.target_bytes.get();
         let output = metadata.clone();
         let partitions = stream::try_unfold(chunks, move |mut chunks| {
             let metadata = output.clone();
             async move {
-                let Some(records) = chunks.next_chunk(rows, target_bytes).await? else {
+                let Some(records) = chunks.next_chunk(rows, target_bytes, record_size).await?
+                else {
                     return Ok(None);
                 };
                 let partition: ScanPartition = Box::pin(async move {
@@ -74,39 +71,6 @@ where
             }
         });
         Ok(ScanPlan::from_stream(metadata, partitions))
-    }
-}
-
-struct WarcChunks {
-    records: BoxStream<'static, Result<RawRecord>>,
-    pending: Option<RawRecord>,
-}
-
-impl WarcChunks {
-    async fn next_chunk(
-        &mut self,
-        rows: usize,
-        target_bytes: usize,
-    ) -> Result<Option<Vec<RawRecord>>> {
-        let mut chunk = Vec::new();
-        let mut bytes = 0usize;
-        while chunk.len() < rows {
-            let record = match self.pending.take() {
-                Some(record) => record,
-                None => match self.records.try_next().await? {
-                    Some(record) => record,
-                    None => break,
-                },
-            };
-            let size = record_size(&record);
-            if !chunk.is_empty() && bytes.saturating_add(size) > target_bytes {
-                self.pending = Some(record);
-                break;
-            }
-            bytes = bytes.saturating_add(size);
-            chunk.push(record);
-        }
-        Ok((!chunk.is_empty()).then_some(chunk))
     }
 }
 

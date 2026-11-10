@@ -17,3 +17,8 @@ impl Default for DecodePartitionOptions {
         }
     }
 }
+
+#[cfg(any(feature = "json", feature = "atif", feature = "warc"))]
+mod chunks;
+#[cfg(any(feature = "json", feature = "atif", feature = "warc"))]
+pub(crate) use chunks::RecordChunks;

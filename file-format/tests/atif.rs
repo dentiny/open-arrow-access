@@ -246,3 +246,31 @@ async fn parallel_gzip_trajectories_keep_global_indices_raw_json_and_projection(
         }
     }
 }
+
+#[tokio::test]
+async fn parallel_byte_targets_keep_lookahead_indices_and_oversized_trajectories() {
+    let source = fixture!("atif", "trajectories.jsonl").await;
+    let accessor = AtifAccessor::new(MemoryAccessor::new(&source, 1), AtifFormat::JsonLines)
+        .with_partition_options(open_arrow_access_file_format::DecodePartitionOptions {
+            target_bytes: NonZeroUsize::MIN,
+        });
+    let request = ReadRequest::new("trajectories.jsonl").with_options(ReadOptions {
+        batch_size: NonZeroUsize::new(10).unwrap(),
+        projection: Some(vec!["source_record_index".into(), "raw_json".into()]),
+    });
+    let mut partitions = accessor.plan_scan(request).await.unwrap().partitions;
+    for index in 1..=3 {
+        let mut reader = partitions.try_next().await.unwrap().unwrap().await.unwrap();
+        let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(
+            batch["source_record_index"]
+                .as_primitive::<arrow_array::types::UInt64Type>()
+                .value(0),
+            index
+        );
+        assert!(text(&batch, "raw_json", 0).len() > 1);
+        assert!(reader.next().await.unwrap().is_none());
+    }
+    assert!(partitions.try_next().await.unwrap().is_none());
+}

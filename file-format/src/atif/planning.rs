@@ -9,7 +9,7 @@ use open_arrow_access_core::{
 };
 
 use super::{AtifAccessor, AtifFormat, error::decode_error, reader::create_reader};
-use crate::DecodePartitionOptions;
+use crate::scan::RecordChunks;
 
 #[async_trait]
 impl<B> ScanPlanner for AtifAccessor<B>
@@ -33,23 +33,36 @@ where
             .await?;
         let frames = AtifFrames {
             lines: read_lines(input, None, "frame_atif").boxed(),
-            pending: None,
             next_index: 1,
-            options: self.partition_options,
-            rows: request.options.batch_size.get(),
             source: request.object.clone(),
         };
+        let records = stream::try_unfold(frames, |mut frames| async move {
+            Ok(frames.next_record().await?.map(|record| (record, frames)))
+        })
+        .boxed();
+        let chunks = RecordChunks::new(records);
+        let rows = request.options.batch_size.get();
+        let target_bytes = self.partition_options.target_bytes.get();
         let output = metadata.clone();
-        let partitions = stream::try_unfold(frames, move |mut frames| {
+        let partitions = stream::try_unfold(chunks, move |mut frames| {
             let request = request.clone();
             let metadata = output.clone();
             let projection = projection.clone();
             async move {
-                let Some((bytes, first_index)) = frames.next_chunk().await? else {
+                let Some(records) = frames
+                    .next_chunk(rows, target_bytes, |(line, _)| line.len())
+                    .await?
+                else {
                     return Ok(None);
                 };
+                let first_index = records[0].1;
+                // Keep original line endings/whitespace for raw_json fidelity.
+                let bytes = records
+                    .into_iter()
+                    .flat_map(|(line, _)| line)
+                    .collect::<Vec<_>>();
                 let partition: ScanPartition = Box::pin(async move {
-                    let input = Box::new(bytes_reader(bytes, Some(request.object.clone())));
+                    let input = Box::new(bytes_reader(bytes.into(), Some(request.object.clone())));
                     Ok(Box::new(create_reader(
                         input,
                         format,
@@ -68,41 +81,22 @@ where
 
 struct AtifFrames {
     lines: BoxStream<'static, Result<Bytes>>,
-    pending: Option<Bytes>,
     next_index: u64,
-    options: DecodePartitionOptions,
-    rows: usize,
     source: ObjectRef,
 }
 
 impl AtifFrames {
-    async fn next_chunk(&mut self) -> Result<Option<(Bytes, u64)>> {
-        let first_index = self.next_index;
-        let mut output = Vec::new();
-        let mut rows = 0;
-        while rows < self.rows {
-            let line = match self.pending.take() {
-                Some(line) => line,
-                None => match self.lines.try_next().await? {
-                    Some(line) => line,
-                    None => break,
-                },
-            };
+    async fn next_record(&mut self) -> Result<Option<(Bytes, u64)>> {
+        while let Some(line) = self.lines.try_next().await? {
             let text = std::str::from_utf8(&line)
                 .map_err(|error| decode_error(Some(&self.source), self.next_index, error))?;
             if text.trim().is_empty() {
                 continue;
             }
-            if rows > 0 && output.len().saturating_add(line.len()) > self.options.target_bytes.get()
-            {
-                self.pending = Some(line);
-                break;
-            }
-            // Keep original line endings/whitespace for raw_json fidelity.
-            output.extend_from_slice(&line);
+            let index = self.next_index;
             self.next_index += 1;
-            rows += 1;
+            return Ok(Some((line, index)));
         }
-        Ok((rows > 0).then(|| (output.into(), first_index)))
+        Ok(None)
     }
 }
