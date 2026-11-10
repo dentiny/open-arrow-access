@@ -3,19 +3,19 @@ use std::{collections::HashSet, sync::Arc};
 use arrow_array::{RecordBatch, RecordBatchOptions};
 use arrow_schema::{FieldRef, Schema, SchemaRef};
 use datafusion::{
-    common::{
-        DFSchema,
-        tree_node::{TreeNode, TreeNodeRecursion},
-    },
-    error::DataFusionError,
+    common::DFSchema,
     execution::{SessionState, context::SessionContext},
-    logical_expr::Expr,
     optimizer::simplify_expressions::{ExprSimplifier, SimplifyContext},
     physical_expr::PhysicalExpr,
 };
 use open_arrow_access_core::{
-    Accessor, Capability, Error, ErrorKind, Layer, ReadOptionsProvider, Reader, RecordMetadata,
-    RecordReader, Result, async_trait,
+    Accessor, Capability, Layer, ReadOptionsProvider, Reader, RecordMetadata, RecordReader, Result,
+    async_trait,
+};
+
+use crate::{
+    error::{generated_batch_error, generated_column_error, generated_plan_error},
+    validation::{validate_expression, validate_generated_column_name, validate_generated_specs},
 };
 
 /// One row-level SQL expression. May reference source and earlier generated fields.
@@ -37,18 +37,7 @@ pub struct GeneratedColumnsLayer {
 impl GeneratedColumnsLayer {
     /// Validate declarations without I/O. Expression planning happens at open.
     pub fn try_new(specs: Vec<GeneratedColumnSpec>) -> Result<Self> {
-        let mut names = HashSet::with_capacity(specs.len());
-        for spec in &specs {
-            if spec.column.trim().is_empty() || !names.insert(&spec.column) {
-                return Err(invalid(
-                    &spec.column,
-                    "column names must be nonempty and distinct",
-                ));
-            }
-            if spec.expression.trim().is_empty() {
-                return Err(invalid(&spec.column, "expression must not be blank"));
-            }
-        }
+        validate_generated_specs(&specs)?;
         Ok(Self {
             specs: specs.into(),
         })
@@ -110,15 +99,13 @@ where
             .collect();
         let mut steps = Vec::with_capacity(self.specs.len());
         for spec in self.specs.iter() {
-            if !column_names.insert(spec.column.as_str()) {
-                return Err(invalid(&spec.column, "column already exists"));
-            }
+            validate_generated_column_name(&spec.column, &mut column_names)?;
             let input = Arc::new(Schema::new_with_metadata(
                 fields.clone(),
                 source.metadata().clone(),
             ));
             let (expression, output) = plan_expression(&context, &state, &spec.expression, &input)
-                .map_err(|error| invalid(&spec.column, error.to_string()).with_source(error))?;
+                .map_err(|error| generated_plan_error(&spec.column, error))?;
             let mut metadata = output.metadata().clone();
             metadata.insert(
                 "open_arrow_access:generated_expression".into(),
@@ -184,14 +171,6 @@ fn plan_expression(
     Ok((physical, output))
 }
 
-fn invalid(column: &str, message: impl std::fmt::Display) -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "plan_generated_column",
-        format!("column {column:?}: {message}"),
-    )
-}
-
 fn record_capability(inner: Capability) -> Capability {
     Capability {
         read: inner.read,
@@ -199,33 +178,6 @@ fn record_capability(inner: Capability) -> Capability {
         read_with_range: false,
         list: false,
     }
-}
-
-fn validate_expression(expression: &Expr) -> datafusion::error::Result<()> {
-    if expression.is_volatile() {
-        return Err(DataFusionError::Plan(
-            "volatile functions are not supported".into(),
-        ));
-    }
-    expression.apply(|expr| {
-        if matches!(
-            expr,
-            Expr::AggregateFunction(_)
-                | Expr::WindowFunction(_)
-                | Expr::ScalarSubquery(_)
-                | Expr::Exists(_)
-                | Expr::InSubquery(_)
-                | Expr::SetComparison(_)
-                | Expr::GroupingSet(_)
-                | Expr::Unnest(_)
-        ) {
-            return Err(DataFusionError::Plan(
-                "only row-level expressions are supported".into(),
-            ));
-        }
-        Ok(TreeNodeRecursion::Continue)
-    })?;
-    Ok(())
 }
 
 struct GeneratedStep {
@@ -253,14 +205,7 @@ impl GeneratedColumnsReader {
                 .expression
                 .evaluate(&batch)
                 .and_then(|value| value.into_array(rows))
-                .map_err(|error| {
-                    Error::new(
-                        ErrorKind::Decode,
-                        "generate_column",
-                        format!("column {:?}: {error}", step.column),
-                    )
-                    .with_source(error)
-                })?;
+                .map_err(|error| generated_column_error(&step.column, error))?;
             columns.push(array);
             // Only materialize an intermediate batch if a later expression needs
             // it. Cloning ArrayRefs preserves the original buffers.
@@ -270,7 +215,7 @@ impl GeneratedColumnsReader {
                     columns.clone(),
                     &options,
                 )
-                .map_err(batch_error)?;
+                .map_err(generated_batch_error)?;
             }
         }
         if let Some(indices) = &self.projection {
@@ -280,12 +225,8 @@ impl GeneratedColumnsReader {
                 .collect();
         }
         RecordBatch::try_new_with_options(Arc::clone(&self.metadata.schema), columns, &options)
-            .map_err(batch_error)
+            .map_err(generated_batch_error)
     }
-}
-
-fn batch_error(error: arrow_schema::ArrowError) -> Error {
-    Error::new(ErrorKind::Decode, "generate_column", error.to_string()).with_source(error)
 }
 
 #[async_trait]

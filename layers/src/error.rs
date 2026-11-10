@@ -25,3 +25,43 @@ pub(crate) fn partition_task_error(error: tokio::task::JoinError) -> Error {
         format!("partition task failed: {error}"),
     )
 }
+
+#[cfg(feature = "generated-columns")]
+pub(crate) fn invalid_generated_column(column: &str, message: impl std::fmt::Display) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "plan_generated_column",
+        format!("column {column:?}: {message}"),
+    )
+}
+
+#[cfg(feature = "generated-columns")]
+pub(crate) fn invalid_generated_expression(message: &str) -> datafusion::error::DataFusionError {
+    datafusion::error::DataFusionError::Plan(message.into())
+}
+
+#[cfg(feature = "generated-columns")]
+pub(crate) fn generated_plan_error(
+    column: &str,
+    error: datafusion::error::DataFusionError,
+) -> Error {
+    invalid_generated_column(column, &error).with_source(error)
+}
+
+#[cfg(feature = "generated-columns")]
+pub(crate) fn generated_column_error(
+    column: &str,
+    error: datafusion::error::DataFusionError,
+) -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "generate_column",
+        format!("column {column:?}: {error}"),
+    )
+    .with_source(error)
+}
+
+#[cfg(feature = "generated-columns")]
+pub(crate) fn generated_batch_error(error: ArrowError) -> Error {
+    Error::new(ErrorKind::Decode, "generate_column", error.to_string()).with_source(error)
+}
