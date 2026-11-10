@@ -1,12 +1,15 @@
 use csv_core::ReadRecordResult;
-use futures::stream;
+use futures::{
+    StreamExt, TryStreamExt,
+    stream::{self, BoxStream, Fuse},
+};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt,
     RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 
 use super::{CsvAccessor, CsvDialect, error};
-use crate::{DecodePartitionOptions, scan::input::ChunkInput};
+use crate::scan::input::ChunkInput;
 
 #[async_trait]
 impl<B> ScanPlanner for CsvAccessor<B>
@@ -14,8 +17,8 @@ where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        let mut format = self.binding.factory().clone();
-        let Some(dialect) = format.parallel_dialect else {
+        let format = self.binding.factory().clone();
+        let Some(dialect) = format.parallel_dialect() else {
             return Ok(ScanPlan::whole_input(self.open(request).await?));
         };
         let (schema, _) = format.prepare(&request)?;
@@ -28,134 +31,91 @@ where
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
-        // A header prefix prevents each fresh parser from stripping an in-data BOM.
-        // Reuse the actual header when present; otherwise skip a synthetic header.
-        let synthetic = synthetic_header(dialect, self.binding.factory().schema_len());
-        if !dialect.has_header {
-            format.format = format
-                .format
-                .with_header(true)
-                .with_header_validation(false);
-        }
-        let frames = CsvFrames {
-            input,
-            pending_input: Bytes::new(),
-            next_input: None,
-            prefix_checked: false,
-            eof: false,
-            parser: dialect.parser(),
-            options: self.partition_options,
-            rows: request.options.batch_size.get(),
-            header: (!dialect.has_header).then_some(synthetic),
-            header_read: !dialect.has_header,
-            emitted: false,
-            pending_record: None,
-        };
-        let partitions = stream::try_unfold(frames, move |mut frames| {
-            let format = format.clone();
-            let request = request.clone();
-            async move {
-                let Some(bytes) = frames.next_chunk().await? else {
-                    return Ok(None);
-                };
-                let partition: ScanPartition =
-                    Box::pin(async move { format.open_reader(&ChunkInput(bytes), request).await });
-                Ok(Some((partition, frames)))
-            }
-        });
+        let target_bytes = self.partition_options.target_bytes.get();
+        // Initialization runs on first poll, keeping partition discovery lazy.
+        let partitions = stream::once(async move {
+            let frames = CsvFrames::new(input, dialect).await?;
+            Ok(stream::try_unfold(frames, move |mut frames| {
+                let format = format.clone();
+                let request = request.clone();
+                async move {
+                    let Some(bytes) = frames
+                        .next_chunk(request.options.batch_size.get(), target_bytes)
+                        .await?
+                    else {
+                        return Ok(None);
+                    };
+                    let partition: ScanPartition =
+                        Box::pin(
+                            async move { format.open_reader(&ChunkInput(bytes), request).await },
+                        );
+                    Ok(Some((partition, frames)))
+                }
+            }))
+        })
+        .try_flatten();
         Ok(ScanPlan::from_stream(metadata, partitions))
     }
 }
 
-fn synthetic_header(dialect: CsvDialect, columns: usize) -> Vec<u8> {
-    let byte = (b'a'..=b'z')
-        .find(|byte| {
-            *byte != dialect.delimiter
-                && *byte != dialect.quote
-                && Some(*byte) != dialect.escape
-                && Some(*byte) != dialect.comment
-                && Some(*byte) != dialect.terminator
-        })
-        .unwrap();
-    let mut header = Vec::new();
-    for index in 0..columns {
-        if index > 0 {
-            header.push(dialect.delimiter);
-        }
-        header.push(byte);
-    }
-    header.push(dialect.terminator.unwrap_or(b'\n'));
-    header
-}
-
 struct CsvFrames {
-    input: Box<dyn ByteReader>,
+    input: Fuse<BoxStream<'static, Result<Bytes>>>,
     pending_input: Bytes,
-    next_input: Option<Bytes>,
-    prefix_checked: bool,
-    eof: bool,
     parser: csv_core::Reader,
-    options: DecodePartitionOptions,
-    rows: usize,
-    header: Option<Vec<u8>>,
-    header_read: bool,
+    prefix: Vec<u8>,
+    // Emit a header-only input once so Arrow can validate it even without rows.
     emitted: bool,
-    pending_record: Option<Vec<u8>>,
 }
 
 impl CsvFrames {
-    async fn read_input(&mut self) -> Result<Option<Bytes>> {
-        match self.next_input.take() {
-            Some(bytes) => Ok(Some(bytes)),
-            None => self.input.next().await,
-        }
-    }
-
-    async fn read_prefix(&mut self) -> Result<()> {
-        let mut prefix = Vec::new();
-        while prefix.len() < 3 {
-            match self.input.next().await? {
+    async fn new(input: Box<dyn ByteReader>, dialect: CsvDialect) -> Result<Self> {
+        let mut input = stream::try_unfold(input, |mut input| async move {
+            match input.next().await? {
                 Some(bytes) if bytes.is_empty() => {
-                    return Err(error::invalid_frame("frame_csv", "empty byte chunk"));
+                    Err(error::invalid_frame("frame_csv", "empty byte chunk"))
                 }
-                Some(mut bytes) => {
-                    prefix.extend_from_slice(&bytes.split_to((3 - prefix.len()).min(bytes.len())));
-                    if !bytes.is_empty() {
-                        self.next_input = Some(bytes);
-                    }
-                    if !b"\xef\xbb\xbf".starts_with(&prefix) {
-                        break;
-                    }
-                }
-                None => {
-                    self.eof = true;
-                    break;
-                }
+                bytes => Ok(bytes.map(|bytes| (bytes, input))),
             }
+        })
+        .boxed()
+        .fuse();
+        // Gather only a possible source-start BOM; stop as soon as it is ruled out.
+        // Retain the rest of the first chunk in the ordinary input buffer.
+        let mut pending_input = Bytes::new();
+        while pending_input.len() < 3 && b"\xef\xbb\xbf".starts_with(&pending_input) {
+            let Some(bytes) = input.try_next().await? else {
+                break;
+            };
+            pending_input = if pending_input.is_empty() {
+                bytes
+            } else {
+                [pending_input.as_ref(), bytes.as_ref()].concat().into()
+            };
         }
-        // Strip only a source-start BOM, before any synthetic header is added.
-        // Buffering three bytes also handles a BOM fragmented by storage chunks.
-        if prefix != b"\xef\xbb\xbf" {
-            self.pending_input = prefix.into();
+        if pending_input.starts_with(b"\xef\xbb\xbf") {
+            let _ = pending_input.split_to(3);
         }
-        self.prefix_checked = true;
-        Ok(())
+        let mut frames = Self {
+            input,
+            pending_input,
+            parser: dialect.parser(),
+            // A skipped blank line prevents fresh Arrow parsers from stripping
+            // a BOM that belongs to a later data record. Replay real headers only.
+            prefix: vec![dialect.terminator.unwrap_or(b'\n')],
+            emitted: false,
+        };
+        if dialect.has_header {
+            let header = frames.next_record().await?.unwrap_or_default();
+            frames.prefix.extend_from_slice(&header);
+        }
+        Ok(frames)
     }
 
     async fn next_record(&mut self) -> Result<Option<Vec<u8>>> {
-        if !self.prefix_checked {
-            self.read_prefix().await?;
-        }
         let mut raw = Vec::new();
         loop {
-            if self.pending_input.is_empty() && !self.eof {
-                match self.read_input().await? {
-                    Some(bytes) if bytes.is_empty() => {
-                        return Err(error::invalid_frame("frame_csv", "empty byte chunk"));
-                    }
-                    Some(bytes) => self.pending_input = bytes,
-                    None => self.eof = true,
-                }
+            if self.pending_input.is_empty() {
+                self.pending_input = self.input.try_next().await?.unwrap_or_default();
             }
             // Discard decoded fields: csv-core is used only to identify safe raw
             // record boundaries with the same quoting/escape rules as Arrow CSV.
@@ -173,31 +133,18 @@ impl CsvFrames {
         }
     }
 
-    async fn next_chunk(&mut self) -> Result<Option<Bytes>> {
-        if !self.header_read {
-            self.header = self.next_record().await?;
-            self.header_read = true;
-        }
-        let mut output = self.header.clone().unwrap_or_default();
+    async fn next_chunk(&mut self, row_target: usize, byte_target: usize) -> Result<Option<Bytes>> {
+        let mut output = self.prefix.clone();
         let mut rows = 0;
-        while rows < self.rows {
-            let record = match self.pending_record.take() {
-                Some(record) => record,
-                None => match self.next_record().await? {
-                    Some(record) => record,
-                    None => break,
-                },
-            };
-            if rows > 0
-                && output.len().saturating_add(record.len()) > self.options.target_bytes.get()
-            {
-                self.pending_record = Some(record);
+        // The byte target is soft: stop after a complete record reaches it.
+        while rows < row_target && (rows == 0 || output.len() < byte_target) {
+            let Some(record) = self.next_record().await? else {
                 break;
-            }
+            };
             output.extend_from_slice(&record);
             rows += 1;
         }
-        if rows == 0 && (self.emitted || output.is_empty()) {
+        if rows == 0 && self.emitted {
             return Ok(None);
         }
         self.emitted = true;

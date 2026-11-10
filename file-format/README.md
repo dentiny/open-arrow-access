@@ -31,8 +31,9 @@ remain unsupported. Output stays ordered and batch boundaries may change.
 The default CSV configuration and explicit `CsvDialect` configurations support
 file-internal parallel decoding. Framing uses csv-core with the same delimiter,
 quote, escape, comment, and record terminator settings as the Arrow decoder,
-including quoted multiline fields. Headers are replayed per partition and output
-order is preserved. For opaque Arrow `CsvFormat` configurations installed through
+including quoted multiline fields. Each partition begins with a skipped blank
+line to preserve any BOM in later records, followed by the original header when
+present. Output order is preserved. For opaque Arrow `CsvFormat` configurations installed through
 `with_format`, planning keeps the input whole because their private dialect
 settings cannot be inspected safely. Use `with_dialect` for supported parallel
 framing. No storage range access is required.

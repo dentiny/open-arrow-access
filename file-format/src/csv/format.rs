@@ -12,34 +12,39 @@ use open_arrow_access_core::{
 #[derive(Clone, Debug)]
 pub struct CsvFileFormat {
     schema: SchemaRef,
-    pub(super) format: CsvFormat,
-    pub(super) parallel_dialect: Option<CsvDialect>,
+    options: CsvOptions,
+}
+
+#[derive(Clone, Debug)]
+enum CsvOptions {
+    Dialect(CsvDialect),
+    Custom(CsvFormat),
 }
 
 impl CsvFileFormat {
     pub fn new(schema: SchemaRef) -> Self {
         Self {
             schema,
-            format: CsvFormat::default(),
-            parallel_dialect: Some(CsvDialect::default()),
+            options: CsvOptions::Dialect(CsvDialect::default()),
         }
     }
 
-    pub(super) fn schema_len(&self) -> usize {
-        self.schema.fields().len()
+    pub(super) fn parallel_dialect(&self) -> Option<CsvDialect> {
+        match &self.options {
+            CsvOptions::Dialect(dialect) => Some(*dialect),
+            CsvOptions::Custom(_) => None,
+        }
     }
 
     pub fn with_format(mut self, format: CsvFormat) -> Self {
-        self.format = format;
-        self.parallel_dialect = None;
+        self.options = CsvOptions::Custom(format);
         self
     }
     /// Configure a known CSV dialect for both sequential decoding and parallel framing.
     /// Opaque Arrow CsvFormat settings remain supported through with_format, using
     /// a whole-input plan because their private framing options cannot be inspected.
     pub fn with_dialect(mut self, dialect: CsvDialect) -> Self {
-        self.format = dialect.format();
-        self.parallel_dialect = Some(dialect);
+        self.options = CsvOptions::Dialect(dialect);
         self
     }
 }
@@ -76,7 +81,10 @@ impl ReaderFactory for CsvFileFormat {
             }
         }
         let mut builder = ReaderBuilder::new(self.schema.clone())
-            .with_format(self.format.clone())
+            .with_format(match &self.options {
+                CsvOptions::Dialect(dialect) => dialect.format(),
+                CsvOptions::Custom(format) => format.clone(),
+            })
             .with_batch_size(options.batch_size.get());
         if let Some(indices) = projection {
             builder = builder.with_projection(indices);
