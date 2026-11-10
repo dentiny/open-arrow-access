@@ -16,8 +16,8 @@ warc = ["dep:warc", "dep:futures", "dep:arrow-schema"]
 xml = ["dep:xml-arrow", "dep:futures", "dep:quick-xml", "dep:tokio-util"]
 
 [dependencies]
-csv = { version = "1.4", optional = true }
-csv-async = { version = "1.3", default-features = false, optional = true }
+csv = { workspace = true, optional = true }
+csv-async = { workspace = true, optional = true }
 arrow-csv = { workspace = true, optional = true }
 arrow-json = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
@@ -28,7 +28,7 @@ serde_json = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 parquet = { workspace = true, optional = true }
 quick-xml = { workspace = true, optional = true, features = ["async-tokio"] }
-tokio-util = { version = "0.7", optional = true, features = ["compat"] }
+tokio-util = { workspace = true, optional = true, features = ["compat"] }
 warc = { workspace = true, optional = true }
 xml-arrow = { workspace = true, optional = true }
 
