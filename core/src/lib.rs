@@ -61,4 +61,4 @@ pub use async_trait::async_trait;
 pub use bytes::Bytes;
 
 mod scan;
-pub use scan::{ScanPartition, ScanPlan, ScanPlanner};
+pub use scan::{OrderRequirement, ScanPartition, ScanPlan, ScanPlanner};

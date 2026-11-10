@@ -573,7 +573,8 @@ impl ScanPlanner for PlannedFiles {
                 }) as ScanPartition
             })
             .collect();
-        Ok(ScanPlan::new(metadata, partitions))
+        Ok(ScanPlan::new(metadata, partitions)
+            .with_ordering(open_arrow_access_core::OrderRequirement::Reorderable))
     }
 }
 
@@ -614,6 +615,10 @@ async fn native_file_plans_share_one_budget_and_preserve_lazy_ordered_selection(
     request.options.batch_size = NonZeroUsize::new(2).unwrap();
     request.byte_options.io_concurrency = NonZeroUsize::new(3).unwrap();
     let plan = accessor.plan_scan(request.clone()).await.unwrap();
+    assert_eq!(
+        plan.ordering,
+        open_arrow_access_core::OrderRequirement::PreserveGlobal
+    );
     assert_eq!(plans.lock().unwrap().len(), 1);
     assert_eq!(files.active.load(Ordering::SeqCst), 0);
     assert!(files.opens.lock().unwrap().is_empty());

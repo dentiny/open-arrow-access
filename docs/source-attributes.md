@@ -1,11 +1,10 @@
 # Source attributes and scan planning
 
-Status: design proposal. Source attributes, partition planning, parallel execution,
-and unordered emission are not implemented. See the [roadmap](roadmap.md#planning-parallelism-and-order).
-
-Status: design proposal for future planning/layer PRs. This document introduces
-no runtime attributes, partition planner, Cargo features or capability flags.
-The existing framework implements byte I/O concurrency, not parallel record scans.
+Status: the runtime now implements `ScanPlanner`, ordered parallel execution,
+`OrderRequirement`, and `ScanPlan::ordering`; see [parallel reading](parallel-read.md).
+The fuller attribute/strategy types below remain a design proposal. In particular,
+`SourceAttributes` and `ScanProperties` are not current exports. Unordered emission
+is the next step and remains explicitly opt-in.
 
 Confirmed application requirement: **the entire ATIF input must retain global
 record order**. Preserving order only within each trajectory is insufficient.

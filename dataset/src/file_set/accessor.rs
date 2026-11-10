@@ -3,14 +3,15 @@ use std::sync::Arc;
 use futures::{StreamExt, TryStreamExt, future::BoxFuture, stream};
 
 use open_arrow_access_core::{
-    Accessor, Capability, ReadRequest, RecordMetadata, RecordReader, Result, ScanPartition,
-    ScanPlan, ScanPlanner, async_trait,
+    Accessor, Capability, OrderRequirement, ReadRequest, RecordMetadata, RecordReader, Result,
+    ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 
 use super::{
     FileSetRequest,
     error::{empty_selection, schema_mismatch},
     reader::create_reader,
+    validation::validate_file_ordering,
 };
 
 type FilePlanner<A> = fn(Arc<A>, ReadRequest) -> BoxFuture<'static, Result<ScanPlan>>;
@@ -24,6 +25,7 @@ type FilePlanner<A> = fn(Arc<A>, ReadRequest) -> BoxFuture<'static, Result<ScanP
 pub struct FileSetAccessor<A> {
     inner: Arc<A>,
     file_planner: Option<FilePlanner<A>>,
+    ordering: OrderRequirement,
 }
 
 impl<A> Clone for FileSetAccessor<A> {
@@ -31,6 +33,7 @@ impl<A> Clone for FileSetAccessor<A> {
         Self {
             inner: self.inner.clone(),
             file_planner: self.file_planner,
+            ordering: self.ordering,
         }
     }
 }
@@ -40,6 +43,7 @@ impl<A> FileSetAccessor<A> {
         Self {
             inner: Arc::new(inner),
             file_planner: None,
+            ordering: OrderRequirement::PreserveGlobal,
         }
     }
 
@@ -49,6 +53,7 @@ impl<A> FileSetAccessor<A> {
     where
         A: ScanPlanner<Request = ReadRequest> + 'static,
     {
+        self.ordering = self.inner.order_requirement();
         self.file_planner =
             Some(|inner, request| Box::pin(async move { inner.plan_scan(request).await }));
         self
@@ -96,6 +101,10 @@ impl<A> ScanPlanner for FileSetAccessor<A>
 where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
 {
+    fn order_requirement(&self) -> OrderRequirement {
+        self.ordering
+    }
+
     async fn plan_scan(&self, request: FileSetRequest) -> Result<ScanPlan> {
         let mut requests = request.into_requests();
         let first = requests
@@ -105,6 +114,7 @@ where
             Some(plan_file) => plan_file(self.inner.clone(), first).await?,
             None => ScanPlan::whole_input(self.inner.open(first).await?),
         };
+        let ordering = self.ordering.combine(first.ordering);
         let metadata = RecordMetadata {
             schema: first.metadata.schema,
             source: None,
@@ -117,26 +127,27 @@ where
                 let schema = schema.clone();
                 async move {
                     let plan = plan_file(inner, request).await?;
+                    validate_file_ordering(ordering, plan.ordering)?;
                     if plan.metadata.schema != schema {
                         return Err(schema_mismatch());
                     }
                     Ok(plan.partitions)
                 }
             });
-            Ok(ScanPlan::from_stream(
-                metadata,
-                first.partitions.chain(later.try_flatten()),
-            ))
+            Ok(
+                ScanPlan::from_stream(metadata, first.partitions.chain(later.try_flatten()))
+                    .with_ordering(ordering),
+            )
         } else {
             let later = requests.map(move |request| {
                 let inner = inner.clone();
                 let partition: ScanPartition = Box::pin(async move { inner.open(request).await });
                 Ok(partition)
             });
-            Ok(ScanPlan::from_stream(
-                metadata,
-                first.partitions.chain(stream::iter(later)),
-            ))
+            Ok(
+                ScanPlan::from_stream(metadata, first.partitions.chain(stream::iter(later)))
+                    .with_ordering(ordering),
+            )
         }
     }
 }

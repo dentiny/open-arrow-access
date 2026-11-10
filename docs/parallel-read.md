@@ -72,3 +72,24 @@ partition. Dropping the scan aborts all owned tasks; Tokio releases their state
 when cancellation is next scheduled. Cancelled `next` calls must be followed by
 dropping the reader, as required by the shared reader contract. Already delivered
 batches are never replayed. No source snapshot guarantee is added.
+
+## Source ordering contract
+
+`ScanPlan::ordering` describes permission for the entire selected input; it does
+not select an emission policy. Constructors default to `PreserveGlobal`.
+Providers may explicitly declare `Reorderable` after establishing that contract.
+`require_ordering` adds an enclosing dataset or service restriction and cannot
+relax a child's requirement. ATIF plans always retain global order.
+
+`ScanPlanner::order_requirement()` is a selection-wide declaration without I/O,
+conservatively `PreserveGlobal` for unknown or mixed sources. Native CSV, JSON,
+XML, Parquet and raw WARC views declare their records reorderable. A surrounding
+semantic dataset may still require order; HF dataset scans conservatively do so.
+
+FileSet/Directory with `with_file_planning()` use the supplied accessor's
+selection-wide declaration before lazily discovering later partitions. The first
+file alone never grants permission. Without native planning, the dataset remains
+conservatively globally ordered. Later plans must honor a declared reorderable
+contract (including empty plans), as well as the fixed schema. Custom mixed
+accessors must preserve global order unless they can guarantee all selections
+are reorderable. Partition discovery remains lazy and does not add a snapshot.
