@@ -96,7 +96,7 @@ decompression-lz4 = ["dep:open-arrow-access-decompression", "open-arrow-access-d
 decompression-tar = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
 decompression-zip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zip"]
 decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zstd"]
-default = ["layer-type-conversion"]
+default = []
 format-atif = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/atif"]
 format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
 format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
@@ -107,7 +107,6 @@ format-xml = [
     "open-arrow-access-file-format/xml",
     "open-arrow-access-service/format-xml",
 ]
-layer-type-conversion = ["dep:open-arrow-access-layers"]
 service-arxiv = ["open-arrow-access-service/arxiv"]
 service-bhl = ["open-arrow-access-service/bhl"]
 service-biorxiv = ["open-arrow-access-service/biorxiv"]
@@ -137,7 +136,7 @@ open-arrow-access-core.workspace = true
 open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 open-arrow-access-file-format = { workspace = true, optional = true }
-open-arrow-access-layers = { workspace = true, optional = true }
+open-arrow-access-layers.workspace = true
 open-arrow-access-service.workspace = true
 open-arrow-access-storage.workspace = true
 

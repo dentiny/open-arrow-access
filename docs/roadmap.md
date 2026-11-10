@@ -56,7 +56,7 @@ own format rules.
 
 ## Generated columns and observation
 
-[`TypeConversionLayer`](../layers/README.md) is implemented and enabled by default.
+[`TypeConversionLayer`](../layers/README.md) is implemented and always available.
 It uses the existing layer contract for explicit Arrow output casts.
 
 Generated columns remain a planned functional record layer. The existing

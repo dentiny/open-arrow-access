@@ -70,7 +70,7 @@ See [architecture](docs/architecture.md) for component boundaries and execution 
 | Providers | Hugging Face, Common Crawl, PMC, Gutenberg, research repositories, books, and government data | [Provider matrix and output types](docs/support.md#dataset-providers) |
 | Execution | Pull-based reads; per-reader storage I/O concurrency | [Ordering and concurrency](docs/architecture.md#execution-and-resource-ownership) |
 
-The `layer-type-conversion` Cargo feature is enabled by default. Shared service utilities such as
+Default Cargo features are empty. Arrow type conversion and shared service utilities such as
 `service::common::Connection` and `ApiDocument` are always available, alongside
 core contracts and OpenDAL storage. This includes the HTTP/JSON/URL dependency
 baseline; concrete providers remain feature-gated. Enable the formats and
@@ -168,7 +168,7 @@ for the Arrow, Parquet, and OpenDAL version baseline.
 
 ## Output type conversion
 
-The default-enabled [`TypeConversionLayer`](layers/README.md) wraps record accessors
+The [`TypeConversionLayer`](layers/README.md) wraps record accessors
 through the shared `Layer<A>` contract. It casts explicitly named top-level columns
 using Arrow kernels, plans a fixed output schema before the first batch, and shares
-unchanged array buffers. Disable it with `default-features = false` when unused.
+unchanged array buffers. It is always available, including with `default-features = false`.

@@ -7,7 +7,7 @@ must forward optional operations or remove their advertised capabilities.
 ## Available today
 
 - The public layer contract, verified by test wrappers for byte and record accessors.
-- `TypeConversionLayer` for explicit Arrow column casts; its facade feature is enabled by default.
+- `TypeConversionLayer` for explicit Arrow column casts; it is always exported by the facade.
 - `decompression::DecompressionLayer<C>` for gzip, bzip2, LZ4, and Zstandard byte
   transformations. See the [decompression guide](../decompression/README.md).
 - Caller-configured OpenDAL policies on the storage operator. These belong to
@@ -17,8 +17,8 @@ The `TypeConversionLayer` is the production record layer in this crate.
 
 ## Type conversion
 
-`TypeConversionLayer` is available through the default-enabled
-`layer-type-conversion` feature. It wraps any
+`TypeConversionLayer` is always available through `open_arrow_access::layers`,
+including with `default-features = false`. It wraps any
 `Accessor<Reader = dyn RecordReader>` whose request implements
 `ReadOptionsProvider`. An empty configuration and same-type conversions pass
 through without converting arrays. Building a layer starts no I/O; casts are
