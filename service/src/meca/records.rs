@@ -13,6 +13,8 @@ use open_arrow_access_core::{
 
 use super::MecaArchive;
 
+const DEFAULT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
+
 /// Read settings for a previously opened and validated MECA archive.
 #[derive(Clone, Debug)]
 pub struct MecaReadRequest {
@@ -37,7 +39,7 @@ impl Default for MecaReadRequest {
     fn default() -> Self {
         Self {
             options: ReadOptions::default(),
-            chunk_size: NonZeroUsize::new(65536).unwrap(),
+            chunk_size: DEFAULT_CHUNK_SIZE,
         }
     }
 }
