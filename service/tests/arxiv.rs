@@ -1,7 +1,11 @@
 use std::num::NonZeroUsize;
 
-use open_arrow_access_core::{ByteReadOptions, ErrorKind};
-use open_arrow_access_service::arxiv::{ArxivKind, ArxivService};
+use arrow_array::cast::AsArray;
+use open_arrow_access_core::{
+    Accessor, AccessorExt, ByteReadOptions, ErrorKind, ReadOptions, ScanPlanner,
+};
+use open_arrow_access_layers::ParallelReadLayer;
+use open_arrow_access_service::arxiv::{ArxivKind, ArxivReadRequest, ArxivService, record_schema};
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::{
     MemoryAccessor, byte_layer, fixture, fixture_path, fs_operator,
@@ -203,4 +207,97 @@ async fn numeric_month_preserves_zero_padded_archive_names() {
     assert_eq!(archives.len(), 2);
     assert_eq!(archives[0].month, 1);
     assert_eq!(archives[0].filename, "pdf/arXiv_pdf_0001_003.tar");
+}
+
+#[tokio::test]
+async fn native_parallel_shards_preserve_manifest_entry_order_and_binary_payloads() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("pdf")).unwrap();
+    std::fs::copy(
+        fixture_path!("arxiv", "pdf/arXiv_pdf_manifest.xml"),
+        dir.path().join("pdf/arXiv_pdf_manifest.xml"),
+    )
+    .unwrap();
+    for name in ["arXiv_pdf_2410_003.tar", "arXiv_pdf_2410_001.tar"] {
+        std::fs::copy(
+            fixture_path!("arxiv", "pdf/arXiv_pdf_2410_001.tar"),
+            dir.path().join("pdf").join(name),
+        )
+        .unwrap();
+    }
+    for projection in [
+        None,
+        Some(vec!["entry_index".into(), "data".into()]),
+        Some(vec![]),
+    ] {
+        let source = ArxivService::new(OpenDalAccessor::new(fs_operator(dir.path())));
+        let records = source.records();
+        let request = ArxivReadRequest::new(ArxivKind::Pdf)
+            .with_month(2410)
+            .with_options(ReadOptions {
+                batch_size: NonZeroUsize::MIN,
+                projection,
+            });
+        let plan = records.plan_scan(request.clone()).await.unwrap();
+        assert_eq!(plan.partitions.size_hint().0, 2);
+        let mut expected = records.open(request.clone()).await.unwrap();
+        let mut actual = records
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::MIN,
+            ))
+            .open(request)
+            .await
+            .unwrap();
+        let mut rows = 0;
+        let mut payloads = Vec::new();
+        while let Some(batch) = expected.next().await.unwrap() {
+            assert_eq!(actual.next().await.unwrap().unwrap(), batch);
+            if let Some(data) = batch.column_by_name("data") {
+                payloads.push(data.as_binary::<i64>().value(0).to_vec());
+            }
+            rows += batch.num_rows();
+        }
+        assert_eq!(rows, 6);
+        if !payloads.is_empty() {
+            assert_eq!(
+                payloads,
+                [
+                    b"%PDF-first-paper".to_vec(),
+                    b"%PDF-second-paper".to_vec(),
+                    vec![],
+                    b"%PDF-first-paper".to_vec(),
+                    b"%PDF-second-paper".to_vec(),
+                    vec![]
+                ]
+            );
+        }
+        assert!(actual.next().await.unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn native_empty_selection_keeps_schema_and_invalid_projection_precedes_io() {
+    let records = service().records();
+    let plan = records
+        .plan_scan(ArxivReadRequest::new(ArxivKind::Pdf).with_month(2501))
+        .await
+        .unwrap();
+    assert_eq!(plan.partitions.size_hint().0, 0);
+    assert_eq!(plan.metadata.schema, record_schema());
+    let input = MemoryAccessor::new(b"not XML", 1);
+    let observed = input.observations.clone();
+    let records = ArxivService::new(input).records();
+    let error = records
+        .plan_scan(
+            ArxivReadRequest::new(ArxivKind::Pdf).with_options(ReadOptions {
+                projection: Some(vec!["unknown".into()]),
+                ..ReadOptions::default()
+            }),
+        )
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert!(observed.requests.lock().unwrap().is_empty());
 }
