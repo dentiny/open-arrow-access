@@ -1,0 +1,23 @@
+[package]
+name = "open-arrow-access-layers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Composable Arrow record layers for Open Arrow Access"
+
+[dependencies]
+arrow-array = { workspace = true, features = ["chrono-tz"] }
+arrow-cast.workspace = true
+arrow-schema.workspace = true
+open-arrow-access-core.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true
+
+[[test]]
+name = "type_conversion"

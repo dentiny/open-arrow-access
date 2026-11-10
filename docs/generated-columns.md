@@ -127,7 +127,7 @@ OpenDAL to the same upstream Lance commit. Follow the
 not replace this requirement. No Lance writer, sink, catalog, or SQL query
 service is needed.
 
-This is a useful first production layer for the PR-6 workstream. Metrics can be
+This is the planned expression layer for the PR-6 workstream. Metrics can be
 added separately. Parallel read and unordered emission remain independent
 enhancements, and row-local generation must not depend on arrival order.
 

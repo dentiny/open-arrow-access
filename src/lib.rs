@@ -1,7 +1,8 @@
 //! Composable, asynchronous read access to Arrow record batches.
 //!
-//! The shared extension contracts, OpenDAL storage adapter and service HTTP
-//! utilities are always available. Concrete providers remain opt-in.
+//! The shared extension contracts, OpenDAL storage adapter, service HTTP utilities,
+//! and [`layers::TypeConversionLayer`] are always available. Concrete providers
+//! remain opt-in.
 //! Enable a `format-parquet`, `format-json`, `format-csv`, `format-xml`, or
 //! `format-atif` reader to decode records.
 
@@ -33,3 +34,5 @@ pub use open_arrow_access_file_format as file_format;
 pub use open_arrow_access_dataset as dataset;
 
 pub use open_arrow_access_storage as storage;
+
+pub use open_arrow_access_layers as layers;

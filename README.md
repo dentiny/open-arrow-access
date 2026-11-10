@@ -52,7 +52,7 @@ flowchart LR
 - **Datasets and providers** select files, preserve source metadata, and reuse the
   same storage and format components.
 - **Layers** wrap accessors through a common extension contract. Streaming
-  decompression is implemented; generated columns, metrics, and parallel scan
+  decompression and Arrow type conversion are implemented; generated columns, metrics, and parallel scan
   layers are planned.
 
 See [architecture](docs/architecture.md) for component boundaries and execution behavior.
@@ -70,7 +70,7 @@ See [architecture](docs/architecture.md) for component boundaries and execution 
 | Providers | Hugging Face, Common Crawl, PMC, Gutenberg, research repositories, books, and government data | [Provider matrix and output types](docs/support.md#dataset-providers) |
 | Execution | Pull-based reads; per-reader storage I/O concurrency | [Ordering and concurrency](docs/architecture.md#execution-and-resource-ownership) |
 
-Default Cargo features are empty. Shared service utilities such as
+Default Cargo features are empty. Arrow type conversion and shared service utilities such as
 `service::common::Connection` and `ApiDocument` are always available, alongside
 core contracts and OpenDAL storage. This includes the HTTP/JSON/URL dependency
 baseline; concrete providers remain feature-gated. Enable the formats and
@@ -165,3 +165,10 @@ cargo test --workspace --all-features --locked
 
 See [testing](docs/testing.md) for suite placement and [dependency alignment](docs/dependencies.md)
 for the Arrow, Parquet, and OpenDAL version baseline.
+
+## Output type conversion
+
+The [`TypeConversionLayer`](layers/README.md) wraps record accessors
+through the shared `Layer<A>` contract. It casts explicitly named top-level columns
+using Arrow kernels, plans a fixed output schema before the first batch, and shares
+unchanged array buffers. It is always available, including with `default-features = false`.
