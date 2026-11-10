@@ -23,6 +23,16 @@ pub struct ScanPlan {
 }
 
 impl ScanPlan {
+    /// Read partitions sequentially in plan order, opening each on demand.
+    /// Discovery, opening, or reading errors end the reader without opening later partitions.
+    pub fn into_reader(self) -> impl RecordReader {
+        let batches = self
+            .partitions
+            .and_then(|partition| async { partition.await.map(into_stream) })
+            .try_flatten();
+        StreamReader::new(batches, self.metadata)
+    }
+
     /// Plan an already known ordered partition list without opening its readers.
     pub fn new(metadata: RecordMetadata, partitions: Vec<ScanPartition>) -> Self {
         Self::from_stream(metadata, stream::iter(partitions.into_iter().map(Ok)))
@@ -38,15 +48,6 @@ impl ScanPlan {
             metadata,
             partitions: partitions.boxed(),
         }
-    }
-
-    /// Open partitions lazily in order, stopping at the first discovery, open, or read error.
-    pub fn into_reader(self) -> impl RecordReader {
-        let batches = self
-            .partitions
-            .and_then(|partition| async { partition.await.map(into_stream) })
-            .try_flatten();
-        StreamReader::new(batches, self.metadata)
     }
 
     /// Keep a stateful or indivisible input in one partition. The reader's schema

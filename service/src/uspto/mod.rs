@@ -1,4 +1,9 @@
 //! USPTO Open Data Portal bulk product discovery and original file access.
+//!
+//! Resolved files expose `records(format)` for explicit Arrow decoding and scan
+//! planning. The adapter retains validated product identity and file-list pagination;
+//! metadata links are not followed automatically. API pages can bind an explicit
+//! JSON record selection with `ApiDocument::records_at`.
 mod error;
 mod parser;
 mod validation;

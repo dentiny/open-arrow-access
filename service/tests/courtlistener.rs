@@ -1,6 +1,13 @@
-use std::num::NonZeroUsize;
+use std::{num::NonZeroUsize, sync::Arc};
 
-use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest, ErrorKind, Result};
+use arrow_array::cast::AsArray;
+use arrow_schema::{DataType, Field, Schema};
+use open_arrow_access_core::{
+    Accessor, AccessorExt, ByteReadOptions, ByteReadRequest, ErrorKind, Result, ScanPlanner,
+};
+use open_arrow_access_dataset::file_set::FileSetRequest;
+use open_arrow_access_file_format::csv::{CsvFileFormat, CsvFormat};
+use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::courtlistener::{CourtListenerBulkAccessor, CourtListenerSnapshot};
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::{MemoryAccessor, collect_bytes, fixture, fs_operator};
@@ -117,4 +124,60 @@ async fn invalid_selections_fail_before_storage_io() {
         );
     }
     assert!(observed.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn snapshot_record_plans_preserve_validation_order_and_quoted_csv() {
+    let raw = fixture!("courtlistener", "courts-2026-09-30.csv").await;
+    let fields = std::str::from_utf8(&raw)
+        .unwrap()
+        .lines()
+        .next()
+        .unwrap()
+        .split(',')
+        .map(|name| Field::new(name, DataType::Utf8, true))
+        .collect::<Vec<_>>();
+    let bytes = MemoryAccessor::new(
+        &fixture!("courtlistener", "courts-2026-09-30.csv.bz2").await,
+        1,
+    );
+    let observed = bytes.observations.clone();
+    let records = CourtListenerBulkAccessor::new(bytes).records(
+        CsvFileFormat::new(Arc::new(Schema::new(fields)))
+            .with_format(CsvFormat::default().with_header(true)),
+    );
+    let bad = FileSetRequest::new(["bulk-data/../courts-2026-09-30.csv.bz2"]);
+    assert_eq!(
+        records.plan_scan(bad).await.err().unwrap().kind(),
+        ErrorKind::InvalidInput
+    );
+    assert!(observed.requests.lock().unwrap().is_empty());
+    let key = CourtListenerSnapshot::new("courts", "2026-09-30")
+        .unwrap()
+        .object();
+    let selection = FileSetRequest::new([key.clone(), key]);
+    let plan = records.plan_scan(selection.clone()).await.unwrap();
+    assert_eq!(plan.partitions.size_hint().0, 2);
+    drop(plan);
+    let mut reader = records
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ))
+        .open(selection)
+        .await
+        .unwrap();
+    let mut ids = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        ids.extend(
+            batch["id"]
+                .as_string::<i32>()
+                .iter()
+                .map(|value| value.unwrap().to_owned()),
+        );
+    }
+    assert_eq!(
+        ids,
+        ["nc", "minnag", "arizsuper", "nc", "minnag", "arizsuper"]
+    );
 }

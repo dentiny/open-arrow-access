@@ -44,3 +44,7 @@ pub(super) fn missing_auth_scope() -> opendal::Error {
         "missing provider authentication scope",
     )
 }
+
+pub(super) fn serialize_metadata(source: serde_json::Error) -> Error {
+    decode("failed to serialize selected API records").with_source(source)
+}

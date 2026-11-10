@@ -5,11 +5,11 @@ use futures::{
 };
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt,
-    RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, into_async_read,
+    RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader,
+    into_async_read,
 };
 
 use super::{CsvAccessor, CsvDialect, error};
-use crate::scan::input::ChunkInput;
 
 #[async_trait]
 impl<B> ScanPlanner for CsvAccessor<B>
@@ -52,10 +52,10 @@ where
                     else {
                         return Ok(None);
                     };
-                    let partition: ScanPartition =
-                        Box::pin(
-                            async move { format.open_reader(&ChunkInput(bytes), request).await },
-                        );
+                    let partition: ScanPartition = Box::pin(async move {
+                        let input = bytes_reader(bytes, Some(request.object.clone()));
+                        format.open_input(Box::new(input), request).await
+                    });
                     Ok(Some((partition, frames)))
                 }
             }))
