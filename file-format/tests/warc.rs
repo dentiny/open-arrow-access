@@ -1,8 +1,10 @@
+use open_arrow_access_layers::ParallelReadLayer;
 use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
 use arrow_array::cast::AsArray;
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ByteReadRequest, Error, ErrorKind, ReadOptions, ReadRequest,
+    Accessor, AccessorExt, ByteReadOptions, ByteReadRequest, Error, ErrorKind, ReadOptions,
+    ReadRequest, ScanPlanner,
 };
 use open_arrow_access_file_format::warc::{WarcAccessor, WarcArrowAccessor, WarcHeader};
 use open_arrow_access_test_support::{MemoryAccessor, fixture, reader};
@@ -240,4 +242,29 @@ async fn arrow_records_propagate_parser_errors() {
         .unwrap();
     assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
     assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn physical_warc_plan_keeps_one_ordered_partition() {
+    let bytes = fixture!("warc", "good_physical_records.warc").await;
+    let accessor = WarcArrowAccessor::new(MemoryAccessor::new(&bytes, 1));
+    let request = ReadRequest::new("records.warc");
+    let plan = accessor.plan_scan(request.clone()).await.unwrap();
+    assert_eq!(plan.partitions.size_hint().0, 1);
+    let mut expected = accessor.open(request.clone()).await.unwrap();
+    let mut actual = accessor
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(3).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ))
+        .open(request)
+        .await
+        .unwrap();
+    loop {
+        let batch = expected.next().await.unwrap();
+        assert_eq!(actual.next().await.unwrap(), batch);
+        if batch.is_none() {
+            break;
+        }
+    }
 }

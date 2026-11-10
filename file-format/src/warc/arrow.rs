@@ -3,8 +3,9 @@ use std::sync::{Arc, OnceLock};
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
-    ByteReadRequest, ByteReader, FactoryToken, ReadRequest, ReaderFactory, RecordBatchBuilder,
-    RecordMetadata, RecordReader, Result, SchemaRef, StreamReader, async_trait,
+    Accessor, ByteReadRequest, ByteReader, FactoryToken, ReadRequest, ReaderFactory,
+    RecordBatchBuilder, RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, SchemaRef,
+    StreamReader, async_trait,
 };
 
 use super::{WarcFormat, WarcHeader};
@@ -117,5 +118,17 @@ impl ReaderFactory for WarcArrowFormat {
                 source: Some(source),
             },
         )))
+    }
+}
+
+/// A physical WARC stream is indivisible without a verified record/compression index.
+/// FileSet/Directory can schedule independent WARC files concurrently.
+#[async_trait]
+impl<B> ScanPlanner for WarcArrowAccessor<B>
+where
+    B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+{
+    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
+        Ok(ScanPlan::whole_input(self.open(request).await?))
     }
 }
