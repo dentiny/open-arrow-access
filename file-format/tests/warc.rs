@@ -1,10 +1,14 @@
 use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
 use arrow_array::cast::AsArray;
+use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ByteReadRequest, Error, ErrorKind, ReadOptions, ReadRequest,
+    Accessor, AccessorExt, ByteReadOptions, ByteReadRequest, Error, ErrorKind, ReadOptions,
+    ReadRequest, ScanPlanner,
 };
+use open_arrow_access_file_format::DecodePartitionOptions;
 use open_arrow_access_file_format::warc::{WarcAccessor, WarcArrowAccessor, WarcHeader};
+use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_test_support::{MemoryAccessor, fixture, reader};
 
 #[tokio::test]
@@ -239,5 +243,54 @@ async fn arrow_records_propagate_parser_errors() {
         .await
         .unwrap();
     assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
+    assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn parallel_record_partitions_are_lazy_and_preserve_binary_projection_and_order() {
+    let bytes = fixture!("warc", "good_physical_records.warc").await;
+    let input = MemoryAccessor::new(&bytes, 1);
+    let observed = input.observations.clone();
+    let accessor = WarcArrowAccessor::new(input).with_partition_options(DecodePartitionOptions {
+        target_bytes: NonZeroUsize::MIN,
+    });
+    let request = ReadRequest::new("physical.warc").with_options(ReadOptions {
+        batch_size: NonZeroUsize::new(2).unwrap(),
+        projection: Some(vec!["body".into(), "record_id".into()]),
+    });
+    let mut plan = accessor.plan_scan(request.clone()).await.unwrap();
+    assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
+    let partition = plan.partitions.try_next().await.unwrap().unwrap();
+    assert!(observed.reads.load(Ordering::SeqCst) < bytes.len());
+    let reads = observed.reads.load(Ordering::SeqCst);
+    let mut first = partition.await.unwrap();
+    assert_eq!(first.metadata().schema, plan.metadata.schema);
+    assert_eq!(first.metadata().source, plan.metadata.source);
+    assert_eq!(first.next().await.unwrap().unwrap().num_rows(), 1);
+    assert_eq!(observed.reads.load(Ordering::SeqCst), reads);
+    drop(plan);
+
+    let mut reader = accessor
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::MIN,
+        ))
+        .open(request)
+        .await
+        .unwrap();
+    let mut ids = Vec::new();
+    let mut bodies = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        // Every record exceeds the soft byte target and must still be accepted.
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(batch.schema().field(0).name(), "body");
+        ids.push(batch["record_id"].as_string::<i32>().value(0).to_owned());
+        bodies.push(batch["body"].as_binary::<i64>().value(0).to_vec());
+    }
+    assert_eq!(
+        ids,
+        ["<urn:test:first>", "<urn:test:second>", "<urn:test:third>"]
+    );
+    assert_eq!(bodies, [vec![], vec![0, 255, 13, 10], b"end".to_vec()]);
     assert!(reader.next().await.unwrap().is_none());
 }
