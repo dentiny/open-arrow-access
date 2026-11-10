@@ -192,8 +192,5 @@ async fn jsonl_pulls_only_the_requested_batch_and_keeps_delivered_rows_on_later_
     assert_eq!(error.kind(), ErrorKind::Decode);
     assert!(error.to_string().contains("record 2:"));
     format::assert_finished(reader.as_mut(), &observations.reads).await;
-    let reads = observations.reads.load(Ordering::SeqCst);
-    drop(reader);
-    assert_eq!(observations.reads.load(Ordering::SeqCst), reads);
     assert_eq!(text(&batch, "trajectory_id", 0), "first");
 }

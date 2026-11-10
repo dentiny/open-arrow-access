@@ -7,10 +7,8 @@ use crate::{
     Result, async_trait,
 };
 
-/// Factory for readers. The request and reader types keep bytes and Arrow records
-/// statically distinct while sharing the same opening and layering contract.
-/// Implementations use the re-exported `#[async_trait]` attribute so asynchronous
-/// opening remains usable through `dyn` accessors with Send futures.
+/// Factory for independently owned readers, with typed requests and outputs.
+/// Use the re-exported `#[async_trait]` for `dyn` accessors with Send futures.
 #[async_trait]
 pub trait Accessor: Send + Sync {
     /// Selection and options needed to open one reader, interpreted by the accessor.
@@ -18,19 +16,13 @@ pub trait Accessor: Send + Sync {
     /// Reader interface returned by this accessor, including its item and metadata types.
     type Reader: Reader + ?Sized;
 
-    /// Report effective operations after all adapters/layers, without I/O.
-    ///
-    /// Wrappers must forward or adjust these flags to match their own interface.
-    /// A supported operation can still fail for a particular request. The opened
-    /// reader reports its own representation's abilities via [`Reader::capability`].
+    /// Report this interface's effective operations without I/O; see [`Capability`].
+    /// Opened readers report their own abilities via [`Reader::capability`].
     fn capability(&self) -> Capability;
 
-    /// Open the input selected by `request` and return an independently owned reader.
-    ///
-    /// Opening may perform I/O and schema inspection. Reader metadata must be
-    /// available when this future completes; returning a reader does not require
-    /// loading all of its items. The request's locator and options are interpreted
-    /// by the concrete accessor rather than by the shared protocol.
+    /// Open the accessor-defined selection and options in `request`.
+    /// Opening may perform I/O and schema inspection; metadata is available on return
+    /// without requiring all items to be loaded.
     ///
     /// # Errors
     ///
@@ -65,19 +57,14 @@ pub type ObjectStream = BoxStream<'static, Result<ObjectRef>>;
 /// Optional byte-accessor discovery boundary for directory and source adapters.
 #[async_trait]
 pub trait ByteAccessor: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> {
-    /// Discover object references beneath the requested directory prefix.
-    ///
-    /// The accessor defines prefix interpretation and listing order. Apply the
-    /// requested recursion policy during discovery; nonrecursive requests must
-    /// not descend into child directories and filter their results afterwards.
-    /// Objects are returned as a stream so discovery need not collect all results
-    /// in memory. Additional I/O errors may occur while consuming that stream.
-    /// Implementations must set [`Capability::list`] to match their support.
+    /// Stream object references in accessor-defined prefix semantics and order.
+    /// Apply recursion during discovery; nonrecursive requests must not descend
+    /// into child directories. Implementations must advertise [`Capability::list`].
     ///
     /// # Errors
     ///
-    /// The default returns [`ErrorKind::Unsupported`]. Implementations also report
-    /// invalid selections, access failures and failures starting discovery.
+    /// Defaults to [`ErrorKind::Unsupported`]. Discovery failures may occur here
+    /// or while consuming the stream.
     async fn list(&self, _request: ListRequest) -> Result<ObjectStream> {
         Err(Error::new(
             ErrorKind::Unsupported,

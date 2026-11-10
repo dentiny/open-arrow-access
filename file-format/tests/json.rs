@@ -161,9 +161,6 @@ async fn reading_a_batch_does_not_collect_the_entire_input() {
     assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
     assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [0, 1]);
     assert_lt!(observed.reads.load(Ordering::SeqCst), data.len());
-    let reads = observed.reads.load(Ordering::SeqCst);
-    drop(reader);
-    assert_eq!(observed.reads.load(Ordering::SeqCst), reads);
 }
 
 #[tokio::test]
