@@ -54,7 +54,7 @@ pmc = [
     "open-arrow-access-decompression/gzip",
 ]
 regulations = []
-semantic-scholar = []
+semantic-scholar = ["record-files"]
 uspto = []
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 zenodo = []
