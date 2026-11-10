@@ -21,6 +21,14 @@ fn metadata() -> RecordMetadata {
 fn batch(n: i32) -> RecordBatch {
     RecordBatch::try_new(metadata().schema, vec![Arc::new(Int32Array::from(vec![n]))]).unwrap()
 }
+fn value(batch: &RecordBatch) -> i32 {
+    batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<Int32Array>()
+        .unwrap()
+        .value(0)
+}
 struct Source;
 #[async_trait]
 impl Accessor for Source {
@@ -75,13 +83,7 @@ async fn ordered_duplicates_empty_partitions_and_single_worker() {
         .await;
         let mut values = vec![];
         while let Some(b) = r.next().await.unwrap() {
-            values.push(
-                b.column(0)
-                    .as_any()
-                    .downcast_ref::<Int32Array>()
-                    .unwrap()
-                    .value(0),
-            );
+            values.push(value(&b));
         }
         assert_eq!(values, [2, 3, 2, 4]);
         assert!(r.next().await.unwrap().is_none());
@@ -113,20 +115,10 @@ async fn overlaps_without_replacing_completed_buffered_partitions() {
         (b, r)
     });
     ready.acquire_many(2).await.unwrap().forget();
-    for _ in 0..10 {
-        tokio::task::yield_now().await;
-    }
     assert_eq!(opened.load(Ordering::SeqCst), 3);
     release.notify_one();
     let (b, mut r) = task.await.unwrap();
-    assert_eq!(
-        b.column(0)
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .unwrap()
-            .value(0),
-        0
-    );
+    assert_eq!(value(&b), 0);
     let mut count = 1;
     while r.next().await.unwrap().is_some() {
         count += 1;
@@ -209,10 +201,9 @@ async fn full_later_queue_stops_decoding_before_next_batch() {
     });
     let mut r = open(vec![Box::pin(std::future::pending()), later], 2).await;
     let task = tokio::spawn(async move { r.next().await });
+    // On the current-thread runtime, the producer runs from this signal to
+    // its next suspension (reserving the full queue) before this task resumes.
     produced.acquire().await.unwrap().forget();
-    for _ in 0..10 {
-        tokio::task::yield_now().await;
-    }
     assert_eq!(polls.load(Ordering::SeqCst), 1);
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());

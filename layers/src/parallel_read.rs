@@ -49,9 +49,10 @@ impl<A: ScanPlanner> Accessor for ParallelReadAccessor<A> {
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> Capability {
+        let read = self.inner.capability().read;
         Capability {
-            read: self.inner.capability().read,
-            read_parallel: self.inner.capability().read,
+            read,
+            read_parallel: read,
             read_with_range: false,
             list: false,
         }
@@ -66,7 +67,7 @@ impl<A: ScanPlanner> Accessor for ParallelReadAccessor<A> {
 struct ParallelReader {
     metadata: RecordMetadata,
     remaining: IntoIter<ScanPartition>,
-    queues: VecDeque<mpsc::Receiver<RecordBatch>>,
+    partition_receivers: VecDeque<mpsc::Receiver<RecordBatch>>,
     tasks: JoinSet<Result<()>>,
     settings: ParallelReadLayer,
     // Set after EOF or an error so later next() calls return EOF without restarting work.
@@ -78,7 +79,7 @@ impl ParallelReader {
         Self {
             metadata: plan.metadata,
             remaining: plan.partitions.into_iter(),
-            queues: VecDeque::new(),
+            partition_receivers: VecDeque::new(),
             tasks: JoinSet::new(),
             settings,
             terminal: false,
@@ -86,7 +87,7 @@ impl ParallelReader {
     }
 
     fn fill(&mut self) {
-        while self.queues.len() < self.settings.partitions.get() {
+        while self.partition_receivers.len() < self.settings.partitions.get() {
             let Some(open) = self.remaining.next() else {
                 break;
             };
@@ -111,45 +112,38 @@ impl ParallelReader {
                     permit.send(batch);
                 }
             });
-            self.queues.push_back(receiver);
+            self.partition_receivers.push_back(receiver);
         }
     }
 
     fn stop(&mut self) {
         self.terminal = true;
         self.tasks.abort_all();
-        self.queues.clear();
+        self.partition_receivers.clear();
         self.remaining = Vec::new().into_iter();
     }
 
     async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
         loop {
             self.fill();
-            let Some(front) = self.queues.front_mut() else {
+            let Some(front) = self.partition_receivers.front_mut() else {
                 // Channel closure alone is not proof that its worker succeeded.
                 while let Some(joined) = self.tasks.join_next().await {
-                    match joined {
-                        Ok(result) => result?,
-                        Err(error) => {
-                            return Err(partition_task_error(error));
-                        }
-                    }
+                    joined.map_err(partition_task_error)??;
                 }
                 return Ok(None);
             };
             tokio::select! {
                 biased;
                 joined = self.tasks.join_next(), if !self.tasks.is_empty() => {
-                    match joined {
-                        Some(Ok(result)) => result?,
-                        Some(Err(error)) => return Err(partition_task_error(error)),
-                        None => {},
+                    if let Some(joined) = joined {
+                        joined.map_err(partition_task_error)??;
                     }
                 }
                 batch = front.recv() => {
                     if batch.is_some() { return Ok(batch); }
                     // A completed worker keeps its slot until all queued batches drain.
-                    self.queues.pop_front();
+                    self.partition_receivers.pop_front();
                 }
             }
         }
