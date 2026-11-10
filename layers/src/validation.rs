@@ -282,12 +282,12 @@ pub(crate) fn validate_expression(
         logical_expr::Expr,
     };
 
-    if expression.is_volatile() {
-        return Err(crate::error::invalid_generated_expression(
-            "volatile functions are not supported",
-        ));
-    }
     expression.apply(|expr| {
+        if expr.is_volatile_node() {
+            return Err(crate::error::invalid_generated_expression(
+                "volatile functions are not supported",
+            ));
+        }
         if matches!(
             expr,
             Expr::AggregateFunction(_)
