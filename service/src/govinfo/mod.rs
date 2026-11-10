@@ -1,6 +1,4 @@
 //! GovInfo bulk XML directories and API package discovery.
-//!
-//! Preserves validated package identity and bulk-file membership.
 use crate::common::{ApiDocument, Connection, RemoteFiles, segment};
 mod error;
 mod resolver;

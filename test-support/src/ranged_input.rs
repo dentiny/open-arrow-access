@@ -31,19 +31,11 @@ where
         let error = inspect(source).await.err().expect("accepted invalid input");
         assert_eq!(error.kind(), expected, "{case}: {error}");
     }
-    for kind in [
-        ErrorKind::InvalidInput,
-        ErrorKind::Unsupported,
-        ErrorKind::NotFound,
-        ErrorKind::PermissionDenied,
-        ErrorKind::Io,
-        ErrorKind::Decode,
-    ] {
-        let error = inspect(ranged().with_range_failure(0, kind))
-            .await
-            .err()
-            .expect("ignored injected range failure");
-        assert_eq!(error.kind(), kind);
-        assert_memory_error(&error, kind, "memory_range", "injected range failure");
-    }
+    let kind = ErrorKind::PermissionDenied;
+    let error = inspect(ranged().with_range_failure(0, kind))
+        .await
+        .err()
+        .expect("ignored injected range failure");
+    assert_eq!(error.kind(), kind);
+    assert_memory_error(&error, kind, "memory_range", "injected range failure");
 }

@@ -1,6 +1,4 @@
 //! Public Internet Archive item metadata and attached file bytes.
-//!
-//! Preserves validated public item membership and canonical download namespace.
 
 mod error;
 mod validation;

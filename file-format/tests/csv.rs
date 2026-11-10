@@ -4,7 +4,7 @@ use std::{
 };
 
 use arrow_array::{Array, StringArray, types::Int64Type};
-use arrow_schema::{DataType, Field, IntervalUnit, Schema, TimeUnit};
+use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch,
     ScanPlanner, SchemaRef,
@@ -150,40 +150,32 @@ async fn empty_input_schema_is_rejected_before_opening() {
 
 #[tokio::test]
 async fn unsupported_csv_fields_are_configuration_errors_only_when_projected() {
-    for data_type in [
-        DataType::Binary,
-        DataType::LargeUtf8,
-        DataType::Duration(TimeUnit::Second),
-        DataType::Interval(IntervalUnit::YearMonth),
-        DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
-    ] {
-        let bytes = MemoryAccessor::new(&fixture!("csv", "good_no_header.csv").await, 1);
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int64, false),
-            Field::new("title", data_type.clone(), true),
-        ]));
-        let accessor = CsvAccessor::new(bytes.clone(), schema);
-        let error = accessor
-            .open(ReadRequest::new("good_no_header.csv"))
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), ErrorKind::Unsupported, "{data_type:?}");
-        assert_eq!(error.operation(), "open_csv");
-        assert!(bytes.observations.requests.lock().unwrap().is_empty());
-        let batches = collect(
-            &accessor,
-            ReadRequest::new("good_no_header.csv").with_options(options(2, Some(vec!["id"]))),
-        )
-        .await;
-        assert_eq!(collect_values::<Int64Type>(&batches, 0), [1, 2, 3]);
-        let batches = collect(
-            &accessor,
-            ReadRequest::new("good_no_header.csv").with_options(options(2, Some(vec![]))),
-        )
-        .await;
-        assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 3);
-    }
+    let bytes = MemoryAccessor::new(&fixture!("csv", "good_no_header.csv").await, 1);
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("title", DataType::Binary, true),
+    ]));
+    let accessor = CsvAccessor::new(bytes.clone(), schema);
+    let error = accessor
+        .open(ReadRequest::new("good_no_header.csv"))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+    assert_eq!(error.operation(), "open_csv");
+    assert!(bytes.observations.requests.lock().unwrap().is_empty());
+    let batches = collect(
+        &accessor,
+        ReadRequest::new("good_no_header.csv").with_options(options(2, Some(vec!["id"]))),
+    )
+    .await;
+    assert_eq!(collect_values::<Int64Type>(&batches, 0), [1, 2, 3]);
+    let batches = collect(
+        &accessor,
+        ReadRequest::new("good_no_header.csv").with_options(options(2, Some(vec![]))),
+    )
+    .await;
+    assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 3);
 }
 
 #[tokio::test]

@@ -1,6 +1,5 @@
 //! Semantic Scholar release-pinned bulk datasets and incremental diff manifests.
-//!
-//! Preserves immutable release identity and exact signed download URLs.
+//! Signed download URLs are preserved exactly.
 use crate::common::{ApiDocument, Connection, RemoteFiles, segment, text};
 mod error;
 mod parser;

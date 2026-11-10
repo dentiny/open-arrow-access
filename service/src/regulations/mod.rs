@@ -1,6 +1,4 @@
 //! Read-only Regulations.gov API v4 discovery, metadata and attachments.
-//!
-//! Preserves validated resource identity and attachment membership.
 mod parser;
 mod validation;
 use crate::common::{ApiDocument, Connection, RemoteFiles, invalid, segment};

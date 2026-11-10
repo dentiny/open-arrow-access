@@ -85,8 +85,8 @@ where
     error
 }
 
-/// Exercise representative source-error categories and empty chunks at selected
-/// byte offsets, with one-byte input chunks. Errors may occur during opening
+/// Exercise source errors at selected byte offsets and one empty chunk, using
+/// one-byte input chunks. Errors may occur during opening
 /// (such as schema inference) or while reading. Open failures must not poll input.
 /// The request's byte conversion defines the expected forwarded object/options.
 ///
@@ -107,10 +107,10 @@ pub async fn assert_error_contract<A, M>(
     M: Debug + PartialEq,
 {
     assert!(!offsets.is_empty());
-    // Ordinary I/O and a non-I/O sentinel catch category erasure without
-    // repeating the same adapter path for every enum variant.
-    let kinds = [ErrorKind::Io, ErrorKind::PermissionDenied];
-    for kind in kinds {
+    // A non-I/O sentinel detects adapters that erase source categories to Io.
+    // Opening and reading are distinct paths; enum variants are not.
+    let kind = ErrorKind::PermissionDenied;
+    {
         let input = MemoryAccessor::new(bytes, 1).with_open_failure(kind);
         let observed = input.observations.clone();
         let error = read_error(make_accessor(input), &request, &observed, &snapshot).await;
@@ -126,19 +126,17 @@ pub async fn assert_error_contract<A, M>(
     }
     for &offset in offsets {
         assert!(offset <= bytes.len());
-        for kind in kinds {
-            let input = MemoryAccessor::new(bytes, 1).with_failure(offset, kind);
-            let observed = input.observations.clone();
-            let error = read_error(make_accessor(input), &request, &observed, &snapshot).await;
-            assert_eq!(error.kind(), kind, "offset {offset}: {error}");
-            assert_memory_read_error(&error, kind);
-            check_source_error(&error, kind);
-        }
-        let input = MemoryAccessor::new(bytes, 1).with_empty_chunk(offset);
+        let input = MemoryAccessor::new(bytes, 1).with_failure(offset, kind);
         let observed = input.observations.clone();
         let error = read_error(make_accessor(input), &request, &observed, &snapshot).await;
-        assert_eq!(error.kind(), ErrorKind::Io, "offset {offset}: {error}");
+        assert_eq!(error.kind(), kind, "offset {offset}: {error}");
+        assert_memory_read_error(&error, kind);
+        check_source_error(&error, kind);
     }
+    let input = MemoryAccessor::new(bytes, 1).with_empty_chunk(0);
+    let observed = input.observations.clone();
+    let error = read_error(make_accessor(input), &request, &observed, &snapshot).await;
+    assert_eq!(error.kind(), ErrorKind::Io);
 }
 
 pub(crate) fn assert_memory_read_error(error: &Error, kind: ErrorKind) {

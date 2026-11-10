@@ -1,6 +1,5 @@
-//! Figshare public versioned articles, including BHL's Smithsonian OCR export.
-//!
-//! Preserves article identity, published version and embargo validation.
+//! Figshare published article files, including BHL's Smithsonian OCR export.
+//! Embargoed files are rejected.
 mod error;
 mod parser;
 mod validation;
