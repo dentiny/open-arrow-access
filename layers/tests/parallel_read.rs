@@ -11,7 +11,7 @@ use std::{
     },
     task::Poll,
 };
-use tokio::sync::{Notify, Semaphore};
+use tokio::sync::{Notify, Semaphore, oneshot};
 
 fn metadata() -> RecordMetadata {
     RecordMetadata {
@@ -144,27 +144,21 @@ async fn later_error_interrupts_blocked_first_partition() {
     }
 }
 
-struct Guard(Arc<Semaphore>);
-impl Drop for Guard {
-    fn drop(&mut self) {
-        self.0.add_permits(1);
-    }
-}
 #[tokio::test]
 async fn drop_cancels_partition_work() {
-    let dropped = Arc::new(Semaphore::new(0));
-    let started = Arc::new(Semaphore::new(0));
-    let (d, s) = (dropped.clone(), started.clone());
+    // Dropping an unsent sender reports when cancellation releases the future.
+    let (lifetime, dropped) = oneshot::channel::<()>();
+    let (start, started) = oneshot::channel();
     let blocked: ScanPartition = Box::pin(async move {
-        let _guard = Guard(d);
-        s.add_permits(1);
+        let _lifetime = lifetime;
+        start.send(()).unwrap();
         std::future::pending().await
     });
     let mut r = open(vec![part(vec![1]), blocked], 2).await;
     r.next().await.unwrap();
-    started.acquire().await.unwrap().forget();
+    started.await.unwrap();
     drop(r);
-    dropped.acquire().await.unwrap().forget();
+    assert!(dropped.await.is_err());
 }
 
 #[tokio::test]
@@ -230,10 +224,9 @@ async fn discovery_errors_interrupt_a_blocked_partition() {
 
 #[tokio::test]
 async fn read_error_cancels_blocked_workers_and_keeps_reader_at_eof() {
-    let dropped = Arc::new(Semaphore::new(0));
-    let guard = Guard(dropped.clone());
+    let (lifetime, dropped) = oneshot::channel::<()>();
     let first: ScanPartition = Box::pin(async move {
-        let _guard = guard;
+        let _lifetime = lifetime;
         std::future::pending().await
     });
     let failed: ScanPartition = Box::pin(async {
@@ -246,7 +239,7 @@ async fn read_error_cancels_blocked_workers_and_keeps_reader_at_eof() {
     let mut reader = open(vec![first, failed, unopened], 2).await;
 
     assert_eq!(reader.next().await.unwrap_err().operation(), "read");
-    dropped.acquire().await.unwrap().forget();
+    assert!(dropped.await.is_err());
     for _ in 0..2 {
         assert!(reader.next().await.unwrap().is_none());
     }
