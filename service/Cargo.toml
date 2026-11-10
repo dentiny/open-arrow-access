@@ -34,7 +34,7 @@ huggingface = [
     "open-arrow-access-dataset/directory",
     "open-arrow-access-file-format/parquet",
 ]
-internet-archive = []
+internet-archive = ["record-files"]
 library-of-congress = []
 meca = [
     "format-xml",
