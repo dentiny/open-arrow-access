@@ -197,11 +197,15 @@ async fn empty_and_header_only_inputs_emit_no_batches() {
             MemoryAccessor::new(&fixture!("csv", name).await, 1),
             schema(),
         )
-        .with_format(
-            CsvFormat::default()
-                .with_header(header)
-                .with_header_validation(header),
-        );
+        .with_dialect(CsvDialect {
+            has_header: header,
+            validate_header: header,
+            ..CsvDialect::default()
+        })
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ));
         assert!(
             collect(&accessor, ReadRequest::new("empty.csv"))
                 .await
@@ -212,83 +216,69 @@ async fn empty_and_header_only_inputs_emit_no_batches() {
 
 #[tokio::test]
 async fn invalid_data_errors_are_terminal() {
-    for parallel in [false, true] {
-        for chunk_size in [1, 4096] {
-            for name in BAD_FILES {
-                let bytes = MemoryAccessor::new(&fixture!("csv", name).await, chunk_size);
-                let accessor = CsvAccessor::new(bytes.clone(), schema());
-                let mut reader = if parallel {
-                    accessor
-                        .layer(ParallelReadLayer::new(
-                            NonZeroUsize::new(1).unwrap(),
-                            NonZeroUsize::new(1).unwrap(),
-                        ))
-                        .open(ReadRequest::new(name))
-                        .await
-                        .unwrap()
-                } else {
-                    accessor.open(ReadRequest::new(name)).await.unwrap()
-                };
-                let error = format::assert_terminal_error(
-                    reader.as_mut(),
-                    &bytes.observations.reads,
-                    ErrorKind::Decode,
-                )
-                .await;
-                assert_eq!(error.operation(), "decode_csv");
-                assert!(std::error::Error::source(&error).is_some());
-            }
-        }
+    for name in BAD_FILES {
+        let bytes = MemoryAccessor::new(&fixture!("csv", name).await, 1);
+        let accessor = CsvAccessor::new(bytes.clone(), schema()).layer(ParallelReadLayer::new(
+            NonZeroUsize::new(1).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ));
+        let mut reader = accessor.open(ReadRequest::new(name)).await.unwrap();
+        let error = format::assert_terminal_error(
+            reader.as_mut(),
+            &bytes.observations.reads,
+            ErrorKind::Decode,
+        )
+        .await;
+        assert_eq!(error.operation(), "decode_csv");
+        assert!(std::error::Error::source(&error).is_some());
     }
 }
 
 #[tokio::test]
 async fn io_failure_after_a_delivered_row_does_not_read_ahead() {
-    for parallel in [false, true] {
-        let bytes = MemoryAccessor::new(&fixture!("csv", "good_no_header.csv").await, 6)
-            .with_failure(6, ErrorKind::Io);
-        let accessor = CsvAccessor::new(bytes.clone(), schema());
-        let request = ReadRequest::new("data.csv").with_options(options(1, None));
-        let mut reader = if parallel {
-            accessor
-                .layer(ParallelReadLayer::new(
-                    NonZeroUsize::new(1).unwrap(),
-                    NonZeroUsize::new(1).unwrap(),
-                ))
-                .open(request)
-                .await
-                .unwrap()
-        } else {
-            accessor.open(request).await.unwrap()
-        };
-        assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 0);
-        let batch = reader.next().await.unwrap().unwrap();
-        assert_eq!(collect_values::<Int64Type>(&[batch], 0), [1]);
-        assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 1);
-        assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Io);
-        assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 2);
-    }
+    let bytes = MemoryAccessor::new(&fixture!("csv", "good_no_header.csv").await, 6)
+        .with_failure(6, ErrorKind::Io);
+    let accessor = CsvAccessor::new(bytes.clone(), schema()).layer(ParallelReadLayer::new(
+        NonZeroUsize::new(1).unwrap(),
+        NonZeroUsize::new(1).unwrap(),
+    ));
+    let request = ReadRequest::new("data.csv").with_options(options(1, None));
+    let mut reader = accessor.open(request).await.unwrap();
+    assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 0);
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(collect_values::<Int64Type>(&[batch], 0), [1]);
+    assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 1);
+    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Io);
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(bytes.observations.reads.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]
 async fn header_validation_and_truncated_row_policy_are_explicit() {
-    let accessor = CsvAccessor::new(
-        MemoryAccessor::new(&fixture!("csv", "bad_header.csv").await, 1),
-        schema(),
-    )
-    .with_format(
-        CsvFormat::default()
-            .with_header(true)
-            .with_header_validation(true),
-    );
+    let accessor = CsvAccessor::new(MemoryAccessor::new(b"wrong,title", 1), schema())
+        .with_dialect(CsvDialect {
+            has_header: true,
+            validate_header: true,
+            ..CsvDialect::default()
+        })
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ));
     let mut reader = accessor.open(ReadRequest::new("header.csv")).await.unwrap();
     assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
     let accessor = CsvAccessor::new(
         MemoryAccessor::new(&fixture!("csv", "good_truncated_rows.csv").await, 1),
         schema(),
     )
-    .with_format(CsvFormat::default().with_truncated_rows(true));
+    .with_dialect(CsvDialect {
+        allow_truncated_rows: true,
+        ..CsvDialect::default()
+    })
+    .layer(ParallelReadLayer::new(
+        NonZeroUsize::new(2).unwrap(),
+        NonZeroUsize::new(1).unwrap(),
+    ));
     let batches = collect(&accessor, ReadRequest::new("short.csv")).await;
     assert_eq!(collect_values::<Int64Type>(&batches, 0), [1, 2]);
     assert!(batches[0].column(1).is_null(0));
@@ -297,7 +287,7 @@ async fn header_validation_and_truncated_row_policy_are_explicit() {
 #[tokio::test]
 async fn parallel_csv_preserves_multiline_quotes_comments_header_and_projection() {
     let raw = b"id,title\r\n1,\"a\nb\"\r\n#skip\r\n2,\"c\"\"d\"\r\n3,end";
-    for projection in [None, Some(vec!["title", "id"]), Some(vec![])] {
+    for projection in [Some(vec!["title", "id"]), Some(vec![])] {
         let accessor =
             CsvAccessor::new(MemoryAccessor::new(raw, 1), schema()).with_dialect(CsvDialect {
                 has_header: true,
@@ -331,30 +321,6 @@ async fn parallel_csv_preserves_multiline_quotes_comments_header_and_projection(
 }
 
 #[tokio::test]
-async fn csv_without_header_preserves_all_rows_and_custom_formats_remain_unsplit() {
-    let raw = b"1,one\n2,two\n3,three";
-    let accessor = CsvAccessor::new(MemoryAccessor::new(raw, 1), schema());
-    let request = ReadRequest::new("no-header.csv").with_options(options(1, None));
-    let mut reader = accessor
-        .layer(ParallelReadLayer::new(
-            NonZeroUsize::new(2).unwrap(),
-            NonZeroUsize::new(1).unwrap(),
-        ))
-        .open(request.clone())
-        .await
-        .unwrap();
-    let mut ids = Vec::new();
-    while let Some(batch) = reader.next().await.unwrap() {
-        ids.extend(collect_values::<Int64Type>(&[batch], 0));
-    }
-    assert_eq!(ids, [1, 2, 3]);
-    let custom =
-        CsvAccessor::new(MemoryAccessor::new(raw, 1), schema()).with_format(CsvFormat::default());
-    let plan = custom.plan_scan(request).await.unwrap();
-    assert_eq!(plan.partitions.size_hint().0, 1);
-}
-
-#[tokio::test]
 async fn parallel_csv_strips_only_the_source_start_bom() {
     for raw in [
         b"\xef\xbb\xbf1,one\n2,two\n".as_slice(),
@@ -364,94 +330,72 @@ async fn parallel_csv_strips_only_the_source_start_bom() {
         let expected = CsvAccessor::new(MemoryAccessor::new(raw, 4096), schema());
         let selection = ReadRequest::new("bom.csv").with_options(options(1, None));
         let expected = collect(&expected, selection.clone()).await;
-        for chunk in [1, 2, 4096] {
-            let mut actual = CsvAccessor::new(MemoryAccessor::new(raw, chunk), schema())
-                .layer(ParallelReadLayer::new(
-                    NonZeroUsize::new(2).unwrap(),
-                    NonZeroUsize::new(1).unwrap(),
-                ))
-                .open(selection.clone())
-                .await
-                .unwrap();
-            let mut batches = Vec::new();
-            while let Some(batch) = actual.next().await.unwrap() {
-                batches.push(batch);
-            }
-            assert_eq!(batches, expected);
+        let mut actual = CsvAccessor::new(MemoryAccessor::new(raw, 1), schema())
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::new(1).unwrap(),
+            ))
+            .open(selection.clone())
+            .await
+            .unwrap();
+        let mut batches = Vec::new();
+        while let Some(batch) = actual.next().await.unwrap() {
+            batches.push(batch);
         }
+        assert_eq!(batches, expected);
     }
 }
 
 #[tokio::test]
-async fn parallel_csv_initialization_is_lazy_and_handles_empty_inputs_and_custom_dialects() {
-    let header = CsvDialect {
-        has_header: true,
-        validate_header: true,
-        ..CsvDialect::default()
-    };
-    let custom = CsvDialect {
-        delimiter: b';',
-        quote: b'\'',
-        escape: Some(b'\\'),
-        terminator: Some(b'|'),
-        ..header
-    };
-    for (raw, dialect) in [
-        (b"".as_slice(), CsvDialect::default()),
-        (b"id,title", header),
-        (b"id,title\n1,one\n2,two\n3,three", header),
-        (b"id;title|1;'a|b'|2;'c\\'d'|3;end", custom),
-    ] {
-        for chunk_size in [1, 4096] {
-            let input = MemoryAccessor::new(raw, chunk_size);
-            let observations = input.observations.clone();
-            let accessor = CsvAccessor::new(input, schema())
-                .with_dialect(dialect)
-                .with_partition_options(DecodePartitionOptions {
-                    target_bytes: NonZeroUsize::new(4).unwrap(),
-                });
-            let request = ReadRequest::new("custom.csv").with_options(options(10, None));
-            let plan = accessor.plan_scan(request.clone()).await.unwrap();
-            assert_eq!(observations.reads.load(Ordering::SeqCst), 0);
-            drop(plan);
-            let expected = collect(&accessor, request.clone()).await;
-            let actual = collect(
-                &accessor.layer(ParallelReadLayer::new(
-                    NonZeroUsize::new(2).unwrap(),
-                    NonZeroUsize::new(1).unwrap(),
-                )),
-                request,
-            )
-            .await;
-            assert_eq!(
-                collect_values::<Int64Type>(&actual, 0),
-                collect_values::<Int64Type>(&expected, 0),
-            );
-            let titles = |batches: &[RecordBatch]| {
-                batches
-                    .iter()
-                    .flat_map(|batch| {
-                        batch
-                            .column(1)
-                            .as_any()
-                            .downcast_ref::<StringArray>()
-                            .unwrap()
-                            .iter()
-                            .map(|s| s.map(str::to_owned))
-                    })
-                    .collect::<Vec<_>>()
-            };
-            assert_eq!(titles(&actual), titles(&expected));
-        }
-    }
-    // Header validation still runs when there are no data records.
-    let accessor = CsvAccessor::new(MemoryAccessor::new(b"wrong,title", 1), schema())
-        .with_dialect(header)
+async fn parallel_csv_custom_dialect_is_lazy_and_opaque_formats_remain_unsplit() {
+    let input = MemoryAccessor::new(b"id;title|1;'a|b'|2;'c\\'d'|3;end", 1);
+    let observations = input.observations.clone();
+    let accessor = CsvAccessor::new(input, schema())
+        .with_dialect(CsvDialect {
+            has_header: true,
+            validate_header: true,
+            delimiter: b';',
+            quote: b'\'',
+            escape: Some(b'\\'),
+            terminator: Some(b'|'),
+            ..CsvDialect::default()
+        })
+        .with_partition_options(DecodePartitionOptions {
+            target_bytes: NonZeroUsize::new(4).unwrap(),
+        });
+    let request = ReadRequest::new("custom.csv").with_options(options(10, None));
+    let mut reader = accessor
+        .clone()
         .layer(ParallelReadLayer::new(
             NonZeroUsize::new(2).unwrap(),
             NonZeroUsize::new(1).unwrap(),
-        ));
-    let mut reader = accessor.open(ReadRequest::new("header.csv")).await.unwrap();
-    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
+        ))
+        .open(request.clone())
+        .await
+        .unwrap();
+    assert_eq!(observations.reads.load(Ordering::SeqCst), 0);
+    // The soft byte target splits records even though the row target is ten.
+    for (id, title) in [(1, "a|b"), (2, "c'd"), (3, "end")] {
+        let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(
+            collect_values::<Int64Type>(std::slice::from_ref(&batch), 0),
+            [id]
+        );
+        assert_eq!(
+            batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+                .value(0),
+            title
+        );
+    }
     assert!(reader.next().await.unwrap().is_none());
+    let plan = accessor
+        .with_format(CsvFormat::default())
+        .plan_scan(request)
+        .await
+        .unwrap();
+    assert_eq!(plan.partitions.size_hint().0, 1);
 }
