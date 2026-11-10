@@ -268,11 +268,12 @@ Wrapping only `next` does not intercept a Parquet reader's range I/O. Byte
 wrappers must also handle `read_ranges`: delegate it for transparent observation
 or keep its sequential fallback to route each range through the wrapper.
 
-Future `ParallelReadLayer` and `UnorderedEmissionLayer` remain independent,
-default-off enhancements. Parallel execution alone preserves ordering; unordered
-emission alone does not create concurrency. Emission policy must reach a future
-executor before ordered merging. Partition planning is an optional extension
-to this framework, not a required method for every byte reader in the current implementation.
+`ParallelReadLayer` and `UnorderedEmissionLayer` are independent, explicit opt-in
+enhancements. Parallel execution alone preserves ordering; unordered emission
+alone does not create concurrency. Both collect settings in `ScanPlan` before
+one executor starts, independently of layer insertion order. Global-order sources
+reject unordered requests before execution. Partition planning remains an optional
+extension, not a required method for every byte reader.
 
 ## Implementation boundaries
 

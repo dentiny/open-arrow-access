@@ -79,3 +79,8 @@ See the [roadmap](../docs/roadmap.md) and
 [source-attribute proposal](../docs/source-attributes.md). Planning-aware layers
 must also wrap partition accessors so observation, generated columns, and budgets
 remain active during execution.
+
+`UnorderedEmissionLayer` opts a reorderable scan into ready-batch emission.
+Combine it with `ParallelReadLayer` in either order; both configure one executor.
+By itself it keeps sequential execution. Global-order sources (including ATIF)
+reject the request. See [parallel reading](../docs/parallel-read.md).

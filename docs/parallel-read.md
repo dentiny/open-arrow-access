@@ -1,4 +1,4 @@
-# Ordered parallel reading
+# Parallel reading and emission policies
 
 `ParallelReadLayer` runs independent partitions on Tokio tasks and defaults to
 emitting every partition in declared order. The executor also supports an
@@ -105,8 +105,8 @@ execution policies instead of silently discarding them during flattening.
 
 `EmissionPolicy::Ordered` is the default. `Unordered` is admitted only for a
 `Reorderable` plan; global order requirements cause an `InvalidInput` error before
-workers start, including for empty and single-partition scans. The public opt-in
-layer follows separately; custom planners can already set the plan policy.
+workers start, including for empty and single-partition scans. Use `UnorderedEmissionLayer` for the public opt-in; custom planners can also set
+the plan policy.
 
 Unordered merging polls all resident receivers, returning ready batches without
 waiting for an earlier partition. FIFO order within each partition is retained;
@@ -115,3 +115,31 @@ Polling rotates among ready receivers to avoid starving a partition. Completed
 partitions retain their slots until their queues drain. Both policies share the
 same worker, reservation-before-decode backpressure, schema checks, fail-fast
 errors and drop cancellation. Queues bound batch counts, not total memory bytes.
+
+## Opting into unordered emission
+
+```rust,ignore
+use std::num::NonZeroUsize;
+use open_arrow_access::{Accessor, AccessorExt, layers::{ParallelReadLayer, UnorderedEmissionLayer}};
+
+let source = files.with_file_planning()
+    .layer(ParallelReadLayer::new(
+        NonZeroUsize::new(4).unwrap(),
+        NonZeroUsize::new(2).unwrap(),
+    ))
+    .layer(UnorderedEmissionLayer::new());
+let mut reader = source.open(request).await?;
+while let Some(batch) = reader.next().await? {
+    // Ready batches may arrive from any resident partition.
+}
+```
+
+Swapping the two layers produces the same policy and one executor budget.
+Put execution/emission layers around the complete dataset or service scan.
+Unordered emission alone validates permission and uses the sequential plan reader;
+it neither spawns tasks nor requires a Tokio runtime. It does not promise to
+shuffle records. A `read_parallel` capability does not grant unordered permission.
+ATIF, HF's conservative dataset contract, and unknown/custom sources reject the
+request unless their source contract explicitly permits it. Repeated unordered
+layers are idempotent. Do not derive row identities or generated values from batch
+arrival order; use source identity and original positions.

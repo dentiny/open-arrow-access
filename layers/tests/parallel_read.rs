@@ -2,7 +2,7 @@ use arrow_array::Int32Array;
 use arrow_schema::{DataType, Field, Schema};
 use futures::{StreamExt, stream};
 use open_arrow_access_core::*;
-use open_arrow_access_layers::ParallelReadLayer;
+use open_arrow_access_layers::{ParallelReadLayer, UnorderedEmissionLayer};
 use std::{
     num::NonZeroUsize,
     sync::{
@@ -257,4 +257,44 @@ async fn ready_batches_progress_despite_pending_discovery_or_partitions() {
     assert_eq!(value(&reader.next().await.unwrap().unwrap()), 0);
     assert!(reader.next().await.unwrap().is_none());
     assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn emission_and_parallel_layers_collect_one_budget_in_either_order() {
+    let budget = ParallelReadLayer::new(NonZeroUsize::new(2).unwrap(), NonZeroUsize::MIN);
+    let a = Source.layer(budget).layer(UnorderedEmissionLayer);
+    let b = Source.layer(UnorderedEmissionLayer).layer(budget);
+    let empty = || ScanPlan::new(metadata(), vec![]).with_ordering(OrderRequirement::Reorderable);
+    let left = a.plan_scan(empty()).await.unwrap();
+    let right = b.plan_scan(empty()).await.unwrap();
+    assert_eq!(left.parallel_read, right.parallel_read);
+    assert_eq!(left.emission, EmissionPolicy::Unordered);
+    assert_eq!(right.emission, EmissionPolicy::Unordered);
+    for reverse in [false, true] {
+        let blocked = Box::pin(std::future::pending()) as ScanPartition;
+        let plan = ScanPlan::new(metadata(), vec![blocked, part(vec![7])])
+            .with_ordering(OrderRequirement::Reorderable);
+        let mut reader = if reverse {
+            b.open(plan).await
+        } else {
+            a.open(plan).await
+        }
+        .unwrap();
+        assert_eq!(value(&reader.next().await.unwrap().unwrap()), 7);
+        drop(reader);
+        let rejected = ScanPlan::new(metadata(), vec![]);
+        let result = if reverse {
+            b.open(rejected).await
+        } else {
+            a.open(rejected).await
+        };
+        assert_eq!(result.err().unwrap().kind(), ErrorKind::InvalidInput);
+    }
+    let conflict = Source
+        .layer(budget)
+        .layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN));
+    assert_eq!(
+        conflict.open(empty()).await.err().unwrap().kind(),
+        ErrorKind::InvalidInput
+    );
 }

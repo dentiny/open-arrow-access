@@ -178,6 +178,16 @@ mod filesystem {
             partitions += 1;
         }
         assert_eq!(partitions, 8);
+        let unordered = directory
+            .clone()
+            .layer(open_arrow_access_layers::UnorderedEmissionLayer)
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(3).unwrap(),
+                NonZeroUsize::MIN,
+            ));
+        let mut unordered_values = values(unordered.open(request.clone()).await.unwrap()).await;
+        unordered_values.sort_unstable();
+        assert_eq!(unordered_values, [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6]);
         let reader = directory
             .layer(ParallelReadLayer::new(
                 NonZeroUsize::new(3).unwrap(),

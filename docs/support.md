@@ -139,7 +139,7 @@ one metadata page at a time; callers own continuation, pacing, and retry policy.
 | Generated columns | Implemented | Row-level SQL expressions and final projection; [source projection pushdown deferred](generated-columns.md) |
 | Metrics, timeout, read budgets | Planned | Observation and resource policies |
 | Partition planning / parallel scans | Planned | Source-aware work units and bounded execution |
-| Unordered emission | Planned | Optional output policy, subject to source ordering requirements |
+| Unordered emission | Implemented | Explicit `UnorderedEmissionLayer`; requires a reorderable scan; independent of parallel execution |
 
 `layers/` includes Arrow type conversion and generated-column record layers. Backend-specific OpenDAL layers can already be configured on the
 operator; they are distinct from this project's accessor layers.
