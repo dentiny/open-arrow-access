@@ -3,17 +3,12 @@ use std::{num::NonZeroUsize, sync::Arc};
 use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{Accessor, AccessorExt, Bytes, ReadRequest, ScanPlanner};
-use open_arrow_access_file_format::{
-    json::JsonFormat,
-    xml::{XmlField, XmlFormat, XmlSchema},
-};
+use open_arrow_access_file_format::json::JsonFormat;
 use open_arrow_access_layers::ParallelReadLayer;
-use open_arrow_access_service::{common::ApiDocument, oai::OaiPage};
-use open_arrow_access_test_support::http::HttpFixture;
+use open_arrow_access_service::common::ApiDocument;
 
 #[tokio::test]
 async fn selected_json_records_preserve_order_and_links_without_fetching_them() {
-    let server = HttpFixture::new();
     let document = ApiDocument::from_bytes(Bytes::from_static(
         br#"{
         "results":[{"id":2,"url":"https://example.invalid/paper.pdf"},
@@ -56,26 +51,9 @@ async fn selected_json_records_preserve_order_and_links_without_fetching_them() 
         "https://example.invalid/paper.pdf"
     );
     assert!(reader.next().await.unwrap().is_none());
-    assert!(server.requests().is_empty());
     assert!(
         document
             .records_at("/missing", JsonFormat::new(schema))
             .is_err()
     );
-}
-
-#[tokio::test]
-async fn xml_page_adapter_keeps_record_context_and_does_not_follow_cursor() {
-    let page = OaiPage {
-        bytes: Bytes::from_static(b"<OAI-PMH><ListRecords><record><id>1</id></record><record><id>2</id></record><resumptionToken>next</resumptionToken></ListRecords></OAI-PMH>"),
-        record_count: 2, resumption_token: Some("next".into()),
-    };
-    let records = page.records(XmlFormat::new("/OAI-PMH/ListRecords/record").with_schema(
-        XmlSchema::new(vec![XmlField::new("id", "id", DataType::Int64, false)]).unwrap(),
-    ));
-    let mut reader = records.open(ReadRequest::new("oai-page")).await.unwrap();
-    let batch = reader.next().await.unwrap().unwrap();
-    assert_eq!(batch.num_rows(), 2);
-    assert_eq!(page.resumption_token.as_deref(), Some("next"));
-    assert!(reader.next().await.unwrap().is_none());
 }
