@@ -123,3 +123,21 @@ async fn dropping_stream_reader_releases_unpolled_or_partially_consumed_streams(
         assert_eq!(calls.load(Ordering::SeqCst), usize::from(consume));
     }
 }
+
+#[tokio::test]
+async fn buffered_bytes_preserve_metadata_and_never_emit_empty_chunks() {
+    use open_arrow_access_core::{Bytes, ObjectRef, bytes_reader};
+
+    for bytes in [Bytes::new(), Bytes::from_static(b"buffered input")] {
+        let source = ObjectRef::new("page.xml");
+        let mut reader = bytes_reader(bytes.clone(), Some(source.clone()));
+        assert_eq!(reader.metadata().source.as_ref(), Some(&source));
+        assert_eq!(reader.metadata().content_length, Some(bytes.len() as u64));
+        let expected = (!bytes.is_empty()).then_some(bytes.clone());
+        assert_eq!(reader.next().await.unwrap(), expected);
+        assert!(reader.next().await.unwrap().is_none());
+        assert!(reader.next().await.unwrap().is_none());
+        assert_eq!(reader.metadata().source.as_ref(), Some(&source));
+        assert_eq!(reader.metadata().content_length, Some(bytes.len() as u64));
+    }
+}

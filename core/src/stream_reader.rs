@@ -2,7 +2,7 @@ use std::pin::Pin;
 
 use futures::{Stream, StreamExt};
 
-use crate::{ByteMetadata, ByteReader, Bytes, Capability, Reader, Result, async_trait};
+use crate::{ByteMetadata, ByteReader, Bytes, Capability, ObjectRef, Reader, Result, async_trait};
 
 /// Adapt an owned stream of shared results into a sequential [`Reader`].
 ///
@@ -82,3 +82,17 @@ where
 
 #[async_trait]
 impl<S> ByteReader for StreamReader<S, ByteMetadata> where S: Stream<Item = Result<Bytes>> + Send {}
+
+/// Read an owned buffer once, retaining its source and byte length after EOF.
+/// Empty buffers start at EOF rather than emitting an empty byte chunk.
+pub fn bytes_reader(bytes: Bytes, source: Option<ObjectRef>) -> impl ByteReader {
+    let metadata = ByteMetadata {
+        source,
+        content_length: Some(bytes.len() as u64),
+        version: None,
+    };
+    StreamReader::new(
+        futures::stream::iter((!bytes.is_empty()).then_some(Ok(bytes))),
+        metadata,
+    )
+}
