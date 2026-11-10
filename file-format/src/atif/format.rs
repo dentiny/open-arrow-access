@@ -41,7 +41,7 @@ impl ReaderFactory for AtifFormat {
                 schema,
                 source: Some(request.object),
             },
-            1,
+            /*first_index=*/ 1,
         )))
     }
 }
