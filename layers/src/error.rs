@@ -34,10 +34,6 @@ pub(crate) fn invalid_generated_column(column: &str, message: impl std::fmt::Dis
     )
 }
 
-pub(crate) fn invalid_generated_expression(message: &str) -> datafusion::error::DataFusionError {
-    datafusion::error::DataFusionError::Plan(message.into())
-}
-
 pub(crate) fn generated_plan_error(
     column: &str,
     error: datafusion::error::DataFusionError,

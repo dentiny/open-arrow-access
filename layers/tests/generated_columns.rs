@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    error::Error as _,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -17,7 +18,7 @@ use open_arrow_access_core::{
 use open_arrow_access_layers::{
     ColumnTypeSpec, GeneratedColumnSpec, GeneratedColumnsLayer, TypeConversionLayer,
 };
-use open_arrow_access_test_support::reader::assert_finished;
+use open_arrow_access_test_support::reader::{assert_finished, assert_terminal_error};
 
 fn layer(specs: &[(&str, &str)]) -> GeneratedColumnsLayer {
     GeneratedColumnsLayer::try_new(
@@ -179,6 +180,69 @@ async fn expressions_preserve_order_metadata_nulls_and_source_buffers() {
 }
 
 #[tokio::test]
+async fn empty_configuration_delegates_projection() {
+    for generated in [GeneratedColumnsLayer::default(), layer(&[])] {
+        for names in [vec!["text", "Count"], vec![]] {
+            let input = input();
+            let mut reader = MemoryAccessor::new(vec![input.clone()])
+                .layer(generated.clone())
+                .open(request(&names))
+                .await
+                .unwrap();
+            let batch = reader.next().await.unwrap().unwrap();
+            assert_eq!(batch.num_rows(), input.num_rows());
+            assert_eq!(batch.num_columns(), names.len());
+            assert_eq!(batch.schema(), reader.metadata().schema);
+            for (index, name) in names.iter().enumerate() {
+                assert!(Arc::ptr_eq(
+                    batch.column(index),
+                    input.column_by_name(name).unwrap()
+                ));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn runtime_error_is_terminal_and_releases_input_even_when_hidden() {
+    for names in [vec!["broken"], vec!["text"], vec![]] {
+        let input = input();
+        // Emit one valid batch, then divide by zero, with unread input remaining.
+        let source = MemoryAccessor::new(vec![
+            input.slice(0, 1),
+            input.slice(2, 1),
+            input.slice(0, 1),
+        ]);
+        let polls = source.polls.clone();
+        let mut reader = source
+            .layer(layer(&[("broken", "10 / (\"Count\" - 4)")]))
+            .open(request(&names))
+            .await
+            .unwrap();
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
+        // The stream owns the only other polling-counter reference.
+        assert_eq!(Arc::strong_count(&polls), 2);
+        let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(batch.num_rows(), 1);
+        if names == ["broken"] {
+            assert_eq!(
+                batch.column(0).to_data(),
+                Int64Array::from(vec![-5]).to_data()
+            );
+        }
+        let error = assert_terminal_error(reader.as_mut(), &polls, ErrorKind::Decode, |m| {
+            (m.schema.clone(), m.source.clone())
+        })
+        .await;
+        assert_eq!(error.operation(), "generate_column");
+        assert!(error.to_string().contains("broken"), "{error}");
+        assert!(error.source().is_some());
+        assert_eq!(polls.load(Ordering::SeqCst), 2);
+        assert_eq!(Arc::strong_count(&polls), 1);
+    }
+}
+
+#[tokio::test]
 async fn final_projection_keeps_dependencies_and_zero_column_row_counts() {
     for names in [vec!["twice"], vec!["twice", "text"], vec![]] {
         let mut reader = MemoryAccessor::new(vec![input()])
@@ -249,6 +313,7 @@ async fn invalid_expressions_fail_at_open_even_when_hidden() {
             .unwrap();
         assert_eq!(error.kind(), ErrorKind::InvalidInput, "{specs:?}: {error}");
         assert_eq!(polls.load(Ordering::SeqCst), 0);
+        assert_eq!(Arc::strong_count(&polls), 1);
     }
     for names in [vec!["missing"], vec!["x", "x"]] {
         assert!(
@@ -296,9 +361,13 @@ async fn csv_and_parallel_reads_share_one_generation_context() {
             NonZeroUsize::new(2).unwrap(),
             NonZeroUsize::MIN,
         ))
-        .layer(layer(&[("x", "n * 2"), ("started", "now()")]));
+        .layer(layer(&[
+            ("x", "n * 2"),
+            ("started", "now()"),
+            ("started_again", "now()"),
+        ]));
     assert!(source.capability().read_parallel);
-    let mut req = request(&["x", "started"]);
+    let mut req = request(&["x", "started", "started_again"]);
     req.options.batch_size = NonZeroUsize::MIN;
     let mut reader = source.open(req).await.unwrap();
     assert!(reader.capability().read_parallel);
@@ -307,6 +376,7 @@ async fn csv_and_parallel_reads_share_one_generation_context() {
     let mut started = None;
     for expected in [2, 4, 6, 8] {
         let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(batch.column(1).to_data(), batch.column(2).to_data());
         assert_eq!(
             batch.column(0).to_data(),
             Int64Array::from(vec![expected]).to_data()

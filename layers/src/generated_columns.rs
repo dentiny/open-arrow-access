@@ -14,8 +14,11 @@ use open_arrow_access_core::{
 };
 
 use crate::{
-    error::{generated_batch_error, generated_column_error, generated_plan_error},
-    validation::{validate_expression, validate_generated_column_name, validate_generated_specs},
+    error::{
+        generated_batch_error, generated_column_error, generated_plan_error,
+        invalid_generated_column,
+    },
+    validation::{validate_expression, validate_generated_specs},
 };
 
 /// One row-level SQL expression. May reference source and earlier generated fields.
@@ -99,7 +102,12 @@ where
             .collect();
         let mut steps = Vec::with_capacity(self.specs.len());
         for spec in self.specs.iter() {
-            validate_generated_column_name(&spec.column, &mut column_names)?;
+            if !column_names.insert(&spec.column) {
+                return Err(invalid_generated_column(
+                    &spec.column,
+                    "column already exists",
+                ));
+            }
             let (expression, output) = plan_expression(&state, &spec.expression, &schema)
                 .map_err(|error| generated_plan_error(&spec.column, error))?;
             let mut metadata = output.metadata().clone();
