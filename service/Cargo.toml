@@ -53,7 +53,7 @@ pmc = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/gzip",
 ]
-regulations = []
+regulations = ["record-files"]
 semantic-scholar = []
 uspto = []
 warc = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
