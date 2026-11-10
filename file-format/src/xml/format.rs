@@ -1,7 +1,8 @@
-use super::{reader::xml_reader, xml_error};
+use super::xml_error;
+use futures::TryStreamExt;
 use open_arrow_access_core::{
     ByteReader, Error, ErrorKind, FactoryToken, ReadRequest, ReaderFactory, RecordMetadata,
-    RecordReader, Result, SchemaRef, async_trait, into_async_read,
+    RecordReader, Result, SchemaRef, async_trait, into_async_read, record_stream_reader,
 };
 use xml_arrow::{InferenceOptions, NamespaceBinding, ReaderOptions, XmlReader, XmlSchema};
 
@@ -174,8 +175,8 @@ impl ReaderFactory for XmlFormat {
             let (schema, projection) = request.options.resolve_projection(&reader.schema())?;
             (reader, schema, projection)
         };
-        Ok(Box::new(xml_reader(
-            reader,
+        Ok(Box::new(record_stream_reader(
+            reader.into_stream().map_err(xml_error),
             RecordMetadata {
                 schema,
                 source: Some(request.object),

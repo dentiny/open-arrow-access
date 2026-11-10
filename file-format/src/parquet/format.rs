@@ -1,7 +1,8 @@
-use super::{decode_error, input::ParquetInput, reader::parquet_reader};
+use super::{decode_error, input::ParquetInput};
+use futures::TryStreamExt;
 use open_arrow_access_core::{
     ByteReader, Capability, Error, ErrorKind, FactoryToken, FieldNameIndex, ReadRequest,
-    ReaderFactory, RecordMetadata, RecordReader, Result, async_trait,
+    ReaderFactory, RecordMetadata, RecordReader, Result, async_trait, record_stream_reader,
 };
 use parquet::arrow::{ProjectionMask, async_reader::ParquetRecordBatchStreamBuilder};
 
@@ -72,8 +73,9 @@ impl ReaderFactory for ParquetFormat {
             .transpose()
             .map_err(|e| decode_error("project", e))?
             .filter(|indices| indices.iter().copied().ne(0..indices.len()));
-        Ok(Box::new(parquet_reader(
-            stream,
+        // TODO: Decode row groups concurrently while preserving row order.
+        Ok(Box::new(record_stream_reader(
+            stream.map_err(|error| decode_error("decode_parquet", error)),
             RecordMetadata {
                 schema,
                 source: Some(request.object),
