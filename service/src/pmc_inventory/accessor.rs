@@ -1,8 +1,8 @@
 use super::{manifest, reader::InventoryTransform};
 use arrow_schema::Schema;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, Capability, ReadRequest, RecordReader, Result,
-    async_trait,
+    Accessor, ByteAccessor, ByteReadRequest, Capability, ObjectRef, ReadRequest, RecordMetadata,
+    RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -36,7 +36,21 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
             list: false,
         }
     }
-    async fn open(&self, mut request: ReadRequest) -> Result<Box<dyn RecordReader>> {
+    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
+        let (transform, files, request) = self.prepare_scan(request).await?;
+        Ok(Box::new(transform.create_reader(
+            self.inner.clone(),
+            files,
+            request,
+        )))
+    }
+}
+
+impl<A: ByteAccessor + 'static> PmcInventoryAccessor<A> {
+    async fn prepare_scan(
+        &self,
+        mut request: ReadRequest,
+    ) -> Result<(InventoryTransform, Vec<ObjectRef>, ReadRequest)> {
         let manifest = manifest::read(
             self.inner.as_ref(),
             ByteReadRequest::new(request.object.clone()).with_options(request.byte_options),
@@ -74,16 +88,43 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
             output_projection,
             output_schema,
         };
-        Ok(Box::new(
-            transform.create_reader(
-                self.inner.clone(),
-                manifest
-                    .files
-                    .into_iter()
-                    .map(|file| file.key.into())
-                    .collect(),
-                request,
-            ),
+        Ok((
+            transform,
+            manifest
+                .files
+                .into_iter()
+                .map(|file| file.key.into())
+                .collect(),
+            request,
         ))
+    }
+}
+
+#[async_trait]
+impl<A: ByteAccessor + 'static> ScanPlanner for PmcInventoryAccessor<A> {
+    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
+        let (transform, files, request) = self.prepare_scan(request).await?;
+        let metadata = RecordMetadata {
+            schema: transform.output_schema.clone(),
+            source: Some(request.object.clone()),
+        };
+        let partitions = files
+            .into_iter()
+            .map(|file| {
+                let transform = transform.clone();
+                let source = self.inner.clone();
+                let request = request.clone();
+                Box::pin(async move {
+                    Ok(
+                        Box::new(transform.create_reader(source, vec![file], request))
+                            as Box<dyn RecordReader>,
+                    )
+                }) as ScanPartition
+            })
+            .collect();
+        Ok(ScanPlan {
+            metadata,
+            partitions,
+        })
     }
 }
