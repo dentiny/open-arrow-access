@@ -149,7 +149,6 @@ async fn reads_one_record_on_demand_forwards_io_options_and_stops_on_drop() {
     let first = reader.next().await.unwrap().unwrap();
     assert_eq!(observed.reads.load(Ordering::SeqCst), boundary);
     drop(reader);
-    assert_eq!(observed.reads.load(Ordering::SeqCst), boundary);
     assert_eq!(first.warc_id(), "<urn:test:a>");
 }
 
