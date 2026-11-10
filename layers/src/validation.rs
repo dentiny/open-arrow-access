@@ -291,32 +291,20 @@ pub(crate) fn validate_generated_specs(specs: &[crate::GeneratedColumnSpec]) -> 
     Ok(())
 }
 
-pub(crate) fn validate_generated_column_name<'a>(
-    column: &'a str,
-    names: &mut HashSet<&'a str>,
-) -> Result<()> {
-    if !names.insert(column) {
-        return Err(crate::error::invalid_generated_column(
-            column,
-            "column already exists",
-        ));
-    }
-    Ok(())
-}
-
 pub(crate) fn validate_expression(
     expression: &datafusion::logical_expr::Expr,
 ) -> datafusion::error::Result<()> {
     use datafusion::{
-        common::tree_node::{TreeNode, TreeNodeRecursion},
+        common::{
+            plan_err,
+            tree_node::{TreeNode, TreeNodeRecursion},
+        },
         logical_expr::Expr,
     };
 
     expression.apply(|expr| {
         if expr.is_volatile_node() {
-            return Err(crate::error::invalid_generated_expression(
-                "volatile functions are not supported",
-            ));
+            return plan_err!("volatile functions are not supported");
         }
         if matches!(
             expr,
@@ -329,9 +317,7 @@ pub(crate) fn validate_expression(
                 | Expr::GroupingSet(_)
                 | Expr::Unnest(_)
         ) {
-            return Err(crate::error::invalid_generated_expression(
-                "only row-level expressions are supported",
-            ));
+            return plan_err!("only row-level expressions are supported");
         }
         Ok(TreeNodeRecursion::Continue)
     })?;

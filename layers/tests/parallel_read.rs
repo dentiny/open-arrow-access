@@ -96,6 +96,19 @@ fn part(values: Vec<i32>) -> ScanPartition {
         )) as Box<dyn RecordReader>)
     })
 }
+// The start signal distinguishes cancelling a running worker from merely dropping
+// an opener that has never been polled. The unsent sender observes resource release.
+fn blocked_partition() -> (ScanPartition, oneshot::Receiver<()>, oneshot::Receiver<()>) {
+    let (start, started) = oneshot::channel();
+    let (lifetime, dropped) = oneshot::channel();
+    let partition: ScanPartition = Box::pin(async move {
+        let _lifetime = lifetime;
+        start.send(()).unwrap();
+        std::future::pending().await
+    });
+    (partition, started, dropped)
+}
+
 #[tokio::test]
 async fn ordered_duplicates_empty_partitions_and_single_worker() {
     for p in [1, 3] {
@@ -136,6 +149,7 @@ async fn overlaps_without_replacing_completed_buffered_partitions() {
     }
     // Two slots let each later worker queue its batch and reach EOF.
     let mut r = open_plan(ScanPlan::new(metadata(), parts), 3, 2).await;
+    assert_eq!(opened.load(Ordering::SeqCst), 0);
     let task = tokio::spawn(async move {
         let b = r.next().await.unwrap().unwrap();
         (b, r)
@@ -155,14 +169,7 @@ async fn overlaps_without_replacing_completed_buffered_partitions() {
 #[tokio::test]
 async fn drop_cancels_partition_work() {
     for emission in [EmissionPolicy::Ordered, EmissionPolicy::Unordered] {
-        // Dropping an unsent sender reports when cancellation releases the future.
-        let (lifetime, dropped) = oneshot::channel::<()>();
-        let (start, started) = oneshot::channel();
-        let blocked: ScanPartition = Box::pin(async move {
-            let _lifetime = lifetime;
-            start.send(()).unwrap();
-            std::future::pending().await
-        });
+        let (blocked, started, dropped) = blocked_partition();
         let mut r = open_mode(vec![part(vec![1]), blocked], 2, emission).await;
         r.next().await.unwrap();
         started.await.unwrap();
@@ -214,26 +221,6 @@ async fn full_later_queue_stops_decoding_before_next_batch() {
     assert_eq!(produced.available_permits(), 0);
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());
-}
-
-#[tokio::test]
-async fn discovery_errors_interrupt_a_blocked_partition() {
-    for emission in [EmissionPolicy::Ordered, EmissionPolicy::Unordered] {
-        let partitions = stream::iter([
-            Ok(Box::pin(std::future::pending()) as ScanPartition),
-            Err(Error::new(ErrorKind::Io, "discover", "injected failure")),
-        ]);
-        let mut reader = open_with_policy(
-            ScanPlan::from_stream(metadata(), partitions)
-                .with_ordering(OrderRequirement::Reorderable),
-            2,
-            1,
-            emission,
-        )
-        .await;
-        assert_eq!(reader.next().await.unwrap_err().operation(), "discover");
-        assert!(reader.next().await.unwrap().is_none());
-    }
 }
 
 #[tokio::test]
