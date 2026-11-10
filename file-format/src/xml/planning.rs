@@ -91,7 +91,6 @@ struct XmlFrames {
     path: Vec<String>,
     ancestors: Vec<BytesStart<'static>>,
     matches: Vec<bool>,
-    ancestor_bytes: usize,
     root_seen: bool,
     bom: u64,
     declaration: Option<Event<'static>>,
@@ -120,7 +119,6 @@ impl XmlFrames {
                 .collect(),
             ancestors: Vec::new(),
             matches: Vec::new(),
-            ancestor_bytes: 0,
             root_seen: false,
             bom,
             declaration: None,
@@ -148,14 +146,23 @@ impl XmlFrames {
             buffer.clear();
             let event = self.reader.read_event_into_async(&mut buffer).await;
             if allowance - self.reader.get_mut().get_mut().limit() > limit {
-                return Err(error::limit("XML event exceeds max_record_bytes"));
+                return Err(error::limit(
+                    xml_arrow::Limit::EventBytes,
+                    self.limits.max_record_bytes,
+                    self.position(),
+                ));
             }
             let event = event.map_err(error::framing)?.into_owned();
             let empty = matches!(event, Event::Empty(_));
             let closes = empty || matches!(event, Event::End(_));
             match &event {
                 Event::Start(start) | Event::Empty(start) => {
-                    validation::enter(self.root_seen, self.ancestors.len(), self.limits.max_depth)?;
+                    validation::enter(
+                        self.root_seen,
+                        self.ancestors.len(),
+                        self.limits.max_depth,
+                        self.position(),
+                    )?;
                     if self.ancestors.is_empty() {
                         self.root_seen = true;
                     }
@@ -191,12 +198,6 @@ impl XmlFrames {
                         }
                         capture = Some(writer);
                     }
-                    self.ancestor_bytes = self.ancestor_bytes.saturating_add(start.len() + 2);
-                    if self.ancestor_bytes > self.limits.max_record_bytes {
-                        return Err(error::limit(
-                            "XML ancestor envelope exceeds max_record_bytes",
-                        ));
-                    }
                     self.ancestors.push(start.clone());
                     self.matches.push(matches);
                 }
@@ -217,9 +218,6 @@ impl XmlFrames {
             }
             if let Some(writer) = &mut capture {
                 writer.write_event(event.clone()).map_err(error::framing)?;
-                if writer.get_ref().len() > self.limits.max_batch_bytes {
-                    return Err(error::limit("framed XML document exceeds max_batch_bytes"));
-                }
             } else if self.ancestors.is_empty() && !matches!(event, Event::End(_)) {
                 let allowed = match &event {
                     Event::Text(text) => text
@@ -233,9 +231,7 @@ impl XmlFrames {
             }
             let complete = closes && capture.is_some() && self.ancestors.len() == self.path.len();
             if closes {
-                if let Some(ancestor) = self.ancestors.pop() {
-                    self.ancestor_bytes -= ancestor.len() + 2;
-                }
+                self.ancestors.pop();
                 self.matches.pop();
             }
             if complete {
@@ -244,9 +240,6 @@ impl XmlFrames {
                     writer
                         .write_event(Event::End(ancestor.to_end()))
                         .map_err(error::framing)?;
-                }
-                if writer.get_ref().len() > self.limits.max_batch_bytes {
-                    return Err(error::limit("framed XML document exceeds max_batch_bytes"));
                 }
                 return Ok(Some(writer.into_inner().into()));
             }

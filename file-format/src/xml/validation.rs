@@ -8,9 +8,18 @@ pub(super) fn outside_root(allowed: bool) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn enter(root_seen: bool, depth: usize, max_depth: usize) -> Result<()> {
+pub(super) fn enter(
+    root_seen: bool,
+    depth: usize,
+    max_depth: usize,
+    byte_offset: u64,
+) -> Result<()> {
     if depth == max_depth {
-        return Err(error::limit("XML depth exceeds max_depth"));
+        return Err(error::limit(
+            xml_arrow::Limit::Depth,
+            max_depth,
+            byte_offset,
+        ));
     }
     if depth == 0 && root_seen {
         return Err(error::invalid("multiple document elements"));

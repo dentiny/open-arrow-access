@@ -494,7 +494,7 @@ async fn parallel_xml_rejects_invalid_document_tails_and_dtds() {
 }
 
 #[tokio::test]
-async fn parallel_xml_bounds_event_context_and_depth() {
+async fn parallel_xml_preserves_native_event_and_depth_limits() {
     let oversized = format!("<rows note='{}'><row id='1'/></rows>", "x".repeat(80));
     for (raw, max_depth) in [
         (oversized.as_bytes(), 8),
@@ -515,10 +515,42 @@ async fn parallel_xml_bounds_event_context_and_depth() {
             .open(ReadRequest::new("limits.xml"))
             .await
             .unwrap();
-        assert_eq!(
-            reader.next().await.unwrap_err().kind(),
-            ErrorKind::ResourceExhausted
-        );
+        assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
         assert!(reader.next().await.unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn parallel_xml_accepts_large_ancestor_envelopes_accepted_sequentially() {
+    // Each event and the selected record fit the native 64-byte limit, while the
+    // combined ancestor envelope exceeds both record and batch byte settings.
+    let raw = format!(
+        "<r note='{}'><s note='{}'><row id='1'/></s></r>",
+        "x".repeat(48),
+        "y".repeat(48)
+    );
+    for projection in [None, Some(&[][..])] {
+        let accessor = XmlAccessor::new(MemoryAccessor::new(raw.as_bytes(), 1), "/r/s/row")
+            .with_schema(XmlSchema::new(vec![XmlField::new("id", "@id", Int64, false)]).unwrap())
+            .with_limits(XmlLimits {
+                max_record_bytes: 64,
+                max_batch_bytes: 64,
+                max_depth: 8,
+            });
+        let request = request("large-envelope.xml", 1, projection);
+        let expected = planned_rows(accessor.open(request.clone()).await.unwrap()).await;
+        assert_eq!(expected.len(), 1);
+        let actual = planned_rows(
+            accessor
+                .layer(ParallelReadLayer::new(
+                    NonZeroUsize::new(2).unwrap(),
+                    NonZeroUsize::new(1).unwrap(),
+                ))
+                .open(request)
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(actual, expected);
     }
 }

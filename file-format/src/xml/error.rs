@@ -17,6 +17,10 @@ pub(super) fn invalid(message: &'static str) -> Error {
     Error::new(ErrorKind::Decode, "frame_xml", message)
 }
 
-pub(super) fn limit(message: &'static str) -> Error {
-    Error::new(ErrorKind::ResourceExhausted, "frame_xml", message)
+pub(super) fn limit(kind: xml_arrow::Limit, limit: usize, byte_offset: u64) -> Error {
+    xml_error(xml_arrow::ReadError::LimitExceeded {
+        kind,
+        limit,
+        byte_offset,
+    })
 }

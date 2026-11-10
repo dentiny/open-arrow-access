@@ -6,10 +6,12 @@
 //! path. This preserves namespace aliases and default-namespace overrides.
 //! Inferred schemas retain one bounded sample/replay reader in a whole-input plan.
 //!
-//! Parallel planning bounds retained ancestor tags by `max_record_bytes` and each
-//! serialized envelope/record by `max_batch_bytes`. These framing limits exclude
-//! upstream buffers and Arrow allocations. Decoder offsets are relative to the
-//! framed document; planning does not provide random storage reads.
+//! Framing preserves the sequential reader's event and depth checks; the
+//! authoritative decoder retains the ordinary record and batch limits. Complete
+//! ancestor envelopes are retained with their records and may exceed those byte
+//! targets: the parallel task window bounds partition counts, not total memory.
+//! Decoder offsets are relative to the framed document; planning does not provide
+//! random storage reads.
 
 mod accessor;
 mod error;
