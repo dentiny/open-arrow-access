@@ -1,4 +1,7 @@
-use futures::{TryStreamExt, stream::BoxStream};
+use futures::{
+    Stream, TryStreamExt,
+    stream::{self, BoxStream},
+};
 use open_arrow_access_core::Result;
 
 /// Batches complete records with one-record lookahead and a soft byte target.
@@ -16,7 +19,24 @@ impl<T> RecordChunks<T> {
         }
     }
 
-    pub(crate) async fn next_chunk(
+    pub(crate) fn into_stream(
+        self,
+        rows: usize,
+        target_bytes: usize,
+        size: impl Fn(&T) -> usize + Send + Sync + 'static,
+    ) -> impl Stream<Item = Result<Vec<T>>> + Send
+    where
+        T: Send + 'static,
+    {
+        stream::try_unfold((self, size), move |(mut chunks, size)| async move {
+            Ok(chunks
+                .next_chunk(rows, target_bytes, &size)
+                .await?
+                .map(|records| (records, (chunks, size))))
+        })
+    }
+
+    async fn next_chunk(
         &mut self,
         rows: usize,
         target_bytes: usize,

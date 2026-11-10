@@ -1,4 +1,4 @@
-use futures::{StreamExt, stream};
+use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, ReadRequest, ReaderFactory, RecordMetadata,
     RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, StreamReader, async_trait,
@@ -45,14 +45,10 @@ where
         let rows = request.options.batch_size.get();
         let target_bytes = self.partition_options.target_bytes.get();
         let output = metadata.clone();
-        let partitions = stream::try_unfold(chunks, move |mut chunks| {
-            let metadata = output.clone();
-            async move {
-                let Some(records) = chunks.next_chunk(rows, target_bytes, record_size).await?
-                else {
-                    return Ok(None);
-                };
-                let partition: ScanPartition = Box::pin(async move {
+        let partitions = chunks.into_stream(rows, target_bytes, record_size).map_ok(
+            move |records| -> ScanPartition {
+                let metadata = output.clone();
+                Box::pin(async move {
                     let mut batch = new_batch(&metadata.schema)?;
                     let source = metadata.source.as_ref().unwrap().locator();
                     for (headers, body) in records {
@@ -66,10 +62,9 @@ where
                         Box::new(StreamReader::new(stream::iter([Ok(batch)]), metadata))
                             as Box<dyn RecordReader>,
                     )
-                });
-                Ok(Some((partition, chunks)))
-            }
-        });
+                })
+            },
+        );
         Ok(ScanPlan::from_stream(metadata, partitions))
     }
 }
