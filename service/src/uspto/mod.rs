@@ -1,6 +1,4 @@
-//! USPTO Open Data Portal bulk product discovery and original file access.
-//!
-//! Preserves validated product identity and file-list pagination.
+//! USPTO Open Data Portal bulk products, paginated file lists and original downloads.
 mod error;
 mod parser;
 mod validation;

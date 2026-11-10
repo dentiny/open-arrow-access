@@ -1,6 +1,4 @@
 //! bioRxiv and medRxiv metadata pages with lazy JATS access.
-//!
-//! Preserves observed API cursor order and validated JATS-link membership.
 mod error;
 mod parser;
 mod resolver;

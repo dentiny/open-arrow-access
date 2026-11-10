@@ -1,6 +1,4 @@
-//! A published Dataverse dataset version exposed as independently readable files.
-//!
-//! Preserves published persistent ID/version and original-download representation.
+//! Published Dataverse dataset versions and their original-download files.
 
 mod error;
 mod validation;

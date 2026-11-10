@@ -1,6 +1,4 @@
 //! OpenStax book repositories pinned to Git commit snapshots.
-//!
-//! Preserves resolved Git commit identity and commit-bound archive URLs.
 mod error;
 mod parser;
 mod resolver;
