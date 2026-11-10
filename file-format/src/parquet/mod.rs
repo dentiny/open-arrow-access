@@ -4,6 +4,7 @@ mod accessor;
 mod format;
 mod input;
 mod planning;
+mod validation;
 
 pub use accessor::ParquetAccessor;
 pub use format::ParquetFormat;

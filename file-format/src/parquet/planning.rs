@@ -7,8 +7,11 @@ use parquet::arrow::{
     async_reader::ParquetRecordBatchStreamBuilder,
 };
 
-use super::{ParquetAccessor, decode_error, format::create_reader, input::ParquetInput};
-use crate::error::{parquet_partition_changed, parquet_partition_input_error};
+use super::{
+    ParquetAccessor, decode_error, format::create_reader, input::ParquetInput,
+    validation::validate_input,
+};
+use crate::error::parquet_partition_changed;
 
 #[async_trait]
 impl<B> ScanPlanner for ParquetAccessor<B>
@@ -59,11 +62,4 @@ where
             partitions,
         })
     }
-}
-
-fn validate_input(input: &dyn ByteReader) -> Result<()> {
-    if !input.capability().read_with_range || input.metadata().content_length.is_none() {
-        return Err(parquet_partition_input_error());
-    }
-    Ok(())
 }
