@@ -173,10 +173,8 @@ async fn parallel_dataset_preserves_pinned_shard_order_and_partial_admission() {
         service.plan_scan(request()).await.err().unwrap().kind(),
         ErrorKind::NotFound
     );
-    assert!(
-        service
-            .plan_scan(request().with_partial_exports())
-            .await
-            .is_ok()
-    );
+    service
+        .plan_scan(request().with_partial_exports())
+        .await
+        .unwrap();
 }
