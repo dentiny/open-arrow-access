@@ -1,8 +1,8 @@
 # Ordered parallel reading
 
-`ParallelReadLayer` runs independent partitions on Tokio tasks and emits every
-partition in declared order. It does not change record order or enable unordered
-emission. FileSet preserves explicit duplicates and selection order; Directory
+`ParallelReadLayer` runs independent partitions on Tokio tasks and defaults to
+emitting every partition in declared order. The executor also supports an
+explicit unordered emission policy when the entire source is reorderable. FileSet preserves explicit duplicates and selection order; Directory
 uses the same validated, sorted discovery as sequential reads.
 
 ```rust,ignore
@@ -93,3 +93,25 @@ conservatively globally ordered. Later plans must honor a declared reorderable
 contract (including empty plans), as well as the fixed schema. Custom mixed
 accessors must preserve global order unless they can guarantee all selections
 are reorderable. Partition discovery remains lazy and does not add a snapshot.
+
+## Execution and emission settings
+
+Execution layers collect `ScanPlan::parallel_read` and `ScanPlan::emission` before
+starting workers. `ParallelReadOptions` holds one resident-partition and prefetch
+budget. Different parallel budgets on the same composed scan are rejected rather
+than creating nested executors. Repeating the same budget is idempotent. Put these
+layers around the complete dataset scan; native file planning rejects child
+execution policies instead of silently discarding them during flattening.
+
+`EmissionPolicy::Ordered` is the default. `Unordered` is admitted only for a
+`Reorderable` plan; global order requirements cause an `InvalidInput` error before
+workers start, including for empty and single-partition scans. The public opt-in
+layer follows separately; custom planners can already set the plan policy.
+
+Unordered merging polls all resident receivers, returning ready batches without
+waiting for an earlier partition. FIFO order within each partition is retained;
+there is no guarantee of partition contiguity or a reproducible interleaving.
+Polling rotates among ready receivers to avoid starving a partition. Completed
+partitions retain their slots until their queues drain. Both policies share the
+same worker, reservation-before-decode backpressure, schema checks, fail-fast
+errors and drop cancellation. Queues bound batch counts, not total memory bytes.

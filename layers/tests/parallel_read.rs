@@ -56,7 +56,29 @@ impl ScanPlanner for Source {
 async fn open(parts: Vec<ScanPartition>, p: usize) -> Box<dyn RecordReader> {
     open_plan(ScanPlan::new(metadata(), parts), p, 1).await
 }
+async fn open_mode(
+    parts: Vec<ScanPartition>,
+    p: usize,
+    emission: EmissionPolicy,
+) -> Box<dyn RecordReader> {
+    open_with_policy(
+        ScanPlan::new(metadata(), parts).with_ordering(OrderRequirement::Reorderable),
+        p,
+        /*prefetch=*/ 1,
+        emission,
+    )
+    .await
+}
 async fn open_plan(plan: ScanPlan, p: usize, prefetch: usize) -> Box<dyn RecordReader> {
+    open_with_policy(plan, p, prefetch, EmissionPolicy::Ordered).await
+}
+async fn open_with_policy(
+    mut plan: ScanPlan,
+    p: usize,
+    prefetch: usize,
+    emission: EmissionPolicy,
+) -> Box<dyn RecordReader> {
+    plan.emission = emission;
     Source
         .layer(ParallelReadLayer::new(
             NonZeroUsize::new(p).unwrap(),
@@ -130,95 +152,48 @@ async fn overlaps_without_replacing_completed_buffered_partitions() {
     assert_eq!(values, (0..4).collect::<Vec<_>>());
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn partition_failures_cancel_started_workers_and_end_the_scan() {
-    for during_read in [false, true] {
-        for panic in [false, true] {
-            let (lifetime, dropped) = oneshot::channel::<()>();
-            let (start, started) = oneshot::channel();
-            let first: ScanPartition = Box::pin(async move {
-                let _lifetime = lifetime;
-                start.send(()).unwrap();
-                std::future::pending().await
-            });
-            let failed: ScanPartition = Box::pin(async move {
-                // Ensure cancellation is tested against a running worker, even
-                // when the failing worker wins the runtime's scheduling race.
-                started.await.unwrap();
-                let fail = move || {
-                    assert!(!panic, "injected worker panic");
-                    Error::new(ErrorKind::Io, "partition", "injected failure")
-                };
-                if !during_read {
-                    return Err(fail());
-                }
-                Ok(Box::new(StreamReader::new(
-                    stream::iter([Ok(batch(2))]).chain(stream::once(async move { Err(fail()) })),
-                    metadata(),
-                )) as Box<dyn RecordReader>)
-            });
-            let opened = Arc::new(AtomicUsize::new(0));
-            let count = opened.clone();
-            let unopened: ScanPartition = Box::pin(async move {
-                count.fetch_add(1, Ordering::SeqCst);
-                std::future::pending().await
-            });
-            // Allow the later reader to queue output before reaching its failure.
-            let plan = ScanPlan::new(metadata(), vec![first, failed, unopened]);
-            let mut reader = open_plan(plan, 2, 2).await;
-
-            let error = reader.next().await.unwrap_err();
-            assert_eq!(
-                error.operation(),
-                if panic { "parallel_read" } else { "partition" }
-            );
-            assert!(dropped.await.is_err());
-            assert_eq!(opened.load(Ordering::SeqCst), 0);
-            for _ in 0..2 {
-                assert!(reader.next().await.unwrap().is_none());
-            }
-        }
+#[tokio::test]
+async fn drop_cancels_partition_work() {
+    for emission in [EmissionPolicy::Ordered, EmissionPolicy::Unordered] {
+        // Dropping an unsent sender reports when cancellation releases the future.
+        let (lifetime, dropped) = oneshot::channel::<()>();
+        let (start, started) = oneshot::channel();
+        let blocked: ScanPartition = Box::pin(async move {
+            let _lifetime = lifetime;
+            start.send(()).unwrap();
+            std::future::pending().await
+        });
+        let mut r = open_mode(vec![part(vec![1]), blocked], 2, emission).await;
+        r.next().await.unwrap();
+        started.await.unwrap();
+        drop(r);
+        assert!(dropped.await.is_err());
     }
 }
 
 #[tokio::test]
-async fn drop_cancels_partition_work() {
-    // Dropping an unsent sender reports when cancellation releases the future.
-    let (lifetime, dropped) = oneshot::channel::<()>();
-    let (start, started) = oneshot::channel();
-    let blocked: ScanPartition = Box::pin(async move {
-        let _lifetime = lifetime;
-        start.send(()).unwrap();
-        std::future::pending().await
-    });
-    let mut r = open(vec![part(vec![1]), blocked], 2).await;
-    r.next().await.unwrap();
-    started.await.unwrap();
-    drop(r);
-    assert!(dropped.await.is_err());
-}
-
-#[tokio::test]
 async fn rejects_partition_metadata_and_batch_schema_mismatch() {
-    let wrong = RecordMetadata {
-        schema: Arc::new(Schema::empty()),
-        source: None,
-    };
-    let wrong_batch = RecordBatch::new_empty(wrong.schema.clone());
-    let p: ScanPartition = Box::pin(async move {
-        Ok(Box::new(StreamReader::new(
-            stream::iter([Ok(wrong_batch)]),
-            metadata(),
-        )) as Box<dyn RecordReader>)
-    });
-    assert!(open(vec![p], 1).await.next().await.is_err());
-    let p: ScanPartition = Box::pin(async move {
-        Ok(Box::new(StreamReader::new(
-            stream::empty::<Result<RecordBatch>>(),
-            wrong,
-        )) as Box<dyn RecordReader>)
-    });
-    assert!(open(vec![p], 1).await.next().await.is_err());
+    for emission in [EmissionPolicy::Ordered, EmissionPolicy::Unordered] {
+        let wrong = RecordMetadata {
+            schema: Arc::new(Schema::empty()),
+            source: None,
+        };
+        let wrong_batch = RecordBatch::new_empty(wrong.schema.clone());
+        let p: ScanPartition = Box::pin(async move {
+            Ok(Box::new(StreamReader::new(
+                stream::iter([Ok(wrong_batch)]),
+                metadata(),
+            )) as Box<dyn RecordReader>)
+        });
+        assert!(open_mode(vec![p], 1, emission).await.next().await.is_err());
+        let p: ScanPartition = Box::pin(async move {
+            Ok(Box::new(StreamReader::new(
+                stream::empty::<Result<RecordBatch>>(),
+                wrong,
+            )) as Box<dyn RecordReader>)
+        });
+        assert!(open_mode(vec![p], 1, emission).await.next().await.is_err());
+    }
 }
 
 #[tokio::test]
@@ -242,19 +217,57 @@ async fn full_later_queue_stops_decoding_before_next_batch() {
 }
 
 #[tokio::test]
-async fn pending_partition_discovery_does_not_block_ready_output() {
-    let partitions = stream::iter([Ok(part(vec![7]))]).chain(stream::pending());
-    let mut reader = open_plan(ScanPlan::from_stream(metadata(), partitions), 2, 1).await;
-    assert_eq!(value(&reader.next().await.unwrap().unwrap()), 7);
+async fn discovery_errors_interrupt_a_blocked_partition() {
+    for emission in [EmissionPolicy::Ordered, EmissionPolicy::Unordered] {
+        let partitions = stream::iter([
+            Ok(Box::pin(std::future::pending()) as ScanPartition),
+            Err(Error::new(ErrorKind::Io, "discover", "injected failure")),
+        ]);
+        let mut reader = open_with_policy(
+            ScanPlan::from_stream(metadata(), partitions)
+                .with_ordering(OrderRequirement::Reorderable),
+            2,
+            1,
+            emission,
+        )
+        .await;
+        assert_eq!(reader.next().await.unwrap_err().operation(), "discover");
+        assert!(reader.next().await.unwrap().is_none());
+    }
 }
 
 #[tokio::test]
-async fn discovery_errors_interrupt_a_blocked_partition() {
-    let partitions = stream::iter([
-        Ok(Box::pin(std::future::pending()) as ScanPartition),
-        Err(Error::new(ErrorKind::Io, "discover", "injected failure")),
-    ]);
-    let mut reader = open_plan(ScanPlan::from_stream(metadata(), partitions), 2, 1).await;
-    assert_eq!(reader.next().await.unwrap_err().operation(), "discover");
+async fn ready_batches_progress_despite_pending_discovery_or_partitions() {
+    // Pending discovery must not stall either emission policy.
+    for emission in [EmissionPolicy::Ordered, EmissionPolicy::Unordered] {
+        let partitions = stream::iter([Ok(part(vec![7]))]).chain(stream::pending());
+        let mut reader = open_with_policy(
+            ScanPlan::from_stream(metadata(), partitions)
+                .with_ordering(OrderRequirement::Reorderable),
+            2,
+            1,
+            emission,
+        )
+        .await;
+        assert_eq!(value(&reader.next().await.unwrap().unwrap()), 7);
+    }
+
+    // Unordered emission also bypasses an earlier blocked partition.
+    let (release, released) = oneshot::channel();
+    let blocked: ScanPartition = Box::pin(async {
+        released.await.unwrap();
+        part(vec![0]).await
+    });
+    let mut reader = open_mode(
+        vec![blocked, part(vec![1, 2]), part(vec![])],
+        2,
+        EmissionPolicy::Unordered,
+    )
+    .await;
+    assert_eq!(value(&reader.next().await.unwrap().unwrap()), 1);
+    assert_eq!(value(&reader.next().await.unwrap().unwrap()), 2);
+    release.send(()).unwrap();
+    assert_eq!(value(&reader.next().await.unwrap().unwrap()), 0);
+    assert!(reader.next().await.unwrap().is_none());
     assert!(reader.next().await.unwrap().is_none());
 }

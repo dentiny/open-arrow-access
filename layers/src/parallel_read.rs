@@ -1,19 +1,24 @@
-use std::{collections::VecDeque, num::NonZeroUsize};
+use std::{collections::VecDeque, num::NonZeroUsize, task::Poll};
 
 use futures::{
     StreamExt,
+    future::poll_fn,
     stream::{self, BoxStream, Fuse, FusedStream},
 };
 
 use open_arrow_access_core::{
-    Accessor, Capability, Layer, Reader, RecordBatch, RecordMetadata, RecordReader, Result,
-    ScanPartition, ScanPlan, ScanPlanner, async_trait,
+    Accessor, Capability, EmissionPolicy, Layer, OrderRequirement, ParallelReadOptions, Reader,
+    RecordBatch, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner,
+    async_trait,
 };
 use tokio::{sync::mpsc, task::JoinSet};
 
-use crate::error::{partition_task_error, schema_error};
+use crate::{
+    error::{partition_task_error, schema_error},
+    validation::{validate_emission_policy, validate_parallel_read_settings},
+};
 
-/// Execute independent partitions concurrently, emitting them in logical order.
+/// Execute independent partitions concurrently, preserving logical order by default.
 /// Requires an active Tokio runtime.
 #[derive(Clone, Copy, Debug)]
 pub struct ParallelReadLayer {
@@ -69,8 +74,33 @@ impl<A: ScanPlanner> Accessor for ParallelReadAccessor<A> {
         // TODO: After parallel-read implementation is complete, verify support across
         // format, layer, directory, and service combinations, including partition
         // independence, preserved output order, and effective storage capabilities.
-        let plan = self.inner.plan_scan(request).await?;
-        Ok(Box::new(ParallelReader::new(plan, self.settings)))
+        open_plan(self.plan_scan(request).await?)
+    }
+}
+
+#[async_trait]
+impl<A: ScanPlanner> ScanPlanner for ParallelReadAccessor<A> {
+    fn order_requirement(&self) -> OrderRequirement {
+        self.inner.order_requirement()
+    }
+
+    async fn plan_scan(&self, request: Self::Request) -> Result<ScanPlan> {
+        let mut plan = self.inner.plan_scan(request).await?;
+        let settings = ParallelReadOptions {
+            partitions: self.settings.partitions,
+            prefetch: self.settings.prefetch,
+        };
+        validate_parallel_read_settings(plan.parallel_read, settings)?;
+        plan.parallel_read = Some(settings);
+        Ok(plan)
+    }
+}
+
+pub(crate) fn open_plan(plan: ScanPlan) -> Result<Box<dyn RecordReader>> {
+    validate_emission_policy(plan.emission, plan.ordering)?;
+    match plan.parallel_read {
+        Some(settings) => Ok(Box::new(ParallelReader::new(plan, settings))),
+        None => Ok(Box::new(plan.into_reader())),
     }
 }
 
@@ -79,17 +109,21 @@ struct ParallelReader {
     remaining: Fuse<BoxStream<'static, Result<ScanPartition>>>,
     partition_receivers: VecDeque<mpsc::Receiver<RecordBatch>>,
     tasks: JoinSet<Result<()>>,
-    settings: ParallelReadLayer,
+    settings: ParallelReadOptions,
+    emission: EmissionPolicy,
+    next_receiver: usize,
 }
 
 impl ParallelReader {
-    fn new(plan: ScanPlan, settings: ParallelReadLayer) -> Self {
+    fn new(plan: ScanPlan, settings: ParallelReadOptions) -> Self {
         Self {
             metadata: plan.metadata,
             remaining: plan.partitions.fuse(),
             partition_receivers: VecDeque::new(),
             tasks: JoinSet::new(),
             settings,
+            emission: plan.emission,
+            next_receiver: 0,
         }
     }
 
@@ -130,7 +164,9 @@ impl ParallelReader {
             let has_front = !self.partition_receivers.is_empty();
             let can_discover = !self.remaining.is_terminated()
                 && self.partition_receivers.len() < self.settings.partitions.get();
-            let front = self.partition_receivers.front_mut();
+            let receivers = &mut self.partition_receivers;
+            let next_receiver = &mut self.next_receiver;
+            let emission = self.emission;
             tokio::select! {
                 biased;
                 joined = self.tasks.join_next(), if !self.tasks.is_empty() => {
@@ -143,10 +179,28 @@ impl ParallelReader {
                         self.spawn_partition(partition?);
                     }
                 }
-                batch = async { front.unwrap().recv().await }, if has_front => {
+                (index, batch) = poll_fn(|cx| {
+                    let count = receivers.len();
+                    // Rotate the starting point so continuously ready partitions
+                    // cannot starve other readers. Each receiver preserves FIFO order.
+                    for offset in 0..count {
+                        let index = if emission == EmissionPolicy::Ordered {
+                            0
+                        } else {
+                            (*next_receiver + offset) % count
+                        };
+                        if let Poll::Ready(batch) = receivers[index].poll_recv(cx) {
+                            *next_receiver = (index + 1) % count;
+                            return Poll::Ready((index, batch));
+                        }
+                        if emission == EmissionPolicy::Ordered { break; }
+                    }
+                    Poll::Pending
+                }), if has_front => {
                     if batch.is_some() { return Ok(batch); }
-                    // Keep the resident slot until queued output has drained.
-                    self.partition_receivers.pop_front();
+                    // EOF only frees a resident slot after that receiver is drained.
+                    self.partition_receivers.remove(index);
+                    self.next_receiver = index;
                 }
                 else => return Ok(None),
             }
