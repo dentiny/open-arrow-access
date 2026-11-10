@@ -254,8 +254,8 @@ content mapping to `LargeBinary`; an ordinary JSON string is not silently treate
 as Arrow's hexadecimal binary representation. The binding does not perform that
 source-specific content mapping.
 
-`RecordPage::into_file_accessor()` exposes the owned page bytes through the selected
-native format accessor. After the format-specific planners are enabled, install
-`ParallelReadLayer` on this accessor to use JSON/XML file-internal framing. The
-RecordPage wrapper retains its conservative whole-page plan for compatibility;
-this explicit path changes decode planning, not API cursor acquisition.
+`RecordPage::plan_scan()` delegates to the native format planner, so installing
+`ParallelReadLayer` directly on a JSON/XML page uses file-internal framing.
+`into_file_accessor()` exposes format-specific settings. Application-defined
+formats without a native planner can use `plan_whole_page()` explicitly.
+These methods do not acquire additional API pages or follow continuation tokens.
