@@ -1,4 +1,3 @@
-
 ### Parquet row-group planning
 
 `ParquetAccessor` implements `ScanPlanner` when its byte accessor is cloneable
