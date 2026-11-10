@@ -40,7 +40,7 @@ impl ScanPlan {
         }
     }
 
-    /// Read partitions lazily in order, ending at the first error or EOF.
+    /// Open partitions lazily in order, stopping at the first discovery, open, or read error.
     pub fn into_reader(self) -> impl RecordReader {
         let batches = self
             .partitions
