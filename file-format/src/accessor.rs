@@ -27,6 +27,7 @@ use open_arrow_access_core::{
 #[derive(Clone, Debug)]
 pub struct FileAccessor<B, F> {
     pub(crate) binding: FactoryAccessor<B, F>,
+    pub(crate) partition_options: crate::DecodePartitionOptions,
 }
 
 impl<B, F> FileAccessor<B, F> {
@@ -34,11 +35,20 @@ impl<B, F> FileAccessor<B, F> {
     pub fn from_format(inner: B, format: F) -> Self {
         Self {
             binding: FactoryAccessor::new(inner, format),
+            partition_options: crate::DecodePartitionOptions::default(),
         }
     }
+    /// Configure bounded input units for supported file-internal decode planners.
+    /// This does not alter the ordinary sequential reader.
+    pub fn with_partition_options(mut self, options: crate::DecodePartitionOptions) -> Self {
+        self.partition_options = options;
+        self
+    }
+
     pub fn map_format(self, map: impl FnOnce(F) -> F) -> Self {
         Self {
             binding: self.binding.map_factory(map),
+            partition_options: self.partition_options,
         }
     }
 }
