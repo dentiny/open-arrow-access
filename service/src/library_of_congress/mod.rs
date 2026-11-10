@@ -1,4 +1,9 @@
 //! Library of Congress public metadata, resource files and original OCR responses.
+//!
+//! Resolved files expose `records(format)` for explicit Arrow decoding and scan
+//! planning. The adapter retains validated item metadata and permitted resource-file membership;
+//! metadata links are not followed automatically. API pages can bind an explicit
+//! JSON record selection with `ApiDocument::records_at`.
 mod error;
 mod resolver;
 mod validation;

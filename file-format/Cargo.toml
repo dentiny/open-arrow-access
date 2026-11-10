@@ -72,4 +72,4 @@ required-features = ["parquet"]
 
 [[test]]
 name = "document"
-required-features = ["json", "xml", "csv"]
+required-features = ["json"]
