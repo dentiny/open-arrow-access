@@ -1,8 +1,13 @@
-use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
+use futures::TryStreamExt;
+use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
+use open_arrow_access_layers::ParallelReadLayer;
+use std::{error::Error as _, io::Write, num::NonZeroUsize, sync::atomic::Ordering};
 
 use arrow_array::{RecordBatch, cast::AsArray};
 use atif_arrow::trajectory_schema;
-use open_arrow_access_core::{Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest};
+use open_arrow_access_core::{
+    Accessor, AccessorExt, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, ScanPlanner,
+};
 use open_arrow_access_file_format::atif::{AtifAccessor, AtifFormat};
 use open_arrow_access_test_support::{MemoryAccessor, fixture, format};
 
@@ -193,4 +198,51 @@ async fn jsonl_pulls_only_the_requested_batch_and_keeps_delivered_rows_on_later_
     assert!(error.to_string().contains("record 2:"));
     format::assert_finished(reader.as_mut(), &observations.reads).await;
     assert_eq!(text(&batch, "trajectory_id", 0), "first");
+}
+
+#[tokio::test]
+async fn parallel_gzip_trajectories_keep_global_indices_raw_json_and_projection() {
+    let mut bytes = b" \r\n".to_vec();
+    let source = fixture!("atif", "trajectories.jsonl").await;
+    bytes.extend_from_slice(&source);
+    bytes.extend_from_slice(b"\n\t\n");
+    bytes.extend_from_slice(&source);
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gzip.write_all(&bytes).unwrap();
+    let bytes = gzip.finish().unwrap();
+    for projection in [
+        None,
+        Some(vec!["source_record_index".into(), "raw_json".into()]),
+        Some(vec![]),
+    ] {
+        let accessor = AtifAccessor::new(
+            MemoryAccessor::new(&bytes, 1).layer(DecompressionLayer::new(Gzip)),
+            AtifFormat::JsonLines,
+        );
+        let request = ReadRequest::new("trajectories.jsonl").with_options(ReadOptions {
+            batch_size: NonZeroUsize::new(1).unwrap(),
+            projection,
+        });
+        let plan = accessor.plan_scan(request.clone()).await.unwrap();
+        assert_eq!(
+            plan.partitions.try_collect::<Vec<_>>().await.unwrap().len(),
+            6
+        );
+        let mut expected = accessor.open(request.clone()).await.unwrap();
+        let mut actual = accessor
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(3).unwrap(),
+                NonZeroUsize::new(1).unwrap(),
+            ))
+            .open(request)
+            .await
+            .unwrap();
+        loop {
+            let batch = expected.next().await.unwrap();
+            assert_eq!(actual.next().await.unwrap(), batch);
+            if batch.is_none() {
+                break;
+            }
+        }
+    }
 }
