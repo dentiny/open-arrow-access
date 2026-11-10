@@ -247,10 +247,6 @@ async fn invalid_expressions_fail_at_open_even_when_hidden() {
         vec![("x", "row_number() OVER ()")],
         vec![("x", "(SELECT 1)")],
         vec![("x", "random()")],
-        vec![(
-            "x",
-            r#"arrow_cast(NULL, 'RunEndEncoded("run_ends": non-null Int16, "values": Int64)')"#,
-        )],
         vec![("x", "CASE WHEN false THEN sum(\"Count\") ELSE 0 END")],
         vec![("x", "CASE WHEN false THEN random() ELSE 0 END")],
     ] {
@@ -467,7 +463,7 @@ async fn csv_and_parallel_reads_share_one_generation_context() {
 }
 
 #[tokio::test]
-async fn cast_function_rewrites_preserve_values_and_nulls() {
+async fn casts_preserve_values_and_nulls() {
     for expression in [
         r#"CAST("Count" AS INT)"#,
         r#"TRY_CAST("Count" AS INT)"#,
@@ -489,92 +485,4 @@ async fn cast_function_rewrites_preserve_values_and_nulls() {
             "{expression}"
         );
     }
-}
-
-#[tokio::test]
-async fn unsafe_decimal_rescaling_fails_before_evaluation() {
-    use arrow_array::Decimal256Array;
-    let batch = RecordBatch::try_from_iter([(
-        "n",
-        Arc::new(
-            Decimal256Array::from_iter([Some(1.into())])
-                .with_precision_and_scale(76, 0)
-                .unwrap(),
-        ) as ArrayRef,
-    )])
-    .unwrap();
-    for expression in [
-        "CAST(n AS DECIMAL(76, 60))",
-        "TRY_CAST(n AS DECIMAL(76, 60))",
-        "arrow_cast(n, 'Decimal256(76, 60)')",
-        "arrow_try_cast(n, 'Decimal256(76, 60)')",
-        "cast_to_type(n, arrow_cast(1, 'Decimal256(76, 60)'))",
-        "try_cast_to_type(n, arrow_cast(1, 'Decimal256(76, 60)'))",
-        "CAST(CAST(1 AS DECIMAL(76, 0)) AS DECIMAL(76, 60))",
-        "arrow_cast(arrow_cast(1, 'Decimal256(76, 0)'), 'Decimal256(76, 60)')",
-        "arrow_try_cast(arrow_cast(1, 'Decimal256(76, 0)'), 'Decimal256(76, 60)')",
-        "coalesce(n, arrow_cast(n, 'Decimal256(76, 60)'))",
-    ] {
-        let source = MemoryAccessor::new(vec![batch.clone()]);
-        let polls = source.polls.clone();
-        let error = source
-            .layer(layer(&[("x", expression)]))
-            .open(ReadRequest::new("test"))
-            .await
-            .err()
-            .unwrap();
-        assert!(
-            error.to_string().contains("unsafe Decimal rescale"),
-            "{error}"
-        );
-        assert_eq!(polls.load(Ordering::SeqCst), 0);
-    }
-    let mut reader = MemoryAccessor::new(vec![batch])
-        .layer(layer(&[("x", "CAST(n AS DECIMAL(76, 51))")]))
-        .open(ReadRequest::new("test"))
-        .await
-        .unwrap();
-    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
-
-    let batch = RecordBatch::try_from_iter([(
-        "n",
-        Arc::new(
-            arrow_array::Decimal128Array::from(vec![1])
-                .with_precision_and_scale(38, -128)
-                .unwrap(),
-        ) as ArrayRef,
-    )])
-    .unwrap();
-    assert!(
-        MemoryAccessor::new(vec![batch])
-            .layer(layer(&[("x", "CAST(n AS DECIMAL(38, 0))")]))
-            .open(ReadRequest::new("test"))
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("unsafe Decimal rescale")
-    );
-}
-
-#[tokio::test]
-async fn incompatible_struct_cast_fails_at_open() {
-    use arrow_array::StructArray;
-    let field = Arc::new(Field::new("a", DataType::Int64, true));
-    let array = StructArray::from(vec![(
-        field,
-        Arc::new(Int64Array::from(vec![1])) as ArrayRef,
-    )]);
-    let batch = RecordBatch::try_from_iter([("n", Arc::new(array) as ArrayRef)]).unwrap();
-    let error = MemoryAccessor::new(vec![batch])
-        .layer(layer(&[(
-            "x",
-            r#"arrow_cast(n, 'Struct("a": Int64, "b": Int64)')"#,
-        )]))
-        .open(ReadRequest::new("test"))
-        .await
-        .err()
-        .unwrap();
-    assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    assert!(error.to_string().contains("cannot cast"), "{error}");
 }

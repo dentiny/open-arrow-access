@@ -31,11 +31,8 @@ Unquoted SQL identifiers are lowercased; quote mixed-case names: `"Count" * 2`.
 Aggregates, windows, subqueries, `unnest`, and volatile functions such as
 `random()` are rejected before simplification, including inside dead branches.
 The enabled built-ins include core, string, Unicode, datetime and math functions.
-Types and nullability are inferred by DataFusion. Casts (including cast built-ins)
-reuse the type-conversion layer's check for Decimal rescale pairs that overflow Arrow 59.3's internal i8 arithmetic;
-these pairs fail at open, even if individual values would fit. Cast type pairs
-must be supported by Arrow, including nested casts. Invalid target parameters
-and run-end encoded cast targets are rejected, matching `TypeConversionLayer`.
+Type coercion, expression simplification, casts, and inferred types/nullability
+follow DataFusion semantics.
 Each logical open uses one query context, so stable functions such as `now()` agree across declarations and
 batches; separate opens need not produce identical values.
 

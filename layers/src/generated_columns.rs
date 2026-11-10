@@ -5,11 +5,11 @@ use arrow_schema::{FieldRef, Schema, SchemaRef};
 use datafusion::{
     common::{
         DFSchema,
-        tree_node::{Transformed, TreeNode, TreeNodeRecursion},
+        tree_node::{TreeNode, TreeNodeRecursion},
     },
     error::DataFusionError,
     execution::{SessionState, context::SessionContext},
-    logical_expr::{Expr, ExprSchemable, simplify::ExprSimplifyResult},
+    logical_expr::Expr,
     optimizer::simplify_expressions::{ExprSimplifier, SimplifyContext},
     physical_expr::PhysicalExpr,
 };
@@ -165,68 +165,12 @@ fn plan_expression(
         .with_config_options(Arc::clone(state.config_options()))
         .with_query_execution_start_time(state.execution_props().query_execution_start_time)
         .build();
-    // Reject unsafe explicit casts before type coercion inspects their types.
-    let logical = normalize_and_validate_casts(logical, &df_schema, &simplify_context)?;
-    let simplifier = ExprSimplifier::new(simplify_context.clone());
+    let simplifier = ExprSimplifier::new(simplify_context);
     let logical = simplifier.coerce(logical, &df_schema)?;
-    // Type coercion can insert additional casts.
-
-    let logical = normalize_and_validate_casts(logical, &df_schema, &simplify_context)?;
     let logical = simplifier.simplify(logical)?;
     let physical = context.create_physical_expr(logical, &df_schema)?;
     let output = physical.return_field(input)?;
     Ok((physical, output))
-}
-
-// Apply function-specific rewrites without the simplifier's constant evaluation.
-// Walk bottom-up so every child cast is checked before a parent can discard it.
-fn normalize_and_validate_casts(
-    expression: Expr,
-    schema: &DFSchema,
-    context: &SimplifyContext,
-) -> datafusion::error::Result<Expr> {
-    Ok(expression
-        .transform_up(|expr| {
-            let rewritten = match expr {
-                Expr::ScalarFunction(mut function) => {
-                    match function.func.simplify(function.args, context)? {
-                        ExprSimplifyResult::Simplified(expr) => Transformed::yes(expr),
-                        ExprSimplifyResult::Original(args) => {
-                            function.args = args;
-                            Transformed::no(Expr::ScalarFunction(function))
-                        }
-                    }
-                }
-                expr => Transformed::no(expr),
-            };
-            // Function rewrites can introduce casts. Check their result as well
-            // as explicit SQL casts before any constant folding can run.
-            // Unchanged nodes already have validated children.
-            let recursion = if rewritten.transformed {
-                TreeNodeRecursion::Continue
-            } else {
-                TreeNodeRecursion::Jump
-            };
-            rewritten.data.apply(|expr| {
-                let (input, target) = match expr {
-                    Expr::Cast(cast) => (cast.expr.as_ref(), cast.field.data_type()),
-                    Expr::TryCast(cast) => (cast.expr.as_ref(), cast.field.data_type()),
-                    _ => return Ok(recursion),
-                };
-                let from = input.get_type(schema)?;
-                crate::validation::validate_target(target)?;
-                // The recursive Decimal guard requires an Arrow-supported pair.
-                if !arrow_cast::can_cast_types(&from, target) {
-                    return Err(DataFusionError::Plan(format!(
-                        "cannot cast {from} to {target}"
-                    )));
-                }
-                crate::validation::validate_decimal_cast(&from, target)?;
-                Ok(recursion)
-            })?;
-            Ok(rewritten)
-        })?
-        .data)
 }
 
 fn invalid(column: &str, message: impl std::fmt::Display) -> Error {
