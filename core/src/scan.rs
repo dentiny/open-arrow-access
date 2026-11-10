@@ -50,16 +50,6 @@ impl ScanPlan {
         }
     }
 
-    /// Open and drain partitions sequentially in plan order, stopping at the first error.
-    /// Partition discovery and opening remain lazy until the reader is polled.
-    pub fn into_reader(self) -> impl RecordReader {
-        let batches = self
-            .partitions
-            .and_then(|partition| async { partition.await.map(into_stream) })
-            .try_flatten();
-        StreamReader::new(batches, self.metadata)
-    }
-
     /// Keep a stateful or indivisible input in one partition. The reader's schema
     /// is already fixed; partition execution remains lazy. Outer file-set plans
     /// can still run multiple such inputs concurrently.
