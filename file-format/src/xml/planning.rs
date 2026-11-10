@@ -1,13 +1,12 @@
 use std::pin::Pin;
 
 use futures::{
-    io::{AsyncBufRead, AsyncReadExt, Chain, Cursor, Take},
+    io::{AsyncBufRead, AsyncReadExt, Cursor, Take},
     stream,
 };
 use open_arrow_access_core::{
-    Accessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, ReadRequest,
-    ReaderFactory, ReaderFactoryExt, RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner,
-    StreamReader, async_trait, into_async_read,
+    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt,
+    RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, into_async_read,
 };
 use quick_xml::{
     NsReader, Writer, XmlVersion,
@@ -17,8 +16,9 @@ use quick_xml::{
 use tokio_util::compat::{Compat, FuturesAsyncReadCompatExt};
 
 use super::{XmlAccessor, XmlLimits, error, validation};
+use crate::scan::input::ChunkInput;
 
-type Input = Compat<Take<Chain<Cursor<Vec<u8>>, Pin<Box<dyn AsyncBufRead + Send>>>>>;
+type Input = Compat<Take<Pin<Box<dyn AsyncBufRead + Send>>>>;
 
 #[async_trait]
 impl<B> ScanPlanner for XmlAccessor<B>
@@ -52,7 +52,7 @@ where
                     return Ok(None);
                 };
                 let partition: ScanPartition =
-                    Box::pin(async move { format.open_reader(&FrameInput(bytes), request).await });
+                    Box::pin(async move { format.open_reader(&ChunkInput(bytes), request).await });
                 Ok(Some((partition, frames)))
             }
         });
@@ -60,37 +60,10 @@ where
     }
 }
 
-struct FrameInput(Bytes);
-
-#[async_trait]
-impl Accessor for FrameInput {
-    type Request = ByteReadRequest;
-    type Reader = dyn ByteReader;
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-    }
-    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        Ok(Box::new(StreamReader::new(
-            stream::iter([Ok(self.0.clone())]),
-            ByteMetadata {
-                source: Some(request.object),
-                content_length: Some(self.0.len() as u64),
-                version: None,
-            },
-        )))
-    }
-}
-
 struct XmlFrames {
     reader: NsReader<Input>,
     path: Vec<String>,
     ancestors: Vec<BytesStart<'static>>,
-    matches: Vec<bool>,
     root_seen: bool,
     bom: u64,
     declaration: Option<Event<'static>>,
@@ -99,8 +72,7 @@ struct XmlFrames {
 
 impl XmlFrames {
     async fn new(input: Box<dyn ByteReader>, path: &str, limits: XmlLimits) -> Result<Self> {
-        let mut input: Pin<Box<dyn AsyncBufRead + Send>> =
-            Box::pin(into_async_read(input, "frame_xml"));
+        let mut input = into_async_read(input, "frame_xml");
         // quick-xml needs a complete UTF-8 BOM even with single-byte sources.
         let mut prefix = Vec::new();
         (&mut input)
@@ -109,7 +81,8 @@ impl XmlFrames {
             .await
             .map_err(error::framing)?;
         let bom = if prefix == b"\xEF\xBB\xBF" { 3 } else { 0 };
-        let mut reader = NsReader::from_reader(Cursor::new(prefix).chain(input).take(0).compat());
+        let input: Pin<Box<dyn AsyncBufRead + Send>> = Box::pin(Cursor::new(prefix).chain(input));
+        let mut reader = NsReader::from_reader(input.take(0).compat());
         reader.config_mut().check_comments = true;
         Ok(Self {
             reader,
@@ -118,7 +91,6 @@ impl XmlFrames {
                 .map(|part| part.rsplit(':').next().unwrap().into())
                 .collect(),
             ancestors: Vec::new(),
-            matches: Vec::new(),
             root_seen: false,
             bom,
             declaration: None,
@@ -152,9 +124,8 @@ impl XmlFrames {
                     self.position(),
                 ));
             }
-            let event = event.map_err(error::framing)?.into_owned();
-            let empty = matches!(event, Event::Empty(_));
-            let closes = empty || matches!(event, Event::End(_));
+            let event = event.map_err(error::framing)?;
+            let closes = matches!(event, Event::Empty(_) | Event::End(_));
             match &event {
                 Event::Start(start) | Event::Empty(start) => {
                     validation::enter(
@@ -163,9 +134,7 @@ impl XmlFrames {
                         self.limits.max_depth,
                         self.position(),
                     )?;
-                    if self.ancestors.is_empty() {
-                        self.root_seen = true;
-                    }
+                    self.root_seen = true;
                     // Preserve the source parser's validation of off-path namespace
                     // declarations and unbound element prefixes.
                     for attribute in start.attributes().with_checks(false) {
@@ -178,28 +147,31 @@ impl XmlFrames {
                     }
                     let (namespace, local) = self.reader.resolver().resolve_element(start.name());
                     Option::<Namespace<'_>>::try_from(namespace).map_err(error::framing)?;
-                    let local = std::str::from_utf8(local.as_ref()).map_err(error::framing)?;
-                    let matches = self.matches.last().copied().unwrap_or(true)
+                    std::str::from_utf8(local.as_ref()).map_err(error::framing)?;
+                    let on_path = self.ancestors.len() + 1 == self.path.len()
                         && self
-                            .path
-                            .get(self.ancestors.len())
-                            .is_some_and(|part| part == local);
-                    if capture.is_none() && matches && self.ancestors.len() + 1 == self.path.len() {
+                            .ancestors
+                            .iter()
+                            .chain(std::iter::once(start))
+                            .zip(&self.path)
+                            .all(|(element, expected)| {
+                                element.local_name().as_ref() == expected.as_bytes()
+                            });
+                    if capture.is_none() && on_path {
                         let mut writer = Writer::new(Vec::new());
                         if let Some(declaration) = &self.declaration {
                             writer
-                                .write_event(declaration.clone())
+                                .write_event(declaration.borrow())
                                 .map_err(error::framing)?;
                         }
                         for ancestor in &self.ancestors {
                             writer
-                                .write_event(Event::Start(ancestor.clone()))
+                                .write_event(Event::Start(ancestor.borrow()))
                                 .map_err(error::framing)?;
                         }
                         capture = Some(writer);
                     }
-                    self.ancestors.push(start.clone());
-                    self.matches.push(matches);
+                    self.ancestors.push(start.clone().into_owned());
                 }
                 Event::DocType(_) => {
                     return Err(error::invalid("DTDs and custom entities are not supported"));
@@ -208,7 +180,7 @@ impl XmlFrames {
                     if before != self.bom {
                         return Err(error::invalid("XML declaration must be at the beginning"));
                     }
-                    self.declaration = Some(event.clone());
+                    self.declaration = Some(event.clone().into_owned());
                 }
                 Event::Eof => {
                     validation::eof(self.root_seen, self.ancestors.len())?;
@@ -217,7 +189,7 @@ impl XmlFrames {
                 _ => {}
             }
             if let Some(writer) = &mut capture {
-                writer.write_event(event.clone()).map_err(error::framing)?;
+                writer.write_event(event.borrow()).map_err(error::framing)?;
             } else if self.ancestors.is_empty() && !matches!(event, Event::End(_)) {
                 let allowed = match &event {
                     Event::Text(text) => text
@@ -232,7 +204,6 @@ impl XmlFrames {
             let complete = closes && capture.is_some() && self.ancestors.len() == self.path.len();
             if closes {
                 self.ancestors.pop();
-                self.matches.pop();
             }
             if complete {
                 let mut writer = capture.unwrap();
