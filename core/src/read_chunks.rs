@@ -39,6 +39,12 @@ where
             return Ok(None);
         }
         output.truncate(len);
+        // Owned Bytes otherwise keeps the entire allocation after a short read.
+        // Compact only heavily underfilled large chunks, avoiding an extra copy
+        // for ordinary final chunks and small fragmented inputs.
+        if output.capacity() > 64 * 1024 && len < output.capacity() / 4 {
+            output.shrink_to_fit();
+        }
         Ok(Some((Bytes::from(output), input)))
     })
 }
