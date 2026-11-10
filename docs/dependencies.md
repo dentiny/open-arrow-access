@@ -27,9 +27,11 @@ The CSV feature uses the same Arrow baseline (`59.3.0`) for `arrow-csv`, includi
 the transitive Arrow Cast and Arrow Ord components in the committed lockfile.
 
 DataFusion is a required dependency of the layers crate for generated columns
-and inherits its version through `workspace = true`. SQL, core/string/Unicode/datetime/math
-expressions and recursive protection are enabled; optional Parquet and compression
-features remain disabled. Core does not import DataFusion or Lance types.
+and inherits its version through `workspace = true`. Only the `sql` feature is
+explicitly enabled, with DataFusion's default features disabled. DataFusion 55.2.0
+still enables scalar-function defaults (including string, Unicode, datetime, and
+math) through its dependencies. Optional Parquet, compression, and recursive
+protection features are not enabled here. Core does not import DataFusion or Lance types.
 
 ## Updating the baseline
 

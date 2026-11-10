@@ -7,7 +7,7 @@ repository.workspace = true
 description = "Composable Arrow record layers for Open Arrow Access"
 
 [dependencies]
-datafusion = { workspace = true, features = ["sql", "string_expressions", "unicode_expressions", "datetime_expressions", "math_expressions", "recursive_protection"] }
+datafusion = { workspace = true, features = ["sql"] }
 futures.workspace = true
 arrow-array = { workspace = true, features = ["chrono-tz"] }
 arrow-cast.workspace = true
