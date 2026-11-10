@@ -77,6 +77,8 @@ where
     /// Bind an explicit Arrow format for sequential reads or scan planning.
     /// [`FileSetAccessor`] selects logical names in caller order, including duplicates;
     /// each selected file opens an independent byte reader on demand.
+    /// Call `with_file_planning()` on the result when the format supports native
+    /// partitions, to combine file-internal and cross-file parallelism.
     pub fn records<F>(self, format: F) -> FileSetAccessor<FileAccessor<Self, F>>
     where
         F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader> + 'static,

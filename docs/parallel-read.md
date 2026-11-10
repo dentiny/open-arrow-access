@@ -21,12 +21,27 @@ while let Some(batch) = reader.next().await? {
 
 The accessor must implement the optional `ScanPlanner` extension. Unsupported
 sources fail at compile time instead of silently ignoring parallel settings.
-Ordinary `open` remains sequential. Planning opens only the first selected file
-to fix the schema; subsequent files open in workers. All partition metadata and
-batches must match that schema, including metadata. Empty file sets remain errors.
+Ordinary `open` remains sequential. By default, file-set planning opens the first
+selected file to fix the schema and creates one partition per file. Empty file
+sets remain errors.
 
-With P resident partitions and Q queue slots per partition, at most P readers
-are active and P * Q batches are queued. A worker reserves queue capacity before
+Call `with_file_planning()` on `FileSetAccessor` or `DirectoryAccessor` when the
+inner format implements `ScanPlanner`. Native partitions (for example, Parquet
+row groups) are flattened in file and record order under the same executor
+budget. Only the first file is planned initially; later files are planned when
+partition discovery reaches them. Later plan schemas, including empty plans,
+must match the first schema. No nested executor or second worker budget is used.
+Hugging Face dataset scans enable this mode automatically. Resolved provider
+files can opt in with `files.records(format).with_file_planning()`. Common Crawl
+WARC and segment accessors expose the same builder when their supplied format
+supports native planning.
+
+All partition metadata and batches must match the fixed schema, including
+metadata. Format-specific discovery may retain an input reader, framing state
+and buffers separately from partition workers.
+
+With P resident partitions and Q queue slots per partition, at most P partition
+readers are active and P * Q batches are queued. A worker reserves queue capacity before
 calling `next`. A finished worker retains its partition slot until its queue has
 drained; a slow first file cannot cause unlimited later files to accumulate.
 The consumer can hold additional batches. Decoder allocations, individual batch
@@ -34,10 +49,10 @@ sizes and compressed input buffers are not bounded by these queue limits.
 Storage's per-reader I/O limit remains separate: P readers may each use their
 configured I/O concurrency. This version does not impose a backend-global cap.
 
-Each worker owns its reader and codec state, so file-level parallelism composes
-with a decompression accessor installed below the format accessor. Decoded bytes
-within each file retain their original order. Parquet row-group planning and
-single-file JSONL parallel decode are subsequent milestones, not provided here.
+Each worker owns its reader and codec state. File-level plans can therefore run
+independent compressed files concurrently. Native file planning may frame decoded
+bytes sequentially before dispatching independent decode partitions; decompression
+is not made parallel by this composition. Decoded bytes retain their order.
 
 Workers begin on first consumption and require an active Tokio runtime. On a
 multithreaded runtime decoder work can run on separate runtime threads; a single

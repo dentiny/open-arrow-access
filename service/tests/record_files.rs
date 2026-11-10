@@ -2,6 +2,7 @@ use std::{num::NonZeroUsize, sync::Arc};
 
 use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
+use futures::TryStreamExt;
 use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, ScanPlanner};
 use open_arrow_access_dataset::file_set::FileSetRequest;
 use open_arrow_access_file_format::json::JsonFormat;
@@ -32,11 +33,13 @@ async fn resolved_files_keep_membership_order_duplicates_and_lazy_parallel_reads
             (),
         )
         .unwrap();
-    let records = files.records(JsonFormat::new(Arc::new(Schema::new(vec![Field::new(
-        "id",
-        DataType::UInt64,
-        false,
-    )]))));
+    let records = files
+        .records(JsonFormat::new(Arc::new(Schema::new(vec![Field::new(
+            "id",
+            DataType::UInt64,
+            false,
+        )]))))
+        .with_file_planning();
     assert_eq!(
         records
             .plan_scan(FileSetRequest::new(["unknown.json"]))
@@ -49,10 +52,11 @@ async fn resolved_files_keep_membership_order_duplicates_and_lazy_parallel_reads
     assert!(server.requests().is_empty());
     let request = FileSetRequest::new(["b.json", "a.json", "b.json"]);
     let plan = records.plan_scan(request.clone()).await.unwrap();
-    assert_eq!(plan.partitions.size_hint().0, 3);
     // Only the first selected file is opened to fix the schema.
     assert!(!server.requests().iter().any(|request| request.path == "/a"));
-    drop(plan);
+    let partitions: Vec<_> = plan.partitions.try_collect().await.unwrap();
+    assert_eq!(partitions.len(), 3);
+    drop(partitions);
     let mut reader = records
         .layer(ParallelReadLayer::new(
             NonZeroUsize::new(2).unwrap(),

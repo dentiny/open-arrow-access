@@ -175,4 +175,46 @@ mod filesystem {
             ErrorKind::InvalidInput
         );
     }
+
+    #[tokio::test]
+    async fn directory_flattens_parquet_row_groups_without_changing_file_order() {
+        use futures::StreamExt;
+        use open_arrow_access_core::{AccessorExt, ReadOptions, ScanPlanner};
+        use open_arrow_access_layers::ParallelReadLayer;
+
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.parquet", "b.parquet"] {
+            std::fs::copy(
+                open_arrow_access_test_support::fixture_path!("parquet", "ordered-snappy.parquet"),
+                dir.path().join(name),
+            )
+            .unwrap();
+        }
+        let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
+        let directory = DirectoryAccessor::new(storage.clone(), ParquetAccessor::new(storage))
+            .with_file_planning();
+        let mut request = DirectoryRequest::new("");
+        request.options = ReadOptions {
+            projection: Some(vec!["id".into()]),
+            ..Default::default()
+        };
+        let mut plan = directory.plan_scan(request.clone()).await.unwrap();
+        let mut partitions = 0;
+        while plan.partitions.next().await.transpose().unwrap().is_some() {
+            partitions += 1;
+        }
+        assert_eq!(partitions, 8);
+        let reader = directory
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(3).unwrap(),
+                NonZeroUsize::MIN,
+            ))
+            .open(request)
+            .await
+            .unwrap();
+        assert_eq!(
+            values(reader).await,
+            [0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6]
+        );
+    }
 }

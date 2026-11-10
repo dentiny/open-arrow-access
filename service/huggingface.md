@@ -21,6 +21,11 @@ schema; later shards must match it. There are no added repository/split columns;
 record metadata has `source = None`. A repository file reader instead exposes
 byte length/source and ranges through OpenDAL.
 
+`plan_scan` exposes the native Parquet row groups across all selected shards.
+Install `ParallelReadLayer` to execute them with one shared partition budget,
+retaining shard path order and row-group order. Later shard footers are inspected
+lazily during partition discovery; ordinary `dataset`/`open` stays sequential.
+
 `with_revision` on a dataset request selects the Parquet export revision, not an
 original source revision. Missing complete exports fail unless
 `with_partial_exports()` is enabled; full exports take precedence. Constructor

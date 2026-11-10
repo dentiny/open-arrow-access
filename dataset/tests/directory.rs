@@ -17,7 +17,8 @@ use futures::stream;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind,
     ListRequest, ObjectRef, ObjectStream, ReadOptionsProvider, ReadRequest, Reader, RecordBatch,
-    RecordMetadata, RecordReader, Result, ScanPlanner, Schema, SchemaRef, async_trait,
+    RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, Schema, SchemaRef,
+    async_trait,
 };
 use open_arrow_access_layers::ParallelReadLayer;
 
@@ -493,4 +494,143 @@ async fn parallel_directory_keeps_discovery_filter_sort_and_validation() {
     .layer(layer);
     assert!(invalid.open(DirectoryRequest::new("")).await.is_err());
     assert_eq!(files.opens.lock().unwrap().len(), calls);
+}
+
+#[derive(Clone)]
+struct PlannedFiles {
+    files: Files,
+    plans: Arc<Mutex<Vec<ReadRequest>>>,
+}
+
+#[async_trait]
+impl Accessor for PlannedFiles {
+    type Request = ReadRequest;
+    type Reader = dyn RecordReader;
+
+    fn capability(&self) -> Capability {
+        self.files.capability()
+    }
+
+    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
+        self.files.open(request).await
+    }
+}
+
+#[async_trait]
+impl ScanPlanner for PlannedFiles {
+    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
+        self.plans.lock().unwrap().push(request.clone());
+        let file = self
+            .files
+            .files
+            .get(request.object.locator())
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "plan_fixture", "missing"))?;
+        let metadata = RecordMetadata {
+            schema: file.schema.clone(),
+            source: Some(request.object),
+        };
+        let partitions = file
+            .batches
+            .iter()
+            .cloned()
+            .map(|batch| {
+                let files = self.files.clone();
+                let metadata = metadata.clone();
+                Box::pin(async move {
+                    let active = files.active.fetch_add(1, Ordering::SeqCst) + 1;
+                    files.max_active.fetch_max(active, Ordering::SeqCst);
+                    let reader = Batches {
+                        active: files.active,
+                        metadata,
+                        batches: vec![batch].into_iter(),
+                    };
+                    tokio::task::yield_now().await;
+                    Ok(Box::new(reader) as Box<dyn RecordReader>)
+                }) as ScanPartition
+            })
+            .collect();
+        Ok(ScanPlan::new(metadata, partitions))
+    }
+}
+
+#[tokio::test]
+async fn native_file_plans_share_one_budget_and_preserve_lazy_ordered_selection() {
+    let native_schema = schema("native");
+    let files = Files::new([
+        (
+            "a",
+            FileData::new(
+                native_schema.clone(),
+                vec![
+                    batch(native_schema.clone(), &[1, 2]),
+                    batch(native_schema.clone(), &[3]),
+                ],
+            ),
+        ),
+        (
+            "b",
+            FileData::new(
+                native_schema.clone(),
+                vec![
+                    batch(native_schema.clone(), &[4]),
+                    batch(native_schema.clone(), &[5]),
+                ],
+            ),
+        ),
+        ("empty", FileData::new(native_schema, vec![])),
+        ("mismatch", FileData::new(schema("different"), vec![])),
+    ]);
+    let plans = Arc::new(Mutex::new(Vec::new()));
+    let accessor = FileSetAccessor::new(PlannedFiles {
+        files: files.clone(),
+        plans: plans.clone(),
+    })
+    .with_file_planning();
+    let mut request = FileSetRequest::new(["b", "empty", "a", "b"]);
+    request.options.batch_size = NonZeroUsize::new(2).unwrap();
+    request.byte_options.io_concurrency = NonZeroUsize::new(3).unwrap();
+    let plan = accessor.plan_scan(request.clone()).await.unwrap();
+    assert_eq!(plans.lock().unwrap().len(), 1);
+    assert_eq!(files.active.load(Ordering::SeqCst), 0);
+    assert!(files.opens.lock().unwrap().is_empty());
+    drop(plan);
+    plans.lock().unwrap().clear();
+    let parallel = accessor.clone().layer(ParallelReadLayer::new(
+        NonZeroUsize::new(2).unwrap(),
+        NonZeroUsize::MIN,
+    ));
+    assert_eq!(
+        values(parallel.open(request).await.unwrap()).await,
+        [4, 5, 1, 2, 3, 4, 5]
+    );
+    assert_eq!(files.active.load(Ordering::SeqCst), 0);
+    assert_eq!(files.max_active.load(Ordering::SeqCst), 2);
+    assert!(files.opens.lock().unwrap().is_empty());
+    {
+        let observed = plans.lock().unwrap();
+        assert_eq!(
+            observed
+                .iter()
+                .map(|r| r.object.locator())
+                .collect::<Vec<_>>(),
+            ["b", "empty", "a", "b"]
+        );
+        assert!(
+            observed.iter().all(
+                |r| r.options.batch_size.get() == 2 && r.byte_options.io_concurrency.get() == 3
+            )
+        );
+    }
+    let mut plan = accessor
+        .plan_scan(FileSetRequest::new(["empty", "mismatch", "a"]))
+        .await
+        .unwrap();
+    use futures::StreamExt;
+    let error = plan.partitions.next().await.unwrap().err().unwrap();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert_eq!(error.operation(), "read_file_set");
+    assert_eq!(
+        plans.lock().unwrap().last().unwrap().object.locator(),
+        "mismatch"
+    );
 }
