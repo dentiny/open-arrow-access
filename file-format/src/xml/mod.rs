@@ -1,6 +1,5 @@
 mod accessor;
 mod format;
-mod reader;
 
 pub use accessor::XmlAccessor;
 pub use format::{XmlFormat, XmlLimits};

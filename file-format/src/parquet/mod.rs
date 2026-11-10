@@ -3,7 +3,6 @@
 mod accessor;
 mod format;
 mod input;
-mod reader;
 
 pub use accessor::ParquetAccessor;
 pub use format::ParquetFormat;
