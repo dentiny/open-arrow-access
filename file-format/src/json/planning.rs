@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use futures::stream;
+use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt,
     RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader,
@@ -7,7 +7,7 @@ use open_arrow_access_core::{
 use serde_json::{Deserializer, value::RawValue};
 
 use super::{JsonAccessor, error};
-use crate::DecodePartitionOptions;
+use crate::scan::chunks::RecordChunks;
 
 #[async_trait]
 impl<B> ScanPlanner for JsonAccessor<B>
@@ -29,19 +29,28 @@ where
         let frames = JsonFrames {
             input,
             pending_input: BytesMut::new(),
-            pending_record: None,
-            options: self.partition_options,
-            rows: request.options.batch_size.get(),
         };
-        let partitions = stream::try_unfold(frames, move |mut frames| {
+        let records = stream::try_unfold(frames, |mut frames| async move {
+            Ok(frames.next_record().await?.map(|record| (record, frames)))
+        })
+        .boxed();
+        let chunks = RecordChunks::new(records);
+        let rows = request.options.batch_size.get();
+        let target_bytes = self.partition_options.target_bytes.get();
+        let partitions = stream::try_unfold(chunks, move |mut frames| {
             let format = format.clone();
             let request = request.clone();
             async move {
-                let Some(bytes) = frames.next_chunk().await? else {
+                let Some(records) = frames.next_chunk(rows, target_bytes, Bytes::len).await? else {
                     return Ok(None);
                 };
+                let mut bytes = Vec::new();
+                for record in records {
+                    bytes.extend_from_slice(&record);
+                    bytes.push(b'\n');
+                }
                 let partition: ScanPartition = Box::pin(async move {
-                    let input = bytes_reader(bytes, Some(request.object.clone()));
+                    let input = bytes_reader(bytes.into(), Some(request.object.clone()));
                     format.open_input(Box::new(input), request).await
                 });
                 Ok(Some((partition, frames)))
@@ -56,9 +65,6 @@ where
 struct JsonFrames {
     input: Box<dyn ByteReader>,
     pending_input: BytesMut,
-    pending_record: Option<Bytes>,
-    options: DecodePartitionOptions,
-    rows: usize,
 }
 
 impl JsonFrames {
@@ -93,29 +99,5 @@ impl JsonFrames {
                 }
             }
         }
-    }
-
-    async fn next_chunk(&mut self) -> Result<Option<Bytes>> {
-        let mut output = Vec::new();
-        let mut rows = 0;
-        while rows < self.rows {
-            let record = match self.pending_record.take() {
-                Some(record) => record,
-                None => match self.next_record().await? {
-                    Some(record) => record,
-                    None => break,
-                },
-            };
-            if rows > 0
-                && output.len().saturating_add(record.len()) > self.options.target_bytes.get()
-            {
-                self.pending_record = Some(record);
-                break;
-            }
-            output.extend_from_slice(&record);
-            output.push(b'\n');
-            rows += 1;
-        }
-        Ok((rows > 0).then(|| output.into()))
     }
 }

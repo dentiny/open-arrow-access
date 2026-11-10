@@ -7,13 +7,13 @@ repository.workspace = true
 description = "Arrow file-format readers for Open Arrow Access"
 
 [features]
-atif = ["dep:atif-arrow", "dep:futures"]
-csv = ["dep:arrow-csv", "dep:arrow-schema", "dep:futures", "dep:csv", "dep:csv-async"]
+atif = ["dep:atif-arrow"]
+csv = ["dep:arrow-csv", "dep:arrow-schema", "dep:csv", "dep:csv-async"]
 default = []
-json = ["dep:arrow-json", "dep:arrow-schema", "dep:bytes", "dep:futures", "dep:serde_json"]
-parquet = ["dep:parquet", "dep:arrow-schema", "dep:futures"]
-warc = ["dep:warc", "dep:futures", "dep:arrow-schema"]
-xml = ["dep:xml-arrow", "dep:futures"]
+json = ["dep:arrow-json", "dep:arrow-schema", "dep:bytes", "dep:serde_json"]
+parquet = ["dep:parquet", "dep:arrow-schema"]
+warc = ["dep:warc", "dep:arrow-schema"]
+xml = ["dep:xml-arrow"]
 
 [dependencies]
 csv = { workspace = true, optional = true }
@@ -23,7 +23,7 @@ arrow-json = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
 atif-arrow = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
-futures = { workspace = true, optional = true }
+futures.workspace = true
 serde_json = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 parquet = { workspace = true, optional = true }
@@ -36,7 +36,6 @@ open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
 open-arrow-access-layers.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
-futures.workspace = true
 more-asserts.workspace = true
 open-arrow-access-storage.workspace = true
 open-arrow-access-test-support.workspace = true
