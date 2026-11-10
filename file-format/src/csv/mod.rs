@@ -1,4 +1,7 @@
 mod accessor;
+mod dialect;
+mod planning;
+pub use dialect::CsvDialect;
 mod format;
 mod reader;
 

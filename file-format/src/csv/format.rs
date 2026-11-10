@@ -1,4 +1,4 @@
-use super::{CsvFormat, reader::csv_reader};
+use super::{CsvDialect, CsvFormat, reader::csv_reader};
 use arrow_csv::{ReaderBuilder, reader::Decoder};
 use arrow_schema::{DataType, TimeUnit};
 use open_arrow_access_core::{
@@ -12,7 +12,8 @@ use open_arrow_access_core::{
 #[derive(Clone, Debug)]
 pub struct CsvFileFormat {
     schema: SchemaRef,
-    format: CsvFormat,
+    pub(super) format: CsvFormat,
+    pub(super) parallel_dialect: Option<CsvDialect>,
 }
 
 impl CsvFileFormat {
@@ -20,11 +21,25 @@ impl CsvFileFormat {
         Self {
             schema,
             format: CsvFormat::default(),
+            parallel_dialect: Some(CsvDialect::default()),
         }
+    }
+
+    pub(super) fn schema_len(&self) -> usize {
+        self.schema.fields().len()
     }
 
     pub fn with_format(mut self, format: CsvFormat) -> Self {
         self.format = format;
+        self.parallel_dialect = None;
+        self
+    }
+    /// Configure a known CSV dialect for both sequential decoding and parallel framing.
+    /// Opaque Arrow CsvFormat settings remain supported through with_format, using
+    /// a whole-input plan because their private framing options cannot be inspected.
+    pub fn with_dialect(mut self, dialect: CsvDialect) -> Self {
+        self.format = dialect.format();
+        self.parallel_dialect = Some(dialect);
         self
     }
 }

@@ -1930,6 +1930,7 @@ dependencies = [
  "arrow-json",
  "arrow-schema",
  "atif-arrow",
+ "csv-core",
  "flate2",
  "futures",
  "more-asserts",

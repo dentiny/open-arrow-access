@@ -6,10 +6,13 @@ use std::{
 use arrow_array::{Array, StringArray, types::Int64Type};
 use arrow_schema::{DataType, Field, IntervalUnit, Schema, TimeUnit};
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
+    Accessor, AccessorExt, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch,
+    ScanPlanner, SchemaRef,
 };
 
-use open_arrow_access_file_format::csv::{CsvAccessor, CsvFormat};
+use futures::TryStreamExt;
+use open_arrow_access_file_format::csv::{CsvAccessor, CsvDialect, CsvFormat};
+use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_test_support::{
     MemoryAccessor, fixture,
     format::{self, collect_batches as collect},
@@ -262,4 +265,64 @@ async fn header_validation_and_truncated_row_policy_are_explicit() {
     let batches = collect(&accessor, ReadRequest::new("short.csv")).await;
     assert_eq!(collect_values::<Int64Type>(&batches, 0), [1, 2]);
     assert!(batches[0].column(1).is_null(0));
+}
+
+#[tokio::test]
+async fn parallel_csv_preserves_multiline_quotes_comments_header_and_projection() {
+    let raw = b"id,title\r\n1,\"a\nb\"\r\n#skip\r\n2,\"c\"\"d\"\r\n3,end";
+    for projection in [None, Some(vec!["title", "id"]), Some(vec![])] {
+        let accessor =
+            CsvAccessor::new(MemoryAccessor::new(raw, 1), schema()).with_dialect(CsvDialect {
+                has_header: true,
+                validate_header: true,
+                comment: Some(b'#'),
+                ..CsvDialect::default()
+            });
+        let request = ReadRequest::new("multiline.csv").with_options(options(1, projection));
+        let plan = accessor.plan_scan(request.clone()).await.unwrap();
+        assert_eq!(
+            plan.partitions.try_collect::<Vec<_>>().await.unwrap().len(),
+            3
+        );
+        let mut expected = accessor.open(request.clone()).await.unwrap();
+        let mut actual = accessor
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(3).unwrap(),
+                NonZeroUsize::new(1).unwrap(),
+            ))
+            .open(request)
+            .await
+            .unwrap();
+        loop {
+            let batch = expected.next().await.unwrap();
+            assert_eq!(actual.next().await.unwrap(), batch);
+            if batch.is_none() {
+                break;
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn csv_without_header_preserves_all_rows_and_custom_formats_remain_unsplit() {
+    let raw = b"1,one\n2,two\n3,three";
+    let accessor = CsvAccessor::new(MemoryAccessor::new(raw, 1), schema());
+    let request = ReadRequest::new("no-header.csv").with_options(options(1, None));
+    let mut reader = accessor
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ))
+        .open(request.clone())
+        .await
+        .unwrap();
+    let mut ids = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        ids.extend(collect_values::<Int64Type>(&[batch], 0));
+    }
+    assert_eq!(ids, [1, 2, 3]);
+    let custom =
+        CsvAccessor::new(MemoryAccessor::new(raw, 1), schema()).with_format(CsvFormat::default());
+    let plan = custom.plan_scan(request).await.unwrap();
+    assert_eq!(plan.partitions.size_hint().0, 1);
 }

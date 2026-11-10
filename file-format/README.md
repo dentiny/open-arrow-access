@@ -23,3 +23,14 @@ is the request's batch size. The resident task window bounds chunk retention,
 with one pending lookahead record plus the upstream input buffer. These limits
 do not cap Arrow allocations or decoder state. Scalar/array top-level inputs
 remain unsupported. Output stays ordered and batch boundaries may change.
+
+### CSV decode partitions
+
+The default CSV configuration and explicit `CsvDialect` configurations support
+file-internal parallel decoding. Framing uses csv-core with the same delimiter,
+quote, escape, comment, and record terminator settings as the Arrow decoder,
+including quoted multiline fields. Headers are replayed per partition and output
+order is preserved. For opaque Arrow `CsvFormat` configurations installed through
+`with_format`, planning keeps the input whole because their private dialect
+settings cannot be inspected safely. Use `with_dialect` for supported parallel
+framing. No storage range access is required.
