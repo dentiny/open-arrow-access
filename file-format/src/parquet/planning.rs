@@ -7,11 +7,11 @@ use parquet::arrow::{
     async_reader::ParquetRecordBatchStreamBuilder,
 };
 
+use super::error::parquet_partition_changed;
 use super::{
     ParquetAccessor, decode_error, format::create_reader, input::ParquetInput,
     validation::validate_input,
 };
-use crate::error::parquet_partition_changed;
 
 #[async_trait]
 impl<B> ScanPlanner for ParquetAccessor<B>
