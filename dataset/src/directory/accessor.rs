@@ -1,6 +1,6 @@
 use open_arrow_access_core::{
     Accessor, ByteAccessor, Capability, Error, ErrorKind, ListRequest, ReadRequest, RecordReader,
-    Result, async_trait, list_files,
+    Result, ScanPlan, ScanPlanner, async_trait, list_files,
 };
 
 use super::{
@@ -48,6 +48,15 @@ where
     }
 
     async fn open(&self, request: DirectoryRequest) -> Result<Box<dyn RecordReader>> {
+        self.files.open(self.resolve(request).await?).await
+    }
+}
+
+impl<B, A> DirectoryAccessor<B, A>
+where
+    B: ByteAccessor,
+{
+    async fn resolve(&self, request: DirectoryRequest) -> Result<FileSetRequest> {
         let prefix = normalize_prefix(request.prefix.locator()).ok_or_else(|| {
             Error::new(
                 ErrorKind::InvalidInput,
@@ -75,12 +84,21 @@ where
             },
         )
         .await?;
-        self.files
-            .open(FileSetRequest {
-                objects,
-                options: request.options,
-                byte_options: request.byte_options,
-            })
-            .await
+        Ok(FileSetRequest {
+            objects,
+            options: request.options,
+            byte_options: request.byte_options,
+        })
+    }
+}
+
+#[async_trait]
+impl<B, A> ScanPlanner for DirectoryAccessor<B, A>
+where
+    B: ByteAccessor,
+    A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
+{
+    async fn plan_scan(&self, request: DirectoryRequest) -> Result<ScanPlan> {
+        self.files.plan_scan(self.resolve(request).await?).await
     }
 }

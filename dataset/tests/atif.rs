@@ -1,7 +1,11 @@
+use std::{io::Write, num::NonZeroUsize};
+
 use arrow_array::cast::AsArray;
-use open_arrow_access_core::{Accessor, ReadOptions, ReadRequest};
+use open_arrow_access_core::{Accessor, AccessorExt, ReadOptions, ReadRequest};
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
+use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::atif::{AtifAccessor, AtifFormat};
+use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_storage::OpenDalAccessor;
 
 #[tokio::test]
@@ -45,4 +49,67 @@ async fn reads_atif_jsonl_and_ordered_file_sets() {
         rows += batch.num_rows();
     }
     assert_eq!(rows, 2);
+}
+
+#[tokio::test]
+async fn parallel_atif_matches_sequential_values_and_source_context() {
+    let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
+        open_arrow_access_test_support::fixture_path!("atif", ""),
+    ));
+    let files = FileSetAccessor::new(AtifAccessor::new(bytes, AtifFormat::JsonLines));
+    let request = FileSetRequest::new(["trajectories.jsonl", "trajectories.jsonl"]);
+    let mut sequential = files.open(request.clone()).await.unwrap();
+    let mut parallel = files
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ))
+        .open(request)
+        .await
+        .unwrap();
+    loop {
+        let expected = sequential.next().await.unwrap();
+        let actual = parallel.next().await.unwrap();
+        assert_eq!(actual, expected);
+        if expected.is_none() {
+            break;
+        }
+    }
+}
+
+#[tokio::test]
+async fn parallel_atif_composes_with_independent_gzip_readers() {
+    let root = tempfile::tempdir().unwrap();
+    let original = std::fs::read(open_arrow_access_test_support::fixture_path!(
+        "atif",
+        "trajectories.jsonl"
+    ))
+    .unwrap();
+    for name in ["a.gz", "b.gz"] {
+        let file = std::fs::File::create(root.path().join(name)).unwrap();
+        let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        encoder.write_all(&original).unwrap();
+        encoder.finish().unwrap();
+    }
+    let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(root.path()))
+        .layer(DecompressionLayer::new(Gzip));
+    let files = FileSetAccessor::new(AtifAccessor::new(bytes, AtifFormat::JsonLines));
+    let request = FileSetRequest::new(["b.gz", "a.gz", "b.gz"]);
+    let mut sequential = files.open(request.clone()).await.unwrap();
+    let mut parallel = files
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ))
+        .open(request)
+        .await
+        .unwrap();
+    loop {
+        let expected = sequential.next().await.unwrap();
+        let actual = parallel.next().await.unwrap();
+        assert_eq!(actual, expected);
+        if expected.is_none() {
+            break;
+        }
+    }
 }

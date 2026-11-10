@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use open_arrow_access_core::{
     Accessor, Capability, Error, ErrorKind, ReadRequest, RecordMetadata, RecordReader, Result,
-    async_trait,
+    ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 
 use super::{FileSetRequest, reader::create_reader};
@@ -79,5 +79,46 @@ where
             request.byte_options,
             metadata,
         )))
+    }
+}
+
+#[async_trait]
+impl<A> ScanPlanner for FileSetAccessor<A>
+where
+    A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
+{
+    async fn plan_scan(&self, request: FileSetRequest) -> Result<ScanPlan> {
+        let mut objects = request.objects.into_iter();
+        let first = objects.next().ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                "plan_file_set",
+                "file selection is empty",
+            )
+        })?;
+        let first = self
+            .inner
+            .open(
+                ReadRequest::new(first)
+                    .with_options(request.options.clone())
+                    .with_byte_options(request.byte_options),
+            )
+            .await?;
+        let metadata = RecordMetadata {
+            schema: first.metadata().schema.clone(),
+            source: None,
+        };
+        let mut partitions: Vec<ScanPartition> = vec![Box::pin(async move { Ok(first) })];
+        for object in objects {
+            let inner = self.inner.clone();
+            let read_request = ReadRequest::new(object)
+                .with_options(request.options.clone())
+                .with_byte_options(request.byte_options);
+            partitions.push(Box::pin(async move { inner.open(read_request).await }));
+        }
+        Ok(ScanPlan {
+            metadata,
+            partitions,
+        })
     }
 }

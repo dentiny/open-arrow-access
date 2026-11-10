@@ -19,5 +19,6 @@ I/O settings. Empty file selections are invalid; an empty file with a known sche
 is supported. File-set output metadata has no single source object.
 
 See [multi-shard examples](../docs/usage.md#read-multiple-shards) and
-[architecture](../docs/architecture.md). Partition parallelism and unordered
-emission are [planned](../docs/roadmap.md#planning-parallelism-and-order).
+[architecture](../docs/architecture.md). Install
+[`ParallelReadLayer`](../docs/parallel-read.md) for bounded file-level concurrency
+with the same output order. Unordered emission remains planned.
