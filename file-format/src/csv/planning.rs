@@ -126,6 +126,9 @@ impl CsvFrames {
                     if !bytes.is_empty() {
                         self.next_input = Some(bytes);
                     }
+                    if !b"\xef\xbb\xbf".starts_with(&prefix) {
+                        break;
+                    }
                 }
                 None => {
                     self.eof = true;
