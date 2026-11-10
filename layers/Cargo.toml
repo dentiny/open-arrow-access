@@ -11,10 +11,10 @@ arrow-array = { workspace = true, features = ["chrono-tz"] }
 arrow-cast.workspace = true
 arrow-schema.workspace = true
 open-arrow-access-core.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 futures.workspace = true
-tokio.workspace = true
 
 [lints]
 workspace = true
