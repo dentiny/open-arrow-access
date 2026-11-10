@@ -3959,8 +3959,7 @@ dependencies = [
 [[package]]
 name = "xml-arrow"
 version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b360fe4bd8970604f878b804dc98875c826975a4b20cc4c55aa29f089b174555"
+source = "git+https://github.com/dentiny/xml-arrow-rs?rev=62e5ad54591f50b0d0336b2adcb502a312ff9e24#62e5ad54591f50b0d0336b2adcb502a312ff9e24"
 dependencies = [
  "arrow-array",
  "arrow-schema",

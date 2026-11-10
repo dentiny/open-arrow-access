@@ -49,3 +49,10 @@ independently. Output remains globally ordered, including raw_json, source URI,
 projection, and zero-column row counts. The original line endings are retained.
 Single-document ATIF JSON remains a whole-input partition. Framing can consume
 sequential decoded bytes; it does not require random reads or parallel gzip.
+
+### XML inferred-schema partitions
+
+XML scan planning infers native mappings once from the configured bounded sample,
+then replays sampled records before unread input. Both inferred and explicit
+schemas use independent record conversion partitions, retaining namespace mappings,
+record order and source offsets. Projection names are resolved after inference.

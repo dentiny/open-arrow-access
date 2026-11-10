@@ -4,7 +4,7 @@ use open_arrow_access_core::{
     RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, into_async_read,
     record_stream_reader,
 };
-use xml_arrow::{XmlBatchBuilder, read_records};
+use xml_arrow::{XmlBatchBuilder, infer_records, read_records};
 
 use super::{XmlAccessor, error};
 
@@ -15,28 +15,42 @@ where
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = self.binding.factory();
-        // Inferred mappings are not exposed for reuse across independent workers.
-        if format.schema.is_none() {
-            return Ok(ScanPlan::whole_input(self.open(request).await?));
-        }
-        let (schema, options, output_schema) = format.prepare(&request)?;
-        let metadata = RecordMetadata {
-            schema: output_schema.unwrap(),
-            source: Some(request.object.clone()),
-        };
+        let (validation_schema, mut options, explicit_schema) = format.prepare(&request)?;
         let input = self
             .binding
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
-        let projection = options.projection.clone();
-        let records = read_records(
-            into_async_read(input, "read_xml"),
-            schema.clone(),
-            &format.record_path,
-            options,
-        )
-        .map_err(error::xml_error)?;
+        let input = into_async_read(input, "read_xml");
+        let (schema, records, output_schema) = if let Some(output_schema) = explicit_schema {
+            let records = read_records(
+                input,
+                validation_schema.clone(),
+                &format.record_path,
+                options.clone(),
+            )
+            .map_err(error::xml_error)?;
+            (validation_schema, records, output_schema)
+        } else {
+            let (schema, records) = infer_records(
+                input,
+                &format.record_path,
+                &format.bindings(),
+                options.clone(),
+                format.inference.clone(),
+            )
+            .await
+            .map_err(error::xml_error)?;
+            let (output_schema, projection) =
+                request.options.resolve_projection(&schema.arrow_schema())?;
+            options.projection = projection;
+            (schema, records, output_schema)
+        };
+        let metadata = RecordMetadata {
+            schema: output_schema,
+            source: Some(request.object),
+        };
+        let projection = options.projection;
         let output = metadata.clone();
         let partitions = records.enumerate().map(move |(index, record)| {
             let schema = schema.clone();
