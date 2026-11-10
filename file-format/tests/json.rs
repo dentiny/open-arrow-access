@@ -1,3 +1,8 @@
+use futures::TryStreamExt;
+use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
+use open_arrow_access_file_format::DecodePartitionOptions;
+use open_arrow_access_layers::ParallelReadLayer;
+use std::io::Write;
 use std::{
     error::Error as _,
     num::NonZeroUsize,
@@ -8,7 +13,7 @@ use arrow_array::{Array, Int64Array, StringArray};
 use arrow_schema::{ArrowError, DataType, Field, IntervalUnit, Schema, TimeUnit};
 use more_asserts::assert_lt;
 use open_arrow_access_core::{
-    Accessor, ErrorKind, ReadOptions, ReadRequest, RecordBatch, SchemaRef,
+    Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, RecordBatch, ScanPlanner, SchemaRef,
 };
 
 use open_arrow_access_file_format::json::JsonAccessor;
@@ -195,5 +200,111 @@ async fn decoder_configuration_errors_are_classified_before_opening_bytes() {
         assert!(error.source().unwrap().is::<ArrowError>());
         assert!(observed.requests.lock().unwrap().is_empty());
         assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn parallel_object_chunks_preserve_pretty_json_and_gzip_projection() {
+    let raw = br#"{ "id": 1, "title": "brace } and \"quote\"" }
+    {
+      "id": 2, "title": "nested"
+    } {"id":3,"title":null}"#;
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gzip.write_all(raw).unwrap();
+    let bytes = gzip.finish().unwrap();
+    for projection in [None, Some(vec!["title", "id"]), Some(vec![])] {
+        let accessor = JsonAccessor::new(
+            MemoryAccessor::new(&bytes, 1).layer(DecompressionLayer::new(Gzip)),
+            schema(),
+        );
+        let selection = request(1, projection);
+        let plan = accessor.plan_scan(selection.clone()).await.unwrap();
+        assert_eq!(
+            plan.partitions.try_collect::<Vec<_>>().await.unwrap().len(),
+            3
+        );
+        let mut expected = accessor.open(selection.clone()).await.unwrap();
+        let mut actual = accessor
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::new(1).unwrap(),
+            ))
+            .open(selection)
+            .await
+            .unwrap();
+        loop {
+            let batch = expected.next().await.unwrap();
+            assert_eq!(actual.next().await.unwrap(), batch);
+            if batch.is_none() {
+                break;
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn parallel_json_reports_truncated_tail_and_accepts_records_larger_than_target() {
+    let accessor = JsonAccessor::new(MemoryAccessor::new(b"{\"id\":1}{\"id\":", 1), schema());
+    let mut reader = accessor
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(1).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ))
+        .open(request(1, None))
+        .await
+        .unwrap();
+    assert!(reader.next().await.unwrap().is_some());
+    assert!(reader.next().await.is_err());
+    let accessor = JsonAccessor::new(MemoryAccessor::new(b"{\"id\":1}", 1), schema())
+        .with_partition_options(DecodePartitionOptions {
+            target_bytes: NonZeroUsize::new(2).unwrap(),
+        });
+    let mut reader = accessor
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ))
+        .open(request(1, None))
+        .await
+        .unwrap();
+    assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
+    assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn parallel_json_framing_handles_nested_values_and_rejects_invalid_syntax() {
+    let raw = format!(
+        "  {{\"id\":1,\"title\":\"{}é\",\"extra\":[{{\"x\":\"}}\\\"\"}},null]}}\n\t",
+        "x".repeat(16 * 1024)
+    );
+    for chunk_size in [7, 4096] {
+        let accessor = JsonAccessor::new(MemoryAccessor::new(raw.as_bytes(), chunk_size), schema())
+            .with_partition_options(DecodePartitionOptions {
+                target_bytes: NonZeroUsize::new(32).unwrap(),
+            });
+        let mut expected = accessor.open(request(1, None)).await.unwrap();
+        let mut actual = accessor
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::new(1).unwrap(),
+            ))
+            .open(request(1, None))
+            .await
+            .unwrap();
+        assert_eq!(actual.next().await.unwrap(), expected.next().await.unwrap());
+        assert!(actual.next().await.unwrap().is_none());
+    }
+    for raw in [b"{\"id\":1,}".as_slice(), b"{\"id\":[}", b"[]", b"null"] {
+        let accessor = JsonAccessor::new(MemoryAccessor::new(raw, 1), schema());
+        let error = accessor
+            .plan_scan(request(1, None))
+            .await
+            .unwrap()
+            .partitions
+            .try_collect::<Vec<_>>()
+            .await
+            .err()
+            .expect("invalid JSON must fail framing");
+        assert_eq!(error.kind(), ErrorKind::Decode);
     }
 }

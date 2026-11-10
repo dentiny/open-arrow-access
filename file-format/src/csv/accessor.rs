@@ -1,4 +1,4 @@
-use super::{CsvFileFormat, CsvFormat};
+use super::{CsvDialect, CsvFileFormat, CsvFormat};
 use crate::FileAccessor;
 use open_arrow_access_core::SchemaRef;
 
@@ -13,5 +13,8 @@ impl<B> FileAccessor<B, CsvFileFormat> {
     /// Configure delimiter, header handling and other Arrow CSV options.
     pub fn with_format(self, format: CsvFormat) -> Self {
         self.map_format(|factory| factory.with_format(format))
+    }
+    pub fn with_dialect(self, dialect: CsvDialect) -> Self {
+        self.map_format(|factory| factory.with_dialect(dialect))
     }
 }
