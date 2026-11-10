@@ -1,7 +1,6 @@
-use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, ReadRequest,
-    ReaderFactory, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait,
+    Accessor, ByteReadRequest, ByteReader, Bytes, Capability, ReadRequest, ReaderFactory,
+    RecordReader, Result, ScanPlan, ScanPlanner, async_trait, bytes_reader,
 };
 use open_arrow_access_file_format::FileAccessor;
 
@@ -12,8 +11,8 @@ pub struct RecordPage<F> {
 }
 
 impl<F> RecordPage<F> {
-    /// Expose format-specific scan planning for parallel decoding within this page.
-    /// Provider cursor requests remain sequential.
+    /// Access the native format configuration used for this page's scan planning.
+    /// API continuation requests remain provider-controlled.
     pub fn into_file_accessor(self) -> FileAccessor<RecordPageInput, F> {
         self.binding
     }
@@ -22,6 +21,14 @@ impl<F> RecordPage<F> {
         Self {
             binding: FileAccessor::from_format(RecordPageInput(bytes), format),
         }
+    }
+
+    /// Plan an application-defined format as one partition without native framing.
+    pub async fn plan_whole_page(&self, request: ReadRequest) -> Result<ScanPlan>
+    where
+        F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader>,
+    {
+        Ok(ScanPlan::whole_input(self.open(request).await?))
     }
 }
 
@@ -46,9 +53,10 @@ where
 impl<F> ScanPlanner for RecordPage<F>
 where
     F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader>,
+    FileAccessor<RecordPageInput, F>: ScanPlanner<Request = ReadRequest>,
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        Ok(ScanPlan::whole_input(self.open(request).await?))
+        self.binding.plan_scan(request).await
     }
 }
 
@@ -71,13 +79,6 @@ impl Accessor for RecordPageInput {
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        let metadata = ByteMetadata {
-            source: Some(request.object),
-            content_length: Some(self.0.len() as u64),
-            version: None,
-        };
-        let bytes = self.0.clone();
-        let chunks = stream::iter((!bytes.is_empty()).then_some(Ok(bytes)));
-        Ok(Box::new(StreamReader::new(chunks, metadata)))
+        Ok(Box::new(bytes_reader(self.0.clone(), Some(request.object))))
     }
 }

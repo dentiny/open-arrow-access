@@ -426,3 +426,39 @@ async fn parallel_xml_uses_native_namespace_selection_and_preserves_order() {
     assert!(actual.next().await.unwrap().is_none());
     assert!(expected.next().await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn parallel_inferred_xml_replays_bounded_sample_and_keeps_nested_mappings() {
+    let input = open_arrow_access_test_support::fixture!("xml", "inventory.xml").await;
+    let bytes = MemoryAccessor::new(&input, 1);
+    let observed = bytes.observations.clone();
+    let accessor =
+        XmlAccessor::new(bytes, INVENTORY_PATH).with_inference_options(XmlInferenceOptions {
+            max_records: 1,
+            max_bytes: 4096,
+        });
+    let request = request("inventory.xml", 1, Some(&["rack", "@id"]));
+    let plan = accessor.plan_scan(request.clone()).await.unwrap();
+    assert!(observed.reads.load(Ordering::Relaxed) < input.len());
+    assert_eq!(
+        plan.partitions.try_collect::<Vec<_>>().await.unwrap().len(),
+        2
+    );
+    let mut expected = accessor.open(request.clone()).await.unwrap();
+    let mut actual = accessor
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::MIN,
+        ))
+        .open(request)
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        assert_eq!(
+            actual.next().await.unwrap().unwrap(),
+            expected.next().await.unwrap().unwrap()
+        );
+    }
+    assert!(actual.next().await.unwrap().is_none());
+    assert!(expected.next().await.unwrap().is_none());
+}

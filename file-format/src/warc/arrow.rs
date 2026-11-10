@@ -7,7 +7,7 @@ use open_arrow_access_core::{
     RecordMetadata, RecordReader, Result, SchemaRef, StreamReader, async_trait,
 };
 
-use super::{WarcFormat, WarcHeader};
+use super::{WarcFormat, WarcHeader, WarcRecord};
 use crate::FileAccessor;
 
 /// Physical WARC records as Arrow rows. Bodies are unmodified LargeBinary;
@@ -73,36 +73,12 @@ impl ReaderFactory for WarcArrowFormat {
             let output = output.clone();
             let source_uri = source_uri.clone();
             async move {
-                let mut batch = RecordBatchBuilder::new(
-                    arrow_schema(),
-                    Some(
-                        output
-                            .fields()
-                            .iter()
-                            .map(|field| field.name().clone())
-                            .collect(),
-                    ),
-                )?;
+                let mut batch = new_batch(&output)?;
                 while batch.len() < batch_size {
                     let Some(record) = records.next().await? else {
                         break;
                     };
-                    batch.push(|row| {
-                        row.append("record_id", record.warc_id())?;
-                        row.append("record_type", record.warc_type().as_str())?;
-                        row.append("warc_version", record.warc_version())?;
-                        row.append("date", record.date().to_rfc3339().as_str())?;
-                        row.append("source_uri", source_uri.as_str())?;
-                        row.append(
-                            "target_uri",
-                            record.header(WarcHeader::TargetURI).as_deref(),
-                        )?;
-                        row.append(
-                            "content_type",
-                            record.header(WarcHeader::ContentType).as_deref(),
-                        )?;
-                        row.append("body", record.body())
-                    })?;
+                    append_record(&mut batch, &record, &source_uri)?;
                 }
                 if batch.is_empty() {
                     return Ok(None);
@@ -118,4 +94,40 @@ impl ReaderFactory for WarcArrowFormat {
             },
         )))
     }
+}
+
+pub(super) fn new_batch(output: &SchemaRef) -> Result<RecordBatchBuilder> {
+    RecordBatchBuilder::new(
+        arrow_schema(),
+        Some(
+            output
+                .fields()
+                .iter()
+                .map(|field| field.name().clone())
+                .collect(),
+        ),
+    )
+}
+
+pub(super) fn append_record(
+    batch: &mut RecordBatchBuilder,
+    record: &WarcRecord,
+    source_uri: &str,
+) -> Result<()> {
+    batch.push(|row| {
+        row.append("record_id", record.warc_id())?;
+        row.append("record_type", record.warc_type().as_str())?;
+        row.append("warc_version", record.warc_version())?;
+        row.append("date", record.date().to_rfc3339().as_str())?;
+        row.append("source_uri", source_uri)?;
+        row.append(
+            "target_uri",
+            record.header(WarcHeader::TargetURI).as_deref(),
+        )?;
+        row.append(
+            "content_type",
+            record.header(WarcHeader::ContentType).as_deref(),
+        )?;
+        row.append("body", record.body())
+    })
 }

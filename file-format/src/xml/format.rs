@@ -37,7 +37,7 @@ pub struct XmlFormat {
     pub(super) record_path: String,
     limits: XmlLimits,
     namespaces: Vec<(String, String)>,
-    inference: InferenceOptions,
+    pub(super) inference: InferenceOptions,
 }
 
 impl XmlFormat {
@@ -83,7 +83,7 @@ impl XmlFormat {
         self
     }
 
-    fn bindings(&self) -> Vec<NamespaceBinding<'_>> {
+    pub(super) fn bindings(&self) -> Vec<NamespaceBinding<'_>> {
         self.namespaces
             .iter()
             .map(|(prefix, uri)| NamespaceBinding { prefix, uri })

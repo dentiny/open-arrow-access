@@ -2,7 +2,8 @@ use std::{num::NonZeroUsize, sync::Arc};
 
 use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
-use open_arrow_access_core::{Accessor, AccessorExt, Bytes, ReadRequest, ScanPlanner};
+use futures::TryStreamExt;
+use open_arrow_access_core::{Accessor, AccessorExt, Bytes, ReadOptions, ReadRequest, ScanPlanner};
 use open_arrow_access_file_format::json::JsonFormat;
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::common::ApiDocument;
@@ -25,10 +26,14 @@ async fn selected_json_records_preserve_order_and_links_without_fetching_them() 
         .records_at("/results", JsonFormat::new(schema.clone()))
         .unwrap();
     let plan = records
-        .plan_scan(ReadRequest::new("api-page"))
+        .plan_scan(ReadRequest::new("api-page").with_options(ReadOptions {
+            batch_size: NonZeroUsize::MIN,
+            ..Default::default()
+        }))
         .await
         .unwrap();
-    assert_eq!(plan.partitions.size_hint().0, 1);
+    let partitions: Vec<_> = plan.partitions.try_collect().await.unwrap();
+    assert_eq!(partitions.len(), 2);
     let mut reader = records
         .layer(ParallelReadLayer::new(
             NonZeroUsize::new(2).unwrap(),
