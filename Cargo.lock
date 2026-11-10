@@ -264,9 +264,9 @@ checksum = "5d2050892d4691cf110586070786712b504985a4d37ed64a9cd8a402718e1706"
 
 [[package]]
 name = "atif-arrow"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d976984767c20607b40359a252d68a0fe81c15c467fe1b5c65647afb07b21c91"
+checksum = "6ec32256d727b501e665309770b63df3971a718008b7cf66cb7a669b59c5da50"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -3403,9 +3403,9 @@ dependencies = [
 
 [[package]]
 name = "warc-rs"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae663dc1278a5b8cb655494b948c73de3ce467d9773bb09576e6af630d415bf5"
+checksum = "99174793d99ca20c6511793f3feff565925d73a85f840bc7f4888a13edf3d217"
 dependencies = [
  "chrono",
  "futures-util",
@@ -3958,8 +3958,9 @@ dependencies = [
 
 [[package]]
 name = "xml-arrow"
-version = "0.2.6"
-source = "git+https://github.com/dentiny/xml-arrow-rs?rev=4d7ede743213bc9e5719ee80b09670d0da4db108#4d7ede743213bc9e5719ee80b09670d0da4db108"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b360fe4bd8970604f878b804dc98875c826975a4b20cc4c55aa29f089b174555"
 dependencies = [
  "arrow-array",
  "arrow-schema",
