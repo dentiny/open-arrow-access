@@ -1,4 +1,9 @@
 //! Semantic Scholar release-pinned bulk datasets and incremental diff manifests.
+//!
+//! Resolved files expose `records(format)` for explicit Arrow decoding and scan
+//! planning. The adapter retains immutable release identity and exact signed download URLs;
+//! metadata links are not followed automatically. API pages can bind an explicit
+//! JSON record selection with `ApiDocument::records_at`.
 use crate::common::{ApiDocument, Connection, RemoteFiles, segment, text};
 mod error;
 mod parser;
