@@ -45,12 +45,12 @@ do not query upstream or automatically change dependency versions.
 
 ## XML parser
 
-`format-xml` temporarily uses [xml-arrow-rs #36](https://github.com/dentiny/xml-arrow-rs/pull/36)
-for reusable inferred mappings and bounded sample replay during parallel decoding.
-Replace the pinned git revision with a registry version after that API is released.
+`format-xml` uses the published [`xml-arrow 0.2.8`](https://crates.io/crates/xml-arrow/0.2.8)
+parser for reusable inferred mappings and bounded sample replay during parallel decoding.
 Its companion `xml-io` storage crate is not used, so storage remains on this
 workspace's OpenDAL 0.59.2 baseline. Arrow family versions remain 59.3.0 in the
-lockfile. Cargo.lock records the full upstream commit for this temporary dependency.
+lockfile. The parser uses a normal registry dependency, with the resolved version
+and checksum recorded in Cargo.lock.
 
 ## ATIF parser
 
