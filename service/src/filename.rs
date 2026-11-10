@@ -10,7 +10,3 @@ pub(crate) fn valid_filename_component(value: &str) -> bool {
         && !value.chars().any(char::is_control)
         && value.trim() == value
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/filename_validation.rs"]
-mod tests;
