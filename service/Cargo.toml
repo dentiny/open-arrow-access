@@ -15,7 +15,7 @@ arxiv = [
     "open-arrow-access-decompression/tar",
 ]
 bhl = ["figshare"]
-biorxiv = ["meca", "dep:chrono"]
+biorxiv = ["meca", "dep:chrono", "record-files"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
 default = []
