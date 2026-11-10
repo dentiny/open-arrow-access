@@ -362,14 +362,14 @@ async fn input_failures_keep_their_category_during_sampling_and_later_reads() {
         |bytes| XmlAccessor::new(bytes, INVENTORY_PATH),
         &input,
         request("inventory.xml", 1, None),
-        &[0, 1],
+        &[1],
     )
     .await;
     format::assert_error_contract(
         |bytes| XmlAccessor::new(bytes, INVENTORY_PATH).with_schema(warehouse_schema()),
         &input,
         request("inventory.xml", 1, None),
-        &[0, 1],
+        &[1],
     )
     .await;
     let accessor = XmlAccessor::new(

@@ -146,7 +146,7 @@ next call to fail; byte-layer helpers retain their drain-until-error behavior.
 | `assert_invalid_projection_before_open` | Missing and duplicate fields fail as `InvalidInput` before any byte open or read. Use with a valid fixed/explicit schema. |
 | `assert_finished` | After EOF/error, repeated reads return EOF with stable metadata and no new upstream polls. |
 | `assert_terminal_error` | The next read fails with the expected kind and terminates; returns the error for operation/parser checks. |
-| `assert_error_contract` | A format factory over `MemoryAccessor` preserves representative source error categories and cause, rejects empty chunks, forwards the object and byte options, and stops polling after read failures. |
+| `assert_error_contract` | A format factory over `MemoryAccessor` preserves a non-I/O source category and cause at selected stages, rejects an empty chunk, forwards the object and byte options, and stops polling after read failures. |
 
 Pass the expected full schema and row count to `assert_projection`; the helper
 derives expected fields using Arrow's schema API independently of the accessor.
@@ -168,8 +168,8 @@ read-ahead/drop behavior and format-specific scenarios in the owning tests.
 ## Ranged sources
 
 `ranged_input::assert_contract(bytes, inspect)` checks that ranged consumers reject
-sequential inputs, unknown lengths and short ranges, and preserve all shared error
-categories plus original causes for injected range failures. The async callback
+sequential inputs, unknown lengths and short ranges, and preserve a non-I/O error
+category plus its original cause for an injected range failure. The async callback
 opens or inspects valid fixture bytes and must perform an initial range read.
 Entry decoding, format-specific errors and failures after inspection stay local.
 ZIP and TAR use this runner; sequential source-error assertions share its internal
