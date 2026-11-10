@@ -1,5 +1,6 @@
 use super::{manifest, reader::InventoryTransform};
 use arrow_schema::Schema;
+use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, Capability, ObjectRef, ReadRequest, RecordMetadata,
     RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
@@ -108,20 +109,21 @@ impl<A: ByteAccessor + 'static> ScanPlanner for PmcInventoryAccessor<A> {
             schema: transform.output_schema.clone(),
             source: Some(request.object.clone()),
         };
-        let partitions = files
-            .into_iter()
-            .map(|file| {
-                let transform = transform.clone();
-                let source = self.inner.clone();
-                let request = request.clone();
-                Box::pin(async move {
-                    Ok(
-                        Box::new(transform.create_reader(source, vec![file], request))
-                            as Box<dyn RecordReader>,
-                    )
-                }) as ScanPartition
-            })
-            .collect();
-        Ok(ScanPlan::new(metadata, partitions))
+        let source = self.inner.clone();
+        let partitions = files.into_iter().map(move |file| {
+            let transform = transform.clone();
+            let source = source.clone();
+            let request = request.clone();
+            Box::pin(async move {
+                Ok(
+                    Box::new(transform.create_reader(source, vec![file], request))
+                        as Box<dyn RecordReader>,
+                )
+            }) as ScanPartition
+        });
+        Ok(ScanPlan::from_stream(
+            metadata,
+            stream::iter(partitions.map(Ok)),
+        ))
     }
 }

@@ -130,61 +130,62 @@ where
             schema: schema.clone(),
             source: None,
         };
-        let partitions = archives
-            .into_iter()
-            .map(|archive| {
-                let service = self.service.clone();
-                let request = request.clone();
-                let schema = schema.clone();
-                Box::pin(async move {
-                    let tar = service.stream(&archive, request.byte_options).await?;
-                    let source = archive.filename;
-                    let output = RecordMetadata {
-                        schema,
-                        source: Some(ObjectRef::new(source.clone())),
-                    };
-                    let batches = stream::try_unfold(tar, move |mut tar| {
-                        let source = source.clone();
-                        let projection = request.options.projection.clone();
-                        let rows = request.options.batch_size.get();
-                        let target_bytes = request.target_bytes.get() as u64;
-                        async move {
-                            let mut builder = RecordBatchBuilder::new(record_schema(), projection)?;
-                            let mut payload_bytes = 0_u64;
-                            while builder.len() < rows
-                                && (builder.is_empty() || payload_bytes < target_bytes)
-                            {
-                                let Some((entry, mut body)) = tar.next_entry().await? else {
-                                    break;
-                                };
-                                if !entry.is_file {
-                                    drop(body);
-                                    continue;
-                                }
-                                payload_bytes = payload_bytes.saturating_add(entry.size);
-                                let data = if builder.schema().column_with_name("data").is_some() {
-                                    Bytes::from(read_all(body, "read_arxiv_entry").await?)
-                                } else {
-                                    while body.next().await?.is_some() {}
-                                    Bytes::new()
-                                };
-                                builder.push(|row| {
-                                    row.append("shard_uri", source.as_str())?;
-                                    row.append("entry_index", entry.index as u64)?;
-                                    row.append("entry_name", entry.name.as_slice())?;
-                                    row.append("data", data.as_ref())
-                                })?;
+        let service = self.service.clone();
+        let partitions = archives.into_iter().map(move |archive| {
+            let service = service.clone();
+            let request = request.clone();
+            let schema = schema.clone();
+            Box::pin(async move {
+                let tar = service.stream(&archive, request.byte_options).await?;
+                let source = archive.filename;
+                let output = RecordMetadata {
+                    schema,
+                    source: Some(ObjectRef::new(source.clone())),
+                };
+                let batches = stream::try_unfold(tar, move |mut tar| {
+                    let source = source.clone();
+                    let projection = request.options.projection.clone();
+                    let rows = request.options.batch_size.get();
+                    let target_bytes = request.target_bytes.get() as u64;
+                    async move {
+                        let mut builder = RecordBatchBuilder::new(record_schema(), projection)?;
+                        let mut payload_bytes = 0_u64;
+                        while builder.len() < rows
+                            && (builder.is_empty() || payload_bytes < target_bytes)
+                        {
+                            let Some((entry, mut body)) = tar.next_entry().await? else {
+                                break;
+                            };
+                            if !entry.is_file {
+                                drop(body);
+                                continue;
                             }
-                            if builder.is_empty() {
-                                return Ok(None);
-                            }
-                            Ok(Some((builder.finish()?, tar)))
+                            payload_bytes = payload_bytes.saturating_add(entry.size);
+                            let data = if builder.schema().column_with_name("data").is_some() {
+                                Bytes::from(read_all(body, "read_arxiv_entry").await?)
+                            } else {
+                                while body.next().await?.is_some() {}
+                                Bytes::new()
+                            };
+                            builder.push(|row| {
+                                row.append("shard_uri", source.as_str())?;
+                                row.append("entry_index", entry.index as u64)?;
+                                row.append("entry_name", entry.name.as_slice())?;
+                                row.append("data", data.as_ref())
+                            })?;
                         }
-                    });
-                    Ok(Box::new(StreamReader::new(batches, output)) as Box<dyn RecordReader>)
-                }) as ScanPartition
-            })
-            .collect();
-        Ok(ScanPlan::new(metadata, partitions))
+                        if builder.is_empty() {
+                            return Ok(None);
+                        }
+                        Ok(Some((builder.finish()?, tar)))
+                    }
+                });
+                Ok(Box::new(StreamReader::new(batches, output)) as Box<dyn RecordReader>)
+            }) as ScanPartition
+        });
+        Ok(ScanPlan::from_stream(
+            metadata,
+            stream::iter(partitions.map(Ok)),
+        ))
     }
 }
