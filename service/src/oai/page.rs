@@ -1,6 +1,7 @@
 use crate::common::RecordPage;
-use open_arrow_access_core::{ByteMetadata, ByteReader, Bytes, StreamReader};
-use open_arrow_access_core::{ReadRequest, ReaderFactory, RecordReader};
+use open_arrow_access_core::{
+    ByteReader, Bytes, ReadRequest, ReaderFactory, RecordReader, bytes_reader,
+};
 
 /// One page. Deleted records and all provider metadata remain in `bytes`.
 #[derive(Clone, Debug)]
@@ -11,18 +12,9 @@ pub struct OaiPage {
 }
 impl OaiPage {
     pub fn reader(&self) -> Box<dyn ByteReader> {
-        Box::new(StreamReader::new(
-            futures::stream::iter([Ok(self.bytes.clone())]),
-            ByteMetadata {
-                source: None,
-                content_length: Some(self.bytes.len() as u64),
-                version: None,
-            },
-        ))
+        Box::new(bytes_reader(self.bytes.clone(), None))
     }
-}
 
-impl OaiPage {
     /// Bind an explicit XML record path/schema to this already fetched page.
     /// Page bytes, deleted records and namespace context remain intact. The
     /// resumption token does not become an independent parallel fetch partition.

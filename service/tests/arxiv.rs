@@ -1,7 +1,9 @@
 use std::num::NonZeroUsize;
 
-use open_arrow_access_core::{ByteReadOptions, ErrorKind};
-use open_arrow_access_service::arxiv::{ArxivKind, ArxivService};
+use arrow_array::cast::AsArray;
+use open_arrow_access_core::{Accessor, AccessorExt, ByteReadOptions, ErrorKind, ScanPlanner};
+use open_arrow_access_layers::ParallelReadLayer;
+use open_arrow_access_service::arxiv::{ArxivKind, ArxivReadRequest, ArxivService};
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::{
     MemoryAccessor, byte_layer, fixture, fixture_path, fs_operator,
@@ -203,4 +205,51 @@ async fn numeric_month_preserves_zero_padded_archive_names() {
     assert_eq!(archives.len(), 2);
     assert_eq!(archives[0].month, 1);
     assert_eq!(archives[0].filename, "pdf/arXiv_pdf_0001_003.tar");
+}
+
+fn native_record_fixture() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("pdf")).unwrap();
+    std::fs::copy(
+        fixture_path!("arxiv", "pdf/arXiv_pdf_manifest.xml"),
+        dir.path().join("pdf/arXiv_pdf_manifest.xml"),
+    )
+    .unwrap();
+    for name in ["arXiv_pdf_2410_003.tar", "arXiv_pdf_2410_001.tar"] {
+        std::fs::copy(
+            fixture_path!("arxiv", "pdf/arXiv_pdf_2410_001.tar"),
+            dir.path().join("pdf").join(name),
+        )
+        .unwrap();
+    }
+    dir
+}
+
+#[tokio::test]
+async fn native_parallel_shards_preserve_order_and_payloads_with_a_soft_byte_target() {
+    let dir = native_record_fixture();
+    let records = ArxivService::new(OpenDalAccessor::new(fs_operator(dir.path()))).records();
+    // A payload may exceed the target, but it must remain intact in its own batch.
+    let request = ArxivReadRequest::new(ArxivKind::Pdf)
+        .with_month(2410)
+        .with_target_bytes(NonZeroUsize::MIN);
+    let plan = records.plan_scan(request.clone()).await.unwrap();
+    assert_eq!(plan.partitions.size_hint().0, 2);
+    let mut expected = records.open(request.clone()).await.unwrap();
+    let mut actual = records
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::MIN,
+        ))
+        .open(request)
+        .await
+        .unwrap();
+    for payload in [b"%PDF-first-paper".as_slice(), b"%PDF-second-paper", b""].repeat(2) {
+        let batch = actual.next().await.unwrap().unwrap();
+        assert_eq!(batch, expected.next().await.unwrap().unwrap());
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(batch["data"].as_binary::<i64>().value(0), payload);
+    }
+    assert!(actual.next().await.unwrap().is_none());
+    assert!(expected.next().await.unwrap().is_none());
 }
