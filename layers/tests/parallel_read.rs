@@ -53,12 +53,15 @@ impl ScanPlanner for Source {
     }
 }
 async fn open(parts: Vec<ScanPartition>, p: usize) -> Box<dyn RecordReader> {
+    open_plan(ScanPlan::new(metadata(), parts), p).await
+}
+async fn open_plan(plan: ScanPlan, p: usize) -> Box<dyn RecordReader> {
     Source
         .layer(ParallelReadLayer::new(
             NonZeroUsize::new(p).unwrap(),
             NonZeroUsize::new(1).unwrap(),
         ))
-        .open(ScanPlan::new(metadata(), parts))
+        .open(plan)
         .await
         .unwrap()
 }
@@ -208,14 +211,7 @@ async fn full_later_queue_stops_decoding_before_next_batch() {
 #[tokio::test]
 async fn pending_partition_discovery_does_not_block_ready_output() {
     let partitions = stream::iter([Ok(part(vec![7]))]).chain(stream::pending());
-    let mut reader = Source
-        .layer(ParallelReadLayer::new(
-            NonZeroUsize::new(2).unwrap(),
-            NonZeroUsize::new(1).unwrap(),
-        ))
-        .open(ScanPlan::from_stream(metadata(), partitions))
-        .await
-        .unwrap();
+    let mut reader = open_plan(ScanPlan::from_stream(metadata(), partitions), 2).await;
     assert_eq!(value(&reader.next().await.unwrap().unwrap()), 7);
 }
 
@@ -225,14 +221,7 @@ async fn discovery_errors_interrupt_a_blocked_partition() {
         Ok(Box::pin(std::future::pending()) as ScanPartition),
         Err(Error::new(ErrorKind::Io, "discover", "injected failure")),
     ]);
-    let mut reader = Source
-        .layer(ParallelReadLayer::new(
-            NonZeroUsize::new(2).unwrap(),
-            NonZeroUsize::new(1).unwrap(),
-        ))
-        .open(ScanPlan::from_stream(metadata(), partitions))
-        .await
-        .unwrap();
+    let mut reader = open_plan(ScanPlan::from_stream(metadata(), partitions), 2).await;
     assert_eq!(reader.next().await.unwrap_err().operation(), "discover");
     assert!(reader.next().await.unwrap().is_none());
 }
