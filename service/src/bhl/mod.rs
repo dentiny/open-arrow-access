@@ -1,4 +1,9 @@
 //! BHL API v3 and its versioned Smithsonian Figshare OCR export.
+//!
+//! Resolved files expose `records(format)` for explicit Arrow decoding and scan
+//! planning. The adapter retains validated BHL item identity and versioned OCR-export membership;
+//! metadata links are not followed automatically. API pages can bind an explicit
+//! JSON record selection with `ApiDocument::records_at`.
 mod error;
 mod resolver;
 mod validation;
