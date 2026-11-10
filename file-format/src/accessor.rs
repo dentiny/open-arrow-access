@@ -26,7 +26,7 @@ use open_arrow_access_core::{
 /// ```
 #[derive(Clone, Debug)]
 pub struct FileAccessor<B, F> {
-    binding: FactoryAccessor<B, F>,
+    pub(crate) binding: FactoryAccessor<B, F>,
 }
 
 impl<B, F> FileAccessor<B, F> {

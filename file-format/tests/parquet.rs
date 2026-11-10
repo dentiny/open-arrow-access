@@ -17,9 +17,10 @@ use futures::TryStreamExt;
 use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteReadOptions, Capability, ErrorKind, Layer,
-    ListRequest, ObjectRef, ObjectStream, ReadOptions, ReadRequest, Result, async_trait,
-    into_stream,
+    ListRequest, ObjectRef, ObjectStream, ReadOptions, ReadRequest, RecordBatch, RecordReader,
+    Result, ScanPlanner, async_trait, into_stream,
 };
+use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_test_support::format;
 use parquet::basic::Compression;
 use support::{
@@ -417,5 +418,51 @@ async fn parquet_preserves_source_error_categories_during_inspection_and_decodin
             );
             assert_eq!(ErrorKind::from_source(error.source().unwrap()), Some(kind));
         }
+    }
+}
+
+async fn rows(mut reader: Box<dyn RecordReader>) -> Vec<RecordBatch> {
+    let mut rows = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        rows.extend((0..batch.num_rows()).map(|row| batch.slice(row, 1)));
+    }
+    rows
+}
+
+#[tokio::test]
+async fn row_group_plan_reuses_metadata_and_preserves_projection_and_rows() {
+    let fixture = fixture(Compression::SNAPPY).await;
+    let observations = Arc::new(Observations::default());
+    let bytes = Arc::new(
+        OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
+            fixture.dir.path(),
+        ))
+        .layer(ByteObserverLayer(observations.clone())),
+    );
+    let accessor = ParquetAccessor::new(bytes);
+    let plan = accessor
+        .plan_scan(ReadRequest::new("data.parquet"))
+        .await
+        .unwrap();
+    assert!(plan.partitions.len() > 1);
+    assert_eq!(observations.byte_options.lock().unwrap().len(), 1);
+    let reads = observations.range_reads.load(Ordering::SeqCst);
+    for partition in plan.partitions {
+        let reader = partition.await.unwrap();
+        assert_eq!(reader.metadata().schema, fixture.schema);
+    }
+    assert_eq!(observations.range_reads.load(Ordering::SeqCst), reads);
+    for projection in [None, Some(vec!["title".into(), "id".into()]), Some(vec![])] {
+        let request = ReadRequest::new("data.parquet").with_options(ReadOptions {
+            batch_size: NonZeroUsize::new(2).unwrap(),
+            projection,
+        });
+        let expected = rows(accessor.open(request.clone()).await.unwrap()).await;
+        let parallel = accessor.clone().layer(ParallelReadLayer::new(
+            NonZeroUsize::new(3).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ));
+        let actual = rows(parallel.open(request).await.unwrap()).await;
+        assert_eq!(actual, expected);
     }
 }

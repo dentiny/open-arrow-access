@@ -43,44 +43,50 @@ impl ReaderFactory for ParquetFormat {
                 "Parquet requires range reads and a known byte length; materialize sequential input first",
             ));
         }
-        let mut builder = ParquetRecordBatchStreamBuilder::new(ParquetInput::new(input))
+        let builder = ParquetRecordBatchStreamBuilder::new(ParquetInput::new(input))
             .await
             .map_err(|e| decode_error("inspect_parquet", e))?;
 
-        // The native projection mask selects fields in file order. Reorder
-        // decoded top-level fields separately to honor the caller's order.
-        // The native stream drops schema metadata; retain it from inspection.
-        let (schema, projection) = request.options.resolve_projection(builder.schema())?;
-        if let Some(indices) = projection {
-            let mask = ProjectionMask::roots(builder.parquet_schema(), indices);
-            builder = builder.with_projection(mask);
-        }
-        let stream = builder
-            .with_batch_size(request.options.batch_size.get())
-            .build()
-            .map_err(|e| decode_error("open_parquet", e))?;
-        let reorder = request
-            .options
-            .projection
-            .as_ref()
-            .map(|columns| {
-                let field_index = FieldNameIndex::new(stream.schema().fields());
-                columns
-                    .iter()
-                    .map(|name| field_index.index_of(name))
-                    .collect::<std::result::Result<Vec<_>, _>>()
-            })
-            .transpose()
-            .map_err(|e| decode_error("project", e))?
-            .filter(|indices| indices.iter().copied().ne(0..indices.len()));
-        // TODO: Decode row groups concurrently while preserving row order.
-        Ok(Box::new(record_stream_reader(
-            stream.map_err(|error| decode_error("decode_parquet", error)),
-            RecordMetadata {
-                schema,
-                source: Some(request.object),
-            },
-            reorder,
-        )) as Box<dyn RecordReader>)
+        create_reader(builder, request)
     }
+}
+
+pub(super) fn create_reader(
+    mut builder: ParquetRecordBatchStreamBuilder<ParquetInput>,
+    request: ReadRequest,
+) -> Result<Box<dyn RecordReader>> {
+    // The native projection mask selects fields in file order. Reorder
+    // decoded top-level fields separately to honor the caller's order.
+    // The native stream drops schema metadata; retain it from inspection.
+    let (schema, projection) = request.options.resolve_projection(builder.schema())?;
+    if let Some(indices) = projection {
+        let mask = ProjectionMask::roots(builder.parquet_schema(), indices);
+        builder = builder.with_projection(mask);
+    }
+    let stream = builder
+        .with_batch_size(request.options.batch_size.get())
+        .build()
+        .map_err(|e| decode_error("open_parquet", e))?;
+    let reorder = request
+        .options
+        .projection
+        .as_ref()
+        .map(|columns| {
+            let field_index = FieldNameIndex::new(stream.schema().fields());
+            columns
+                .iter()
+                .map(|name| field_index.index_of(name))
+                .collect::<std::result::Result<Vec<_>, _>>()
+        })
+        .transpose()
+        .map_err(|e| decode_error("project", e))?
+        .filter(|indices| indices.iter().copied().ne(0..indices.len()));
+    Ok(Box::new(record_stream_reader(
+        stream.map_err(|error| decode_error("decode_parquet", error)),
+        RecordMetadata {
+            schema,
+            source: Some(request.object),
+        },
+        reorder,
+    )) as Box<dyn RecordReader>)
 }
