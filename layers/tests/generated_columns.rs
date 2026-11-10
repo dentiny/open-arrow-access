@@ -1,8 +1,9 @@
 use std::{
     collections::HashMap,
+    error::Error as _,
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     task::Poll,
 };
@@ -17,7 +18,10 @@ use open_arrow_access_core::{
 use open_arrow_access_layers::{
     ColumnTypeSpec, GeneratedColumnSpec, GeneratedColumnsLayer, TypeConversionLayer,
 };
-use open_arrow_access_test_support::reader::assert_finished;
+use open_arrow_access_test_support::{
+    DropProbe, fixture,
+    reader::{assert_error_contract, assert_finished, assert_terminal_error},
+};
 
 fn layer(specs: &[(&str, &str)]) -> GeneratedColumnsLayer {
     GeneratedColumnsLayer::try_new(
@@ -35,6 +39,7 @@ fn layer(specs: &[(&str, &str)]) -> GeneratedColumnsLayer {
 struct MemoryAccessor {
     batches: Vec<RecordBatch>,
     polls: Arc<AtomicUsize>,
+    dropped: Arc<AtomicBool>,
 }
 
 impl MemoryAccessor {
@@ -42,6 +47,7 @@ impl MemoryAccessor {
         Self {
             batches,
             polls: Arc::default(),
+            dropped: Arc::default(),
         }
     }
 }
@@ -64,7 +70,9 @@ impl Accessor for MemoryAccessor {
             .resolve_projection(&self.batches[0].schema())?;
         let mut batches = self.batches.clone().into_iter().map(Ok);
         let polls = self.polls.clone();
+        let probe = DropProbe::new(self.dropped.clone());
         let stream = stream::poll_fn(move |_| {
+            let _ = &probe;
             polls.fetch_add(1, Ordering::SeqCst);
             Poll::Ready(batches.next())
         });
@@ -112,6 +120,7 @@ async fn expressions_preserve_order_metadata_nulls_and_source_buffers() {
     let input = input();
     let source = MemoryAccessor::new(vec![input.clone(), input.slice(0, 0), input.clone()]);
     let polls = source.polls.clone();
+    let dropped = source.dropped.clone();
     let mut reader = source
         .layer(layer(&[
             ("length", "character_length(text)"),
@@ -122,6 +131,7 @@ async fn expressions_preserve_order_metadata_nulls_and_source_buffers() {
             ("alias", "\"Count\""),
             ("nothing", "NULL"),
             ("text_alias", "text"),
+            ("also_started", "now()"),
         ]))
         .open(ReadRequest::new("test"))
         .await
@@ -149,6 +159,7 @@ async fn expressions_preserve_order_metadata_nulls_and_source_buffers() {
         assert_eq!(batch.column(8).logical_null_count(), rows);
         assert!(Arc::ptr_eq(batch.schema_ref(), &schema));
         if rows > 0 {
+            assert_eq!(batch.column(6).to_data(), batch.column(10).to_data());
             assert!(Arc::ptr_eq(batch.column(0), input.column(0)));
             assert!(Arc::ptr_eq(batch.column(1), input.column(1)));
             assert!(Arc::ptr_eq(batch.column(7), input.column(0)));
@@ -172,6 +183,7 @@ async fn expressions_preserve_order_metadata_nulls_and_source_buffers() {
         }
     }
     assert!(reader.next().await.unwrap().is_none());
+    assert!(dropped.load(Ordering::SeqCst));
     assert_finished(reader.as_mut(), &polls, |m| {
         (m.schema.clone(), m.source.clone())
     })
@@ -236,6 +248,8 @@ async fn invalid_expressions_fail_at_open_even_when_hidden() {
         vec![("x", "row_number() OVER ()")],
         vec![("x", "(SELECT 1)")],
         vec![("x", "random()")],
+        vec![("x", "1 + random()")],
+        vec![("x", "unnest(ARRAY[1, 2])")],
         vec![("x", "CASE WHEN false THEN sum(\"Count\") ELSE 0 END")],
         vec![("x", "CASE WHEN false THEN random() ELSE 0 END")],
     ] {
@@ -259,6 +273,37 @@ async fn invalid_expressions_fail_at_open_even_when_hidden() {
                 .is_err()
         );
     }
+}
+
+#[tokio::test]
+async fn runtime_errors_release_input_even_when_the_generated_column_is_hidden() {
+    // The first batch succeeds; the next divides by zero. A later batch must
+    // never be polled, even if the caller keeps the failed reader alive.
+    let input = input();
+    let source = MemoryAccessor::new(vec![input.slice(0, 2), input.slice(2, 1), input]);
+    let polls = source.polls.clone();
+    let dropped = source.dropped.clone();
+    let mut reader = source
+        .layer(layer(&[("quotient", "12 / (\"Count\" - 4)")]))
+        .open(request(&["text"]))
+        .await
+        .unwrap();
+    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 2);
+    assert!(!dropped.load(Ordering::SeqCst));
+    let error = assert_terminal_error(reader.as_mut(), &polls, ErrorKind::Decode, |m| {
+        (m.schema.clone(), m.source.clone())
+    })
+    .await;
+    assert_eq!(error.operation(), "generate_column");
+    assert!(error.to_string().contains("quotient"));
+    assert!(
+        error
+            .source()
+            .unwrap()
+            .is::<datafusion::error::DataFusionError>()
+    );
+    assert_eq!(polls.load(Ordering::SeqCst), 2);
+    assert!(dropped.load(Ordering::SeqCst));
 }
 
 #[tokio::test]
@@ -289,14 +334,18 @@ async fn csv_and_parallel_reads_share_one_generation_context() {
     use open_arrow_access_test_support::MemoryAccessor as BytesAccessor;
     use std::num::NonZeroUsize;
 
-    let schema = Arc::new(Schema::new(vec![Field::new("n", DataType::Int64, false)]));
-    let source = CsvAccessor::new(BytesAccessor::new(b"1\n2\n3\n4\n", 1), schema);
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("title", DataType::Utf8, true),
+    ]));
+    let bytes = fixture!("csv", "good_no_header.csv").await;
+    let source = CsvAccessor::new(BytesAccessor::new(&bytes, 1), schema.clone());
     let source = source
         .layer(ParallelReadLayer::new(
             NonZeroUsize::new(2).unwrap(),
             NonZeroUsize::MIN,
         ))
-        .layer(layer(&[("x", "n * 2"), ("started", "now()")]));
+        .layer(layer(&[("x", "id * 2"), ("started", "now()")]));
     assert!(source.capability().read_parallel);
     let mut req = request(&["x", "started"]);
     req.options.batch_size = NonZeroUsize::MIN;
@@ -305,7 +354,7 @@ async fn csv_and_parallel_reads_share_one_generation_context() {
     assert!(!reader.capability().list);
     assert!(!reader.capability().read_with_range);
     let mut started = None;
-    for expected in [2, 4, 6, 8] {
+    for expected in [2, 4, 6] {
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(
             batch.column(0).to_data(),
@@ -317,6 +366,15 @@ async fn csv_and_parallel_reads_share_one_generation_context() {
         started = Some(batch.column(1).to_data());
     }
     assert!(reader.next().await.unwrap().is_none());
+    assert_error_contract(
+        |input| CsvAccessor::new(input, schema.clone()).layer(layer(&[("x", "id * 2")])),
+        &bytes,
+        request(&["x"]),
+        &[0, bytes.len() - 1],
+        |m| (m.schema.clone(), m.source.clone()),
+        |_, _| {},
+    )
+    .await;
 }
 
 #[tokio::test]
