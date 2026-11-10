@@ -9,12 +9,14 @@ use tokio::{sync::mpsc, task::JoinSet};
 use crate::error::{partition_task_error, schema_error};
 
 /// Execute independent partitions concurrently, emitting them in logical order.
-/// Requires an active Tokio runtime. Each partition has at most `prefetch` queued
-/// batches plus one delivered batch held by the caller. This bounds queue counts,
-/// not decoder allocations or total bytes; configure format batch sizes separately.
+/// Requires an active Tokio runtime.
 #[derive(Clone, Copy, Debug)]
 pub struct ParallelReadLayer {
+    /// Maximum resident partitions, including completed partitions with queued batches.
     partitions: NonZeroUsize,
+    /// Maximum queued batches per partition; callers may hold additional delivered batches.
+    /// Bounds queue counts, not decoder allocations or total bytes; configure format
+    /// batch sizes separately.
     prefetch: NonZeroUsize,
 }
 
