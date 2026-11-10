@@ -1,0 +1,86 @@
+Initial-investigation CPU sample (not the final timing run)
+Source baseline: ca31d4edf92df03d9265f72ba218b74bd3eee171
+Workload: read_matrix, ATIF scan, 8-thread Tokio runtime
+Collection: macOS sample, 2 seconds, 1 millisecond sampling interval
+Counts include all threads; sleeping-thread samples dominate. These are not CPU percentages.
+Function names are Rust-mangled; relevant substrings include atif_arrow,
+normalize_field, append_value, normalize_trajectory and serde_json Value/BTreeMap.
+
+Sort by top of stack, same collapsed (when >= 5):
+        __psynch_cvwait  (in libsystem_kernel.dylib)        34676
+        _xzm_free  (in libsystem_malloc.dylib)        362
+        _xzm_xzone_malloc_tiny  (in libsystem_malloc.dylib)        286
+        _platform_memcmp  (in libsystem_platform.dylib)        252
+        _platform_memmove  (in libsystem_platform.dylib)        199
+        _RNvXs0_NtNtCsgmXpVFzMzuC_10serde_json5value5indexNtNtCs3XW7gbOxCtj_5alloc6string6StringNtB5_5Index10index_into  (in read_matrix)        144
+        _RNvNtCseE3Kkfck2Ap_10atif_arrow7convert15normalize_field  (in read_matrix)        107
+        <deduplicated_symbol>  (in libsystem_malloc.dylib)        103
+        _malloc_zone_malloc  (in libsystem_malloc.dylib)        93
+        _xzm_xzone_malloc  (in libsystem_malloc.dylib)        91
+        mach_absolute_time  (in libsystem_kernel.dylib)        91
+        _RNvNtCseE3Kkfck2Ap_10atif_arrow8builders12append_value  (in read_matrix)        78
+        _free  (in libsystem_malloc.dylib)        69
+        _RNvMsi_NtNtNtCs3XW7gbOxCtj_5alloc11collections5btree3mapINtB5_8BTreeMapNtNtBb_6string6StringNtNtCsgmXpVFzMzuC_10serde_json5value5ValueE6insertCseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        68
+        DYLD-STUB$$memcmp  (in read_matrix)        59
+        _RNvMsz_NtNtNtCs3XW7gbOxCtj_5alloc11collections5btree3mapINtB5_8IntoIterNtNtBb_6string6StringNtNtCsgmXpVFzMzuC_10serde_json5value5ValueE10dying_nextCseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        56
+        _RNvNtCseE3Kkfck2Ap_10atif_arrow8builders13check_offsets  (in read_matrix)        55
+        _platform_memset  (in libsystem_platform.dylib)        50
+        _RINvMsN_NtNtNtCs3XW7gbOxCtj_5alloc11collections5btree4nodeINtB6_6HandleINtB6_7NodeRefNtNtB6_6marker3MutNtNtBc_6string6StringNtNtCsgmXpVFzMzuC_10serde_json5value5ValueNtB1n_4LeafENtB1n_4EdgeE16insert_recursingNtNtBc_5alloc6GlobalNCNvMs4_NtNtB8_3map5entryINtB3M_11VacantEntryB1D_B1Y_E12insert_entry0ECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        48
+        DYLD-STUB$$free  (in read_matrix)        44
+        _RNvMs4_NtNtNtNtCs3XW7gbOxCtj_5alloc11collections5btree3map5entryINtB5_11VacantEntryNtNtBd_6string6StringNtNtCsgmXpVFzMzuC_10serde_json5value5ValueE12insert_entryCseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        44
+        _RNvNtCseE3Kkfck2Ap_10atif_arrow7convert20normalize_trajectory  (in read_matrix)        36
+        _RINvNtCsaTNopw4qKPP_4core3ptr9drop_glueNtNtCsgmXpVFzMzuC_10serde_json5value5ValueECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        35
+        _RNvNtCsaTNopw4qKPP_4core3fmt5write  (in read_matrix)        35
+        _RNvXs4_NtCs3XW7gbOxCtj_5alloc6stringNtB5_6StringNtNtCsaTNopw4qKPP_4core5clone5Clone5clone  (in read_matrix)        34
+        _RNvNvNtCs3XW7gbOxCtj_5alloc3fmt6format12format_inner  (in read_matrix)        30
+        _RNvXsZ_NtCs3XW7gbOxCtj_5alloc6stringNtB5_6StringNtNtCsaTNopw4qKPP_4core3fmt5Write9write_str  (in read_matrix)        30
+        _RNvMs3_NtCsgmXpVFzMzuC_10serde_json4readNtB5_9SliceRead14skip_to_escape  (in read_matrix)        27
+        xzm_realloc  (in libsystem_malloc.dylib)        23
+        _RNvCs7a7XMsdEgBq_7___rustc11___rdl_alloc  (in read_matrix)        22
+        _RNvMNtNtCsgQ2CgWD3Oby_12arrow_buffer7builder4nullNtB2_17NullBufferBuilder6append  (in read_matrix)        21
+        _RINvXs0_NtCs7wdwc2x3bTA_19serde_path_to_error2deINtNtB8_4wrap4WrapNtNvXNvNtCseE3Kkfck2Ap_10atif_arrow5parses2_1__NtB19_4StepNtNtCsapIYBx1xw7g_10serde_core2de11Deserialize11deserialize9___VisitorENtB20_7Visitor9visit_mapINtNtCsgmXpVFzMzuC_10serde_json2de9MapAccessNtNtB3A_4read7StrReadEEB1b_  (in read_matrix)        18
+        DYLD-STUB$$malloc  (in read_matrix)        17
+        _RNvNtNtCsaTNopw4qKPP_4core3str8converts9from_utf8  (in read_matrix)        17
+        _RINvNvXs9_NtCsgmXpVFzMzuC_10serde_json2deINtB8_9MapAccesspENtNtCsapIYBx1xw7g_10serde_core2de9MapAccess13next_key_seed12has_next_keyNtNtBa_4read7StrReadECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        16
+        xzm_malloc_zone_size  (in libsystem_malloc.dylib)        15
+        DYLD-STUB$$memcpy  (in read_matrix)        13
+        _RINvXsj_NtNtNtCsdBjQDbQRwnj_5serde7private2de7contentNtB6_14ContentVisitorNtNtCsapIYBx1xw7g_10serde_core2de7Visitor9visit_mapINtNtCs7wdwc2x3bTA_19serde_path_to_error2de9MapAccessINtNtCsgmXpVFzMzuC_10serde_json2de9MapAccessNtNtB2V_4read7StrReadEEECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        13
+        _RNvMsa_NtCsaTNopw4qKPP_4core3fmtNtB5_9Formatter3pad  (in read_matrix)        13
+        _malloc_zone_realloc  (in libsystem_malloc.dylib)        13
+        _RINvYINtNtCs7wdwc2x3bTA_19serde_path_to_error2de12DeserializerQINtNtCsgmXpVFzMzuC_10serde_json2de12DeserializerNtNtB14_4read7StrReadEENtNtCsapIYBx1xw7g_10serde_core2de12Deserializer24___deserialize_content_v1NtNtNtNtCsdBjQDbQRwnj_5serde7private2de7content14ContentVisitorECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        12
+        _RNvCs7a7XMsdEgBq_7___rustc35___rust_no_alloc_shim_is_unstable_v2  (in read_matrix)        12
+        _RINvXs4_NtCs7wdwc2x3bTA_19serde_path_to_error2deINtB6_10CaptureKeyINtNtCsaTNopw4qKPP_4core6marker11PhantomDataNtNvXNvNtCseE3Kkfck2Ap_10atif_arrow5parses2_1__NtB1R_4StepNtNtCsapIYBx1xw7g_10serde_core2de11Deserialize11deserialize7___FieldEENtB2I_15DeserializeSeed11deserializeINtNtCsgmXpVFzMzuC_10serde_json2de6MapKeyNtNtB4t_4read7StrReadEEB1T_  (in read_matrix)        11
+        _RNvXs8_NtCsgmXpVFzMzuC_10serde_json4readNtB5_7StrReadNtB5_4Read9parse_str  (in read_matrix)        11
+        _RINvXNvXNtNtCsgmXpVFzMzuC_10serde_json5value2deNtB8_5ValueNtNtCsapIYBx1xw7g_10serde_core2de11Deserialize11deserializeNtB3_12ValueVisitorNtBW_7Visitor9visit_mapQINtNtNtNtCsdBjQDbQRwnj_5serde7private2de7content18MapRefDeserializerNtNtBa_5error5ErrorEECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        10
+        _RINvXs8_NtCs7wdwc2x3bTA_19serde_path_to_error2deINtB6_11TrackedSeedNtNtNtNtCsdBjQDbQRwnj_5serde7private2de7content14ContentVisitorENtNtCsapIYBx1xw7g_10serde_core2de15DeserializeSeed11deserializeQINtNtCsgmXpVFzMzuC_10serde_json2de12DeserializerNtNtB3c_4read7StrReadEECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        9
+        _RNvMs4_NtCs3XW7gbOxCtj_5alloc7raw_vecNtB5_11RawVecInner11finish_growB7_  (in read_matrix)        9
+        _RNvXs_NtNtCsgmXpVFzMzuC_10serde_json5value5indexeNtB4_5Index10index_into  (in read_matrix)        9
+        _RINvNtCsaTNopw4qKPP_4core3ptr9drop_glueINtNtNtNtCs3XW7gbOxCtj_5alloc11collections5btree3map8IntoIterNtNtBK_6string6StringNtNtCsgmXpVFzMzuC_10serde_json5value5ValueEECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        8
+        _RINvNvMs2_NtCs3XW7gbOxCtj_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalEBa_  (in read_matrix)        8
+        _RINvXs0_NtCs7wdwc2x3bTA_19serde_path_to_error2deINtNtB8_4wrap4WrapNtNvXNvNtCseE3Kkfck2Ap_10atif_arrow5parse1__NtB19_10TrajectoryNtNtCsapIYBx1xw7g_10serde_core2de11Deserialize11deserialize9___VisitorENtB24_7Visitor9visit_mapINtNtCsgmXpVFzMzuC_10serde_json2de9MapAccessNtNtB3E_4read7StrReadEEB1b_  (in read_matrix)        8
+        _RNvNtCseE3Kkfck2Ap_10atif_arrow8builders10append_row  (in read_matrix)        8
+        _RNvXNtNtCs3XW7gbOxCtj_5alloc3vec21spec_from_iter_nestedINtB4_3VecRNtNtCsgmXpVFzMzuC_10serde_json5value5ValueEINtB2_18SpecFromIterNestedB11_INtNtNtNtCsaTNopw4qKPP_4core4iter8adapters7flatten7FlattenINtNtB2i_10filter_map9FilterMapINtNtNtB2m_5slice4iter4IterB11_ENCNvNtCseE3Kkfck2Ap_10atif_arrow8builders13check_offsetss2_0EEE9from_iterB4g_  (in read_matrix)        8
+        pread  (in libsystem_kernel.dylib)        8
+        DYLD-STUB$$memmove  (in read_matrix)        7
+        _RINvMNtNtCs6QKuvJchp2k_11arrow_array7builder21generic_bytes_builderINtB3_18GenericByteBuilderINtNtB7_5types17GenericStringTypelEE12append_valueReECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        7
+        _RINvXs6_NtCs7wdwc2x3bTA_19serde_path_to_error2deINtB6_10CaptureKeyNtNvXNvNtCseE3Kkfck2Ap_10atif_arrow5parses2_1__NtB19_4StepNtNtCsapIYBx1xw7g_10serde_core2de11Deserialize11deserialize14___FieldVisitorENtB20_7Visitor18visit_borrowed_strNtNtCsgmXpVFzMzuC_10serde_json5error5ErrorEB1b_  (in read_matrix)        7
+        _RINvXsc_NtCs7wdwc2x3bTA_19serde_path_to_error2deINtB6_9MapAccessINtNtCsgmXpVFzMzuC_10serde_json2de9MapAccessNtNtB15_4read7StrReadEENtNtCsapIYBx1xw7g_10serde_core2de9MapAccess13next_key_seedINtNtCsaTNopw4qKPP_4core6marker11PhantomDataNtNvXNvNtCseE3Kkfck2Ap_10atif_arrow5parses2_1__NtB3Q_4StepNtB27_11Deserialize11deserialize7___FieldEEB3S_  (in read_matrix)        7
+        _RINvYNtNtNtCsgmXpVFzMzuC_10serde_json5value3ser12SerializeMapNtNtCsapIYBx1xw7g_10serde_core3ser12SerializeMap15serialize_entryNtNtCs3XW7gbOxCtj_5alloc6string6StringNtB7_5ValueECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        7
+        _RNvMNtNtCsgQ2CgWD3Oby_12arrow_buffer7builder4nullNtB2_17NullBufferBuilder21materialize_if_needed  (in read_matrix)        7
+        _RNvMs4_NtCs3XW7gbOxCtj_5alloc7raw_vecNtB5_11RawVecInner11finish_growCseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        7
+        __bzero  (in libsystem_platform.dylib)        7
+        _RINvXs4_NtNtCsgmXpVFzMzuC_10serde_json5value3serNtB6_12SerializeMapNtNtCsapIYBx1xw7g_10serde_core3ser12SerializeMap13serialize_keyeECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        6
+        _RINvXsD_NtNtNtCsdBjQDbQRwnj_5serde7private2de7contentINtB6_22ContentRefDeserializerNtNtCsgmXpVFzMzuC_10serde_json5error5ErrorENtNtCsapIYBx1xw7g_10serde_core2de12Deserializer15deserialize_anyNtNvXNtNtB1n_5value2deNtB39_5ValueNtB22_11Deserialize11deserialize12ValueVisitorECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        6
+        _realloc  (in libsystem_malloc.dylib)        6
+        _RINvNtCsaTNopw4qKPP_4core3ptr9drop_glueNtNtNtCsapIYBx1xw7g_10serde_core7private7content7ContentECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        5
+        _RINvXs1H_NtNtCsapIYBx1xw7g_10serde_core3ser5implsRNtNtCsgmXpVFzMzuC_10serde_json5value5ValueNtB9_9Serialize9serializeNtNtBO_3ser10SerializerECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        5
+        _RINvXs9_NtCsgmXpVFzMzuC_10serde_json2deINtB6_9MapAccessNtNtB8_4read7StrReadENtNtCsapIYBx1xw7g_10serde_core2de9MapAccess15next_value_seedINtNtCs7wdwc2x3bTA_19serde_path_to_error2de11TrackedSeedNtNtNtNtCsdBjQDbQRwnj_5serde7private2de7content14ContentVisitorEECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        5
+        _RINvXs_NtCs7wdwc2x3bTA_19serde_path_to_error2deINtB5_12DeserializerQINtNtCsgmXpVFzMzuC_10serde_json2de12DeserializerNtNtB19_4read7StrReadEENtNtCsapIYBx1xw7g_10serde_core2de12Deserializer18deserialize_stringNtNtB2f_5impls13StringVisitorECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        5
+        _RINvXsc_NtCs7wdwc2x3bTA_19serde_path_to_error2deINtB6_9MapAccessINtNtCsgmXpVFzMzuC_10serde_json2de9MapAccessNtNtB15_4read7StrReadEENtNtCsapIYBx1xw7g_10serde_core2de9MapAccess13next_key_seedNtNtNtNtCsdBjQDbQRwnj_5serde7private2de7content14ContentVisitorECseE3Kkfck2Ap_10atif_arrow  (in read_matrix)        5
+        _RNvCs7a7XMsdEgBq_7___rustc13___rdl_realloc  (in read_matrix)        5
+        _RNvNtCseE3Kkfck2Ap_10atif_arrow10validation13validate_core  (in read_matrix)        5
+        _RNvNtCseE3Kkfck2Ap_10atif_arrow10validation16validate_details  (in read_matrix)        5
+        _RNvXs_NtNtCs6QKuvJchp2k_11arrow_array7builder14struct_builderNtB4_13StructBuilderNtB6_12ArrayBuilder10as_any_mut  (in read_matrix)        5
+        _RNvXsd_NtNtNtCsaTNopw4qKPP_4core3fmt3num3impyNtB9_7Display3fmt  (in read_matrix)        5
+        xzm_malloc_zone_malloc_type_malloc  (in libsystem_malloc.dylib)        5
+
