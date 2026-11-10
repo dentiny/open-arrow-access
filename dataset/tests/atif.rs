@@ -81,10 +81,11 @@ async fn parallel_atif_matches_sequential_values_and_source_context() {
 async fn parallel_atif_composes_with_independent_gzip_readers() {
     let root = tempfile::tempdir().unwrap();
     for name in ["a.gz", "b.gz"] {
-        std::fs::copy(
+        tokio::fs::copy(
             open_arrow_access_test_support::fixture_path!("atif", "trajectories.jsonl.gz"),
             root.path().join(name),
         )
+        .await
         .unwrap();
     }
     let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(root.path()))
