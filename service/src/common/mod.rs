@@ -18,15 +18,11 @@ pub use json_util::{LinkField, MetadataLink, resolve_named_links, resolve_option
 
 pub(crate) use validation::filename_component as validate_filename;
 
-#[cfg(any(
-    feature = "bhl",
-    feature = "library-of-congress",
-    feature = "regulations"
-))]
-pub(crate) use validation::reject_reserved_parameters;
-
-#[cfg(any(feature = "huggingface", feature = "openstax"))]
-pub(crate) use validation::is_commit_sha;
+#[allow(
+    unused_imports,
+    reason = "Shared utilities are available to every provider build."
+)]
+pub(crate) use validation::{is_commit_sha, reject_reserved_parameters};
 
 mod record_page;
 pub use record_page::{RecordPage, RecordPageInput};

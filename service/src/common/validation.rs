@@ -56,16 +56,18 @@ pub(super) fn validate_downloads(files: &[MetadataLink]) -> Result<()> {
 }
 
 /// Recognize a complete SHA-1 Git object ID, without accepting branch names or short IDs.
-#[cfg(any(feature = "huggingface", feature = "openstax"))]
+#[allow(
+    dead_code,
+    reason = "Shared utility may be unused by the enabled providers."
+)]
 pub(crate) fn is_commit_sha(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-#[cfg(any(
-    feature = "bhl",
-    feature = "library-of-congress",
-    feature = "regulations"
-))]
+#[allow(
+    dead_code,
+    reason = "Shared utility may be unused by the enabled providers."
+)]
 pub(crate) fn reject_reserved_parameters(
     parameters: &[(&str, &str)],
     reserved: &[&str],
