@@ -4,16 +4,15 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_file_format::FileAccessor;
 
-/// An already resolved API page bound to an explicit Arrow record decoder.
-/// Opening performs no network requests; schema inference/decoding may inspect the
-/// owned page bytes. Cursor acquisition remains with the provider protocol.
+/// Already fetched page bytes bound to an explicit Arrow decoder.
+/// Opening may infer/decode the page but performs no network I/O.
 pub struct RecordPage<F> {
     binding: FileAccessor<RecordPageInput, F>,
 }
 
 impl<F> RecordPage<F> {
-    /// Access the native format configuration. RecordPage delegates scan planning
-    /// to this accessor; API continuation requests remain provider-controlled.
+    /// Access the native format configuration used for this page's scan planning.
+    /// API continuation requests remain provider-controlled.
     pub fn into_file_accessor(self) -> FileAccessor<RecordPageInput, F> {
         self.binding
     }
@@ -61,9 +60,7 @@ where
     }
 }
 
-/// Immutable, already fetched page bytes used by a native format accessor.
-/// Instances are created by the provider page adapters. Each open owns an
-/// independent sequential cursor and never performs network I/O.
+/// Immutable page input; each open creates an independent sequential cursor.
 #[derive(Clone)]
 pub struct RecordPageInput(Bytes);
 
