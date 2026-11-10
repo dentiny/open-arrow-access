@@ -7,9 +7,7 @@ use std::{
     task::Poll,
 };
 
-use arrow_array::{
-    Array, ArrayRef, Int32Array, Int64Array, RecordBatch, RecordBatchOptions, StringArray,
-};
+use arrow_array::{Array, Int32Array, Int64Array, RecordBatch, RecordBatchOptions, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
@@ -291,65 +289,6 @@ async fn composes_after_type_conversion() {
         &DataType::Float64
     );
     assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 3);
-}
-
-#[tokio::test]
-#[ignore = "manual release performance check"]
-async fn generated_columns_throughput() {
-    use std::{hint::black_box, time::Instant};
-    let batch = RecordBatch::try_from_iter([
-        (
-            "n",
-            Arc::new(Int64Array::from_iter_values(0..8192)) as ArrayRef,
-        ),
-        (
-            "text",
-            Arc::new(StringArray::from(vec!["generated columns 中文"; 8192])) as ArrayRef,
-        ),
-    ])
-    .unwrap();
-    let batches = vec![batch; 1024];
-    for (name, specs) in [
-        ("direct", None),
-        ("empty", Some(vec![])),
-        ("arithmetic", Some(vec![("x", "n * 2")])),
-        (
-            "string+dependency",
-            Some(vec![
-                ("length", "character_length(text)"),
-                ("twice", "length * 2"),
-            ]),
-        ),
-    ] {
-        let mut timings = Vec::new();
-        for _ in 0..5 {
-            let source = MemoryAccessor::new(batches.clone());
-            let start = Instant::now();
-            let mut reader = match &specs {
-                None => source.open(ReadRequest::new("perf")).await.unwrap(),
-                Some(specs) => source
-                    .layer(layer(specs))
-                    .open(ReadRequest::new("perf"))
-                    .await
-                    .unwrap(),
-            };
-            let open = start.elapsed();
-            let start = Instant::now();
-            let mut rows = 0;
-            while let Some(batch) = reader.next().await.unwrap() {
-                rows += batch.num_rows();
-                black_box(batch);
-            }
-            assert_eq!(rows, 8192 * 1024);
-            timings.push((start.elapsed(), open));
-        }
-        timings.sort();
-        let (scan, open) = timings[2];
-        println!(
-            "{name}: median scan {scan:?}, open {open:?}, {:.1} M rows/s",
-            (8192.0 * 1024.0) / scan.as_secs_f64() / 1e6
-        );
-    }
 }
 
 #[tokio::test]

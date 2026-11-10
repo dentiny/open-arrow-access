@@ -93,20 +93,8 @@ separate extension: the current API has no virtual-field request contract.
 Imported source metadata never silently hides a field. Add explicit source-owned
 virtual-field requests together with a real reader, coordinate semantics and tests.
 
-## Validation and performance
+## Validation
 
 Integration tests cover expressions, dependent columns, constants, nulls, quoting,
 metadata/buffer sharing, zero rows/columns, projection, invalid and hidden
-expressions, runtime failures, drop, type conversion, and CSV with parallel reads.
-
-Run the manual release timing check on an otherwise idle machine:
-
-```sh
-cargo test -p open-arrow-access-layers --release \
-  --test generated_columns generated_columns_throughput -- --ignored --nocapture
-```
-
-It reports median scan time across five runs over 8,388,608 rows in 8192-row
-batches sharing the same cached input buffers, with SQL/open time reported separately: direct, empty configuration,
-single arithmetic expression, and Unicode length plus an earlier-column dependency.
-This is a diagnostic benchmark without a flaky wall-clock pass/fail threshold.
+expressions, SQL casts, type conversion, and CSV with parallel reads.
