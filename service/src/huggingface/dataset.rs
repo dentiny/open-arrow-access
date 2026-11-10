@@ -1,6 +1,6 @@
 use open_arrow_access_core::{
-    Accessor, Capability, Error, ErrorKind, ListRequest, ObjectRef, RecordReader, Result,
-    async_trait, list_files,
+    Accessor, Capability, Error, ErrorKind, ListRequest, ObjectRef, RecordReader, Result, ScanPlan,
+    ScanPlanner, async_trait, list_files,
 };
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
 use open_arrow_access_file_format::parquet::ParquetAccessor;
@@ -18,6 +18,17 @@ impl HuggingFaceService {
         &self,
         request: HuggingFaceDatasetRequest,
     ) -> Result<Box<dyn RecordReader>> {
+        let (files, request) = self.resolve_dataset(request).await?;
+        files.open(request).await
+    }
+
+    async fn resolve_dataset(
+        &self,
+        request: HuggingFaceDatasetRequest,
+    ) -> Result<(
+        FileSetAccessor<ParquetAccessor<HuggingFaceAccessor>>,
+        FileSetRequest,
+    )> {
         let repository =
             HuggingFaceRepository::new(&request.repository).with_revision(&request.revision);
         validate_repository(&repository)?;
@@ -54,13 +65,12 @@ impl HuggingFaceService {
             }
             Err(error) => return Err(error),
         };
-        FileSetAccessor::new(ParquetAccessor::new(accessor))
-            .open(
-                FileSetRequest::new(objects)
-                    .with_options(request.options)
-                    .with_byte_options(request.byte_options),
-            )
-            .await
+        Ok((
+            FileSetAccessor::new(ParquetAccessor::new(accessor)),
+            FileSetRequest::new(objects)
+                .with_options(request.options)
+                .with_byte_options(request.byte_options),
+        ))
     }
 }
 
@@ -102,5 +112,13 @@ impl HuggingFaceAccessor {
             ));
         }
         Ok(objects)
+    }
+}
+
+#[async_trait]
+impl ScanPlanner for HuggingFaceService {
+    async fn plan_scan(&self, request: HuggingFaceDatasetRequest) -> Result<ScanPlan> {
+        let (files, request) = self.resolve_dataset(request).await?;
+        files.plan_scan(request).await
     }
 }

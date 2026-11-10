@@ -2,11 +2,14 @@ use std::num::NonZeroUsize;
 
 use arrow_array::{cast::AsArray, types::Int64Type};
 use http::StatusCode;
-use open_arrow_access_core::{Accessor, ByteReadOptions, Bytes, ErrorKind, ReadOptions};
+use open_arrow_access_core::{
+    Accessor, AccessorExt, ByteReadOptions, Bytes, ErrorKind, ReadOptions, ScanPlanner,
+};
 use open_arrow_access_test_support::fixture;
 
 use super::super::HuggingFaceDatasetRequest;
 use super::support::{COMMIT, ExportHub};
+use open_arrow_access_layers::ParallelReadLayer;
 
 fn request() -> HuggingFaceDatasetRequest {
     HuggingFaceDatasetRequest::new("owner/example", "default", "train")
@@ -130,4 +133,48 @@ async fn revision_metadata_can_exceed_the_previous_size_limit() {
     metadata.extend_from_slice(&hub.metadata);
     hub.metadata = metadata.into();
     assert_eq!(hub.read_ids(request()).await, [1, 2]);
+}
+
+#[tokio::test]
+async fn parallel_dataset_preserves_pinned_shard_order_and_partial_admission() {
+    let hub = ExportHub::new("paginated.json").await;
+    let service = hub.service().await;
+    let plan = service.plan_scan(request()).await.unwrap();
+    assert_eq!(plan.partitions.len(), 2);
+    assert!(!hub.requested("0001.parquet"));
+    drop(plan);
+    hub.clear_requests();
+    let mut reader = service
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ))
+        .open(request().with_options(ReadOptions {
+            batch_size: NonZeroUsize::MIN,
+            projection: Some(vec!["id".into()]),
+        }))
+        .await
+        .unwrap();
+    let mut ids = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        ids.push(batch.column(0).as_primitive::<Int64Type>().value(0));
+    }
+    assert_eq!(ids, [1, 2, 3]);
+    assert_eq!(
+        hub.requests()
+            .iter()
+            .filter(|uri| uri.contains("/revision/"))
+            .count(),
+        1
+    );
+    let hub = ExportHub::new("partial.json").await;
+    let service = hub.service().await;
+    assert_eq!(
+        service.plan_scan(request()).await.err().unwrap().kind(),
+        ErrorKind::NotFound
+    );
+    service
+        .plan_scan(request().with_partial_exports())
+        .await
+        .unwrap();
 }

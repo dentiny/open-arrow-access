@@ -1968,6 +1968,7 @@ dependencies = [
  "open-arrow-access-dataset",
  "open-arrow-access-decompression",
  "open-arrow-access-file-format",
+ "open-arrow-access-layers",
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
  "opendal",
