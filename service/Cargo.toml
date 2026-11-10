@@ -24,7 +24,7 @@ federal-register = []
 figshare = []
 govinfo = []
 gutenberg = ["format-xml", "dep:chrono"]
-hathifiles = []
+hathifiles = ["record-files"]
 huggingface = [
     "dep:open-arrow-access-dataset",
     "dep:open-arrow-access-file-format",
