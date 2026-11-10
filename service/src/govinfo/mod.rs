@@ -1,4 +1,9 @@
 //! GovInfo bulk XML directories and API package discovery.
+//!
+//! Resolved files expose `records(format)` for explicit Arrow decoding and scan
+//! planning. The adapter retains validated package identity and bulk-file membership;
+//! metadata links are not followed automatically. API pages can bind an explicit
+//! JSON record selection with `ApiDocument::records_at`.
 use crate::common::{ApiDocument, Connection, RemoteFiles, segment};
 mod error;
 mod resolver;

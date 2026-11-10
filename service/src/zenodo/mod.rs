@@ -1,4 +1,8 @@
 //! Published Zenodo records and their attached files.
+//!
+//! A resolved record exposes `files.records(format)` for explicit Arrow decoding
+//! and `ScanPlanner`/`ParallelReadLayer` composition. Membership stays bound to
+//! the selected record ID; selecting a format never follows links automatically.
 
 mod error;
 mod validation;
