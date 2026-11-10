@@ -61,7 +61,11 @@ pub(super) fn validate_path(path: &str, directory: bool) -> Result<()> {
         return Err(invalid_path("path must not have surrounding whitespace"));
     }
 
-    if !components.is_empty() && !open_arrow_access_core::is_relative_path(components) {
+    if !components.is_empty()
+        && components
+            .split('/')
+            .any(|part| matches!(part, "" | "." | ".."))
+    {
         return Err(invalid_path(
             "path must not contain empty or dot components",
         ));
