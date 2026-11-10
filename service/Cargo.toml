@@ -211,7 +211,3 @@ required-features = ["bhl"]
 [[test]]
 name = "regulations"
 required-features = ["regulations"]
-
-[[test]]
-name = "record_pages"
-required-features = ["oai"]
