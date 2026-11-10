@@ -146,6 +146,18 @@ async fn casts_preserve_metadata_nulls_order_and_unchanged_buffers() {
 }
 
 #[tokio::test]
+async fn incompatible_types_fail_before_reading() {
+    let input = batch(Arc::new(Int32Array::from(vec![42])));
+    let source = MemoryAccessor::new(vec![input]);
+    let calls = source.calls.clone();
+    let target = DataType::Struct(vec![item(DataType::Int32)].into());
+    let error = source.open_cast(target).await.err().unwrap();
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+    assert!(error.to_string().contains("cannot cast Int32 to Struct"));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn projection_keeps_cast_dependencies_and_zero_column_row_counts() {
     let input = RecordBatch::try_from_iter([
         (
