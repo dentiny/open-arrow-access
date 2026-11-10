@@ -1,6 +1,4 @@
 //! Federal Register public API pages and original document representations.
-//!
-//! Preserves validated document numbers and available representation links.
 mod error;
 mod resolver;
 mod validation;

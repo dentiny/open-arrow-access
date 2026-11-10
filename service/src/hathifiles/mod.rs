@@ -1,6 +1,4 @@
 //! HathiTrust's published full and incremental catalogue files.
-//!
-//! Preserves catalogue filenames and declared file metadata.
 use crate::common::{Connection, RemoteFiles};
 mod error;
 mod resolver;

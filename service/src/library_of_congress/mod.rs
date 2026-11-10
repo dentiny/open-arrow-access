@@ -1,6 +1,4 @@
 //! Library of Congress public metadata, resource files and original OCR responses.
-//!
-//! Preserves validated item metadata and permitted resource-file membership.
 mod error;
 mod resolver;
 mod validation;

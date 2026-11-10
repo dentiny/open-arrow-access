@@ -1,6 +1,4 @@
 //! BHL API v3 and its versioned Smithsonian Figshare OCR export.
-//!
-//! Preserves validated BHL item identity and versioned OCR-export membership.
 mod error;
 mod resolver;
 mod validation;
