@@ -209,8 +209,7 @@ async fn numeric_month_preserves_zero_padded_archive_names() {
     assert_eq!(archives[0].filename, "pdf/arXiv_pdf_0001_003.tar");
 }
 
-#[tokio::test]
-async fn native_parallel_shards_preserve_manifest_entry_order_and_binary_payloads() {
+fn native_record_fixture() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("pdf")).unwrap();
     std::fs::copy(
@@ -225,6 +224,12 @@ async fn native_parallel_shards_preserve_manifest_entry_order_and_binary_payload
         )
         .unwrap();
     }
+    dir
+}
+
+#[tokio::test]
+async fn native_parallel_shards_preserve_manifest_entry_order_and_binary_payloads() {
+    let dir = native_record_fixture();
     for projection in [
         None,
         Some(vec!["entry_index".into(), "data".into()]),
@@ -300,4 +305,46 @@ async fn native_empty_selection_keeps_schema_and_invalid_projection_precedes_io(
         .unwrap();
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
     assert!(observed.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn native_batches_use_a_soft_payload_target_without_rejecting_large_entries() {
+    let dir = native_record_fixture();
+    for target in [1, 1024] {
+        let records = ArxivService::new(OpenDalAccessor::new(fs_operator(dir.path()))).records();
+        let request = ArxivReadRequest::new(ArxivKind::Pdf)
+            .with_month(2410)
+            .with_target_bytes(NonZeroUsize::new(target).unwrap());
+        let mut reader = records.open(request).await.unwrap();
+        let mut batch_rows = Vec::new();
+        let mut payloads = Vec::new();
+        while let Some(batch) = reader.next().await.unwrap() {
+            batch_rows.push(batch.num_rows());
+            payloads.extend(
+                batch["data"]
+                    .as_binary::<i64>()
+                    .iter()
+                    .map(|value| value.unwrap().to_vec()),
+            );
+        }
+        assert_eq!(
+            payloads,
+            [
+                b"%PDF-first-paper".to_vec(),
+                b"%PDF-second-paper".to_vec(),
+                vec![],
+                b"%PDF-first-paper".to_vec(),
+                b"%PDF-second-paper".to_vec(),
+                vec![]
+            ]
+        );
+        assert_eq!(
+            batch_rows,
+            if target == 1 {
+                vec![1, 1, 1, 1, 1, 1]
+            } else {
+                vec![3, 3]
+            }
+        );
+    }
 }

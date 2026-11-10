@@ -1,4 +1,7 @@
-use std::sync::{Arc, OnceLock};
+use std::{
+    num::NonZeroUsize,
+    sync::{Arc, OnceLock},
+};
 
 use arrow_schema::{DataType, Field, Schema};
 use futures::{TryStreamExt, stream};
@@ -11,6 +14,8 @@ use open_arrow_access_core::{
 
 use super::{ArxivKind, ArxivService};
 
+const DEFAULT_BATCH_TARGET_BYTES: usize = 4 * 1024 * 1024;
+
 /// Selection of independent TAR shards; entries inside each shard remain sequential.
 #[derive(Clone, Debug)]
 pub struct ArxivReadRequest {
@@ -18,6 +23,9 @@ pub struct ArxivReadRequest {
     pub month: Option<u16>,
     pub options: ReadOptions,
     pub byte_options: ByteReadOptions,
+    /// Soft serialized payload target per Arrow batch. A complete entry can
+    /// exceed this target; batch_size still limits the number of rows.
+    pub target_bytes: NonZeroUsize,
 }
 
 impl ArxivReadRequest {
@@ -27,6 +35,7 @@ impl ArxivReadRequest {
             month: None,
             options: ReadOptions::default(),
             byte_options: ByteReadOptions::default(),
+            target_bytes: NonZeroUsize::new(DEFAULT_BATCH_TARGET_BYTES).unwrap(),
         }
     }
     pub fn with_month(mut self, month: u16) -> Self {
@@ -35,6 +44,10 @@ impl ArxivReadRequest {
     }
     pub fn with_options(mut self, options: ReadOptions) -> Self {
         self.options = options;
+        self
+    }
+    pub fn with_target_bytes(mut self, target_bytes: NonZeroUsize) -> Self {
+        self.target_bytes = target_bytes;
         self
     }
     pub fn with_byte_options(mut self, options: ByteReadOptions) -> Self {
@@ -55,7 +68,8 @@ impl ReadOptionsProvider for ArxivReadRequest {
 /// Native Arrow rows for regular TAR entries. Names and embedded PDF/source bytes
 /// are retained as LargeBinary; no document extraction or external URL fetch occurs.
 /// Each parallel partition owns one TAR stream. TarLimits still bound entry sizes;
-/// Arrow batch_size bounds rows, not total payload bytes.
+/// A soft payload target avoids accumulating many large entries in one batch;
+/// individual entries remain intact and may exceed that target.
 pub struct ArxivRecords<A> {
     service: Arc<ArxivService<A>>,
 }
@@ -141,9 +155,13 @@ where
                         let source = source.clone();
                         let projection = request.options.projection.clone();
                         let rows = request.options.batch_size.get();
+                        let target_bytes = request.target_bytes.get() as u64;
                         async move {
                             let mut builder = RecordBatchBuilder::new(record_schema(), projection)?;
-                            while builder.len() < rows {
+                            let mut payload_bytes = 0_u64;
+                            while builder.len() < rows
+                                && (builder.is_empty() || payload_bytes < target_bytes)
+                            {
                                 let Some((entry, mut body)) = tar.next_entry().await? else {
                                     break;
                                 };
@@ -151,6 +169,7 @@ where
                                     drop(body);
                                     continue;
                                 }
+                                payload_bytes = payload_bytes.saturating_add(entry.size);
                                 let data = if builder.schema().column_with_name("data").is_some() {
                                     Bytes::from(read_all(body, "read_arxiv_entry").await?)
                                 } else {
