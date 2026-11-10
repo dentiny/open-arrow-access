@@ -9,6 +9,7 @@ use parquet::arrow::{
 
 use super::{
     ParquetAccessor, decode_error,
+    error::parquet_partition_input_error,
     format::create_reader,
     input::ParquetInput,
     validation::{validate_input, validate_partition_input},
@@ -22,7 +23,7 @@ where
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let storage = self.binding.storage();
         let input = storage.open(ByteReadRequest::from(&request)).await?;
-        validate_input(input.as_ref())?;
+        validate_input(input.as_ref(), parquet_partition_input_error)?;
         let identity = input.metadata().clone();
         let metadata = ArrowReaderMetadata::load_async(
             &mut ParquetInput::new(input),

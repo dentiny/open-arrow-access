@@ -1,7 +1,7 @@
 //! Read-only Regulations.gov API v4 discovery, metadata and attachments.
 mod parser;
 mod validation;
-use crate::common::{ApiDocument, Connection, RemoteFiles, invalid, segment};
+use crate::common::{ApiDocument, Connection, RemoteFiles, segment};
 use open_arrow_access_core::Result;
 #[derive(Clone, Copy, Debug)]
 pub enum RegulationsResource {
@@ -24,9 +24,7 @@ pub struct RegulationsService {
 }
 impl RegulationsService {
     pub fn new(key: &str) -> Result<Self> {
-        if key.is_empty() {
-            return Err(invalid("Regulations.gov requires an API key"));
-        }
+        validation::validate_key(key)?;
         Ok(Self::with_connection(
             Connection::new("https://api.regulations.gov")?.with_header("X-Api-Key", key)?,
         ))

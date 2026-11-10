@@ -691,3 +691,37 @@ async fn row_group_plan_reuses_metadata_and_preserves_projection_and_rows() {
         assert_eq!(actual, expected);
     }
 }
+
+#[tokio::test]
+async fn open_and_planning_reject_unusable_inputs_with_their_own_error_context() {
+    for bytes in [
+        MemoryAccessor::new(b"", 1),
+        MemoryAccessor::new(b"", 1)
+            .with_ranges()
+            .without_content_length(),
+    ] {
+        let observations = bytes.observations.clone();
+        let accessor = ParquetAccessor::new(bytes);
+        let request = ReadRequest::new("data.parquet");
+        let open_error = accessor.open(request.clone()).await.err().unwrap();
+        let plan_error = accessor.plan_scan(request).await.err().unwrap();
+        for (error, operation, message) in [
+            (
+                open_error,
+                "open_parquet",
+                "Parquet requires range reads and a known byte length; materialize sequential input first",
+            ),
+            (
+                plan_error,
+                "plan_parquet",
+                "Parquet partitions require range reads and a known byte length",
+            ),
+        ] {
+            assert_eq!(error.kind(), ErrorKind::Unsupported);
+            assert_eq!(error.operation(), operation);
+            assert!(error.to_string().contains(message));
+        }
+        assert_eq!(observations.reads.load(Ordering::SeqCst), 0);
+        assert_eq!(observations.range_reads.load(Ordering::SeqCst), 0);
+    }
+}

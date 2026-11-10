@@ -15,3 +15,11 @@ pub(super) fn parquet_partition_changed() -> Error {
         "input length or version changed after row-group planning",
     )
 }
+
+pub(super) fn parquet_input_error() -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        "open_parquet",
+        "Parquet requires range reads and a known byte length; materialize sequential input first",
+    )
+}
