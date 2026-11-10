@@ -1933,6 +1933,7 @@ dependencies = [
  "futures",
  "more-asserts",
  "open-arrow-access-core",
+ "open-arrow-access-layers",
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
  "parquet",

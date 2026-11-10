@@ -27,6 +27,7 @@ warc = { workspace = true, optional = true }
 xml-arrow = { workspace = true, optional = true }
 
 [dev-dependencies]
+open-arrow-access-layers.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
 futures.workspace = true
