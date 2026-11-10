@@ -1,15 +1,10 @@
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectStream,
-    Result, async_trait,
+    ReadRequest, ReaderFactory, RecordReader, Result, async_trait,
 };
-use open_arrow_access_storage::NamedFileAccessor;
-
-#[cfg(feature = "record-files")]
-use open_arrow_access_core::{ReadRequest, ReaderFactory, RecordReader};
-#[cfg(feature = "record-files")]
 use open_arrow_access_dataset::file_set::FileSetAccessor;
-#[cfg(feature = "record-files")]
 use open_arrow_access_file_format::FileAccessor;
+use open_arrow_access_storage::NamedFileAccessor;
 
 use crate::file_manifest::FileSpec;
 
@@ -74,7 +69,6 @@ where
     }
 }
 
-#[cfg(feature = "record-files")]
 impl<A, M> ResolvedFileSet<A, M>
 where
     A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,

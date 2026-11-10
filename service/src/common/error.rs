@@ -45,7 +45,6 @@ pub(super) fn missing_auth_scope() -> opendal::Error {
     )
 }
 
-#[cfg(feature = "record-files")]
 pub(super) fn serialize_metadata(source: serde_json::Error) -> Error {
     decode("failed to serialize selected API records").with_source(source)
 }
