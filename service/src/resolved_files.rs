@@ -74,9 +74,11 @@ where
     A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,
     M: Send + Sync + 'static,
 {
-    /// Bind an explicit Arrow format; select logical names with FileSetRequest.
-    /// ScanPlanner preserves selection order and duplicates using independent readers.
-    /// Attachments are fetched lazily; ordinary open remains sequential.
+    /// Bind an explicit Arrow format to this validated file namespace.
+    /// Select logical file names using FileSetRequest, preserving order and duplicates.
+    /// The returned accessor implements ScanPlanner and uses independent byte readers
+    /// for each file; normal open remains sequential. No format is guessed and no
+    /// attachment is fetched until it is explicitly selected for a scan.
     pub fn records<F>(self, format: F) -> FileSetAccessor<FileAccessor<Self, F>>
     where
         F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
