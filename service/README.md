@@ -253,3 +253,9 @@ never followed automatically. Already embedded document bodies require a native
 content mapping to `LargeBinary`; an ordinary JSON string is not silently treated
 as Arrow's hexadecimal binary representation. The binding does not perform that
 source-specific content mapping.
+
+`RecordPage::into_file_accessor()` exposes the owned page bytes through the selected
+native format accessor. After the format-specific planners are enabled, install
+`ParallelReadLayer` on this accessor to use JSON/XML file-internal framing. The
+RecordPage wrapper retains its conservative whole-page plan for compatibility;
+this explicit path changes decode planning, not API cursor acquisition.

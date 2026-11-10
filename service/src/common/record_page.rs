@@ -1,21 +1,29 @@
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, FactoryAccessor,
-    ReadRequest, ReaderFactory, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader,
-    async_trait,
+    Accessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, ReadRequest,
+    ReaderFactory, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait,
 };
+use open_arrow_access_file_format::FileAccessor;
 
 /// An already resolved API page bound to an explicit Arrow record decoder.
 /// Opening performs no network requests; schema inference/decoding may inspect the
 /// owned page bytes. Cursor acquisition remains with the provider protocol.
 pub struct RecordPage<F> {
-    binding: FactoryAccessor<PageInput, F>,
+    binding: FileAccessor<RecordPageInput, F>,
 }
 
 impl<F> RecordPage<F> {
+    /// Expose the native format accessor for format-specific scan planning.
+    /// When the chosen format implements ScanPlanner, callers can install the
+    /// parallel layer here to use its file-internal framing. This does not make
+    /// the provider's continuation/cursor requests independently fetchable.
+    pub fn into_file_accessor(self) -> FileAccessor<RecordPageInput, F> {
+        self.binding
+    }
+
     pub(crate) fn new(bytes: Bytes, format: F) -> Self {
         Self {
-            binding: FactoryAccessor::new(PageInput(bytes), format),
+            binding: FileAccessor::from_format(RecordPageInput(bytes), format),
         }
     }
 }
@@ -47,10 +55,14 @@ where
     }
 }
 
-struct PageInput(Bytes);
+/// Immutable, already fetched page bytes used by a native format accessor.
+/// Instances are created by the provider page adapters. Each open owns an
+/// independent sequential cursor and never performs network I/O.
+#[derive(Clone)]
+pub struct RecordPageInput(Bytes);
 
 #[async_trait]
-impl Accessor for PageInput {
+impl Accessor for RecordPageInput {
     type Request = ByteReadRequest;
     type Reader = dyn ByteReader;
 
