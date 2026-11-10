@@ -4,8 +4,8 @@ use futures::{
 };
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ObjectRef, ReadRequest, ReaderFactory,
-    RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
-    bytes_reader, read_lines,
+    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, async_trait, bytes_reader,
+    read_lines,
 };
 
 use super::{AtifAccessor, AtifFormat, error::decode_error, reader::create_reader};
@@ -44,24 +44,21 @@ where
         let rows = request.options.batch_size.get();
         let target_bytes = self.partition_options.target_bytes.get();
         let output = metadata.clone();
-        let partitions = stream::try_unfold(chunks, move |mut frames| {
-            let request = request.clone();
-            let metadata = output.clone();
-            let projection = projection.clone();
-            async move {
-                let Some(records) = frames
-                    .next_chunk(rows, target_bytes, |(line, _)| line.len())
-                    .await?
-                else {
-                    return Ok(None);
-                };
+        let partitions = chunks.into_partitions(
+            rows,
+            target_bytes,
+            |(line, _)| line.len(),
+            move |records| {
+                let request = request.clone();
+                let metadata = output.clone();
+                let projection = projection.clone();
                 let first_index = records[0].1;
                 // Keep original line endings/whitespace for raw_json fidelity.
                 let bytes = records
                     .into_iter()
                     .flat_map(|(line, _)| line)
                     .collect::<Vec<_>>();
-                let partition: ScanPartition = Box::pin(async move {
+                Box::pin(async move {
                     let input = Box::new(bytes_reader(bytes.into(), Some(request.object.clone())));
                     Ok(Box::new(create_reader(
                         input,
@@ -71,10 +68,9 @@ where
                         metadata,
                         first_index,
                     )) as Box<dyn RecordReader>)
-                });
-                Ok(Some((partition, frames)))
-            }
-        });
+                })
+            },
+        );
         Ok(ScanPlan::from_stream(metadata, partitions))
     }
 }
