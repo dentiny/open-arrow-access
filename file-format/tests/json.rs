@@ -243,7 +243,7 @@ async fn parallel_object_chunks_preserve_pretty_json_and_gzip_projection() {
 }
 
 #[tokio::test]
-async fn parallel_json_reports_truncated_tail_and_bounds_record_bytes() {
+async fn parallel_json_reports_truncated_tail_and_accepts_records_larger_than_target() {
     let accessor = JsonAccessor::new(MemoryAccessor::new(b"{\"id\":1}{\"id\":", 1), schema());
     let mut reader = accessor
         .layer(ParallelReadLayer::new(
@@ -258,7 +258,6 @@ async fn parallel_json_reports_truncated_tail_and_bounds_record_bytes() {
     let accessor = JsonAccessor::new(MemoryAccessor::new(b"{\"id\":1}", 1), schema())
         .with_partition_options(DecodePartitionOptions {
             target_bytes: NonZeroUsize::new(2).unwrap(),
-            max_record_bytes: NonZeroUsize::new(4).unwrap(),
         });
     let mut reader = accessor
         .layer(ParallelReadLayer::new(
@@ -268,8 +267,6 @@ async fn parallel_json_reports_truncated_tail_and_bounds_record_bytes() {
         .open(request(1, None))
         .await
         .unwrap();
-    assert_eq!(
-        reader.next().await.unwrap_err().kind(),
-        ErrorKind::ResourceExhausted
-    );
+    assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
+    assert!(reader.next().await.unwrap().is_none());
 }

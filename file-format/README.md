@@ -17,11 +17,11 @@ lazily. Each partition uses an independent Arrow decoder with the fixed projecte
 schema. Structural framing is sequential; decoding runs in executor workers.
 This works over sequential decompression and does not require range access.
 
-Use `FileAccessor::with_partition_options` to configure target chunk bytes and
-maximum record bytes. Defaults are 4 MiB and 64 MiB respectively; the row target
-is the request's batch size. The resident task window bounds chunk retention,
-with one pending lookahead record plus the upstream input buffer. These limits
-do not cap Arrow allocations or decoder state. Scalar/array top-level inputs
+Use `FileAccessor::with_partition_options` to configure a soft chunk-byte target
+(default 4 MiB); the row target is the request's batch size. A complete record can
+exceed the byte target and is never rejected for its size. The resident task window
+bounds the number of retained chunks, with one pending lookahead record plus the
+upstream input buffer. This is not a cap on input bytes, Arrow allocations, or decoder state. Scalar/array top-level inputs
 remain unsupported. Output stays ordered and batch boundaries may change.
 
 ### CSV decode partitions
