@@ -1946,6 +1946,7 @@ dependencies = [
  "arrow-array",
  "arrow-cast",
  "arrow-schema",
+ "futures",
  "open-arrow-access-core",
  "open-arrow-access-file-format",
  "open-arrow-access-test-support",

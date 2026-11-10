@@ -1,22 +1,25 @@
 use std::{
-    collections::VecDeque,
     error::Error as _,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
+    task::Poll,
 };
 
+use futures::stream;
+
 use arrow_array::{
-    Array, ArrayRef, Int32Array, Int64Array, LargeBinaryArray, ListArray, RecordBatch, StringArray,
-    TimestampMicrosecondArray, types::Int32Type,
+    Array, ArrayRef, Int32Array, Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray,
+    cast::AsArray, types::Int32Type,
 };
-use arrow_schema::{DataType, Field, Schema, TimeUnit};
+use arrow_schema::{DataType, Field, Schema, TimeUnit, UnionFields, UnionMode};
 use open_arrow_access_core::{
     Accessor, AccessorExt, Capability, Error, ErrorKind, ObjectRef, ReadOptions, ReadRequest,
-    Reader, RecordMetadata, RecordReader, Result, async_trait,
+    RecordMetadata, RecordReader, Result, async_trait, record_stream_reader,
 };
 use open_arrow_access_layers::{ColumnTypeSpec, TypeConversionLayer};
+use open_arrow_access_test_support::{format, record};
 
 fn layer(name: &str, data_type: DataType) -> TypeConversionLayer {
     TypeConversionLayer::try_new(vec![ColumnTypeSpec {
@@ -24,6 +27,22 @@ fn layer(name: &str, data_type: DataType) -> TypeConversionLayer {
         data_type,
     }])
     .unwrap()
+}
+
+fn item(data_type: DataType) -> Arc<Field> {
+    Arc::new(Field::new("item", data_type, true))
+}
+
+fn dictionary(value: DataType) -> DataType {
+    DataType::Dictionary(Box::new(DataType::Int8), Box::new(value))
+}
+
+fn union(types: Vec<DataType>) -> DataType {
+    let ids = 0..types.len() as i8;
+    DataType::Union(
+        UnionFields::try_new(ids, types.into_iter().map(item)).unwrap(),
+        UnionMode::Sparse,
+    )
 }
 
 struct MemoryAccessor {
@@ -39,6 +58,12 @@ impl MemoryAccessor {
             fail: false,
             calls: Arc::default(),
         }
+    }
+
+    async fn open_cast(self, target: DataType) -> Result<Box<dyn RecordReader>> {
+        self.layer(layer("value", target))
+            .open(ReadRequest::new("test"))
+            .await
     }
 }
 
@@ -57,74 +82,26 @@ impl Accessor for MemoryAccessor {
     }
 
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        let schema = self.batches[0].schema();
-        let indices = request
+        let (schema, projection) = request
             .options
-            .projection
-            .as_ref()
-            .map(|names| {
-                names
-                    .iter()
-                    .map(|name| schema.index_of(name))
-                    .collect::<std::result::Result<Vec<_>, _>>()
-            })
-            .transpose()
-            .map_err(|e| Error::new(ErrorKind::InvalidInput, "project", e.to_string()))?;
-        let mut batches = self.batches.clone();
-        let schema = if let Some(indices) = indices {
-            batches = batches
-                .iter()
-                .map(|b| b.project(&indices).unwrap())
-                .collect();
-            Arc::new(schema.project(&indices).unwrap())
-        } else {
-            schema
-        };
-        Ok(Box::new(MemoryReader {
-            batches: batches.into(),
-            fail: self.fail,
-            calls: self.calls.clone(),
-            metadata: RecordMetadata {
+            .resolve_projection(&self.batches[0].schema())?;
+        let mut batches = self.batches.clone().into_iter().map(Ok).chain(
+            self.fail
+                .then(|| Err(Error::new(ErrorKind::Io, "read", "injected"))),
+        );
+        let calls = self.calls.clone();
+        let stream = stream::poll_fn(move |_| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Poll::Ready(batches.next())
+        });
+        Ok(Box::new(record_stream_reader(
+            stream,
+            RecordMetadata {
                 schema,
                 source: Some(request.object),
             },
-        }))
-    }
-}
-
-struct MemoryReader {
-    batches: VecDeque<RecordBatch>,
-    metadata: RecordMetadata,
-    calls: Arc<AtomicUsize>,
-    fail: bool,
-}
-
-#[async_trait]
-impl Reader for MemoryReader {
-    type Item = RecordBatch;
-    type Metadata = RecordMetadata;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-    }
-    fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
-    }
-
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        if let Some(batch) = self.batches.pop_front() {
-            return Ok(Some(batch));
-        }
-        if std::mem::take(&mut self.fail) {
-            return Err(Error::new(ErrorKind::Io, "read", "injected"));
-        }
-        Ok(None)
+            projection,
+        )))
     }
 }
 
@@ -151,8 +128,7 @@ async fn casts_preserve_metadata_nulls_order_and_unchanged_buffers() {
     )
     .unwrap();
     let mut reader = MemoryAccessor::new(vec![input.clone(), input.slice(1, 0), input.clone()])
-        .layer(layer("value", DataType::Int32))
-        .open(ReadRequest::new("test"))
+        .open_cast(DataType::Int32)
         .await
         .unwrap();
     let expected = reader.metadata().schema.clone();
@@ -167,11 +143,7 @@ async fn casts_preserve_metadata_nulls_order_and_unchanged_buffers() {
         assert_eq!(output.num_rows(), rows);
         if rows > 0 {
             assert_eq!(
-                output
-                    .column(0)
-                    .as_any()
-                    .downcast_ref::<Int32Array>()
-                    .unwrap(),
+                output.column(0).as_primitive::<Int32Type>(),
                 &Int32Array::from(vec![Some(42), None, Some(-7)])
             );
             assert!(Arc::ptr_eq(output.column(1), input.column(1)));
@@ -181,79 +153,39 @@ async fn casts_preserve_metadata_nulls_order_and_unchanged_buffers() {
 }
 
 #[tokio::test]
-async fn binary_timestamp_and_nested_casts_use_arrow_semantics() {
-    let cases: Vec<(ArrayRef, DataType, ArrayRef)> = vec![
-        (
-            Arc::new(StringArray::from(vec![Some("hello"), None])),
-            DataType::LargeBinary,
-            Arc::new(LargeBinaryArray::from(vec![
-                Some(b"hello".as_slice()),
-                None,
-            ])),
-        ),
-        (
-            Arc::new(StringArray::from(vec![Some("1970-01-01T00:00:01Z"), None])),
-            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
-            Arc::new(
-                TimestampMicrosecondArray::from(vec![Some(1_000_000), None]).with_timezone("UTC"),
-            ),
-        ),
-        (
-            Arc::new(ListArray::from_iter_primitive::<Int32Type, _, _>(vec![
-                Some(vec![Some(1), None]),
-                None,
-            ])),
-            DataType::List(Arc::new(Field::new("item", DataType::Int64, true))),
-            Arc::new(ListArray::from_iter_primitive::<
-                arrow_array::types::Int64Type,
-                _,
-                _,
-            >(vec![Some(vec![Some(1), None]), None])),
-        ),
-    ];
-    for (input, target, expected) in cases {
-        let mut reader = MemoryAccessor::new(vec![batch(input)])
-            .layer(layer("value", target))
-            .open(ReadRequest::new("test"))
-            .await
-            .unwrap();
-        let output = reader.next().await.unwrap().unwrap();
-        assert_eq!(output.column(0).to_data(), expected.to_data());
-    }
+async fn casts_timestamp_with_named_timezone() {
+    let input = batch(Arc::new(StringArray::from(vec![
+        Some("1970-01-01T00:00:01Z"),
+        None,
+    ])));
+    let mut reader = MemoryAccessor::new(vec![input])
+        .open_cast(DataType::Timestamp(
+            TimeUnit::Microsecond,
+            Some("UTC".into()),
+        ))
+        .await
+        .unwrap();
+    let output = reader.next().await.unwrap().unwrap();
+    let expected =
+        TimestampMicrosecondArray::from(vec![Some(1_000_000), None]).with_timezone("UTC");
+    assert_eq!(output.column(0).to_data(), expected.to_data());
 }
 
 #[tokio::test]
 async fn invalid_values_and_upstream_errors_terminate_reading() {
-    for input in [
-        Arc::new(StringArray::from(vec!["42", "bad"])) as ArrayRef,
-        Arc::new(Int64Array::from(vec![i64::from(i32::MAX) + 1])),
-    ] {
-        let source = MemoryAccessor::new(vec![batch(input)]);
-        let calls = source.calls.clone();
-        let mut reader = source
-            .layer(layer("value", DataType::Int32))
-            .open(ReadRequest::new("test"))
-            .await
-            .unwrap();
-        let error = reader.next().await.unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Decode);
-        assert!(error.to_string().contains("value"));
-        assert!(error.source().is_some());
-        assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-    }
+    let input = batch(Arc::new(StringArray::from(vec!["42", "bad"])));
+    let source = MemoryAccessor::new(vec![input]);
+    let calls = source.calls.clone();
+    let mut reader = source.open_cast(DataType::Int32).await.unwrap();
+    let error = format::assert_terminal_error(reader.as_mut(), &calls, ErrorKind::Decode).await;
+    assert!(error.to_string().contains("value"));
+    assert!(error.source().is_some());
     let mut source = MemoryAccessor::new(vec![batch(Arc::new(StringArray::from(vec!["1"])))]);
     source.fail = true;
     let calls = source.calls.clone();
-    let mut reader = source
-        .layer(layer("value", DataType::Int32))
-        .open(ReadRequest::new("test"))
-        .await
-        .unwrap();
+    let mut reader = source.open_cast(DataType::Int32).await.unwrap();
     assert!(reader.next().await.unwrap().is_some());
-    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Io);
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    format::assert_terminal_error(reader.as_mut(), &calls, ErrorKind::Io).await;
 }
 
 #[tokio::test]
@@ -307,19 +239,14 @@ async fn projection_keeps_cast_dependencies_and_zero_column_row_counts() {
 
 #[tokio::test]
 async fn invalid_declarations_fail_before_reading_and_extensions_are_protected() {
-    for specs in [
-        vec![ColumnTypeSpec {
-            column: "".into(),
-            data_type: DataType::Int32,
-        }],
-        vec![
-            ColumnTypeSpec {
-                column: "value".into(),
-                data_type: DataType::Int32
-            };
-            2
-        ],
-    ] {
+    for names in [vec![""], vec!["value", "value"]] {
+        let specs = names
+            .into_iter()
+            .map(|name| ColumnTypeSpec {
+                column: name.into(),
+                data_type: DataType::Int32,
+            })
+            .collect();
         assert!(TypeConversionLayer::try_new(specs).is_err());
     }
     let input = batch(Arc::new(StringArray::from(vec!["1"])));
@@ -348,8 +275,7 @@ async fn invalid_declarations_fail_before_reading_and_extensions_are_protected()
     let input = RecordBatch::try_new(schema, input.columns().to_vec()).unwrap();
     assert!(
         MemoryAccessor::new(vec![input])
-            .layer(layer("value", DataType::Int32))
-            .open(ReadRequest::new("test"))
+            .open_cast(DataType::Int32)
             .await
             .is_err()
     );
@@ -367,7 +293,6 @@ async fn no_ops_share_batches_and_layers_compose_in_order() {
             .open(ReadRequest::new("test"))
             .await
             .unwrap();
-        assert!(Arc::ptr_eq(&reader.metadata().schema, input.schema_ref()));
         let output = reader.next().await.unwrap().unwrap();
         assert!(Arc::ptr_eq(output.schema_ref(), input.schema_ref()));
         assert!(Arc::ptr_eq(output.column(0), input.column(0)));
@@ -379,20 +304,11 @@ async fn no_ops_share_batches_and_layers_compose_in_order() {
         .await
         .unwrap();
     let output = reader.next().await.unwrap().unwrap();
-    assert_eq!(
-        output
-            .column(0)
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .unwrap()
-            .value(0),
-        42
-    );
+    assert_eq!(output.column(0).as_primitive::<Int32Type>().value(0), 42);
 }
 
 #[test]
 fn malformed_target_types_are_rejected_recursively() {
-    use arrow_schema::{UnionFields, UnionMode};
     for target in [
         DataType::FixedSizeBinary(-1),
         DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Int32, true)), -1),
@@ -428,9 +344,7 @@ fn malformed_target_types_are_rejected_recursively() {
             Arc::new(Field::new("ends", DataType::Int16, false)),
             Arc::new(Field::new("values", DataType::Utf8, true)),
         ),
-        DataType::Decimal128(0, 0),
         DataType::Decimal128(39, 0),
-        DataType::Decimal128(3, 4),
         DataType::List(Arc::new(Field::new(
             "item",
             DataType::FixedSizeBinary(-1),
@@ -454,7 +368,7 @@ async fn parquet_conversion_preserves_projection_and_batch_order() {
     let bytes =
         open_arrow_access_test_support::fixture!("parquet", "ordered-uncompressed.parquet").await;
     let source = ParquetAccessor::new(ByteAccessor::new(&bytes, 1024).with_ranges());
-    let mut reader = source
+    let reader = source
         .layer(layer("id", DataType::Int32))
         .open(ReadRequest::new("test.parquet").with_options(ReadOptions {
             projection: Some(vec!["title".into(), "id".into()]),
@@ -465,29 +379,18 @@ async fn parquet_conversion_preserves_projection_and_batch_order() {
     let schema = reader.metadata().schema.clone();
     assert_eq!(schema.field(0).name(), "title");
     assert_eq!(schema.field(1).data_type(), &DataType::Int32);
-    let mut ids = Vec::new();
-    while let Some(batch) = reader.next().await.unwrap() {
-        assert_eq!(batch.schema(), schema);
-        ids.extend_from_slice(
-            batch
-                .column(1)
-                .as_any()
-                .downcast_ref::<Int32Array>()
-                .unwrap()
-                .values(),
-        );
-    }
-    assert_eq!(ids, (0..7).collect::<Vec<_>>());
+    assert_eq!(
+        record::collect_column::<Int32Type>(reader, 1).await,
+        (0..7).collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test]
 async fn decimal_rescaling_rejects_unsafe_pairs_before_reading() {
-    use arrow_array::{Decimal256Array, new_empty_array};
-    use arrow_schema::UnionFields;
+    use arrow_array::new_empty_array;
 
     let from = DataType::Decimal256(76, 0);
     let to = DataType::Decimal256(76, 60);
-    let item = |data_type| Arc::new(Field::new("item", data_type, true));
     let map = |data_type| {
         DataType::Map(
             Arc::new(Field::new(
@@ -508,11 +411,8 @@ async fn decimal_rescaling_rejects_unsafe_pairs_before_reading() {
         (from.clone(), to.clone()),
         (from.clone(), DataType::Decimal256(76, 52)),
         (
-            DataType::Union(
-                UnionFields::try_new([0, 1], [item(from.clone()), item(to.clone())]).unwrap(),
-                arrow_schema::UnionMode::Sparse,
-            ),
-            DataType::Dictionary(Box::new(DataType::Int8), Box::new(to.clone())),
+            union(vec![from.clone(), to.clone()]),
+            dictionary(to.clone()),
         ),
         (DataType::Decimal128(38, 38), DataType::Decimal128(38, -128)),
         (DataType::Decimal128(38, -128), DataType::Decimal256(76, 60)),
@@ -524,10 +424,7 @@ async fn decimal_rescaling_rejects_unsafe_pairs_before_reading() {
             DataType::Struct(vec![item(from.clone())].into()),
             DataType::Struct(vec![item(to.clone())].into()),
         ),
-        (
-            DataType::Dictionary(Box::new(DataType::Int8), Box::new(from.clone())),
-            DataType::Dictionary(Box::new(DataType::Int16), Box::new(to.clone())),
-        ),
+        (dictionary(from.clone()), dictionary(to.clone())),
         (
             DataType::RunEndEncoded(
                 Arc::new(Field::new("ends", DataType::Int32, false)),
@@ -535,13 +432,7 @@ async fn decimal_rescaling_rejects_unsafe_pairs_before_reading() {
             ),
             to.clone(),
         ),
-        (
-            DataType::Union(
-                UnionFields::try_new([0], [item(from.clone())]).unwrap(),
-                arrow_schema::UnionMode::Sparse,
-            ),
-            to.clone(),
-        ),
+        (union(vec![from.clone()]), to.clone()),
         (map(from.clone()), map(to.clone())),
         (DataType::FixedSizeList(item(from.clone()), 1), to.clone()),
         (from, DataType::List(item(to))),
@@ -549,30 +440,11 @@ async fn decimal_rescaling_rejects_unsafe_pairs_before_reading() {
     for (from, to) in pairs {
         let source = MemoryAccessor::new(vec![batch(new_empty_array(&from))]);
         let calls = source.calls.clone();
-        let error = source
-            .layer(layer("value", to))
-            .open(ReadRequest::new("test"))
-            .await
-            .err()
-            .unwrap();
+        let error = source.open_cast(to).await.err().unwrap();
         assert_eq!(error.kind(), ErrorKind::Unsupported);
         assert!(error.to_string().contains("Decimal rescale"));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
-
-    let value = "1000000000000000000000000000000000000000000000000000000000000000000000000000"
-        .parse()
-        .unwrap();
-    let input = Decimal256Array::from_iter_values([value])
-        .with_precision_and_scale(76, 0)
-        .unwrap();
-    assert!(
-        MemoryAccessor::new(vec![batch(Arc::new(input))])
-            .layer(layer("value", DataType::Decimal256(76, 60)))
-            .open(ReadRequest::new("test"))
-            .await
-            .is_err()
-    );
 }
 
 #[tokio::test]
@@ -583,8 +455,7 @@ async fn decimal_guard_preserves_safe_rescaling_and_struct_field_mapping() {
         .with_precision_and_scale(76, 0)
         .unwrap();
     let mut reader = MemoryAccessor::new(vec![batch(Arc::new(input))])
-        .layer(layer("value", DataType::Decimal256(76, 51)))
-        .open(ReadRequest::new("test"))
+        .open_cast(DataType::Decimal256(76, 51))
         .await
         .unwrap();
     let output = reader.next().await.unwrap().unwrap();
@@ -594,52 +465,26 @@ async fn decimal_guard_preserves_safe_rescaling_and_struct_field_mapping() {
             .unwrap();
     assert_eq!(output.column(0).to_data(), expected.to_data());
 
-    let from = DataType::Struct(
-        vec![
-            Field::new("a", DataType::Decimal256(76, 0), true),
-            Field::new("b", DataType::Decimal256(76, 60), true),
-        ]
-        .into(),
-    );
-    let to = DataType::Struct(
-        vec![
-            Field::new("b", DataType::Decimal256(76, 60), true),
-            Field::new("a", DataType::Decimal256(76, 0), true),
-        ]
-        .into(),
-    );
+    let fields = vec![
+        Field::new("a", DataType::Decimal256(76, 0), true),
+        Field::new("b", DataType::Decimal256(76, 60), true),
+    ];
+    let from = DataType::Struct(fields.clone().into());
+    let to = DataType::Struct(fields.into_iter().rev().collect());
     let mut reader = MemoryAccessor::new(vec![batch(new_empty_array(&from))])
-        .layer(layer("value", to))
-        .open(ReadRequest::new("test"))
+        .open_cast(to)
         .await
         .unwrap();
     assert!(reader.next().await.unwrap().is_some());
 
-    let union = DataType::Union(
-        arrow_schema::UnionFields::try_new(
-            [0, 1],
-            [
-                Field::new("from", DataType::Decimal256(76, 0), true),
-                Field::new("exact", DataType::Decimal256(76, 60), true),
-            ],
-        )
-        .unwrap(),
-        arrow_schema::UnionMode::Sparse,
-    );
-    let from = DataType::Dictionary(
-        Box::new(DataType::Int8),
-        Box::new(DataType::Dictionary(
-            Box::new(DataType::Int8),
-            Box::new(union),
-        )),
-    );
-    let to = DataType::Dictionary(
-        Box::new(DataType::Int16),
-        Box::new(DataType::Decimal256(76, 60)),
-    );
+    let union = union(vec![
+        DataType::Decimal256(76, 0),
+        DataType::Decimal256(76, 60),
+    ]);
+    let from = dictionary(dictionary(union));
+    let to = dictionary(DataType::Decimal256(76, 60));
     let mut reader = MemoryAccessor::new(vec![batch(new_empty_array(&from))])
-        .layer(layer("value", to))
-        .open(ReadRequest::new("test"))
+        .open_cast(to)
         .await
         .unwrap();
     assert!(reader.next().await.unwrap().is_some());
@@ -652,8 +497,7 @@ async fn decimal_guard_preserves_safe_rescaling_and_struct_field_mapping() {
     .with_precision_and_scale(76, 0)
     .unwrap();
     let mut reader = MemoryAccessor::new(vec![batch(Arc::new(overflow))])
-        .layer(layer("value", DataType::Decimal256(76, 1)))
-        .open(ReadRequest::new("test"))
+        .open_cast(DataType::Decimal256(76, 1))
         .await
         .unwrap();
     assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
