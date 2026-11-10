@@ -4,12 +4,11 @@ use std::{
 };
 
 use arrow_schema::{DataType, Field, Schema};
-use futures::{TryStreamExt, stream};
+use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, ObjectRef,
     ReadOptions, ReadOptionsProvider, RecordBatchBuilder, RecordMetadata, RecordReader, Result,
-    ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, into_stream,
-    read_all,
+    ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, read_all,
 };
 
 use super::{ArxivKind, ArxivService};
@@ -114,12 +113,7 @@ where
     }
 
     async fn open(&self, request: ArxivReadRequest) -> Result<Box<dyn RecordReader>> {
-        let plan = self.plan_scan(request).await?;
-        let batches = plan
-            .partitions
-            .and_then(|partition| async { partition.await.map(into_stream) })
-            .try_flatten();
-        Ok(Box::new(StreamReader::new(batches, plan.metadata)))
+        Ok(Box::new(self.plan_scan(request).await?.into_reader()))
     }
 }
 
