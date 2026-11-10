@@ -4,7 +4,7 @@ use arrow_array::{Array, cast::AsArray};
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ObjectRef, ReadRequest, RecordBatch, RecordMetadata,
-    RecordReader, Result, SchemaRef, StreamReader, into_stream, project_batch,
+    RecordReader, Result, SchemaRef, into_stream, record_stream_reader,
 };
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::csv::CsvAccessor;
@@ -41,25 +41,23 @@ impl InventoryTransform {
                 .with_byte_options(request.byte_options);
             async move { csv.open(request).await.map(into_stream) }
         });
-        let batches = readers
-            .try_flatten()
-            .map(move |batch| batch.and_then(|batch| self.transform(batch)));
-        StreamReader::new(batches, metadata)
+        let batches = readers.try_flatten().map(|batch| {
+            let batch = batch?;
+            validate_batch(&batch)?;
+            Ok(batch)
+        });
+        record_stream_reader(batches, metadata, self.output_projection)
     }
+}
 
-    fn transform(&self, batch: RecordBatch) -> Result<RecordBatch> {
-        let buckets = batch.column_by_name("Bucket").unwrap().as_string::<i32>();
-        let keys = batch.column_by_name("Key").unwrap().as_string::<i32>();
-        for row in 0..batch.num_rows() {
-            validation::validate_row(
-                (!buckets.is_null(row)).then(|| buckets.value(row)),
-                (!keys.is_null(row)).then(|| keys.value(row)),
-            )?;
-        }
-        project_batch(
-            batch,
-            self.output_projection.as_deref(),
-            self.output_schema.clone(),
-        )
+fn validate_batch(batch: &RecordBatch) -> Result<()> {
+    let buckets = batch.column_by_name("Bucket").unwrap().as_string::<i32>();
+    let keys = batch.column_by_name("Key").unwrap().as_string::<i32>();
+    for row in 0..batch.num_rows() {
+        validation::validate_row(
+            (!buckets.is_null(row)).then(|| buckets.value(row)),
+            (!keys.is_null(row)).then(|| keys.value(row)),
+        )?;
     }
+    Ok(())
 }
