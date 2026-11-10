@@ -1,5 +1,4 @@
-mod error;
-
+use crate::error::document_row_count;
 use open_arrow_access_core::{
     Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt, RecordBatch, RecordReader, Result,
     bytes_reader,
@@ -14,9 +13,9 @@ where
 {
     let input = bytes_reader(bytes, Some(request.object.clone()));
     let mut reader = format.open_input(Box::new(input), request).await?;
-    let batch = reader.next().await?.ok_or_else(error::row_count)?;
+    let batch = reader.next().await?.ok_or_else(document_row_count)?;
     if batch.num_rows() != 1 || reader.next().await?.is_some() {
-        return Err(error::row_count());
+        return Err(document_row_count());
     }
     Ok(batch)
 }
