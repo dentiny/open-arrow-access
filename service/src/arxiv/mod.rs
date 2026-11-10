@@ -2,6 +2,8 @@
 
 mod error;
 mod manifest;
+mod records;
+pub use records::{ArxivReadRequest, ArxivRecords, record_schema};
 mod validation;
 
 use open_arrow_access_core::{
@@ -136,3 +138,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivServi
         Ok(input)
     }
 }
+
+// Native record scans use one partition per manifest shard. Install
+// ParallelReadLayer on service.records() to read independent shards concurrently;
+// entries inside each TAR are consumed in their physical order.
