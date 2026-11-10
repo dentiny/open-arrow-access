@@ -119,11 +119,11 @@ async fn overlaps_without_replacing_completed_buffered_partitions() {
     release.notify_one();
     let (b, mut r) = task.await.unwrap();
     assert_eq!(value(&b), 0);
-    let mut count = 1;
-    while r.next().await.unwrap().is_some() {
-        count += 1;
+    let mut values = vec![value(&b)];
+    while let Some(batch) = r.next().await.unwrap() {
+        values.push(value(&batch));
     }
-    assert_eq!(count, 20);
+    assert_eq!(values, (0..20).collect::<Vec<_>>());
 }
 
 #[tokio::test]
@@ -189,11 +189,9 @@ async fn rejects_partition_metadata_and_batch_schema_mismatch() {
 #[tokio::test]
 async fn full_later_queue_stops_decoding_before_next_batch() {
     let produced = Arc::new(Semaphore::new(0));
-    let polls = Arc::new(AtomicUsize::new(0));
-    let (signal, count) = (produced.clone(), polls.clone());
+    let signal = produced.clone();
     let later: ScanPartition = Box::pin(async move {
         let input = stream::iter((0..50).map(|n| Ok(batch(n)))).inspect(move |_| {
-            count.fetch_add(1, Ordering::SeqCst);
             signal.add_permits(1);
         });
         Ok(Box::new(StreamReader::new(input, metadata())) as Box<dyn RecordReader>)
@@ -203,7 +201,7 @@ async fn full_later_queue_stops_decoding_before_next_batch() {
     // On the current-thread runtime, the producer runs from this signal to
     // its next suspension (reserving the full queue) before this task resumes.
     produced.acquire().await.unwrap().forget();
-    assert_eq!(polls.load(Ordering::SeqCst), 1);
+    assert_eq!(produced.available_permits(), 0);
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());
 }
@@ -224,4 +222,28 @@ async fn discovery_errors_interrupt_a_blocked_partition() {
     let mut reader = open_plan(ScanPlan::from_stream(metadata(), partitions), 2).await;
     assert_eq!(reader.next().await.unwrap_err().operation(), "discover");
     assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn read_error_cancels_blocked_workers_and_keeps_reader_at_eof() {
+    let dropped = Arc::new(Semaphore::new(0));
+    let guard = Guard(dropped.clone());
+    let first: ScanPartition = Box::pin(async move {
+        let _guard = guard;
+        std::future::pending().await
+    });
+    let failed: ScanPartition = Box::pin(async {
+        Ok(Box::new(StreamReader::new(
+            stream::iter([Err(Error::new(ErrorKind::Io, "read", "injected failure"))]),
+            metadata(),
+        )) as Box<dyn RecordReader>)
+    });
+    let unopened: ScanPartition = Box::pin(async { panic!("opened after failure") });
+    let mut reader = open(vec![first, failed, unopened], 2).await;
+
+    assert_eq!(reader.next().await.unwrap_err().operation(), "read");
+    dropped.acquire().await.unwrap().forget();
+    for _ in 0..2 {
+        assert!(reader.next().await.unwrap().is_none());
+    }
 }

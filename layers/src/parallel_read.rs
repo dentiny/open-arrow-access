@@ -80,8 +80,6 @@ struct ParallelReader {
     partition_receivers: VecDeque<mpsc::Receiver<RecordBatch>>,
     tasks: JoinSet<Result<()>>,
     settings: ParallelReadLayer,
-    // Set after EOF or an error so later next() calls return EOF without restarting work.
-    terminal: bool,
 }
 
 impl ParallelReader {
@@ -92,7 +90,6 @@ impl ParallelReader {
             partition_receivers: VecDeque::new(),
             tasks: JoinSet::new(),
             settings,
-            terminal: false,
         }
     }
 
@@ -122,20 +119,14 @@ impl ParallelReader {
     }
 
     fn stop(&mut self) {
-        self.terminal = true;
-        self.tasks.abort_all();
+        // Dropping the JoinSet aborts workers and leaves no completions to poll.
+        self.tasks = JoinSet::new();
         self.partition_receivers.clear();
         self.remaining = stream::empty().boxed().fuse();
     }
 
     async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
         loop {
-            if self.remaining.is_terminated()
-                && self.partition_receivers.is_empty()
-                && self.tasks.is_empty()
-            {
-                return Ok(None);
-            }
             let has_front = !self.partition_receivers.is_empty();
             let can_discover = !self.remaining.is_terminated()
                 && self.partition_receivers.len() < self.settings.partitions.get();
@@ -157,6 +148,7 @@ impl ParallelReader {
                     // Keep the resident slot until queued output has drained.
                     self.partition_receivers.pop_front();
                 }
+                else => return Ok(None),
             }
         }
     }
@@ -181,9 +173,6 @@ impl Reader for ParallelReader {
     }
 
     async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.terminal {
-            return Ok(None);
-        }
         let result = self.read_batch().await;
         if !matches!(result, Ok(Some(_))) {
             self.stop();
