@@ -1,13 +1,13 @@
 use bytes::BytesMut;
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt,
-    RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
+    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, RecordMetadata,
+    Result, ScanPlan, ScanPlanner, async_trait,
 };
 use serde_json::{Deserializer, value::RawValue};
 
 use super::{JsonAccessor, error};
-use crate::{DecodePartitionOptions, scan::input::ChunkInput};
+use crate::{DecodePartitionOptions, scan::input::decode_partition};
 
 #[async_trait]
 impl<B> ScanPlanner for JsonAccessor<B>
@@ -40,8 +40,7 @@ where
                 let Some(bytes) = frames.next_chunk().await? else {
                     return Ok(None);
                 };
-                let partition: ScanPartition =
-                    Box::pin(async move { format.open_reader(&ChunkInput(bytes), request).await });
+                let partition = decode_partition(format, bytes, request);
                 Ok(Some((partition, frames)))
             }
         });

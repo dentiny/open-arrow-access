@@ -5,11 +5,11 @@ use futures::{
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ObjectRef, ReadRequest, ReaderFactory,
     RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
-    read_lines,
+    bytes_reader, read_lines,
 };
 
 use super::{AtifAccessor, AtifFormat, error::decode_error, reader::create_reader};
-use crate::{DecodePartitionOptions, scan::input::ChunkInput};
+use crate::DecodePartitionOptions;
 
 #[async_trait]
 impl<B> ScanPlanner for AtifAccessor<B>
@@ -49,9 +49,7 @@ where
                     return Ok(None);
                 };
                 let partition: ScanPartition = Box::pin(async move {
-                    let input = ChunkInput(bytes)
-                        .open(ByteReadRequest::from(&request))
-                        .await?;
+                    let input = Box::new(bytes_reader(bytes, Some(request.object)));
                     Ok(Box::new(create_reader(
                         input,
                         format,
