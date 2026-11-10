@@ -53,7 +53,7 @@ flowchart LR
   same storage and format components.
 - **Layers** wrap accessors through a common extension contract. Streaming
   decompression, Arrow type conversion, and [ordered file-level parallel reads](docs/parallel-read.md)
-  are implemented; generated columns and metrics are planned.
+  and [generated columns](docs/generated-columns.md) are implemented; metrics are planned.
 
 See [architecture](docs/architecture.md) for component boundaries and execution behavior.
 
@@ -129,7 +129,7 @@ The next planned capabilities focus on preparing consistent Arrow input for corp
 pipelines:
 
 - CSV/JSON schema inference, followed by opt-in cross-file schema merging and alignment.
-- Generated columns with dependency-aware projection and a stable output schema.
+- Dependency-aware projection pushdown for generated columns.
 - Metrics, timeout, and read-budget layers.
 - File-internal partition planning and optional unordered emission.
 - WARC-to-Arrow conversion and format-specific indexing/splitting.

@@ -78,7 +78,10 @@ fn list_item(data_type: &DataType) -> Option<&DataType> {
     }
 }
 
-fn validate_decimal_cast(from: &DataType, to: &DataType) -> std::result::Result<(), ArrowError> {
+pub(crate) fn validate_decimal_cast(
+    from: &DataType,
+    to: &DataType,
+) -> std::result::Result<(), ArrowError> {
     if from == to || from.is_null() {
         return Ok(());
     }
@@ -157,7 +160,7 @@ fn validate_decimal_cast(from: &DataType, to: &DataType) -> std::result::Result<
     Ok(())
 }
 
-fn validate_target(data_type: &DataType) -> std::result::Result<(), ArrowError> {
+pub(crate) fn validate_target(data_type: &DataType) -> std::result::Result<(), ArrowError> {
     let invalid = || {
         ArrowError::InvalidArgumentError(format!("invalid or unsupported cast target {data_type}"))
     };

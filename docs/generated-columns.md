@@ -1,143 +1,115 @@
 # Generated columns
 
-Status: design proposal. Expression evaluation and the generated-column layer are
-not implemented. See the [roadmap](roadmap.md#generated-columns-and-observation).
+`GeneratedColumnsLayer` appends Arrow fields using row-level DataFusion SQL
+expressions. Enable the facade's default-off `layer-generated-columns` feature,
+or `generated-columns` on `open-arrow-access-layers`. Core remains Arrow-only;
+DataFusion is absent from the default dependency graph.
 
-The framework supplies reusable request and layer contracts. DataFusion is
-recorded as a workspace dependency for this work but is not enabled in the
-current dependency graph.
+```rust,ignore
+use open_arrow_access::{AccessorExt, layers::{GeneratedColumnSpec, GeneratedColumnsLayer}};
+
+let generated = source.layer(GeneratedColumnsLayer::try_new(vec![
+    GeneratedColumnSpec {
+        column: "text_length".into(),
+        expression: "character_length(text)".into(),
+    },
+    GeneratedColumnSpec {
+        column: "doubled".into(),
+        expression: "text_length * 2".into(),
+    },
+])?);
+```
 
 ## Semantics
 
-Implement `GeneratedColumnsLayer` on record accessors. It appends one column per
-declaration using a row-level SQL expression, independently of storage and file
-format. For example:
+Declarations run in order. Each sees source fields and earlier generated fields;
+forward references and cycles are errors. Names are exact, nonempty and distinct,
+and may not collide with any source field, even one hidden by output projection.
+Blank expressions fail at construction; SQL/schema errors fail at `open`.
+Unquoted SQL identifiers are lowercased; quote mixed-case names: `"Count" * 2`.
 
-```json
-[
-  {"column": "text_length", "expression": "character_length(text)"},
-  {"column": "doubled", "expression": "n * 2"},
-  {"column": "quadrupled", "expression": "doubled * 2"}
-]
+Aggregates, windows, subqueries, `unnest`, and volatile functions such as
+`random()` are rejected before simplification, including inside dead branches.
+The enabled built-ins include core, string, Unicode, datetime and math functions.
+Types and nullability are inferred by DataFusion. Casts (including cast built-ins)
+reuse the type-conversion layer's check for Decimal rescale pairs that overflow Arrow 59.3's internal i8 arithmetic;
+these pairs fail at open, even if individual values would fit. Cast type pairs
+must be supported by Arrow, including nested casts. Invalid target parameters
+and run-end encoded cast targets are rejected, matching `TypeConversionLayer`.
+Each logical open uses one query context, so stable functions such as `now()` agree across declarations and
+batches; separate opens need not produce identical values.
+
+Output preserves row count, batch boundaries, logical order, source identity,
+source field metadata and schema metadata. Scalar results broadcast to the batch
+row count, including zero-row and zero-column inputs. Generated fields retain
+inferred metadata (including extension metadata for identity expressions) and add
+`open_arrow_access:generated_expression` with the original expression text.
+
+Runtime data errors retain their source chain and column name. An error ends the
+reader and releases its input immediately; previously emitted batches remain
+emitted. EOF is also terminal. The layer starts no producer tasks. After cancelling
+a pending `next`, drop the reader, following the core reader contract.
+
+## Design and projection
+
+The wrapper works with any `Accessor<Reader = dyn RecordReader>` whose request
+implements `ReadOptionsProvider`; it does not depend on formats or storage.
+
+1. Empty configuration delegates directly, without an expression context.
+2. Retain the final projection and clear the inner projection before opening.
+3. Compile declarations against the complete source schema plus earlier outputs.
+   Coerce and simplify each logical expression before physical planning.
+4. Expose the fixed augmented/projected schema before reading a batch.
+5. Evaluate physical expressions on Arrow arrays, then apply the final projection.
+
+Source arrays share their buffers. Only later declarations need intermediate
+batches; a single generated column avoids that allocation. Memory is bounded by
+one input batch, its generated arrays and expression/kernel state. There is no
+DataFrame execution plan, materialized table, dependency graph or per-row SQL.
+
+**Projection limitation:** a nonempty configuration reads every source column and
+evaluates every declaration, including outputs omitted by the final projection.
+This can add substantial I/O/decoding cost for wide columnar inputs. It ensures
+full-schema collision/type checking with one open and the current accessor API.
+Dependency-aware pushdown is deferred until accessors can supply a complete source
+schema independently of the selected data. SQL literals/comments must never be
+inferred as dependencies by regex. Timing the in-memory kernel path does not
+measure this source-I/O cost.
+
+For internal parallel reads, compose in this order:
+`source.layer(ParallelReadLayer::new(...)).layer(generated_layer)`.
+Generation runs once over the ordered merged batches, sharing one query context.
+The generated wrapper forwards internal read concurrency but does not implement
+`ScanPlanner`, so placing `ParallelReadLayer` outside it is not supported.
+
+## Reference implementations and scope
+
+The design follows `ml-infra/lance/lance_migration/crates/converter/src/generated.rs`:
+ordered declarations, DataFusion physical expressions and field provenance.
+It adds the accessor/request protocol, final projection, explicit zero-column row
+counts, pre-simplification row-local validation and terminal input cleanup.
+The available older `duckdb_lance_conversion` checkout contains DuckDB's own
+generated table-column machinery but no analogous converter feature.
+
+Reader-provided private context fields (for example WARC path/offset) remain a
+separate extension: the current API has no virtual-field request contract.
+Imported source metadata never silently hides a field. Add explicit source-owned
+virtual-field requests together with a real reader, coordinate semantics and tests.
+
+## Validation and performance
+
+Integration tests cover expressions, dependent columns, constants, nulls, quoting,
+metadata/buffer sharing, zero rows/columns, projection, invalid and hidden
+expressions, runtime failures, drop, type conversion, and CSV with parallel reads.
+
+Run the manual release timing check on an otherwise idle machine:
+
+```sh
+cargo test -p open-arrow-access-layers --features generated-columns --release \
+  --test generated_columns generated_columns_throughput -- --ignored --nocapture
 ```
 
-- Keep the configuration shape `column` + `expression`. Names must be nonempty,
-  distinct, and must not collide with any physical source field, including a
-  field omitted from the requested output projection. Blank expressions fail.
-- Evaluate declarations in order. Each sees source columns and earlier generated
-  columns. Forward references and cycles fail rather than requiring reordering.
-- Use DataFusion SQL identifier rules: unquoted identifiers are normalized;
-  mixed-case or otherwise special names require quoting.
-- Restrict evaluation to row-level expressions. Reject aggregates, windows,
-  subqueries and volatile functions such as `random()`.
-- Compile/type-check expressions once when opening a logical read, infer Arrow
-  type/nullability, and expose the final schema before emitting any batch. Runtime
-  data-dependent errors can still terminate the stream after earlier batches.
-- Evaluate Arrow arrays batch by batch, preserving row counts, null semantics,
-  logical order and existing schema/field metadata. Broadcast scalar expressions
-  to the batch row count, including zero-row and zero-column inputs.
-- Attach expression provenance to generated fields under the proposed
-  `open_arrow_access:generated_expression` metadata key.
-
-One evaluation context belongs to the logical scan. If stable functions that
-depend on query time/configuration are supported, their context must be shared
-across batches and future parallel partitions. Merely rejecting volatile
-functions does not establish reproducibility across separate scans.
-
-## Common contracts
-
-The layer uses the existing `Layer<A>` / `Accessor` / `Reader` protocol:
-
-```text
-A::Reader = dyn RecordReader
-A::Request: ReadOptionsProvider
-
-open(request)
-  -> prepare source-column selection
-  -> inner.open(inner_request)
-  -> compile expressions against the source schema
-  -> return a RecordReader with the final output schema
-
-next()
-  -> inner.next()
-  -> evaluate each expression in declaration order
-  -> remove private inputs / apply final projection
-  -> emit one batch with the declared output schema
-```
-
-`ReadOptionsProvider`, added in the framework PR, exposes immutable/mutable
-common read options. `ReadRequest` implements it. Future dataset and service
-requests can implement it while retaining their own selectors/configuration;
-generated-column layers do not have to depend on file-only request types.
-
-The existing `Layer` trait preserves request/reader *types*, not a fixed set of
-Arrow fields. An appended schema remains `RecordMetadata`; transformed batches
-remain `RecordBatch`. The wrapper must update metadata and emitted batches
-together. No new method is needed on storage or byte readers for SQL evaluation.
-
-## Projection and dependencies
-
-Projection on a generated-column accessor selects the final augmented schema.
-For `projection = ["text_length"]`, the inner reader must still supply `text`.
-Generated field names must not be sent directly to a physical format reader.
-
-Start the feature PR with a correctness-first path: retain the caller's final
-projection, clear the inner projection, inspect the complete source schema,
-compile/evaluate declarations, then project the final output. This validates
-collisions against all physical fields and avoids premature dependency pruning.
-The cost is reading unneeded physical columns; document that limitation.
-
-An optimized follow-up may push down the union of visible source fields and
-transitive expression dependencies. It also needs full-source schema knowledge
-for collision/type validation. Do not infer dependencies with regexes or collect
-SQL literals/comments as field references. Earlier generated names are computed
-dependencies, not additional physical columns to read. AST parsing alone does
-not supply the source schema or prove field availability.
-
-## Source context and private fields
-
-The reference implementation also allows expressions to use reader-provided
-WARC locators, such as `__warc_path` and `__warc_offset`, while excluding those
-inputs from public output. Preserve this ability as a separate optional source
-context extension when the corresponding readers are implemented.
-
-Required contract for that extension:
-
-- Parse source-context dependencies before opening the reader, then explicitly
-  request supported virtual fields. Unsupported/missing fields fail; do not
-  substitute null or guess locator semantics.
-- Mark reader-owned private fields and remove them after expression evaluation,
-  unless an explicit public mapping exposes them. Unrelated source fields must
-  not be hidden merely because imported schema metadata contains a reserved tag.
-- Document locator identity and offset coordinates. A compressed frame offset
-  shared by several records does not uniquely identify each record.
-
-The current framework does not yet expose a virtual-field request API or WARC
-reader. Add that optional extension together with a real source and tests;
-`ReadOptionsProvider` alone does not supply private locator fields.
-
-## Dependency and feature isolation
-
-The planned public feature is `layer-generated-columns`, default-off. Register
-it only when the follow-up implementation is usable. Keep expression types and
-DataFusion dependencies inside the layer package; core remains Arrow-facing.
-Use DataFusion directly through the workspace dependency, aligned with Arrow and
-OpenDAL to the same upstream Lance commit. Follow the
-[dependency alignment policy](dependencies.md); importing through Lance would
-not replace this requirement. No Lance writer, sink, catalog, or SQL query
-service is needed.
-
-This is the planned expression layer for the PR-6 workstream. Metrics can be
-added separately. Parallel read and unordered emission remain independent
-enhancements, and row-local generation must not depend on arrival order.
-
-## Feature PR acceptance
-
-Cover source expressions, earlier-generated dependencies, constants, nulls,
-quoted identifiers, schema/field metadata, zero rows/columns, name collisions,
-unknown/forward references, invalid expressions and rejected non-row/volatile
-constructs. Include projections that select only generated fields and projections
-that omit a colliding source name. Verify the same layer with multiple record
-accessors, fixed-schema opening, terminal runtime errors, cancellation/drop and
-unchanged output ordering. Test optional source-context fields when that
-extension is actually introduced.
+It reports median scan time across five runs over 8,388,608 rows in 8192-row
+batches sharing the same cached input buffers, with SQL/open time reported separately: direct, empty configuration,
+single arithmetic expression, and Unicode length plus an earlier-column dependency.
+This is a diagnostic benchmark without a flaky wall-clock pass/fail threshold.

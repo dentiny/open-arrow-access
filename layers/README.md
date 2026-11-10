@@ -8,12 +8,14 @@ must forward optional operations or remove their advertised capabilities.
 
 - The public layer contract, verified by test wrappers for byte and record accessors.
 - `TypeConversionLayer` for explicit Arrow column casts; it is always exported by the facade.
+- `GeneratedColumnsLayer` for ordered row-level SQL expressions, behind
+  `layer-generated-columns` on the facade. See the [design and usage](../docs/generated-columns.md).
 - `decompression::DecompressionLayer<C>` for gzip, bzip2, LZ4, and Zstandard byte
   transformations. See the [decompression guide](../decompression/README.md).
 - Caller-configured OpenDAL policies on the storage operator. These belong to
   OpenDAL's layer system, independently of this library's accessor layers.
 
-The `TypeConversionLayer` is the production record layer in this crate.
+Type conversion and generated columns compose over any compatible record accessor.
 
 ## Type conversion
 
@@ -65,7 +67,7 @@ renaming, generated columns and writer-specific restrictions remain separate.
 
 | Layer | Purpose | Design / dependency |
 | --- | --- | --- |
-| Generated columns | Derived Arrow fields with dependency-aware projection | [Proposal](../docs/generated-columns.md); core already exposes `ReadOptionsProvider` |
+| Generated-column projection pushdown | Read only visible fields and expression dependencies | Requires complete source-schema knowledge; see the [design](../docs/generated-columns.md) |
 | Metrics | Count byte operations, batches, rows, failures, and latency | Preserve values, metadata, and ordering |
 | Timeout / read budgets | Bound operations and resource use | Cover sequential and ranged paths |
 | Parallel reads | Concurrent files/partitions with bounded ordered merging | Validated source/partition plans |
