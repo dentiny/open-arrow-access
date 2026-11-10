@@ -71,6 +71,29 @@ fn part(values: Vec<i32>) -> ScanPartition {
     })
 }
 #[tokio::test]
+async fn execution_capability_is_added_by_the_layer_independently_of_plan_size_and_limit() {
+    // Planning support alone does not advertise internal concurrent execution.
+    assert!(!Source.capability().read_parallel);
+    for limit in [1, 3] {
+        let parallel = Source.layer(ParallelReadLayer::new(
+            NonZeroUsize::new(limit).unwrap(),
+            NonZeroUsize::MIN,
+        ));
+        assert!(parallel.capability().read);
+        assert!(parallel.capability().read_parallel);
+        for count in [0, 1, 2] {
+            let parts = (0..count).map(|n| part(vec![n])).collect();
+            let plan = ScanPlan::new(metadata(), parts);
+            let mut reader = parallel.open(plan).await.unwrap();
+            assert!(reader.capability().read);
+            assert!(reader.capability().read_parallel);
+            while reader.next().await.unwrap().is_some() {}
+            assert!(reader.capability().read_parallel);
+        }
+    }
+}
+
+#[tokio::test]
 async fn ordered_duplicates_empty_partitions_and_single_worker() {
     for p in [1, 3] {
         let mut r = open(

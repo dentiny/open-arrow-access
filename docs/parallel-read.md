@@ -21,9 +21,17 @@ while let Some(batch) = reader.next().await? {
 
 The accessor must implement the optional `ScanPlanner` extension. Unsupported
 sources fail at compile time instead of silently ignoring parallel settings.
-Ordinary `open` remains sequential. By default, file-set planning opens the first
-selected file to fix the schema and creates one partition per file. Empty file
-sets remain errors.
+Ordinary `open` on the unwrapped accessor remains sequential. By default, file-set
+planning opens the first selected file to fix the schema and creates one partition
+per file. Empty file sets remain errors.
+
+`Capability::read_parallel` reports concurrent execution in the current interface.
+`ParallelReadLayer` advertises it on the wrapped accessor when `read` is supported,
+and on the opened reader. Implementing `ScanPlanner` alone does not advertise it:
+planning exposes independent work, while the layer executes that work concurrently.
+The flag reports capability even when a request has zero or one partition or the
+configured partition limit is one. Inspecting it enables no work and does not
+promise a speedup, unordered output, or parallel byte I/O within each reader.
 
 Call `with_file_planning()` on `FileSetAccessor` or `DirectoryAccessor` when the
 inner format implements `ScanPlanner`. Native partitions (for example, Parquet
