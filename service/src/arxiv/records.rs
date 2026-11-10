@@ -64,8 +64,8 @@ impl ReadOptionsProvider for ArxivReadRequest {
     }
 }
 
-/// Native Arrow rows for regular TAR entries, retaining names and PDF/source bytes
-/// as LargeBinary. Each partition owns one sequential TAR stream; TarLimits apply.
+/// Native Arrow rows for regular TAR entries, preserving names and payloads as LargeBinary.
+/// Each partition owns one sequential TAR stream; TarLimits apply.
 /// See [`ArxivReadRequest::target_bytes`] for batch payload sizing.
 pub struct ArxivRecords<A> {
     service: Arc<ArxivService<A>>,
