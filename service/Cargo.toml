@@ -43,7 +43,7 @@ meca = [
     "open-arrow-access-decompression/zip",
 ]
 oapen = ["oai"]
-openstax = []
+openstax = ["record-files"]
 pmc = [
     "dep:arrow-array",
     "dep:arrow-schema",
