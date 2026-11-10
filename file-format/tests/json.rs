@@ -110,37 +110,30 @@ async fn fixed_schema_contract_preserves_projection_and_source_failures() {
 
 #[tokio::test]
 async fn malformed_truncated_and_non_object_inputs_fail_terminally() {
-    for name in [
-        "bad-empty-array.json",
-        "bad-object-array.json",
-        "bad-null.json",
-        "bad-number.json",
-        "bad-boolean.json",
-        "bad-string.json",
-        "bad-truncated-value.json",
-        "bad-truncated-object.json",
-        "bad-trailing.json",
-        "bad-type.json",
-        "bad-utf8.json",
+    // One representative per parser failure, plus a projected-away syntax error.
+    // Scalar variants and every projection crossed with every malformed fixture
+    // repeat Arrow's validation rather than exercising another adapter path.
+    for (name, projection) in [
+        ("bad-empty-array.json", None),
+        ("bad-null.json", None),
+        ("bad-truncated-object.json", None),
+        ("bad-trailing.json", None),
+        ("bad-type.json", None),
+        ("bad-utf8.json", None),
+        ("bad-trailing.json", Some(vec![])),
     ] {
-        for projection in [None, Some(vec![])] {
-            // A projected-away field's value is deliberately not decoded.
-            if matches!(name, "bad-type.json" | "bad-utf8.json") && projection.is_some() {
-                continue;
-            }
-            let (input, observed) = fixture(name, 1).await;
-            let accessor = JsonAccessor::new(input, schema());
-            let mut reader = accessor.open(request(10, projection)).await.unwrap();
-            let error = reader
-                .next()
-                .await
-                .err()
-                .unwrap_or_else(|| panic!("accepted {name}"));
-            assert_eq!(error.kind(), ErrorKind::Decode, "{name}");
-            assert_eq!(error.operation(), "decode_json", "{name}");
-            assert!(error.source().unwrap().is::<ArrowError>(), "{name}");
-            format::assert_finished(reader.as_mut(), &observed.reads).await;
-        }
+        let (input, observed) = fixture(name, 1).await;
+        let accessor = JsonAccessor::new(input, schema());
+        let mut reader = accessor.open(request(10, projection)).await.unwrap();
+        let error = reader
+            .next()
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("accepted {name}"));
+        assert_eq!(error.kind(), ErrorKind::Decode, "{name}");
+        assert_eq!(error.operation(), "decode_json", "{name}");
+        assert!(error.source().unwrap().is::<ArrowError>(), "{name}");
+        format::assert_finished(reader.as_mut(), &observed.reads).await;
     }
 }
 

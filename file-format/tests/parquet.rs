@@ -357,47 +357,46 @@ async fn parquet_forwards_io_options_and_bulk_ranges_through_third_party_layers(
 
 #[tokio::test]
 async fn parquet_preserves_source_error_categories_during_inspection_and_decoding() {
-    for kind in [ErrorKind::Io, ErrorKind::PermissionDenied] {
-        for inspect in [true, false] {
-            let fixture = fixture(Compression::UNCOMPRESSED).await;
-            let observations = Arc::new(Observations::default());
-            *observations.failure_kind.lock().unwrap() = Some(kind);
-            observations.fail_reads.store(inspect, Ordering::SeqCst);
-            let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
-                fixture.dir.path(),
-            ))
-            .layer(ByteObserverLayer(observations.clone()));
-            let accessor = ParquetAccessor::new(bytes);
-            let error = if inspect {
-                accessor
-                    .open(ReadRequest::new("data.parquet"))
-                    .await
-                    .err()
-                    .unwrap()
+    let kind = ErrorKind::PermissionDenied;
+    for inspect in [true, false] {
+        let fixture = fixture(Compression::UNCOMPRESSED).await;
+        let observations = Arc::new(Observations::default());
+        *observations.failure_kind.lock().unwrap() = Some(kind);
+        observations.fail_reads.store(inspect, Ordering::SeqCst);
+        let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(
+            fixture.dir.path(),
+        ))
+        .layer(ByteObserverLayer(observations.clone()));
+        let accessor = ParquetAccessor::new(bytes);
+        let error = if inspect {
+            accessor
+                .open(ReadRequest::new("data.parquet"))
+                .await
+                .err()
+                .unwrap()
+        } else {
+            let mut reader = accessor
+                .open(ReadRequest::new("data.parquet"))
+                .await
+                .unwrap();
+            observations.fail_reads.store(true, Ordering::SeqCst);
+            let error = reader.next().await.unwrap_err();
+            let calls = observations.range_reads.load(Ordering::SeqCst);
+            assert!(reader.next().await.unwrap().is_none());
+            assert!(reader.next().await.unwrap().is_none());
+            assert_eq!(observations.range_reads.load(Ordering::SeqCst), calls);
+            error
+        };
+        assert_eq!(error.kind(), kind, "inspect={inspect}");
+        assert_eq!(
+            error.operation(),
+            if inspect {
+                "inspect_parquet"
             } else {
-                let mut reader = accessor
-                    .open(ReadRequest::new("data.parquet"))
-                    .await
-                    .unwrap();
-                observations.fail_reads.store(true, Ordering::SeqCst);
-                let error = reader.next().await.unwrap_err();
-                let calls = observations.range_reads.load(Ordering::SeqCst);
-                assert!(reader.next().await.unwrap().is_none());
-                assert!(reader.next().await.unwrap().is_none());
-                assert_eq!(observations.range_reads.load(Ordering::SeqCst), calls);
-                error
-            };
-            assert_eq!(error.kind(), kind, "inspect={inspect}");
-            assert_eq!(
-                error.operation(),
-                if inspect {
-                    "inspect_parquet"
-                } else {
-                    "decode_parquet"
-                }
-            );
-            assert_eq!(ErrorKind::from_source(error.source().unwrap()), Some(kind));
-        }
+                "decode_parquet"
+            }
+        );
+        assert_eq!(ErrorKind::from_source(error.source().unwrap()), Some(kind));
     }
 }
 

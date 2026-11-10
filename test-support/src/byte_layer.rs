@@ -100,27 +100,26 @@ where
     A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
     use std::error::Error as _;
-    // Keep each decoder's distinct failure offsets, using ordinary I/O and
-    // a non-I/O sentinel rather than a full error-kind cross product.
-    for kind in [ErrorKind::Io, ErrorKind::PermissionDenied] {
-        // Fail before input, after its first byte, and while checking EOF.
-        for offset in [0, 1, bytes.len()] {
-            let input = MemoryAccessor::new(bytes, 1).with_failure(offset, kind);
-            let observed = input.observations.clone();
-            let mut reader = make_layer(input).open("source".into()).await?;
-            assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
-            let error =
-                assert_terminal_error(reader.as_mut(), &observed.reads, kind, operation).await;
-            reader::assert_memory_read_error(&error, kind);
-        }
-    }
-    for offset in [0, 1, bytes.len()] {
-        let input = MemoryAccessor::new(bytes, 1).with_empty_chunk(offset);
+    // Cover startup, partial input and EOF without crossing every position with
+    // every category. Non-I/O failures detect category erasure to Io.
+    for (offset, kind) in [
+        (0, ErrorKind::Io),
+        (1, ErrorKind::PermissionDenied),
+        (bytes.len(), ErrorKind::PermissionDenied),
+    ] {
+        let input = MemoryAccessor::new(bytes, 1).with_failure(offset, kind);
         let observed = input.observations.clone();
-        let mut reader = make_layer(input).open("empty-chunk".into()).await?;
-        let error =
-            assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Io, operation).await;
-        assert!(error.source().unwrap().to_string().contains("empty chunk"));
+        let mut reader = make_layer(input).open("source".into()).await?;
+        assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
+        let error = assert_terminal_error(reader.as_mut(), &observed.reads, kind, operation).await;
+        reader::assert_memory_read_error(&error, kind);
     }
+    // Empty chunks are rejected by the shared input bridge before decoding.
+    let input = MemoryAccessor::new(bytes, 1).with_empty_chunk(0);
+    let observed = input.observations.clone();
+    let mut reader = make_layer(input).open("empty-chunk".into()).await?;
+    let error =
+        assert_terminal_error(reader.as_mut(), &observed.reads, ErrorKind::Io, operation).await;
+    assert!(error.source().unwrap().to_string().contains("empty chunk"));
     Ok(())
 }
