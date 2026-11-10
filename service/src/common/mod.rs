@@ -23,3 +23,6 @@ pub(crate) use validation::is_commit_sha;
 
 mod record_page;
 pub use record_page::{RecordPage, RecordPageInput};
+
+mod page_set;
+pub use page_set::PageSetAccessor;
