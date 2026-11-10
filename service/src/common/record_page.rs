@@ -13,10 +13,8 @@ pub struct RecordPage<F> {
 }
 
 impl<F> RecordPage<F> {
-    /// Expose the native format accessor for format-specific scan planning.
-    /// When the chosen format implements ScanPlanner, callers can install the
-    /// parallel layer here to use its file-internal framing. This does not make
-    /// the provider's continuation/cursor requests independently fetchable.
+    /// Access the native format configuration. RecordPage delegates scan planning
+    /// to this accessor; API continuation requests remain provider-controlled.
     pub fn into_file_accessor(self) -> FileAccessor<RecordPageInput, F> {
         self.binding
     }
@@ -25,6 +23,14 @@ impl<F> RecordPage<F> {
         Self {
             binding: FileAccessor::from_format(RecordPageInput(bytes), format),
         }
+    }
+
+    /// Plan an application-defined format as one partition without native framing.
+    pub async fn plan_whole_page(&self, request: ReadRequest) -> Result<ScanPlan>
+    where
+        F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader>,
+    {
+        Ok(ScanPlan::whole_input(self.open(request).await?))
     }
 }
 
@@ -49,9 +55,10 @@ where
 impl<F> ScanPlanner for RecordPage<F>
 where
     F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader>,
+    FileAccessor<RecordPageInput, F>: ScanPlanner<Request = ReadRequest>,
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        Ok(ScanPlan::whole_input(self.open(request).await?))
+        self.binding.plan_scan(request).await
     }
 }
 
