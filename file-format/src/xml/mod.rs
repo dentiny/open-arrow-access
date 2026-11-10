@@ -1,8 +1,7 @@
 //! XML record access with explicit or inferred schemas.
 //!
-//! Explicit-schema scans use xml-arrow's native record stream and independently
-//! convert each selected record to Arrow. Namespace matching, input limits and
-//! source offsets come from the ordinary XML parser. Inference uses one reader.
+//! Explicit and inferred scans use xml-arrow's native record streams, preserving
+//! namespace matching, input limits and source offsets for independent conversion.
 
 mod accessor;
 mod error;
