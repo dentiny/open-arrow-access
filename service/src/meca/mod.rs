@@ -1,6 +1,8 @@
 //! Storage-independent MECA manifests over the existing ranged ZIP reader.
 mod error;
 mod parser;
+mod records;
+pub use records::{MecaReadRequest, MecaRecords, record_schema};
 mod resolver;
 mod validation;
 use open_arrow_access_core::{ByteReader, Bytes, Result, read_all};
