@@ -40,29 +40,29 @@ where
                 .map(|record| (record, records)))
         })
         .boxed();
-        let chunks = RecordChunks::new(records);
-        let rows = request.options.batch_size.get();
-        let target_bytes = self.partition_options.target_bytes.get();
-        let output = metadata.clone();
-        let partitions = chunks.into_partitions(rows, target_bytes, record_size, move |records| {
-            let metadata = output.clone();
-            Box::pin(async move {
-                let mut batch = new_batch(&metadata.schema)?;
-                let source = metadata.source.as_ref().unwrap().locator();
-                for (headers, body) in records {
-                    let record = warc::Record::<warc::EmptyBody>::try_from(headers)
-                        .map_err(decode_error)?
-                        .add_body(body);
-                    append_record(&mut batch, &record, source)?;
-                }
-                let batch = batch.finish()?;
-                Ok(
-                    Box::new(StreamReader::new(stream::iter([Ok(batch)]), metadata))
-                        as Box<dyn RecordReader>,
-                )
-            })
-        });
-        Ok(ScanPlan::from_stream(metadata, partitions))
+        Ok(RecordChunks::new(records).into_plan(
+            metadata,
+            request.options.batch_size.get(),
+            self.partition_options.target_bytes.get(),
+            record_size,
+            move |records, metadata| {
+                Box::pin(async move {
+                    let mut batch = new_batch(&metadata.schema)?;
+                    let source = metadata.source.as_ref().unwrap().locator();
+                    for (headers, body) in records {
+                        let record = warc::Record::<warc::EmptyBody>::try_from(headers)
+                            .map_err(decode_error)?
+                            .add_body(body);
+                        append_record(&mut batch, &record, source)?;
+                    }
+                    let batch = batch.finish()?;
+                    Ok(
+                        Box::new(StreamReader::new(stream::iter([Ok(batch)]), metadata))
+                            as Box<dyn RecordReader>,
+                    )
+                })
+            },
+        ))
     }
 }
 

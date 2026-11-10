@@ -40,17 +40,13 @@ where
             Ok(frames.next_record().await?.map(|record| (record, frames)))
         })
         .boxed();
-        let chunks = RecordChunks::new(records);
-        let rows = request.options.batch_size.get();
-        let target_bytes = self.partition_options.target_bytes.get();
-        let output = metadata.clone();
-        let partitions = chunks.into_partitions(
-            rows,
-            target_bytes,
+        Ok(RecordChunks::new(records).into_plan(
+            metadata,
+            request.options.batch_size.get(),
+            self.partition_options.target_bytes.get(),
             |(line, _)| line.len(),
-            move |records| {
+            move |records, metadata| {
                 let request = request.clone();
-                let metadata = output.clone();
                 let projection = projection.clone();
                 let first_index = records[0].1;
                 // Keep original line endings/whitespace for raw_json fidelity.
@@ -70,8 +66,7 @@ where
                     )) as Box<dyn RecordReader>)
                 })
             },
-        );
-        Ok(ScanPlan::from_stream(metadata, partitions))
+        ))
     }
 }
 

@@ -2,7 +2,7 @@ use futures::{
     Stream, TryStreamExt,
     stream::{self, BoxStream},
 };
-use open_arrow_access_core::{Result, ScanPartition};
+use open_arrow_access_core::{RecordMetadata, Result, ScanPartition, ScanPlan};
 
 /// Batches complete records with one-record lookahead and a soft byte target.
 /// The row limit is strict; an oversized first record is emitted on its own.
@@ -48,6 +48,22 @@ impl<T> RecordChunks<T> {
 }
 
 impl<T: Send + 'static> RecordChunks<T> {
+    /// Bind shared metadata while discovering format partitions lazily.
+    pub(crate) fn into_plan(
+        self,
+        metadata: RecordMetadata,
+        rows: usize,
+        target_bytes: usize,
+        size: impl Fn(&T) -> usize + Send + Sync + 'static,
+        partition: impl Fn(Vec<T>, RecordMetadata) -> ScanPartition + Send + 'static,
+    ) -> ScanPlan {
+        let output = metadata.clone();
+        let partitions = self.into_partitions(rows, target_bytes, size, move |records| {
+            partition(records, output.clone())
+        });
+        ScanPlan::from_stream(metadata, partitions)
+    }
+
     /// Discover chunks lazily; constructing a partition does not run its decoder.
     pub(crate) fn into_partitions(
         self,

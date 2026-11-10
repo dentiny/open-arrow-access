@@ -34,23 +34,25 @@ where
             Ok(frames.next_record().await?.map(|record| (record, frames)))
         })
         .boxed();
-        let chunks = RecordChunks::new(records);
-        let rows = request.options.batch_size.get();
-        let target_bytes = self.partition_options.target_bytes.get();
-        let partitions = chunks.into_partitions(rows, target_bytes, Bytes::len, move |records| {
-            let format = format.clone();
-            let request = request.clone();
-            let mut bytes = Vec::new();
-            for record in records {
-                bytes.extend_from_slice(&record);
-                bytes.push(b'\n');
-            }
-            Box::pin(async move {
-                let input = bytes_reader(bytes.into(), Some(request.object.clone()));
-                format.open_input(Box::new(input), request).await
-            })
-        });
-        Ok(ScanPlan::from_stream(metadata, partitions))
+        Ok(RecordChunks::new(records).into_plan(
+            metadata,
+            request.options.batch_size.get(),
+            self.partition_options.target_bytes.get(),
+            Bytes::len,
+            move |records, _| {
+                let request = request.clone();
+                let format = format.clone();
+                let mut bytes = Vec::new();
+                for record in records {
+                    bytes.extend_from_slice(&record);
+                    bytes.push(b'\n');
+                }
+                Box::pin(async move {
+                    let input = bytes_reader(bytes.into(), Some(request.object.clone()));
+                    format.open_input(Box::new(input), request).await
+                })
+            },
+        ))
     }
 }
 
