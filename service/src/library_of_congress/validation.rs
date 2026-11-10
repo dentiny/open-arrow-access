@@ -12,15 +12,11 @@ pub(super) fn validate_search_request(
     if page == 0 || count == 0 {
         return Err(invalid("LoC page and count must be nonzero"));
     }
-    if parameters
-        .iter()
-        .any(|(name, _)| matches!(*name, "fo" | "sp" | "c" | "at" | "callback"))
-    {
-        return Err(invalid(
-            "LoC response format and pagination are configured by the service",
-        ));
-    }
-    Ok(())
+    crate::common::reject_reserved_parameters(
+        parameters,
+        &["fo", "sp", "c", "at", "callback"],
+        "LoC response format and pagination are configured by the service",
+    )
 }
 
 pub(super) fn validate_search_response(value: &Value) -> Result<()> {

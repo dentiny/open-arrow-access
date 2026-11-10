@@ -9,13 +9,11 @@ pub(super) fn validate_pagination(parameters: &[(&str, &str)], page: u8, size: u
             "Regulations.gov page must be 1..=20 and size 5..=250",
         ));
     }
-    if parameters
-        .iter()
-        .any(|(name, _)| matches!(*name, "page[number]" | "page[size]"))
-    {
-        return Err(invalid("pagination is configured separately from filters"));
-    }
-    Ok(())
+    crate::common::reject_reserved_parameters(
+        parameters,
+        &["page[number]", "page[size]"],
+        "pagination is configured separately from filters",
+    )
 }
 
 pub(super) fn validate_search_response(value: &Value) -> Result<()> {
