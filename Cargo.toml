@@ -61,7 +61,7 @@ arrow-schema = "59.3.0"
 async-trait = "0.1.91"
 atif-arrow = "0.4.6"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-warc = { package = "warc-rs", version = "=0.3.3", default-features = false }
+warc = { package = "warc-rs", version = "0.3.3", default-features = false }
 xml-arrow = "0.2.7"
 
 # Reserved for the generated-column layer; no crate enables DataFusion yet.
