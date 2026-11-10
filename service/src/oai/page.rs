@@ -1,7 +1,5 @@
-#[cfg(feature = "record-files")]
 use crate::common::RecordPage;
 use open_arrow_access_core::{ByteMetadata, ByteReader, Bytes, StreamReader};
-#[cfg(feature = "record-files")]
 use open_arrow_access_core::{ReadRequest, ReaderFactory, RecordReader};
 
 /// One page. Deleted records and all provider metadata remain in `bytes`.
@@ -24,7 +22,6 @@ impl OaiPage {
     }
 }
 
-#[cfg(feature = "record-files")]
 impl OaiPage {
     /// Bind an explicit XML record path/schema to this already fetched page.
     /// Page bytes, deleted records and namespace context remain intact. The
