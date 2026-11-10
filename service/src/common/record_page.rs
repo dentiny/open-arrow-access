@@ -1,6 +1,6 @@
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Bytes, Capability, ReadRequest, ReaderFactory,
-    RecordReader, Result, ScanPlan, ScanPlanner, async_trait, bytes_reader,
+    Accessor, ByteReadRequest, ByteReader, Bytes, Capability, OrderRequirement, ReadRequest,
+    ReaderFactory, RecordReader, Result, ScanPlan, ScanPlanner, async_trait, bytes_reader,
 };
 use open_arrow_access_file_format::FileAccessor;
 
@@ -55,6 +55,10 @@ where
     F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader>,
     FileAccessor<RecordPageInput, F>: ScanPlanner<Request = ReadRequest>,
 {
+    fn order_requirement(&self) -> OrderRequirement {
+        self.binding.order_requirement()
+    }
+
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         self.binding.plan_scan(request).await
     }

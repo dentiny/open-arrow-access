@@ -99,6 +99,9 @@ impl HuggingFaceAccessor {
 impl ScanPlanner for HuggingFaceService {
     async fn plan_scan(&self, request: HuggingFaceDatasetRequest) -> Result<ScanPlan> {
         let (files, request) = self.resolve_dataset(request).await?;
-        files.plan_scan(request).await
+        Ok(files
+            .plan_scan(request)
+            .await?
+            .require_ordering(self.order_requirement()))
     }
 }

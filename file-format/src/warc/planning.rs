@@ -1,7 +1,8 @@
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, ReadRequest, ReaderFactory, RecordMetadata,
-    RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait, into_async_read,
+    Accessor, ByteReadRequest, ByteReader, OrderRequirement, ReadRequest, ReaderFactory,
+    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait,
+    into_async_read,
 };
 
 use super::{
@@ -19,6 +20,10 @@ impl<B> ScanPlanner for WarcArrowAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
+    fn order_requirement(&self) -> OrderRequirement {
+        OrderRequirement::Reorderable
+    }
+
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let schema = self.binding.factory().prepare(&request)?;
         let metadata = RecordMetadata {
@@ -40,7 +45,7 @@ where
                 .map(|record| (record, records)))
         })
         .boxed();
-        Ok(RecordChunks::new(records).into_plan(
+        let plan = RecordChunks::new(records).into_plan(
             metadata,
             request.options.batch_size.get(),
             self.partition_options.target_bytes.get(),
@@ -62,7 +67,8 @@ where
                     )
                 })
             },
-        ))
+        );
+        Ok(plan.with_ordering(self.order_requirement()))
     }
 }
 

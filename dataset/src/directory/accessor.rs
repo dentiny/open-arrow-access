@@ -1,6 +1,6 @@
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, Capability, ListRequest, ReadRequest, RecordReader, Result, ScanPlan,
-    ScanPlanner, async_trait, list_files,
+    Accessor, ByteAccessor, Capability, ListRequest, OrderRequirement, ReadRequest, RecordReader,
+    Result, ScanPlan, ScanPlanner, async_trait, list_files,
 };
 
 use super::DirectoryRequest;
@@ -90,6 +90,10 @@ where
     B: ByteAccessor,
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
 {
+    fn order_requirement(&self) -> OrderRequirement {
+        self.files.order_requirement()
+    }
+
     async fn plan_scan(&self, request: DirectoryRequest) -> Result<ScanPlan> {
         self.files.plan_scan(self.resolve(request).await?).await
     }

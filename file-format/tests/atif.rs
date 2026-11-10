@@ -218,6 +218,10 @@ async fn parallel_gzip_trajectories_keep_global_indices_raw_json_and_projection(
         });
         let plan = accessor.plan_scan(request.clone()).await.unwrap();
         assert_eq!(
+            plan.ordering,
+            open_arrow_access_core::OrderRequirement::PreserveGlobal
+        );
+        assert_eq!(
             plan.partitions.try_collect::<Vec<_>>().await.unwrap().len(),
             6
         );

@@ -1,7 +1,7 @@
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, ReadRequest, ReaderFactory, RecordMetadata,
-    RecordReader, Result, ScanPlan, ScanPlanner, async_trait, into_async_read,
+    Accessor, ByteReadRequest, ByteReader, OrderRequirement, ReadRequest, ReaderFactory,
+    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, async_trait, into_async_read,
     record_stream_reader,
 };
 use xml_arrow::{XmlBatchBuilder, infer_records, read_records};
@@ -14,6 +14,10 @@ impl<B> ScanPlanner for XmlAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
+    fn order_requirement(&self) -> OrderRequirement {
+        OrderRequirement::Reorderable
+    }
+
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = self.binding.factory();
         let (validation_schema, mut options, explicit_schema) = format.prepare(&request)?;
@@ -68,7 +72,7 @@ where
                     .map_err(error::xml_error)
             })
             .boxed();
-        Ok(RecordChunks::new(records).into_plan(
+        let plan = RecordChunks::new(records).into_plan(
             metadata,
             rows,
             target_bytes,
@@ -104,6 +108,7 @@ where
                     )) as Box<dyn RecordReader>)
                 })
             },
-        ))
+        );
+        Ok(plan.with_ordering(self.order_requirement()))
     }
 }

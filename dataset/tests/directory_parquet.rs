@@ -169,6 +169,10 @@ mod filesystem {
             ..Default::default()
         };
         let mut plan = directory.plan_scan(request.clone()).await.unwrap();
+        assert_eq!(
+            plan.ordering,
+            open_arrow_access_core::OrderRequirement::Reorderable
+        );
         let mut partitions = 0;
         while plan.partitions.next().await.transpose().unwrap().is_some() {
             partitions += 1;
