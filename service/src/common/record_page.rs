@@ -1,7 +1,6 @@
-use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, ReadRequest,
-    ReaderFactory, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait,
+    Accessor, ByteReadRequest, ByteReader, Bytes, Capability, ReadRequest, ReaderFactory,
+    RecordReader, Result, ScanPlan, ScanPlanner, async_trait, bytes_reader,
 };
 use open_arrow_access_file_format::FileAccessor;
 
@@ -83,13 +82,6 @@ impl Accessor for RecordPageInput {
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        let metadata = ByteMetadata {
-            source: Some(request.object),
-            content_length: Some(self.0.len() as u64),
-            version: None,
-        };
-        let bytes = self.0.clone();
-        let chunks = stream::iter((!bytes.is_empty()).then_some(Ok(bytes)));
-        Ok(Box::new(StreamReader::new(chunks, metadata)))
+        Ok(Box::new(bytes_reader(self.0.clone(), Some(request.object))))
     }
 }
