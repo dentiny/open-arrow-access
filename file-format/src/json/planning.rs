@@ -96,9 +96,6 @@ impl JsonFrames {
                         return Err(error::invalid_frame("frame_json", "expected a JSON object"));
                     }
                 }
-                if raw.len() == self.options.max_record_bytes.get() {
-                    return Err(error::record_too_large("frame_json"));
-                }
                 raw.push(byte);
                 if quoted {
                     if escaped {
