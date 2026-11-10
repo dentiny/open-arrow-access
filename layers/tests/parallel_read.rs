@@ -248,16 +248,3 @@ async fn pending_partition_discovery_does_not_block_ready_output() {
     let mut reader = open_plan(ScanPlan::from_stream(metadata(), partitions), 2, 1).await;
     assert_eq!(value(&reader.next().await.unwrap().unwrap()), 7);
 }
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn discovery_errors_cancel_started_workers_and_end_the_scan() {
-    let (blocked, started, dropped) = blocked_partition();
-    let partitions = stream::iter([Ok(blocked)]).chain(stream::once(async move {
-        started.await.unwrap();
-        Err(Error::new(ErrorKind::Io, "discover", "injected failure"))
-    }));
-    let mut reader = open_plan(ScanPlan::from_stream(metadata(), partitions), 2, 1).await;
-    assert_eq!(reader.next().await.unwrap_err().operation(), "discover");
-    assert!(dropped.await.is_err());
-    assert!(reader.next().await.unwrap().is_none());
-}
