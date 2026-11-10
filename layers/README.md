@@ -39,7 +39,10 @@ Specifications address top-level columns by exact name. Target types use Arrow's
 `DataType`; a caller accepting strings can parse them with `str::parse`.
 Malformed target type parameters fail at configuration; run-end encoded targets
 are rejected because Arrow can panic when a null batch exceeds the run-end key
-range. Unsupported type pairs fail at opening, unknown/duplicate/empty column names are
+range. Decimal rescaling pairs that overflow Arrow 59.3's internal i8 arithmetic
+are rejected at opening, including inside nested fields and dictionaries. This
+restriction applies to the type pair even if particular values would fit.
+Unsupported type pairs fail at opening, unknown/duplicate/empty column names are
 errors, and invalid values or overflows terminate reading rather than becoming
 null. Errors retain their source chains. Already-emitted batches are not rolled
 back. Nested casts follow Arrow kernel behavior, including child-field mapping;

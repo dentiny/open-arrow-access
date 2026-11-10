@@ -8,7 +8,7 @@ use std::{
 };
 
 use arrow_array::{
-    ArrayRef, Int32Array, Int64Array, LargeBinaryArray, ListArray, RecordBatch, StringArray,
+    Array, ArrayRef, Int32Array, Int64Array, LargeBinaryArray, ListArray, RecordBatch, StringArray,
     TimestampMicrosecondArray, types::Int32Type,
 };
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
@@ -478,4 +478,184 @@ async fn parquet_conversion_preserves_projection_and_batch_order() {
         );
     }
     assert_eq!(ids, (0..7).collect::<Vec<_>>());
+}
+
+#[tokio::test]
+async fn decimal_rescaling_rejects_unsafe_pairs_before_reading() {
+    use arrow_array::{Decimal256Array, new_empty_array};
+    use arrow_schema::UnionFields;
+
+    let from = DataType::Decimal256(76, 0);
+    let to = DataType::Decimal256(76, 60);
+    let item = |data_type| Arc::new(Field::new("item", data_type, true));
+    let map = |data_type| {
+        DataType::Map(
+            Arc::new(Field::new(
+                "entries",
+                DataType::Struct(
+                    vec![
+                        Field::new("key", DataType::Int32, false),
+                        Field::new("value", data_type, true),
+                    ]
+                    .into(),
+                ),
+                false,
+            )),
+            false,
+        )
+    };
+    let pairs = [
+        (from.clone(), to.clone()),
+        (from.clone(), DataType::Decimal256(76, 52)),
+        (
+            DataType::Union(
+                UnionFields::try_new([0, 1], [item(from.clone()), item(to.clone())]).unwrap(),
+                arrow_schema::UnionMode::Sparse,
+            ),
+            DataType::Dictionary(Box::new(DataType::Int8), Box::new(to.clone())),
+        ),
+        (DataType::Decimal128(38, 38), DataType::Decimal128(38, -128)),
+        (DataType::Decimal128(38, -128), DataType::Decimal256(76, 60)),
+        (
+            DataType::List(item(from.clone())),
+            DataType::List(item(to.clone())),
+        ),
+        (
+            DataType::Struct(vec![item(from.clone())].into()),
+            DataType::Struct(vec![item(to.clone())].into()),
+        ),
+        (
+            DataType::Dictionary(Box::new(DataType::Int8), Box::new(from.clone())),
+            DataType::Dictionary(Box::new(DataType::Int16), Box::new(to.clone())),
+        ),
+        (
+            DataType::RunEndEncoded(
+                Arc::new(Field::new("ends", DataType::Int32, false)),
+                item(from.clone()),
+            ),
+            to.clone(),
+        ),
+        (
+            DataType::Union(
+                UnionFields::try_new([0], [item(from.clone())]).unwrap(),
+                arrow_schema::UnionMode::Sparse,
+            ),
+            to.clone(),
+        ),
+        (map(from.clone()), map(to.clone())),
+        (DataType::FixedSizeList(item(from.clone()), 1), to.clone()),
+        (from, DataType::List(item(to))),
+    ];
+    for (from, to) in pairs {
+        let source = MemoryAccessor::new(vec![batch(new_empty_array(&from))]);
+        let calls = source.calls.clone();
+        let error = source
+            .layer(layer("value", to))
+            .open(ReadRequest::new("test"))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::Unsupported);
+        assert!(error.to_string().contains("Decimal rescale"));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    let value = "1000000000000000000000000000000000000000000000000000000000000000000000000000"
+        .parse()
+        .unwrap();
+    let input = Decimal256Array::from_iter_values([value])
+        .with_precision_and_scale(76, 0)
+        .unwrap();
+    assert!(
+        MemoryAccessor::new(vec![batch(Arc::new(input))])
+            .layer(layer("value", DataType::Decimal256(76, 60)))
+            .open(ReadRequest::new("test"))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn decimal_guard_preserves_safe_rescaling_and_struct_field_mapping() {
+    use arrow_array::{Decimal256Array, new_empty_array};
+
+    let input = Decimal256Array::from_iter([Some(1.into()), None])
+        .with_precision_and_scale(76, 0)
+        .unwrap();
+    let mut reader = MemoryAccessor::new(vec![batch(Arc::new(input))])
+        .layer(layer("value", DataType::Decimal256(76, 51)))
+        .open(ReadRequest::new("test"))
+        .await
+        .unwrap();
+    let output = reader.next().await.unwrap().unwrap();
+    let expected =
+        Decimal256Array::from_iter([Some(format!("1{}", "0".repeat(51)).parse().unwrap()), None])
+            .with_precision_and_scale(76, 51)
+            .unwrap();
+    assert_eq!(output.column(0).to_data(), expected.to_data());
+
+    let from = DataType::Struct(
+        vec![
+            Field::new("a", DataType::Decimal256(76, 0), true),
+            Field::new("b", DataType::Decimal256(76, 60), true),
+        ]
+        .into(),
+    );
+    let to = DataType::Struct(
+        vec![
+            Field::new("b", DataType::Decimal256(76, 60), true),
+            Field::new("a", DataType::Decimal256(76, 0), true),
+        ]
+        .into(),
+    );
+    let mut reader = MemoryAccessor::new(vec![batch(new_empty_array(&from))])
+        .layer(layer("value", to))
+        .open(ReadRequest::new("test"))
+        .await
+        .unwrap();
+    assert!(reader.next().await.unwrap().is_some());
+
+    let union = DataType::Union(
+        arrow_schema::UnionFields::try_new(
+            [0, 1],
+            [
+                Field::new("from", DataType::Decimal256(76, 0), true),
+                Field::new("exact", DataType::Decimal256(76, 60), true),
+            ],
+        )
+        .unwrap(),
+        arrow_schema::UnionMode::Sparse,
+    );
+    let from = DataType::Dictionary(
+        Box::new(DataType::Int8),
+        Box::new(DataType::Dictionary(
+            Box::new(DataType::Int8),
+            Box::new(union),
+        )),
+    );
+    let to = DataType::Dictionary(
+        Box::new(DataType::Int16),
+        Box::new(DataType::Decimal256(76, 60)),
+    );
+    let mut reader = MemoryAccessor::new(vec![batch(new_empty_array(&from))])
+        .layer(layer("value", to))
+        .open(ReadRequest::new("test"))
+        .await
+        .unwrap();
+    assert!(reader.next().await.unwrap().is_some());
+
+    let overflow = Decimal256Array::from_iter_values([
+        "1000000000000000000000000000000000000000000000000000000000000000000000000000"
+            .parse()
+            .unwrap(),
+    ])
+    .with_precision_and_scale(76, 0)
+    .unwrap();
+    let mut reader = MemoryAccessor::new(vec![batch(Arc::new(overflow))])
+        .layer(layer("value", DataType::Decimal256(76, 1)))
+        .open(ReadRequest::new("test"))
+        .await
+        .unwrap();
+    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
+    assert!(reader.next().await.unwrap().is_none());
 }

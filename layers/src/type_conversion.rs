@@ -148,6 +148,14 @@ where
                     ),
                 ));
             }
+            validate_decimal_cast(field.data_type(), &spec.data_type).map_err(|error| {
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "plan_cast",
+                    format!("column {:?}: {error}", spec.column),
+                )
+                .with_source(error)
+            })?;
             fields[index] = Arc::new(
                 field
                     .as_ref()
@@ -175,6 +183,108 @@ where
             done: false,
         }))
     }
+}
+
+fn decimal_params(data_type: &DataType) -> Option<(i16, i16)> {
+    match data_type {
+        DataType::Decimal32(precision, scale)
+        | DataType::Decimal64(precision, scale)
+        | DataType::Decimal128(precision, scale)
+        | DataType::Decimal256(precision, scale) => {
+            Some((i16::from(*precision), i16::from(*scale)))
+        }
+        _ => None,
+    }
+}
+
+fn list_item(data_type: &DataType) -> Option<&DataType> {
+    match data_type {
+        DataType::List(field)
+        | DataType::LargeList(field)
+        | DataType::ListView(field)
+        | DataType::LargeListView(field)
+        | DataType::FixedSizeList(field, _) => Some(field.data_type()),
+        _ => None,
+    }
+}
+
+fn validate_decimal_cast(from: &DataType, to: &DataType) -> std::result::Result<(), ArrowError> {
+    if from == to || from.is_null() {
+        return Ok(());
+    }
+    if let (Some((precision, from_scale)), Some((_, to_scale))) =
+        (decimal_params(from), decimal_params(to))
+    {
+        // Arrow 59.3 computes both expressions in i8, which can panic or select wrapping multiplication.
+        let delta = to_scale - from_scale;
+        if delta.abs() > i16::from(i8::MAX)
+            || (delta >= 0 && precision + delta > i16::from(i8::MAX))
+        {
+            return Err(ArrowError::CastError(format!(
+                "unsafe Decimal rescale from {from} to {to}: Arrow's i8 scale arithmetic would overflow"
+            )));
+        }
+        return Ok(());
+    }
+    match (from, to) {
+        (DataType::RunEndEncoded(_, values), _) => validate_decimal_cast(values.data_type(), to)?,
+        (DataType::Union(fields, _), _) => {
+            if !fields.iter().any(|(_, field)| field.data_type() == to)
+                && let Some((_, field)) = fields
+                    .iter()
+                    .find(|(_, field)| can_cast_types(field.data_type(), to))
+            {
+                validate_decimal_cast(field.data_type(), to)?;
+            }
+        }
+        (DataType::Dictionary(_, from), DataType::Dictionary(_, to)) => {
+            let mut from = from.as_ref();
+            while let DataType::Dictionary(_, values) = from {
+                from = values;
+            }
+            validate_decimal_cast(from, to)?;
+        }
+        (DataType::Dictionary(_, value), _) => validate_decimal_cast(value, to)?,
+        (_, DataType::Dictionary(_, value)) => validate_decimal_cast(from, value)?,
+        (DataType::Struct(from_fields), DataType::Struct(to_fields)) => {
+            let in_order = from_fields
+                .iter()
+                .zip(to_fields)
+                .all(|(from, to)| from.name() == to.name());
+            let by_name = (!in_order)
+                .then(|| FieldNameIndex::new(from_fields))
+                .filter(|index| {
+                    to_fields
+                        .iter()
+                        .all(|field| index.get(field.name()).is_some())
+                });
+            for (position, to) in to_fields.iter().enumerate() {
+                let index = by_name
+                    .as_ref()
+                    .map_or(position, |index| index.get(to.name()).unwrap());
+                let from = &from_fields[index];
+                validate_decimal_cast(from.data_type(), to.data_type())?;
+            }
+        }
+        (DataType::Map(from, _), DataType::Map(to, _)) => {
+            if let (DataType::Struct(from), DataType::Struct(to)) =
+                (from.data_type(), to.data_type())
+            {
+                for (from, to) in from.iter().zip(to) {
+                    validate_decimal_cast(from.data_type(), to.data_type())?;
+                }
+            }
+        }
+        _ => match (list_item(from), list_item(to)) {
+            (Some(from), Some(to)) => validate_decimal_cast(from, to)?,
+            (_, Some(to)) => validate_decimal_cast(from, to)?,
+            (Some(item), None) if matches!(from, DataType::FixedSizeList(_, 1)) => {
+                validate_decimal_cast(item, to)?
+            }
+            _ => {}
+        },
+    }
+    Ok(())
 }
 
 fn validate_target(data_type: &DataType) -> std::result::Result<(), ArrowError> {
