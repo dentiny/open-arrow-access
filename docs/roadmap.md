@@ -59,11 +59,11 @@ own format rules.
 [`TypeConversionLayer`](../layers/README.md) is implemented and always available.
 It uses the existing layer contract for explicit Arrow output casts.
 
-Generated columns remain a planned functional record layer. The existing
-`ReadOptionsProvider` contract allows a layer to widen an inner projection for
-expression dependencies, then apply the caller's final selection. Expression
-execution and DataFusion integration are not implemented. See the
-[generated-column proposal](generated-columns.md).
+`GeneratedColumnsLayer` is implemented and always available, with
+ordered row-level SQL expressions, a fixed output schema, and final projection.
+It currently reads all source columns for complete schema validation;
+dependency-aware pushdown remains planned. See the
+[generated-column design](generated-columns.md).
 
 Metrics can be developed independently. Byte counts, record batches, row counts,
 latency, and failures describe different stages and should remain separate.

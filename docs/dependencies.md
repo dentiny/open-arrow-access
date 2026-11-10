@@ -26,9 +26,12 @@ additional OpenDAL services and HTTP transports, use the same OpenDAL release
 The CSV feature uses the same Arrow baseline (`59.3.0`) for `arrow-csv`, including
 the transitive Arrow Cast and Arrow Ord components in the committed lockfile.
 
-DataFusion is only an unused workspace dependency declaration for the later generated
-column layer. It is not built or present in the resolved graph yet. The layer
-must inherit it through `workspace = true`; do not import types through Lance.
+DataFusion is a required dependency of the layers crate for generated columns
+and inherits its version through `workspace = true`. Only the `sql` feature is
+explicitly enabled, with DataFusion's default features disabled. DataFusion 55.2.0
+still enables scalar-function defaults (including string, Unicode, datetime, and
+math) through its dependencies. Optional Parquet, compression, and recursive
+protection features are not enabled here. Core does not import DataFusion or Lance types.
 
 ## Updating the baseline
 

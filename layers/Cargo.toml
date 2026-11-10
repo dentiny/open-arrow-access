@@ -7,6 +7,7 @@ repository.workspace = true
 description = "Composable Arrow record layers for Open Arrow Access"
 
 [dependencies]
+datafusion = { workspace = true, features = ["sql"] }
 futures.workspace = true
 arrow-array = { workspace = true, features = ["chrono-tz"] }
 arrow-cast.workspace = true
@@ -15,9 +16,14 @@ open-arrow-access-core.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
+open-arrow-access-file-format = { workspace = true, features = ["csv"] }
+open-arrow-access-test-support.workspace = true
 
 [lints]
 workspace = true
 
 [[test]]
 name = "type_conversion"
+
+[[test]]
+name = "generated_columns"

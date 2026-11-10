@@ -241,3 +241,69 @@ fn has_extension_type(data_type: &DataType) -> bool {
         _ => false,
     }
 }
+
+pub(crate) fn validate_generated_specs(specs: &[crate::GeneratedColumnSpec]) -> Result<()> {
+    let mut names = HashSet::with_capacity(specs.len());
+    for spec in specs {
+        if spec.column.trim().is_empty() || !names.insert(&spec.column) {
+            return Err(crate::error::invalid_generated_column(
+                &spec.column,
+                "column names must be nonempty and distinct",
+            ));
+        }
+        if spec.expression.trim().is_empty() {
+            return Err(crate::error::invalid_generated_column(
+                &spec.column,
+                "expression must not be blank",
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_generated_column_name<'a>(
+    column: &'a str,
+    names: &mut HashSet<&'a str>,
+) -> Result<()> {
+    if !names.insert(column) {
+        return Err(crate::error::invalid_generated_column(
+            column,
+            "column already exists",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_expression(
+    expression: &datafusion::logical_expr::Expr,
+) -> datafusion::error::Result<()> {
+    use datafusion::{
+        common::tree_node::{TreeNode, TreeNodeRecursion},
+        logical_expr::Expr,
+    };
+
+    if expression.is_volatile() {
+        return Err(crate::error::invalid_generated_expression(
+            "volatile functions are not supported",
+        ));
+    }
+    expression.apply(|expr| {
+        if matches!(
+            expr,
+            Expr::AggregateFunction(_)
+                | Expr::WindowFunction(_)
+                | Expr::ScalarSubquery(_)
+                | Expr::Exists(_)
+                | Expr::InSubquery(_)
+                | Expr::SetComparison(_)
+                | Expr::GroupingSet(_)
+                | Expr::Unnest(_)
+        ) {
+            return Err(crate::error::invalid_generated_expression(
+                "only row-level expressions are supported",
+            ));
+        }
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+    Ok(())
+}
