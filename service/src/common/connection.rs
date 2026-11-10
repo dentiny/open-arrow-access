@@ -119,17 +119,24 @@ impl Connection {
             .map_or(DEFAULT_CHUNK_SIZE, |s| s.get());
         let body = BodyReader::new(response, error::OP)?;
         let content_length = body.content_length();
-        let state = (body, Bytes::new());
-        let chunks = stream::try_unfold(state, move |(mut body, mut pending)| async move {
-            if pending.is_empty() {
-                let Some(buffer) = body.next().await? else {
-                    return Ok(None);
-                };
-                pending = buffer.to_bytes();
-            }
-            let chunk = pending.split_to(pending.len().min(chunk_size));
-            Ok(Some((chunk, (body, pending))))
-        });
+        let state = (body, Buffer::new(), Bytes::new());
+        let chunks = stream::try_unfold(
+            state,
+            move |(mut body, mut parts, mut pending)| async move {
+                while pending.is_empty() {
+                    if let Some(part) = parts.next() {
+                        pending = part;
+                        continue;
+                    }
+                    let Some(buffer) = body.next().await? else {
+                        return Ok(None);
+                    };
+                    parts = buffer;
+                }
+                let chunk = pending.split_to(pending.len().min(chunk_size));
+                Ok(Some((chunk, (body, parts, pending))))
+            },
+        );
         Ok(Box::new(StreamReader::new(
             chunks,
             ByteMetadata {

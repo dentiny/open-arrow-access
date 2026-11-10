@@ -198,3 +198,49 @@ async fn http_failures_preserve_retry_metadata() {
     assert_eq!(error.http_status(), Some(429));
     assert_eq!(error.retry_after(), None);
 }
+
+#[tokio::test]
+async fn sequential_downloads_share_fragmented_body_storage_and_preserve_chunk_limit() {
+    use open_arrow_access_core::{ByteReadOptions, Bytes};
+    use std::num::NonZeroUsize;
+    let first = Bytes::copy_from_slice(b"abcdef");
+    let second = Bytes::copy_from_slice(b"ghi");
+    let expected = first.clone();
+    let fixture = HttpFixture::new();
+    fixture.handle(move |_| {
+        let body: Buffer = vec![
+            Bytes::new(),
+            first.clone(),
+            Bytes::new(),
+            second.clone(),
+            Bytes::new(),
+        ]
+        .into_iter()
+        .collect();
+        Ok(Response::builder()
+            .status(200)
+            .header("content-length", 9)
+            .body(HttpBody::new(stream::iter([Ok(body)]), Some(9)))
+            .unwrap())
+    });
+    let mut reader = connection(&fixture)
+        .open(
+            &format!("{}/file", fixture.endpoint()),
+            ByteReadOptions {
+                io_chunk_size: NonZeroUsize::new(4),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let first = reader.next().await.unwrap().unwrap();
+    assert_eq!(&first[..], b"abcd");
+    assert_eq!(
+        first.as_ptr(),
+        expected.as_ptr(),
+        "download copied body fragments"
+    );
+    assert_eq!(&reader.next().await.unwrap().unwrap()[..], b"ef");
+    assert_eq!(&reader.next().await.unwrap().unwrap()[..], b"ghi");
+    assert!(reader.next().await.unwrap().is_none());
+}
