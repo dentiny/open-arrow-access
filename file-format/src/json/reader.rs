@@ -3,7 +3,7 @@ use open_arrow_access_core::{
     BatchDecoder, ByteReader, RecordBatch, RecordMetadata, RecordReader, Result, decode_batches,
 };
 
-use super::decode_error;
+use super::error::decode_error;
 
 struct JsonDecoder {
     decoder: Decoder,

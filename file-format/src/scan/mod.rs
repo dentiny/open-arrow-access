@@ -19,6 +19,4 @@ impl Default for DecodePartitionOptions {
 }
 
 #[cfg(feature = "json")]
-pub(crate) mod error;
-#[cfg(feature = "json")]
 pub(crate) mod input;

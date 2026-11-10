@@ -6,11 +6,8 @@ use open_arrow_access_core::{
 };
 use serde_json::{Deserializer, value::RawValue};
 
-use super::JsonAccessor;
-use crate::{
-    DecodePartitionOptions,
-    scan::{error, input::ChunkInput},
-};
+use super::{JsonAccessor, error};
+use crate::{DecodePartitionOptions, scan::input::ChunkInput};
 
 #[async_trait]
 impl<B> ScanPlanner for JsonAccessor<B>
