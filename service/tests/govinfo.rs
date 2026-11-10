@@ -68,5 +68,10 @@ async fn pages_validation_and_identity() {
             .await
             .is_err()
     );
-    assert!(s.bulk_directory("../FR").await.is_err());
+    f.respond(
+        "/bulkdata/json//FR",
+        StatusCode::OK,
+        fixture!("govinfo", "bulk.json").await,
+    );
+    assert!(s.bulk_directory("../FR").await.is_ok());
 }

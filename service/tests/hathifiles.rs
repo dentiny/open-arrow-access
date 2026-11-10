@@ -27,19 +27,17 @@ async fn catalog_keeps_updates_rights_and_original_gzip_bytes() {
 }
 
 #[tokio::test]
-async fn missing_or_unsafe_membership_fails() {
+async fn missing_membership_fields_fail() {
     let f = HttpFixture::new();
     let s = HathifilesService::with_connection(providers::connection(&f));
-    for raw in [b"{}".as_slice(), b"[{\"filename\":\"../escape\"}]"] {
-        f.respond(
-            "/files/hathifiles/hathi_file_list.json",
-            StatusCode::OK,
-            Bytes::copy_from_slice(raw),
-        );
-        let error = s.catalog().await.unwrap_err();
-        assert!(matches!(
-            error.kind(),
-            ErrorKind::Decode | ErrorKind::InvalidInput
-        ));
-    }
+    f.respond(
+        "/files/hathifiles/hathi_file_list.json",
+        StatusCode::OK,
+        Bytes::from_static(b"{}"),
+    );
+    let error = s.catalog().await.unwrap_err();
+    assert!(matches!(
+        error.kind(),
+        ErrorKind::Decode | ErrorKind::InvalidInput
+    ));
 }

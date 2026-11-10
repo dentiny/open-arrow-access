@@ -5,8 +5,8 @@ use crate::{ByteAccessor, Error, ErrorKind, ListRequest, ObjectRef, Result};
 /// Collect sorted, unique objects beneath a directory prefix.
 /// Return [`ErrorKind::Unsupported`] before I/O if listing is unavailable.
 ///
-/// `select` validates and filters each relative locator. Path rules and empty
-/// results belong to the caller. The request is forwarded unchanged, including
+/// `select` filters each locator beneath the prefix. Empty results belong to
+/// the caller. The request is forwarded unchanged, including
 /// recursion; a trailing prefix slash is optional and an empty prefix selects root.
 /// Listing and callback errors pass through unchanged. Objects outside the prefix
 /// return [`ErrorKind::InvalidInput`]. Memory grows with the selected file count.

@@ -78,8 +78,6 @@ async fn rejects_invalid_metadata_and_unsupported_files() {
             ("wrong-pid.json", StatusCode::OK, ErrorKind::Decode),
             ("wrong-version.json", StatusCode::OK, ErrorKind::Decode),
             ("draft.json", StatusCode::OK, ErrorKind::Decode),
-            ("bad-directory.json", StatusCode::OK, ErrorKind::Decode),
-            ("bad-label.json", StatusCode::OK, ErrorKind::Decode),
             ("duplicate-name.json", StatusCode::OK, ErrorKind::Decode),
             ("malformed.json", StatusCode::OK, ErrorKind::Decode),
             ("missing-files.json", StatusCode::OK, ErrorKind::Decode),
@@ -125,4 +123,19 @@ async fn accepts_equivalent_doi_casing() {
         .unwrap();
     assert_eq!(dataset.files().len(), 2);
     assert_eq!(http.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn preserves_logical_names_without_path_validation() {
+    for name in ["bad-directory.json", "bad-label.json"] {
+        let http = HttpFixture::new();
+        http.respond(METADATA, StatusCode::OK, fixture!("dataverse", name).await);
+        let dataset = DataverseService::new(http.endpoint())
+            .unwrap()
+            .dataset(PID, "1.0")
+            .await
+            .unwrap();
+        assert_eq!(dataset.files().len(), 2);
+        assert_eq!(http.requests().len(), 1);
+    }
 }

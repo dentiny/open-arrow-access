@@ -39,8 +39,8 @@ pub struct MetadataLink {
 }
 
 /// Resolve a list of files with required name and download URL string fields.
-/// Names use provider filename-component rules. Order and URL strings are
-/// preserved; URL and namespace validation happen when binding downloads.
+/// Order and URL strings are preserved; URL and namespace validation happen
+/// when binding downloads.
 pub fn resolve_named_links(
     files: &[Value],
     name_field: &str,
@@ -50,7 +50,6 @@ pub fn resolve_named_links(
         .iter()
         .map(|file| {
             let name = text(file, name_field)?;
-            super::validate_filename(name)?;
             Ok(MetadataLink {
                 file_name: name.into(),
                 url: text(file, url_field)?.into(),

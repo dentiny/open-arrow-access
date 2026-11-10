@@ -1,7 +1,5 @@
 use open_arrow_access_core::Result;
 
-use crate::filename::valid_filename_component;
-
 use super::{
     Response,
     error::{decode, invalid, unsupported},
@@ -74,18 +72,6 @@ pub(super) fn validate_dataset(
         }
         if file.data_file.id == 0 {
             return Err(decode("file ID must be nonzero"));
-        }
-        if !valid_filename_component(&file.label) {
-            return Err(decode("invalid logical filename"));
-        }
-        if !file.directory_label.is_empty()
-            && !file
-                .directory_label
-                .trim_end_matches('/')
-                .split('/')
-                .all(valid_filename_component)
-        {
-            return Err(decode("invalid directory label"));
         }
     }
     Ok(())

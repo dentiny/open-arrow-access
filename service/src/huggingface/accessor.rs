@@ -7,7 +7,7 @@ use open_arrow_access_core::{
 use open_arrow_access_storage::OpenDalAccessor;
 use opendal::{OperationContext, Operator};
 
-use super::{map_error, validation::validate_path};
+use super::map_error;
 
 /// Read repository-relative files through OpenDAL's Hugging Face service.
 ///
@@ -53,7 +53,6 @@ impl Accessor for HuggingFaceAccessor {
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        validate_path(request.object.locator(), false)?;
         self.inner.open(request).await
     }
 }
@@ -64,7 +63,6 @@ impl ByteAccessor for HuggingFaceAccessor {
     /// Recursion follows the request and is enabled by default.
     /// Discovery follows Hub pagination order, which is not a stable dataset order.
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        validate_path(request.prefix.locator(), true)?;
         self.inner.list(request).await
     }
 }

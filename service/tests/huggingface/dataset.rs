@@ -100,9 +100,6 @@ async fn invalid_dataset_selection_fails_before_network_io() {
     let service = hub.service().await;
     for selection in [
         HuggingFaceDatasetRequest::new("../repo", "default", "train"),
-        HuggingFaceDatasetRequest::new("owner/example", "", "train"),
-        HuggingFaceDatasetRequest::new("owner/example", "default/other", "train"),
-        HuggingFaceDatasetRequest::new("owner/example", "default", "../test"),
         HuggingFaceDatasetRequest::new("owner/example", "default", "partial-train"),
     ] {
         let error = service.dataset(selection).await.err().unwrap();

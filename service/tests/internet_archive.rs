@@ -88,7 +88,6 @@ async fn maps_empty_missing_and_unavailable_item_responses() {
             ("wrong-id.json", StatusCode::OK, ErrorKind::Decode),
             ("missing-files.json", StatusCode::OK, ErrorKind::Decode),
             ("duplicate.json", StatusCode::OK, ErrorKind::Decode),
-            ("traversal.json", StatusCode::OK, ErrorKind::Decode),
             ("invalid-size.json", StatusCode::OK, ErrorKind::Decode),
         ],
         |endpoint| async move {
@@ -141,4 +140,21 @@ async fn validates_selection_before_io_and_reads_chunked_metadata() {
         Bytes::from(fixture!("internet_archive", "item.json").await),
     );
     assert!(service.item(ITEM).await.is_ok());
+}
+
+#[tokio::test]
+async fn preserves_file_names_without_path_validation() {
+    let http = HttpFixture::new();
+    http.respond(
+        METADATA,
+        StatusCode::OK,
+        fixture!("internet_archive", "traversal.json").await,
+    );
+    let item = InternetArchiveService::with_endpoint(http.endpoint())
+        .unwrap()
+        .item(ITEM)
+        .await
+        .unwrap();
+    assert_eq!(item.files()[0].name, "papers/../secret");
+    assert_eq!(http.requests().len(), 1);
 }

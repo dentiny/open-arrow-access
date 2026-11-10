@@ -37,7 +37,7 @@ async fn original_manifest_and_independent_members_are_retained() {
 }
 
 #[tokio::test]
-async fn missing_ambiguous_and_unsafe_references_fail() {
+async fn missing_ambiguous_and_invalid_manifests_fail() {
     for name in [
         "missing.meca",
         "unsafe.meca",

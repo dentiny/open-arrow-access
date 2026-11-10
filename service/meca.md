@@ -21,7 +21,7 @@ ZIP directory and the transfer manifest.
 | `archive()` | Underlying `ZipArchive`, including members not listed in the manifest |
 | `archive().open_entry(index, chunk_size)` | Sequential decoded bytes of a selected member |
 
-Relative URI references are resolved against ZIP members; traversal, missing and
+Percent-decoded URI references are matched against ZIP members; missing and
 ambiguous references fail. External DTDs are not fetched. This validates archive
 membership/reference handling rather than every MECA schema rule.
 

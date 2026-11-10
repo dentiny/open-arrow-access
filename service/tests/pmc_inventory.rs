@@ -140,12 +140,7 @@ async fn projection_preserves_output_order_and_zero_column_rows() {
 
 #[tokio::test]
 async fn invalid_manifests_fail_before_opening_shards() {
-    for name in [
-        "bad_bucket.json",
-        "bad_timestamp.json",
-        "bad_schema.json",
-        "bad_shard_path.json",
-    ] {
+    for name in ["bad_bucket.json", "bad_timestamp.json", "bad_schema.json"] {
         let mut source = Objects::fixture().await;
         source.insert(MANIFEST, &fixture!("pmc/inventory", name).await);
         let error = PmcInventoryAccessor::new(source.clone())
@@ -264,4 +259,27 @@ async fn parallel_inventory_matches_order_metadata_projection_and_validation() {
             Ok(None) => panic!("invalid bucket bypassed validation"),
         }
     }
+}
+
+#[tokio::test]
+async fn forwards_shard_keys_without_path_validation() {
+    let mut source = Objects::fixture().await;
+    source.insert(
+        MANIFEST,
+        &fixture!("pmc/inventory", "bad_shard_path.json").await,
+    );
+    source.insert(
+        "../escape.csv.gz",
+        &fixture!("pmc/inventory", "first.csv.gz").await,
+    );
+    let opened = source.opened.clone();
+    let mut reader = PmcInventoryAccessor::new(source)
+        .open(request(None))
+        .await
+        .unwrap();
+    assert!(reader.next().await.unwrap().is_some());
+    assert_eq!(
+        opened.lock().unwrap()[1].object.locator(),
+        "../escape.csv.gz"
+    );
 }

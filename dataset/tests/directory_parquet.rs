@@ -61,12 +61,6 @@ mod filesystem {
                 .unwrap(),
             vec![ObjectRef::new("sub/b")]
         );
-        for path in ["../outside", "/absolute", ".", " sub"] {
-            assert_eq!(
-                fs.list(path.into()).await.err().unwrap().kind(),
-                ErrorKind::InvalidInput
-            );
-        }
         // OpenDAL Fs treats nonexistent and non-directory prefixes as empty.
         for prefix in ["missing", "a"] {
             assert!(

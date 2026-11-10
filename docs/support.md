@@ -55,7 +55,7 @@ contracts; they are not a certification of every upstream cloud service.
 
 Backend setup, credentials, roots, and OpenDAL storage policies belong to the
 caller. Object locators are interpreted by the supplying accessor. For generic
-storage, use canonical root-relative paths. See [S3 configuration](usage.md#use-s3-or-another-opendal-backend).
+storage, locators are passed to the configured backend. See [S3 configuration](usage.md#use-s3-or-another-opendal-backend).
 
 ## Compression and archives
 
