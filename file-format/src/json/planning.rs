@@ -2,7 +2,7 @@ use bytes::BytesMut;
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt,
-    RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader,
+    RecordMetadata, Result, ScanPlan, ScanPlanner, async_trait, bytes_reader,
 };
 use serde_json::{Deserializer, value::RawValue};
 
@@ -37,24 +37,18 @@ where
         let chunks = RecordChunks::new(records);
         let rows = request.options.batch_size.get();
         let target_bytes = self.partition_options.target_bytes.get();
-        let partitions = stream::try_unfold(chunks, move |mut frames| {
+        let partitions = chunks.into_partitions(rows, target_bytes, Bytes::len, move |records| {
             let format = format.clone();
             let request = request.clone();
-            async move {
-                let Some(records) = frames.next_chunk(rows, target_bytes, Bytes::len).await? else {
-                    return Ok(None);
-                };
-                let mut bytes = Vec::new();
-                for record in records {
-                    bytes.extend_from_slice(&record);
-                    bytes.push(b'\n');
-                }
-                let partition: ScanPartition = Box::pin(async move {
-                    let input = bytes_reader(bytes.into(), Some(request.object.clone()));
-                    format.open_input(Box::new(input), request).await
-                });
-                Ok(Some((partition, frames)))
+            let mut bytes = Vec::new();
+            for record in records {
+                bytes.extend_from_slice(&record);
+                bytes.push(b'\n');
             }
+            Box::pin(async move {
+                let input = bytes_reader(bytes.into(), Some(request.object.clone()));
+                format.open_input(Box::new(input), request).await
+            })
         });
         Ok(ScanPlan::from_stream(metadata, partitions))
     }
