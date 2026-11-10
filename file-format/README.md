@@ -40,3 +40,12 @@ For opaque Arrow `CsvFormat` configurations installed through `with_format`,
 planning keeps the input whole because their private dialect settings cannot be
 inspected safely. Use `with_dialect` for supported parallel parsing. No storage
 range access is required. Soft byte targets apply to the encoded partition bytes.
+
+### ATIF trajectory partitions
+
+ATIF JSON Lines plans frame bounded groups of complete nonblank trajectories,
+assign global source record indices before scheduling, and decode each group
+independently. Output remains globally ordered, including raw_json, source URI,
+projection, and zero-column row counts. The original line endings are retained.
+Single-document ATIF JSON remains a whole-input partition. Framing can consume
+sequential decoded bytes; it does not require random reads or parallel gzip.
