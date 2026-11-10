@@ -4,8 +4,8 @@ use futures::stream;
 
 use crate::{
     Accessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ReadOptionsProvider,
-    RecordBatch, RecordMetadata, RecordReader, Result, SchemaRef, StreamReader, async_trait,
-    read_object,
+    RecordBatch, RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, SchemaRef,
+    StreamReader, async_trait, read_object,
 };
 
 /// Decode one whole object into one Arrow row.
@@ -103,5 +103,17 @@ where
             })
         });
         Ok(Box::new(StreamReader::new(stream, metadata)))
+    }
+}
+
+#[async_trait]
+impl<B, D> ScanPlanner for DocumentAccessor<B, D>
+where
+    B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,
+    D: DocumentDecoder + 'static,
+    for<'a> ByteReadRequest: From<&'a D::Request>,
+{
+    async fn plan_scan(&self, request: D::Request) -> Result<ScanPlan> {
+        Ok(ScanPlan::whole_input(self.open(request).await?))
     }
 }

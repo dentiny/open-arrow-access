@@ -16,6 +16,18 @@ pub struct ScanPlan {
     pub partitions: Vec<ScanPartition>,
 }
 
+impl ScanPlan {
+    /// Keep a stateful or indivisible input in one partition. The reader's schema
+    /// is already fixed; partition execution remains lazy. Outer file-set plans
+    /// can still run multiple such inputs concurrently.
+    pub fn whole_input(reader: Box<dyn RecordReader>) -> Self {
+        Self {
+            metadata: reader.metadata().clone(),
+            partitions: vec![Box::pin(async move { Ok(reader) })],
+        }
+    }
+}
+
 /// Optional extension for sources that can expose independent record partitions.
 /// Normal `Accessor::open` remains the sequential path. A plan's partitions must
 /// cover the selection exactly once and be listed in the source's logical order.
