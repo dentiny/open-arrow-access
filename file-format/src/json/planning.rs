@@ -1,8 +1,10 @@
+use bytes::BytesMut;
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt,
     RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
+use serde_json::{Deserializer, value::RawValue};
 
 use super::JsonAccessor;
 use crate::{
@@ -29,9 +31,8 @@ where
             .await?;
         let frames = JsonFrames {
             input,
-            pending_input: Bytes::new(),
+            pending_input: BytesMut::new(),
             pending_record: None,
-            eof: false,
             options: self.partition_options,
             rows: request.options.batch_size.get(),
         };
@@ -51,74 +52,47 @@ where
     }
 }
 
-/// Frame complete JSON objects, including pretty-printed objects. Structural
-/// scanning stays sequential; each owned chunk is decoded by an independent worker.
+/// Frame complete JSON objects with serde_json, retaining the original bytes.
+/// Framing stays sequential; each owned chunk is decoded by an independent worker.
 struct JsonFrames {
     input: Box<dyn ByteReader>,
-    pending_input: Bytes,
+    pending_input: BytesMut,
     pending_record: Option<Bytes>,
-    eof: bool,
     options: DecodePartitionOptions,
     rows: usize,
 }
 
 impl JsonFrames {
     async fn next_record(&mut self) -> Result<Option<Bytes>> {
-        let mut raw = Vec::new();
-        let mut depth = 0;
-        let mut quoted = false;
-        let mut escaped = false;
         loop {
-            if self.pending_input.is_empty() && !self.eof {
-                match self.input.next().await? {
-                    Some(bytes) if bytes.is_empty() => {
-                        return Err(error::invalid_frame("frame_json", "empty byte chunk"));
-                    }
-                    Some(bytes) => self.pending_input = bytes,
-                    None => self.eof = true,
-                }
-            }
-            if self.pending_input.is_empty() && self.eof {
-                return if raw.is_empty() {
-                    Ok(None)
-                } else {
-                    Err(error::invalid_frame("frame_json", "truncated JSON object"))
-                };
-            }
-            let mut consumed = 0;
-            for &byte in self.pending_input.iter() {
-                consumed += 1;
-                if raw.is_empty() {
-                    if matches!(byte, b' ' | b'\r' | b'\n' | b'\t') {
-                        continue;
-                    }
-                    if byte != b'{' {
+            let mut records =
+                Deserializer::from_slice(&self.pending_input).into_iter::<&RawValue>();
+            match records.next() {
+                Some(Ok(record)) => {
+                    if !record.get().starts_with('{') {
                         return Err(error::invalid_frame("frame_json", "expected a JSON object"));
                     }
+                    let consumed = records.byte_offset();
+                    return Ok(Some(self.pending_input.split_to(consumed).freeze()));
                 }
-                raw.push(byte);
-                if quoted {
-                    if escaped {
-                        escaped = false;
-                    } else if byte == b'\\' {
-                        escaped = true;
-                    } else if byte == b'"' {
-                        quoted = false;
-                    }
-                } else {
-                    match byte {
-                        b'"' => quoted = true,
-                        b'{' | b'[' => depth += 1,
-                        b'}' | b']' => depth -= 1,
-                        _ => {}
-                    }
-                    if depth == 0 {
-                        let _ = self.pending_input.split_to(consumed);
-                        return Ok(Some(raw.into()));
-                    }
+                Some(Err(source)) if !source.is_eof() => {
+                    return Err(error::json_frame(source));
+                }
+                _ => {}
+            }
+            // serde_json retries incomplete values from their start after more input arrives.
+            let consumed = records.byte_offset();
+            let _ = self.pending_input.split_to(consumed);
+            match self.input.next().await? {
+                Some(bytes) if bytes.is_empty() => {
+                    return Err(error::invalid_frame("frame_json", "empty byte chunk"));
+                }
+                Some(bytes) => self.pending_input.extend_from_slice(&bytes),
+                None if self.pending_input.is_empty() => return Ok(None),
+                None => {
+                    return Err(error::invalid_frame("frame_json", "truncated JSON object"));
                 }
             }
-            let _ = self.pending_input.split_to(consumed);
         }
     }
 

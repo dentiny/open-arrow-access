@@ -36,8 +36,6 @@ impl BatchDecoder for JsonDecoder {
     }
 }
 
-// TODO: Decode JSONL chunks in parallel at complete line boundaries, preserving
-// input order and retaining sequential decoding for general JSON object streams.
 pub(super) fn json_reader(
     input: Box<dyn ByteReader>,
     decoder: Decoder,
