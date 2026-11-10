@@ -270,3 +270,41 @@ async fn parallel_json_reports_truncated_tail_and_accepts_records_larger_than_ta
     assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
     assert!(reader.next().await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn parallel_json_framing_handles_nested_values_and_rejects_invalid_syntax() {
+    let raw = format!(
+        "  {{\"id\":1,\"title\":\"{}é\",\"extra\":[{{\"x\":\"}}\\\"\"}},null]}}\n\t",
+        "x".repeat(16 * 1024)
+    );
+    for chunk_size in [7, 4096] {
+        let accessor = JsonAccessor::new(MemoryAccessor::new(raw.as_bytes(), chunk_size), schema())
+            .with_partition_options(DecodePartitionOptions {
+                target_bytes: NonZeroUsize::new(32).unwrap(),
+            });
+        let mut expected = accessor.open(request(1, None)).await.unwrap();
+        let mut actual = accessor
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::new(1).unwrap(),
+            ))
+            .open(request(1, None))
+            .await
+            .unwrap();
+        assert_eq!(actual.next().await.unwrap(), expected.next().await.unwrap());
+        assert!(actual.next().await.unwrap().is_none());
+    }
+    for raw in [b"{\"id\":1,}".as_slice(), b"{\"id\":[}", b"[]", b"null"] {
+        let accessor = JsonAccessor::new(MemoryAccessor::new(raw, 1), schema());
+        let error = accessor
+            .plan_scan(request(1, None))
+            .await
+            .unwrap()
+            .partitions
+            .try_collect::<Vec<_>>()
+            .await
+            .err()
+            .expect("invalid JSON must fail framing");
+        assert_eq!(error.kind(), ErrorKind::Decode);
+    }
+}

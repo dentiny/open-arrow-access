@@ -5,11 +5,8 @@ use open_arrow_access_core::{
     RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 
-use super::{CsvAccessor, CsvDialect};
-use crate::{
-    DecodePartitionOptions,
-    scan::{error, input::ChunkInput},
-};
+use super::{CsvAccessor, CsvDialect, error};
+use crate::{DecodePartitionOptions, scan::input::ChunkInput};
 
 #[async_trait]
 impl<B> ScanPlanner for CsvAccessor<B>

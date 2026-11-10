@@ -14,7 +14,9 @@ storage version, this does not provide a snapshot of a mutable object.
 `JsonAccessor::plan_scan` frames complete whitespace-separated JSON objects,
 including JSONL and pretty-printed objects, and emits owned decode partitions
 lazily. Each partition uses an independent Arrow decoder with the fixed projected
-schema. Structural framing is sequential; decoding runs in executor workers.
+schema. Framing uses serde_json RawValue sequentially; Arrow decoding runs in
+executor workers. Incomplete records are rescanned when more input arrives, so
+large records delivered in tiny chunks can increase framing cost.
 This works over sequential decompression and does not require range access.
 
 Use `FileAccessor::with_partition_options` to configure a soft chunk-byte target
