@@ -8,7 +8,7 @@ use arrow_cast::can_cast_types;
 use arrow_schema::{ArrowError, DataType, Field, TimeUnit};
 use open_arrow_access_core::{Error, ErrorKind, FieldNameIndex, Result};
 
-use crate::ColumnTypeSpec;
+use crate::{ColumnTypeSpec, error::column_error};
 
 pub(crate) fn validate_specs(specs: &[ColumnTypeSpec]) -> Result<()> {
     let mut names = HashSet::with_capacity(specs.len());
@@ -53,15 +53,6 @@ pub(crate) fn validate_cast(field: &Field, target: &DataType) -> Result<()> {
     }
     validate_decimal_cast(from, target)
         .map_err(|error| column_error(ErrorKind::Unsupported, "plan_cast", field.name(), error))
-}
-
-fn column_error(
-    kind: ErrorKind,
-    operation: &'static str,
-    column: &str,
-    error: ArrowError,
-) -> Error {
-    Error::new(kind, operation, format!("column {column:?}: {error}")).with_source(error)
 }
 
 fn decimal_params(data_type: &DataType) -> Option<(i16, i16)> {
