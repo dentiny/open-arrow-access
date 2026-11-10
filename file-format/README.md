@@ -23,3 +23,12 @@ is the request's batch size. The resident task window bounds chunk retention,
 with one pending lookahead record plus the upstream input buffer. These limits
 do not cap Arrow allocations or decoder state. Scalar/array top-level inputs
 remain unsupported. Output stays ordered and batch boundaries may change.
+
+### ATIF trajectory partitions
+
+ATIF JSON Lines plans frame bounded groups of complete nonblank trajectories,
+assign global source record indices before scheduling, and decode each group
+independently. Output remains globally ordered, including raw_json, source URI,
+projection, and zero-column row counts. The original line endings are retained.
+Single-document ATIF JSON remains a whole-input partition. Framing can consume
+sequential decoded bytes; it does not require random reads or parallel gzip.
