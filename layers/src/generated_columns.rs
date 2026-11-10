@@ -1,14 +1,14 @@
 use std::{collections::HashSet, sync::Arc};
 
 use arrow_array::{RecordBatch, RecordBatchOptions};
-use arrow_schema::{Schema, SchemaRef};
+use arrow_schema::{FieldRef, Schema, SchemaRef};
 use datafusion::{
     common::{
         DFSchema,
         tree_node::{TreeNode, TreeNodeRecursion},
     },
     error::DataFusionError,
-    execution::context::SessionContext,
+    execution::{SessionState, context::SessionContext},
     logical_expr::{Expr, ExprSchemable},
     optimizer::simplify_expressions::{ExprSimplifier, SimplifyContext},
     physical_expr::PhysicalExpr,
@@ -112,62 +112,7 @@ where
                 fields.clone(),
                 source.metadata().clone(),
             ));
-            let plan = || -> datafusion::error::Result<_> {
-                let df_schema = DFSchema::try_from(Arc::clone(&input))?;
-                let logical = context.parse_sql_expr(&spec.expression, &df_schema)?;
-                // Validate before simplification: a dead branch must not hide an
-                // aggregate, subquery, or volatile function.
-                validate_expression(&logical)?;
-                let simplify_context = SimplifyContext::builder()
-                    .with_schema(Arc::new(df_schema.clone()))
-                    .with_config_options(Arc::clone(state.config_options()))
-                    .with_query_execution_start_time(
-                        state.execution_props().query_execution_start_time,
-                    )
-                    .build();
-                let simplifier = ExprSimplifier::new(simplify_context);
-                let logical = simplifier.coerce(logical, &df_schema)?;
-                // Reuse the type-conversion layer's guard before constant
-                // folding can execute an unsafe Arrow Decimal rescale.
-                logical.apply(|expr| {
-                    let input = match expr {
-                        Expr::Cast(cast) => Some(cast.expr.as_ref()),
-                        Expr::TryCast(cast) => Some(cast.expr.as_ref()),
-                        // These built-ins become casts during simplification.
-                        Expr::ScalarFunction(function)
-                            if matches!(
-                                function.func.name(),
-                                "arrow_cast"
-                                    | "arrow_try_cast"
-                                    | "cast_to_type"
-                                    | "try_cast_to_type"
-                            ) =>
-                        {
-                            function.args.first()
-                        }
-                        _ => None,
-                    };
-                    if let Some(input) = input {
-                        let from = input.get_type(&df_schema)?;
-                        let to = expr.get_type(&df_schema)?;
-                        crate::validation::validate_target(&to)?;
-                        // The recursive Decimal guard assumes an Arrow-supported
-                        // type pair, as it does for TypeConversionLayer.
-                        if !arrow_cast::can_cast_types(&from, &to) {
-                            return Err(DataFusionError::Plan(format!(
-                                "cannot cast {from} to {to}"
-                            )));
-                        }
-                        crate::validation::validate_decimal_cast(&from, &to)?;
-                    }
-                    Ok(TreeNodeRecursion::Continue)
-                })?;
-                let logical = simplifier.simplify(logical)?;
-                let physical = context.create_physical_expr(logical, &df_schema)?;
-                let output = physical.return_field(&input)?;
-                Ok((physical, output))
-            };
-            let (expression, output) = plan()
+            let (expression, output) = plan_expression(&context, &state, &spec.expression, &input)
                 .map_err(|error| invalid(&spec.column, error.to_string()).with_source(error))?;
             let mut metadata = output.metadata().clone();
             metadata.insert(
@@ -202,6 +147,60 @@ where
             capability,
         }))
     }
+}
+
+fn plan_expression(
+    context: &SessionContext,
+    state: &SessionState,
+    expression: &str,
+    input: &SchemaRef,
+) -> datafusion::error::Result<(Arc<dyn PhysicalExpr>, FieldRef)> {
+    let df_schema = DFSchema::try_from(Arc::clone(input))?;
+    let logical = context.parse_sql_expr(expression, &df_schema)?;
+    // Validate before simplification: a dead branch must not hide an
+    // aggregate, subquery, or volatile function.
+    validate_expression(&logical)?;
+    let simplify_context = SimplifyContext::builder()
+        .with_schema(Arc::new(df_schema.clone()))
+        .with_config_options(Arc::clone(state.config_options()))
+        .with_query_execution_start_time(state.execution_props().query_execution_start_time)
+        .build();
+    let simplifier = ExprSimplifier::new(simplify_context);
+    let logical = simplifier.coerce(logical, &df_schema)?;
+    // Reuse the type-conversion layer's guard before constant
+    // folding can execute an unsafe Arrow Decimal rescale.
+    logical.apply(|expr| {
+        let input = match expr {
+            Expr::Cast(cast) => Some(cast.expr.as_ref()),
+            Expr::TryCast(cast) => Some(cast.expr.as_ref()),
+            // These built-ins become casts during simplification.
+            Expr::ScalarFunction(function)
+                if matches!(
+                    function.func.name(),
+                    "arrow_cast" | "arrow_try_cast" | "cast_to_type" | "try_cast_to_type"
+                ) =>
+            {
+                function.args.first()
+            }
+            _ => None,
+        };
+        if let Some(input) = input {
+            let from = input.get_type(&df_schema)?;
+            let to = expr.get_type(&df_schema)?;
+            crate::validation::validate_target(&to)?;
+            // The recursive Decimal guard assumes an Arrow-supported
+            // type pair, as it does for TypeConversionLayer.
+            if !arrow_cast::can_cast_types(&from, &to) {
+                return Err(DataFusionError::Plan(format!("cannot cast {from} to {to}")));
+            }
+            crate::validation::validate_decimal_cast(&from, &to)?;
+        }
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+    let logical = simplifier.simplify(logical)?;
+    let physical = context.create_physical_expr(logical, &df_schema)?;
+    let output = physical.return_field(input)?;
+    Ok((physical, output))
 }
 
 fn invalid(column: &str, message: impl std::fmt::Display) -> Error {
