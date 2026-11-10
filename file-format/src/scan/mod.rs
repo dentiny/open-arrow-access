@@ -18,7 +18,5 @@ impl Default for DecodePartitionOptions {
     }
 }
 
-#[cfg(any(feature = "json", feature = "atif", feature = "warc"))]
-mod chunks;
-#[cfg(any(feature = "json", feature = "atif", feature = "warc"))]
-pub(crate) use chunks::RecordChunks;
+#[allow(dead_code)] // Some builds enable no formats that use record chunking.
+pub(crate) mod chunks;

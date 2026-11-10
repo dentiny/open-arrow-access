@@ -7,7 +7,7 @@ use open_arrow_access_core::{
 use serde_json::{Deserializer, value::RawValue};
 
 use super::{JsonAccessor, error};
-use crate::scan::RecordChunks;
+use crate::scan::chunks::RecordChunks;
 
 #[async_trait]
 impl<B> ScanPlanner for JsonAccessor<B>

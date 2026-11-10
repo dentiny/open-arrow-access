@@ -11,7 +11,7 @@ use super::{
     decode_error,
 };
 
-use crate::scan::RecordChunks;
+use crate::scan::chunks::RecordChunks;
 
 type RawRecord = (warc::RawRecordHeader, Vec<u8>);
 

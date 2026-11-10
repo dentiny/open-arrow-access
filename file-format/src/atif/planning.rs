@@ -9,7 +9,7 @@ use open_arrow_access_core::{
 };
 
 use super::{AtifAccessor, AtifFormat, error::decode_error, reader::create_reader};
-use crate::scan::RecordChunks;
+use crate::scan::chunks::RecordChunks;
 
 #[async_trait]
 impl<B> ScanPlanner for AtifAccessor<B>
