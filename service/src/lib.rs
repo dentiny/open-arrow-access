@@ -7,8 +7,6 @@
 mod file_manifest;
 mod opendal_error;
 mod resolved_files;
-#[cfg(any(feature = "internet-archive", feature = "pmc", feature = "meca"))]
-mod validation;
 pub use resolved_files::ResolvedFileSet;
 
 #[cfg(feature = "courtlistener")]
@@ -34,8 +32,6 @@ pub mod pmc;
 
 #[cfg(feature = "zenodo")]
 pub mod zenodo;
-
-mod filename;
 
 // Individual providers may use only part of the shared HTTP utilities.
 mod http_body;

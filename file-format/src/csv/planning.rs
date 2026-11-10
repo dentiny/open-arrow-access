@@ -1,7 +1,7 @@
 use futures::{
-    StreamExt, TryStreamExt,
+    TryStreamExt,
     io::{AsyncReadExt, Cursor},
-    stream::{self, BoxStream},
+    stream,
 };
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt,
@@ -66,7 +66,8 @@ where
 }
 
 struct CsvChunks {
-    records: BoxStream<'static, Result<csv_async::ByteRecord>>,
+    records: csv_async::AsyncReader<Box<dyn futures::io::AsyncRead + Unpin + Send>>,
+    record: csv_async::ByteRecord,
     header: Option<csv_async::ByteRecord>,
     // Validate a header-only input once even when there are no data records.
     emitted: bool,
@@ -92,17 +93,21 @@ impl CsvChunks {
         prefix.insert(0, dialect.terminator.unwrap_or(b'\n'));
         let mut records = dialect
             .reader_builder()
-            .create_reader(Cursor::new(prefix).chain(input))
-            .into_byte_records()
-            .map_err(error::record_error)
-            .boxed();
+            .create_reader(Box::new(Cursor::new(prefix).chain(input))
+                as Box<dyn futures::io::AsyncRead + Unpin + Send>);
         let header = if dialect.has_header {
-            records.try_next().await?
+            let mut header = csv_async::ByteRecord::new();
+            records
+                .read_byte_record(&mut header)
+                .await
+                .map_err(error::record_error)?
+                .then_some(header)
         } else {
             None
         };
         Ok(Self {
             records,
+            record: csv_async::ByteRecord::new(),
             header,
             emitted: false,
         })
@@ -124,11 +129,16 @@ impl CsvChunks {
                     .map_err(error::write_error)?;
             }
             while rows < row_target {
-                let Some(record) = self.records.try_next().await? else {
+                if !self
+                    .records
+                    .read_byte_record(&mut self.record)
+                    .await
+                    .map_err(error::record_error)?
+                {
                     break;
                 };
                 writer
-                    .write_record(record.iter())
+                    .write_record(self.record.iter())
                     .map_err(error::write_error)?;
                 writer.flush().map_err(error::input_error)?;
                 rows += 1;

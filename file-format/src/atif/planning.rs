@@ -50,10 +50,11 @@ where
                 let projection = projection.clone();
                 let first_index = records[0].1;
                 // Keep original line endings/whitespace for raw_json fidelity.
-                let bytes = records
-                    .into_iter()
-                    .flat_map(|(line, _)| line)
-                    .collect::<Vec<_>>();
+                let capacity = records.iter().map(|(line, _)| line.len()).sum();
+                let mut bytes = Vec::with_capacity(capacity);
+                for (line, _) in records {
+                    bytes.extend_from_slice(&line);
+                }
                 Box::pin(async move {
                     let input = Box::new(bytes_reader(bytes.into(), Some(request.object.clone())));
                     Ok(Box::new(create_reader(

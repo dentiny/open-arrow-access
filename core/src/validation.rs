@@ -1,4 +1,6 @@
-use std::ops::Range;
+use std::{collections::HashSet, ops::Range};
+
+use arrow_schema::{DataType, Fields};
 
 use crate::{Error, ErrorKind, Result};
 
@@ -19,9 +21,41 @@ pub fn validate_byte_range(range: &Range<u64>, len: u64, operation: &'static str
     Ok(())
 }
 
-/// Check slash-separated relative path components without normalizing them.
-/// Empty, dot and parent components (including leading/trailing slashes) fail.
-/// Whitespace, backslashes, control characters and URL syntax are left to callers.
-pub fn is_relative_path(path: &str) -> bool {
-    path.split('/').all(|part| !matches!(part, "" | "." | ".."))
+// These restrictions apply to RecordBatchBuilder, not to arbitrary Arrow schemas.
+pub(crate) fn validate_record_batch_fields(fields: &Fields) -> Result<()> {
+    let mut seen = HashSet::new();
+    for field in fields {
+        if !seen.insert(field.name()) {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "build_record_batch",
+                "duplicate schema field name",
+            ));
+        }
+        validate_record_batch_type(field.data_type())?;
+    }
+    Ok(())
+}
+
+fn validate_record_batch_type(data_type: &DataType) -> Result<()> {
+    match data_type {
+        DataType::Boolean
+        | DataType::Int32
+        | DataType::Date32
+        | DataType::UInt32
+        | DataType::UInt64
+        | DataType::Utf8
+        | DataType::LargeUtf8
+        | DataType::Binary
+        | DataType::LargeBinary => Ok(()),
+        DataType::Struct(fields) => validate_record_batch_fields(fields),
+        DataType::List(field) | DataType::LargeList(field) => {
+            validate_record_batch_type(field.data_type())
+        }
+        _ => Err(Error::new(
+            ErrorKind::Unsupported,
+            "build_record_batch",
+            format!("unsupported metadata type {data_type}"),
+        )),
+    }
 }

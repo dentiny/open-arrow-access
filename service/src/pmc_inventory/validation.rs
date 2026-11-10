@@ -2,9 +2,9 @@ use super::{
     error::decode,
     manifest::{InventoryFormat, Manifest},
 };
-use crate::validation::valid_relative_file_path;
+use arrow_array::{Array, cast::AsArray};
 use arrow_schema::Fields;
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::{Error, ErrorKind, RecordBatch, Result};
 use std::collections::HashSet;
 
 pub(super) fn validate_manifest(manifest: &Manifest) -> Result<()> {
@@ -27,7 +27,7 @@ pub(super) fn validate_manifest(manifest: &Manifest) -> Result<()> {
     }
     validate_fields(manifest.file_schema.fields())?;
     for file in &manifest.files {
-        if !valid_path(&file.key) || !file.key.ends_with(".csv.gz") {
+        if !file.key.ends_with(".csv.gz") {
             return Err(decode("invalid inventory shard entry"));
         }
     }
@@ -48,7 +48,7 @@ fn validate_fields(fields: &Fields) -> Result<()> {
     }
     Ok(())
 }
-pub(super) fn validate_row(bucket: Option<&str>, key: Option<&str>) -> Result<()> {
+fn validate_row(bucket: Option<&str>, key: Option<&str>) -> Result<()> {
     if bucket != Some("pmc-oa-opendata") {
         return Err(decode("inventory row has a missing or unexpected Bucket"));
     }
@@ -58,6 +58,14 @@ pub(super) fn validate_row(bucket: Option<&str>, key: Option<&str>) -> Result<()
     Ok(())
 }
 
-fn valid_path(path: &str) -> bool {
-    valid_relative_file_path(path) && !path.contains(['?', '#']) && !path.contains("://")
+pub(super) fn validate_batch(batch: &RecordBatch) -> Result<()> {
+    let buckets = batch.column_by_name("Bucket").unwrap().as_string::<i32>();
+    let keys = batch.column_by_name("Key").unwrap().as_string::<i32>();
+    for row in 0..batch.num_rows() {
+        validate_row(
+            (!buckets.is_null(row)).then(|| buckets.value(row)),
+            (!keys.is_null(row)).then(|| keys.value(row)),
+        )?;
+    }
+    Ok(())
 }

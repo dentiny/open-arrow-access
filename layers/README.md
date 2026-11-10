@@ -7,6 +7,7 @@ must forward optional operations or remove their advertised capabilities.
 ## Available today
 
 - The public layer contract, verified by test wrappers for byte and record accessors.
+- [`ParallelReadLayer`](../docs/parallel-read.md) for bounded concurrent partition execution with ordered output.
 - `TypeConversionLayer` for explicit Arrow column casts; it is always exported by the facade.
 - `GeneratedColumnsLayer` for ordered row-level SQL expressions, behind
   `layer-generated-columns` on the facade. See the [design and usage](../docs/generated-columns.md).
@@ -15,7 +16,9 @@ must forward optional operations or remove their advertised capabilities.
 - Caller-configured OpenDAL policies on the storage operator. These belong to
   OpenDAL's layer system, independently of this library's accessor layers.
 
-Type conversion and generated columns compose over any compatible record accessor.
+`TypeConversionLayer`, `ParallelReadLayer`, and `GeneratedColumnsLayer` are the
+production record layers in this crate. Type conversion and generated columns
+compose over any compatible record accessor.
 
 ## Type conversion
 
@@ -70,7 +73,6 @@ renaming, generated columns and writer-specific restrictions remain separate.
 | Generated-column projection pushdown | Read only visible fields and expression dependencies | Requires complete source-schema knowledge; see the [design](../docs/generated-columns.md) |
 | Metrics | Count byte operations, batches, rows, failures, and latency | Preserve values, metadata, and ordering |
 | Timeout / read budgets | Bound operations and resource use | Cover sequential and ranged paths |
-| Parallel reads | Concurrent files/partitions with bounded ordered merging | Validated source/partition plans |
 | Unordered emission | Emit ready results when source order permits | Independent opt-in policy; ATIF requires global order |
 
 See the [roadmap](../docs/roadmap.md) and

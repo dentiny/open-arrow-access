@@ -102,19 +102,7 @@ async fn projection_and_terminal_file_errors_use_fileset_contracts() {
 
 #[tokio::test]
 async fn malformed_manifests_fail_before_record_files_open() {
-    for name in [
-        "duplicate.paths",
-        "bad_traversal.paths",
-        "bad_leading_space.paths",
-        "bad_absolute.paths",
-        "bad_origin.paths",
-        "bad_query.paths",
-        "bad_encoding.paths",
-        "bad_suffix.paths",
-        "bad_oversized.paths",
-        "bad_utf8.paths",
-        "raw_manifest.paths.gz",
-    ] {
+    for name in ["duplicate.paths", "bad_utf8.paths", "raw_manifest.paths.gz"] {
         let records = Records::default();
         let opens = records.opens.clone();
         let accessor = CommonCrawlWarcAccessor::new(manifest(name, 19), records);
@@ -241,5 +229,23 @@ async fn native_parallel_warc_view_keeps_source_urls_and_binary_bodies() {
     assert_eq!(bodies.len(), expected.len() * 3);
     for chunk in bodies.chunks(3) {
         assert_eq!(chunk, &[vec![], vec![0, 255, 13, 10], b"end".to_vec()]);
+    }
+}
+
+#[tokio::test]
+async fn forwards_selected_manifest_paths_without_validation() {
+    for name in [
+        "bad_traversal.paths",
+        "bad_encoding.paths",
+        "bad_query.paths",
+        "bad_suffix.paths",
+    ] {
+        let records = Records::default();
+        let opens = records.opens.clone();
+        let accessor = CommonCrawlWarcAccessor::new(manifest(name, 19), records);
+        let reader = accessor.open(request()).await.unwrap();
+        let paths = commoncrawl_support::paths(reader).await;
+        assert_eq!(paths.len(), 1, "{name}");
+        assert_eq!(opens.lock().unwrap()[0].object.locator(), paths[0]);
     }
 }

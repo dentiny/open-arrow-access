@@ -1,4 +1,3 @@
-use crate::validation::valid_relative_file_path;
 use open_arrow_access_core::Result;
 
 use super::{
@@ -50,11 +49,5 @@ pub(super) fn extract_items_and_validate(
     let files = item
         .files
         .ok_or_else(|| decode("item file membership is missing"))?;
-    if files
-        .iter()
-        .any(|file| !valid_relative_file_path(&file.name))
-    {
-        return Err(decode("invalid item filename"));
-    }
     Ok(files)
 }

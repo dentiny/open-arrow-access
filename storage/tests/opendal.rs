@@ -59,56 +59,6 @@ async fn filesystem_read_contract() {
 }
 
 #[tokio::test]
-async fn filesystem_rejects_surrounding_whitespace_without_aliasing_files() {
-    let dir = tempfile::tempdir().unwrap();
-    tokio::fs::write(
-        dir.path().join("data.bin"),
-        &fixture!("bytes", "other.bin").await,
-    )
-    .await
-    .unwrap();
-    let locators = [
-        " data.bin",
-        "data.bin ",
-        " data.bin ",
-        "\tdata.bin\n",
-        "\u{a0}data.bin\u{a0}",
-    ];
-    #[cfg(unix)]
-    for locator in locators {
-        tokio::fs::write(
-            dir.path().join(locator),
-            &fixture!("bytes", "requested.bin").await,
-        )
-        .await
-        .unwrap();
-    }
-    tokio::fs::write(
-        dir.path().join("data file.bin"),
-        &fixture!("bytes", "internal_space.bin").await,
-    )
-    .await
-    .unwrap();
-    let accessor = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
-
-    for locator in locators {
-        let error = accessor.open(locator.into()).await.err().unwrap();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput, "{locator:?}");
-        assert_eq!(error.operation(), "open");
-    }
-    let mut reader = accessor.open("data.bin".into()).await.unwrap();
-    assert_eq!(
-        reader.next().await.unwrap().unwrap().as_ref(),
-        b"other file"
-    );
-    let mut reader = accessor.open("data file.bin".into()).await.unwrap();
-    assert_eq!(
-        reader.next().await.unwrap().unwrap().as_ref(),
-        b"internal space"
-    );
-}
-
-#[tokio::test]
 async fn sequential_reads_report_short_input_and_terminate() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("short.bin");
@@ -385,16 +335,12 @@ async fn io_options_enable_bounded_backend_concurrency_for_single_and_bulk_reads
 }
 
 #[tokio::test]
-async fn filesystem_rejects_missing_files_directories_and_invalid_locators() {
+async fn filesystem_rejects_missing_files_and_directories() {
     let dir = tempfile::tempdir().unwrap();
     let fs = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
     let error = fs.open("missing.bin".into()).await.err().unwrap();
     assert_eq!(error.kind(), ErrorKind::NotFound);
     assert!(error.source().is_some());
-    for locator in ["", "../outside", "/absolute", "."] {
-        let error = fs.open(locator.into()).await.err().unwrap();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    }
     tokio::fs::create_dir(dir.path().join("subdir"))
         .await
         .unwrap();

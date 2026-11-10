@@ -1,10 +1,8 @@
-use std::collections::HashSet;
-
 use arrow_array::{RecordBatchOptions, builder::*};
 use arrow_schema::{DataType, Field, Fields};
 
-use crate::error::invalid_output_schema;
 use crate::{Error, ErrorKind, FieldNameIndex, ReadOptions, RecordBatch, Result, SchemaRef};
+use crate::{error::invalid_output_schema, validation::validate_record_batch_fields};
 
 /// Build metadata batches using Arrow's native builders and named fields.
 ///
@@ -48,7 +46,7 @@ impl RecordBatchBuilder {
             ..Default::default()
         }
         .resolve_projection(&schema)?;
-        Self::validate_fields(&fields)?;
+        validate_record_batch_fields(&fields)?;
         Self::from_fields(fields, schema)
     }
 
@@ -59,7 +57,7 @@ impl RecordBatchBuilder {
         output_schema: SchemaRef,
         write: impl FnOnce(&mut RecordBatchRow<'_>) -> Result<()>,
     ) -> Result<RecordBatch> {
-        Self::validate_fields(schema.fields())?;
+        validate_record_batch_fields(schema.fields())?;
         let mut builder = Self::from_fields(schema.fields().clone(), output_schema)?;
         builder.push(write)?;
         builder.finish()
@@ -113,43 +111,6 @@ impl RecordBatchBuilder {
             &RecordBatchOptions::new().with_row_count(Some(self.rows)),
         )
         .map_err(|error| decode(error.to_string()).with_source(error))
-    }
-    fn validate_fields(fields: &Fields) -> Result<()> {
-        let mut seen = HashSet::new();
-        for field in fields {
-            if !seen.insert(field.name()) {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "build_record_batch",
-                    "duplicate schema field name",
-                ));
-            }
-            Self::validate_type(field.data_type())?;
-        }
-        Ok(())
-    }
-
-    fn validate_type(data_type: &DataType) -> Result<()> {
-        match data_type {
-            DataType::Boolean
-            | DataType::Int32
-            | DataType::Date32
-            | DataType::UInt32
-            | DataType::UInt64
-            | DataType::Utf8
-            | DataType::LargeUtf8
-            | DataType::Binary
-            | DataType::LargeBinary => Ok(()),
-            DataType::Struct(fields) => Self::validate_fields(fields),
-            DataType::List(field) | DataType::LargeList(field) => {
-                Self::validate_type(field.data_type())
-            }
-            _ => Err(Error::new(
-                ErrorKind::Unsupported,
-                "build_record_batch",
-                format!("unsupported metadata type {data_type}"),
-            )),
-        }
     }
 }
 
@@ -233,18 +194,29 @@ impl<'a, T: Into<FieldValue<'a>>> From<Option<T>> for FieldValue<'a> {
 pub struct RecordBatchRow<'a> {
     builder: &'a mut StructBuilder,
     layout: &'a StructLayout,
-    seen: Vec<bool>,
+    seen: u64,
+    seen_overflow: Vec<bool>,
     failed: bool,
 }
 
 impl<'a> RecordBatchRow<'a> {
     fn new(builder: &'a mut StructBuilder, layout: &'a StructLayout) -> Self {
-        let seen = vec![false; builder.num_fields()];
+        let seen_overflow = vec![false; builder.num_fields().saturating_sub(64)];
         Self {
             builder,
             layout,
-            seen,
+            seen: 0,
+            seen_overflow,
             failed: false,
+        }
+    }
+
+    // Most metadata rows fit inline; wide schemas retain arbitrary field counts.
+    fn was_written(&self, index: usize) -> bool {
+        if index < 64 {
+            self.seen & (1u64 << index) != 0
+        } else {
+            self.seen_overflow[index - 64]
         }
     }
 
@@ -299,7 +271,7 @@ impl<'a> RecordBatchRow<'a> {
             let Some(index) = self.layout.output_indices[source_index] else {
                 return Ok(());
             };
-            if self.seen[index] {
+            if self.was_written(index) {
                 return Err(decode(format!("field {name:?} was already written")));
             }
             let field = self.builder.fields()[index].clone();
@@ -308,7 +280,11 @@ impl<'a> RecordBatchRow<'a> {
                 field: &field,
                 layout: &self.layout.values[index],
             })?;
-            self.seen[index] = true;
+            if index < 64 {
+                self.seen |= 1u64 << index;
+            } else {
+                self.seen_overflow[index - 64] = true;
+            }
             Ok(())
         })();
         self.failed |= result.is_err();
@@ -321,7 +297,7 @@ impl<'a> RecordBatchRow<'a> {
         }
         let fields = self.builder.fields().clone();
         for (index, field) in fields.iter().enumerate() {
-            if !self.seen[index] {
+            if !self.was_written(index) {
                 FieldWriter {
                     builder: self.builder.field_builders_mut()[index].as_mut(),
                     field,

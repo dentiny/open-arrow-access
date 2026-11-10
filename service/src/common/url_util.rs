@@ -13,13 +13,12 @@ pub fn resolve_download_url(value: &str) -> Result<Url> {
 
 /// Encode one provider path component, including slashes in opaque IDs/tokens.
 pub fn segment(value: &str) -> Result<String> {
-    validation::identifier(value)?;
     let mut url = Url::parse("https://encode.invalid/").unwrap();
     url.path_segments_mut().unwrap().push(value);
     Ok(url.path()[1..].to_owned())
 }
 
-/// Encode slash-separated provider paths, rejecting empty and dot components.
+/// Encode slash-separated provider paths.
 pub fn encode_path(value: &str) -> Result<String> {
     value
         .split('/')
@@ -28,14 +27,12 @@ pub fn encode_path(value: &str) -> Result<String> {
         .map(|parts| parts.join("/"))
 }
 
-/// Validate and encode one logical filename component.
+/// Encode one logical filename component.
 pub fn filename(value: &str) -> Result<String> {
-    super::validate_filename(value)?;
     segment(value)
 }
 
 pub(super) fn provider_url(origin: &Url, path: &str, query: &[(&str, &str)]) -> Result<Url> {
-    validation::provider_path(path)?;
     let mut url = origin.join(path).map_err(error::provider_path)?;
     validation::same_origin(origin, &url)?;
     if !query.is_empty() {

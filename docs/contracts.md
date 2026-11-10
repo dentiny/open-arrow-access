@@ -234,7 +234,7 @@ directories. `OpenDalAccessor` passes that policy to OpenDAL, and transparent wr
 complete request. Other byte accessors can supply their own implementation. Input locators
 remain backend-owned. Directory datasets consume those file
 references and compose any shared single-file record accessor. Directory prefixes
-normalize repeated and trailing slash separators before discovery and matching.
+and listed locators are backend-defined and passed through unchanged.
 
 `ByteReadRequest` carries an `ObjectRef` and `ByteReadOptions`. `io_concurrency`
 defaults to one and `io_chunk_size` defaults to the backend's choice. Record-file
@@ -282,6 +282,12 @@ file, dataset or service request types. `ReadRequest` implements it; expression
 evaluation and DataFusion integration remain a separate PR. See
 [generated-column design](generated-columns.md) for dependency/projection,
 schema and optional reader-context contracts.
+
+Independent configuration and domain checks live in the owning crate or module's
+`validation.rs`. Constructors, parsers and readers call those checks at the original
+validation boundary. Checks coupled to indexing or streaming state may remain with
+that operation. Logical namespace names stay opaque and are not interpreted as
+storage paths.
 
 - `core/` depends on common types and Arrow, never concrete backends or formats.
   It exposes `ReaderFactory`, with `ReaderFactoryExt` providing shared opening

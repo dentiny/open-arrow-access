@@ -3,7 +3,10 @@ use serde::Deserialize;
 
 use crate::common::is_commit_sha;
 
-use super::{HuggingFaceRepository, HuggingFaceService, client::endpoint};
+use super::{
+    HuggingFaceRepository, HuggingFaceService,
+    validation::{endpoint, validate_commit_sha},
+};
 
 #[derive(Deserialize)]
 struct RepositoryInfo {
@@ -48,13 +51,7 @@ impl HuggingFaceService {
             "resolve_huggingface",
         )
         .await?;
-        if !is_commit_sha(&metadata.sha) {
-            return Err(Error::new(
-                ErrorKind::Decode,
-                "resolve_huggingface",
-                "revision metadata did not contain a commit SHA",
-            ));
-        }
+        validate_commit_sha(&metadata.sha)?;
         Ok(metadata)
     }
 }
