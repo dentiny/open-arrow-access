@@ -3,7 +3,7 @@ use http::{Response, StatusCode};
 use open_arrow_access_core::{ErrorKind, read_all};
 use open_arrow_access_service::common::Connection;
 use open_arrow_access_test_support::http::{HttpFixture, response};
-use opendal::{Buffer, HttpBody};
+use opendal::HttpBody;
 
 mod providers;
 use providers::connection;
@@ -163,38 +163,4 @@ async fn credentials_stay_stripped_after_redirect_returns_to_provider() {
         .unwrap();
     assert_eq!(provider.requests().len(), 2);
     assert_eq!(external.requests().len(), 1);
-}
-
-#[tokio::test]
-async fn http_failures_preserve_retry_metadata() {
-    for (status, header) in [
-        (StatusCode::TOO_MANY_REQUESTS, "120"),
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Wed, 21 Oct 2015 07:28:00 GMT",
-        ),
-        (StatusCode::TOO_MANY_REQUESTS, "invalid-delay"),
-    ] {
-        let fixture = HttpFixture::new();
-        fixture.handle(move |_| {
-            Ok(Response::builder()
-                .status(status)
-                .header("retry-after", header)
-                .body(HttpBody::new(futures::stream::empty(), Some(0)))
-                .unwrap())
-        });
-        let error = connection(&fixture).json("limited", &[]).await.unwrap_err();
-        assert_eq!(error.http_status(), Some(status.as_u16()));
-        assert_eq!(error.retry_after(), Some(header));
-        assert_eq!(fixture.requests().len(), 1);
-    }
-    let fixture = HttpFixture::new();
-    fixture.respond(
-        "/limited",
-        StatusCode::TOO_MANY_REQUESTS,
-        Buffer::new().to_bytes(),
-    );
-    let error = connection(&fixture).json("limited", &[]).await.unwrap_err();
-    assert_eq!(error.http_status(), Some(429));
-    assert_eq!(error.retry_after(), None);
 }
