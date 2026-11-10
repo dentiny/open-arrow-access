@@ -65,11 +65,9 @@ impl ReadOptionsProvider for ArxivReadRequest {
     }
 }
 
-/// Native Arrow rows for regular TAR entries. Names and embedded PDF/source bytes
-/// are retained as LargeBinary; no document extraction or external URL fetch occurs.
-/// Each parallel partition owns one TAR stream. TarLimits still bound entry sizes;
-/// A soft payload target avoids accumulating many large entries in one batch;
-/// individual entries remain intact and may exceed that target.
+/// Native Arrow rows for regular TAR entries, preserving names and payloads as LargeBinary.
+/// Each partition owns one TAR stream. TarLimits bound entry sizes; the batch byte
+/// target is soft and never splits an entry.
 pub struct ArxivRecords<A> {
     service: Arc<ArxivService<A>>,
 }
