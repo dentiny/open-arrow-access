@@ -1,16 +1,17 @@
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, ReadRequest, RecordMetadata, Result, ScanPartition,
-    ScanPlan, ScanPlanner, async_trait,
+    Accessor, ByteMetadata, ByteReadRequest, ByteReader, ReadRequest, RecordMetadata, Result,
+    ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 use parquet::arrow::{
     arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions},
     async_reader::ParquetRecordBatchStreamBuilder,
 };
 
-use super::error::parquet_partition_changed;
 use super::{
-    ParquetAccessor, decode_error, format::create_reader, input::ParquetInput,
-    validation::validate_input,
+    ParquetAccessor, decode_error,
+    format::create_reader,
+    input::ParquetInput,
+    validation::{validate_input, validate_partition_input},
 };
 
 #[async_trait]
@@ -41,13 +42,7 @@ where
                 let request = request.clone();
                 let identity = identity.clone();
                 Box::pin(async move {
-                    let input = storage.open(ByteReadRequest::from(&request)).await?;
-                    validate_input(input.as_ref())?;
-                    if input.metadata().content_length != identity.content_length
-                        || input.metadata().version != identity.version
-                    {
-                        return Err(parquet_partition_changed());
-                    }
+                    let input = open_partition_input(&storage, &request, &identity).await?;
                     let builder = ParquetRecordBatchStreamBuilder::new_with_metadata(
                         ParquetInput::new(input),
                         metadata,
@@ -62,4 +57,17 @@ where
             partitions,
         })
     }
+}
+
+async fn open_partition_input<B>(
+    storage: &B,
+    request: &ReadRequest,
+    identity: &ByteMetadata,
+) -> Result<Box<dyn ByteReader>>
+where
+    B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+{
+    let input = storage.open(ByteReadRequest::from(request)).await?;
+    validate_partition_input(input.as_ref(), identity)?;
+    Ok(input)
 }
