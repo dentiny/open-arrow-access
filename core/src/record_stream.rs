@@ -4,14 +4,13 @@ use crate::{RecordBatch, RecordMetadata, RecordReader, Result, StreamReader, pro
 
 /// Adapt native Arrow batches to a sequential reader with a fixed output schema.
 ///
-/// Project or reorder each batch, then attach `metadata.schema`, retaining schema
-/// and field metadata. `None` retains every column; an empty projection retains
-/// row counts with zero columns. Arrays are shared without copying.
+/// Project/reorder columns and attach `metadata.schema`, sharing arrays and
+/// retaining field/schema metadata. `None` keeps all columns; an empty projection
+/// preserves row counts with zero columns.
 ///
-/// Map parser-specific errors into [`crate::Error`] before calling this helper.
-/// Source errors are preserved; projection/schema failures are decode errors.
-/// Construction does not poll the stream. EOF and errors release the stream and
-/// terminate reading, following [`StreamReader`]'s lifecycle.
+/// Map parser errors to [`crate::Error`] first. Source errors pass through;
+/// projection/schema errors become decode errors. [`StreamReader`] handles
+/// lazy construction and terminal cleanup.
 pub fn record_stream_reader<S>(
     stream: S,
     metadata: RecordMetadata,
