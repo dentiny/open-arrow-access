@@ -59,3 +59,6 @@ pub use arrow_array::RecordBatch;
 pub use arrow_schema::{Schema, SchemaRef};
 pub use async_trait::async_trait;
 pub use bytes::Bytes;
+
+mod scan;
+pub use scan::{ScanPartition, ScanPlan, ScanPlanner};
