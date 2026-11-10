@@ -1,5 +1,7 @@
 mod accessor;
+mod arrow;
 mod format;
+pub use arrow::{WarcArrowAccessor, WarcArrowFormat, arrow_schema};
 
 pub use accessor::WarcAccessor;
 pub use format::WarcFormat;
