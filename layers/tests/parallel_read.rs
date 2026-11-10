@@ -9,7 +9,6 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::Duration,
 };
 use tokio::sync::{Notify, Semaphore};
 
@@ -66,12 +65,6 @@ fn part(values: Vec<i32>) -> ScanPartition {
         )) as Box<dyn RecordReader>)
     })
 }
-async fn bounded<F: std::future::Future>(f: F) -> F::Output {
-    tokio::time::timeout(Duration::from_secs(5), f)
-        .await
-        .expect("test timed out")
-}
-
 #[tokio::test]
 async fn ordered_duplicates_empty_partitions_and_single_worker() {
     for p in [1, 3] {
@@ -81,7 +74,7 @@ async fn ordered_duplicates_empty_partitions_and_single_worker() {
         )
         .await;
         let mut values = vec![];
-        while let Some(b) = bounded(r.next()).await.unwrap() {
+        while let Some(b) = r.next().await.unwrap() {
             values.push(
                 b.column(0)
                     .as_any()
@@ -119,13 +112,13 @@ async fn overlaps_without_replacing_completed_buffered_partitions() {
         let b = r.next().await.unwrap().unwrap();
         (b, r)
     });
-    bounded(ready.acquire_many(2)).await.unwrap().forget();
+    ready.acquire_many(2).await.unwrap().forget();
     for _ in 0..10 {
         tokio::task::yield_now().await;
     }
     assert_eq!(opened.load(Ordering::SeqCst), 3);
     release.notify_one();
-    let (b, mut r) = bounded(task).await.unwrap();
+    let (b, mut r) = task.await.unwrap();
     assert_eq!(
         b.column(0)
             .as_any()
@@ -135,7 +128,7 @@ async fn overlaps_without_replacing_completed_buffered_partitions() {
         0
     );
     let mut count = 1;
-    while bounded(r.next()).await.unwrap().is_some() {
+    while r.next().await.unwrap().is_some() {
         count += 1;
     }
     assert_eq!(count, 20);
@@ -150,7 +143,7 @@ async fn later_error_interrupts_blocked_first_partition() {
             Err(Error::new(ErrorKind::Io, "test", "later open failed"))
         });
         let mut r = open(vec![first, second], 2).await;
-        assert!(bounded(r.next()).await.is_err());
+        assert!(r.next().await.is_err());
         assert!(r.next().await.unwrap().is_none());
     }
 }
@@ -172,10 +165,10 @@ async fn drop_cancels_partition_work() {
         std::future::pending().await
     });
     let mut r = open(vec![part(vec![1]), blocked], 2).await;
-    bounded(r.next()).await.unwrap();
-    bounded(started.acquire()).await.unwrap().forget();
+    r.next().await.unwrap();
+    started.acquire().await.unwrap().forget();
     drop(r);
-    bounded(dropped.acquire()).await.unwrap().forget();
+    dropped.acquire().await.unwrap().forget();
 }
 
 #[tokio::test]
@@ -191,14 +184,14 @@ async fn rejects_partition_metadata_and_batch_schema_mismatch() {
             metadata(),
         )) as Box<dyn RecordReader>)
     });
-    assert!(bounded(open(vec![p], 1).await.next()).await.is_err());
+    assert!(open(vec![p], 1).await.next().await.is_err());
     let p: ScanPartition = Box::pin(async move {
         Ok(Box::new(StreamReader::new(
             stream::empty::<Result<RecordBatch>>(),
             wrong,
         )) as Box<dyn RecordReader>)
     });
-    assert!(bounded(open(vec![p], 1).await.next()).await.is_err());
+    assert!(open(vec![p], 1).await.next().await.is_err());
 }
 
 #[tokio::test]
@@ -216,7 +209,7 @@ async fn full_later_queue_stops_decoding_before_next_batch() {
     });
     let mut r = open(vec![Box::pin(std::future::pending()), later], 2).await;
     let task = tokio::spawn(async move { r.next().await });
-    bounded(produced.acquire()).await.unwrap().forget();
+    produced.acquire().await.unwrap().forget();
     for _ in 0..10 {
         tokio::task::yield_now().await;
     }

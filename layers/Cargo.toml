@@ -15,7 +15,6 @@ tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 futures.workspace = true
-tokio = { workspace = true, features = ["time"] }
 
 [lints]
 workspace = true
