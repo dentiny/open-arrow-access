@@ -223,7 +223,7 @@ async fn parallel_inventory_matches_order_metadata_projection_and_validation() {
             .plan_scan(request(projection.clone()))
             .await
             .unwrap();
-        assert_eq!(plan.partitions.len(), 2);
+        assert_eq!(plan.partitions.size_hint().0, 2);
         assert_eq!(source.opened.lock().unwrap().len(), 1);
         drop(plan);
         let mut expected = accessor.open(request(projection.clone())).await.unwrap();

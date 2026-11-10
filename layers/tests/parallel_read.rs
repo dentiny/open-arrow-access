@@ -1,6 +1,6 @@
 use arrow_array::Int32Array;
 use arrow_schema::{DataType, Field, Schema};
-use futures::stream;
+use futures::{StreamExt, stream};
 use open_arrow_access_core::*;
 use open_arrow_access_layers::ParallelReadLayer;
 use std::{
@@ -58,10 +58,7 @@ async fn open(parts: Vec<ScanPartition>, p: usize) -> Box<dyn RecordReader> {
             NonZeroUsize::new(p).unwrap(),
             NonZeroUsize::new(1).unwrap(),
         ))
-        .open(ScanPlan {
-            metadata: metadata(),
-            partitions: parts,
-        })
+        .open(ScanPlan::new(metadata(), parts))
         .await
         .unwrap()
 }
@@ -188,7 +185,6 @@ async fn rejects_partition_metadata_and_batch_schema_mismatch() {
 
 #[tokio::test]
 async fn full_later_queue_stops_decoding_before_next_batch() {
-    use futures::StreamExt;
     let produced = Arc::new(Semaphore::new(0));
     let polls = Arc::new(AtomicUsize::new(0));
     let (signal, count) = (produced.clone(), polls.clone());
@@ -207,4 +203,36 @@ async fn full_later_queue_stops_decoding_before_next_batch() {
     assert_eq!(polls.load(Ordering::SeqCst), 1);
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());
+}
+
+#[tokio::test]
+async fn pending_partition_discovery_does_not_block_ready_output() {
+    let partitions = stream::iter([Ok(part(vec![7]))]).chain(stream::pending());
+    let mut reader = Source
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ))
+        .open(ScanPlan::from_stream(metadata(), partitions))
+        .await
+        .unwrap();
+    assert_eq!(value(&reader.next().await.unwrap().unwrap()), 7);
+}
+
+#[tokio::test]
+async fn discovery_errors_interrupt_a_blocked_partition() {
+    let partitions = stream::iter([
+        Ok(Box::pin(std::future::pending()) as ScanPartition),
+        Err(Error::new(ErrorKind::Io, "discover", "injected failure")),
+    ]);
+    let mut reader = Source
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::new(1).unwrap(),
+        ))
+        .open(ScanPlan::from_stream(metadata(), partitions))
+        .await
+        .unwrap();
+    assert_eq!(reader.next().await.unwrap_err().operation(), "discover");
+    assert!(reader.next().await.unwrap().is_none());
 }

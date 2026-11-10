@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use futures::future::BoxFuture;
+use futures::{
+    StreamExt,
+    future::BoxFuture,
+    stream::{self, BoxStream},
+};
 
 use crate::{Accessor, RecordMetadata, RecordReader, Result, async_trait};
 
@@ -13,18 +17,35 @@ pub type ScanPartition = BoxFuture<'static, Result<Box<dyn RecordReader>>>;
 /// All partition metadata and batches must match `metadata.schema` exactly.
 pub struct ScanPlan {
     pub metadata: RecordMetadata,
-    pub partitions: Vec<ScanPartition>,
+    pub partitions: BoxStream<'static, Result<ScanPartition>>,
 }
 
 impl ScanPlan {
+    /// Plan an already known ordered partition list without opening its readers.
+    pub fn new(metadata: RecordMetadata, partitions: Vec<ScanPartition>) -> Self {
+        Self::from_stream(metadata, stream::iter(partitions.into_iter().map(Ok)))
+    }
+
+    /// Discover partitions lazily. Producers must bound each pending input chunk;
+    /// the executor polls discovery only while its resident partition window has room.
+    pub fn from_stream(
+        metadata: RecordMetadata,
+        partitions: impl futures::Stream<Item = Result<ScanPartition>> + Send + 'static,
+    ) -> Self {
+        Self {
+            metadata,
+            partitions: partitions.boxed(),
+        }
+    }
+
     /// Keep a stateful or indivisible input in one partition. The reader's schema
     /// is already fixed; partition execution remains lazy. Outer file-set plans
     /// can still run multiple such inputs concurrently.
     pub fn whole_input(reader: Box<dyn RecordReader>) -> Self {
-        Self {
-            metadata: reader.metadata().clone(),
-            partitions: vec![Box::pin(async move { Ok(reader) })],
-        }
+        Self::new(
+            reader.metadata().clone(),
+            vec![Box::pin(async move { Ok(reader) })],
+        )
     }
 }
 

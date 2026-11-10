@@ -52,10 +52,7 @@ where
                 }) as ScanPartition
             })
             .collect();
-        Ok(ScanPlan {
-            metadata: output,
-            partitions,
-        })
+        Ok(ScanPlan::new(output, partitions))
     }
 }
 
