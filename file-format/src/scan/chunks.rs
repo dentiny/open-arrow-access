@@ -1,5 +1,8 @@
-use futures::{TryStreamExt, stream::BoxStream};
-use open_arrow_access_core::Result;
+use futures::{
+    Stream, TryStreamExt,
+    stream::{self, BoxStream},
+};
+use open_arrow_access_core::{Result, ScanPartition};
 
 /// Batches complete records with one-record lookahead and a soft byte target.
 /// The row limit is strict; an oversized first record is emitted on its own.
@@ -16,7 +19,23 @@ impl<T> RecordChunks<T> {
         }
     }
 
-    pub(crate) async fn next_chunk(
+    pub(crate) fn into_partitions(
+        self,
+        rows: usize,
+        target_bytes: usize,
+        size: impl Fn(&T) -> usize,
+        partition: impl FnMut(Vec<T>) -> ScanPartition,
+    ) -> impl Stream<Item = Result<ScanPartition>> {
+        stream::try_unfold((self, size), move |(mut chunks, size)| async move {
+            Ok(chunks
+                .next_chunk(rows, target_bytes, &size)
+                .await?
+                .map(|records| (records, (chunks, size))))
+        })
+        .map_ok(partition)
+    }
+
+    async fn next_chunk(
         &mut self,
         rows: usize,
         target_bytes: usize,
