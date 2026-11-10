@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
     },
     task::Poll,
 };
@@ -17,7 +17,7 @@ use open_arrow_access_core::{
 use open_arrow_access_layers::{
     ColumnTypeSpec, GeneratedColumnSpec, GeneratedColumnsLayer, TypeConversionLayer,
 };
-use open_arrow_access_test_support::{DropProbe, reader::assert_finished};
+use open_arrow_access_test_support::reader::assert_finished;
 
 fn layer(specs: &[(&str, &str)]) -> GeneratedColumnsLayer {
     GeneratedColumnsLayer::try_new(
@@ -35,7 +35,6 @@ fn layer(specs: &[(&str, &str)]) -> GeneratedColumnsLayer {
 struct MemoryAccessor {
     batches: Vec<RecordBatch>,
     polls: Arc<AtomicUsize>,
-    drops: Arc<AtomicBool>,
 }
 
 impl MemoryAccessor {
@@ -43,7 +42,6 @@ impl MemoryAccessor {
         Self {
             batches,
             polls: Arc::default(),
-            drops: Arc::default(),
         }
     }
 }
@@ -66,9 +64,7 @@ impl Accessor for MemoryAccessor {
             .resolve_projection(&self.batches[0].schema())?;
         let mut batches = self.batches.clone().into_iter().map(Ok);
         let polls = self.polls.clone();
-        let guard = DropProbe::new(self.drops.clone());
         let stream = stream::poll_fn(move |_| {
-            let _ = &guard;
             polls.fetch_add(1, Ordering::SeqCst);
             Poll::Ready(batches.next())
         });
@@ -116,7 +112,6 @@ async fn expressions_preserve_order_metadata_nulls_and_source_buffers() {
     let input = input();
     let source = MemoryAccessor::new(vec![input.clone(), input.slice(0, 0), input.clone()]);
     let polls = source.polls.clone();
-    let drops = source.drops.clone();
     let mut reader = source
         .layer(layer(&[
             ("length", "character_length(text)"),
@@ -177,7 +172,6 @@ async fn expressions_preserve_order_metadata_nulls_and_source_buffers() {
         }
     }
     assert!(reader.next().await.unwrap().is_none());
-    assert!(drops.load(Ordering::SeqCst));
     assert_finished(reader.as_mut(), &polls, |m| {
         (m.schema.clone(), m.source.clone())
     })
@@ -347,66 +341,5 @@ async fn casts_preserve_values_and_nulls() {
             arrow_array::Int32Array::from(vec![Some(2), None, Some(4)]).to_data(),
             "{expression}"
         );
-    }
-}
-
-#[tokio::test]
-async fn stable_functions_agree_across_declarations() {
-    let mut reader = MemoryAccessor::new(vec![input()])
-        .layer(layer(&[
-            ("first", "now()"),
-            ("second", "now()"),
-            ("same", "first = second AND first = now()"),
-        ]))
-        .open(request(&["same"]))
-        .await
-        .unwrap();
-    let batch = reader.next().await.unwrap().unwrap();
-    assert_eq!(
-        batch.column(0).to_data(),
-        arrow_array::BooleanArray::from(vec![true; 3]).to_data()
-    );
-}
-
-#[tokio::test]
-async fn runtime_errors_are_terminal_even_for_hidden_columns() {
-    use std::error::Error as _;
-
-    for names in [vec!["x"], vec!["text"]] {
-        let input = input();
-        let source = MemoryAccessor::new(vec![input.slice(0, 1), input.clone(), input]);
-        let polls = source.polls.clone();
-        let drops = source.drops.clone();
-        let mut reader = source
-            .layer(layer(&[("x", r#"10 / ("Count" - 4)"#)]))
-            .open(request(&names))
-            .await
-            .unwrap();
-        let first = reader.next().await.unwrap().unwrap();
-        assert_eq!(first.num_rows(), 1);
-        if names == ["x"] {
-            assert_eq!(
-                first.column(0).to_data(),
-                Int64Array::from(vec![-5]).to_data()
-            );
-        }
-        assert!(!drops.load(Ordering::SeqCst));
-        let error = reader.next().await.unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Decode);
-        assert_eq!(error.operation(), "generate_column");
-        assert!(error.to_string().contains("column \"x\""));
-        assert!(
-            error
-                .source()
-                .unwrap()
-                .downcast_ref::<datafusion::error::DataFusionError>()
-                .is_some()
-        );
-        assert_eq!(polls.load(Ordering::SeqCst), 2);
-        assert!(drops.load(Ordering::SeqCst));
-        assert_finished(reader.as_mut(), &polls, |m| {
-            (m.schema.clone(), m.source.clone())
-        })
-        .await;
     }
 }

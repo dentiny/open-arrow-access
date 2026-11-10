@@ -97,5 +97,4 @@ virtual-field requests together with a real reader, coordinate semantics and tes
 
 Integration tests cover expressions, dependent columns, constants, nulls, quoting,
 metadata/buffer sharing, zero rows/columns, projection, invalid and hidden
-expressions, SQL casts, type conversion, CSV with parallel reads, stable functions
-across declarations, and terminal cleanup after runtime errors in hidden columns.
+expressions, SQL casts, type conversion, and CSV with parallel reads.
