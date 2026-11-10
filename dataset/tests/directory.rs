@@ -269,6 +269,7 @@ async fn batch_schema_is_checked_against_the_opened_schema() {
 }
 
 struct Listing {
+    expected_prefix: Option<&'static str>,
     objects: Vec<&'static str>,
     fail: bool,
 }
@@ -293,8 +294,11 @@ impl Accessor for Listing {
 #[async_trait]
 impl ByteAccessor for Listing {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
+        if let Some(expected) = self.expected_prefix {
+            assert_eq!(request.prefix.locator(), expected);
+        }
         let mut prefix = request.prefix.locator().to_owned();
-        if !prefix.is_empty() {
+        if !prefix.is_empty() && !prefix.ends_with('/') {
             prefix.push('/');
         }
         let mut items = self
@@ -334,6 +338,7 @@ async fn generic_listing_is_sorted_filtered_and_fails_before_opening_on_listing_
     ]);
     let opens = files.opens.clone();
     let listing = Listing {
+        expected_prefix: None,
         objects: vec![
             "data/b.parquet",
             "data/.hidden.parquet",
@@ -356,6 +361,7 @@ async fn generic_listing_is_sorted_filtered_and_fails_before_opening_on_listing_
     opens.lock().unwrap().clear();
     let accessor = DirectoryAccessor::new(
         Listing {
+            expected_prefix: None,
             objects: vec!["data/a.parquet"],
             fail: true,
         },
@@ -373,6 +379,7 @@ async fn generic_listing_is_sorted_filtered_and_fails_before_opening_on_listing_
     assert!(opens.lock().unwrap().is_empty());
     let accessor = DirectoryAccessor::new(
         Listing {
+            expected_prefix: None,
             objects: vec!["different/a.parquet"],
             fail: false,
         },
@@ -390,22 +397,39 @@ async fn generic_listing_is_sorted_filtered_and_fails_before_opening_on_listing_
 }
 
 #[tokio::test]
-async fn directory_rejects_traversal_entries() {
-    let files = Files::new([]);
-    for path in ["data/../outside", "data/./a", "data//absolute"] {
+async fn directory_passes_backend_prefixes_and_locators_through_unchanged() {
+    let schema = schema("same");
+    for (prefix, path) in [
+        ("data//sub//", "data//sub//a.parquet"),
+        ("/data", "/data/a.parquet"),
+        ("data/./sub", "data/./sub/a.parquet"),
+        ("data/../sub", "data/../sub/a.parquet"),
+        ("data", "data//a.parquet"),
+        ("data", "data/./a.parquet"),
+        ("data", "data/../a.parquet"),
+        (
+            "https://example.com/data//",
+            "https://example.com/data//a.parquet",
+        ),
+    ] {
+        let files = Files::new([(
+            path,
+            FileData::new(schema.clone(), vec![batch(schema.clone(), &[1])]),
+        )]);
+        let opens = files.opens.clone();
         let accessor = DirectoryAccessor::new(
             Listing {
+                expected_prefix: Some(prefix),
                 objects: vec![path],
                 fail: false,
             },
-            files.clone(),
+            files,
         );
-        let request = DirectoryRequest::new("data");
         assert_eq!(
-            accessor.open(request).await.err().unwrap().kind(),
-            ErrorKind::InvalidInput
+            values(accessor.open(DirectoryRequest::new(prefix)).await.unwrap()).await,
+            [1]
         );
-        assert!(files.opens.lock().unwrap().is_empty());
+        assert_eq!(opens.lock().unwrap()[0].object.locator(), path);
     }
 }
 
@@ -458,7 +482,7 @@ async fn parallel_file_plan_is_lazy_and_preserves_options_order_and_duplicates()
 }
 
 #[tokio::test]
-async fn parallel_directory_keeps_discovery_filter_sort_and_validation() {
+async fn parallel_directory_keeps_discovery_filter_sort_and_prefix_validation() {
     let schema = schema("parallel-directory");
     let files = Files::new([
         (
@@ -474,6 +498,7 @@ async fn parallel_directory_keeps_discovery_filter_sort_and_validation() {
         ParallelReadLayer::new(NonZeroUsize::new(2).unwrap(), NonZeroUsize::new(1).unwrap());
     let directory = DirectoryAccessor::new(
         Listing {
+            expected_prefix: None,
             objects: vec!["data/b", "data/a", "data/b", "data/sub/c"],
             fail: false,
         },
@@ -486,13 +511,14 @@ async fn parallel_directory_keeps_discovery_filter_sort_and_validation() {
     let calls = files.opens.lock().unwrap().len();
     let invalid = DirectoryAccessor::new(
         Listing {
-            objects: vec!["../bad"],
+            expected_prefix: None,
+            objects: vec!["other/bad"],
             fail: false,
         },
         files.clone(),
     )
     .layer(layer);
-    assert!(invalid.open(DirectoryRequest::new("")).await.is_err());
+    assert!(invalid.open(DirectoryRequest::new("data")).await.is_err());
     assert_eq!(files.opens.lock().unwrap().len(), calls);
 }
 
