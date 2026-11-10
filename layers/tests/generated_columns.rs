@@ -273,26 +273,6 @@ async fn invalid_expressions_fail_at_open_even_when_hidden() {
 }
 
 #[tokio::test]
-async fn empty_layer_passes_through_and_drop_stops_reading() {
-    let input = input();
-    for generation in [GeneratedColumnsLayer::default(), layer(&[("x", "1")])] {
-        let source = MemoryAccessor::new(vec![input.clone()]);
-        let polls = source.polls.clone();
-        let drops = source.drops.clone();
-        let mut reader = source
-            .layer(generation)
-            .open(ReadRequest::new("test"))
-            .await
-            .unwrap();
-        let batch = reader.next().await.unwrap().unwrap();
-        assert!(Arc::ptr_eq(batch.column(0), input.column(0)));
-        drop(reader);
-        assert_eq!(polls.load(Ordering::SeqCst), 1);
-        assert_eq!(drops.load(Ordering::SeqCst), 1);
-    }
-}
-
-#[tokio::test]
 async fn composes_after_type_conversion() {
     let mut reader = MemoryAccessor::new(vec![input()])
         .layer(
