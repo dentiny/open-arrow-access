@@ -4,17 +4,11 @@ use futures::{Stream, StreamExt};
 
 use crate::{ByteMetadata, ByteReader, Bytes, Capability, ObjectRef, Reader, Result, async_trait};
 
-/// Adapt an owned stream of shared results into a sequential [`Reader`].
-///
-/// Construction and metadata/capability queries do not poll the stream, which
-/// need not be [`Unpin`]. EOF or errors drop the stream and make subsequent reads
-/// return EOF. Dropping the reader drops the stream; no background work is started.
-///
-/// Map errors to [`crate::Error`] and convert items before wrapping. Items must
-/// match the supplied metadata; byte chunks must be nonempty. Arrow batch streams
-/// implement [`crate::RecordReader`]; byte streams with [`ByteMetadata`] implement
+/// Adapt an owned stream of [`Result`]s into a sequential [`Reader`].
+/// Pins without polling; EOF or errors drop the stream and make later reads return
+/// EOF. Items must match the metadata; byte chunks must be nonempty. Arrow batches
+/// implement [`crate::RecordReader`], and bytes with [`ByteMetadata`] implement
 /// [`ByteReader`].
-/// Only sequential reading is exposed.
 ///
 /// ```
 /// use futures::stream;
