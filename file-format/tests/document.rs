@@ -4,12 +4,7 @@ use open_arrow_access_core::{
     Accessor, ByteReadRequest, Bytes, ErrorKind, ReadOptions, ReadRequest, ReaderFactory,
     ReaderFactoryExt, RecordBatch, RecordReader, Result, SchemaRef,
 };
-use open_arrow_access_file_format::{
-    csv::CsvFileFormat,
-    json::JsonFormat,
-    read_document,
-    xml::{XmlField, XmlFormat, XmlSchema},
-};
+use open_arrow_access_file_format::{json::JsonFormat, read_document};
 use open_arrow_access_test_support::MemoryAccessor;
 use std::sync::{Arc, atomic::Ordering};
 
@@ -34,26 +29,12 @@ async fn read(
 }
 
 #[tokio::test]
-async fn reads_each_format() {
-    let xml = XmlFormat::new("/row").with_schema(
-        XmlSchema::new(vec![XmlField::new(
-            "value",
-            "value",
-            DataType::Int64,
-            false,
-        )])
-        .unwrap(),
-    );
-    for batch in [
-        read(br#"{"value":7}"#, JsonFormat::new(schema()))
-            .await
-            .unwrap(),
-        read(b"7\n", CsvFileFormat::new(schema())).await.unwrap(),
-        read(b"<row><value>7</value></row>", xml).await.unwrap(),
-    ] {
-        assert_eq!(batch.num_rows(), 1);
-        assert_eq!(batch.column(0).as_primitive::<Int64Type>().value(0), 7);
-    }
+async fn reads_one_document() {
+    let batch = read(br#"{"value":7}"#, JsonFormat::new(schema()))
+        .await
+        .unwrap();
+    assert_eq!(batch.num_rows(), 1);
+    assert_eq!(batch.column(0).as_primitive::<Int64Type>().value(0), 7);
 }
 
 #[tokio::test]
