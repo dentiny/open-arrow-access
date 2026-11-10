@@ -1,4 +1,4 @@
-use futures::stream;
+use futures::TryStreamExt;
 use open_arrow_access_core::{RecordMetadata, RecordReader, record_stream_reader};
 
 use super::xml_error;
@@ -8,11 +8,6 @@ pub(super) fn xml_reader(
     metadata: RecordMetadata,
     projection: Option<Vec<usize>>,
 ) -> impl RecordReader {
-    let stream = stream::try_unfold(reader, |mut reader| async move {
-        let Some(batch) = reader.next_batch().await.map_err(xml_error)? else {
-            return Ok(None);
-        };
-        Ok(Some((batch, reader)))
-    });
+    let stream = reader.into_stream().map_err(xml_error);
     record_stream_reader(stream, metadata, projection)
 }
