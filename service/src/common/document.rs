@@ -31,11 +31,9 @@ impl ApiDocument {
 }
 
 impl ApiDocument {
-    /// Bind selected, already fetched JSON metadata to an Arrow format/schema.
-    /// An array at the JSON pointer becomes an ordered JSON object stream; an
-    /// object becomes one record. Links remain metadata and are never fetched.
-    /// No provider envelope or output schema is guessed. This plans one API page,
-    /// not independently fetchable future cursor pages.
+    /// Bind a JSON pointer's value to an explicit Arrow format/schema.
+    /// Arrays become newline-separated records; other values become one record.
+    /// Only this fetched page is decoded; links and future pages are not fetched.
     pub fn records_at<F>(&self, pointer: &str, format: F) -> Result<RecordPage<F>>
     where
         F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader>,
