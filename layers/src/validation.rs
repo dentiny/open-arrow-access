@@ -12,6 +12,17 @@ use open_arrow_access_core::{
 
 use crate::{ColumnTypeSpec, error::column_error};
 
+pub(crate) fn validate_sampling_probability(probability: f64) -> Result<()> {
+    if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "sample",
+            "sampling probability must be finite and between 0 and 1",
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_emission_policy(
     emission: EmissionPolicy,
     ordering: OrderRequirement,

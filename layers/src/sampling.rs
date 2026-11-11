@@ -35,13 +35,7 @@ impl SamplingLayer {
     /// Probabilities use 53-bit resolution. Zero reads no source batches; one
     /// passes through the original reader. The source is opened for metadata.
     pub fn try_new(probability: f64, seed: u64) -> Result<Self> {
-        if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "sample",
-                "sampling probability must be finite and between 0 and 1",
-            ));
-        }
+        crate::validation::validate_sampling_probability(probability)?;
         Ok(Self {
             threshold: (probability * SCALE as f64) as u64,
             seed,
