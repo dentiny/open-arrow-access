@@ -10,16 +10,17 @@ use open_arrow_access_dataset::{
 use open_arrow_access_file_format::{json::JsonAccessor, parquet::ParquetAccessor};
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_storage::OpenDalAccessor;
-use parquet::arrow::ArrowWriter;
+use parquet::arrow::AsyncArrowWriter;
 
 #[tokio::test]
 async fn json_directory_union_by_name_aligns_nested_struct_and_list_fields() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("a.jsonl"), b"{\"id\":1,\"all_null\":null,\"meta\":{\"left\":\"a\"},\"items\":[{\"x\":1}]}\n{\"id\":2,\"meta\":null,\"items\":[]}\n").unwrap();
-    std::fs::write(
+    tokio::fs::write(dir.path().join("a.jsonl"), b"{\"id\":1,\"all_null\":null,\"meta\":{\"left\":\"a\"},\"items\":[{\"x\":1}]}\n{\"id\":2,\"meta\":null,\"items\":[]}\n").await.unwrap();
+    tokio::fs::write(
         dir.path().join("b.jsonl"),
         b"{\"id\":3,\"all_null\":3,\"meta\":{\"right\":true},\"items\":[{\"y\":\"b\"}],\"tail\":\"last\"}\n",
     )
+    .await
     .unwrap();
     for native in [false, true] {
         let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
@@ -134,11 +135,14 @@ async fn json_directory_union_by_name_aligns_nested_struct_and_list_fields() {
 #[tokio::test]
 async fn union_by_name_projection_can_select_a_column_missing_from_the_first_file() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("a.jsonl"), b"{\"id\":1}\n").unwrap();
-    std::fs::write(
+    tokio::fs::write(dir.path().join("a.jsonl"), b"{\"id\":1}\n")
+        .await
+        .unwrap();
+    tokio::fs::write(
         dir.path().join("b.jsonl"),
         b"{\"tail\":\"last\",\"id\":2}\n",
     )
+    .await
     .unwrap();
     let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
     let files = FileSetAccessor::new(JsonAccessor::infer(storage)).with_union_by_name();
@@ -197,10 +201,12 @@ async fn parquet_union_by_name_only_relaxes_missing_fields() {
         .unwrap(),
     ];
     for (name, batch) in ["a.parquet", "b.parquet"].into_iter().zip(batches) {
-        let file = std::fs::File::create(dir.path().join(name)).unwrap();
-        let mut writer = ArrowWriter::try_new(file, batch.schema(), None).unwrap();
-        writer.write(&batch).unwrap();
-        writer.close().unwrap();
+        let file = tokio::fs::File::create(dir.path().join(name))
+            .await
+            .unwrap();
+        let mut writer = AsyncArrowWriter::try_new(file, batch.schema(), None).unwrap();
+        writer.write(&batch).await.unwrap();
+        writer.close().await.unwrap();
     }
     let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
     let files = FileSetAccessor::new(ParquetAccessor::new(storage))
