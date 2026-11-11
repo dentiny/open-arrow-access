@@ -58,7 +58,10 @@ Conversion preserves row counts, order, top-level field names/nullability and
 ordinary field/schema metadata. Arrow semantics are not a losslessness guarantee:
 numeric casts and reduced timestamp precision may lose information without an
 error. String-to-timestamp parsing uses Arrow's parser, with named timezones
-enabled; the custom ISO-minute fallback from ml-infra is not included.
+enabled. If Arrow rejects a string-to-timestamp cast, a compatibility parser also
+accepts ISO minute precision, such as `2000-05-31T04:00Z`. Strings without an
+offset use the target timezone, or UTC when none is specified. Invalid dates,
+ambiguous/nonexistent local times and nanosecond overflow remain errors.
 
 Casts run before the caller's final projection, including casts on hidden columns.
 The inner projection includes only requested output columns and declared cast

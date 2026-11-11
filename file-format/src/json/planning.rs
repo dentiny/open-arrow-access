@@ -1,10 +1,11 @@
 use bytes::BytesMut;
 use futures::stream;
+use jiter::{Jiter, JiterErrorType, JsonErrorType, Peek};
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt,
-    RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader,
+    Accessor, ByteReadRequest, ByteReader, Bytes, Error, ErrorKind, ReadRequest, ReaderFactory,
+    ReaderFactoryExt, RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
+    bytes_reader,
 };
-use serde_json::{Deserializer, value::RawValue};
 
 use super::{JsonAccessor, error};
 
@@ -49,26 +50,30 @@ where
     }
 }
 
-/// Frame complete JSON objects with serde_json, retaining the original bytes.
-/// Framing stays sequential; each owned chunk is decoded by an independent worker.
-struct JsonFrames {
-    input: Box<dyn ByteReader>,
-    pending_input: BytesMut,
+/// Frame complete JSON objects, including nonfinite values, retaining their bytes.
+/// Each owned chunk contains complete objects and can be decoded independently.
+pub(super) struct JsonFrames {
+    pub(super) input: Box<dyn ByteReader>,
+    pub(super) pending_input: BytesMut,
 }
 
 impl JsonFrames {
-    async fn next_chunk(&mut self, row_target: usize, byte_target: usize) -> Result<Option<Bytes>> {
+    pub(super) async fn next_chunk(
+        &mut self,
+        row_target: usize,
+        byte_target: usize,
+    ) -> Result<Option<Bytes>> {
         let mut framed = 0usize;
         let mut rows = 0usize;
         loop {
-            let mut records =
-                Deserializer::from_slice(&self.pending_input[framed..]).into_iter::<&RawValue>();
-            match records.next() {
-                Some(Ok(record)) => {
-                    if !record.get().starts_with('{') {
+            let mut records = Jiter::new(&self.pending_input[framed..]).with_allow_inf_nan();
+            let object = records.peek().ok() == Some(Peek::Object);
+            match records.next_skip() {
+                Ok(()) => {
+                    if !object {
                         return Err(error::invalid_frame("frame_json", "expected a JSON object"));
                     }
-                    let end = framed + records.byte_offset();
+                    let end = framed + records.current_index();
                     if rows > 0 && end > byte_target {
                         return Ok(Some(self.pending_input.split_to(framed).freeze()));
                     }
@@ -79,14 +84,28 @@ impl JsonFrames {
                     }
                     continue;
                 }
-                Some(Err(source)) if !source.is_eof() => {
+                Err(source)
+                    if !matches!(
+                        source.error_type,
+                        JiterErrorType::JsonError(
+                            JsonErrorType::EofWhileParsingList
+                                | JsonErrorType::EofWhileParsingObject
+                                | JsonErrorType::EofWhileParsingString
+                                | JsonErrorType::EofWhileParsingValue
+                        )
+                    ) =>
+                {
                     return Err(error::json_frame(source));
                 }
                 _ => {}
             }
             // Preserve complete objects while retrying only the incomplete tail.
             // Split once per partition, avoiding per-record buffers and concatenation.
-            framed += records.byte_offset();
+            // Skip only whitespace, never bytes from an incomplete record.
+            framed += self.pending_input[framed..]
+                .iter()
+                .take_while(|b| matches!(b, b' ' | b'\n' | b'\r' | b'\t'))
+                .count();
             if rows > 0 && framed >= byte_target {
                 return Ok(Some(self.pending_input.split_to(framed).freeze()));
             }
@@ -96,7 +115,11 @@ impl JsonFrames {
             }
             match self.input.next().await? {
                 Some(bytes) if bytes.is_empty() => {
-                    return Err(error::invalid_frame("frame_json", "empty byte chunk"));
+                    return Err(Error::new(
+                        ErrorKind::Io,
+                        "read_json",
+                        "byte reader emitted an empty chunk",
+                    ));
                 }
                 Some(bytes) => self.pending_input.extend_from_slice(&bytes),
                 None if framed == self.pending_input.len() => {

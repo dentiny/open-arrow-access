@@ -3,6 +3,7 @@
 mod accessor;
 mod error;
 mod format;
+mod nonfinite;
 mod planning;
 mod reader;
 

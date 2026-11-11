@@ -1,10 +1,13 @@
 use arrow_json::reader::Decoder;
+use arrow_schema::ArrowError;
+use bytes::BytesMut;
+use futures::stream;
 use open_arrow_access_core::{
     BatchDecoder, ByteReader, OrderRequirement, RecordBatch, RecordMetadata, RecordReader, Result,
-    decode_batches,
+    StreamReader, decode_batches,
 };
 
-use super::error::decode_error;
+use super::{error::decode_error, nonfinite::normalize_nonfinite, planning::JsonFrames};
 
 struct JsonDecoder {
     decoder: Decoder,
@@ -43,8 +46,35 @@ pub(super) fn json_reader(
     metadata: RecordMetadata,
     batch_size: usize,
 ) -> impl RecordReader {
-    decode_batches(
+    // Frame one object at a time so normalization also handles fragmented byte input.
+    let byte_metadata = input.metadata().clone();
+    let frames = JsonFrames {
         input,
+        pending_input: BytesMut::new(),
+    };
+    let stream = stream::try_unfold(frames, |mut frames| async move {
+        frames
+            .next_chunk(/*row_target=*/ 1, /*byte_target=*/ usize::MAX)
+            .await
+            .map(|bytes| {
+                bytes.map(|bytes| {
+                    let bytes = match normalize_nonfinite(&bytes) {
+                        std::borrow::Cow::Borrowed(_) => bytes,
+                        std::borrow::Cow::Owned(normalized) => normalized.into(),
+                    };
+                    (bytes, frames)
+                })
+            })
+            .map_err(|error| {
+                if error.operation() == "frame_json" {
+                    decode_error(ArrowError::JsonError(error.to_string()))
+                } else {
+                    error
+                }
+            })
+    });
+    decode_batches(
+        Box::new(StreamReader::new(stream, byte_metadata)),
         JsonDecoder {
             decoder,
             batch_size,

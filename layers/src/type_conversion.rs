@@ -1,8 +1,11 @@
 use std::{collections::HashSet, sync::Arc};
 
-use arrow_array::{RecordBatch, RecordBatchOptions};
-use arrow_cast::{CastOptions, cast_with_options};
-use arrow_schema::{DataType, Schema};
+use arrow_array::{
+    Array, ArrayRef, Int64Array, RecordBatch, RecordBatchOptions, cast::AsArray, timezone::Tz,
+};
+use arrow_cast::{CastOptions, cast_with_options, parse::string_to_datetime};
+use arrow_schema::{ArrowError, DataType, Schema, TimeUnit};
+use chrono::format::{Parsed, StrftimeItems, parse};
 use open_arrow_access_core::{
     Accessor, Capability, Error, ErrorKind, FieldNameIndex, Layer, ReadOptionsProvider, Reader,
     RecordCapability, RecordMetadata, RecordReader, Result, async_trait,
@@ -21,7 +24,10 @@ pub struct ColumnTypeSpec {
 ///
 /// Uses Arrow cast semantics: successful casts can still lose numeric or temporal
 /// precision. All declared casts run before the final projection, even for hidden
-/// columns. Storage and decoding schemas are unchanged.
+/// columns. String-to-timestamp casts also accept ISO minute precision (for example,
+/// `2000-05-31T04:00Z`). Naive timestamps use the target timezone, or UTC if absent;
+/// invalid, ambiguous, or out-of-range values fail. Storage and decoding schemas
+/// are unchanged.
 #[derive(Clone, Debug, Default)]
 pub struct TypeConversionLayer {
     specs: Arc<[ColumnTypeSpec]>,
@@ -166,8 +172,17 @@ impl TypeConversionReader {
         for cast in &self.casts {
             let index = cast.source_index;
             let target = &cast.target_type;
-            columns[index] =
-                cast_with_options(columns[index].as_ref(), target, &options).map_err(|error| {
+            columns[index] = cast_with_options(columns[index].as_ref(), target, &options)
+                .or_else(|error| match target {
+                    // Keep Arrow's semantics, adding only the service's minute-precision fallback.
+                    DataType::Timestamp(unit, timezone)
+                        if columns[index].data_type().is_string() =>
+                    {
+                        parse_timestamp(columns[index].as_ref(), *unit, timezone.clone())
+                    }
+                    _ => Err(error),
+                })
+                .map_err(|error| {
                     Error::new(
                         ErrorKind::Decode,
                         "cast",
@@ -231,4 +246,73 @@ impl Reader for TypeConversionReader {
         }
         result
     }
+}
+
+fn parse_timestamp(
+    input: &dyn Array,
+    unit: TimeUnit,
+    timezone: Option<Arc<str>>,
+) -> std::result::Result<ArrayRef, ArrowError> {
+    let parsed_timezone: Tz = timezone.as_deref().unwrap_or("UTC").parse()?;
+    let target = DataType::Timestamp(unit, timezone);
+    let strings = cast_with_options(
+        input,
+        &DataType::LargeUtf8,
+        &CastOptions {
+            safe: false,
+            ..Default::default()
+        },
+    )?;
+    let parse_error = |error: chrono::ParseError| ArrowError::ParseError(error.to_string());
+    let values = strings
+        .as_string::<i64>()
+        .iter()
+        .map(|value| {
+            value
+                .map(|value| {
+                    let datetime =
+                        string_to_datetime(&parsed_timezone, value).or_else(|error| {
+                            // Arrow handles second precision; Chrono handles ISO minute precision.
+                            for format in [
+                                "%FT%R%#z", "%F %R%#z", "%Ft%R%#z", "%FT%R", "%F %R", "%Ft%R",
+                            ] {
+                                let mut parsed = Parsed::new();
+                                if parse(&mut parsed, value, StrftimeItems::new(format)).is_err() {
+                                    continue;
+                                }
+                                return if parsed.offset.is_some() {
+                                    parsed
+                                        .to_datetime()
+                                        .map(|value| value.with_timezone(&parsed_timezone))
+                                        .map_err(parse_error)
+                                } else {
+                                    parsed
+                                        .to_datetime_with_timezone(&parsed_timezone)
+                                        .map_err(parse_error)
+                                };
+                            }
+                            Err(error)
+                        })?;
+                    Ok(match unit {
+                        TimeUnit::Second => datetime.timestamp(),
+                        TimeUnit::Millisecond => datetime.timestamp_millis(),
+                        TimeUnit::Microsecond => datetime.timestamp_micros(),
+                        TimeUnit::Nanosecond => {
+                            datetime.timestamp_nanos_opt().ok_or_else(|| {
+                                ArrowError::CastError(format!(
+                                    "timestamp out of nanosecond range: {value}"
+                                ))
+                            })?
+                        }
+                    })
+                })
+                .transpose()
+        })
+        .collect::<std::result::Result<Vec<Option<i64>>, ArrowError>>()?;
+    let data = Int64Array::from(values)
+        .into_data()
+        .into_builder()
+        .data_type(target)
+        .build()?;
+    Ok(arrow_array::make_array(data))
 }
