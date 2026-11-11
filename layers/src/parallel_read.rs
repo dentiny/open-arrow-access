@@ -179,16 +179,13 @@ impl ParallelReader {
                         self.spawn_partition(partition?);
                     }
                 }
-                batch = poll_fn(|cx| {
+                (index, batch) = poll_fn(|cx| {
                     if emission == EmissionPolicy::Ordered {
-                        return receivers[0].poll_recv(cx);
+                        return receivers[0].poll_recv(cx).map(|batch| (0, batch));
                     }
-                    for index in 0..receivers.len() {
-                        if let Poll::Ready(batch) = receivers[index].poll_recv(cx) {
-                            // Keep the selected receiver at the front for removal
-                            // or rotation below, without a separate queue cursor.
-                            receivers.rotate_left(index);
-                            return Poll::Ready(batch);
+                    for (index, receiver) in receivers.iter_mut().enumerate() {
+                        if let Poll::Ready(batch) = receiver.poll_recv(cx) {
+                            return Poll::Ready((index, batch));
                         }
                     }
                     Poll::Pending
@@ -196,12 +193,12 @@ impl ParallelReader {
                     if batch.is_some() {
                         // Give the other resident partitions the next turn.
                         if emission == EmissionPolicy::Unordered {
-                            self.partition_receivers.rotate_left(1);
+                            self.partition_receivers.rotate_left(index + 1);
                         }
                         return Ok(batch);
                     }
                     // EOF only frees a resident slot after that receiver is drained.
-                    self.partition_receivers.pop_front();
+                    self.partition_receivers.remove(index);
                 }
                 else => return Ok(None),
             }
