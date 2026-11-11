@@ -3080,6 +3080,7 @@ dependencies = [
  "brotli",
  "bytes",
  "chrono",
+ "flate2",
  "futures",
  "half",
  "hashbrown 0.17.1",

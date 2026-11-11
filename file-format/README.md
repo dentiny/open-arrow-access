@@ -75,17 +75,16 @@ projection. Required-header/date conversion and Arrow building run in workers;
 byte framing and any upstream decompression remain sequential. No range access
 or custom WARC parser is required. Ordinary `open` keeps its sequential behavior.
 
-### Parquet Brotli pages
+### Parquet page compression
 
-Enable `parquet-brotli` on `open-arrow-access-file-format`, or
-`format-parquet-brotli` on the `open-arrow-access` facade, to read
-Brotli-compressed Parquet pages. The codec feature also enables the Parquet
-reader; plain `parquet` / `format-parquet` continues to support uncompressed and
-Snappy pages.
+Plain `parquet` / `format-parquet` supports uncompressed and Snappy pages.
+Enable a codec feature to read additional compressed pages; each also enables
+the Parquet reader.
 
-```toml
-open-arrow-access = { git = "https://github.com/dentiny/open-arrow-access", features = ["format-parquet-brotli"] }
-```
+| Codec | File-format feature | Facade feature |
+| --- | --- | --- |
+| Brotli | `parquet-brotli` | `format-parquet-brotli` |
+| Gzip | `parquet-gzip` | `format-parquet-gzip` |
 
-This uses the upstream Parquet codec and preserves range reads, projection, and
+This uses the upstream Parquet codecs and preserves range reads, projection, and
 row-group planning. It is independent of external byte decompression layers.
