@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, AccessorExt, ByteAccessor, ObjectRef, ReadRequest, RecordMetadata, RecordReader,
-    SchemaRef, into_stream, record_stream_reader,
+    Accessor, AccessorExt, ByteAccessor, ObjectRef, OrderRequirement, ReadRequest, RecordMetadata,
+    RecordReader, SchemaRef, into_stream, record_stream_reader,
 };
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::csv::CsvAccessor;
@@ -46,6 +46,11 @@ impl InventoryTransform {
             validation::validate_batch(&batch)?;
             Ok(batch)
         });
-        record_stream_reader(batches, metadata, self.output_projection)
+        record_stream_reader(
+            batches,
+            metadata,
+            self.output_projection,
+            OrderRequirement::Reorderable,
+        )
     }
 }

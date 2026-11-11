@@ -112,9 +112,13 @@ signatures; its wrappers only box calls to the private `async fn` read helpers.
 
 ## Capability
 
-Both `Accessor::capability()` and `Reader::capability()` return the same public
-`Capability` value, following [OpenDAL's reporting pattern](https://opendal.apache.org/docs/rust/opendal/struct.Capability.html).
-The flags describe operation support, including a declaration for future parallel reads:
+`Accessor::capability()` returns its reader's associated `Reader::Capability`
+type. Byte interfaces use `Capability`; record interfaces use `RecordCapability`,
+which adds a mandatory `ordering: OrderRequirement` field. This follows
+[OpenDAL's reporting pattern](https://opendal.apache.org/docs/rust/opendal/struct.Capability.html)
+for effective operation support. Neither record ordering nor record capabilities
+has a default: each format, dataset, service and record wrapper must declare or
+forward its contract. The shared operation flags are:
 
 | Flag | Meaning |
 | --- | --- |

@@ -1,6 +1,6 @@
 use super::{CommonCrawlWarcRequest, manifest::read_manifest};
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, Capability, OrderRequirement, ReadRequest,
+    Accessor, ByteAccessor, ByteReadRequest, Capability, ReadRequest, RecordCapability,
     RecordReader, Result, ScanPlan, ScanPlanner, async_trait,
 };
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
@@ -63,13 +63,14 @@ where
 {
     type Request = CommonCrawlWarcRequest;
     type Reader = dyn RecordReader;
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: self.manifests.capability().read && self.files.capability().read,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(self.files.capability().ordering)
     }
     async fn open(&self, request: CommonCrawlWarcRequest) -> Result<Box<dyn RecordReader>> {
         self.files.open(self.resolve(request).await?).await
@@ -82,10 +83,6 @@ where
     M: ByteAccessor,
     F: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
 {
-    fn order_requirement(&self) -> OrderRequirement {
-        self.files.order_requirement()
-    }
-
     async fn plan_scan(&self, request: CommonCrawlWarcRequest) -> Result<ScanPlan> {
         self.files.plan_scan(self.resolve(request).await?).await
     }

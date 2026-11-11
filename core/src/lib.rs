@@ -28,7 +28,7 @@ mod validation;
 pub use accessor::{Accessor, ByteAccessor, ObjectStream};
 pub use async_read::into_async_read;
 pub use async_seek::{SeekableInput, into_async_seek};
-pub use capability::Capability;
+pub use capability::{Capability, OrderRequirement, RecordCapability};
 pub use decode_batches::{BatchDecoder, decode_batches};
 pub use document::{DocumentAccessor, DocumentDecoder};
 pub use error::{Error, ErrorKind, Result};
@@ -61,6 +61,4 @@ pub use async_trait::async_trait;
 pub use bytes::Bytes;
 
 mod scan;
-pub use scan::{
-    EmissionPolicy, OrderRequirement, ParallelReadOptions, ScanPartition, ScanPlan, ScanPlanner,
-};
+pub use scan::{EmissionPolicy, ParallelReadOptions, ScanPartition, ScanPlan, ScanPlanner};

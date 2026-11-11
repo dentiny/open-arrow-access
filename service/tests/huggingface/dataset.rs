@@ -35,6 +35,10 @@ async fn dataset_pins_export_sorts_paginated_shards_and_reads_lazily_with_option
         .await
         .unwrap();
     assert!(!hub.requested("0001.parquet"));
+    assert_eq!(
+        reader.capability().ordering,
+        open_arrow_access_core::OrderRequirement::PreserveGlobal
+    );
     let mut ids = Vec::new();
     while let Some(batch) = reader.next().await.unwrap() {
         assert_eq!(batch.num_rows(), 1);
@@ -138,6 +142,11 @@ async fn parallel_dataset_preserves_pinned_shard_order_and_partial_admission() {
     let hub = ExportHub::new("paginated.json").await;
     let service = hub.service().await;
     let plan = service.plan_scan(request()).await.unwrap();
+    assert_eq!(
+        service.capability().ordering,
+        open_arrow_access_core::OrderRequirement::PreserveGlobal
+    );
+    assert_eq!(plan.ordering, service.capability().ordering);
     assert!(!hub.requested("0001.parquet"));
     let partitions: Vec<_> = plan.partitions.try_collect().await.unwrap();
     assert_eq!(partitions.len(), 2);
@@ -154,6 +163,10 @@ async fn parallel_dataset_preserves_pinned_shard_order_and_partial_admission() {
         }))
         .await
         .unwrap();
+    assert_eq!(
+        reader.capability().ordering,
+        open_arrow_access_core::OrderRequirement::PreserveGlobal
+    );
     let mut ids = Vec::new();
     while let Some(batch) = reader.next().await.unwrap() {
         ids.push(batch.column(0).as_primitive::<Int64Type>().value(0));

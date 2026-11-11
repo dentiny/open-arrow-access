@@ -1,7 +1,7 @@
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, OrderRequirement, ReadRequest, RecordMetadata, Result,
-    ScanPartition, ScanPlan, ScanPlanner, async_trait,
+    Accessor, ByteReadRequest, ByteReader, ReadRequest, RecordMetadata, Result, ScanPartition,
+    ScanPlan, ScanPlanner, async_trait,
 };
 use parquet::arrow::{
     arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions},
@@ -21,10 +21,6 @@ impl<B> ScanPlanner for ParquetAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + Clone + 'static,
 {
-    fn order_requirement(&self) -> OrderRequirement {
-        OrderRequirement::Reorderable
-    }
-
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let storage = self.binding.storage().clone();
         let input = storage.open(ByteReadRequest::from(&request)).await?;
@@ -59,7 +55,7 @@ where
         });
         Ok(
             ScanPlan::from_stream(output, stream::iter(partitions.map(Ok)))
-                .with_ordering(self.order_requirement()),
+                .with_ordering(self.capability().ordering),
         )
     }
 }

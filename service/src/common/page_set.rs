@@ -2,8 +2,8 @@ use std::{future::Future, marker::PhantomData, sync::Arc};
 
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, Capability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan,
-    ScanPlanner, async_trait,
+    Accessor, Capability, OrderRequirement, RecordCapability, RecordMetadata, RecordReader, Result,
+    ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 
 use super::error::empty_page_selection;
@@ -40,13 +40,14 @@ where
     type Request = Vec<R>;
     type Reader = dyn RecordReader;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: true,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(OrderRequirement::PreserveGlobal)
     }
 
     async fn open(&self, requests: Vec<R>) -> Result<Box<dyn RecordReader>> {
@@ -77,6 +78,6 @@ where
             Ok(partition)
         });
         let partitions = stream::iter([Ok(first)]).chain(stream::iter(rest));
-        Ok(ScanPlan::from_stream(metadata, partitions))
+        Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))
     }
 }

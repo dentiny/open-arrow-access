@@ -1,4 +1,5 @@
-/// Operations exposed by an accessor or reader after all adapters and layers.
+/// Byte/generic operations exposed after all adapters and layers.
+/// Record interfaces use [`RecordCapability`] with an explicit ordering contract.
 ///
 /// This follows OpenDAL's capability-reporting pattern. Flags describe the
 /// current interface, not every operation supported by its underlying backend.
@@ -34,4 +35,64 @@ pub struct Capability {
     /// Can discover object references through [`crate::ByteAccessor::list`].
     /// Always false for readers and interfaces that do not expose discovery.
     pub list: bool,
+}
+
+/// Semantic permission to relax the logical order of a record scan.
+/// Sources with unresolved semantic constraints must explicitly choose global order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OrderRequirement {
+    Reorderable,
+    PreserveGlobal,
+}
+
+impl OrderRequirement {
+    /// Composition may strengthen an ordering requirement, never weaken it.
+    pub fn combine(self, other: Self) -> Self {
+        if self == Self::PreserveGlobal || other == Self::PreserveGlobal {
+            Self::PreserveGlobal
+        } else {
+            Self::Reorderable
+        }
+    }
+}
+
+/// Record operations and the source's semantic ordering requirement.
+/// No default is provided: every record adapter must declare or forward ordering.
+/// `ordering` is permission to relax source order, not the selected emission policy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RecordCapability {
+    pub read: bool,
+    /// Always false for record interfaces.
+    pub read_with_range: bool,
+    pub read_parallel: bool,
+    /// Always false for record interfaces.
+    pub list: bool,
+    /// Requirement covering every input accepted by this record interface.
+    pub ordering: OrderRequirement,
+}
+
+impl Capability {
+    /// Declare the ordering contract while constructing a record capability.
+    pub fn with_ordering(self, ordering: OrderRequirement) -> RecordCapability {
+        RecordCapability {
+            read: self.read,
+            read_with_range: self.read_with_range,
+            read_parallel: self.read_parallel,
+            list: self.list,
+            ordering,
+        }
+    }
+}
+
+impl RecordCapability {
+    /// Capabilities of an opened sequential record stream, with explicit ordering.
+    pub fn sequential(ordering: OrderRequirement) -> Self {
+        Capability {
+            read: true,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+        .with_ordering(ordering)
+    }
 }

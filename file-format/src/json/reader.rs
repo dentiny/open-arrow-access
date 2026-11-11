@@ -1,6 +1,7 @@
 use arrow_json::reader::Decoder;
 use open_arrow_access_core::{
-    BatchDecoder, ByteReader, RecordBatch, RecordMetadata, RecordReader, Result, decode_batches,
+    BatchDecoder, ByteReader, OrderRequirement, RecordBatch, RecordMetadata, RecordReader, Result,
+    decode_batches,
 };
 
 use super::error::decode_error;
@@ -50,5 +51,6 @@ pub(super) fn json_reader(
             eof_flushed: false,
         },
         metadata,
+        OrderRequirement::Reorderable,
     )
 }

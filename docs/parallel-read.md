@@ -81,18 +81,33 @@ Providers may explicitly declare `Reorderable` after establishing that contract.
 `require_ordering` adds an enclosing dataset or service restriction and cannot
 relax a child's requirement. ATIF plans always retain global order.
 
-`ScanPlanner::order_requirement()` is a selection-wide declaration without I/O,
-conservatively `PreserveGlobal` for unknown or mixed sources. Native CSV, JSON,
-XML, Parquet and raw WARC views declare their records reorderable. A surrounding
-semantic dataset may still require order; HF dataset scans conservatively do so.
+Every record accessor and reader returns `RecordCapability`, whose `ordering`
+field is mandatory. Neither `RecordCapability` nor `OrderRequirement` has a
+default. `Reader::Capability` fixes the output type: record implementations must
+return record capabilities, while byte/storage interfaces continue to return
+`Capability`. Factories must implement `capability` explicitly, including custom
+formats. The former `ScanPlanner::order_requirement()` default is removed.
 
-FileSet/Directory with `with_file_planning()` use the supplied accessor's
-selection-wide declaration before lazily discovering later partitions. The first
-file alone never grants permission. Without native planning, the dataset remains
-conservatively globally ordered. Later plans must honor a declared reorderable
-contract (including empty plans), as well as the fixed schema. Custom mixed
-accessors must preserve global order unless they can guarantee all selections
-are reorderable. Partition discovery remains lazy and does not add a snapshot.
+CSV, JSON, XML, Parquet, raw WARC, individual documents, arXiv/MECA entries and
+PMC inventory rows declare reorderable records. ATIF declares `PreserveGlobal`.
+HF dataset scans explicitly retain global order because a Parquet export does not
+establish the dataset's semantic ordering contract. Application-defined page sets
+also explicitly preserve global order because their callback does not declare a
+selection-wide reorderability guarantee.
+
+FileSet and Directory always forward the supplied record accessor's ordering,
+including whole-file planning without `with_file_planning()`. Native planning
+flattens finer partitions under the same contract and budget. The first file alone
+never grants permission. Later native plans must honor the accessor-wide contract,
+including empty plans, as well as the fixed schema. Custom mixed accessors must
+explicitly declare `PreserveGlobal` unless they can guarantee the entire selection
+is reorderable. Partition discovery stays lazy and adds no snapshot guarantee.
+
+Opened record readers retain their source's constraint. `ScanPlan::whole_input`
+derives its ordering from the reader, and enclosing execution/emission layers
+combine the source capability with the resolved plan before admission. A source
+requirement cannot be weakened by requesting unordered output. Row-local generated
+columns and type conversion preserve the inner capability's ordering.
 
 ## Execution and emission settings
 

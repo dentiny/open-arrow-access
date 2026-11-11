@@ -1,8 +1,10 @@
 # Source attributes and scan planning
 
 Status: the runtime now implements `ScanPlanner`, ordered parallel execution,
-`OrderRequirement`, and `ScanPlan::ordering`; see [parallel reading](parallel-read.md).
-The fuller attribute/strategy types below remain a design proposal. In particular,
+typed `RecordCapability` with mandatory `ordering`, and `ScanPlan::ordering`; see [parallel reading](parallel-read.md).
+Every record adapter must declare its capability; the former optional/default
+`ScanPlanner::order_requirement()` method has been removed. The fuller
+attribute/strategy types below remain a design proposal. In particular,
 `SourceAttributes` and `ScanProperties` are not current exports. Unordered emission
 is implemented as an explicit opt-in; the runtime contract and admission rules are
 documented in [parallel reading](parallel-read.md).
@@ -32,7 +34,8 @@ concurrency, partition concurrency and parallel Arrow conversion are separate.
 
 ## Proposed attribute types
 
-The following Rust sketches are proposed API shapes, not current exports:
+`OrderRequirement` below is a current export; the remaining sketches describe
+proposed attribute and strategy types:
 
 ```text
 enum OrderRequirement {

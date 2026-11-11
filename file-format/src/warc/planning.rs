@@ -20,10 +20,6 @@ impl<B> ScanPlanner for WarcArrowAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
-    fn order_requirement(&self) -> OrderRequirement {
-        OrderRequirement::Reorderable
-    }
-
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let schema = self.binding.factory().prepare(&request)?;
         let metadata = RecordMetadata {
@@ -61,14 +57,15 @@ where
                         append_record(&mut batch, &record, source)?;
                     }
                     let batch = batch.finish()?;
-                    Ok(
-                        Box::new(StreamReader::new(stream::iter([Ok(batch)]), metadata))
-                            as Box<dyn RecordReader>,
-                    )
+                    Ok(Box::new(StreamReader::records(
+                        stream::iter([Ok(batch)]),
+                        metadata,
+                        OrderRequirement::Reorderable,
+                    )) as Box<dyn RecordReader>)
                 })
             },
         );
-        Ok(plan.with_ordering(self.order_requirement()))
+        Ok(plan.with_ordering(self.capability().ordering))
     }
 }
 

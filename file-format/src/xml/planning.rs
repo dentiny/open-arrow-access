@@ -14,10 +14,6 @@ impl<B> ScanPlanner for XmlAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
-    fn order_requirement(&self) -> OrderRequirement {
-        OrderRequirement::Reorderable
-    }
-
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = self.binding.factory();
         let (validation_schema, mut options, explicit_schema) = format.prepare(&request)?;
@@ -105,10 +101,11 @@ where
                         stream::iter(batch.map(Ok)),
                         metadata,
                         None,
+                        OrderRequirement::Reorderable,
                     )) as Box<dyn RecordReader>)
                 })
             },
         );
-        Ok(plan.with_ordering(self.order_requirement()))
+        Ok(plan.with_ordering(self.capability().ordering))
     }
 }

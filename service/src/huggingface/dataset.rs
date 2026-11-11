@@ -1,6 +1,7 @@
 use open_arrow_access_core::{
-    Accessor, Capability, Error, ErrorKind, ListRequest, ObjectRef, RecordReader, Result, ScanPlan,
-    ScanPlanner, async_trait, list_files,
+    Accessor, Capability, Error, ErrorKind, ListRequest, ObjectRef, OrderRequirement,
+    RecordCapability, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait,
+    into_stream, list_files,
 };
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
 use open_arrow_access_file_format::parquet::ParquetAccessor;
@@ -19,7 +20,13 @@ impl HuggingFaceService {
         request: HuggingFaceDatasetRequest,
     ) -> Result<Box<dyn RecordReader>> {
         let (files, request) = self.resolve_dataset(request).await?;
-        files.open(request).await
+        let reader = files.open(request).await?;
+        let metadata = reader.metadata().clone();
+        Ok(Box::new(StreamReader::records(
+            into_stream(reader),
+            metadata,
+            self.capability().ordering,
+        )))
     }
 
     async fn resolve_dataset(
@@ -62,13 +69,14 @@ impl Accessor for HuggingFaceService {
     type Request = HuggingFaceDatasetRequest;
     type Reader = dyn RecordReader;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: true,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(OrderRequirement::PreserveGlobal)
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
@@ -102,6 +110,6 @@ impl ScanPlanner for HuggingFaceService {
         Ok(files
             .plan_scan(request)
             .await?
-            .require_ordering(self.order_requirement()))
+            .require_ordering(self.capability().ordering))
     }
 }

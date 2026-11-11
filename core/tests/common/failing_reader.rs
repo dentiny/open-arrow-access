@@ -20,6 +20,7 @@ impl FailingReader {
 impl Reader for FailingReader {
     type Item = u8;
     type Metadata = ();
+    type Capability = Capability;
 
     fn capability(&self) -> Capability {
         Capability {

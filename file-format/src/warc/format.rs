@@ -1,7 +1,7 @@
 use futures::stream;
 use open_arrow_access_core::{
-    ByteReadRequest, ByteReader, FactoryToken, ObjectRef, Reader, ReaderFactory, Result,
-    StreamReader, async_trait, into_async_read,
+    ByteReadRequest, ByteReader, Capability, FactoryToken, ObjectRef, OrderRequirement, Reader,
+    ReaderFactory, RecordCapability, Result, StreamReader, async_trait, into_async_read,
 };
 
 use super::{WarcRecord, decode_error};
@@ -14,7 +14,18 @@ pub struct WarcFormat;
 impl ReaderFactory for WarcFormat {
     type Request = ByteReadRequest;
     type Prepared = ();
-    type Reader = dyn Reader<Item = WarcRecord, Metadata = ObjectRef>;
+    type Reader =
+        dyn Reader<Item = WarcRecord, Metadata = ObjectRef, Capability = RecordCapability>;
+
+    fn capability(&self, input: Capability) -> RecordCapability {
+        Capability {
+            read: input.read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+        .with_ordering(OrderRequirement::Reorderable)
+    }
 
     fn prepare(&self, _request: &ByteReadRequest) -> Result<()> {
         Ok(())
@@ -37,6 +48,9 @@ impl ReaderFactory for WarcFormat {
                 .map_err(decode_error)?
                 .map(|record| (record, records)))
         });
-        Ok(Box::new(StreamReader::new(stream, request.object)))
+        Ok(Box::new(
+            StreamReader::new(stream, request.object)
+                .with_capability(RecordCapability::sequential(OrderRequirement::Reorderable)),
+        ))
     }
 }

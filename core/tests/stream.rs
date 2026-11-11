@@ -82,7 +82,7 @@ async fn stream_reader_preserves_errors_and_releases_the_stream_before_returning
             )
         }))
     });
-    let mut reader: Box<dyn Reader<Item = u8, Metadata = ()>> =
+    let mut reader: Box<dyn Reader<Item = u8, Metadata = (), Capability = Capability>> =
         Box::new(StreamReader::new(stream, ()));
     assert_eq!(reader.next().await.unwrap(), Some(7));
     let error = reader.next().await.unwrap_err();

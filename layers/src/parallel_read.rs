@@ -8,8 +8,8 @@ use futures::{
 
 use open_arrow_access_core::{
     Accessor, Capability, EmissionPolicy, Layer, OrderRequirement, ParallelReadOptions, Reader,
-    RecordBatch, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner,
-    async_trait,
+    RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan,
+    ScanPlanner, async_trait,
 };
 use tokio::{sync::mpsc, task::JoinSet};
 
@@ -60,7 +60,7 @@ impl<A: ScanPlanner> Accessor for ParallelReadAccessor<A> {
     type Request = A::Request;
     type Reader = dyn RecordReader;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         let read = self.inner.capability().read;
         Capability {
             read,
@@ -68,6 +68,7 @@ impl<A: ScanPlanner> Accessor for ParallelReadAccessor<A> {
             read_with_range: false,
             list: false,
         }
+        .with_ordering(self.inner.capability().ordering)
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
@@ -80,12 +81,12 @@ impl<A: ScanPlanner> Accessor for ParallelReadAccessor<A> {
 
 #[async_trait]
 impl<A: ScanPlanner> ScanPlanner for ParallelReadAccessor<A> {
-    fn order_requirement(&self) -> OrderRequirement {
-        self.inner.order_requirement()
-    }
-
     async fn plan_scan(&self, request: Self::Request) -> Result<ScanPlan> {
-        let mut plan = self.inner.plan_scan(request).await?;
+        let mut plan = self
+            .inner
+            .plan_scan(request)
+            .await?
+            .require_ordering(self.inner.capability().ordering);
         let settings = ParallelReadOptions {
             partitions: self.settings.partitions,
             prefetch: self.settings.prefetch,
@@ -105,6 +106,7 @@ pub(crate) fn open_plan(plan: ScanPlan) -> Result<Box<dyn RecordReader>> {
 }
 
 struct ParallelReader {
+    ordering: OrderRequirement,
     metadata: RecordMetadata,
     remaining: Fuse<BoxStream<'static, Result<ScanPartition>>>,
     partition_receivers: VecDeque<mpsc::Receiver<RecordBatch>>,
@@ -117,6 +119,7 @@ struct ParallelReader {
 impl ParallelReader {
     fn new(plan: ScanPlan, settings: ParallelReadOptions) -> Self {
         Self {
+            ordering: plan.ordering,
             metadata: plan.metadata,
             remaining: plan.partitions.fuse(),
             partition_receivers: VecDeque::new(),
@@ -212,14 +215,16 @@ impl ParallelReader {
 impl Reader for ParallelReader {
     type Item = RecordBatch;
     type Metadata = RecordMetadata;
+    type Capability = RecordCapability;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: true,
             read_parallel: true,
             read_with_range: false,
             list: false,
         }
+        .with_ordering(self.ordering)
     }
 
     fn metadata(&self) -> &RecordMetadata {

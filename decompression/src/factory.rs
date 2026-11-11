@@ -1,7 +1,8 @@
 use std::num::NonZeroUsize;
 
 use open_arrow_access_core::{
-    ByteReadRequest, ByteReader, FactoryToken, ReaderFactory, Result, async_trait, into_async_read,
+    ByteReadRequest, ByteReader, Capability, FactoryToken, ReaderFactory, Result, async_trait,
+    into_async_read,
 };
 
 use crate::{Codec, decoded_reader, layer::DEFAULT_CHUNK_SIZE};
@@ -33,6 +34,15 @@ impl<C: Codec> ReaderFactory for DecompressionFactory<C> {
     type Request = ByteReadRequest;
     type Prepared = ();
     type Reader = dyn ByteReader;
+
+    fn capability(&self, input: Capability) -> Capability {
+        Capability {
+            read: input.read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+    }
 
     fn prepare(&self, _request: &ByteReadRequest) -> Result<()> {
         Ok(())

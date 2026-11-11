@@ -54,6 +54,7 @@ where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
     I: Iterator<Item = ReadRequest> + Send + 'static,
 {
+    let ordering = accessor.capability().ordering;
     let state = FileSetState {
         accessor,
         current: Some(current),
@@ -63,5 +64,5 @@ where
     let stream = stream::try_unfold(state, |mut state| async move {
         Ok(state.read_batch().await?.map(|batch| (batch, state)))
     });
-    StreamReader::new(stream, metadata)
+    StreamReader::records(stream, metadata, ordering)
 }

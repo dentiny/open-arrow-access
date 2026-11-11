@@ -3,8 +3,8 @@ use std::{collections::VecDeque, sync::Arc};
 use arrow_array::RecordBatchOptions;
 use futures::stream;
 use open_arrow_access_core::{
-    BatchDecoder, ByteMetadata, ByteReader, Bytes, Error, ErrorKind, Reader, RecordBatch,
-    RecordMetadata, Result, Schema, StreamReader, decode_batches,
+    BatchDecoder, ByteMetadata, ByteReader, Bytes, Error, ErrorKind, OrderRequirement, Reader,
+    RecordBatch, RecordMetadata, Result, Schema, StreamReader, decode_batches,
 };
 use open_arrow_access_test_support::fixture;
 
@@ -87,6 +87,7 @@ async fn preserves_pending_input_and_drains_batches_at_eof() {
         input(vec![Ok(bytes.slice(..3)), Ok(bytes.slice(3..))]),
         decoder,
         metadata(),
+        OrderRequirement::PreserveGlobal,
     );
     for _ in 0..3 {
         assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
@@ -104,6 +105,7 @@ async fn rejects_invalid_consumption_and_no_progress() {
             ))]),
             Decoder::new([("x", consumed, false)]),
             metadata(),
+            OrderRequirement::PreserveGlobal,
         );
         let error = reader.next().await.unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Decode);
@@ -127,7 +129,12 @@ async fn rejects_empty_chunks_and_preserves_source_errors() {
             "read_fixture",
         ),
     ] {
-        let mut reader = decode_batches(input(vec![chunk]), Decoder::new([]), metadata());
+        let mut reader = decode_batches(
+            input(vec![chunk]),
+            Decoder::new([]),
+            metadata(),
+            OrderRequirement::PreserveGlobal,
+        );
         let error = reader.next().await.unwrap_err();
         assert_eq!(error.kind(), kind);
         assert_eq!(error.operation(), operation);

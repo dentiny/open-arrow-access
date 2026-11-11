@@ -1,5 +1,5 @@
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, Capability, ListRequest, OrderRequirement, ReadRequest, RecordReader,
+    Accessor, ByteAccessor, Capability, ListRequest, ReadRequest, RecordCapability, RecordReader,
     Result, ScanPlan, ScanPlanner, async_trait, list_files,
 };
 
@@ -44,13 +44,14 @@ where
     type Request = DirectoryRequest;
     type Reader = dyn RecordReader;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: self.discovery.capability().list && self.files.capability().read,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(self.files.capability().ordering)
     }
 
     async fn open(&self, request: DirectoryRequest) -> Result<Box<dyn RecordReader>> {
@@ -90,10 +91,6 @@ where
     B: ByteAccessor,
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
 {
-    fn order_requirement(&self) -> OrderRequirement {
-        self.files.order_requirement()
-    }
-
     async fn plan_scan(&self, request: DirectoryRequest) -> Result<ScanPlan> {
         self.files.plan_scan(self.resolve(request).await?).await
     }

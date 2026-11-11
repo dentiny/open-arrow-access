@@ -5,7 +5,7 @@ use arrow_cast::{CastOptions, cast_with_options};
 use arrow_schema::{DataType, Schema};
 use open_arrow_access_core::{
     Accessor, Capability, Error, ErrorKind, FieldNameIndex, Layer, ReadOptionsProvider, Reader,
-    RecordMetadata, RecordReader, Result, async_trait,
+    RecordCapability, RecordMetadata, RecordReader, Result, async_trait,
 };
 
 use crate::validation;
@@ -68,7 +68,7 @@ where
     type Request = A::Request;
     type Reader = dyn RecordReader;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         let inner = self.inner.capability();
         Capability {
             read: inner.read,
@@ -76,6 +76,7 @@ where
             read_parallel: inner.read_parallel,
             list: false,
         }
+        .with_ordering(self.inner.capability().ordering)
     }
 
     async fn open(&self, mut request: A::Request) -> Result<Box<dyn RecordReader>> {
@@ -200,8 +201,9 @@ impl TypeConversionReader {
 impl Reader for TypeConversionReader {
     type Item = RecordBatch;
     type Metadata = RecordMetadata;
+    type Capability = RecordCapability;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         let inner = self.inner.capability();
         Capability {
             read: inner.read,
@@ -209,6 +211,7 @@ impl Reader for TypeConversionReader {
             read_parallel: inner.read_parallel,
             list: false,
         }
+        .with_ordering(self.inner.capability().ordering)
     }
 
     fn metadata(&self) -> &RecordMetadata {

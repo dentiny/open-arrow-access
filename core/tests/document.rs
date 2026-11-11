@@ -4,8 +4,8 @@ use arrow_array::{RecordBatchOptions, cast::AsArray};
 use arrow_schema::{DataType, Field};
 use open_arrow_access_core::{
     Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability, DocumentAccessor,
-    DocumentDecoder, Error, ErrorKind, ReadOptions, ReadRequest, RecordBatch, RecordBatchBuilder,
-    Result, Schema, SchemaRef, async_trait,
+    DocumentDecoder, Error, ErrorKind, OrderRequirement, ReadOptions, ReadRequest, RecordBatch,
+    RecordBatchBuilder, RecordCapability, Result, Schema, SchemaRef, async_trait,
 };
 use open_arrow_access_test_support::{MemoryAccessor, fixture};
 
@@ -15,6 +15,16 @@ struct RawDocument;
 #[async_trait]
 impl DocumentDecoder for RawDocument {
     type Request = ReadRequest;
+
+    fn capability(&self, input: Capability) -> RecordCapability {
+        Capability {
+            read: input.read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+        .with_ordering(OrderRequirement::Reorderable)
+    }
 
     fn prepare(&self, _: &ReadRequest) -> Result<SchemaRef> {
         Ok(Arc::new(Schema::new(vec![Field::new(
@@ -148,6 +158,16 @@ enum InvalidDocument {
 #[async_trait]
 impl DocumentDecoder for InvalidDocument {
     type Request = ReadRequest;
+    fn capability(&self, input: Capability) -> RecordCapability {
+        Capability {
+            read: input.read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+        .with_ordering(OrderRequirement::Reorderable)
+    }
+
     fn prepare(&self, _: &ReadRequest) -> Result<SchemaRef> {
         Ok(Arc::new(Schema::empty()))
     }

@@ -35,13 +35,14 @@ struct Source;
 impl Accessor for Source {
     type Request = ScanPlan;
     type Reader = dyn RecordReader;
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: true,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(OrderRequirement::Reorderable)
     }
     async fn open(&self, _: ScanPlan) -> Result<Box<dyn RecordReader>> {
         unreachable!()
@@ -90,9 +91,10 @@ async fn open_with_policy(
 }
 fn part(values: Vec<i32>) -> ScanPartition {
     Box::pin(async move {
-        Ok(Box::new(StreamReader::new(
+        Ok(Box::new(StreamReader::records(
             stream::iter(values.into_iter().map(|n| Ok(batch(n)))),
             metadata(),
+            OrderRequirement::Reorderable,
         )) as Box<dyn RecordReader>)
     })
 }
@@ -144,7 +146,11 @@ async fn overlaps_without_replacing_completed_buffered_partitions() {
                 ready.add_permits(1);
                 Poll::Ready(None)
             }));
-            Ok(Box::new(StreamReader::new(batches, metadata())) as Box<dyn RecordReader>)
+            Ok(Box::new(StreamReader::records(
+                batches,
+                metadata(),
+                OrderRequirement::Reorderable,
+            )) as Box<dyn RecordReader>)
         }));
     }
     // Two slots let each later worker queue its batch and reach EOF.
@@ -187,16 +193,18 @@ async fn rejects_partition_metadata_and_batch_schema_mismatch() {
         };
         let wrong_batch = RecordBatch::new_empty(wrong.schema.clone());
         let p: ScanPartition = Box::pin(async move {
-            Ok(Box::new(StreamReader::new(
+            Ok(Box::new(StreamReader::records(
                 stream::iter([Ok(wrong_batch)]),
                 metadata(),
+                OrderRequirement::Reorderable,
             )) as Box<dyn RecordReader>)
         });
         assert!(open_mode(vec![p], 1, emission).await.next().await.is_err());
         let p: ScanPartition = Box::pin(async move {
-            Ok(Box::new(StreamReader::new(
+            Ok(Box::new(StreamReader::records(
                 stream::empty::<Result<RecordBatch>>(),
                 wrong,
+                OrderRequirement::Reorderable,
             )) as Box<dyn RecordReader>)
         });
         assert!(open_mode(vec![p], 1, emission).await.next().await.is_err());
@@ -211,7 +219,11 @@ async fn full_later_queue_stops_decoding_before_next_batch() {
         let input = stream::iter((0..50).map(|n| Ok(batch(n)))).inspect(move |_| {
             signal.add_permits(1);
         });
-        Ok(Box::new(StreamReader::new(input, metadata())) as Box<dyn RecordReader>)
+        Ok(Box::new(StreamReader::records(
+            input,
+            metadata(),
+            OrderRequirement::Reorderable,
+        )) as Box<dyn RecordReader>)
     });
     let mut r = open(vec![Box::pin(std::future::pending()), later], 2).await;
     let task = tokio::spawn(async move { r.next().await });

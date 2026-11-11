@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use arrow_array::{Int32Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
 use futures::{StreamExt, stream};
-use open_arrow_access_core::{Reader, RecordMetadata, record_stream_reader};
+use open_arrow_access_core::{OrderRequirement, Reader, RecordMetadata, record_stream_reader};
 
 fn batch() -> RecordBatch {
     RecordBatch::try_new(
@@ -48,6 +48,7 @@ async fn restores_schema_and_field_metadata_for_full_reordered_and_empty_project
                 source: Some("native.xml".into()),
             },
             projection.clone(),
+            OrderRequirement::PreserveGlobal,
         );
         assert_eq!(reader.metadata().schema, schema);
         assert_eq!(

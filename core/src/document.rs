@@ -4,8 +4,8 @@ use futures::stream;
 
 use crate::{
     Accessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ReadOptionsProvider,
-    RecordBatch, RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, SchemaRef,
-    StreamReader, async_trait, read_object,
+    RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner,
+    SchemaRef, StreamReader, async_trait, read_object,
 };
 
 /// Decode one whole object into one Arrow row.
@@ -13,6 +13,9 @@ use crate::{
 pub trait DocumentDecoder: Send + Sync {
     /// Per-document request and read options.
     type Request: ReadOptionsProvider + 'static;
+
+    /// Declare this document view's record capabilities and ordering without I/O.
+    fn capability(&self, input: Capability) -> RecordCapability;
 
     /// Validate without I/O and return the full schema.
     fn prepare(&self, request: &Self::Request) -> Result<SchemaRef>;
@@ -68,16 +71,12 @@ where
     type Request = D::Request;
     type Reader = dyn RecordReader;
 
-    fn capability(&self) -> Capability {
-        Capability {
-            read: self.storage.capability().read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+    fn capability(&self) -> RecordCapability {
+        self.decoder.capability(self.storage.capability())
     }
 
     async fn open(&self, request: D::Request) -> Result<Box<dyn RecordReader>> {
+        let ordering = self.capability().ordering;
         let full_schema = self.decoder.prepare(&request)?;
         let (schema, _) = request.read_options().resolve_projection(&full_schema)?;
         let byte_request = ByteReadRequest::from(&request);
@@ -102,7 +101,7 @@ where
                     .with_source(error)
             })
         });
-        Ok(Box::new(StreamReader::new(stream, metadata)))
+        Ok(Box::new(StreamReader::records(stream, metadata, ordering)))
     }
 }
 

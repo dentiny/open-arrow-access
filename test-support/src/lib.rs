@@ -212,6 +212,7 @@ struct MemoryReader {
 impl Reader for MemoryReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
+    type Capability = Capability;
 
     fn capability(&self) -> Capability {
         Capability {

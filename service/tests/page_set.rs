@@ -10,8 +10,8 @@ use arrow_array::{UInt64Array, types::UInt64Type};
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, AccessorExt, ErrorKind, RecordBatch, RecordMetadata, RecordReader, ScanPlanner,
-    StreamReader,
+    Accessor, AccessorExt, ErrorKind, OrderRequirement, RecordBatch, RecordMetadata, RecordReader,
+    ScanPlanner, StreamReader,
 };
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::common::PageSetAccessor;
@@ -28,12 +28,13 @@ fn page(value: u64) -> Box<dyn RecordReader> {
         vec![Arc::new(UInt64Array::from(vec![value]))],
     )
     .unwrap();
-    Box::new(StreamReader::new(
+    Box::new(StreamReader::records(
         stream::iter([Ok(batch)]),
         RecordMetadata {
             schema,
             source: Some(format!("page-{value}").into()),
         },
+        OrderRequirement::Reorderable,
     ))
 }
 
@@ -91,8 +92,11 @@ async fn page_set_schema_drift_is_rejected_by_both_executors() {
                 } else {
                     (expected, vec![Ok(RecordBatch::new_empty(wrong.schema))])
                 };
-                Ok(Box::new(StreamReader::new(stream::iter(batches), metadata))
-                    as Box<dyn RecordReader>)
+                Ok(Box::new(StreamReader::records(
+                    stream::iter(batches),
+                    metadata,
+                    OrderRequirement::Reorderable,
+                )) as Box<dyn RecordReader>)
             });
             let mut reader = open_pages(pages, vec![0, 1], parallel).await;
             // A later worker may fail before the first page is delivered.

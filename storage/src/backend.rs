@@ -328,6 +328,7 @@ impl OpenDalReader {
 impl Reader for OpenDalReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
+    type Capability = Capability;
 
     fn capability(&self) -> Capability {
         Capability {

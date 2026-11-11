@@ -9,8 +9,8 @@ use datafusion::{
     physical_expr::PhysicalExpr,
 };
 use open_arrow_access_core::{
-    Accessor, Capability, Layer, ReadOptionsProvider, Reader, RecordMetadata, RecordReader, Result,
-    async_trait,
+    Accessor, Capability, Layer, ReadOptionsProvider, Reader, RecordCapability, RecordMetadata,
+    RecordReader, Result, async_trait,
 };
 
 use crate::{
@@ -78,7 +78,7 @@ where
     type Request = A::Request;
     type Reader = dyn RecordReader;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         record_capability(self.inner.capability())
     }
 
@@ -177,13 +177,14 @@ fn plan_expression(
     Ok((physical, output))
 }
 
-fn record_capability(inner: Capability) -> Capability {
+fn record_capability(inner: RecordCapability) -> RecordCapability {
     Capability {
         read: inner.read,
         read_parallel: inner.read_parallel,
         read_with_range: false,
         list: false,
     }
+    .with_ordering(inner.ordering)
 }
 
 struct GeneratedStep {
@@ -197,7 +198,7 @@ struct GeneratedColumnsReader {
     metadata: RecordMetadata,
     steps: Vec<GeneratedStep>,
     projection: Option<Vec<usize>>,
-    capability: Capability,
+    capability: RecordCapability,
 }
 
 impl GeneratedColumnsReader {
@@ -226,8 +227,9 @@ impl GeneratedColumnsReader {
 impl Reader for GeneratedColumnsReader {
     type Item = RecordBatch;
     type Metadata = RecordMetadata;
+    type Capability = RecordCapability;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         self.capability
     }
 

@@ -1,8 +1,8 @@
 use futures::stream;
 
 use crate::{
-    ByteReader, Bytes, Error, ErrorKind, RecordBatch, RecordMetadata, RecordReader, Result,
-    StreamReader,
+    ByteReader, Bytes, Error, ErrorKind, OrderRequirement, RecordBatch, RecordMetadata,
+    RecordReader, Result, StreamReader,
 };
 
 /// Format-specific decoding hooks for the shared input loop.
@@ -79,13 +79,14 @@ impl<D: BatchDecoder> DecodeState<D> {
     }
 }
 
-/// Decode bytes lazily into batches with the supplied metadata.
+/// Decode bytes lazily into batches with the supplied metadata and explicit ordering.
 /// Batches must match the metadata schema. EOF and errors terminate the reader;
 /// source and decoder errors are forwarded unchanged.
 pub fn decode_batches<D: BatchDecoder>(
     input: Box<dyn ByteReader>,
     decoder: D,
     metadata: RecordMetadata,
+    ordering: OrderRequirement,
 ) -> impl RecordReader {
     let state = DecodeState {
         input,
@@ -96,5 +97,5 @@ pub fn decode_batches<D: BatchDecoder>(
     let stream = stream::try_unfold(state, |mut state| async move {
         Ok(state.read_batch().await?.map(|batch| (batch, state)))
     });
-    StreamReader::new(stream, metadata)
+    StreamReader::records(stream, metadata, ordering)
 }

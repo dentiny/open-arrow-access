@@ -1,8 +1,8 @@
 use arrow_array::StringArray;
 use arrow_schema::{DataType, Field};
 use open_arrow_access_core::{
-    Accessor, Capability, Error, ErrorKind, ReadRequest, RecordBatch, RecordMetadata, RecordReader,
-    Result, Schema, StreamReader, async_trait,
+    Accessor, Capability, Error, ErrorKind, OrderRequirement, ReadRequest, RecordBatch,
+    RecordCapability, RecordMetadata, RecordReader, Result, Schema, StreamReader, async_trait,
 };
 use open_arrow_access_test_support::MemoryAccessor;
 use std::{
@@ -32,13 +32,14 @@ pub(super) struct Records {
 impl Accessor for Records {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: true,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(OrderRequirement::Reorderable)
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         self.opens.lock().unwrap().push(request.clone());
@@ -65,9 +66,10 @@ impl Accessor for Records {
             schema: batch.schema(),
             source: Some(request.object),
         };
-        Ok(Box::new(StreamReader::new(
+        Ok(Box::new(StreamReader::records(
             futures::stream::iter([Ok(batch)]),
             metadata,
+            OrderRequirement::Reorderable,
         )))
     }
 }

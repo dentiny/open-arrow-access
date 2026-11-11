@@ -1,6 +1,5 @@
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Capability, FactoryAccessor, ReaderFactory, Result,
-    async_trait,
+    Accessor, ByteReadRequest, ByteReader, FactoryAccessor, ReaderFactory, Result, async_trait,
 };
 
 /// Compose byte storage with a [`ReaderFactory`] using the common read protocol.
@@ -63,7 +62,7 @@ where
     type Request = F::Request;
     type Reader = F::Reader;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> <Self::Reader as open_arrow_access_core::Reader>::Capability {
         self.binding.capability()
     }
 

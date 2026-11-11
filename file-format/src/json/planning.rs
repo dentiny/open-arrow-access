@@ -1,9 +1,8 @@
 use bytes::BytesMut;
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Bytes, OrderRequirement, ReadRequest, ReaderFactory,
-    ReaderFactoryExt, RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
-    bytes_reader,
+    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt,
+    RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader,
 };
 use serde_json::{Deserializer, value::RawValue};
 
@@ -14,10 +13,6 @@ impl<B> ScanPlanner for JsonAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
-    fn order_requirement(&self) -> OrderRequirement {
-        OrderRequirement::Reorderable
-    }
-
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = self.binding.factory().clone();
         let (schema, _) = format.prepare(&request)?;
@@ -50,7 +45,7 @@ where
                 Ok(Some((partition, frames)))
             }
         });
-        Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.order_requirement()))
+        Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))
     }
 }
 

@@ -1,7 +1,7 @@
 use super::CommonCrawlSegmentRequest;
 use crate::warc::CommonCrawlWarcAccessor;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, Capability, OrderRequirement, ReadRequest, RecordReader, Result,
+    Accessor, ByteAccessor, Capability, ReadRequest, RecordCapability, RecordReader, Result,
     ScanPlan, ScanPlanner, async_trait,
 };
 use open_arrow_access_dataset::file_set::FileSetRequest;
@@ -44,13 +44,14 @@ where
 {
     type Request = CommonCrawlSegmentRequest;
     type Reader = dyn RecordReader;
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: self.warc.capability().read,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(self.warc.capability().ordering)
     }
     async fn open(&self, request: CommonCrawlSegmentRequest) -> Result<Box<dyn RecordReader>> {
         self.warc.files.open(self.resolve(request).await?).await
@@ -63,10 +64,6 @@ where
     M: ByteAccessor,
     F: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
 {
-    fn order_requirement(&self) -> OrderRequirement {
-        self.warc.order_requirement()
-    }
-
     async fn plan_scan(&self, request: CommonCrawlSegmentRequest) -> Result<ScanPlan> {
         self.warc
             .files
