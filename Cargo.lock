@@ -2793,6 +2793,7 @@ dependencies = [
  "open-arrow-access-layers",
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
+ "parquet",
  "tempfile",
  "tokio",
 ]
