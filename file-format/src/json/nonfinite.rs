@@ -31,8 +31,23 @@ pub(super) fn normalize_input(input: Box<dyn ByteReader>) -> Box<dyn ByteReader>
     Box::new(StreamReader::new(stream, metadata))
 }
 
+/// Produce finite placeholders for type inference, keeping raw byte offsets and
+/// quoted strings unchanged. An incomplete scalar waits for more input unless EOF.
+pub(super) fn inference_sample(bytes: &[u8], eof: bool) -> Vec<u8> {
+    let mut state = Normalizer {
+        inference: true,
+        ..Normalizer::default()
+    };
+    let mut output = state.decode(bytes);
+    if eof {
+        output.extend(state.take_token());
+    }
+    output
+}
+
 #[derive(Default)]
 struct Normalizer {
+    inference: bool,
     in_string: bool,
     escaped: bool,
     // Whether the current container is an array; commas in objects precede keys.
@@ -45,8 +60,15 @@ impl Normalizer {
     fn take_token(&mut self) -> Vec<u8> {
         let mut token = std::mem::take(&mut self.token);
         if matches!(token.as_slice(), b"NaN" | b"Infinity" | b"-Infinity") {
-            token.insert(0, b'"');
-            token.push(b'"');
+            if self.inference {
+                let length = token.len();
+                token.clear();
+                token.extend_from_slice(b"0.0");
+                token.resize(length, b' ');
+            } else {
+                token.insert(0, b'"');
+                token.push(b'"');
+            }
         }
         self.value = false;
         token

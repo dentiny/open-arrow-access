@@ -104,6 +104,9 @@ format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-forma
 format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
 format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
 format-parquet-zstd = ["format-parquet", "open-arrow-access-file-format/parquet-zstd"]
+format-parquet-lz4 = ["format-parquet", "open-arrow-access-file-format/parquet-lz4"]
+format-parquet-gzip = ["format-parquet", "open-arrow-access-file-format/parquet-gzip"]
+format-parquet-brotli = ["format-parquet", "open-arrow-access-file-format/parquet-brotli"]
 format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
 format-xml = [
     "dep:open-arrow-access-file-format",
