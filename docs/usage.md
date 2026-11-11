@@ -153,6 +153,9 @@ Replace the format accessor for other sequential inputs:
 | XML | `XmlAccessor::new(decoded, "/records/record")` | `format-xml` |
 | ATIF JSONL | `AtifAccessor::new(decoded, AtifFormat::JsonLines)` | `format-atif` |
 
+Use `CsvAccessor::infer(decoded)` to infer CSV column types and header presence.
+Configure sampling and override ambiguous headers with `CsvInferenceOptions`.
+
 Use `JsonAccessor::infer(decoded)` to infer a JSON schema rather than supplying
 one. Configure the bounded sample with `JsonInferenceOptions`.
 

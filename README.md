@@ -128,7 +128,7 @@ compressed JSONL, multi-shard reads, and Hugging Face.
 The next planned capabilities focus on preparing consistent Arrow input for corpus
 pipelines:
 
-- CSV schema inference, followed by opt-in cross-file schema merging and alignment.
+- Opt-in cross-file schema merging and alignment.
 - Dependency-aware projection pushdown for generated columns.
 - Metrics, timeout, and read-budget layers.
 - File-internal partition planning and optional unordered emission.
