@@ -11,7 +11,6 @@ datafusion = { workspace = true, features = ["sql"] }
 futures.workspace = true
 arrow-array = { workspace = true, features = ["chrono-tz"] }
 arrow-cast.workspace = true
-chrono.workspace = true
 arrow-schema.workspace = true
 open-arrow-access-core.workspace = true
 tokio = { workspace = true, features = ["sync"] }

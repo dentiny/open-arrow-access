@@ -296,7 +296,10 @@ async fn parallel_json_framing_handles_nested_values_and_rejects_invalid_syntax(
 
 #[tokio::test]
 async fn nonfinite_values_survive_fragmentation_and_parallel_decoding() {
-    use arrow_array::{Float32Array, Float64Array, ListArray, StructArray};
+    use arrow_array::{
+        cast::AsArray,
+        types::{Float32Type, Float64Type},
+    };
 
     let schema = Arc::new(Schema::new(vec![
         Field::new("value", DataType::Float64, true),
@@ -332,40 +335,20 @@ async fn nonfinite_values_survive_fragmentation_and_parallel_decoding() {
                 accessor.open(request(2, None)).await.unwrap()
             };
             let first = reader.next().await.unwrap().unwrap();
-            let values = first
-                .column(0)
-                .as_any()
-                .downcast_ref::<Float64Array>()
-                .unwrap();
+            let values = first.column(0).as_primitive::<Float64Type>();
             assert!(values.value(0).is_nan());
             assert_eq!(values.value(1), f64::INFINITY);
-            let nested = first
-                .column(1)
-                .as_any()
-                .downcast_ref::<StructArray>()
-                .unwrap();
-            let lists = nested
-                .column(0)
-                .as_any()
-                .downcast_ref::<ListArray>()
-                .unwrap();
+            let nested = first.column(1).as_struct();
+            let lists = nested.column(0).as_list::<i32>();
             let list = lists.value(0);
-            let items = list.as_any().downcast_ref::<Float32Array>().unwrap();
+            let items = list.as_primitive::<Float32Type>();
             assert_eq!(items.value(0), f32::INFINITY);
             assert_eq!(items.value(1), f32::NEG_INFINITY);
             assert!(items.is_null(2));
-            let strings = first
-                .column(2)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
+            let strings = first.column(2).as_string::<i32>();
             assert_eq!(strings.value(0), "NaN Infinity -Infinity \"");
             let second = reader.next().await.unwrap().unwrap();
-            let values = second
-                .column(0)
-                .as_any()
-                .downcast_ref::<Float64Array>()
-                .unwrap();
+            let values = second.column(0).as_primitive::<Float64Type>();
             assert_eq!(values.values().as_ref(), &[f64::NEG_INFINITY, 1.5]);
             assert!(reader.next().await.unwrap().unwrap().column(0).is_null(0));
             assert!(reader.next().await.unwrap().is_none());

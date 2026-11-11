@@ -1,70 +1,44 @@
-use jiter::{Jiter, Peek};
-use std::{borrow::Cow, ops::Range};
+use std::borrow::Cow;
 
-/// Adapts bare `NaN`, `Infinity`, and `-Infinity` values without changing strings.
-/// The JSON parser still validates the result; malformed tokens and keys stay invalid.
-#[must_use]
-pub(super) fn normalize_nonfinite(line: &[u8]) -> Cow<'_, [u8]> {
-    let mut parser = Jiter::new(line).with_allow_inf_nan();
-    let mut numbers = Vec::new();
-    // Leave invalid or incomplete JSON unchanged so the existing reader reports
-    // its usual error (including EOF detection for multiline documents).
-    // Bound recursion while inspecting nested objects and lists.
-    if collect_nonfinite(&mut parser, &mut numbers, 128).is_none()
-        || parser.finish().is_err()
-        || numbers.is_empty()
-    {
-        return Cow::Borrowed(line);
-    }
-
-    let mut output = Vec::with_capacity(line.len());
+/// Quote nonfinite values for Arrow, leaving strings and all other bytes intact.
+/// JsonFrames has already validated the complete object, so token boundaries and
+/// string escapes are known to be valid here.
+pub(super) fn normalize_nonfinite(bytes: &[u8]) -> Cow<'_, [u8]> {
+    let mut output = Vec::new();
     let mut copied = 0;
-    for range in numbers {
-        output.extend_from_slice(&line[copied..range.start]);
+    let mut index = 0;
+    while index < bytes.len() {
+        let length = match bytes[index] {
+            b'"' => {
+                index += 1;
+                while bytes[index] != b'"' {
+                    if bytes[index] == b'\\' {
+                        index += 1;
+                    }
+                    index += 1;
+                }
+                0
+            }
+            b'N' => 3,
+            b'I' => 8,
+            b'-' if bytes[index..].starts_with(b"-Infinity") => 9,
+            _ => 0,
+        };
+        if length == 0 {
+            index += 1;
+            continue;
+        }
+        output.extend_from_slice(&bytes[copied..index]);
         output.push(b'"');
-        output.extend_from_slice(&line[range.clone()]);
+        output.extend_from_slice(&bytes[index..index + length]);
         output.push(b'"');
-        copied = range.end;
+        index += length;
+        copied = index;
     }
-    output.extend_from_slice(&line[copied..]);
-    Cow::Owned(output)
-}
-
-/// Walk JSON values using the parser's object/array APIs. Jiter handles syntax,
-/// strings and escapes; we only record the byte ranges of nonfinite numbers.
-fn collect_nonfinite(
-    parser: &mut Jiter<'_>,
-    numbers: &mut Vec<Range<usize>>,
-    depth: usize,
-) -> Option<()> {
-    if depth == 0 {
-        return None;
+    if copied == 0 {
+        Cow::Borrowed(bytes)
+    } else {
+        output.extend_from_slice(&bytes[copied..]);
+        Cow::Owned(output)
     }
-    match parser.peek().ok()? {
-        Peek::Object => {
-            let mut has_key = parser.next_object().ok()?.is_some();
-            while has_key {
-                collect_nonfinite(parser, numbers, depth - 1)?;
-                has_key = parser.next_key().ok()?.is_some();
-            }
-        }
-        Peek::Array => {
-            let mut element = parser.next_array().ok()?;
-            while element.is_some() {
-                collect_nonfinite(parser, numbers, depth - 1)?;
-                element = parser.array_step().ok()?;
-            }
-        }
-        _ => {
-            let start = parser.current_index();
-            parser.next_skip().ok()?;
-            if matches!(
-                parser.slice_to_current(start),
-                b"NaN" | b"Infinity" | b"-Infinity"
-            ) {
-                numbers.push(start..parser.current_index());
-            }
-        }
-    }
-    Some(())
 }

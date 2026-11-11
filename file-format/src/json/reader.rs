@@ -53,25 +53,23 @@ pub(super) fn json_reader(
         pending_input: BytesMut::new(),
     };
     let stream = stream::try_unfold(frames, |mut frames| async move {
-        frames
+        let bytes = frames
             .next_chunk(/*row_target=*/ 1, /*byte_target=*/ usize::MAX)
             .await
-            .map(|bytes| {
-                bytes.map(|bytes| {
-                    let bytes = match normalize_nonfinite(&bytes) {
-                        std::borrow::Cow::Borrowed(_) => bytes,
-                        std::borrow::Cow::Owned(normalized) => normalized.into(),
-                    };
-                    (bytes, frames)
-                })
-            })
             .map_err(|error| {
                 if error.operation() == "frame_json" {
                     decode_error(ArrowError::JsonError(error.to_string()))
                 } else {
                     error
                 }
-            })
+            })?;
+        Ok(bytes.map(|bytes| {
+            let bytes = match normalize_nonfinite(&bytes) {
+                std::borrow::Cow::Borrowed(_) => bytes,
+                std::borrow::Cow::Owned(normalized) => normalized.into(),
+            };
+            (bytes, frames)
+        }))
     });
     decode_batches(
         Box::new(StreamReader::new(stream, byte_metadata)),
