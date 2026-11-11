@@ -1,6 +1,8 @@
 //! Streaming decompression through the shared byte accessor and layer contracts.
 
 mod accessor;
+mod automatic;
+pub use automatic::{AutoDecompressionAccessor, AutoDecompressionLayer, Compression};
 #[cfg(any(feature = "tar", feature = "zip"))]
 mod archive;
 mod codec;
