@@ -1,3 +1,5 @@
+use crate::inference::SchemaInference;
+
 use super::{
     inference::{self, JsonInferenceOptions},
     reader::json_reader,
@@ -34,7 +36,17 @@ impl JsonFormat {
         self
     }
 
-    pub(super) async fn resolve(
+    pub fn new(schema: SchemaRef) -> Self {
+        Self {
+            schema: Some(schema),
+            inference: JsonInferenceOptions::default(),
+        }
+    }
+}
+
+#[async_trait]
+impl SchemaInference for JsonFormat {
+    async fn resolve_schema(
         &self,
         input: Box<dyn ByteReader>,
     ) -> Result<(Self, Box<dyn ByteReader>)> {
@@ -43,13 +55,6 @@ impl JsonFormat {
         }
         let (schema, input) = inference::infer(input, self.inference).await?;
         Ok((Self::new(schema), input))
-    }
-
-    pub fn new(schema: SchemaRef) -> Self {
-        Self {
-            schema: Some(schema),
-            inference: JsonInferenceOptions::default(),
-        }
     }
 }
 
@@ -99,7 +104,7 @@ impl ReaderFactory for JsonFormat {
         let (input, schema, decoder) = match prepared {
             Some((schema, decoder)) => (input, schema, decoder),
             None => {
-                let (format, input) = self.resolve(input).await?;
+                let (format, input) = self.resolve_schema(input).await?;
                 let (schema, decoder) = format.prepare(&request)?.expect("resolved JSON schema");
                 (input, schema, decoder)
             }
