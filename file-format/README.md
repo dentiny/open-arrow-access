@@ -74,3 +74,18 @@ preserving physical order, unmodified LargeBinary bodies, source identity and
 projection. Required-header/date conversion and Arrow building run in workers;
 byte framing and any upstream decompression remain sequential. No range access
 or custom WARC parser is required. Ordinary `open` keeps its sequential behavior.
+
+### Parquet LZ4 (raw and legacy Hadoop) pages
+
+Enable `parquet-lz4` on `open-arrow-access-file-format`, or
+`format-parquet-lz4` on the `open-arrow-access` facade, to read
+LZ4 (raw and legacy Hadoop)-compressed Parquet pages. The codec feature also enables the Parquet
+reader; plain `parquet` / `format-parquet` continues to support uncompressed and
+Snappy pages.
+
+```toml
+open-arrow-access = { git = "https://github.com/dentiny/open-arrow-access", features = ["format-parquet-lz4"] }
+```
+
+This uses the upstream Parquet codec and preserves range reads, projection, and
+row-group planning. It is independent of external byte decompression layers.
