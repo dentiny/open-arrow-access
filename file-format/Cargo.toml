@@ -12,6 +12,7 @@ csv = ["dep:arrow-csv", "dep:arrow-schema", "dep:csv", "dep:csv-async"]
 default = []
 json = ["dep:arrow-json", "dep:arrow-schema", "dep:bytes", "dep:serde_json"]
 parquet = ["dep:parquet", "dep:arrow-schema"]
+parquet-zstd = ["parquet", "parquet/zstd"]
 warc = ["dep:warc", "dep:arrow-schema"]
 xml = ["dep:xml-arrow"]
 
@@ -72,3 +73,7 @@ required-features = ["parquet"]
 [[test]]
 name = "document"
 required-features = ["json"]
+
+[[test]]
+name = "parquet_zstd"
+required-features = ["parquet-zstd"]
