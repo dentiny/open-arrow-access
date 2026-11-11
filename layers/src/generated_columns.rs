@@ -93,7 +93,6 @@ where
         let inner = self.inner.open(request).await?;
         let source = &inner.metadata().schema;
         let state = SessionContext::new().state();
-        let mut fields = source.fields().to_vec();
         let mut schema = Arc::clone(source);
         let mut column_names: HashSet<&str> = source
             .fields()
@@ -115,6 +114,7 @@ where
                 "open_arrow_access:generated_expression".into(),
                 spec.expression.clone(),
             );
+            let mut fields = schema.fields().to_vec();
             fields.push(Arc::new(
                 output
                     .as_ref()
@@ -122,10 +122,7 @@ where
                     .with_name(&spec.column)
                     .with_metadata(metadata),
             ));
-            schema = Arc::new(Schema::new_with_metadata(
-                fields.clone(),
-                source.metadata().clone(),
-            ));
+            schema = Arc::new(Schema::new_with_metadata(fields, source.metadata().clone()));
             steps.push(GeneratedStep {
                 output: Arc::clone(&schema),
                 expression,
