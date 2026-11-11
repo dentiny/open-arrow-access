@@ -11,7 +11,7 @@ use super::{
     accessor::FilePlanner,
     error::{empty_selection, schema_mismatch},
     schema,
-    validation::{validate_file_ordering, validate_file_policy},
+    validation::{validate_fields, validate_file_ordering, validate_file_policy},
 };
 
 pub(super) async fn plan<A>(
@@ -35,7 +35,7 @@ where
         validate_file_policy(&inspected)?;
         ordering = ordering.combine(inspected.ordering);
         let source = inspected.metadata.schema;
-        schema::validate(source.fields())?;
+        validate_fields(source.fields())?;
         union_schema = Some(match union_schema {
             None => source.as_ref().clone(),
             Some(ref previous) => schema::union_by_name(previous, source.as_ref())?,

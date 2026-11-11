@@ -7,48 +7,14 @@ use arrow_array::{
     Array, ArrayRef, RecordBatch, RecordBatchOptions, StructArray, make_array, new_null_array,
 };
 use arrow_schema::{DataType, Field, Fields, Schema};
-use open_arrow_access_core::{Error, ErrorKind, Result, SchemaRef};
+use open_arrow_access_core::{Result, SchemaRef};
 
-fn invalid(message: impl Into<String>) -> Error {
-    Error::new(ErrorKind::InvalidInput, "union_by_name", message)
-}
-
-fn arrow_error(source: arrow_schema::ArrowError) -> Error {
-    invalid(source.to_string()).with_source(source)
-}
-
-pub(super) fn validate(fields: &Fields) -> Result<()> {
-    let mut names = HashSet::new();
-    for field in fields {
-        if !names.insert(field.name()) {
-            return Err(invalid(format!("duplicate field '{}'", field.name())));
-        }
-        match field.data_type() {
-            DataType::Struct(fields) => validate(fields)?,
-            DataType::List(item)
-            | DataType::LargeList(item)
-            | DataType::FixedSizeList(item, _)
-            | DataType::ListView(item)
-            | DataType::LargeListView(item)
-            | DataType::Map(item, _) => {
-                validate(&vec![item.clone()].into())?;
-            }
-            _ => {}
-        }
-    }
-    Ok(())
-}
+use super::{error, validation};
 
 pub(super) fn union_by_name(left: &Schema, right: &Schema) -> Result<Schema> {
     let mut metadata = left.metadata().clone();
-    for (key, value) in right.metadata() {
-        if metadata.get(key).is_some_and(|existing| existing != value) {
-            return Err(invalid(format!(
-                "conflicting schema metadata for key '{key}'"
-            )));
-        }
-        metadata.insert(key.clone(), value.clone());
-    }
+    validation::validate_schema_metadata(left.metadata(), right.metadata())?;
+    metadata.extend(right.metadata().clone());
     Ok(Schema::new_with_metadata(
         union_fields(left.fields(), right.fields())?,
         metadata,
@@ -74,16 +40,9 @@ fn union_fields(left: &Fields, right: &Fields) -> Result<Fields> {
 }
 
 fn union_field(left: &Field, right: &Field) -> Result<Field> {
-    if left.name() != right.name() {
-        return Err(invalid(format!(
-            "list element names differ: '{}' and '{}'",
-            left.name(),
-            right.name()
-        )));
-    }
-    let data_type = union_type(left.data_type(), right.data_type()).map_err(|source| {
-        invalid(format!("field '{}': {source}", left.name())).with_source(source)
-    })?;
+    validation::validate_field_names(left, right)?;
+    let data_type = union_type(left.data_type(), right.data_type())
+        .map_err(|source| error::field_union_error(left.name(), source))?;
     let nullable = left.is_nullable()
         || right.is_nullable()
         || left.data_type() == &DataType::Null
@@ -95,7 +54,7 @@ fn union_field(left: &Field, right: &Field) -> Result<Field> {
     // Arrow enforces field metadata and dictionary-order compatibility.
     field
         .try_merge(&right.clone().with_data_type(data_type))
-        .map_err(arrow_error)?;
+        .map_err(error::arrow_error)?;
     Ok(field)
 }
 
@@ -123,11 +82,7 @@ fn union_type(left: &DataType, right: &DataType) -> Result<DataType> {
         (DataType::FixedSizeList(left, n), DataType::FixedSizeList(right, m)) if n == m => {
             DataType::FixedSizeList(Arc::new(union_field(left, right)?), *n)
         }
-        _ => {
-            return Err(invalid(format!(
-                "incompatible field types: {left} and {right}"
-            )));
-        }
+        _ => return Err(error::incompatible_types(left, right)),
     })
 }
 
@@ -146,7 +101,7 @@ pub(super) fn align(batch: RecordBatch, target: SchemaRef) -> Result<RecordBatch
         columns,
         &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
     )
-    .map_err(arrow_error)
+    .map_err(error::arrow_error)
 }
 
 fn align_fields(
@@ -189,7 +144,7 @@ fn align_array(array: &ArrayRef, target: &DataType) -> Result<ArrayRef> {
             array.len(),
         )
         .map(|array| Arc::new(array) as ArrayRef)
-        .map_err(arrow_error);
+        .map_err(error::arrow_error);
     }
     match target {
         DataType::List(item)
@@ -205,8 +160,8 @@ fn align_array(array: &ArrayRef, target: &DataType) -> Result<ArrayRef> {
                 .child_data(vec![child.to_data()])
                 .build()
                 .map(make_array)
-                .map_err(arrow_error)
+                .map_err(error::arrow_error)
         }
-        _ => Err(invalid("array type differs from its inspected schema")),
+        _ => Err(error::array_schema_mismatch()),
     }
 }
