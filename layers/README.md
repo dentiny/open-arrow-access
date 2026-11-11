@@ -6,6 +6,7 @@ must forward optional operations or remove their advertised capabilities.
 
 ## Available today
 
+- [`SamplingLayer`](../docs/sampling.md) for seeded, streaming Bernoulli row sampling.
 - The public layer contract, verified by test wrappers for byte and record accessors.
 - [`ParallelReadLayer`](../docs/parallel-read.md) for bounded concurrent partition execution with ordered output.
 - `TypeConversionLayer` for explicit Arrow column casts; it is always exported by the facade.
