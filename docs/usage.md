@@ -207,19 +207,19 @@ let reader = dataset.open(request).await?;
 
 Directories sort and deduplicate selected paths; explicit file sets preserve
 order and duplicates. Both read files lazily and sequentially. The first file
-fixes the output schema, and later files must match the projected schema,
-including metadata. An empty selection is invalid. Neither accessor merges
-schemas. With inferred XML, per-file samples can produce incompatible schemas;
-prefer explicit mappings for a stable multi-file contract.
+fixes the output schema by default, and later files must match the projected
+schema, including metadata. An empty selection is invalid. With inferred XML,
+per-file samples can produce incompatible schemas; explicit mappings provide a
+stable multi-file contract, or opt into union by name as described below.
 
 Both request types expose `with_options` and `with_byte_options`. Discovery needs
 listing capability; file sets can work without it.
 
-To reconcile missing/reordered columns instead of requiring identical schemas,
-add `.with_schema_merge()` to the FileSet or Directory accessor. Merging also
+To union missing/reordered columns by name instead of requiring identical schemas,
+add `.with_union_by_name()` to the FileSet or Directory accessor. Union by name also
 handles nested Struct/List fields and nullability. It performs a sequential schema
 preflight, then reopens files lazily; sources must remain stable. Projection is
-applied against the union rather than each file. See the [merge contract](../dataset/README.md#optional-schema-merging)
+applied against the union rather than each file. See the [union-by-name contract](../dataset/README.md#union-by-name)
 for type/metadata conflict rules and resource behavior.
 
 ## Read a Hugging Face split

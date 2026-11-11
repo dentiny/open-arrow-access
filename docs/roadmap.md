@@ -30,7 +30,7 @@ new project-specific storage implementation.
 
 | Workstream | Intended result | Prerequisite / completion boundary |
 | --- | --- | --- |
-| Cross-file schema reconciliation | Implemented: opt-in union and alignment of compatible shards | `with_schema_merge()`; conflicting types/metadata fail; implicit casts remain unsupported |
+| Cross-file union by name | Implemented: opt-in union and alignment of compatible shards | `with_union_by_name()`; conflicting types/metadata fail; implicit casts remain unsupported |
 | Generated columns | Compute derived fields during reading | Dependency-aware projection, fixed augmented schema, isolated expression-engine dependency |
 | Metrics | Observe source cost and throughput | Separate byte I/O from emitted rows/batches; preserve values, schema, and order |
 | Timeout and read budgets | Bound read operations and resource use | Cover sequential and ranged paths; preserve errors without replaying delivered records |
@@ -40,20 +40,20 @@ new project-specific storage implementation.
 | WARC Arrow conversion | Feed web-archive records into Arrow pipelines and existing record datasets | Defined schema, binary payload policy, provenance/record locator semantics |
 | Indexing and splitting | Plan format-specific independent work units | Validate index identity, compression coordinates, and source-order compatibility |
 
-## Schema inference and reconciliation
+## Schema inference and union by name
 
 CSV and JSON infer a fixed schema from a bounded per-input sample and replay the
 sampled records. CSV also supports header detection. Explicit schemas remain
-available. Per-file inference and cross-file reconciliation are independent:
-inference fixes each file's reading schema, while reconciliation combines those
+available. Per-file inference and cross-file union by name are independent:
+inference fixes each file's reading schema, while union by name combines those
 schemas into one dataset schema before any rows are emitted.
 
 Cross-file union and batch alignment are available through the opt-in
-`with_schema_merge()` setting. Fields retain first-seen order, missing fields
-become nullable, and nested Struct/List fields are reconciled recursively.
+`with_union_by_name()` setting. Fields retain first-seen order, missing fields
+become nullable, and nested Struct/List fields are combined recursively.
 Preflight checks all file schemas; actual reads reopen files lazily and reject
 schema drift. Type and metadata conflicts fail without implicit casts. See the
-[dataset merge contract](../dataset/README.md#optional-schema-merging).
+[dataset union-by-name contract](../dataset/README.md#union-by-name).
 
 ## Generated columns and observation
 

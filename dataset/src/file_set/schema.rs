@@ -10,7 +10,7 @@ use arrow_schema::{DataType, Field, Fields, Schema};
 use open_arrow_access_core::{Error, ErrorKind, Result, SchemaRef};
 
 fn invalid(message: impl Into<String>) -> Error {
-    Error::new(ErrorKind::InvalidInput, "merge_file_set", message)
+    Error::new(ErrorKind::InvalidInput, "union_by_name", message)
 }
 
 fn arrow_error(source: arrow_schema::ArrowError) -> Error {
@@ -39,7 +39,7 @@ pub(super) fn validate(fields: &Fields) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn merge(left: &Schema, right: &Schema) -> Result<Schema> {
+pub(super) fn union_by_name(left: &Schema, right: &Schema) -> Result<Schema> {
     let mut metadata = left.metadata().clone();
     for (key, value) in right.metadata() {
         if metadata.get(key).is_some_and(|existing| existing != value) {
@@ -50,18 +50,18 @@ pub(super) fn merge(left: &Schema, right: &Schema) -> Result<Schema> {
         metadata.insert(key.clone(), value.clone());
     }
     Ok(Schema::new_with_metadata(
-        merge_fields(left.fields(), right.fields())?,
+        union_fields(left.fields(), right.fields())?,
         metadata,
     ))
 }
 
-fn merge_fields(left: &Fields, right: &Fields) -> Result<Fields> {
+fn union_fields(left: &Fields, right: &Fields) -> Result<Fields> {
     let right_by_name: HashMap<_, _> = right.iter().map(|field| (field.name(), field)).collect();
     let left_names: HashSet<_> = left.iter().map(|field| field.name()).collect();
     let mut fields = Vec::with_capacity(left.len() + right.len());
     for field in left {
         fields.push(match right_by_name.get(field.name()) {
-            Some(other) => Arc::new(merge_field(field, other)?),
+            Some(other) => Arc::new(union_field(field, other)?),
             None => Arc::new(field.as_ref().clone().with_nullable(true)),
         });
     }
@@ -73,7 +73,7 @@ fn merge_fields(left: &Fields, right: &Fields) -> Result<Fields> {
     Ok(fields.into())
 }
 
-fn merge_field(left: &Field, right: &Field) -> Result<Field> {
+fn union_field(left: &Field, right: &Field) -> Result<Field> {
     if left.name() != right.name() {
         return Err(invalid(format!(
             "list element names differ: '{}' and '{}'",
@@ -81,7 +81,7 @@ fn merge_field(left: &Field, right: &Field) -> Result<Field> {
             right.name()
         )));
     }
-    let data_type = merge_type(left.data_type(), right.data_type()).map_err(|source| {
+    let data_type = union_type(left.data_type(), right.data_type()).map_err(|source| {
         invalid(format!("field '{}': {source}", left.name())).with_source(source)
     })?;
     let nullable = left.is_nullable()
@@ -99,29 +99,29 @@ fn merge_field(left: &Field, right: &Field) -> Result<Field> {
     Ok(field)
 }
 
-fn merge_type(left: &DataType, right: &DataType) -> Result<DataType> {
+fn union_type(left: &DataType, right: &DataType) -> Result<DataType> {
     if left == right {
         return Ok(left.clone());
     }
     Ok(match (left, right) {
         (DataType::Null, other) | (other, DataType::Null) => other.clone(),
         (DataType::Struct(left), DataType::Struct(right)) => {
-            DataType::Struct(merge_fields(left, right)?)
+            DataType::Struct(union_fields(left, right)?)
         }
         (DataType::List(left), DataType::List(right)) => {
-            DataType::List(Arc::new(merge_field(left, right)?))
+            DataType::List(Arc::new(union_field(left, right)?))
         }
         (DataType::LargeList(left), DataType::LargeList(right)) => {
-            DataType::LargeList(Arc::new(merge_field(left, right)?))
+            DataType::LargeList(Arc::new(union_field(left, right)?))
         }
         (DataType::ListView(left), DataType::ListView(right)) => {
-            DataType::ListView(Arc::new(merge_field(left, right)?))
+            DataType::ListView(Arc::new(union_field(left, right)?))
         }
         (DataType::LargeListView(left), DataType::LargeListView(right)) => {
-            DataType::LargeListView(Arc::new(merge_field(left, right)?))
+            DataType::LargeListView(Arc::new(union_field(left, right)?))
         }
         (DataType::FixedSizeList(left, n), DataType::FixedSizeList(right, m)) if n == m => {
-            DataType::FixedSizeList(Arc::new(merge_field(left, right)?), *n)
+            DataType::FixedSizeList(Arc::new(union_field(left, right)?), *n)
         }
         _ => {
             return Err(invalid(format!(

@@ -25,10 +25,10 @@ impl<B, A> DirectoryAccessor<B, A> {
         }
     }
 
-    /// Reconcile selected file schemas by name before reading any batches.
-    /// See [`FileSetAccessor::with_schema_merge`] for merge and preflight semantics.
-    pub fn with_schema_merge(mut self) -> Self {
-        self.files = self.files.with_schema_merge();
+    /// Union selected file schemas by name before reading any batches.
+    /// See [`FileSetAccessor::with_union_by_name`] for union and preflight semantics.
+    pub fn with_union_by_name(mut self) -> Self {
+        self.files = self.files.with_union_by_name();
         self
     }
 

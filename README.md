@@ -66,7 +66,7 @@ See [architecture](docs/architecture.md) for component boundaries and execution 
 | Storage | One OpenDAL adapter; configure filesystem, S3, HTTP, or other upstream backends | [Backend configuration and requirements](docs/support.md#storage) |
 | Compression | Gzip, bzip2, LZ4 frames, Zstandard | [Byte layers](decompression/README.md) |
 | Archives | ZIP Stored/Deflate entries; sequential or ranged TAR access | [Archive requirements](docs/support.md#compression-and-archives) |
-| Datasets | Ordered directory and explicit file-set reads; strict schemas or opt-in union/alignment | [Multi-file reads](docs/usage.md#read-multiple-shards) |
+| Datasets | Ordered directory and explicit file-set reads; strict schemas or opt-in union by name | [Multi-file reads](docs/usage.md#read-multiple-shards) |
 | Providers | Hugging Face, Common Crawl, PMC, Gutenberg, research repositories, books, and government data | [Provider matrix and output types](docs/support.md#dataset-providers) |
 | Execution | Pull-based reads; per-reader storage I/O concurrency | [Ordering and concurrency](docs/architecture.md#execution-and-resource-ownership) |
 

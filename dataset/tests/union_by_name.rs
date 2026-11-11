@@ -13,7 +13,7 @@ use open_arrow_access_storage::OpenDalAccessor;
 use parquet::arrow::ArrowWriter;
 
 #[tokio::test]
-async fn json_directory_merges_nested_struct_and_list_fields_before_emitting_rows() {
+async fn json_directory_union_by_name_aligns_nested_struct_and_list_fields() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("a.jsonl"), b"{\"id\":1,\"all_null\":null,\"meta\":{\"left\":\"a\"},\"items\":[{\"x\":1}]}\n{\"id\":2,\"meta\":null,\"items\":[]}\n").unwrap();
     std::fs::write(
@@ -24,7 +24,7 @@ async fn json_directory_merges_nested_struct_and_list_fields_before_emitting_row
     for native in [false, true] {
         let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
         let directory = DirectoryAccessor::new(storage.clone(), JsonAccessor::infer(storage))
-            .with_schema_merge();
+            .with_union_by_name();
         let mut request = DirectoryRequest::new("");
         request.suffix = Some(".jsonl".into());
         let mut reader = if native {
@@ -132,7 +132,7 @@ async fn json_directory_merges_nested_struct_and_list_fields_before_emitting_row
 }
 
 #[tokio::test]
-async fn merged_projection_can_select_a_column_missing_from_the_first_file() {
+async fn union_by_name_projection_can_select_a_column_missing_from_the_first_file() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("a.jsonl"), b"{\"id\":1}\n").unwrap();
     std::fs::write(
@@ -141,7 +141,7 @@ async fn merged_projection_can_select_a_column_missing_from_the_first_file() {
     )
     .unwrap();
     let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
-    let files = FileSetAccessor::new(JsonAccessor::infer(storage)).with_schema_merge();
+    let files = FileSetAccessor::new(JsonAccessor::infer(storage)).with_union_by_name();
     for columns in [vec!["tail".to_owned(), "id".to_owned()], vec![]] {
         let request = FileSetRequest::new(["a.jsonl", "b.jsonl"]).with_options(ReadOptions {
             projection: Some(columns.clone()),
@@ -170,7 +170,7 @@ async fn merged_projection_can_select_a_column_missing_from_the_first_file() {
 }
 
 #[tokio::test]
-async fn parquet_merge_aligns_by_name_and_only_relaxes_missing_fields() {
+async fn parquet_union_by_name_only_relaxes_missing_fields() {
     let dir = tempfile::tempdir().unwrap();
     let batches = [
         RecordBatch::try_new(
@@ -204,7 +204,7 @@ async fn parquet_merge_aligns_by_name_and_only_relaxes_missing_fields() {
     }
     let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
     let files = FileSetAccessor::new(ParquetAccessor::new(storage))
-        .with_schema_merge()
+        .with_union_by_name()
         .with_file_planning();
     let mut reader = files
         .layer(ParallelReadLayer::new(

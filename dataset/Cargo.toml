@@ -43,5 +43,5 @@ name = "atif"
 required-features = ["directory"]
 
 [[test]]
-name = "schema_merge"
+name = "union_by_name"
 required-features = ["directory"]

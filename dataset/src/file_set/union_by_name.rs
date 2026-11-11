@@ -26,7 +26,7 @@ where
     // A requested column may be absent in one file and present in another.
     request.options.projection = None;
     let mut files = Vec::new();
-    let mut merged = None;
+    let mut union_schema = None;
     let mut ordering = inner.capability().ordering;
     // Drop each inspected reader/plan before opening the next file, so JSON
     // samples and native partitions are not retained across the entire dataset.
@@ -36,14 +36,14 @@ where
         ordering = ordering.combine(inspected.ordering);
         let source = inspected.metadata.schema;
         schema::validate(source.fields())?;
-        merged = Some(match merged {
+        union_schema = Some(match union_schema {
             None => source.as_ref().clone(),
-            Some(ref previous) => schema::merge(previous, source.as_ref())?,
+            Some(ref previous) => schema::union_by_name(previous, source.as_ref())?,
         });
         files.push((request, source));
     }
-    let merged = Arc::new(merged.ok_or_else(|| empty_selection("merge_file_set"))?);
-    let (target, _) = options.resolve_projection(&merged)?;
+    let union_schema = Arc::new(union_schema.ok_or_else(|| empty_selection("union_by_name"))?);
+    let (target, _) = options.resolve_projection(&union_schema)?;
     let metadata = RecordMetadata {
         schema: target.clone(),
         source: None,

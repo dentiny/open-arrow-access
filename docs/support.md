@@ -22,8 +22,8 @@ is listed in the [roadmap](roadmap.md).
 Projection selects top-level fields in caller order. Record readers expose a
 fixed schema at open. CSV and JSON support bounded per-input schema inference;
 CSV also supports automatic header detection. FileSet/Directory provide opt-in
-cross-file schema union and alignment through `with_schema_merge()`. XML already infers schemas independently for each file; use explicit
-mappings when multiple files must share a schema.
+cross-file union by name through `with_union_by_name()`. XML infers schemas
+independently for each file; explicit mappings can fix a shared reading schema.
 
 See [format behavior](formats.md) for layout, validation, and memory limits.
 There is no automatic format or compression detection. PDF, HTML, images, and
@@ -85,13 +85,13 @@ and the [TAR example](../examples/read_tar.rs).
 
 | Selection | Feature | Ordering | Schema policy |
 | --- | --- | --- | --- |
-| `DirectoryAccessor` | `dataset-directory` | Recursive by default; suffix selection; lexicographically sorted and deduplicated paths | Exact projected schema by default; opt-in union and alignment with `with_schema_merge()` |
-| `FileSetAccessor` | `dataset-directory` | Caller order; repeated objects retained | Same strict/merge policies; empty selection is invalid |
+| `DirectoryAccessor` | `dataset-directory` | Recursive by default; suffix selection; lexicographically sorted and deduplicated paths | Exact projected schema by default; opt-in union by name with `with_union_by_name()` |
+| `FileSetAccessor` | `dataset-directory` | Caller order; repeated objects retained | Same strict/union-by-name policies; empty selection is invalid |
 | Hugging Face Parquet split | `service-huggingface` | Sorted shards from the selected config/split and pinned export commit | Reuses Parquet and FileSet |
 
-With schema merging enabled, each file is inspected in sequence before data is
+With union by name enabled, each file is inspected in sequence before data is
 emitted, then reopened lazily. Missing fields receive nulls; conflicting types or
-metadata fail. See the [merge contract](../dataset/README.md#optional-schema-merging).
+metadata fail. See the [union-by-name contract](../dataset/README.md#union-by-name).
 
 Multi-file contents are read lazily and sequentially. Directory discovery collects
 the selected paths before reading to establish order. It is not an atomic

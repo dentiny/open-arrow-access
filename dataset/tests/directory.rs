@@ -683,7 +683,7 @@ async fn native_file_plans_share_one_budget_and_preserve_lazy_ordered_selection(
 }
 
 #[tokio::test]
-async fn schema_merge_preflight_rejects_type_and_metadata_conflicts_and_drops_readers() {
+async fn union_by_name_preflight_rejects_type_and_metadata_conflicts_and_drops_readers() {
     let left = schema("same");
     for right in [
         Arc::new(Schema::new(vec![Field::new("id", DataType::Utf8, false)])),
@@ -705,7 +705,7 @@ async fn schema_merge_preflight_rejects_type_and_metadata_conflicts_and_drops_re
             ("a", FileData::new(left, vec![])),
             ("b", FileData::new(right, vec![])),
         ]);
-        let accessor = FileSetAccessor::new(files.clone()).with_schema_merge();
+        let accessor = FileSetAccessor::new(files.clone()).with_union_by_name();
         let error = accessor
             .open(FileSetRequest::new(["a", "b"]))
             .await
@@ -719,11 +719,11 @@ async fn schema_merge_preflight_rejects_type_and_metadata_conflicts_and_drops_re
 }
 
 #[tokio::test]
-async fn schema_merge_still_checks_each_batch_against_its_source_schema() {
+async fn union_by_name_still_checks_each_batch_against_its_source_schema() {
     let declared = schema("declared");
     let other = schema("other");
     let files = Files::new([("a", FileData::new(declared, vec![batch(other, &[1])]))]);
-    let accessor = FileSetAccessor::new(files.clone()).with_schema_merge();
+    let accessor = FileSetAccessor::new(files.clone()).with_union_by_name();
     let mut reader = accessor.open(FileSetRequest::new(["a"])).await.unwrap();
     assert_eq!(files.active.load(Ordering::SeqCst), 0);
     assert_eq!(
@@ -735,7 +735,7 @@ async fn schema_merge_still_checks_each_batch_against_its_source_schema() {
 }
 
 #[tokio::test]
-async fn schema_merge_rejects_a_schema_that_changes_after_preflight() {
+async fn union_by_name_rejects_a_schema_that_changes_after_preflight() {
     #[derive(Clone)]
     struct Changing(Arc<AtomicUsize>);
     #[async_trait]
@@ -761,7 +761,7 @@ async fn schema_merge_rejects_a_schema_that_changes_after_preflight() {
             )))
         }
     }
-    let accessor = FileSetAccessor::new(Changing(Arc::default())).with_schema_merge();
+    let accessor = FileSetAccessor::new(Changing(Arc::default())).with_union_by_name();
     let mut reader = accessor.open(FileSetRequest::new(["a"])).await.unwrap();
     assert_eq!(
         reader.next().await.unwrap_err().operation(),
