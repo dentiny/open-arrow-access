@@ -46,7 +46,9 @@ sample includes up to 1000 complete records (including the potential header) or
 64 MiB of canonical CSV bytes. Configure sampling and override header detection
 with `with_inference_options(CsvInferenceOptions { max_records, max_bytes, has_header })`.
 `has_header: None` compares the first record with types inferred from subsequent
-records; ambiguous all-string samples default to a header. Use `Some(false)` for
+records: string labels above typed data indicate a header. Numeric widening
+and later nulls alone do not mark the first row as a header. Ambiguous all-string
+samples default to a header. Use `Some(false)` for
 headerless string data, which receives `column_1`, `column_2`, etc.
 
 Inference uses the source `CsvDialect`, preserving quoted delimiters, multiline

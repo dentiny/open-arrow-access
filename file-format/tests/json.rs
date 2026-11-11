@@ -298,49 +298,51 @@ async fn parallel_json_framing_handles_nested_values_and_rejects_invalid_syntax(
 async fn inference_deduces_nested_types_and_replays_sampled_records() {
     use open_arrow_access_file_format::json::JsonInferenceOptions;
     let bytes = fixture!("json", "inference.jsonl").await;
-    let input = MemoryAccessor::new(&bytes, 7);
-    let mut reader = JsonAccessor::infer(input)
-        .with_inference_options(JsonInferenceOptions {
-            max_records: 2,
-            max_bytes: 1024,
-        })
-        .open(request(1, None))
-        .await
-        .unwrap();
-    let schema = reader.metadata().schema.clone();
-    assert_eq!(
-        schema.field_with_name("id").unwrap().data_type(),
-        &DataType::Int64
-    );
-    let DataType::List(item) = schema.field_with_name("values").unwrap().data_type() else {
-        panic!("expected an inferred list");
-    };
-    assert_eq!(item.data_type(), &DataType::Int64);
-    let DataType::Struct(fields) = schema.field_with_name("nested").unwrap().data_type() else {
-        panic!("expected an inferred struct");
-    };
-    assert_eq!(fields[0].name(), "name");
-    assert_eq!(fields[0].data_type(), &DataType::Utf8);
-    let extra = schema.field_with_name("extra").unwrap();
-    assert_eq!(extra.data_type(), &DataType::Boolean);
-    assert!(extra.is_nullable());
-    let mut output_ids = Vec::new();
-    let mut nulls = 0;
-    while let Some(batch) = reader.next().await.unwrap() {
-        assert_eq!(batch.schema(), schema);
-        output_ids.extend_from_slice(
-            batch
-                .column_by_name("id")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .unwrap()
-                .values(),
+    for chunk_size in [1, 7, 4096] {
+        let input = MemoryAccessor::new(&bytes, chunk_size);
+        let mut reader = JsonAccessor::infer(input)
+            .with_inference_options(JsonInferenceOptions {
+                max_records: 2,
+                max_bytes: 1024,
+            })
+            .open(request(1, None))
+            .await
+            .unwrap();
+        let schema = reader.metadata().schema.clone();
+        assert_eq!(
+            schema.field_with_name("id").unwrap().data_type(),
+            &DataType::Int64
         );
-        nulls += batch.column_by_name("extra").unwrap().null_count();
+        let DataType::List(item) = schema.field_with_name("values").unwrap().data_type() else {
+            panic!("expected an inferred list");
+        };
+        assert_eq!(item.data_type(), &DataType::Int64);
+        let DataType::Struct(fields) = schema.field_with_name("nested").unwrap().data_type() else {
+            panic!("expected an inferred struct");
+        };
+        assert_eq!(fields[0].name(), "name");
+        assert_eq!(fields[0].data_type(), &DataType::Utf8);
+        let extra = schema.field_with_name("extra").unwrap();
+        assert_eq!(extra.data_type(), &DataType::Boolean);
+        assert!(extra.is_nullable());
+        let mut output_ids = Vec::new();
+        let mut nulls = 0;
+        while let Some(batch) = reader.next().await.unwrap() {
+            assert_eq!(batch.schema(), schema);
+            output_ids.extend_from_slice(
+                batch
+                    .column_by_name("id")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap()
+                    .values(),
+            );
+            nulls += batch.column_by_name("extra").unwrap().null_count();
+        }
+        assert_eq!(output_ids, [1, 2, 3]);
+        assert_eq!(nulls, 2);
     }
-    assert_eq!(output_ids, [1, 2, 3]);
-    assert_eq!(nulls, 2);
 }
 
 #[tokio::test]
@@ -375,18 +377,20 @@ async fn inference_fixes_the_schema_at_record_and_byte_sample_limits() {
             max_bytes: 1,
         },
     ] {
-        let input = MemoryAccessor::new(b"{\"id\":1} {\"id\":\"bad\"}", 1);
-        let mut reader = JsonAccessor::infer(input)
-            .with_inference_options(options)
-            .open(request(1, None))
-            .await
-            .unwrap();
-        assert_eq!(
-            reader.metadata().schema.field(0).data_type(),
-            &DataType::Int64
-        );
-        assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
-        assert!(reader.next().await.is_err());
+        for chunk_size in [1, 4096] {
+            let input = MemoryAccessor::new(b"{\"id\":1} {\"id\":\"bad\"}", chunk_size);
+            let mut reader = JsonAccessor::infer(input)
+                .with_inference_options(options)
+                .open(request(1, None))
+                .await
+                .unwrap();
+            assert_eq!(
+                reader.metadata().schema.field(0).data_type(),
+                &DataType::Int64
+            );
+            assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
+            assert!(reader.next().await.is_err());
+        }
     }
 }
 
