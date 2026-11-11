@@ -13,7 +13,7 @@ default = []
 futures.workspace = true
 indexmap.workspace = true
 open-arrow-access-core.workspace = true
-opendal = { workspace = true, features = ["executors-tokio"] }
+opendal = { workspace = true, features = ["executors-tokio", "layers-retry", "layers-timeout"] }
 tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
