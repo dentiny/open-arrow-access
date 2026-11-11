@@ -1,4 +1,4 @@
-use super::{CsvDialect, CsvFileFormat, CsvFormat};
+use super::{CsvDialect, CsvFileFormat, CsvFormat, CsvInferenceOptions};
 use crate::FileAccessor;
 use open_arrow_access_core::SchemaRef;
 
@@ -6,6 +6,15 @@ use open_arrow_access_core::SchemaRef;
 pub type CsvAccessor<B> = FileAccessor<B, CsvFileFormat>;
 
 impl<B> FileAccessor<B, CsvFileFormat> {
+    /// Infer column types and detect headers from a bounded sample at open.
+    pub fn infer(inner: B) -> Self {
+        Self::from_format(inner, CsvFileFormat::infer())
+    }
+
+    pub fn with_inference_options(self, options: CsvInferenceOptions) -> Self {
+        self.map_format(|format| format.with_inference_options(options))
+    }
+
     pub fn new(inner: B, schema: SchemaRef) -> Self {
         Self::from_format(inner, CsvFileFormat::new(schema))
     }
