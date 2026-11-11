@@ -1,3 +1,5 @@
+use crate::inference::SchemaInference;
+
 use futures::{
     TryStreamExt,
     io::{AsyncReadExt, Cursor},
@@ -22,16 +24,22 @@ where
             return Ok(ScanPlan::whole_input(self.open(request).await?)
                 .with_ordering(self.capability().ordering));
         };
-        let (schema, _) = format.prepare(&request)?;
-        let metadata = RecordMetadata {
-            schema,
-            source: Some(request.object.clone()),
-        };
+        let prepared = format.prepare(&request)?;
         let input = self
             .binding
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
+        let (format, input) = format.resolve_schema(input).await?;
+        let (schema, _) = match prepared {
+            Some(prepared) => prepared,
+            None => format.prepare(&request)?.expect("resolved CSV schema"),
+        };
+        let dialect = format.parallel_dialect().unwrap_or(dialect);
+        let metadata = RecordMetadata {
+            schema,
+            source: Some(request.object.clone()),
+        };
         // Workers read canonical CSV, regardless of the source dialect.
         let format = format.with_dialect(CsvDialect {
             has_header: dialect.has_header,
@@ -66,7 +74,7 @@ where
     }
 }
 
-struct CsvChunks {
+pub(super) struct CsvChunks {
     records: csv_async::AsyncReader<Box<dyn futures::io::AsyncRead + Unpin + Send>>,
     record: csv_async::ByteRecord,
     header: Option<csv_async::ByteRecord>,
@@ -75,7 +83,7 @@ struct CsvChunks {
 }
 
 impl CsvChunks {
-    async fn new(input: Box<dyn ByteReader>, dialect: CsvDialect) -> Result<Self> {
+    pub(super) async fn new(input: Box<dyn ByteReader>, dialect: CsvDialect) -> Result<Self> {
         let mut input = into_async_read(input, "frame_csv");
         // csv-async's parser does not recognize a BOM split across input chunks.
         // Normalize only the source prefix, stopping as soon as a BOM is ruled out.
@@ -114,7 +122,11 @@ impl CsvChunks {
         })
     }
 
-    async fn next_chunk(&mut self, row_target: usize, byte_target: usize) -> Result<Option<Bytes>> {
+    pub(super) async fn next_chunk(
+        &mut self,
+        row_target: usize,
+        byte_target: usize,
+    ) -> Result<Option<Bytes>> {
         let mut output = Vec::new();
         let mut rows = 0;
         {
