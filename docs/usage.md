@@ -215,6 +215,13 @@ prefer explicit mappings for a stable multi-file contract.
 Both request types expose `with_options` and `with_byte_options`. Discovery needs
 listing capability; file sets can work without it.
 
+To reconcile missing/reordered columns instead of requiring identical schemas,
+add `.with_schema_merge()` to the FileSet or Directory accessor. Merging also
+handles nested Struct/List fields and nullability. It performs a sequential schema
+preflight, then reopens files lazily; sources must remain stable. Projection is
+applied against the union rather than each file. See the [merge contract](../dataset/README.md#optional-schema-merging)
+for type/metadata conflict rules and resource behavior.
+
 ## Read a Hugging Face split
 
 Enable `service-huggingface`; it brings in the provider's internal Parquet and

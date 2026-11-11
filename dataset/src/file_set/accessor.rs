@@ -14,17 +14,19 @@ use super::{
     validation::{validate_file_ordering, validate_file_policy},
 };
 
-type FilePlanner<A> = fn(Arc<A>, ReadRequest) -> BoxFuture<'static, Result<ScanPlan>>;
+pub(super) type FilePlanner<A> = fn(Arc<A>, ReadRequest) -> BoxFuture<'static, Result<ScanPlan>>;
 
 /// Read files sequentially through one supplied format accessor.
 ///
 /// The first file determines the fixed output schema. Later files must have
-/// exactly the same projected schema, including metadata. An empty selection
+/// exactly the same projected schema, including metadata, unless schema merging
+/// is explicitly enabled. An empty selection
 /// is invalid; an empty file with a known schema is supported.
 #[derive(Debug)]
 pub struct FileSetAccessor<A> {
     inner: Arc<A>,
     file_planner: Option<FilePlanner<A>>,
+    merge_schema: bool,
 }
 
 impl<A> Clone for FileSetAccessor<A> {
@@ -32,6 +34,7 @@ impl<A> Clone for FileSetAccessor<A> {
         Self {
             inner: self.inner.clone(),
             file_planner: self.file_planner,
+            merge_schema: self.merge_schema,
         }
     }
 }
@@ -41,7 +44,17 @@ impl<A> FileSetAccessor<A> {
         Self {
             inner: Arc::new(inner),
             file_planner: None,
+            merge_schema: false,
         }
+    }
+
+    /// Merge compatible schemas by name, recursively aligning Struct/List fields
+    /// and filling missing fields with null. Inspect all files before emitting rows;
+    /// readers are then reopened lazily, and must retain their inspected schema.
+    /// The default remains exact projected-schema matching.
+    pub fn with_schema_merge(mut self) -> Self {
+        self.merge_schema = true;
+        self
     }
 
     /// Flatten native file partitions into one ordered scan and executor budget.
@@ -75,6 +88,10 @@ where
     }
 
     async fn open(&self, request: FileSetRequest) -> Result<Box<dyn RecordReader>> {
+        if self.merge_schema {
+            let plan = super::merge::plan(self.inner.clone(), None, request).await?;
+            return Ok(Box::new(plan.into_reader()));
+        }
         let mut requests = request.into_requests();
         let first = requests
             .next()
@@ -99,6 +116,9 @@ where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
 {
     async fn plan_scan(&self, request: FileSetRequest) -> Result<ScanPlan> {
+        if self.merge_schema {
+            return super::merge::plan(self.inner.clone(), self.file_planner, request).await;
+        }
         let mut requests = request.into_requests();
         let first = requests
             .next()

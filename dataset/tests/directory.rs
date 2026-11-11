@@ -681,3 +681,91 @@ async fn native_file_plans_share_one_budget_and_preserve_lazy_ordered_selection(
         "mismatch"
     );
 }
+
+#[tokio::test]
+async fn schema_merge_preflight_rejects_type_and_metadata_conflicts_and_drops_readers() {
+    let left = schema("same");
+    for right in [
+        Arc::new(Schema::new(vec![Field::new("id", DataType::Utf8, false)])),
+        schema("different"),
+        Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false)
+                .with_metadata([("key".to_owned(), "right".to_owned())].into()),
+        ])),
+    ] {
+        let left = if right.field(0).metadata().contains_key("key") {
+            Arc::new(Schema::new(vec![
+                Field::new("id", DataType::Int64, false)
+                    .with_metadata([("key".to_owned(), "left".to_owned())].into()),
+            ]))
+        } else {
+            left.clone()
+        };
+        let files = Files::new([
+            ("a", FileData::new(left, vec![])),
+            ("b", FileData::new(right, vec![])),
+        ]);
+        let accessor = FileSetAccessor::new(files.clone()).with_schema_merge();
+        let error = accessor
+            .open(FileSetRequest::new(["a", "b"]))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(files.max_active.load(Ordering::SeqCst), 1);
+        assert_eq!(files.active.load(Ordering::SeqCst), 0);
+        assert_eq!(files.opens.lock().unwrap().len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn schema_merge_still_checks_each_batch_against_its_source_schema() {
+    let declared = schema("declared");
+    let other = schema("other");
+    let files = Files::new([("a", FileData::new(declared, vec![batch(other, &[1])]))]);
+    let accessor = FileSetAccessor::new(files.clone()).with_schema_merge();
+    let mut reader = accessor.open(FileSetRequest::new(["a"])).await.unwrap();
+    assert_eq!(files.active.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        reader.next().await.unwrap_err().operation(),
+        "read_file_set"
+    );
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(files.active.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn schema_merge_rejects_a_schema_that_changes_after_preflight() {
+    #[derive(Clone)]
+    struct Changing(Arc<AtomicUsize>);
+    #[async_trait]
+    impl Accessor for Changing {
+        type Request = ReadRequest;
+        type Reader = dyn RecordReader;
+        fn capability(&self) -> RecordCapability {
+            RecordCapability::sequential(OrderRequirement::PreserveGlobal)
+        }
+        async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
+            let label = if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                "before"
+            } else {
+                "after"
+            };
+            Ok(Box::new(open_arrow_access_core::StreamReader::records(
+                stream::empty(),
+                RecordMetadata {
+                    schema: schema(label),
+                    source: Some(request.object),
+                },
+                OrderRequirement::PreserveGlobal,
+            )))
+        }
+    }
+    let accessor = FileSetAccessor::new(Changing(Arc::default())).with_schema_merge();
+    let mut reader = accessor.open(FileSetRequest::new(["a"])).await.unwrap();
+    assert_eq!(
+        reader.next().await.unwrap_err().operation(),
+        "read_file_set"
+    );
+    assert!(reader.next().await.unwrap().is_none());
+}

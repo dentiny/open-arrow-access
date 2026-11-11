@@ -18,7 +18,8 @@ public implementations or reserved Cargo feature flags.
 - Caller-configured OpenDAL storage, exact ranges, discovery, and per-reader I/O settings.
 - Parquet, CSV/TSV, JSON/JSONL, XML, and ATIF Arrow readers; native WARC parsing.
 - Streaming gzip, bzip2, LZ4, and Zstandard; ZIP and TAR entry access.
-- Ordered directory/file-set reads with strict projected-schema compatibility.
+- Ordered directory/file-set reads with strict projected-schema compatibility by default,
+  plus opt-in cross-file union, nested Struct/List alignment, and missing-field nulls.
 - Provider discovery, metadata, and file access, including a Hugging Face Parquet split reader.
 
 The earlier framework PR plan is superseded by this capability view. S3 uses the
@@ -29,7 +30,7 @@ new project-specific storage implementation.
 
 | Workstream | Intended result | Prerequisite / completion boundary |
 | --- | --- | --- |
-| Cross-file schema reconciliation | Read compatible shards with missing or reordered fields | Explicit merge rules, nullability/metadata conflict policy, batch alignment, opt-in supported casts |
+| Cross-file schema reconciliation | Implemented: opt-in union and alignment of compatible shards | `with_schema_merge()`; conflicting types/metadata fail; implicit casts remain unsupported |
 | Generated columns | Compute derived fields during reading | Dependency-aware projection, fixed augmented schema, isolated expression-engine dependency |
 | Metrics | Observe source cost and throughput | Separate byte I/O from emitted rows/batches; preserve values, schema, and order |
 | Timeout and read budgets | Bound read operations and resource use | Cover sequential and ranged paths; preserve errors without replaying delivered records |
@@ -41,20 +42,18 @@ new project-specific storage implementation.
 
 ## Schema inference and reconciliation
 
-Inference comes first, followed by cross-file merging and batch alignment as
-separate changes. Explicit schemas remain supported, and merging stays opt-in.
+CSV and JSON infer a fixed schema from a bounded per-input sample and replay the
+sampled records. CSV also supports header detection. Explicit schemas remain
+available. Per-file inference and cross-file reconciliation are independent:
+inference fixes each file's reading schema, while reconciliation combines those
+schemas into one dataset schema before any rows are emitted.
 
-Inference must bound its sample, retain sampled input for replay, and resolve the
-output schema before returning a reader. Later values outside that schema need
-an explicit error policy. CSV and JSON now support bounded per-input inference
-and replay; CSV also supports header detection. Dataset-wide merging remains
-separate work.
-
-Cross-file rules must define field order, nullability, nested compatibility, and
-metadata conflicts. Alignment should reorder by name and fill missing nullable
-fields with nulls. Incompatible types must fail unless the caller selects an
-explicit supported cast policy. CSV headers and column compatibility need their
-own format rules.
+Cross-file union and batch alignment are available through the opt-in
+`with_schema_merge()` setting. Fields retain first-seen order, missing fields
+become nullable, and nested Struct/List fields are reconciled recursively.
+Preflight checks all file schemas; actual reads reopen files lazily and reject
+schema drift. Type and metadata conflicts fail without implicit casts. See the
+[dataset merge contract](../dataset/README.md#optional-schema-merging).
 
 ## Generated columns and observation
 

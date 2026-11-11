@@ -25,6 +25,13 @@ impl<B, A> DirectoryAccessor<B, A> {
         }
     }
 
+    /// Reconcile selected file schemas by name before reading any batches.
+    /// See [`FileSetAccessor::with_schema_merge`] for merge and preflight semantics.
+    pub fn with_schema_merge(mut self) -> Self {
+        self.files = self.files.with_schema_merge();
+        self
+    }
+
     /// Use each selected format's native partitions under the shared executor budget.
     pub fn with_file_planning(mut self) -> Self
     where

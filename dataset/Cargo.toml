@@ -11,18 +11,19 @@ default = []
 directory = []
 
 [dependencies]
+arrow-array.workspace = true
+arrow-schema.workspace = true
 futures.workspace = true
 open-arrow-access-core.workspace = true
 
 [dev-dependencies]
-arrow-array.workspace = true
-arrow-schema.workspace = true
 more-asserts.workspace = true
 open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
-open-arrow-access-file-format = { workspace = true, features = ["atif", "parquet"] }
+open-arrow-access-file-format = { workspace = true, features = ["atif", "json", "parquet"] }
 open-arrow-access-layers.workspace = true
 open-arrow-access-storage.workspace = true
 open-arrow-access-test-support.workspace = true
+parquet.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 
@@ -39,4 +40,8 @@ required-features = ["directory"]
 
 [[test]]
 name = "atif"
+required-features = ["directory"]
+
+[[test]]
+name = "schema_merge"
 required-features = ["directory"]
