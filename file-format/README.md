@@ -74,3 +74,18 @@ preserving physical order, unmodified LargeBinary bodies, source identity and
 projection. Required-header/date conversion and Arrow building run in workers;
 byte framing and any upstream decompression remain sequential. No range access
 or custom WARC parser is required. Ordinary `open` keeps its sequential behavior.
+
+### Parquet Gzip pages
+
+Enable `parquet-gzip` on `open-arrow-access-file-format`, or
+`format-parquet-gzip` on the `open-arrow-access` facade, to read
+Gzip-compressed Parquet pages. The codec feature also enables the Parquet
+reader; plain `parquet` / `format-parquet` continues to support uncompressed and
+Snappy pages.
+
+```toml
+open-arrow-access = { git = "https://github.com/dentiny/open-arrow-access", features = ["format-parquet-gzip"] }
+```
+
+This uses the upstream Parquet codec and preserves range reads, projection, and
+row-group planning. It is independent of external byte decompression layers.

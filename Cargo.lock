@@ -3043,6 +3043,7 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "chrono",
+ "flate2",
  "futures",
  "half",
  "hashbrown 0.17.1",
