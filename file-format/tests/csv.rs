@@ -588,3 +588,45 @@ async fn inference_propagates_source_errors_and_rejects_opaque_formats_before_io
     );
     assert_eq!(observed.requests.lock().unwrap().len(), 0);
 }
+
+#[tokio::test]
+async fn inference_preserves_typed_first_rows_when_later_rows_have_narrower_types() {
+    use arrow_array::Float64Array;
+    for (bytes, expected) in [
+        (b"1.5\n2\n".as_slice(), vec![Some(1.5), Some(2.0)]),
+        (b"1.5\n\"\"\n", vec![Some(1.5), None]),
+        (b"1.5\n", vec![Some(1.5)]),
+        (b"1.5,first\n2,second\n", vec![Some(1.5), Some(2.0)]),
+    ] {
+        for chunk_size in [1, 4096] {
+            for parallel in [false, true] {
+                let accessor = CsvAccessor::infer(MemoryAccessor::new(bytes, chunk_size));
+                let request = ReadRequest::new("records.csv").with_options(options(1, None));
+                let mut reader = if parallel {
+                    accessor
+                        .layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN))
+                        .open(request)
+                        .await
+                        .unwrap()
+                } else {
+                    accessor.open(request).await.unwrap()
+                };
+                assert_eq!(reader.metadata().schema.field(0).name(), "column_1");
+                assert_eq!(
+                    reader.metadata().schema.field(0).data_type(),
+                    &DataType::Float64
+                );
+                let mut actual = Vec::new();
+                while let Some(batch) = reader.next().await.unwrap() {
+                    let values = batch
+                        .column(0)
+                        .as_any()
+                        .downcast_ref::<Float64Array>()
+                        .unwrap();
+                    actual.extend(values.iter());
+                }
+                assert_eq!(actual, expected, "{bytes:?}");
+            }
+        }
+    }
+}

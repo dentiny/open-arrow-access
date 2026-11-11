@@ -49,33 +49,39 @@ pub(super) async fn infer(
     let mut offset = 0;
     let mut records = Vec::new();
     let mut eof = false;
-    loop {
+    'sampling: loop {
+        // Normalize each fetched tail once, then consume all complete objects.
+        // Rebuilding the normalized tail per object repeatedly scans lookahead.
         let sample = super::nonfinite::inference_sample(&buffered[offset..], eof);
+        let start = offset;
         let mut values = Deserializer::from_slice(&sample).into_iter::<Value>();
-        match values.next() {
-            Some(Ok(value)) => {
-                if !value.is_object() {
-                    return Err(Error::new(
-                        ErrorKind::Decode,
-                        "infer_json",
-                        "expected a JSON object",
-                    ));
+        while let Some(value) = values.next() {
+            match value {
+                Ok(value) => {
+                    if !value.is_object() {
+                        return Err(Error::new(
+                            ErrorKind::Decode,
+                            "infer_json",
+                            "expected a JSON object",
+                        ));
+                    }
+                    offset = start + values.byte_offset();
+                    records.push(value);
+                    if records.len() >= options.max_records || offset >= options.max_bytes {
+                        break 'sampling;
+                    }
                 }
-                offset += values.byte_offset();
-                records.push(value);
-                if records.len() >= options.max_records || offset >= options.max_bytes {
-                    break;
+                Err(source) if !source.is_eof() || eof => {
+                    return Err(
+                        Error::new(ErrorKind::Decode, "infer_json", source.to_string())
+                            .with_source(source),
+                    );
                 }
-                continue;
+                Err(_) => break,
             }
-            Some(Err(source)) if !source.is_eof() || eof => {
-                return Err(
-                    Error::new(ErrorKind::Decode, "infer_json", source.to_string())
-                        .with_source(source),
-                );
-            }
-            None if eof => break,
-            _ => {}
+        }
+        if eof {
+            break;
         }
         match input.next().await? {
             Some(bytes) if bytes.is_empty() => {

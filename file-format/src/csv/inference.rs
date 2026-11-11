@@ -1,6 +1,5 @@
 use std::{collections::HashSet, io::Cursor, sync::Arc};
 
-use arrow_csv::ReaderBuilder;
 use arrow_schema::{DataType, Schema};
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{ByteReader, Error, ErrorKind, Result, SchemaRef, StreamReader};
@@ -53,24 +52,26 @@ fn infer_sample(sample: &[u8], has_header: bool, allow_truncated_rows: bool) -> 
         .map_err(inference_error)
 }
 
-fn detect_header(schema: &Schema, first: &[u8]) -> bool {
-    // The candidate schema was inferred from records after the first. All-string
-    // samples are ambiguous and follow the common headered-CSV convention.
-    if schema
+fn detect_header(schema: &Schema, first: &[u8], allow_truncated_rows: bool) -> Result<bool> {
+    let first = infer_sample(first, false, allow_truncated_rows)?;
+    // Only string labels provide evidence for a header. Decoding the first row
+    // against later rows' types would mistake type widening (e.g. float then int)
+    // or a column with no later values for a header and silently discard data.
+    let ambiguous = first
         .fields()
         .iter()
-        .all(|field| field.data_type().is_string())
-        || schema
+        .chain(schema.fields())
+        .all(|field| field.data_type().is_string() || field.data_type() == &DataType::Null);
+    Ok(ambiguous
+        || first
             .fields()
             .iter()
-            .any(|field| field.data_type() == &DataType::Null)
-    {
-        return true;
-    }
-    !ReaderBuilder::new(Arc::new(schema.clone()))
-        .with_batch_size(1)
-        .build(Cursor::new(first))
-        .is_ok_and(|mut reader| matches!(reader.next(), Some(Ok(_))))
+            .zip(schema.fields())
+            .any(|(first, later)| {
+                first.data_type().is_string()
+                    && !later.data_type().is_string()
+                    && later.data_type() != &DataType::Null
+            }))
 }
 
 pub(super) async fn infer(
@@ -114,7 +115,8 @@ pub(super) async fn infer(
         None => detect_header(
             &infer_sample(&sample, true, dialect.allow_truncated_rows)?,
             &sample[..first_end],
-        ),
+            dialect.allow_truncated_rows,
+        )?,
     };
     let schema = infer_sample(&sample, has_header, dialect.allow_truncated_rows)?;
     let mut names = HashSet::new();

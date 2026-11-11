@@ -78,17 +78,5 @@ name = "document"
 required-features = ["json"]
 
 [[test]]
-name = "parquet_brotli"
-required-features = ["parquet-brotli"]
-
-[[test]]
-name = "parquet_gzip"
-required-features = ["parquet-gzip"]
-
-[[test]]
-name = "parquet_lz4"
-required-features = ["parquet-lz4"]
-
-[[test]]
-name = "parquet_zstd"
-required-features = ["parquet-zstd"]
+name = "parquet_compression"
+required-features = ["parquet"]
