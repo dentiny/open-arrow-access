@@ -337,3 +337,40 @@ async fn emission_and_parallel_layers_collect_one_budget_in_either_order() {
         ErrorKind::InvalidInput
     );
 }
+
+#[tokio::test]
+async fn unordered_rejects_source_requirement_before_discovery() {
+    for ordering in [
+        OrderRequirement::PreserveGlobal,
+        OrderRequirement::Reorderable,
+    ] {
+        for parallel in [false, true] {
+            // A permissive plan cannot weaken the source capability, and a
+            // restrictive plan cannot be weakened by a permissive capability.
+            let partitions = stream::poll_fn(|_| -> Poll<Option<Result<ScanPartition>>> {
+                panic!("rejected scans must not poll partition discovery")
+            });
+            let mut plan = ScanPlan::from_stream(metadata(), partitions).with_ordering(
+                if ordering == OrderRequirement::PreserveGlobal {
+                    OrderRequirement::Reorderable
+                } else {
+                    OrderRequirement::PreserveGlobal
+                },
+            );
+            if parallel {
+                plan.parallel_read = Some(ParallelReadOptions {
+                    partitions: NonZeroUsize::MIN,
+                    prefetch: NonZeroUsize::MIN,
+                });
+            }
+            let error = Source(ordering)
+                .layer(UnorderedEmissionLayer)
+                .open(plan)
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(error.kind(), ErrorKind::InvalidInput);
+            assert_eq!(error.operation(), "unordered_emission");
+        }
+    }
+}

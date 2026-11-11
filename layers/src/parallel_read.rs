@@ -113,7 +113,6 @@ struct ParallelReader {
     tasks: JoinSet<Result<()>>,
     settings: ParallelReadOptions,
     emission: EmissionPolicy,
-    next_receiver: usize,
 }
 
 impl ParallelReader {
@@ -126,7 +125,6 @@ impl ParallelReader {
             tasks: JoinSet::new(),
             settings,
             emission: plan.emission,
-            next_receiver: 0,
         }
     }
 
@@ -155,14 +153,6 @@ impl ParallelReader {
         self.partition_receivers.push_back(receiver);
     }
 
-    fn remove_receiver(&mut self, index: usize) {
-        self.partition_receivers.remove(index);
-        // Wrap before discovery can append a replacement at the removed tail index.
-        self.next_receiver = index
-            .checked_rem(self.partition_receivers.len())
-            .unwrap_or(0);
-    }
-
     fn stop(&mut self) {
         // Dropping the JoinSet aborts workers and leaves no completions to poll.
         self.tasks = JoinSet::new();
@@ -176,7 +166,6 @@ impl ParallelReader {
             let can_discover = !self.remaining.is_terminated()
                 && self.partition_receivers.len() < self.settings.partitions.get();
             let receivers = &mut self.partition_receivers;
-            let next_receiver = &mut self.next_receiver;
             let emission = self.emission;
             tokio::select! {
                 biased;
@@ -190,25 +179,29 @@ impl ParallelReader {
                         self.spawn_partition(partition?);
                     }
                 }
-                (index, batch) = poll_fn(|cx| {
-                    let count = receivers.len();
+                batch = poll_fn(|cx| {
                     if emission == EmissionPolicy::Ordered {
-                        return receivers[0].poll_recv(cx).map(|batch| (0, batch));
+                        return receivers[0].poll_recv(cx);
                     }
-                    // Rotate the starting point so continuously ready partitions
-                    // cannot starve other readers. Each receiver preserves FIFO order.
-                    for offset in 0..count {
-                        let index = (*next_receiver + offset) % count;
+                    for index in 0..receivers.len() {
                         if let Poll::Ready(batch) = receivers[index].poll_recv(cx) {
-                            *next_receiver = (index + 1) % count;
-                            return Poll::Ready((index, batch));
+                            // Keep the selected receiver at the front for removal
+                            // or rotation below, without a separate queue cursor.
+                            receivers.rotate_left(index);
+                            return Poll::Ready(batch);
                         }
                     }
                     Poll::Pending
                 }), if has_receivers => {
-                    if batch.is_some() { return Ok(batch); }
+                    if batch.is_some() {
+                        // Give the other resident partitions the next turn.
+                        if emission == EmissionPolicy::Unordered {
+                            self.partition_receivers.rotate_left(1);
+                        }
+                        return Ok(batch);
+                    }
                     // EOF only frees a resident slot after that receiver is drained.
-                    self.remove_receiver(index);
+                    self.partition_receivers.pop_front();
                 }
                 else => return Ok(None),
             }
