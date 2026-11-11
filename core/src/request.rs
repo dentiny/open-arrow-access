@@ -205,6 +205,16 @@ impl Default for ReadOptions {
 /// instead of depending on one concrete request type. A layer that changes an
 /// inner projection remains responsible for its own declared output selection.
 pub trait ReadOptionsProvider: Send {
+    /// Optionally duplicate this selection with different read options. Layers
+    /// can use it to inspect a full schema before opening projected data.
+    /// Return None for selections that cannot safely be reopened.
+    fn clone_with_read_options(&self, _options: ReadOptions) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        None
+    }
+
     /// Borrow the batch target and projection without performing I/O.
     fn read_options(&self) -> &ReadOptions;
 
@@ -246,6 +256,12 @@ impl ReadRequest {
 }
 
 impl ReadOptionsProvider for ReadRequest {
+    fn clone_with_read_options(&self, options: ReadOptions) -> Option<Self> {
+        let mut request = self.clone();
+        *request.read_options_mut() = options;
+        Some(request)
+    }
+
     fn read_options(&self) -> &ReadOptions {
         &self.options
     }

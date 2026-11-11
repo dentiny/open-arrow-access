@@ -337,3 +337,32 @@ async fn emission_and_parallel_layers_collect_one_budget_in_either_order() {
         ErrorKind::InvalidInput
     );
 }
+
+#[tokio::test]
+async fn schema_inspection_does_not_execute_parallel_partitions() {
+    for unordered in [false, true] {
+        let (partition, mut started, dropped) = blocked_partition();
+        let source = Source(OrderRequirement::Reorderable)
+            .layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN));
+        let plan =
+            ScanPlan::new(metadata(), vec![partition]).with_ordering(OrderRequirement::Reorderable);
+        let reader = if unordered {
+            source
+                .layer(UnorderedEmissionLayer)
+                .open_for_schema(plan)
+                .await
+        } else {
+            source.open_for_schema(plan).await
+        }
+        .unwrap();
+        assert_eq!(reader.metadata().schema, metadata().schema);
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            started.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        drop(reader);
+        assert!(started.await.is_err());
+        assert!(dropped.await.is_err());
+    }
+}

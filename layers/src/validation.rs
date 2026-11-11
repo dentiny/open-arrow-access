@@ -334,3 +334,37 @@ pub(crate) fn validate_expression(
     })?;
     Ok(())
 }
+
+pub(crate) fn validate_generated_names(
+    specs: &[crate::GeneratedColumnSpec],
+    source: &arrow_schema::Schema,
+) -> Result<()> {
+    let mut names: HashSet<&str> = source
+        .fields()
+        .iter()
+        .map(|field| field.name().as_str())
+        .collect();
+    for spec in specs {
+        if !names.insert(&spec.column) {
+            return Err(crate::error::invalid_generated_column(
+                &spec.column,
+                "column already exists",
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_generated_schema(
+    actual: &arrow_schema::Schema,
+    expected: &arrow_schema::Schema,
+) -> Result<()> {
+    if actual != expected {
+        return Err(Error::new(
+            ErrorKind::Decode,
+            "plan_generated_column",
+            "source or output schema changed during generated-column planning",
+        ));
+    }
+    Ok(())
+}

@@ -14,11 +14,11 @@ use open_arrow_access_core::{
 };
 
 use crate::{
-    error::{
-        generated_batch_error, generated_column_error, generated_plan_error,
-        invalid_generated_column,
+    error::{generated_batch_error, generated_column_error, generated_plan_error},
+    validation::{
+        validate_expression, validate_generated_names, validate_generated_schema,
+        validate_generated_specs,
     },
-    validation::{validate_expression, validate_generated_specs},
 };
 
 /// One row-level SQL expression. May reference source and earlier generated fields.
@@ -30,8 +30,10 @@ pub struct GeneratedColumnSpec {
 
 /// Appends generated fields in declaration order, then applies the final projection.
 ///
-/// Expressions are compiled once per open and evaluated batch by batch. This first
-/// implementation reads all source columns to validate against the complete schema.
+/// Expressions are evaluated batch by batch. With a projected, clonable request,
+/// inspect the full schema before reopening only visible inputs and expression
+/// dependencies. Sources must remain stable across both opens; schema inference
+/// may sample twice. Custom requests without cloning retain the full-input path.
 #[derive(Clone, Debug, Default)]
 pub struct GeneratedColumnsLayer {
     specs: Arc<[GeneratedColumnSpec]>,
@@ -82,54 +84,86 @@ where
         record_capability(self.inner.capability())
     }
 
-    async fn open(&self, mut request: A::Request) -> Result<Box<dyn RecordReader>> {
+    async fn open(&self, request: A::Request) -> Result<Box<dyn RecordReader>> {
+        self.open_impl(request, false).await
+    }
+
+    async fn open_for_schema(&self, request: A::Request) -> Result<Box<dyn RecordReader>> {
+        self.open_impl(request, true).await
+    }
+}
+
+impl<A> GeneratedColumnsAccessor<A>
+where
+    A: Accessor<Reader = dyn RecordReader>,
+    A::Request: ReadOptionsProvider,
+{
+    async fn open_input(
+        &self,
+        request: A::Request,
+        schema_only: bool,
+    ) -> Result<Box<dyn RecordReader>> {
+        if schema_only {
+            self.inner.open_for_schema(request).await
+        } else {
+            self.inner.open(request).await
+        }
+    }
+
+    async fn open_impl(
+        &self,
+        mut request: A::Request,
+        schema_only: bool,
+    ) -> Result<Box<dyn RecordReader>> {
         if self.specs.is_empty() {
-            return self.inner.open(request).await;
+            return self.open_input(request, schema_only).await;
         }
         let output_options = request.read_options().clone();
-        // Generated names are not physical inputs. Inspect all fields, including
-        // hidden ones, so projection cannot hide an invalid declaration/collision.
         request.read_options_mut().projection = None;
-        let inner = self.inner.open(request).await?;
-        let source = &inner.metadata().schema;
+        let probe = output_options
+            .projection
+            .as_ref()
+            .and_then(|_| request.clone_with_read_options(request.read_options().clone()));
+        let (mut inner, reopen) = if let Some(probe) = probe {
+            (self.inner.open_for_schema(probe).await?, Some(request))
+        } else {
+            (self.open_input(request, schema_only).await?, None)
+        };
+        let source = Arc::clone(&inner.metadata().schema);
         let state = SessionContext::new().state();
-        let mut schema = Arc::clone(source);
-        let mut column_names: HashSet<&str> = source
-            .fields()
-            .iter()
-            .map(|field| field.name().as_str())
-            .collect();
-        let mut steps = Vec::with_capacity(self.specs.len());
-        for spec in self.specs.iter() {
-            if !column_names.insert(&spec.column) {
-                return Err(invalid_generated_column(
-                    &spec.column,
-                    "column already exists",
-                ));
-            }
-            let (expression, output) = plan_expression(&state, &spec.expression, &schema)
-                .map_err(|error| generated_plan_error(&spec.column, error))?;
-            let mut metadata = output.metadata().clone();
-            metadata.insert(
-                "open_arrow_access:generated_expression".into(),
-                spec.expression.clone(),
-            );
-            let mut fields = schema.fields().to_vec();
-            fields.push(Arc::new(
-                output
-                    .as_ref()
-                    .clone()
-                    .with_name(&spec.column)
-                    .with_metadata(metadata),
-            ));
-            schema = Arc::new(Schema::new_with_metadata(fields, source.metadata().clone()));
-            steps.push(GeneratedStep {
-                output: Arc::clone(&schema),
-                expression,
-                column: spec.column.clone(),
-            });
+        let (mut schema, mut steps, dependencies) = plan_steps(&state, &self.specs, &source)?;
+        let (expected_output, _) = output_options.resolve_projection(&schema)?;
+        if let Some(mut request) = reopen {
+            let visible: HashSet<&str> = expected_output
+                .fields()
+                .iter()
+                .map(|f| f.name().as_str())
+                .collect();
+            let names: Vec<String> = source
+                .fields()
+                .iter()
+                .filter(|field| {
+                    visible.contains(field.name().as_str()) || dependencies.contains(field.name())
+                })
+                .map(|field| field.name().clone())
+                .collect();
+            let source_options = open_arrow_access_core::ReadOptions {
+                projection: Some(names.clone()),
+                ..request.read_options().clone()
+            };
+            let (expected_source, _) = source_options.resolve_projection(&source)?;
+            request.read_options_mut().projection = Some(names);
+            // Drop inspection state before reopening. Parallel schema hooks do
+            // not execute workers; inference may still have read a bounded sample.
+            drop(inner);
+            inner = self.open_input(request, schema_only).await?;
+            validate_generated_schema(&inner.metadata().schema, &expected_source)?;
+            // Recompile physical column indices for the reduced schema, using
+            // the same session so stable expressions retain one execution time.
+            (schema, steps, _) = plan_steps(&state, &self.specs, &expected_source)?;
         }
         let (schema, projection) = output_options.resolve_projection(&schema)?;
+        validate_generated_schema(&schema, &expected_output)?;
         let metadata = RecordMetadata {
             schema,
             source: inner.metadata().source.clone(),
@@ -145,6 +179,47 @@ where
     }
 }
 
+fn plan_steps(
+    state: &SessionState,
+    specs: &[GeneratedColumnSpec],
+    source: &SchemaRef,
+) -> Result<(SchemaRef, Vec<GeneratedStep>, HashSet<String>)> {
+    validate_generated_names(specs, source)?;
+    let mut schema = Arc::clone(source);
+    let source_names: HashSet<&str> = source.fields().iter().map(|f| f.name().as_str()).collect();
+    let mut dependencies = HashSet::new();
+    let mut steps = Vec::with_capacity(specs.len());
+    for spec in specs {
+        let (expression, output, columns) = plan_expression(state, &spec.expression, &schema)
+            .map_err(|error| generated_plan_error(&spec.column, error))?;
+        dependencies.extend(
+            columns
+                .into_iter()
+                .filter(|name| source_names.contains(name.as_str())),
+        );
+        let mut metadata = output.metadata().clone();
+        metadata.insert(
+            "open_arrow_access:generated_expression".into(),
+            spec.expression.clone(),
+        );
+        let mut fields = schema.fields().to_vec();
+        fields.push(Arc::new(
+            output
+                .as_ref()
+                .clone()
+                .with_name(&spec.column)
+                .with_metadata(metadata),
+        ));
+        schema = Arc::new(Schema::new_with_metadata(fields, source.metadata().clone()));
+        steps.push(GeneratedStep {
+            output: Arc::clone(&schema),
+            expression,
+            column: spec.column.clone(),
+        });
+    }
+    Ok((schema, steps, dependencies))
+}
+
 /// Plans one row-level SQL expression against the source and earlier generated fields.
 ///
 /// Rejects non-row-level and volatile expressions before DataFusion coerces,
@@ -155,12 +230,17 @@ fn plan_expression(
     state: &SessionState,
     expression: &str,
     input: &SchemaRef,
-) -> datafusion::error::Result<(Arc<dyn PhysicalExpr>, FieldRef)> {
+) -> datafusion::error::Result<(Arc<dyn PhysicalExpr>, FieldRef, HashSet<String>)> {
     let df_schema = DFSchema::try_from(Arc::clone(input))?;
     let logical = state.create_logical_expr(expression, &df_schema)?;
     // Validate before simplification: a dead branch must not hide an
     // aggregate, subquery, or volatile function.
     validate_expression(&logical)?;
+    let columns = logical
+        .column_refs()
+        .into_iter()
+        .map(|column| column.name.clone())
+        .collect();
     let simplify_context = SimplifyContext::builder()
         .with_schema(Arc::new(df_schema.clone()))
         .with_config_options(Arc::clone(state.config_options()))
@@ -171,7 +251,7 @@ fn plan_expression(
     let logical = simplifier.simplify(logical)?;
     let physical = state.create_physical_expr(logical, &df_schema)?;
     let output = physical.return_field(input)?;
-    Ok((physical, output))
+    Ok((physical, output, columns))
 }
 
 fn record_capability(inner: RecordCapability) -> RecordCapability {

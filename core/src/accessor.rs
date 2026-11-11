@@ -31,6 +31,13 @@ pub trait Accessor: Send + Sync {
     /// or opening/inspection fails. Failures encountered while consuming items
     /// are subsequently returned by [`Reader::next`].
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>>;
+
+    /// Open only to inspect reader metadata. Callers must drop the returned
+    /// reader without polling it. Execution wrappers should override this path
+    /// to avoid starting background readers during schema discovery.
+    async fn open_for_schema(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
+        self.open(request).await
+    }
 }
 
 #[async_trait]
@@ -44,6 +51,10 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
         (**self).open(request).await
+    }
+
+    async fn open_for_schema(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
+        (**self).open_for_schema(request).await
     }
 }
 

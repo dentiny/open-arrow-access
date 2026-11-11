@@ -67,6 +67,12 @@ impl CommonCrawlSegmentRequest {
 }
 
 impl ReadOptionsProvider for CommonCrawlSegmentRequest {
+    fn clone_with_read_options(&self, options: ReadOptions) -> Option<Self> {
+        let mut request = self.clone();
+        *request.read_options_mut() = options;
+        Some(request)
+    }
+
     fn read_options(&self) -> &ReadOptions {
         self.dataset.read_options()
     }
