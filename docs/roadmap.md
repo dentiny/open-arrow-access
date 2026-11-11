@@ -13,6 +13,7 @@ public implementations or reserved Cargo feature flags.
 ## Implemented foundations
 
 - Shared async accessor, reader, factory, layer, and capability contracts.
+- Bounded JSON schema inference with sample replay and fixed-schema native scans.
 - Caller-configured OpenDAL storage, exact ranges, discovery, and per-reader I/O settings.
 - Parquet, CSV/TSV, JSON/JSONL, XML, and ATIF Arrow readers; native WARC parsing.
 - Streaming gzip, bzip2, LZ4, and Zstandard; ZIP and TAR entry access.
@@ -27,7 +28,7 @@ new project-specific storage implementation.
 
 | Workstream | Intended result | Prerequisite / completion boundary |
 | --- | --- | --- |
-| CSV/JSON schema inference | Read common tabular/text corpora without hand-writing a schema | Bounded record/byte sampling, replay for sequential inputs, optional CSV header detection, stable schema at open |
+| CSV schema inference | Read common tabular/text corpora without hand-writing a schema | Bounded record/byte sampling, replay for sequential inputs, optional CSV header detection, stable schema at open |
 | Cross-file schema reconciliation | Read compatible shards with missing or reordered fields | Explicit merge rules, nullability/metadata conflict policy, batch alignment, opt-in supported casts |
 | Generated columns | Compute derived fields during reading | Dependency-aware projection, fixed augmented schema, isolated expression-engine dependency |
 | Metrics | Observe source cost and throughput | Separate byte I/O from emitted rows/batches; preserve values, schema, and order |
@@ -45,8 +46,8 @@ separate changes. Explicit schemas remain supported, and merging stays opt-in.
 
 Inference must bound its sample, retain sampled input for replay, and resolve the
 output schema before returning a reader. Later values outside that schema need
-an explicit error policy. XML's existing inference does not supply CSV/JSON
-inference or dataset-wide merging.
+an explicit error policy. JSON now supports bounded per-input inference and replay. CSV inference and
+dataset-wide merging remain separate work.
 
 Cross-file rules must define field order, nullability, nested compatibility, and
 metadata conflicts. Alignment should reorder by name and fill missing nullable

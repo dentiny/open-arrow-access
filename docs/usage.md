@@ -153,6 +153,9 @@ Replace the format accessor for other sequential inputs:
 | XML | `XmlAccessor::new(decoded, "/records/record")` | `format-xml` |
 | ATIF JSONL | `AtifAccessor::new(decoded, AtifFormat::JsonLines)` | `format-atif` |
 
+Use `JsonAccessor::infer(decoded)` to infer a JSON schema rather than supplying
+one. Configure the bounded sample with `JsonInferenceOptions`.
+
 Import each type from its `file_format::<format>` module. XML infers a schema at
 open unless explicit mappings are supplied; ATIF uses its fixed trajectory schema.
 Consult [format behavior](formats.md) before choosing schema and record limits.
