@@ -156,6 +156,9 @@ Replace the format accessor for other sequential inputs:
 Use `CsvAccessor::infer(decoded)` to infer CSV column types and header presence.
 Configure sampling and override ambiguous headers with `CsvInferenceOptions`.
 
+Use `JsonAccessor::infer(decoded)` to infer a JSON schema rather than supplying
+one. Configure the bounded sample with `JsonInferenceOptions`.
+
 Import each type from its `file_format::<format>` module. XML infers a schema at
 open unless explicit mappings are supplied; ATIF uses its fixed trajectory schema.
 Consult [format behavior](formats.md) before choosing schema and record limits.

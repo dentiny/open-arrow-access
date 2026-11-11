@@ -295,3 +295,82 @@ async fn decimal_guard_preserves_safe_rescaling_and_struct_field_mapping() {
         .unwrap();
     assert!(reader.next().await.unwrap().is_some());
 }
+
+#[tokio::test]
+async fn timestamp_casts_accept_minute_precision_and_preserve_arrow_formats() {
+    use arrow_schema::TimeUnit;
+    let cases = [
+        ("2000-05-31T04:00Z", "2000-05-31T04:00:00Z"),
+        ("2000-05-31 06:00+02:00", "2000-05-31T04:00:00Z"),
+        ("2000-05-31t04:00z", "2000-05-31T04:00:00Z"),
+        ("2000-05-31T04:00", "2000-05-31T04:00:00"),
+        ("2000-05-31 04:00", "2000-05-31T04:00:00"),
+        (
+            "2000-05-31T04:00:01.123456789Z",
+            "2000-05-31T04:00:01.123456789Z",
+        ),
+    ];
+    for source_type in [DataType::Utf8, DataType::LargeUtf8, DataType::Utf8View] {
+        for unit in [
+            TimeUnit::Second,
+            TimeUnit::Millisecond,
+            TimeUnit::Microsecond,
+            TimeUnit::Nanosecond,
+        ] {
+            for timezone in [None, Some("UTC".into()), Some("America/New_York".into())] {
+                let target = DataType::Timestamp(unit, timezone);
+                let input = StringArray::from(
+                    cases
+                        .iter()
+                        .map(|(input, _)| Some(*input))
+                        .chain([None])
+                        .collect::<Vec<_>>(),
+                );
+                let expected = StringArray::from(
+                    cases
+                        .iter()
+                        .map(|(_, expected)| Some(*expected))
+                        .chain([None])
+                        .collect::<Vec<_>>(),
+                );
+                let input = arrow_cast::cast(&input, &source_type).unwrap();
+                let expected = arrow_cast::cast(&expected, &target).unwrap();
+                let mut reader = MemoryAccessor::new(vec![batch(input)])
+                    .open_cast(target)
+                    .await
+                    .unwrap();
+                assert_eq!(reader.next().await.unwrap().unwrap().column(0), &expected);
+                assert!(reader.next().await.unwrap().is_none());
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn timestamp_fallback_rejects_invalid_ambiguous_and_overflowing_values() {
+    use arrow_schema::TimeUnit;
+    for (value, unit, timezone) in [
+        ("invalid", TimeUnit::Second, None),
+        ("2000-02-30T04:00Z", TimeUnit::Second, None),
+        (
+            "2025-11-02T01:30",
+            TimeUnit::Second,
+            Some("America/New_York"),
+        ),
+        (
+            "2025-03-09T02:30",
+            TimeUnit::Second,
+            Some("America/New_York"),
+        ),
+        ("2500-01-01T00:00Z", TimeUnit::Nanosecond, None),
+    ] {
+        let mut reader = MemoryAccessor::new(vec![batch(Arc::new(StringArray::from(vec![value])))])
+            .open_cast(DataType::Timestamp(unit, timezone.map(Into::into)))
+            .await
+            .unwrap();
+        let error = reader.next().await.unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Decode, "{value}");
+        assert_eq!(error.operation(), "cast");
+        assert!(reader.next().await.unwrap().is_none());
+    }
+}

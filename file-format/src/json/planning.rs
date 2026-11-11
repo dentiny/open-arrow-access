@@ -15,18 +15,23 @@ where
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = self.binding.factory().clone();
-        let (schema, _) = format.prepare(&request)?;
-        let metadata = RecordMetadata {
-            schema,
-            source: Some(request.object.clone()),
-        };
+        let prepared = format.prepare(&request)?;
         let input = self
             .binding
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
+        let (format, input) = format.resolve(input).await?;
+        let (schema, _) = match prepared {
+            Some(prepared) => prepared,
+            None => format.prepare(&request)?.expect("resolved JSON schema"),
+        };
+        let metadata = RecordMetadata {
+            schema,
+            source: Some(request.object.clone()),
+        };
         let frames = JsonFrames {
-            input,
+            input: super::nonfinite::normalize_input(input),
             pending_input: BytesMut::new(),
         };
         let rows = request.options.batch_size.get();
