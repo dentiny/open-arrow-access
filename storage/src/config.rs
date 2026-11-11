@@ -30,7 +30,7 @@ impl Default for RetryConfig {
             min_delay: Duration::from_secs(1),
             max_delay: Duration::from_secs(60),
             factor: 2.0,
-            jitter: false,
+            jitter: true,
         }
     }
 }
