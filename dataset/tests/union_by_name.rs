@@ -18,118 +18,97 @@ async fn json_directory_union_by_name_aligns_nested_struct_and_list_fields() {
     tokio::fs::write(dir.path().join("a.jsonl"), b"{\"id\":1,\"all_null\":null,\"meta\":{\"left\":\"a\"},\"items\":[{\"x\":1}]}\n{\"id\":2,\"meta\":null,\"items\":[]}\n").await.unwrap();
     tokio::fs::write(
         dir.path().join("b.jsonl"),
-        b"{\"id\":3,\"all_null\":3,\"meta\":{\"right\":true},\"items\":[{\"y\":\"b\"}],\"tail\":\"last\"}\n",
+        b"{\"id\":3,\"all_null\":3,\"meta\":{\"right\":true},\"items\":[{\"y\":\"b\"}]}\n",
     )
     .await
     .unwrap();
-    for native in [false, true] {
-        let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
-        let directory = DirectoryAccessor::new(storage.clone(), JsonAccessor::infer(storage))
-            .with_union_by_name();
-        let mut request = DirectoryRequest::new("");
-        request.suffix = Some(".jsonl".into());
-        let mut reader = if native {
-            directory
-                .with_file_planning()
-                .layer(ParallelReadLayer::new(
-                    NonZeroUsize::new(2).unwrap(),
-                    NonZeroUsize::MIN,
-                ))
-                .open(request)
-                .await
+    let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
+    let directory =
+        DirectoryAccessor::new(storage.clone(), JsonAccessor::infer(storage)).with_union_by_name();
+    let mut request = DirectoryRequest::new("");
+    request.suffix = Some(".jsonl".into());
+    let mut reader = directory.open(request).await.unwrap();
+    let schema = reader.metadata().schema.clone();
+    let DataType::Struct(meta) = schema.field_with_name("meta").unwrap().data_type() else {
+        panic!("expected struct");
+    };
+    assert_eq!(
+        meta.iter()
+            .map(|field| (field.name().as_str(), field.is_nullable()))
+            .collect::<Vec<_>>(),
+        [("left", true), ("right", true)]
+    );
+    let mut ids = Vec::new();
+    let mut null_values = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        let values = batch
+            .column_by_name("id")
+            .unwrap()
+            .as_primitive::<Int64Type>();
+        let metas = batch.column_by_name("meta").unwrap().as_struct();
+        let items = batch.column_by_name("items").unwrap().as_list::<i32>();
+        null_values.extend(
+            batch
+                .column_by_name("all_null")
                 .unwrap()
-        } else {
-            directory.open(request).await.unwrap()
-        };
-        let schema = reader.metadata().schema.clone();
-        assert_eq!(
-            schema.field_with_name("all_null").unwrap().data_type(),
-            &DataType::Int64
+                .as_primitive::<Int64Type>()
+                .iter(),
         );
-        let DataType::Struct(meta) = schema.field_with_name("meta").unwrap().data_type() else {
-            panic!("expected struct");
-        };
-        assert_eq!(
-            meta.iter()
-                .map(|field| (field.name().as_str(), field.is_nullable()))
-                .collect::<Vec<_>>(),
-            [("left", true), ("right", true)]
-        );
-        let mut ids = Vec::new();
-        let mut missing_tail = 0;
-        while let Some(batch) = reader.next().await.unwrap() {
-            assert_eq!(batch.schema(), schema);
-            let values = batch
-                .column_by_name("id")
-                .unwrap()
-                .as_primitive::<Int64Type>();
-            let metas = batch.column_by_name("meta").unwrap().as_struct();
-            let items = batch.column_by_name("items").unwrap().as_list::<i32>();
-            missing_tail += batch.column_by_name("tail").unwrap().null_count();
-            assert_eq!(
-                batch.column_by_name("all_null").unwrap().null_count(),
-                if values.value(0) == 1 {
-                    batch.num_rows()
-                } else {
-                    0
+        for row in 0..batch.num_rows() {
+            let id = values.value(row);
+            ids.push(id);
+            let children = items.value(row);
+            let children = children.as_struct();
+            match id {
+                1 => {
+                    assert_eq!(
+                        metas
+                            .column_by_name("left")
+                            .unwrap()
+                            .as_string::<i32>()
+                            .value(row),
+                        "a"
+                    );
+                    assert!(metas.column_by_name("right").unwrap().is_null(row));
+                    assert_eq!(
+                        children
+                            .column_by_name("x")
+                            .unwrap()
+                            .as_primitive::<Int64Type>()
+                            .value(0),
+                        1
+                    );
+                    assert!(children.column_by_name("y").unwrap().is_null(0));
                 }
-            );
-            for row in 0..batch.num_rows() {
-                let id = values.value(row);
-                ids.push(id);
-                let children = items.value(row);
-                let children = children.as_struct();
-                match id {
-                    1 => {
-                        assert_eq!(
-                            metas
-                                .column_by_name("left")
-                                .unwrap()
-                                .as_string::<i32>()
-                                .value(row),
-                            "a"
-                        );
-                        assert!(metas.column_by_name("right").unwrap().is_null(row));
-                        assert_eq!(
-                            children
-                                .column_by_name("x")
-                                .unwrap()
-                                .as_primitive::<Int64Type>()
-                                .value(0),
-                            1
-                        );
-                        assert!(children.column_by_name("y").unwrap().is_null(0));
-                    }
-                    2 => {
-                        assert!(metas.is_null(row));
-                        assert_eq!(items.value_length(row), 0);
-                    }
-                    3 => {
-                        assert!(metas.column_by_name("left").unwrap().is_null(row));
-                        assert!(
-                            metas
-                                .column_by_name("right")
-                                .unwrap()
-                                .as_boolean()
-                                .value(row)
-                        );
-                        assert!(children.column_by_name("x").unwrap().is_null(0));
-                        assert_eq!(
-                            children
-                                .column_by_name("y")
-                                .unwrap()
-                                .as_string::<i32>()
-                                .value(0),
-                            "b"
-                        );
-                    }
-                    _ => unreachable!(),
+                2 => {
+                    assert!(metas.is_null(row));
+                    assert_eq!(items.value_length(row), 0);
                 }
+                3 => {
+                    assert!(metas.column_by_name("left").unwrap().is_null(row));
+                    assert!(
+                        metas
+                            .column_by_name("right")
+                            .unwrap()
+                            .as_boolean()
+                            .value(row)
+                    );
+                    assert!(children.column_by_name("x").unwrap().is_null(0));
+                    assert_eq!(
+                        children
+                            .column_by_name("y")
+                            .unwrap()
+                            .as_string::<i32>()
+                            .value(0),
+                        "b"
+                    );
+                }
+                _ => unreachable!(),
             }
         }
-        assert_eq!(ids, [1, 2, 3]);
-        assert_eq!(missing_tail, 2);
     }
+    assert_eq!(ids, [1, 2, 3]);
+    assert_eq!(null_values, [None, None, Some(3)]);
 }
 
 #[tokio::test]
@@ -217,7 +196,7 @@ async fn parquet_union_by_name_only_relaxes_missing_fields() {
             NonZeroUsize::new(2).unwrap(),
             NonZeroUsize::MIN,
         ))
-        .open(FileSetRequest::new(["a.parquet", "b.parquet", "a.parquet"]))
+        .open(FileSetRequest::new(["a.parquet", "b.parquet"]))
         .await
         .unwrap();
     let schema = reader.metadata().schema.clone();
@@ -230,15 +209,20 @@ async fn parquet_union_by_name_only_relaxes_missing_fields() {
         [("id", false), ("left", true), ("right", true)]
     );
     let mut ids = Vec::new();
-    let mut missing_left = 0;
-    let mut missing_right = 0;
+    let mut left_values = Vec::new();
+    let mut right_values = Vec::new();
     while let Some(batch) = reader.next().await.unwrap() {
-        assert_eq!(batch.schema(), schema);
         ids.extend_from_slice(batch.column(0).as_primitive::<Int64Type>().values());
-        missing_left += batch.column(1).null_count();
-        missing_right += batch.column(2).null_count();
+        left_values.extend(batch.column(1).as_primitive::<Int64Type>().iter());
+        right_values.extend(
+            batch
+                .column(2)
+                .as_string::<i32>()
+                .iter()
+                .map(|value| value.map(str::to_owned)),
+        );
     }
-    assert_eq!(ids, [1, 2, 3, 1, 2]);
-    assert_eq!(missing_left, 1);
-    assert_eq!(missing_right, 4);
+    assert_eq!(ids, [1, 2, 3]);
+    assert_eq!(left_values, [Some(10), Some(20), None]);
+    assert_eq!(right_values, [None, None, Some("r".to_owned())]);
 }

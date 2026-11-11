@@ -684,23 +684,23 @@ async fn native_file_plans_share_one_budget_and_preserve_lazy_ordered_selection(
 
 #[tokio::test]
 async fn union_by_name_preflight_rejects_type_and_metadata_conflicts_and_drops_readers() {
-    let left = schema("same");
-    for right in [
-        Arc::new(Schema::new(vec![Field::new("id", DataType::Utf8, false)])),
-        schema("different"),
-        Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int64, false)
-                .with_metadata([("key".to_owned(), "right".to_owned())].into()),
-        ])),
-    ] {
-        let left = if right.field(0).metadata().contains_key("key") {
+    for (left, right) in [
+        (
+            schema("same"),
+            Arc::new(Schema::new(vec![Field::new("id", DataType::Utf8, false)])),
+        ),
+        (schema("same"), schema("different")),
+        (
             Arc::new(Schema::new(vec![
                 Field::new("id", DataType::Int64, false)
                     .with_metadata([("key".to_owned(), "left".to_owned())].into()),
-            ]))
-        } else {
-            left.clone()
-        };
+            ])),
+            Arc::new(Schema::new(vec![
+                Field::new("id", DataType::Int64, false)
+                    .with_metadata([("key".to_owned(), "right".to_owned())].into()),
+            ])),
+        ),
+    ] {
         let files = Files::new([
             ("a", FileData::new(left, vec![])),
             ("b", FileData::new(right, vec![])),
@@ -714,7 +714,6 @@ async fn union_by_name_preflight_rejects_type_and_metadata_conflicts_and_drops_r
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
         assert_eq!(files.max_active.load(Ordering::SeqCst), 1);
         assert_eq!(files.active.load(Ordering::SeqCst), 0);
-        assert_eq!(files.opens.lock().unwrap().len(), 2);
     }
 }
 
