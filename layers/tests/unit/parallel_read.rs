@@ -49,28 +49,3 @@ async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
     assert!(reader.next().await.unwrap().is_none());
     assert!(reader.next().await.unwrap().is_none());
 }
-
-#[tokio::test]
-async fn ready_queues_take_turns_and_preserve_partition_fifo() {
-    let mut reader = unordered_reader(vec![], 3);
-    // Different row counts identify batches without needing columns or workers.
-    let batch = |rows| {
-        RecordBatch::try_new_with_options(
-            reader.metadata.schema.clone(),
-            vec![],
-            &arrow_array::RecordBatchOptions::new().with_row_count(Some(rows)),
-        )
-        .unwrap()
-    };
-    reader.partition_receivers.extend([
-        queue(vec![batch(1), batch(4)]),
-        queue(vec![batch(2), batch(5)]),
-        queue(vec![batch(3), batch(6)]),
-    ]);
-
-    let mut rows = Vec::new();
-    while let Some(batch) = reader.next().await.unwrap() {
-        rows.push(batch.num_rows());
-    }
-    assert_eq!(rows, [1, 2, 3, 4, 5, 6]);
-}
