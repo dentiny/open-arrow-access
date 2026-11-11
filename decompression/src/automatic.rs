@@ -12,9 +12,13 @@ use crate::layer::DEFAULT_CHUNK_SIZE;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Compression {
     Uncompressed,
+    #[cfg(feature = "gzip")]
     Gzip,
+    #[cfg(feature = "bz2")]
     Bzip2,
+    #[cfg(feature = "lz4")]
     Lz4,
+    #[cfg(feature = "zstd")]
     Zstd,
 }
 
@@ -22,36 +26,39 @@ impl Compression {
     /// Recognize case-sensitive final suffixes without accessing storage.
     /// Locators are opaque: query/fragment characters are not removed or decoded.
     /// ZIP/TAR are containers and are not selected by this function.
-    pub fn from_path(path: &str) -> Self {
-        if path.ends_with(".gz") || path.ends_with(".tgz") {
-            Self::Gzip
-        } else if path.ends_with(".bz2") {
-            Self::Bzip2
-        } else if path.ends_with(".lz4") {
-            Self::Lz4
-        } else if path.ends_with(".zst") || path.ends_with(".zstd") {
-            Self::Zstd
-        } else {
-            Self::Uncompressed
+    /// Recognized compression with a disabled codec returns `Unsupported`;
+    /// it is never silently treated as uncompressed bytes.
+    pub fn from_path(path: &str) -> Result<Self> {
+        macro_rules! select {
+            ($feature:literal, $variant:ident) => {{
+                #[cfg(feature = $feature)]
+                {
+                    Ok(Self::$variant)
+                }
+                #[cfg(not(feature = $feature))]
+                {
+                    Err(open_arrow_access_core::Error::new(
+                        open_arrow_access_core::ErrorKind::Unsupported,
+                        "auto_decompress",
+                        concat!(
+                            "compression requires enabling the `",
+                            $feature,
+                            "` codec feature"
+                        ),
+                    ))
+                }
+            }};
         }
-    }
-
-    fn validate(self) -> Result<()> {
-        let enabled = match self {
-            Self::Uncompressed => true,
-            Self::Gzip => cfg!(feature = "gzip"),
-            Self::Bzip2 => cfg!(feature = "bz2"),
-            Self::Lz4 => cfg!(feature = "lz4"),
-            Self::Zstd => cfg!(feature = "zstd"),
-        };
-        if enabled {
-            Ok(())
+        if path.ends_with(".gz") || path.ends_with(".tgz") {
+            select!("gzip", Gzip)
+        } else if path.ends_with(".bz2") {
+            select!("bz2", Bzip2)
+        } else if path.ends_with(".lz4") {
+            select!("lz4", Lz4)
+        } else if path.ends_with(".zst") || path.ends_with(".zstd") {
+            select!("zstd", Zstd)
         } else {
-            Err(open_arrow_access_core::Error::new(
-                open_arrow_access_core::ErrorKind::Unsupported,
-                "auto_decompress",
-                format!("{self:?} compression requires enabling its codec feature"),
-            ))
+            Ok(Self::Uncompressed)
         }
     }
 }
@@ -150,9 +157,7 @@ impl ReaderFactory for AutoFactory {
     }
 
     fn prepare(&self, request: &ByteReadRequest) -> Result<Compression> {
-        let compression = Compression::from_path(request.object.locator());
-        compression.validate()?;
-        Ok(compression)
+        Compression::from_path(request.object.locator())
     }
 
     async fn create_reader(
@@ -184,11 +189,6 @@ impl ReaderFactory for AutoFactory {
             Compression::Lz4 => decode!(crate::lz4::Lz4),
             #[cfg(feature = "zstd")]
             Compression::Zstd => decode!(crate::zstd::Zstd),
-            #[allow(unreachable_patterns)]
-            _ => {
-                compression.validate()?;
-                unreachable!("enabled codecs handled above")
-            }
         }
     }
 }

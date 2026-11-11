@@ -249,7 +249,8 @@ that sequential decoded representation directly.
 Use `AutoDecompressionLayer` when one storage accessor supplies a mixture of
 plain and compressed objects. Each `open` selects a codec from the object's final,
 case-sensitive suffix: `.gz`/`.tgz`, `.bz2`, `.lz4`, or `.zst`/`.zstd`.
-`Compression::from_path` exposes the same classification without performing I/O.
+`Compression::from_path` returns `Result<Compression>` without performing I/O;
+codec variants exist only when their corresponding features are enabled.
 Enable the corresponding codec Cargo features. A recognized suffix whose codec
 is disabled returns `Unsupported` before storage opens. Other suffixes pass through.
 

@@ -5,11 +5,17 @@ use open_arrow_access_test_support::{MemoryAccessor, collect_bytes};
 #[test]
 fn recognizes_only_complete_case_sensitive_compression_suffixes() {
     for (name, expected) in [
+        #[cfg(feature = "gzip")]
         ("data.jsonl.gz", Compression::Gzip),
+        #[cfg(feature = "gzip")]
         ("data.tgz", Compression::Gzip),
+        #[cfg(feature = "bz2")]
         ("data.bz2", Compression::Bzip2),
+        #[cfg(feature = "lz4")]
         ("data.lz4", Compression::Lz4),
+        #[cfg(feature = "zstd")]
         ("data.zst", Compression::Zstd),
+        #[cfg(feature = "zstd")]
         ("data.zstd", Compression::Zstd),
         ("data.tar", Compression::Uncompressed),
         ("data.zip", Compression::Uncompressed),
@@ -18,7 +24,7 @@ fn recognizes_only_complete_case_sensitive_compression_suffixes() {
         ("data.gz?name=plain", Compression::Uncompressed),
         ("dir.gz/file", Compression::Uncompressed),
     ] {
-        assert_eq!(Compression::from_path(name), expected);
+        assert_eq!(Compression::from_path(name).unwrap(), expected);
     }
 }
 
@@ -70,6 +76,8 @@ async fn disabled_codec_is_rejected_before_storage_opens() {
         if enabled {
             continue;
         }
+        let error = Compression::from_path(name).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Unsupported);
         let input = MemoryAccessor::new(b"anything", 1);
         let observations = input.observations.clone();
         let accessor = input.layer(AutoDecompressionLayer::new());
@@ -111,21 +119,24 @@ async fn gzip_chunks_and_corruption_use_the_existing_decoder() {
     assert!(reader.next().await.unwrap().is_none());
 }
 
-#[cfg(all(feature = "gzip", feature = "bz2", feature = "lz4", feature = "zstd"))]
-#[tokio::test]
-async fn routes_all_enabled_codecs_on_the_same_accessor_type() {
-    use open_arrow_access_test_support::fixture;
-    for (bytes, name) in [
-        (fixture!("gzip", "payload.gz").await, "data.gz"),
-        (fixture!("bz2", "payload.bz2").await, "data.bz2"),
-        (fixture!("lz4", "payload.lz4").await, "data.lz4"),
-        (fixture!("zstd", "payload.zst").await, "data.zstd"),
-    ] {
-        let accessor = MemoryAccessor::new(&bytes, 1).layer(AutoDecompressionLayer::new());
-        let mut reader = accessor.open(name.into()).await.unwrap();
-        assert!(!reader.capability().read_with_range);
-        assert_eq!(reader.metadata().content_length, None);
-        assert_eq!(reader.metadata().source.as_ref().unwrap().locator(), name);
-        assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"payload");
-    }
+// Each enabled codec is exercised independently in single-feature builds too.
+macro_rules! codec_route_test {
+    ($test:ident, $feature:literal, $directory:literal, $fixture:literal, $name:literal) => {
+        #[cfg(feature = $feature)]
+        #[tokio::test]
+        async fn $test() {
+            use open_arrow_access_test_support::fixture;
+            let bytes = fixture!($directory, $fixture).await;
+            let accessor = MemoryAccessor::new(&bytes, 1).layer(AutoDecompressionLayer::new());
+            let mut reader = accessor.open($name.into()).await.unwrap();
+            assert!(!reader.capability().read_with_range);
+            assert_eq!(reader.metadata().content_length, None);
+            assert_eq!(reader.metadata().source.as_ref().unwrap().locator(), $name);
+            assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"payload");
+        }
+    };
 }
+codec_route_test!(routes_gzip, "gzip", "gzip", "payload.gz", "data.gz");
+codec_route_test!(routes_bzip2, "bz2", "bz2", "payload.bz2", "data.bz2");
+codec_route_test!(routes_lz4, "lz4", "lz4", "payload.lz4", "data.lz4");
+codec_route_test!(routes_zstd, "zstd", "zstd", "payload.zst", "data.zstd");
