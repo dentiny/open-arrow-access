@@ -20,8 +20,8 @@ pub(super) type FilePlanner<A> = fn(Arc<A>, ReadRequest) -> BoxFuture<'static, R
 ///
 /// The first file determines the fixed output schema. Later files must have
 /// exactly the same projected schema, including metadata, unless schema merging
-/// is explicitly enabled. An empty selection
-/// is invalid; an empty file with a known schema is supported.
+/// is explicitly enabled. An empty selection is invalid; an empty file with a
+/// known schema is supported.
 #[derive(Debug)]
 pub struct FileSetAccessor<A> {
     inner: Arc<A>,
