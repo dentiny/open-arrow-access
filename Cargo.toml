@@ -58,6 +58,7 @@ arrow-cast = "59.3.0"
 arrow-csv = "59.3.0"
 arrow-json = "59.3.0"
 arrow-schema = "59.3.0"
+arrow-select = "59.3.0"
 async-trait = "0.1.91"
 atif-arrow = "0.4.6"
 chrono = { version = "0.4", default-features = false, features = ["std"] }

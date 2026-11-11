@@ -2847,6 +2847,7 @@ dependencies = [
  "arrow-array",
  "arrow-cast",
  "arrow-schema",
+ "arrow-select",
  "datafusion",
  "futures",
  "open-arrow-access-core",
