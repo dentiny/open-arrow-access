@@ -414,6 +414,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "backon"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cffb0e931875b666fc4fcb20fee52e9bbd1ef836fd9e9e04ec21555f9f85f7ef"
+dependencies = [
+ "fastrand",
+ "gloo-timers",
+ "tokio",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1841,6 +1852,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
+name = "gloo-timers"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbb143cf96099802033e0d4f4963b19fd2e0b728bcf076cd9cf7f6634f092994"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2922,6 +2945,8 @@ checksum = "9fe43e16d96bed57937eb7c4a28559bf4c5fc4a3951656505d1fdd4f856349b4"
 dependencies = [
  "opendal-core",
  "opendal-http-transport-reqwest",
+ "opendal-layer-retry",
+ "opendal-layer-timeout",
  "opendal-service-fs",
  "opendal-service-hf",
  "opendal-service-http",
@@ -2964,6 +2989,27 @@ dependencies = [
  "http-body",
  "opendal-core",
  "reqwest",
+]
+
+[[package]]
+name = "opendal-layer-retry"
+version = "0.59.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb8e22cb1f86ef9af771a8947d3ccf380c8f5b76236f628314dd41c9ba73331a"
+dependencies = [
+ "backon",
+ "log",
+ "opendal-core",
+]
+
+[[package]]
+name = "opendal-layer-timeout"
+version = "0.59.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08ac6c77fe0d1b18e0064a02c19b98dbebcab78bf5e7753ad1f3abbc18850ff4"
+dependencies = [
+ "opendal-core",
+ "tokio",
 ]
 
 [[package]]

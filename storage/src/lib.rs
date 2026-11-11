@@ -1,6 +1,8 @@
 //! Storage adapters use OpenDAL and expose only the shared read contracts.
 
 mod backend;
+mod config;
+pub use config::{RetryConfig, StorageConfig, TimeoutConfig};
 mod validation;
 
 pub use backend::OpenDalAccessor;

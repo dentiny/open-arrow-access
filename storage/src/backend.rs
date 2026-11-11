@@ -30,6 +30,11 @@ pub struct OpenDalAccessor {
 }
 
 impl OpenDalAccessor {
+    /// Apply optional retry/timeout policies to the supplied OpenDAL operator.
+    pub fn try_new(operator: Operator, config: crate::StorageConfig) -> Result<Self> {
+        Ok(Self::new(config.apply(operator)?))
+    }
+
     pub fn new(operator: Operator) -> Self {
         Self {
             operator,

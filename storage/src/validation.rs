@@ -35,3 +35,32 @@ fn invalid_names() -> Error {
         "empty or duplicate filename",
     )
 }
+
+pub(crate) fn validate_storage_config(config: &crate::StorageConfig) -> Result<()> {
+    if let Some(retry) = &config.retry {
+        if !retry.factor.is_finite() || retry.factor < 1.0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "configure_storage",
+                "retry factor must be finite and at least 1",
+            ));
+        }
+        if retry.min_delay > retry.max_delay {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "configure_storage",
+                "retry min_delay must not exceed max_delay",
+            ));
+        }
+    }
+    if let Some(timeout) = &config.timeout
+        && (timeout.operation_timeout.is_zero() || timeout.io_timeout.is_zero())
+    {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "configure_storage",
+            "storage timeouts must be positive",
+        ));
+    }
+    Ok(())
+}
