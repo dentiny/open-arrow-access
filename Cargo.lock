@@ -3084,6 +3084,7 @@ dependencies = [
  "futures",
  "half",
  "hashbrown 0.17.1",
+ "lz4_flex 0.14.0",
  "num-bigint 0.5.1",
  "num-integer",
  "num-traits",

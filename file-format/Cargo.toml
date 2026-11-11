@@ -12,6 +12,7 @@ csv = ["dep:arrow-csv", "dep:arrow-schema", "dep:csv", "dep:csv-async"]
 default = []
 json = ["dep:arrow-json", "dep:arrow-schema", "dep:bytes", "dep:serde_json"]
 parquet = ["dep:parquet", "dep:arrow-schema"]
+parquet-lz4 = ["parquet", "parquet/lz4"]
 parquet-gzip = ["parquet", "parquet/flate2-zlib-rs"]
 parquet-brotli = ["parquet", "parquet/brotli"]
 warc = ["dep:warc", "dep:arrow-schema"]
@@ -82,3 +83,7 @@ required-features = ["parquet-brotli"]
 [[test]]
 name = "parquet_gzip"
 required-features = ["parquet-gzip"]
+
+[[test]]
+name = "parquet_lz4"
+required-features = ["parquet-lz4"]
