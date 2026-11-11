@@ -1,6 +1,6 @@
 use futures::TryStreamExt;
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
-use open_arrow_access_layers::ParallelReadLayer;
+use open_arrow_access_layers::{ParallelReadLayer, UnorderedEmissionLayer};
 use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
 use arrow_array::{RecordBatch, cast::AsArray};
@@ -270,4 +270,23 @@ async fn parallel_byte_targets_keep_lookahead_indices_and_oversized_trajectories
         assert!(reader.next().await.unwrap().is_none());
     }
     assert!(partitions.try_next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn atif_rejects_unordered_even_with_one_partition() {
+    for (format, fixture_name) in [
+        (AtifFormat::Json, "trajectory.json"),
+        (AtifFormat::JsonLines, "trajectories.jsonl"),
+    ] {
+        let data = open_arrow_access_test_support::fixture!("atif", fixture_name).await;
+        let source = AtifAccessor::new(MemoryAccessor::new(&data, 7), format);
+        let error = source
+            .layer(UnorderedEmissionLayer)
+            .open(ReadRequest::new("runs"))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(error.operation(), "unordered_emission");
+    }
 }

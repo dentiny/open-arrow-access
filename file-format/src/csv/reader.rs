@@ -1,6 +1,7 @@
 use arrow_csv::reader::Decoder;
 use open_arrow_access_core::{
-    BatchDecoder, ByteReader, RecordBatch, RecordMetadata, RecordReader, Result, decode_batches,
+    BatchDecoder, ByteReader, OrderRequirement, RecordBatch, RecordMetadata, RecordReader, Result,
+    decode_batches,
 };
 
 use super::error::decode_error;
@@ -34,5 +35,10 @@ pub(super) fn csv_reader(
     decoder: Decoder,
     metadata: RecordMetadata,
 ) -> impl RecordReader {
-    decode_batches(input, CsvDecoder(decoder), metadata)
+    decode_batches(
+        input,
+        CsvDecoder(decoder),
+        metadata,
+        OrderRequirement::Reorderable,
+    )
 }

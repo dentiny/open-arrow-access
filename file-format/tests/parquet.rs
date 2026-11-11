@@ -103,14 +103,8 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
     type Request = ByteReadRequest;
     type Reader = dyn ByteReader;
 
-    fn capability(&self) -> Capability {
-        let inner = self.inner.capability();
-        Capability {
-            read: inner.read,
-            read_with_range: inner.read_with_range,
-            read_parallel: inner.read_parallel,
-            list: inner.list,
-        }
+    fn capability(&self) -> <Self::Reader as open_arrow_access_core::Reader>::Capability {
+        self.inner.capability()
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
@@ -148,6 +142,7 @@ impl Drop for ByteObserverReader {
 impl Reader for ByteObserverReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
+    type Capability = Capability;
 
     fn capability(&self) -> Capability {
         let inner = self.inner.capability();
@@ -251,6 +246,7 @@ struct SequentialReader(Box<dyn ByteReader>);
 impl Reader for SequentialReader {
     type Item = Bytes;
     type Metadata = ByteMetadata;
+    type Capability = Capability;
 
     fn capability(&self) -> Capability {
         Capability {
@@ -301,14 +297,8 @@ impl<A: Accessor> Accessor for OpenObserverAccessor<A> {
     type Request = A::Request;
     type Reader = A::Reader;
 
-    fn capability(&self) -> Capability {
-        let inner = self.inner.capability();
-        Capability {
-            read: inner.read,
-            read_with_range: inner.read_with_range,
-            read_parallel: inner.read_parallel,
-            list: inner.list,
-        }
+    fn capability(&self) -> <Self::Reader as open_arrow_access_core::Reader>::Capability {
+        self.inner.capability()
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {

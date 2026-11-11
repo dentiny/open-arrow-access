@@ -40,34 +40,37 @@ where
             Ok(frames.next_record().await?.map(|record| (record, frames)))
         })
         .boxed();
-        Ok(RecordChunks::new(records).into_plan(
-            metadata,
-            request.options.batch_size.get(),
-            self.partition_options.target_bytes.get(),
-            |(line, _)| line.len(),
-            move |records, metadata| {
-                let request = request.clone();
-                let projection = projection.clone();
-                let first_index = records[0].1;
-                // Keep original line endings/whitespace for raw_json fidelity.
-                let capacity = records.iter().map(|(line, _)| line.len()).sum();
-                let mut bytes = Vec::with_capacity(capacity);
-                for (line, _) in records {
-                    bytes.extend_from_slice(&line);
-                }
-                Box::pin(async move {
-                    let input = Box::new(bytes_reader(bytes.into(), Some(request.object.clone())));
-                    Ok(Box::new(create_reader(
-                        input,
-                        format,
-                        request.options.batch_size.get(),
-                        projection,
-                        metadata,
-                        first_index,
-                    )) as Box<dyn RecordReader>)
-                })
-            },
-        ))
+        Ok(RecordChunks::new(records)
+            .into_plan(
+                metadata,
+                request.options.batch_size.get(),
+                self.partition_options.target_bytes.get(),
+                |(line, _)| line.len(),
+                move |records, metadata| {
+                    let request = request.clone();
+                    let projection = projection.clone();
+                    let first_index = records[0].1;
+                    // Keep original line endings/whitespace for raw_json fidelity.
+                    let capacity = records.iter().map(|(line, _)| line.len()).sum();
+                    let mut bytes = Vec::with_capacity(capacity);
+                    for (line, _) in records {
+                        bytes.extend_from_slice(&line);
+                    }
+                    Box::pin(async move {
+                        let input =
+                            Box::new(bytes_reader(bytes.into(), Some(request.object.clone())));
+                        Ok(Box::new(create_reader(
+                            input,
+                            format,
+                            request.options.batch_size.get(),
+                            projection,
+                            metadata,
+                            first_index,
+                        )) as Box<dyn RecordReader>)
+                    })
+                },
+            )
+            .with_ordering(self.capability().ordering))
     }
 }
 

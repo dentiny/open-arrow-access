@@ -56,14 +56,22 @@ fn example<B>(storage: B) {
 Bind a format directly with `FileAccessor::from_format(storage, format)`. For an
 already-open `ByteReader`, call `format.open_input(input, request)` with
 `ReaderFactoryExt` in scope; see the [archive example](usage.md#work-with-archives-and-other-providers). The
-factory owns `prepare` and `create_reader`; the shared protocol prepares each
+factory must implement `capability` explicitly, as well as `prepare` and `create_reader`; the shared protocol prepares each
 request before opening bytes and forwards its locator and byte options. A
 format-specific accessor name can be a thin alias with convenience constructors,
 as the built-in CSV, JSON and Parquet accessors demonstrate.
 
-Use `decode_batches` for incremental byte-to-Arrow decoders. Native Arrow batch
+Record factories return `RecordCapability` and must explicitly choose or forward
+`ordering`; there is no default. Byte factories return `Capability`. A custom
+record reader declares `type Capability = RecordCapability`; a byte reader uses
+`type Capability = Capability`. `Accessor::capability()` returns its reader
+representation's associated type, so missing record ordering fails at compile time.
+
+Use `decode_batches` with an explicit `OrderRequirement` for incremental byte-to-Arrow decoders. Native Arrow batch
 streams can use the always-available core `record_stream_reader` helper to apply
-an optional projection/reordering and restore the declared schema metadata.
+an optional projection/reordering and restore the declared schema metadata. Pass
+the source ordering contract explicitly to this helper or use
+`StreamReader::records(stream, metadata, ordering)` for a direct record stream.
 Map format-specific errors before passing the stream; the helper shares
 `StreamReader`'s lazy polling and terminal/error lifecycle. Other item streams
 can use `StreamReader` directly. Schema inference, decoder finalization

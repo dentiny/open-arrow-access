@@ -1,8 +1,9 @@
 use super::xml_error;
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    ByteReader, Error, ErrorKind, FactoryToken, ReadRequest, ReaderFactory, RecordMetadata,
-    RecordReader, Result, SchemaRef, async_trait, into_async_read, record_stream_reader,
+    ByteReader, Capability, Error, ErrorKind, FactoryToken, OrderRequirement, ReadRequest,
+    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
+    into_async_read, record_stream_reader,
 };
 use xml_arrow::{InferenceOptions, NamespaceBinding, ReaderOptions, XmlReader, XmlSchema};
 
@@ -106,6 +107,16 @@ impl ReaderFactory for XmlFormat {
     type Reader = dyn RecordReader;
     type Prepared = (XmlSchema, ReaderOptions, Option<SchemaRef>);
 
+    fn capability(&self, input: Capability) -> RecordCapability {
+        Capability {
+            read: input.read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+        .with_ordering(OrderRequirement::Reorderable)
+    }
+
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
         let options = &request.options;
         let bindings = self.bindings();
@@ -182,6 +193,7 @@ impl ReaderFactory for XmlFormat {
                 source: Some(request.object),
             },
             projection,
+            OrderRequirement::Reorderable,
         )))
     }
 }

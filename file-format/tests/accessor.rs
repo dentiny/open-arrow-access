@@ -5,8 +5,9 @@ use std::{
 
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ByteReader, Capability, Error, ErrorKind, FactoryToken, ReadOptions,
-    ReadRequest, RecordMetadata, RecordReader, Result, Schema, StreamReader, async_trait,
+    Accessor, ByteReadOptions, ByteReader, Capability, Error, ErrorKind, FactoryToken,
+    OrderRequirement, ReadOptions, ReadRequest, RecordCapability, RecordMetadata, RecordReader,
+    Result, Schema, StreamReader, async_trait,
 };
 use open_arrow_access_file_format::{FileAccessor, FileFormat};
 use open_arrow_access_test_support::{MemoryAccessor, fixture};
@@ -23,6 +24,16 @@ impl FileFormat for ProbeFormat {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
     type Prepared = usize;
+
+    fn capability(&self, input: Capability) -> RecordCapability {
+        Capability {
+            read: input.read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+        .with_ordering(OrderRequirement::Reorderable)
+    }
 
     fn prepare(&self, request: &ReadRequest) -> Result<usize> {
         let options = &request.options;
@@ -53,12 +64,13 @@ impl FileFormat for ProbeFormat {
                 "unsupported input",
             ));
         }
-        Ok(Box::new(StreamReader::new(
+        Ok(Box::new(StreamReader::records(
             stream::empty(),
             RecordMetadata {
                 schema: Arc::new(Schema::empty()),
                 source: Some(request.object),
             },
+            OrderRequirement::Reorderable,
         )))
     }
 }
@@ -90,6 +102,7 @@ async fn external_format_prepares_each_open_and_receives_request_options() {
             read_parallel: false,
             list: false,
         }
+        .with_ordering(OrderRequirement::Reorderable)
     );
     assert!(events.lock().unwrap().is_empty());
     assert!(observed.requests.lock().unwrap().is_empty());

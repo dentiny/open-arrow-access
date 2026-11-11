@@ -3,8 +3,9 @@ use super::{
 };
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    ByteReader, Capability, FactoryToken, FieldNameIndex, ReadRequest, ReaderFactory,
-    RecordMetadata, RecordReader, Result, async_trait, record_stream_reader,
+    ByteReader, Capability, FactoryToken, FieldNameIndex, OrderRequirement, ReadRequest,
+    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, Result, async_trait,
+    record_stream_reader,
 };
 use parquet::arrow::{ProjectionMask, async_reader::ParquetRecordBatchStreamBuilder};
 
@@ -18,13 +19,14 @@ impl ReaderFactory for ParquetFormat {
     type Reader = dyn RecordReader;
     type Prepared = ();
 
-    fn capability(&self, input: Capability) -> Capability {
+    fn capability(&self, input: Capability) -> RecordCapability {
         Capability {
             read: input.read && input.read_with_range,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(OrderRequirement::Reorderable)
     }
 
     fn prepare(&self, _request: &ReadRequest) -> Result<()> {
@@ -84,5 +86,6 @@ pub(super) fn create_reader(
             source: Some(request.object),
         },
         reorder,
+        OrderRequirement::Reorderable,
     )) as Box<dyn RecordReader>)
 }

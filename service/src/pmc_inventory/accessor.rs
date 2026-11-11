@@ -2,8 +2,9 @@ use super::{manifest, reader::InventoryTransform};
 use arrow_schema::Schema;
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, Capability, ObjectRef, ReadRequest, RecordMetadata,
-    RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
+    Accessor, ByteAccessor, ByteReadRequest, Capability, ObjectRef, OrderRequirement, ReadRequest,
+    RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner,
+    async_trait,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -29,13 +30,14 @@ impl<A> PmcInventoryAccessor<A> {
 impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: self.inner.capability().read,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(OrderRequirement::Reorderable)
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         let (transform, files, request) = self.prepare_scan(request).await?;
@@ -121,9 +123,9 @@ impl<A: ByteAccessor + 'static> ScanPlanner for PmcInventoryAccessor<A> {
                 )
             }) as ScanPartition
         });
-        Ok(ScanPlan::from_stream(
-            metadata,
-            stream::iter(partitions.map(Ok)),
-        ))
+        Ok(
+            ScanPlan::from_stream(metadata, stream::iter(partitions.map(Ok)))
+                .with_ordering(self.capability().ordering),
+        )
     }
 }

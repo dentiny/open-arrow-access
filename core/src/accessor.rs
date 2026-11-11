@@ -3,8 +3,8 @@ use std::sync::Arc;
 use futures::stream::BoxStream;
 
 use crate::{
-    ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ListRequest, ObjectRef, Reader,
-    Result, async_trait,
+    ByteReadRequest, ByteReader, Error, ErrorKind, ListRequest, ObjectRef, Reader, Result,
+    async_trait,
 };
 
 /// Factory for independently owned readers, with typed requests and outputs.
@@ -16,9 +16,10 @@ pub trait Accessor: Send + Sync {
     /// Reader interface returned by this accessor, including its item and metadata types.
     type Reader: Reader + ?Sized;
 
-    /// Report this interface's effective operations without I/O; see [`Capability`].
+    /// Report effective operations without I/O using [`crate::Capability`] or
+    /// [`crate::RecordCapability`], according to the reader representation.
     /// Opened readers report their own abilities via [`Reader::capability`].
-    fn capability(&self) -> Capability;
+    fn capability(&self) -> <Self::Reader as Reader>::Capability;
 
     /// Open the accessor-defined selection and options in `request`.
     /// Opening may perform I/O and schema inspection; metadata is available on return
@@ -37,14 +38,8 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
     type Request = A::Request;
     type Reader = A::Reader;
 
-    fn capability(&self) -> Capability {
-        let inner = (**self).capability();
-        Capability {
-            read: inner.read,
-            read_with_range: inner.read_with_range,
-            read_parallel: inner.read_parallel,
-            list: inner.list,
-        }
+    fn capability(&self) -> <Self::Reader as Reader>::Capability {
+        (**self).capability()
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {

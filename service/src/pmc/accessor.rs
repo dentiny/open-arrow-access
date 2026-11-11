@@ -1,5 +1,6 @@
 use open_arrow_access_core::{
-    DocumentAccessor, DocumentDecoder, ReadRequest, RecordBatch, Result, SchemaRef, async_trait,
+    Capability, DocumentAccessor, DocumentDecoder, OrderRequirement, ReadRequest, RecordBatch,
+    RecordCapability, Result, SchemaRef, async_trait,
 };
 
 use super::{metadata, schema};
@@ -15,6 +16,16 @@ pub struct PmcDecoder;
 #[async_trait]
 impl DocumentDecoder for PmcDecoder {
     type Request = ReadRequest;
+
+    fn capability(&self, input: Capability) -> RecordCapability {
+        Capability {
+            read: input.read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+        .with_ordering(OrderRequirement::Reorderable)
+    }
 
     fn prepare(&self, _: &ReadRequest) -> Result<SchemaRef> {
         Ok(schema())

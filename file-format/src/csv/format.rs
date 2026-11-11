@@ -1,8 +1,8 @@
 use super::{CsvDialect, CsvFormat, reader::csv_reader, validation};
 use arrow_csv::{ReaderBuilder, reader::Decoder};
 use open_arrow_access_core::{
-    ByteReader, FactoryToken, ReadRequest, ReaderFactory, RecordMetadata, RecordReader, Result,
-    SchemaRef, async_trait,
+    ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
+    RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
 };
 
 /// Incrementally read CSV or TSV using an explicit positional schema.
@@ -53,6 +53,16 @@ impl ReaderFactory for CsvFileFormat {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
     type Prepared = (SchemaRef, Decoder);
+
+    fn capability(&self, input: Capability) -> RecordCapability {
+        Capability {
+            read: input.read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+        .with_ordering(OrderRequirement::Reorderable)
+    }
 
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
         let options = &request.options;

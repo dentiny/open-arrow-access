@@ -88,6 +88,7 @@ where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + ?Sized,
 {
     let reader = accessor.open(request.clone()).await.unwrap();
+    assert_eq!(reader.capability().ordering, accessor.capability().ordering);
     collect_reader(reader, &request).await
 }
 

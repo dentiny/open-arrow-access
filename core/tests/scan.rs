@@ -7,8 +7,8 @@ use arrow_array::Int32Array;
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
-    ErrorKind, Reader, RecordBatch, RecordMetadata, RecordReader, ScanPartition, ScanPlan,
-    StreamReader,
+    ErrorKind, OrderRequirement, Reader, RecordBatch, RecordMetadata, RecordReader, ScanPartition,
+    ScanPlan, StreamReader,
 };
 
 fn metadata(tag: &str) -> RecordMetadata {
@@ -36,8 +36,11 @@ async fn sequential_scan_rejects_metadata_and_batch_schema_drift() {
                     vec![Ok(RecordBatch::new_empty(wrong.schema))],
                 )
             };
-            Ok(Box::new(StreamReader::new(stream::iter(batches), metadata))
-                as Box<dyn RecordReader>)
+            Ok(Box::new(StreamReader::records(
+                stream::iter(batches),
+                metadata,
+                OrderRequirement::PreserveGlobal,
+            )) as Box<dyn RecordReader>)
         });
         let opened = Arc::new(AtomicBool::new(false));
         let observed = opened.clone();
@@ -72,8 +75,11 @@ async fn sequential_scan_opens_on_demand_and_preserves_order_and_duplicates() {
                     )
                     .unwrap())
                 });
-                Ok(Box::new(StreamReader::new(stream::iter(batches), metadata))
-                    as Box<dyn RecordReader>)
+                Ok(Box::new(StreamReader::records(
+                    stream::iter(batches),
+                    metadata,
+                    OrderRequirement::PreserveGlobal,
+                )) as Box<dyn RecordReader>)
             }) as ScanPartition
         })
         .collect();

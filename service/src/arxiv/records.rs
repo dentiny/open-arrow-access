@@ -7,8 +7,9 @@ use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, ObjectRef,
-    ReadOptions, ReadOptionsProvider, RecordBatchBuilder, RecordMetadata, RecordReader, Result,
-    ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, read_all,
+    OrderRequirement, ReadOptions, ReadOptionsProvider, RecordBatchBuilder, RecordCapability,
+    RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef,
+    StreamReader, async_trait, read_all,
 };
 
 use super::{ArxivKind, ArxivService};
@@ -101,13 +102,14 @@ where
     type Request = ArxivReadRequest;
     type Reader = dyn RecordReader;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: self.service.storage.capability().read,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(OrderRequirement::Reorderable)
     }
 
     async fn open(&self, request: ArxivReadRequest) -> Result<Box<dyn RecordReader>> {
@@ -180,12 +182,16 @@ where
                         Ok(Some((builder.finish()?, tar)))
                     }
                 });
-                Ok(Box::new(StreamReader::new(batches, output)) as Box<dyn RecordReader>)
+                Ok(Box::new(StreamReader::records(
+                    batches,
+                    output,
+                    OrderRequirement::Reorderable,
+                )) as Box<dyn RecordReader>)
             }) as ScanPartition
         });
-        Ok(ScanPlan::from_stream(
-            metadata,
-            stream::iter(partitions.map(Ok)),
-        ))
+        Ok(
+            ScanPlan::from_stream(metadata, stream::iter(partitions.map(Ok)))
+                .with_ordering(self.capability().ordering),
+        )
     }
 }

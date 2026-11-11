@@ -16,9 +16,9 @@ use arrow_schema::{DataType, Field};
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind,
-    ListRequest, ObjectRef, ObjectStream, ReadOptionsProvider, ReadRequest, Reader, RecordBatch,
-    RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, Schema, SchemaRef,
-    async_trait,
+    ListRequest, ObjectRef, ObjectStream, OrderRequirement, ReadOptionsProvider, ReadRequest,
+    Reader, RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition,
+    ScanPlan, ScanPlanner, Schema, SchemaRef, async_trait,
 };
 use open_arrow_access_layers::ParallelReadLayer;
 
@@ -76,13 +76,14 @@ impl Accessor for Files {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: true,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(OrderRequirement::PreserveGlobal)
     }
 
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
@@ -120,13 +121,15 @@ impl Drop for Batches {
 impl Reader for Batches {
     type Item = RecordBatch;
     type Metadata = RecordMetadata;
-    fn capability(&self) -> Capability {
+    type Capability = RecordCapability;
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: true,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(OrderRequirement::PreserveGlobal)
     }
     fn metadata(&self) -> &RecordMetadata {
         &self.metadata
@@ -533,7 +536,7 @@ impl Accessor for PlannedFiles {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         self.files.capability()
     }
 

@@ -3,7 +3,8 @@ use std::ops::Range;
 use futures::stream::BoxStream;
 
 use crate::{
-    Bytes, Capability, Error, ErrorKind, ObjectRef, RecordBatch, Result, SchemaRef, async_trait,
+    Bytes, Capability, Error, ErrorKind, ObjectRef, RecordBatch, RecordCapability, Result,
+    SchemaRef, async_trait,
 };
 
 /// A pull-based asynchronous reader. Metadata is available before the first item.
@@ -22,11 +23,15 @@ pub trait Reader: Send {
     /// Typed description of the reader's output representation.
     type Metadata: Send + Sync + 'static;
 
+    /// Capability type of this representation: byte operations or record operations
+    /// with a mandatory ordering contract.
+    type Capability: Copy + Send + Sync + 'static;
+
     /// Report operations on this opened representation without I/O.
     ///
     /// Wrappers must report their effective abilities rather than blindly retain
     /// upstream flags. Reader capabilities never advertise accessor-only listing.
-    fn capability(&self) -> Capability;
+    fn capability(&self) -> Self::Capability;
 
     /// Borrow output metadata without starting another I/O operation.
     ///
@@ -63,7 +68,9 @@ pub struct ByteMetadata {
 /// Byte specialization used by storage, byte layers, and decompression wrappers.
 /// Sequential chunks must be nonempty; use None for EOF.
 #[async_trait]
-pub trait ByteReader: Reader<Item = Bytes, Metadata = ByteMetadata> {
+pub trait ByteReader:
+    Reader<Item = Bytes, Metadata = ByteMetadata, Capability = Capability>
+{
     /// Read exactly the half-open `range` in the current byte representation.
     ///
     /// Range reads leave the sequential cursor unchanged. Valid empty ranges
@@ -104,10 +111,17 @@ pub struct RecordMetadata {
     pub source: Option<ObjectRef>,
 }
 
-/// Record specialization used by formats and future datasets, services and layers.
-pub trait RecordReader: Reader<Item = RecordBatch, Metadata = RecordMetadata> {}
+/// Record specialization used by formats, datasets, services and record layers.
+pub trait RecordReader:
+    Reader<Item = RecordBatch, Metadata = RecordMetadata, Capability = RecordCapability>
+{
+}
 
-impl<T> RecordReader for T where T: Reader<Item = RecordBatch, Metadata = RecordMetadata> + ?Sized {}
+impl<T> RecordReader for T where
+    T: Reader<Item = RecordBatch, Metadata = RecordMetadata, Capability = RecordCapability>
+        + ?Sized
+{
+}
 
 pub type RecordStream = BoxStream<'static, Result<RecordBatch>>;
 

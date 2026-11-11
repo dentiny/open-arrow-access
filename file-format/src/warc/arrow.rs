@@ -3,8 +3,9 @@ use std::sync::{Arc, OnceLock};
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
-    ByteReadRequest, ByteReader, FactoryToken, ReadRequest, ReaderFactory, RecordBatchBuilder,
-    RecordMetadata, RecordReader, Result, SchemaRef, StreamReader, async_trait,
+    ByteReadRequest, ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest,
+    ReaderFactory, RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, Result,
+    SchemaRef, StreamReader, async_trait,
 };
 
 use super::{WarcFormat, WarcHeader, WarcRecord};
@@ -48,6 +49,16 @@ impl ReaderFactory for WarcArrowFormat {
     type Prepared = SchemaRef;
     type Reader = dyn RecordReader;
 
+    fn capability(&self, input: Capability) -> RecordCapability {
+        Capability {
+            read: input.read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+        .with_ordering(OrderRequirement::Reorderable)
+    }
+
     fn prepare(&self, request: &ReadRequest) -> Result<SchemaRef> {
         request
             .options
@@ -86,12 +97,13 @@ impl ReaderFactory for WarcArrowFormat {
                 Ok(Some((batch.finish()?, records)))
             }
         });
-        Ok(Box::new(StreamReader::new(
+        Ok(Box::new(StreamReader::records(
             batches,
             RecordMetadata {
                 schema,
                 source: Some(source),
             },
+            OrderRequirement::Reorderable,
         )))
     }
 }

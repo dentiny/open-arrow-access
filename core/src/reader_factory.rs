@@ -18,14 +18,8 @@ pub trait ReaderFactory: Send + Sync {
     type Reader: Reader + ?Sized + 'static;
 
     /// Derive output capabilities without I/O; listing belongs to the accessor.
-    fn capability(&self, input: Capability) -> Capability {
-        Capability {
-            read: input.read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-    }
+    /// Required for every factory: record formats must explicitly declare ordering.
+    fn capability(&self, input: Capability) -> <Self::Reader as Reader>::Capability;
 
     /// Validate configuration before storage opens; return configuration errors here.
     fn prepare(&self, request: &Self::Request) -> Result<Self::Prepared>;

@@ -11,3 +11,6 @@ pub use type_conversion::{ColumnTypeSpec, TypeConversionAccessor, TypeConversion
 
 mod parallel_read;
 pub use parallel_read::{ParallelReadAccessor, ParallelReadLayer};
+
+mod unordered_emission;
+pub use unordered_emission::{UnorderedEmissionAccessor, UnorderedEmissionLayer};

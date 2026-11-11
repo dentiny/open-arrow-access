@@ -2,13 +2,17 @@ use std::pin::Pin;
 
 use futures::{Stream, StreamExt};
 
-use crate::{ByteMetadata, ByteReader, Bytes, Capability, ObjectRef, Reader, Result, async_trait};
+use crate::{
+    ByteMetadata, ByteReader, Bytes, Capability, ObjectRef, OrderRequirement, Reader,
+    RecordCapability, RecordMetadata, Result, async_trait,
+};
 
 /// Adapt an owned stream of [`Result`]s into a sequential [`Reader`].
 /// Pins without polling; EOF or errors drop the stream and make later reads return
-/// EOF. Items must match the metadata; byte chunks must be nonempty. Arrow batches
-/// implement [`crate::RecordReader`], and bytes with [`ByteMetadata`] implement
-/// [`ByteReader`].
+/// EOF. Items must match the metadata; byte chunks must be nonempty. Use
+/// [`StreamReader::records`] with an explicit ordering contract for Arrow records.
+/// [`StreamReader::new`] uses byte/generic capabilities; bytes with [`ByteMetadata`]
+/// implement [`ByteReader`].
 ///
 /// ```
 /// use futures::stream;
@@ -24,7 +28,8 @@ use crate::{ByteMetadata, ByteReader, Bytes, Capability, ObjectRef, Reader, Resu
 /// assert_eq!(reader.next().await.unwrap(), None);
 /// # }
 /// ```
-pub struct StreamReader<S, M> {
+pub struct StreamReader<S, M, C = Capability> {
+    capability: C,
     stream: Option<Pin<Box<S>>>,
     metadata: M,
 }
@@ -33,29 +38,50 @@ impl<S, M> StreamReader<S, M> {
     /// Own and pin the stream without polling it.
     pub fn new(stream: S, metadata: M) -> Self {
         Self {
+            capability: Capability {
+                read: true,
+                read_with_range: false,
+                read_parallel: false,
+                list: false,
+            },
             stream: Some(Box::pin(stream)),
             metadata,
         }
     }
 }
 
+impl<S, M, C> StreamReader<S, M, C> {
+    /// Attach an explicitly declared capability to a generic stream.
+    pub fn with_capability<N>(self, capability: N) -> StreamReader<S, M, N> {
+        StreamReader {
+            stream: self.stream,
+            metadata: self.metadata,
+            capability,
+        }
+    }
+}
+
+impl<S> StreamReader<S, RecordMetadata, RecordCapability> {
+    /// Construct a record stream with an explicit source ordering contract.
+    pub fn records(stream: S, metadata: RecordMetadata, ordering: OrderRequirement) -> Self {
+        StreamReader::new(stream, metadata).with_capability(RecordCapability::sequential(ordering))
+    }
+}
+
 #[async_trait]
-impl<S, M, T> Reader for StreamReader<S, M>
+impl<S, M, T, C> Reader for StreamReader<S, M, C>
 where
     S: Stream<Item = Result<T>> + Send,
     M: Send + Sync + 'static,
     T: Send + 'static,
+    C: Copy + Send + Sync + 'static,
 {
     type Item = T;
     type Metadata = M;
+    type Capability = C;
 
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+    fn capability(&self) -> C {
+        self.capability
     }
 
     fn metadata(&self) -> &M {

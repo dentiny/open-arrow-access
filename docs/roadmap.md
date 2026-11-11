@@ -34,7 +34,7 @@ new project-specific storage implementation.
 | Timeout and read budgets | Bound read operations and resource use | Cover sequential and ranged paths; preserve errors without replaying delivered records |
 | Source attributes and planning | Describe legal partitions and ordering constraints | Resolve source requirements before admitting execution/emission policies |
 | Parallel reads | Read independent files/partitions concurrently | Bounded scheduling, cancellation, and ordered merging by default |
-| Unordered emission | Emit ready partitions when source semantics allow | Explicit opt-in; reject sources requiring global order |
+| Unordered emission | Implemented: emit ready batches when source semantics allow | Explicit opt-in; reject sources requiring global order |
 | WARC Arrow conversion | Feed web-archive records into Arrow pipelines and existing record datasets | Defined schema, binary payload policy, provenance/record locator semantics |
 | Indexing and splitting | Plan format-specific independent work units | Validate index identity, compression coordinates, and source-order compatibility |
 

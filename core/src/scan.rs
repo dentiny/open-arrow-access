@@ -7,30 +7,11 @@ use futures::{
 };
 
 use crate::{
-    Accessor, RecordMetadata, RecordReader, Result, StreamReader, async_trait, into_stream,
+    Accessor, OrderRequirement, RecordMetadata, RecordReader, Result, StreamReader, async_trait,
+    into_stream,
 };
 
 use crate::error::scan_schema_mismatch;
-/// Semantic permission to relax the logical order of a record scan.
-/// Unknown or application-defined sources conservatively preserve global order.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum OrderRequirement {
-    Reorderable,
-    #[default]
-    PreserveGlobal,
-}
-
-impl OrderRequirement {
-    /// Composition may strengthen an ordering requirement, never weaken it.
-    pub fn combine(self, other: Self) -> Self {
-        if self == Self::PreserveGlobal || other == Self::PreserveGlobal {
-            Self::PreserveGlobal
-        } else {
-            Self::Reorderable
-        }
-    }
-}
-
 /// Requested output policy; permission still comes from `ScanPlan::ordering`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum EmissionPolicy {
@@ -97,7 +78,7 @@ impl ScanPlan {
                 }
                 Ok(batch)
             });
-        StreamReader::new(batches, self.metadata)
+        StreamReader::records(batches, self.metadata, self.ordering)
     }
 
     /// Plan an already known ordered partition list without opening its readers.
@@ -137,10 +118,12 @@ impl ScanPlan {
     /// is already fixed; partition execution remains lazy. Outer file-set plans
     /// can still run multiple such inputs concurrently.
     pub fn whole_input(reader: Box<dyn RecordReader>) -> Self {
+        let ordering = reader.capability().ordering;
         Self::new(
             reader.metadata().clone(),
             vec![Box::pin(async move { Ok(reader) })],
         )
+        .with_ordering(ordering)
     }
 }
 
@@ -149,23 +132,11 @@ impl ScanPlan {
 /// cover the selection exactly once and be listed in the source's logical order.
 #[async_trait]
 pub trait ScanPlanner: Accessor<Reader = dyn RecordReader> {
-    /// Requirement covering every selection accepted by this accessor, without I/O.
-    /// `Reorderable` guarantees every accepted selection is reorderable, including
-    /// empty inputs. Keep the conservative default when selection-specific inspection
-    /// is required; `plan_scan` resolves the selected source's own requirements.
-    fn order_requirement(&self) -> OrderRequirement {
-        OrderRequirement::PreserveGlobal
-    }
-
     async fn plan_scan(&self, request: Self::Request) -> Result<ScanPlan>;
 }
 
 #[async_trait]
 impl<A: ScanPlanner + ?Sized> ScanPlanner for Arc<A> {
-    fn order_requirement(&self) -> OrderRequirement {
-        (**self).order_requirement()
-    }
-
     async fn plan_scan(&self, request: Self::Request) -> Result<ScanPlan> {
         (**self).plan_scan(request).await
     }

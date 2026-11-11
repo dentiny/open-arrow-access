@@ -1,10 +1,13 @@
 # Source attributes and scan planning
 
 Status: the runtime now implements `ScanPlanner`, ordered parallel execution,
-`OrderRequirement`, and `ScanPlan::ordering`; see [parallel reading](parallel-read.md).
-The fuller attribute/strategy types below remain a design proposal. In particular,
+typed `RecordCapability` with mandatory `ordering`, and `ScanPlan::ordering`; see [parallel reading](parallel-read.md).
+Every record adapter must declare its capability; the former optional/default
+`ScanPlanner::order_requirement()` method has been removed. The fuller
+attribute/strategy types below remain a design proposal. In particular,
 `SourceAttributes` and `ScanProperties` are not current exports. Unordered emission
-is the next step and remains explicitly opt-in.
+is implemented as an explicit opt-in; the runtime contract and admission rules are
+documented in [parallel reading](parallel-read.md).
 
 Confirmed application requirement: **the entire ATIF input must retain global
 record order**. Preserving order only within each trajectory is insufficient.
@@ -31,7 +34,8 @@ concurrency, partition concurrency and parallel Arrow conversion are separate.
 
 ## Proposed attribute types
 
-The following Rust sketches are proposed API shapes, not current exports:
+`OrderRequirement` below is a current export; the remaining sketches describe
+proposed attribute and strategy types:
 
 ```text
 enum OrderRequirement {
@@ -88,7 +92,7 @@ row-group scan parallelism at runtime.
 | Provider | Ordering requirement | Candidate partitioning | Admission conditions |
 | --- | --- | --- | --- |
 | Parquet file | Reorderable unless a surrounding source imposes order | Native row groups | Effective range access, footer/schema and independently initialized row-group readers |
-| ATIF file | PreserveGlobal | WholeInput | One sequential record scan; reject unordered emission |
+| ATIF file | PreserveGlobal | Complete JSONL trajectories; whole-input JSON | Parallel decode preserves global indices and order; reject unordered emission |
 | WARC file | Source/view dependent; raw-record view may be reorderable | Indexed record groups | Verified record boundaries, correct offset coordinates, complete decode context and independently decodable compression units |
 | Directory dataset | Resolve child/source constraints | Independent files, optionally child partitions | Files must be independently readable; fixed output schema; defined file order for global-order scans |
 | Hugging Face service | Resolve dataset/view constraints | Selected immutable shards, then child partitions | Selected revision/config/split and each representation's constraints |
@@ -100,8 +104,9 @@ that makes row-group partitioning a candidate, not an unconditional property of
 every compressed/storage combination. See the
 [Parquet file format](https://parquet.apache.org/docs/file-format/).
 
-An ATIF file has no intra-file record partition strategy in this design. Several
-independent ATIF files may be read concurrently by a dataset planner **only** if
+ATIF JSONL planning can frame complete trajectories for independent decode, while
+retaining their original indices and global output order. JSON stays whole-input.
+Several independent ATIF files may be read concurrently by a dataset planner **only** if
 their independence and authoritative file sequence are established and the
 merger preserves the global file/record sequence. A dataset with cross-file
 state/dependencies must keep one sequential partition instead.

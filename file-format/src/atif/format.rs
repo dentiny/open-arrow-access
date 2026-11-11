@@ -1,8 +1,8 @@
 use super::reader::create_reader;
 use atif_arrow::trajectory_schema;
 use open_arrow_access_core::{
-    ByteReader, FactoryToken, ReadRequest, ReaderFactory, RecordMetadata, RecordReader, Result,
-    SchemaRef, async_trait,
+    ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
+    RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
 };
 
 /// The explicitly selected layout of ATIF documents; extensions are not inspected.
@@ -19,6 +19,16 @@ impl ReaderFactory for AtifFormat {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
     type Prepared = (SchemaRef, Option<Vec<usize>>);
+
+    fn capability(&self, input: Capability) -> RecordCapability {
+        Capability {
+            read: input.read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+        .with_ordering(OrderRequirement::PreserveGlobal)
+    }
 
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
         let options = &request.options;

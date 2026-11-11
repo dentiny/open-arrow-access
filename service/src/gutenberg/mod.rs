@@ -8,8 +8,8 @@ use std::sync::{Arc, OnceLock};
 
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
-    DocumentAccessor, DocumentDecoder, FieldNameIndex, FieldValue, ReadRequest, RecordBatch,
-    Result, SchemaRef, async_trait,
+    Capability, DocumentAccessor, DocumentDecoder, FieldNameIndex, FieldValue, OrderRequirement,
+    ReadRequest, RecordBatch, RecordCapability, Result, SchemaRef, async_trait,
 };
 use open_arrow_access_file_format::xml::{NamespaceBinding, XmlField, XmlSchema};
 
@@ -24,6 +24,16 @@ pub struct GutenbergDecoder;
 #[async_trait]
 impl DocumentDecoder for GutenbergDecoder {
     type Request = ReadRequest;
+
+    fn capability(&self, input: Capability) -> RecordCapability {
+        Capability {
+            read: input.read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+        .with_ordering(OrderRequirement::Reorderable)
+    }
 
     fn prepare(&self, _request: &ReadRequest) -> Result<SchemaRef> {
         Ok(schema())

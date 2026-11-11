@@ -1,6 +1,6 @@
 use crate::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ReaderFactory,
-    ReaderFactoryExt, Result, async_trait,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, ReaderFactory, ReaderFactoryExt, Result,
+    async_trait,
 };
 
 /// Bind byte storage to a reader factory through the shared opening protocol.
@@ -43,7 +43,7 @@ where
 {
     type Request = F::Request;
     type Reader = F::Reader;
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> <Self::Reader as crate::Reader>::Capability {
         self.factory.capability(self.storage.capability())
     }
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {

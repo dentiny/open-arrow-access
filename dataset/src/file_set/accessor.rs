@@ -3,7 +3,7 @@ use std::sync::Arc;
 use futures::{StreamExt, TryStreamExt, future::BoxFuture, stream};
 
 use open_arrow_access_core::{
-    Accessor, Capability, OrderRequirement, ReadRequest, RecordMetadata, RecordReader, Result,
+    Accessor, Capability, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result,
     ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 
@@ -25,7 +25,6 @@ type FilePlanner<A> = fn(Arc<A>, ReadRequest) -> BoxFuture<'static, Result<ScanP
 pub struct FileSetAccessor<A> {
     inner: Arc<A>,
     file_planner: Option<FilePlanner<A>>,
-    ordering: OrderRequirement,
 }
 
 impl<A> Clone for FileSetAccessor<A> {
@@ -33,7 +32,6 @@ impl<A> Clone for FileSetAccessor<A> {
         Self {
             inner: self.inner.clone(),
             file_planner: self.file_planner,
-            ordering: self.ordering,
         }
     }
 }
@@ -43,7 +41,6 @@ impl<A> FileSetAccessor<A> {
         Self {
             inner: Arc::new(inner),
             file_planner: None,
-            ordering: OrderRequirement::PreserveGlobal,
         }
     }
 
@@ -53,7 +50,6 @@ impl<A> FileSetAccessor<A> {
     where
         A: ScanPlanner<Request = ReadRequest> + 'static,
     {
-        self.ordering = self.inner.order_requirement();
         self.file_planner =
             Some(|inner, request| Box::pin(async move { inner.plan_scan(request).await }));
         self
@@ -68,13 +64,14 @@ where
     type Request = FileSetRequest;
     type Reader = dyn RecordReader;
 
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: self.inner.capability().read,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(self.inner.capability().ordering)
     }
 
     async fn open(&self, request: FileSetRequest) -> Result<Box<dyn RecordReader>> {
@@ -101,10 +98,6 @@ impl<A> ScanPlanner for FileSetAccessor<A>
 where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
 {
-    fn order_requirement(&self) -> OrderRequirement {
-        self.ordering
-    }
-
     async fn plan_scan(&self, request: FileSetRequest) -> Result<ScanPlan> {
         let mut requests = request.into_requests();
         let first = requests
@@ -115,7 +108,7 @@ where
             None => ScanPlan::whole_input(self.inner.open(first).await?),
         };
         validate_file_policy(&first)?;
-        let ordering = self.ordering.combine(first.ordering);
+        let ordering = self.capability().ordering.combine(first.ordering);
         let metadata = RecordMetadata {
             schema: first.metadata.schema,
             source: None,

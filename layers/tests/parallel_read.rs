@@ -2,7 +2,7 @@ use arrow_array::Int32Array;
 use arrow_schema::{DataType, Field, Schema};
 use futures::{StreamExt, stream};
 use open_arrow_access_core::*;
-use open_arrow_access_layers::ParallelReadLayer;
+use open_arrow_access_layers::{ParallelReadLayer, UnorderedEmissionLayer};
 use std::{
     num::NonZeroUsize,
     sync::{
@@ -30,18 +30,19 @@ fn value(batch: &RecordBatch) -> i32 {
         .unwrap()
         .value(0)
 }
-struct Source;
+struct Source(OrderRequirement);
 #[async_trait]
 impl Accessor for Source {
     type Request = ScanPlan;
     type Reader = dyn RecordReader;
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: true,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(self.0)
     }
     async fn open(&self, _: ScanPlan) -> Result<Box<dyn RecordReader>> {
         unreachable!()
@@ -63,10 +64,10 @@ async fn open_mode(
 ) -> Box<dyn RecordReader> {
     let mut plan = ScanPlan::new(metadata(), parts).with_ordering(OrderRequirement::Reorderable);
     plan.emission = emission;
-    open_plan(plan, p, 1).await
+    open_plan(plan, p, /*prefetch=*/ 1).await
 }
 async fn open_plan(plan: ScanPlan, p: usize, prefetch: usize) -> Box<dyn RecordReader> {
-    Source
+    Source(OrderRequirement::Reorderable)
         .layer(ParallelReadLayer::new(
             NonZeroUsize::new(p).unwrap(),
             NonZeroUsize::new(prefetch).unwrap(),
@@ -77,9 +78,10 @@ async fn open_plan(plan: ScanPlan, p: usize, prefetch: usize) -> Box<dyn RecordR
 }
 fn part(values: Vec<i32>) -> ScanPartition {
     Box::pin(async move {
-        Ok(Box::new(StreamReader::new(
+        Ok(Box::new(StreamReader::records(
             stream::iter(values.into_iter().map(|n| Ok(batch(n)))),
             metadata(),
+            OrderRequirement::Reorderable,
         )) as Box<dyn RecordReader>)
     })
 }
@@ -94,6 +96,44 @@ fn blocked_partition() -> (ScanPartition, oneshot::Receiver<()>, oneshot::Receiv
         std::future::pending().await
     });
     (partition, started, dropped)
+}
+
+#[tokio::test]
+async fn capability_controls_ordering_and_preserves_all_rows() {
+    for ordering in [
+        OrderRequirement::PreserveGlobal,
+        OrderRequirement::Reorderable,
+    ] {
+        let source = Source(ordering).layer(ParallelReadLayer::new(
+            /*partitions=*/ NonZeroUsize::new(3).unwrap(),
+            /*prefetch=*/ NonZeroUsize::MIN,
+        ));
+        // The source capability must strengthen a permissive partition plan.
+        let plan = ScanPlan::new(
+            metadata(),
+            vec![part(vec![0, 1, 1]), part(vec![]), part(vec![2, 3, 4])],
+        )
+        .with_ordering(OrderRequirement::Reorderable);
+        let mut reader = if ordering == OrderRequirement::Reorderable {
+            source.layer(UnorderedEmissionLayer).open(plan).await
+        } else {
+            source.open(plan).await
+        }
+        .unwrap();
+        assert_eq!(reader.capability().ordering, ordering);
+
+        let mut values = Vec::new();
+        while let Some(batch) = reader.next().await.unwrap() {
+            values.push(value(&batch));
+        }
+        // Global-order output is compared directly; unordered output is sorted
+        // by the caller before checking values and duplicate multiplicity.
+        if ordering == OrderRequirement::Reorderable {
+            values.sort_unstable();
+        }
+        assert_eq!(values, [0, 1, 1, 2, 3, 4]);
+        assert!(reader.next().await.unwrap().is_none());
+    }
 }
 
 #[tokio::test]
@@ -131,7 +171,11 @@ async fn overlaps_without_replacing_completed_buffered_partitions() {
                 ready.add_permits(1);
                 Poll::Ready(None)
             }));
-            Ok(Box::new(StreamReader::new(batches, metadata())) as Box<dyn RecordReader>)
+            Ok(Box::new(StreamReader::records(
+                batches,
+                metadata(),
+                OrderRequirement::Reorderable,
+            )) as Box<dyn RecordReader>)
         }));
     }
     // Two slots let each later worker queue its batch and reach EOF.
@@ -174,16 +218,18 @@ async fn rejects_partition_metadata_and_batch_schema_mismatch() {
         };
         let wrong_batch = RecordBatch::new_empty(wrong.schema.clone());
         let p: ScanPartition = Box::pin(async move {
-            Ok(Box::new(StreamReader::new(
+            Ok(Box::new(StreamReader::records(
                 stream::iter([Ok(wrong_batch)]),
                 metadata(),
+                OrderRequirement::Reorderable,
             )) as Box<dyn RecordReader>)
         });
         assert!(open_mode(vec![p], 1, emission).await.next().await.is_err());
         let p: ScanPartition = Box::pin(async move {
-            Ok(Box::new(StreamReader::new(
+            Ok(Box::new(StreamReader::records(
                 stream::empty::<Result<RecordBatch>>(),
                 wrong,
+                OrderRequirement::Reorderable,
             )) as Box<dyn RecordReader>)
         });
         assert!(open_mode(vec![p], 1, emission).await.next().await.is_err());
@@ -198,7 +244,11 @@ async fn full_later_queue_stops_decoding_before_next_batch() {
         let input = stream::iter((0..50).map(|n| Ok(batch(n)))).inspect(move |_| {
             signal.add_permits(1);
         });
-        Ok(Box::new(StreamReader::new(input, metadata())) as Box<dyn RecordReader>)
+        Ok(Box::new(StreamReader::records(
+            input,
+            metadata(),
+            OrderRequirement::Reorderable,
+        )) as Box<dyn RecordReader>)
     });
     let mut r = open(vec![Box::pin(std::future::pending()), later], 2).await;
     let task = tokio::spawn(async move { r.next().await });
@@ -240,4 +290,50 @@ async fn ready_batches_progress_despite_pending_discovery_or_partitions() {
     assert_eq!(value(&reader.next().await.unwrap().unwrap()), 0);
     assert!(reader.next().await.unwrap().is_none());
     assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+// Adding the two layers in either order must select the same emission policy
+// and share one parallel-read budget.
+async fn emission_and_parallel_layers_collect_one_budget_in_either_order() {
+    let budget = ParallelReadLayer::new(NonZeroUsize::new(2).unwrap(), NonZeroUsize::MIN);
+    let a = Source(OrderRequirement::Reorderable)
+        .layer(budget)
+        .layer(UnorderedEmissionLayer);
+    let b = Source(OrderRequirement::Reorderable)
+        .layer(UnorderedEmissionLayer)
+        .layer(budget);
+    let empty = || ScanPlan::new(metadata(), vec![]).with_ordering(OrderRequirement::Reorderable);
+    let left = a.plan_scan(empty()).await.unwrap();
+    let right = b.plan_scan(empty()).await.unwrap();
+    assert_eq!(left.parallel_read, right.parallel_read);
+    assert_eq!(left.emission, EmissionPolicy::Unordered);
+    assert_eq!(right.emission, EmissionPolicy::Unordered);
+    for reverse in [false, true] {
+        let blocked = Box::pin(std::future::pending()) as ScanPartition;
+        let plan = ScanPlan::new(metadata(), vec![blocked, part(vec![7])])
+            .with_ordering(OrderRequirement::Reorderable);
+        let mut reader = if reverse {
+            b.open(plan).await
+        } else {
+            a.open(plan).await
+        }
+        .unwrap();
+        assert_eq!(value(&reader.next().await.unwrap().unwrap()), 7);
+        drop(reader);
+        let rejected = ScanPlan::new(metadata(), vec![]);
+        let result = if reverse {
+            b.open(rejected).await
+        } else {
+            a.open(rejected).await
+        };
+        assert_eq!(result.err().unwrap().kind(), ErrorKind::InvalidInput);
+    }
+    let conflict = Source(OrderRequirement::Reorderable)
+        .layer(budget)
+        .layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN));
+    assert_eq!(
+        conflict.open(empty()).await.err().unwrap().kind(),
+        ErrorKind::InvalidInput
+    );
 }

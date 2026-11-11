@@ -6,9 +6,9 @@ use std::{
 use arrow_schema::{DataType, Field, Schema};
 use futures::{lock::Mutex, stream};
 use open_arrow_access_core::{
-    Accessor, Bytes, Capability, ReadOptions, ReadOptionsProvider, RecordBatchBuilder,
-    RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef,
-    StreamReader, async_trait, read_all,
+    Accessor, Bytes, Capability, OrderRequirement, ReadOptions, ReadOptionsProvider,
+    RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition,
+    ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, read_all,
 };
 
 use super::MecaArchive;
@@ -88,13 +88,14 @@ pub fn record_schema() -> SchemaRef {
 impl Accessor for MecaRecords {
     type Request = MecaReadRequest;
     type Reader = dyn RecordReader;
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: true,
             read_with_range: false,
             read_parallel: false,
             list: false,
         }
+        .with_ordering(OrderRequirement::Reorderable)
     }
     async fn open(&self, request: MecaReadRequest) -> Result<Box<dyn RecordReader>> {
         Ok(Box::new(self.plan_scan(request).await?.into_reader()))
@@ -144,12 +145,16 @@ impl ScanPlanner for MecaRecords {
                     })?;
                     builder.finish()
                 });
-                Ok(Box::new(StreamReader::new(batches, metadata)) as Box<dyn RecordReader>)
+                Ok(Box::new(StreamReader::records(
+                    batches,
+                    metadata,
+                    OrderRequirement::Reorderable,
+                )) as Box<dyn RecordReader>)
             }) as ScanPartition
         });
-        Ok(ScanPlan::from_stream(
-            metadata,
-            stream::iter(partitions.map(Ok)),
-        ))
+        Ok(
+            ScanPlan::from_stream(metadata, stream::iter(partitions.map(Ok)))
+                .with_ordering(self.capability().ordering),
+        )
     }
 }

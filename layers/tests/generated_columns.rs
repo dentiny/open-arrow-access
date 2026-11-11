@@ -11,8 +11,8 @@ use arrow_array::{Array, Int32Array, Int64Array, RecordBatch, RecordBatchOptions
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, AccessorExt, Capability, ErrorKind, ReadOptions, ReadRequest, RecordMetadata,
-    RecordReader, Result, async_trait, record_stream_reader,
+    Accessor, AccessorExt, Capability, ErrorKind, OrderRequirement, ReadOptions, ReadRequest,
+    RecordCapability, RecordMetadata, RecordReader, Result, async_trait, record_stream_reader,
 };
 use open_arrow_access_layers::{
     ColumnTypeSpec, GeneratedColumnSpec, GeneratedColumnsLayer, TypeConversionLayer,
@@ -50,13 +50,14 @@ impl MemoryAccessor {
 impl Accessor for MemoryAccessor {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
-    fn capability(&self) -> Capability {
+    fn capability(&self) -> RecordCapability {
         Capability {
             read: true,
             read_parallel: false,
             read_with_range: false,
             list: false,
         }
+        .with_ordering(OrderRequirement::Reorderable)
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         let (schema, projection) = request
@@ -75,6 +76,7 @@ impl Accessor for MemoryAccessor {
                 source: Some(request.object),
             },
             projection,
+            OrderRequirement::Reorderable,
         )))
     }
 }

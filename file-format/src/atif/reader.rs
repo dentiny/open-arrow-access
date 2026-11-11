@@ -1,8 +1,8 @@
 use atif_arrow::TrajectoryBatchBuilder;
 use futures::{StreamExt, TryStreamExt, stream, stream::BoxStream};
 use open_arrow_access_core::{
-    ByteReader, Bytes, ObjectRef, RecordBatch, RecordMetadata, RecordReader, Result, StreamReader,
-    read_all, read_lines,
+    ByteReader, Bytes, ObjectRef, OrderRequirement, RecordBatch, RecordMetadata, RecordReader,
+    Result, StreamReader, read_all, read_lines,
 };
 
 use super::{AtifFormat, error::decode_error};
@@ -79,5 +79,5 @@ pub(super) fn create_reader(
     let stream = stream::try_unfold(decoder, |mut decoder| async move {
         Ok(decoder.read_batch().await?.map(|batch| (batch, decoder)))
     });
-    StreamReader::new(stream, metadata)
+    StreamReader::records(stream, metadata, OrderRequirement::PreserveGlobal)
 }

@@ -124,8 +124,9 @@ total memory or an individual value's size.
 
 Storage I/O concurrency preserves byte and record order. It does not parallelize
 files or partitions. Multiple application-owned readers each have their own I/O
-budget. Planned parallel execution and unordered emission are separate policies;
-source ordering requirements will constrain where they can be used.
+budget. `ParallelReadLayer` and `UnorderedEmissionLayer` are separate policies;
+source ordering requirements constrain admission to unordered emission. Both
+collect settings before one bounded executor starts.
 
 ## Schema, errors, and source identity
 
