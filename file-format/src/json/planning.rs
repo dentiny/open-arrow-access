@@ -26,7 +26,7 @@ where
             .open(ByteReadRequest::from(&request))
             .await?;
         let frames = JsonFrames {
-            input,
+            input: super::nonfinite::normalize_input(input),
             pending_input: BytesMut::new(),
         };
         let rows = request.options.batch_size.get();

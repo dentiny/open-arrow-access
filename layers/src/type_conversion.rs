@@ -1,8 +1,10 @@
 use std::{collections::HashSet, sync::Arc};
 
-use arrow_array::{RecordBatch, RecordBatchOptions};
+use arrow_array::{
+    Array, ArrayRef, LargeStringArray, RecordBatch, RecordBatchOptions, cast::AsArray,
+};
 use arrow_cast::{CastOptions, cast_with_options};
-use arrow_schema::{DataType, Schema};
+use arrow_schema::{ArrowError, DataType, Schema};
 use open_arrow_access_core::{
     Accessor, Capability, Error, ErrorKind, FieldNameIndex, Layer, ReadOptionsProvider, Reader,
     RecordCapability, RecordMetadata, RecordReader, Result, async_trait,
@@ -21,7 +23,10 @@ pub struct ColumnTypeSpec {
 ///
 /// Uses Arrow cast semantics: successful casts can still lose numeric or temporal
 /// precision. All declared casts run before the final projection, even for hidden
-/// columns. Storage and decoding schemas are unchanged.
+/// columns. String-to-timestamp casts also accept ISO minute precision (for example,
+/// `2000-05-31T04:00Z`). Naive timestamps use the target timezone, or UTC if absent;
+/// invalid, ambiguous, or out-of-range values fail. Storage and decoding schemas
+/// are unchanged.
 #[derive(Clone, Debug, Default)]
 pub struct TypeConversionLayer {
     specs: Arc<[ColumnTypeSpec]>,
@@ -166,8 +171,15 @@ impl TypeConversionReader {
         for cast in &self.casts {
             let index = cast.source_index;
             let target = &cast.target_type;
-            columns[index] =
-                cast_with_options(columns[index].as_ref(), target, &options).map_err(|error| {
+            columns[index] = cast_with_options(columns[index].as_ref(), target, &options)
+                .or_else(|error| match target {
+                    // Keep Arrow's semantics, adding only the service's minute-precision fallback.
+                    DataType::Timestamp(_, _) if columns[index].data_type().is_string() => {
+                        cast_minute_timestamps(columns[index].as_ref(), target, &options)
+                    }
+                    _ => Err(error),
+                })
+                .map_err(|error| {
                     Error::new(
                         ErrorKind::Decode,
                         "cast",
@@ -231,4 +243,29 @@ impl Reader for TypeConversionReader {
         }
         result
     }
+}
+
+/// Supply omitted seconds, then let Arrow validate dates, offsets, timezones and range.
+fn cast_minute_timestamps(
+    input: &dyn Array,
+    target: &DataType,
+    options: &CastOptions<'_>,
+) -> std::result::Result<ArrayRef, ArrowError> {
+    let strings = cast_with_options(input, &DataType::LargeUtf8, options)?;
+    let normalized = LargeStringArray::from_iter(strings.as_string::<i64>().iter().map(|value| {
+        value.map(|value| {
+            if value.as_bytes().get(13) == Some(&b':')
+                && matches!(
+                    value.as_bytes().get(16),
+                    None | Some(b'Z' | b'z' | b'+' | b'-')
+                )
+                && value.get(..16).is_some()
+            {
+                format!("{}:00{}", &value[..16], &value[16..])
+            } else {
+                value.to_owned()
+            }
+        })
+    }));
+    cast_with_options(&normalized, target, options)
 }
