@@ -50,7 +50,8 @@ pub(super) async fn infer(
     let mut records = Vec::new();
     let mut eof = false;
     loop {
-        let mut values = Deserializer::from_slice(&buffered[offset..]).into_iter::<Value>();
+        let sample = super::nonfinite::inference_sample(&buffered[offset..], eof);
+        let mut values = Deserializer::from_slice(&sample).into_iter::<Value>();
         match values.next() {
             Some(Ok(value)) => {
                 if !value.is_object() {

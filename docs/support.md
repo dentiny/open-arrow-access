@@ -14,7 +14,7 @@ is listed in the [roadmap](roadmap.md).
 | --- | --- | --- | --- |
 | Parquet | `format-parquet` | Arrow batches | File schema; exact ranges and known byte length; uncompressed/Snappy pages |
 | CSV / TSV | `format-csv` | Arrow batches | Caller-supplied Arrow schema; configurable delimiter and header; sequential bytes |
-| JSON / JSONL | `format-json` | Arrow batches | Explicit or sampled Arrow schema; whitespace-separated objects, not top-level arrays; sequential bytes |
+| JSON / JSONL | `format-json` | Arrow batches | Explicit or sampled Arrow schema; whitespace-separated objects, not top-level arrays; bare NaN/Infinity/-Infinity accepted; sequential bytes |
 | XML | `format-xml` | Arrow batches | Explicit record path; bounded schema inference or explicit mappings; sequential UTF-8 bytes |
 | ATIF JSON / JSONL | `format-atif` | Arrow batches | Fixed trajectory schema; one complete trajectory per document or nonblank line; sequential bytes |
 | WARC | `format-warc` | Native `WarcRecord` values | Sequential bytes; preserves headers and binary bodies; no built-in Arrow conversion |

@@ -31,7 +31,7 @@ where
             source: Some(request.object.clone()),
         };
         let frames = JsonFrames {
-            input,
+            input: super::nonfinite::normalize_input(input),
             pending_input: BytesMut::new(),
         };
         let rows = request.options.batch_size.get();

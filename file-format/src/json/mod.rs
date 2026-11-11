@@ -4,6 +4,7 @@ mod accessor;
 mod error;
 mod format;
 mod inference;
+mod nonfinite;
 mod planning;
 mod reader;
 

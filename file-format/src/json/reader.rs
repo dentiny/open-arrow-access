@@ -44,7 +44,7 @@ pub(super) fn json_reader(
     batch_size: usize,
 ) -> impl RecordReader {
     decode_batches(
-        input,
+        super::nonfinite::normalize_input(input),
         JsonDecoder {
             decoder,
             batch_size,

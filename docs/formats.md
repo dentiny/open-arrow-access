@@ -21,7 +21,8 @@ Targets are checked between complete objects: a single object and one upstream
 chunk can exceed the byte target. Sampling and decoding share one input, so
 sequential and compressed sources do not need to be reopened. Sampled bytes,
 including lookahead, are replayed before the remaining input. Arrow supplies
-nested Struct/List inference and type merging within the sample. Empty input
+nested Struct/List inference and type merging within the sample. Bare
+`NaN`, `Infinity`, and `-Infinity` infer as Float64; quoted strings remain strings. Empty input
 requires an explicit schema. Projection is resolved after inference; schema
 inference is independent for each file, and later values use the fixed schema.
 Native parallel scans infer once before partitioning, then share that schema

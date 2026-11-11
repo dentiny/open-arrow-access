@@ -11,7 +11,8 @@ use open_arrow_access_core::{
 
 /// Read whitespace-separated JSON objects, including JSONL, with an explicit or inferred fixed schema.
 /// Missing nullable fields become null; unknown fields are ignored. Top-level
-/// arrays and scalar records are rejected.
+/// arrays and scalar records are rejected. Bare `NaN`, `Infinity`, and `-Infinity`
+/// values are accepted and decoded by Arrow as floating-point values.
 #[derive(Clone, Debug)]
 pub struct JsonFormat {
     schema: Option<SchemaRef>,
