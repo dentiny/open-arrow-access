@@ -9,13 +9,26 @@ filename extensions do not attach parsers or decompression layers.
 `ParquetAccessor::new(bytes)` reads the file schema at open and requires exact
 byte ranges and a known input length. Projection is pushed into the Parquet
 reader. Uncompressed and Snappy pages are supported by `format-parquet`.
-Enable `format-parquet-lz4` for LZ4 (raw and legacy Hadoop)-compressed pages; it also enables
-the Parquet reader. External file compression is separate:
+Enable `format-parquet-brotli` for Brotli, `format-parquet-gzip` for Gzip, `format-parquet-lz4` for LZ4
+compressed pages; each codec feature also enables the Parquet reader. External file compression is separate:
 a gzip byte layer removes the range access Parquet needs.
 
 ## JSON and JSONL
 
-`JsonAccessor::new(bytes, schema)` requires a fixed Arrow schema. It accepts
+`JsonAccessor::new(bytes, schema)` uses an explicit Arrow schema.
+`JsonAccessor::infer(bytes)` infers a fixed schema at open from up to 1000
+objects or 64 MiB of sampled input. Configure these targets with
+`with_inference_options(JsonInferenceOptions { max_records, max_bytes })`.
+Targets are checked between complete objects: a single object and one upstream
+chunk can exceed the byte target. Sampling and decoding share one input, so
+sequential and compressed sources do not need to be reopened. Sampled bytes,
+including lookahead, are replayed before the remaining input. Arrow supplies
+nested Struct/List inference and type merging within the sample. Bare
+`NaN`, `Infinity`, and `-Infinity` infer as Float64; quoted strings remain strings. Empty input
+requires an explicit schema. Projection is resolved after inference; schema
+inference is independent for each file, and later values use the fixed schema.
+Native parallel scans infer once before partitioning, then share that schema
+across every decode partition. It accepts
 whitespace-separated objects, including JSONL and pretty-printed object streams.
 Top-level arrays are not flattened; arrays, scalars and null records are rejected.
 Empty or whitespace-only input emits no rows. Missing nullable fields become
@@ -27,7 +40,31 @@ EOF, terminate the reader. Batch size does not bound one record's byte size.
 
 ## CSV and TSV
 
-`CsvAccessor::new(bytes, schema)` requires a fixed Arrow schema. Configure headers
+`CsvAccessor::new(bytes, schema)` uses an explicit Arrow schema.
+`CsvAccessor::infer(bytes)` infers types and detects headers at open. The default
+sample includes up to 1000 complete records (including the potential header) or
+64 MiB of canonical CSV bytes. Configure sampling and override header detection
+with `with_inference_options(CsvInferenceOptions { max_records, max_bytes, has_header })`.
+`has_header: None` compares the first record with types inferred from subsequent
+records; ambiguous all-string samples default to a header. Use `Some(false)` for
+headerless string data, which receives `column_1`, `column_2`, etc.
+
+Inference uses the source `CsvDialect`, preserving quoted delimiters, multiline
+fields, custom quotes/escapes, comments, terminators, UTF-8 and CRLF. Calling
+`with_dialect` also explicitly sets header presence; install inference options
+with `has_header: None` afterwards to restore automatic detection for that dialect.
+Opaque `with_format` settings require an explicit schema. Record framing reuses
+the native scan parser and canonical quoting; sampled records and unread input
+continue through one source reader without reopening storage, including gzip
+streams. Byte targets are soft and checked between complete encoded records;
+one record, parser lookahead and upstream chunks can exceed them.
+
+The schema is fixed before returning the reader. Projection is resolved after
+inference, and native parallel scans share the inferred schema across partitions.
+Schemas are inferred separately per file; no cross-file reconciliation is added.
+Later incompatible values fail decoding. Empty inputs, header-only samples,
+all-null sampled columns, and duplicate/empty headers require an explicit schema.
+For identifiers with significant leading zeros, supply an explicit string schema. Configure headers
 with `CsvFormat::default().with_header(true)` and TSV with `.with_delimiter(b'\t')`.
 The reader uses Arrow CSV's incremental decoder over sequential bytes.
 

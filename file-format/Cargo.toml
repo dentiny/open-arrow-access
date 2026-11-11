@@ -13,6 +13,8 @@ default = []
 json = ["dep:arrow-json", "dep:arrow-schema", "dep:bytes", "dep:serde_json"]
 parquet = ["dep:parquet", "dep:arrow-schema"]
 parquet-lz4 = ["parquet", "parquet/lz4"]
+parquet-gzip = ["parquet", "parquet/flate2-zlib-rs"]
+parquet-brotli = ["parquet", "parquet/brotli"]
 warc = ["dep:warc", "dep:arrow-schema"]
 xml = ["dep:xml-arrow"]
 
@@ -73,6 +75,14 @@ required-features = ["parquet"]
 [[test]]
 name = "document"
 required-features = ["json"]
+
+[[test]]
+name = "parquet_brotli"
+required-features = ["parquet-brotli"]
+
+[[test]]
+name = "parquet_gzip"
+required-features = ["parquet-gzip"]
 
 [[test]]
 name = "parquet_lz4"

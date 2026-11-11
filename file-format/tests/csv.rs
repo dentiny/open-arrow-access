@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, atomic::Ordering},
 };
 
-use arrow_array::{Array, StringArray, types::Int64Type};
+use arrow_array::{Array, Int64Array, StringArray, types::Int64Type};
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteReadOptions, ErrorKind, ReadOptions, ReadRequest, RecordBatch,
@@ -390,4 +390,201 @@ async fn parallel_csv_custom_dialect_is_lazy_and_opaque_formats_remain_unsplit()
         .await
         .unwrap();
     assert_eq!(plan.partitions.size_hint().0, 1);
+}
+
+#[tokio::test]
+async fn inference_detects_headers_replays_samples_and_supports_parallel_projection() {
+    use open_arrow_access_file_format::csv::CsvInferenceOptions;
+    use open_arrow_access_layers::ParallelReadLayer;
+    for chunk_size in [1, 7, 4096] {
+        for parallel in [false, true] {
+            let bytes = fixture!("csv", "inference.csv").await;
+            let input = MemoryAccessor::new(&bytes, chunk_size);
+            let observed = input.observations.clone();
+            let accessor = CsvAccessor::infer(input).with_inference_options(CsvInferenceOptions {
+                max_records: 3,
+                max_bytes: 1024,
+                has_header: None,
+            });
+            let request = ReadRequest::new("records.csv").with_options(ReadOptions {
+                batch_size: NonZeroUsize::new(1).unwrap(),
+                projection: Some(vec![
+                    "score".to_owned(),
+                    "id".to_owned(),
+                    "title".to_owned(),
+                ]),
+            });
+            let mut reader = if parallel {
+                accessor
+                    .layer(ParallelReadLayer::new(
+                        NonZeroUsize::new(2).unwrap(),
+                        NonZeroUsize::new(1).unwrap(),
+                    ))
+                    .open(request)
+                    .await
+                    .unwrap()
+            } else {
+                accessor.open(request).await.unwrap()
+            };
+            let schema = reader.metadata().schema.clone();
+            assert_eq!(schema.field(0).data_type(), &DataType::Float64);
+            assert_eq!(schema.field(1).data_type(), &DataType::Int64);
+            let mut ids = Vec::new();
+            let mut titles = Vec::new();
+            while let Some(batch) = reader.next().await.unwrap() {
+                assert_eq!(batch.schema(), schema);
+                ids.extend_from_slice(
+                    batch
+                        .column(1)
+                        .as_any()
+                        .downcast_ref::<Int64Array>()
+                        .unwrap()
+                        .values(),
+                );
+                let values = batch
+                    .column(2)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap();
+                titles.extend(values.iter().map(|value| value.unwrap().to_owned()));
+            }
+            assert_eq!(ids, [1, 2, 3]);
+            assert_eq!(titles, ["first\nline", "second", "third"]);
+            assert_eq!(observed.requests.lock().unwrap().len(), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn inference_detects_numeric_headerless_data_and_allows_string_header_override() {
+    use open_arrow_access_file_format::csv::CsvInferenceOptions;
+    for (bytes, has_header, column) in [
+        (b"1,2\n3,4\n".as_slice(), None, "column_1"),
+        (b"one,two\nthree,four\n", Some(false), "column_1"),
+        (b"name,value\none,two\n", None, "name"),
+    ] {
+        let mut reader = CsvAccessor::infer(MemoryAccessor::new(bytes, 1))
+            .with_inference_options(CsvInferenceOptions {
+                has_header,
+                ..Default::default()
+            })
+            .open(ReadRequest::new("records.csv"))
+            .await
+            .unwrap();
+        assert_eq!(reader.metadata().schema.field(0).name(), column);
+        let mut rows = 0;
+        while let Some(batch) = reader.next().await.unwrap() {
+            rows += batch.num_rows();
+        }
+        assert_eq!(rows, if column == "name" { 1 } else { 2 });
+    }
+}
+
+#[tokio::test]
+async fn inference_preserves_tsv_dialect_bom_gzip_and_zero_column_rows() {
+    use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
+    use open_arrow_access_file_format::csv::CsvDialect;
+    use std::io::Write;
+    let mut encoded = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoded
+        .write_all(b"\xef\xbb\xbfid\ttitle\r\n1\t'first\tvalue'\r\n2\t'next'\r\n")
+        .unwrap();
+    let bytes = encoded.finish().unwrap();
+    let input = MemoryAccessor::new(&bytes, 1).layer(DecompressionLayer::new(Gzip));
+    let accessor = CsvAccessor::infer(input).with_dialect(CsvDialect {
+        delimiter: b'\t',
+        quote: b'\'',
+        has_header: true,
+        ..Default::default()
+    });
+    let mut reader = accessor
+        .open(ReadRequest::new("records.tsv").with_options(ReadOptions {
+            projection: Some(vec![]),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    assert!(reader.metadata().schema.fields().is_empty());
+    let mut rows = 0;
+    while let Some(batch) = reader.next().await.unwrap() {
+        rows += batch.num_rows();
+    }
+    assert_eq!(rows, 2);
+}
+
+#[tokio::test]
+async fn inference_rejects_empty_header_only_duplicate_and_null_columns() {
+    for bytes in [
+        b"".as_slice(),
+        b"id,title\n",
+        b"id,id\n1,2\n",
+        b"id,empty\n1,\n2,\n",
+    ] {
+        assert!(
+            CsvAccessor::infer(MemoryAccessor::new(bytes, 1))
+                .open(ReadRequest::new("records.csv"))
+                .await
+                .is_err()
+        );
+    }
+}
+
+#[tokio::test]
+async fn inference_limits_validate_before_io_and_later_type_conflicts_are_terminal() {
+    use open_arrow_access_file_format::csv::CsvInferenceOptions;
+    let input = MemoryAccessor::new(b"id\n1\n", 1);
+    let observed = input.observations.clone();
+    let accessor = CsvAccessor::infer(input).with_inference_options(CsvInferenceOptions {
+        max_records: 0,
+        ..Default::default()
+    });
+    assert!(
+        accessor
+            .open(ReadRequest::new("records.csv"))
+            .await
+            .is_err()
+    );
+    assert_eq!(observed.requests.lock().unwrap().len(), 0);
+    let input = MemoryAccessor::new(b"1\n2\nbad\n", 1);
+    let mut reader = CsvAccessor::infer(input)
+        .with_inference_options(CsvInferenceOptions {
+            max_records: 2,
+            max_bytes: 1,
+            has_header: Some(false),
+        })
+        .open(ReadRequest::new("records.csv").with_options(ReadOptions {
+            batch_size: NonZeroUsize::new(1).unwrap(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    assert_eq!(
+        reader.metadata().schema.field(0).data_type(),
+        &DataType::Int64
+    );
+    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
+    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
+    assert!(reader.next().await.is_err());
+    assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn inference_propagates_source_errors_and_rejects_opaque_formats_before_io() {
+    let input = MemoryAccessor::new(b"id\n1\n", 1).with_failure(2, ErrorKind::PermissionDenied);
+    assert!(
+        CsvAccessor::infer(input)
+            .open(ReadRequest::new("records.csv"))
+            .await
+            .is_err()
+    );
+    let input = MemoryAccessor::new(b"id\n1\n", 1);
+    let observed = input.observations.clone();
+    let accessor = CsvAccessor::infer(input).with_format(CsvFormat::default().with_header(true));
+    assert!(
+        accessor
+            .open(ReadRequest::new("records.csv"))
+            .await
+            .is_err()
+    );
+    assert_eq!(observed.requests.lock().unwrap().len(), 0);
 }

@@ -1,6 +1,8 @@
 //! File-format adapters consume a ByteReader, never a storage-specific handle.
 
 mod accessor;
+#[cfg(any(feature = "csv", feature = "json"))]
+mod inference;
 mod scan;
 pub use scan::DecodePartitionOptions;
 #[cfg(any(
