@@ -1,3 +1,5 @@
+use crate::inference::SchemaInference;
+
 use super::{
     CsvDialect, CsvFormat,
     inference::{self, CsvInferenceOptions},
@@ -41,24 +43,6 @@ impl CsvFileFormat {
         self
     }
 
-    pub(super) async fn resolve(
-        &self,
-        input: Box<dyn ByteReader>,
-    ) -> Result<(Self, Box<dyn ByteReader>)> {
-        if self.schema.is_some() {
-            return Ok((self.clone(), input));
-        }
-        let dialect = self.parallel_dialect().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "infer_csv", "schema inference requires an inspectable CsvDialect; use with_dialect instead of with_format"))?;
-        let (schema, has_header, input) = inference::infer(input, dialect, self.inference).await?;
-        let format = Self::new(schema).with_dialect(CsvDialect {
-            has_header,
-            validate_header: dialect.validate_header,
-            allow_truncated_rows: dialect.allow_truncated_rows,
-            ..CsvDialect::default()
-        });
-        Ok((format, input))
-    }
-
     pub fn new(schema: SchemaRef) -> Self {
         Self {
             schema: Some(schema),
@@ -89,6 +73,27 @@ impl CsvFileFormat {
         }
         self.options = CsvOptions::Dialect(dialect);
         self
+    }
+}
+
+#[async_trait]
+impl SchemaInference for CsvFileFormat {
+    async fn resolve_schema(
+        &self,
+        input: Box<dyn ByteReader>,
+    ) -> Result<(Self, Box<dyn ByteReader>)> {
+        if self.schema.is_some() {
+            return Ok((self.clone(), input));
+        }
+        let dialect = self.parallel_dialect().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "infer_csv", "schema inference requires an inspectable CsvDialect; use with_dialect instead of with_format"))?;
+        let (schema, has_header, input) = inference::infer(input, dialect, self.inference).await?;
+        let format = Self::new(schema).with_dialect(CsvDialect {
+            has_header,
+            validate_header: dialect.validate_header,
+            allow_truncated_rows: dialect.allow_truncated_rows,
+            ..CsvDialect::default()
+        });
+        Ok((format, input))
     }
 }
 
@@ -146,7 +151,7 @@ impl ReaderFactory for CsvFileFormat {
         let (input, schema, decoder) = match prepared {
             Some((schema, decoder)) => (input, schema, decoder),
             None => {
-                let (format, input) = self.resolve(input).await?;
+                let (format, input) = self.resolve_schema(input).await?;
                 let (schema, decoder) = format.prepare(&request)?.expect("resolved CSV schema");
                 (input, schema, decoder)
             }

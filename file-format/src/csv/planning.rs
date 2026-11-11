@@ -1,3 +1,5 @@
+use crate::inference::SchemaInference;
+
 use futures::{
     TryStreamExt,
     io::{AsyncReadExt, Cursor},
@@ -28,7 +30,7 @@ where
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
-        let (format, input) = format.resolve(input).await?;
+        let (format, input) = format.resolve_schema(input).await?;
         let (schema, _) = match prepared {
             Some(prepared) => prepared,
             None => format.prepare(&request)?.expect("resolved CSV schema"),

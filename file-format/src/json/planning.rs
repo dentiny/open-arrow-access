@@ -1,3 +1,5 @@
+use crate::inference::SchemaInference;
+
 use bytes::BytesMut;
 use futures::stream;
 use open_arrow_access_core::{
@@ -21,7 +23,7 @@ where
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
-        let (format, input) = format.resolve(input).await?;
+        let (format, input) = format.resolve_schema(input).await?;
         let (schema, _) = match prepared {
             Some(prepared) => prepared,
             None => format.prepare(&request)?.expect("resolved JSON schema"),
