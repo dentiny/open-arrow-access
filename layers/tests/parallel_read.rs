@@ -61,24 +61,11 @@ async fn open_mode(
     p: usize,
     emission: EmissionPolicy,
 ) -> Box<dyn RecordReader> {
-    open_with_policy(
-        ScanPlan::new(metadata(), parts).with_ordering(OrderRequirement::Reorderable),
-        p,
-        /*prefetch=*/ 1,
-        emission,
-    )
-    .await
+    let mut plan = ScanPlan::new(metadata(), parts).with_ordering(OrderRequirement::Reorderable);
+    plan.emission = emission;
+    open_plan(plan, p, 1).await
 }
 async fn open_plan(plan: ScanPlan, p: usize, prefetch: usize) -> Box<dyn RecordReader> {
-    open_with_policy(plan, p, prefetch, EmissionPolicy::Ordered).await
-}
-async fn open_with_policy(
-    mut plan: ScanPlan,
-    p: usize,
-    prefetch: usize,
-    emission: EmissionPolicy,
-) -> Box<dyn RecordReader> {
-    plan.emission = emission;
     Source
         .layer(ParallelReadLayer::new(
             NonZeroUsize::new(p).unwrap(),
@@ -228,14 +215,10 @@ async fn ready_batches_progress_despite_pending_discovery_or_partitions() {
     // Pending discovery must not stall either emission policy.
     for emission in [EmissionPolicy::Ordered, EmissionPolicy::Unordered] {
         let partitions = stream::iter([Ok(part(vec![7]))]).chain(stream::pending());
-        let mut reader = open_with_policy(
-            ScanPlan::from_stream(metadata(), partitions)
-                .with_ordering(OrderRequirement::Reorderable),
-            2,
-            1,
-            emission,
-        )
-        .await;
+        let mut plan = ScanPlan::from_stream(metadata(), partitions)
+            .with_ordering(OrderRequirement::Reorderable);
+        plan.emission = emission;
+        let mut reader = open_plan(plan, 2, 1).await;
         assert_eq!(value(&reader.next().await.unwrap().unwrap()), 7);
     }
 
