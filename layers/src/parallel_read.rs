@@ -152,6 +152,14 @@ impl ParallelReader {
         self.partition_receivers.push_back(receiver);
     }
 
+    fn remove_receiver(&mut self, index: usize) {
+        self.partition_receivers.remove(index);
+        // Wrap before discovery can append a replacement at the removed tail index.
+        self.next_receiver = index
+            .checked_rem(self.partition_receivers.len())
+            .unwrap_or(0);
+    }
+
     fn stop(&mut self) {
         // Dropping the JoinSet aborts workers and leaves no completions to poll.
         self.tasks = JoinSet::new();
@@ -197,14 +205,17 @@ impl ParallelReader {
                 }), if has_receivers => {
                     if batch.is_some() { return Ok(batch); }
                     // EOF only frees a resident slot after that receiver is drained.
-                    self.partition_receivers.remove(index);
-                    self.next_receiver = index;
+                    self.remove_receiver(index);
                 }
                 else => return Ok(None),
             }
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/parallel_read.rs"]
+mod tests;
 
 #[async_trait]
 impl Reader for ParallelReader {
