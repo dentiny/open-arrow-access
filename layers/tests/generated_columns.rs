@@ -1,8 +1,9 @@
 use std::{
     collections::HashMap,
+    error::Error as _,
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     task::Poll,
 };
@@ -17,24 +18,29 @@ use open_arrow_access_core::{
 use open_arrow_access_layers::{
     ColumnTypeSpec, GeneratedColumnSpec, GeneratedColumnsLayer, TypeConversionLayer,
 };
-use open_arrow_access_test_support::reader::assert_finished;
+use open_arrow_access_test_support::{
+    DropProbe,
+    reader::{assert_finished, assert_terminal_error},
+};
 
-fn layer(specs: &[(&str, &str)]) -> GeneratedColumnsLayer {
-    GeneratedColumnsLayer::try_new(
-        specs
-            .iter()
-            .map(|(column, expression)| GeneratedColumnSpec {
-                column: (*column).into(),
-                expression: (*expression).into(),
-            })
-            .collect(),
-    )
-    .unwrap()
+fn specs(declarations: &[(&str, &str)]) -> Vec<GeneratedColumnSpec> {
+    declarations
+        .iter()
+        .map(|(column, expression)| GeneratedColumnSpec {
+            column: (*column).into(),
+            expression: (*expression).into(),
+        })
+        .collect()
+}
+
+fn layer(declarations: &[(&str, &str)]) -> GeneratedColumnsLayer {
+    GeneratedColumnsLayer::try_new(specs(declarations)).unwrap()
 }
 
 struct MemoryAccessor {
     batches: Vec<RecordBatch>,
     polls: Arc<AtomicUsize>,
+    dropped: Arc<AtomicBool>,
 }
 
 impl MemoryAccessor {
@@ -42,6 +48,7 @@ impl MemoryAccessor {
         Self {
             batches,
             polls: Arc::default(),
+            dropped: Arc::default(),
         }
     }
 }
@@ -64,7 +71,9 @@ impl Accessor for MemoryAccessor {
             .resolve_projection(&self.batches[0].schema())?;
         let mut batches = self.batches.clone().into_iter().map(Ok);
         let polls = self.polls.clone();
+        let probe = DropProbe::new(self.dropped.clone());
         let stream = stream::poll_fn(move |_| {
+            let _ = &probe;
             polls.fetch_add(1, Ordering::SeqCst);
             Poll::Ready(batches.next())
         });
@@ -122,6 +131,7 @@ async fn expressions_preserve_order_metadata_nulls_and_source_buffers() {
             ("alias", "\"Count\""),
             ("nothing", "NULL"),
             ("text_alias", "text"),
+            ("same_start", "now() = started"),
         ]))
         .open(ReadRequest::new("test"))
         .await
@@ -147,6 +157,10 @@ async fn expressions_preserve_order_metadata_nulls_and_source_buffers() {
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(batch.num_rows(), rows);
         assert_eq!(batch.column(8).logical_null_count(), rows);
+        assert_eq!(
+            batch.column(10).to_data(),
+            arrow_array::BooleanArray::from(vec![true; rows]).to_data()
+        );
         assert!(Arc::ptr_eq(batch.schema_ref(), &schema));
         if rows > 0 {
             assert!(Arc::ptr_eq(batch.column(0), input.column(0)));
@@ -341,5 +355,50 @@ async fn casts_preserve_values_and_nulls() {
             arrow_array::Int32Array::from(vec![Some(2), None, Some(4)]).to_data(),
             "{expression}"
         );
+    }
+}
+
+#[test]
+fn invalid_declarations_fail_at_construction() {
+    for declarations in [
+        vec![("", "1")],
+        vec![(" ", "1")],
+        vec![("x", "")],
+        vec![("x", " ")],
+        vec![("x", "1"), ("x", "2")],
+    ] {
+        let error = GeneratedColumnsLayer::try_new(specs(&declarations)).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput, "{declarations:?}");
+    }
+}
+
+#[tokio::test]
+async fn runtime_error_is_terminal_and_releases_input_even_when_hidden() {
+    for names in [vec!["x"], vec!["Count"], vec![]] {
+        // Emit one valid batch before division by zero in the next batch.
+        let source = MemoryAccessor::new(vec![input().slice(2, 1), input(), input()]);
+        let polls = source.polls.clone();
+        let dropped = source.dropped.clone();
+        let mut reader = source
+            .layer(layer(&[("x", r#"10 / ("Count" - 2)"#)]))
+            .open(request(&names))
+            .await
+            .unwrap();
+        assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
+        assert!(!dropped.load(Ordering::SeqCst));
+        let error = assert_terminal_error(reader.as_mut(), &polls, ErrorKind::Decode, |m| {
+            (m.schema.clone(), m.source.clone())
+        })
+        .await;
+        assert_eq!(error.operation(), "generate_column");
+        assert!(error.to_string().contains("column \"x\""));
+        assert!(
+            error
+                .source()
+                .unwrap()
+                .is::<datafusion::error::DataFusionError>()
+        );
+        assert!(dropped.load(Ordering::SeqCst));
+        assert_eq!(polls.load(Ordering::SeqCst), 2);
     }
 }
