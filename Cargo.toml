@@ -41,7 +41,6 @@ async-compression = { version = "0.4.50", default-features = false, features = [
 async_zip = { version = "0.0.19", default-features = false, features = ["deflate"] }
 http = "1"
 indexmap = "2"
-jiter = { version = "0.18", default-features = false }
 opendal-http-transport-reqwest = { version = "=0.59.2", default-features = false }
 opendal-service-http = "=0.59.2"
 percent-encoding = "2"

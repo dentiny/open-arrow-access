@@ -318,7 +318,7 @@ async fn nonfinite_values_survive_fragmentation_and_parallel_decoding() {
         Field::new("NaN", DataType::Utf8, true),
     ]));
     let raw = br#"{"value":NaN,"nested":{"values":[Infinity,-Infinity,null]},"NaN":"NaN Infinity -Infinity \""}
-    {"value":Infinity} {"value":-Infinity} {"value":1.5} {"value":null}"#;
+    {"value":Infinity} {"value":-Infinity} {"value":1.5} {"value":null} {"value":-1.5,"extra":"\\NaN"}"#;
     for chunk_size in [1, 7, 4096] {
         for parallel in [false, true] {
             let accessor = JsonAccessor::new(MemoryAccessor::new(raw, chunk_size), schema.clone());
@@ -350,7 +350,10 @@ async fn nonfinite_values_survive_fragmentation_and_parallel_decoding() {
             let second = reader.next().await.unwrap().unwrap();
             let values = second.column(0).as_primitive::<Float64Type>();
             assert_eq!(values.values().as_ref(), &[f64::NEG_INFINITY, 1.5]);
-            assert!(reader.next().await.unwrap().unwrap().column(0).is_null(0));
+            let last = reader.next().await.unwrap().unwrap();
+            let values = last.column(0).as_primitive::<Float64Type>();
+            assert!(values.is_null(0));
+            assert_eq!(values.value(1), -1.5);
             assert!(reader.next().await.unwrap().is_none());
         }
     }
@@ -362,6 +365,7 @@ async fn nonfinite_compatibility_does_not_accept_malformed_json() {
         br#"{"value":NaNx}"#.as_slice(),
         br#"{"value":-NaN}"#,
         br#"{NaN :2}"#,
+        br#"{"value":1,NaN :2}"#,
         br#"{"value":Infinity:1}"#,
         br#"{"value":NaN,"bad":}"#,
         br#"{"value":NaN} trailing"#,

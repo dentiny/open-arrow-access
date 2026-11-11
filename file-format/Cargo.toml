@@ -10,7 +10,7 @@ description = "Arrow file-format readers for Open Arrow Access"
 atif = ["dep:atif-arrow"]
 csv = ["dep:arrow-csv", "dep:arrow-schema", "dep:csv", "dep:csv-async"]
 default = []
-json = ["dep:arrow-json", "dep:arrow-schema", "dep:bytes", "dep:serde_json", "dep:jiter"]
+json = ["dep:arrow-json", "dep:arrow-schema", "dep:bytes", "dep:serde_json"]
 parquet = ["dep:parquet", "dep:arrow-schema"]
 warc = ["dep:warc", "dep:arrow-schema"]
 xml = ["dep:xml-arrow"]
@@ -24,7 +24,6 @@ arrow-schema = { workspace = true, optional = true }
 atif-arrow = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
 futures.workspace = true
-jiter = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 parquet = { workspace = true, optional = true }
