@@ -7,6 +7,9 @@ use open_arrow_access_core::{
 };
 use serde_json::{Deserializer, Value};
 
+const DEFAULT_MAX_RECORDS: usize = 1000;
+const DEFAULT_MAX_BYTES: usize = 64 * 1024 * 1024;
+
 /// Sampling limits for JSON schema inference. Limits are checked between complete
 /// objects; one object and an upstream byte chunk can exceed the byte target.
 #[derive(Clone, Copy, Debug)]
@@ -18,8 +21,8 @@ pub struct JsonInferenceOptions {
 impl Default for JsonInferenceOptions {
     fn default() -> Self {
         Self {
-            max_records: 1000,
-            max_bytes: 64 * 1024 * 1024,
+            max_records: DEFAULT_MAX_RECORDS,
+            max_bytes: DEFAULT_MAX_BYTES,
         }
     }
 }
