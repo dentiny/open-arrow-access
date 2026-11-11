@@ -13,7 +13,20 @@ compression is separate: a gzip byte layer removes the range access Parquet need
 
 ## JSON and JSONL
 
-`JsonAccessor::new(bytes, schema)` requires a fixed Arrow schema. It accepts
+`JsonAccessor::new(bytes, schema)` uses an explicit Arrow schema.
+`JsonAccessor::infer(bytes)` infers a fixed schema at open from up to 1000
+objects or 64 MiB of sampled input. Configure these targets with
+`with_inference_options(JsonInferenceOptions { max_records, max_bytes })`.
+Targets are checked between complete objects: a single object and one upstream
+chunk can exceed the byte target. Sampling and decoding share one input, so
+sequential and compressed sources do not need to be reopened. Sampled bytes,
+including lookahead, are replayed before the remaining input. Arrow supplies
+nested Struct/List inference and type merging within the sample. Bare
+`NaN`, `Infinity`, and `-Infinity` infer as Float64; quoted strings remain strings. Empty input
+requires an explicit schema. Projection is resolved after inference; schema
+inference is independent for each file, and later values use the fixed schema.
+Native parallel scans infer once before partitioning, then share that schema
+across every decode partition. It accepts
 whitespace-separated objects, including JSONL and pretty-printed object streams.
 Top-level arrays are not flattened; arrays, scalars and null records are rejected.
 Empty or whitespace-only input emits no rows. Missing nullable fields become

@@ -1,4 +1,7 @@
-use super::reader::json_reader;
+use super::{
+    inference::{self, JsonInferenceOptions},
+    reader::json_reader,
+};
 use arrow_json::{ReaderBuilder, reader::Decoder};
 use arrow_schema::ArrowError;
 use open_arrow_access_core::{
@@ -6,18 +9,47 @@ use open_arrow_access_core::{
     ReaderFactory, RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
 };
 
-/// Read whitespace-separated JSON objects, including JSONL, with a fixed schema.
+/// Read whitespace-separated JSON objects, including JSONL, with an explicit or inferred fixed schema.
 /// Missing nullable fields become null; unknown fields are ignored. Top-level
 /// arrays and scalar records are rejected. Bare `NaN`, `Infinity`, and `-Infinity`
 /// values are accepted and decoded by Arrow as floating-point values.
 #[derive(Clone, Debug)]
 pub struct JsonFormat {
-    schema: SchemaRef,
+    schema: Option<SchemaRef>,
+    inference: JsonInferenceOptions,
 }
 
 impl JsonFormat {
+    /// Infer a schema before returning the reader, replaying the sample on the
+    /// same input. Missing fields become nullable; types follow Arrow inference.
+    pub fn infer() -> Self {
+        Self {
+            schema: None,
+            inference: JsonInferenceOptions::default(),
+        }
+    }
+
+    pub fn with_inference_options(mut self, options: JsonInferenceOptions) -> Self {
+        self.inference = options;
+        self
+    }
+
+    pub(super) async fn resolve(
+        &self,
+        input: Box<dyn ByteReader>,
+    ) -> Result<(Self, Box<dyn ByteReader>)> {
+        if self.schema.is_some() {
+            return Ok((self.clone(), input));
+        }
+        let (schema, input) = inference::infer(input, self.inference).await?;
+        Ok((Self::new(schema), input))
+    }
+
     pub fn new(schema: SchemaRef) -> Self {
-        Self { schema }
+        Self {
+            schema: Some(schema),
+            inference: JsonInferenceOptions::default(),
+        }
     }
 }
 
@@ -25,7 +57,7 @@ impl JsonFormat {
 impl ReaderFactory for JsonFormat {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
-    type Prepared = (SchemaRef, Decoder);
+    type Prepared = Option<(SchemaRef, Decoder)>;
 
     fn capability(&self, input: Capability) -> RecordCapability {
         Capability {
@@ -38,8 +70,12 @@ impl ReaderFactory for JsonFormat {
     }
 
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
+        let Some(input_schema) = &self.schema else {
+            self.inference.validate()?;
+            return Ok(None);
+        };
         let options = &request.options;
-        let (schema, _) = options.resolve_projection(&self.schema)?;
+        let (schema, _) = options.resolve_projection(input_schema)?;
         let decoder = ReaderBuilder::new(schema.clone())
             .with_batch_size(options.batch_size.get())
             .build_decoder()
@@ -50,7 +86,7 @@ impl ReaderFactory for JsonFormat {
                 };
                 Error::new(kind, "open_json", error.to_string()).with_source(error)
             })?;
-        Ok((schema, decoder))
+        Ok(Some((schema, decoder)))
     }
 
     async fn create_reader(
@@ -58,8 +94,16 @@ impl ReaderFactory for JsonFormat {
         _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
-        (schema, decoder): Self::Prepared,
+        prepared: Self::Prepared,
     ) -> Result<Box<dyn RecordReader>> {
+        let (input, schema, decoder) = match prepared {
+            Some((schema, decoder)) => (input, schema, decoder),
+            None => {
+                let (format, input) = self.resolve(input).await?;
+                let (schema, decoder) = format.prepare(&request)?.expect("resolved JSON schema");
+                (input, schema, decoder)
+            }
+        };
         Ok(Box::new(json_reader(
             input,
             decoder,

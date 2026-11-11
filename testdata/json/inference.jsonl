@@ -1,0 +1,3 @@
+{"id":1,"nested":{"name":"a"},"values":[1,2]}
+{"id":2,"nested":{"name":null},"values":[3],"extra":true}
+{"id":3,"nested":{"name":"c"},"values":[]}
