@@ -161,7 +161,7 @@ impl ParallelReader {
 
     async fn read_batch(&mut self) -> Result<Option<RecordBatch>> {
         loop {
-            let has_front = !self.partition_receivers.is_empty();
+            let has_receivers = !self.partition_receivers.is_empty();
             let can_discover = !self.remaining.is_terminated()
                 && self.partition_receivers.len() < self.settings.partitions.get();
             let receivers = &mut self.partition_receivers;
@@ -181,22 +181,20 @@ impl ParallelReader {
                 }
                 (index, batch) = poll_fn(|cx| {
                     let count = receivers.len();
+                    if emission == EmissionPolicy::Ordered {
+                        return receivers[0].poll_recv(cx).map(|batch| (0, batch));
+                    }
                     // Rotate the starting point so continuously ready partitions
                     // cannot starve other readers. Each receiver preserves FIFO order.
                     for offset in 0..count {
-                        let index = if emission == EmissionPolicy::Ordered {
-                            0
-                        } else {
-                            (*next_receiver + offset) % count
-                        };
+                        let index = (*next_receiver + offset) % count;
                         if let Poll::Ready(batch) = receivers[index].poll_recv(cx) {
                             *next_receiver = (index + 1) % count;
                             return Poll::Ready((index, batch));
                         }
-                        if emission == EmissionPolicy::Ordered { break; }
                     }
                     Poll::Pending
-                }), if has_front => {
+                }), if has_receivers => {
                     if batch.is_some() { return Ok(batch); }
                     // EOF only frees a resident slot after that receiver is drained.
                     self.partition_receivers.remove(index);
