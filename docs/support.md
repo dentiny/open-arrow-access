@@ -12,7 +12,7 @@ is listed in the [roadmap](roadmap.md).
 
 | Input | Feature | Output | Schema and input requirements |
 | --- | --- | --- | --- |
-| Parquet | `format-parquet` | Arrow batches | File schema; exact ranges and known byte length; uncompressed/Snappy pages |
+| Parquet | `format-parquet` | Arrow batches | File schema; exact ranges and known byte length; uncompressed/Snappy pages; opt-in Brotli via `format-parquet-brotli` |
 | CSV / TSV | `format-csv` | Arrow batches | Explicit or sampled Arrow schema; configurable delimiter and header; sequential bytes |
 | JSON / JSONL | `format-json` | Arrow batches | Explicit or sampled Arrow schema; whitespace-separated objects, not top-level arrays; bare NaN/Infinity/-Infinity accepted; sequential bytes |
 | XML | `format-xml` | Arrow batches | Explicit record path; bounded schema inference or explicit mappings; sequential UTF-8 bytes |

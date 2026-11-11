@@ -8,8 +8,10 @@ filename extensions do not attach parsers or decompression layers.
 
 `ParquetAccessor::new(bytes)` reads the file schema at open and requires exact
 byte ranges and a known input length. Projection is pushed into the Parquet
-reader. Supported page compression is uncompressed or Snappy. External file
-compression is separate: a gzip byte layer removes the range access Parquet needs.
+reader. Uncompressed and Snappy pages are supported by `format-parquet`.
+Enable `format-parquet-brotli` for Brotli-compressed pages; it also enables
+the Parquet reader. External file compression is separate:
+a gzip byte layer removes the range access Parquet needs.
 
 ## JSON and JSONL
 
