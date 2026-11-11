@@ -86,6 +86,7 @@ the Parquet reader.
 | Brotli | `parquet-brotli` | `format-parquet-brotli` |
 | Gzip | `parquet-gzip` | `format-parquet-gzip` |
 | LZ4 | `parquet-lz4` | `format-parquet-lz4` |
+| Zstandard | `parquet-zstd` | `format-parquet-zstd` |
 
 This uses the upstream Parquet codecs and preserves range reads, projection, and
 row-group planning. It is independent of external byte decompression layers.

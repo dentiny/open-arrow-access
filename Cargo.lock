@@ -3092,6 +3092,7 @@ dependencies = [
  "snap",
  "tokio",
  "twox-hash",
+ "zstd 0.13.4",
 ]
 
 [[package]]
