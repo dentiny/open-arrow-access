@@ -272,6 +272,8 @@ async fn ready_batches_progress_despite_pending_discovery_or_partitions() {
 }
 
 #[tokio::test]
+// Adding the two layers in either order must select the same emission policy
+// and share one parallel-read budget.
 async fn emission_and_parallel_layers_collect_one_budget_in_either_order() {
     let budget = ParallelReadLayer::new(NonZeroUsize::new(2).unwrap(), NonZeroUsize::MIN);
     let a = Source.layer(budget).layer(UnorderedEmissionLayer);
