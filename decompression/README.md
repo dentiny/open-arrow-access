@@ -243,3 +243,33 @@ cargo run --example read_tar --features decompression-tar -- /absolute/data/root
 For a compressed archive, open it through `DecompressionLayer::new(Gzip)` and
 pass the decoded byte reader to `TarStream`. Ranged `TarArchive` cannot consume
 that sequential decoded representation directly.
+
+## Per-object automatic decompression
+
+Use `AutoDecompressionLayer` when one storage accessor supplies a mixture of
+plain and compressed objects. Each `open` selects a codec from the object's final,
+case-sensitive suffix: `.gz`/`.tgz`, `.bz2`, `.lz4`, or `.zst`/`.zstd`.
+`Compression::from_path` returns `Result<Compression>` without performing I/O;
+codec variants exist only when their corresponding features are enabled.
+Enable the corresponding codec Cargo features. A recognized suffix whose codec
+is disabled returns `Unsupported` before storage opens. Other suffixes pass through.
+
+```rust,ignore
+use open_arrow_access::{AccessorExt, decompression::AutoDecompressionLayer};
+let bytes = storage.layer(AutoDecompressionLayer::new());
+let records = JsonAccessor::infer(bytes);
+```
+
+The layer preserves listing, source identity, storage options, and error chains.
+Compressed readers use the existing codec implementations and expose sequential,
+unknown-length decoded bytes. Plain readers retain their original length and
+range access. Because an accessor can open either representation, its advertised
+range capability is conservatively false; inspect an opened reader for its exact
+capabilities. `with_chunk_size` limits decoded output chunks, not plain chunks.
+
+This is suffix routing, not magic-byte sniffing. Locators remain opaque (URL
+queries/fragments are not stripped), and the layer neither infers record formats
+nor selects archive members. `.tar.gz` produces TAR bytes for `TarStream`; ZIP/TAR
+selection uses the existing explicit archive APIs. It removes one compression
+layer. For extensionless objects or noncanonical names, keep using
+`DecompressionLayer::new(codec)` to select the codec explicitly.

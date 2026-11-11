@@ -26,7 +26,8 @@ cross-file union by name through `with_union_by_name()`. XML infers schemas
 independently for each file; explicit mappings can fix a shared reading schema.
 
 See [format behavior](formats.md) for layout, validation, and memory limits.
-There is no automatic format or compression detection. PDF, HTML, images, and
+Record format selection remains explicit. `AutoDecompressionLayer` optionally
+routes compression by final suffix; it does not inspect magic bytes. PDF, HTML, images, and
 other provider files can be accessed as bytes; the library does not supply
 content-extraction or multimodal decoding for those representations.
 
