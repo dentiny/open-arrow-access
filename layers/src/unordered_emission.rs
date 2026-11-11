@@ -44,12 +44,6 @@ impl<A: ScanPlanner> Accessor for UnorderedEmissionAccessor<A> {
         .with_ordering(self.inner.capability().ordering)
     }
 
-    async fn open_for_schema(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
-        let plan = self.plan_scan(request).await?;
-        crate::validation::validate_emission_policy(plan.emission, plan.ordering)?;
-        Ok(Box::new(plan.into_reader()))
-    }
-
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
         open_plan(self.plan_scan(request).await?)
     }

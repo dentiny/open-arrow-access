@@ -84,31 +84,9 @@ where
         .with_ordering(self.inner.capability().ordering)
     }
 
-    async fn open(&self, request: A::Request) -> Result<Box<dyn RecordReader>> {
-        self.open_impl(request, false).await
-    }
-
-    async fn open_for_schema(&self, request: A::Request) -> Result<Box<dyn RecordReader>> {
-        self.open_impl(request, true).await
-    }
-}
-
-impl<A> TypeConversionAccessor<A>
-where
-    A: Accessor<Reader = dyn RecordReader>,
-    A::Request: ReadOptionsProvider,
-{
-    async fn open_impl(
-        &self,
-        mut request: A::Request,
-        for_schema: bool,
-    ) -> Result<Box<dyn RecordReader>> {
+    async fn open(&self, mut request: A::Request) -> Result<Box<dyn RecordReader>> {
         if self.specs.is_empty() {
-            return if for_schema {
-                self.inner.open_for_schema(request).await
-            } else {
-                self.inner.open(request).await
-            };
+            return self.inner.open(request).await;
         }
         let output_options = request.read_options().clone();
         if let Some(columns) = &mut request.read_options_mut().projection {
@@ -119,11 +97,7 @@ where
                 }
             }
         }
-        let inner = if for_schema {
-            self.inner.open_for_schema(request).await?
-        } else {
-            self.inner.open(request).await?
-        };
+        let inner = self.inner.open(request).await?;
         let source = &inner.metadata().schema;
         let field_index = FieldNameIndex::new(source.fields());
         let mut fields = source.fields().to_vec();

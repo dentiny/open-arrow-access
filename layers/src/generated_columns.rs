@@ -33,7 +33,7 @@ pub struct GeneratedColumnSpec {
 /// Expressions are evaluated batch by batch. With a projected, clonable request,
 /// inspect the full schema before reopening only visible inputs and expression
 /// dependencies. Sources must remain stable across both opens; schema inference
-/// may sample twice. Custom requests without cloning retain the full-input path.
+/// may sample twice. Parallel readers retain the existing full-input path.
 #[derive(Clone, Debug, Default)]
 pub struct GeneratedColumnsLayer {
     specs: Arc<[GeneratedColumnSpec]>,
@@ -59,7 +59,7 @@ pub struct GeneratedColumnsAccessor<A> {
 impl<A> Layer<A> for GeneratedColumnsLayer
 where
     A: Accessor<Reader = dyn RecordReader>,
-    A::Request: ReadOptionsProvider,
+    A::Request: ReadOptionsProvider + Clone,
 {
     type Layered = GeneratedColumnsAccessor<A>;
 
@@ -75,7 +75,7 @@ where
 impl<A> Accessor for GeneratedColumnsAccessor<A>
 where
     A: Accessor<Reader = dyn RecordReader>,
-    A::Request: ReadOptionsProvider,
+    A::Request: ReadOptionsProvider + Clone,
 {
     type Request = A::Request;
     type Reader = dyn RecordReader;
@@ -84,56 +84,22 @@ where
         record_capability(self.inner.capability())
     }
 
-    async fn open(&self, request: A::Request) -> Result<Box<dyn RecordReader>> {
-        self.open_impl(request, false).await
-    }
-
-    async fn open_for_schema(&self, request: A::Request) -> Result<Box<dyn RecordReader>> {
-        self.open_impl(request, true).await
-    }
-}
-
-impl<A> GeneratedColumnsAccessor<A>
-where
-    A: Accessor<Reader = dyn RecordReader>,
-    A::Request: ReadOptionsProvider,
-{
-    async fn open_input(
-        &self,
-        request: A::Request,
-        schema_only: bool,
-    ) -> Result<Box<dyn RecordReader>> {
-        if schema_only {
-            self.inner.open_for_schema(request).await
-        } else {
-            self.inner.open(request).await
-        }
-    }
-
-    async fn open_impl(
-        &self,
-        mut request: A::Request,
-        schema_only: bool,
-    ) -> Result<Box<dyn RecordReader>> {
+    async fn open(&self, mut request: A::Request) -> Result<Box<dyn RecordReader>> {
         if self.specs.is_empty() {
-            return self.open_input(request, schema_only).await;
+            return self.inner.open(request).await;
         }
         let output_options = request.read_options().clone();
         request.read_options_mut().projection = None;
-        let probe = output_options
-            .projection
-            .as_ref()
-            .and_then(|_| request.clone_with_read_options(request.read_options().clone()));
-        let (mut inner, reopen) = if let Some(probe) = probe {
-            (self.inner.open_for_schema(probe).await?, Some(request))
-        } else {
-            (self.open_input(request, schema_only).await?, None)
-        };
+        // A normal open must not start parallel workers just for inspection.
+        // Keep the existing single-open path for parallel readers.
+        let reopen = output_options.projection.is_some() && !self.inner.capability().read_parallel;
+        let original_request = reopen.then(|| request.clone());
+        let mut inner = self.inner.open(request).await?;
         let source = Arc::clone(&inner.metadata().schema);
         let state = SessionContext::new().state();
         let (mut schema, mut steps, dependencies) = plan_steps(&state, &self.specs, &source)?;
         let (expected_output, _) = output_options.resolve_projection(&schema)?;
-        if let Some(mut request) = reopen {
+        if let Some(mut request) = original_request {
             let visible: HashSet<&str> = expected_output
                 .fields()
                 .iter()
@@ -147,16 +113,11 @@ where
                 })
                 .map(|field| field.name().clone())
                 .collect();
-            let source_options = open_arrow_access_core::ReadOptions {
-                projection: Some(names.clone()),
-                ..request.read_options().clone()
-            };
-            let (expected_source, _) = source_options.resolve_projection(&source)?;
             request.read_options_mut().projection = Some(names);
-            // Drop inspection state before reopening. Parallel schema hooks do
-            // not execute workers; inference may still have read a bounded sample.
+            let (expected_source, _) = request.read_options().resolve_projection(&source)?;
+            // Release the probe without polling batches before reopening.
             drop(inner);
-            inner = self.open_input(request, schema_only).await?;
+            inner = self.inner.open(request).await?;
             validate_generated_schema(&inner.metadata().schema, &expected_source)?;
             // Recompile physical column indices for the reduced schema, using
             // the same session so stable expressions retain one execution time.

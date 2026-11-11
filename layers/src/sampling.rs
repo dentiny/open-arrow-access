@@ -72,10 +72,6 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for SamplingAccessor<A> {
         self.inner.capability()
     }
 
-    async fn open_for_schema(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
-        self.inner.open_for_schema(request).await
-    }
-
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
         let inner = self.inner.open(request).await?;
         if self.settings.threshold == SCALE {
