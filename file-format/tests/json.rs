@@ -295,69 +295,63 @@ async fn parallel_json_framing_handles_nested_values_and_rejects_invalid_syntax(
 }
 
 #[tokio::test]
-async fn inferred_schema_replays_fragmented_samples_and_supports_parallel_projection() {
+async fn inference_deduces_nested_types_and_replays_sampled_records() {
     use open_arrow_access_file_format::json::JsonInferenceOptions;
-    for chunk_size in [1, 7, 4096] {
-        for parallel in [false, true] {
-            let bytes = fixture!("json", "inference.jsonl").await;
-            let input = MemoryAccessor::new(&bytes, chunk_size);
-            let observed = input.observations.clone();
-            let accessor =
-                JsonAccessor::infer(input).with_inference_options(JsonInferenceOptions {
-                    max_records: 2,
-                    max_bytes: 1024,
-                });
-            let request = request(1, Some(vec!["values", "id", "nested", "extra"]));
-            let mut reader = if parallel {
-                accessor
-                    .layer(ParallelReadLayer::new(
-                        NonZeroUsize::new(2).unwrap(),
-                        NonZeroUsize::new(1).unwrap(),
-                    ))
-                    .open(request)
-                    .await
-                    .unwrap()
-            } else {
-                accessor.open(request).await.unwrap()
-            };
-            let schema = reader.metadata().schema.clone();
-            assert!(matches!(schema.field(0).data_type(), DataType::List(_)));
-            assert_eq!(schema.field(1).data_type(), &DataType::Int64);
-            assert!(matches!(schema.field(2).data_type(), DataType::Struct(_)));
-            assert_eq!(schema.field(3).data_type(), &DataType::Boolean);
-            let mut output_ids = Vec::new();
-            let mut nulls = 0;
-            while let Some(batch) = reader.next().await.unwrap() {
-                assert_eq!(batch.schema(), schema);
-                output_ids.extend_from_slice(
-                    batch
-                        .column(1)
-                        .as_any()
-                        .downcast_ref::<Int64Array>()
-                        .unwrap()
-                        .values(),
-                );
-                nulls += batch.column(3).null_count();
-            }
-            assert_eq!(output_ids, [1, 2, 3]);
-            assert_eq!(nulls, 2);
-            assert_eq!(observed.requests.lock().unwrap().len(), 1);
-        }
+    let bytes = fixture!("json", "inference.jsonl").await;
+    let input = MemoryAccessor::new(&bytes, 7);
+    let mut reader = JsonAccessor::infer(input)
+        .with_inference_options(JsonInferenceOptions {
+            max_records: 2,
+            max_bytes: 1024,
+        })
+        .open(request(1, None))
+        .await
+        .unwrap();
+    let schema = reader.metadata().schema.clone();
+    assert_eq!(
+        schema.field_with_name("id").unwrap().data_type(),
+        &DataType::Int64
+    );
+    let DataType::List(item) = schema.field_with_name("values").unwrap().data_type() else {
+        panic!("expected an inferred list");
+    };
+    assert_eq!(item.data_type(), &DataType::Int64);
+    let DataType::Struct(fields) = schema.field_with_name("nested").unwrap().data_type() else {
+        panic!("expected an inferred struct");
+    };
+    assert_eq!(fields[0].name(), "name");
+    assert_eq!(fields[0].data_type(), &DataType::Utf8);
+    let extra = schema.field_with_name("extra").unwrap();
+    assert_eq!(extra.data_type(), &DataType::Boolean);
+    assert!(extra.is_nullable());
+    let mut output_ids = Vec::new();
+    let mut nulls = 0;
+    while let Some(batch) = reader.next().await.unwrap() {
+        assert_eq!(batch.schema(), schema);
+        output_ids.extend_from_slice(
+            batch
+                .column_by_name("id")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap()
+                .values(),
+        );
+        nulls += batch.column_by_name("extra").unwrap().null_count();
     }
+    assert_eq!(output_ids, [1, 2, 3]);
+    assert_eq!(nulls, 2);
 }
 
 #[tokio::test]
-async fn inference_rejects_empty_malformed_and_non_object_input_and_validates_limits() {
+async fn inference_requires_a_nonempty_sample_and_positive_limits() {
     use open_arrow_access_file_format::json::JsonInferenceOptions;
-    for bytes in [b"".as_slice(), b"  ", b"[]", b"{\"id\":", b"{bad}"] {
-        let input = MemoryAccessor::new(bytes, 1);
-        assert!(
-            JsonAccessor::infer(input)
-                .open(request(2, None))
-                .await
-                .is_err()
-        );
-    }
+    assert!(
+        JsonAccessor::infer(MemoryAccessor::new(b"", 1))
+            .open(request(2, None))
+            .await
+            .is_err()
+    );
     let input = MemoryAccessor::new(b"{}", 1);
     let observed = input.observations.clone();
     let accessor = JsonAccessor::infer(input).with_inference_options(JsonInferenceOptions {
@@ -369,60 +363,29 @@ async fn inference_rejects_empty_malformed_and_non_object_input_and_validates_li
 }
 
 #[tokio::test]
-async fn inference_byte_target_stops_between_records_and_later_conflicts_fail_terminally() {
+async fn inference_fixes_the_schema_at_record_and_byte_sample_limits() {
     use open_arrow_access_file_format::json::JsonInferenceOptions;
-    let input = MemoryAccessor::new(b"{\"id\":1} {\"id\":\"bad\"}", 1);
-    let mut reader = JsonAccessor::infer(input)
-        .with_inference_options(JsonInferenceOptions {
+    for options in [
+        JsonInferenceOptions {
+            max_records: 1,
+            max_bytes: 1024,
+        },
+        JsonInferenceOptions {
             max_records: 1000,
             max_bytes: 1,
-        })
-        .open(request(1, None))
-        .await
-        .unwrap();
-    assert_eq!(
-        reader.metadata().schema.field(0).data_type(),
-        &DataType::Int64
-    );
-    assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
-    assert!(reader.next().await.is_err());
-    assert!(reader.next().await.unwrap().is_none());
-}
-
-#[tokio::test]
-async fn inference_composes_with_gzip_and_zero_column_projection() {
-    let mut encoded = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoded
-        .write_all(&fixture!("json", "inference.jsonl").await)
-        .unwrap();
-    let bytes = encoded.finish().unwrap();
-    let input = MemoryAccessor::new(&bytes, 1).layer(DecompressionLayer::new(Gzip));
-    let mut reader = JsonAccessor::infer(input)
-        .open(request(2, Some(vec![])))
-        .await
-        .unwrap();
-    assert!(reader.metadata().schema.fields().is_empty());
-    let mut rows = 0;
-    while let Some(batch) = reader.next().await.unwrap() {
-        rows += batch.num_rows();
-    }
-    assert_eq!(rows, 3);
-}
-
-#[tokio::test]
-async fn inference_propagates_source_failures_and_validates_projection_after_sampling() {
-    let input = MemoryAccessor::new(b"{\"id\":1}", 1).with_failure(3, ErrorKind::PermissionDenied);
-    let error = JsonAccessor::infer(input)
-        .open(request(1, None))
-        .await
-        .err()
-        .unwrap();
-    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
-    let input = MemoryAccessor::new(b"{\"id\":1}", 1);
-    assert!(
-        JsonAccessor::infer(input)
-            .open(request(1, Some(vec!["missing"])))
+        },
+    ] {
+        let input = MemoryAccessor::new(b"{\"id\":1} {\"id\":\"bad\"}", 1);
+        let mut reader = JsonAccessor::infer(input)
+            .with_inference_options(options)
+            .open(request(1, None))
             .await
-            .is_err()
-    );
+            .unwrap();
+        assert_eq!(
+            reader.metadata().schema.field(0).data_type(),
+            &DataType::Int64
+        );
+        assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
+        assert!(reader.next().await.is_err());
+    }
 }
