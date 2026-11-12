@@ -14,7 +14,7 @@ fn names_check_only_change_targets_against_the_existing_index() {
             .collect::<Vec<_>>(),
     );
     let names = FieldNameIndex::new(schema.fields());
-    validate_evolution_source(&names).unwrap();
+    validate_evolution_source(names.len(), schema.fields().len()).unwrap();
     let changes = vec![
         ColumnEvolution::rename_column("c0", "c1"),
         ColumnEvolution::remove_column("c1"),
@@ -30,14 +30,14 @@ fn names_check_only_change_targets_against_the_existing_index() {
 }
 
 #[test]
-fn source_uniqueness_uses_index_metadata_and_preserves_first_lookup() {
+fn source_uniqueness_uses_index_size_and_preserves_first_lookup() {
     let schema = Schema::new(vec![
         Field::new("a", DataType::Int32, true),
         Field::new("a", DataType::Utf8, true),
     ]);
     let names = FieldNameIndex::new(schema.fields());
     assert_eq!(names.get("a"), Some(0));
-    assert!(validate_evolution_source(&names).is_err());
+    assert!(validate_evolution_source(names.len(), schema.fields().len()).is_err());
 }
 
 #[test]

@@ -228,7 +228,7 @@ fn plan_evolution(
     options: &open_arrow_access_core::ReadOptions,
 ) -> Result<SchemaEvolutionPlan> {
     let names = open_arrow_access_core::FieldNameIndex::new(source.fields());
-    validation::validate_evolution_source(&names)?;
+    validation::validate_evolution_source(names.len(), source.fields().len())?;
     let mut affected = HashSet::new();
     let mut fields = source.fields().to_vec();
     let mut removed = HashSet::new();

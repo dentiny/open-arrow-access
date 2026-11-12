@@ -374,9 +374,9 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
     Ok(())
 }
 
-// Input indexing already counted unique names; no additional field traversal.
-pub(crate) fn validate_evolution_source(names: &FieldNameIndex) -> Result<()> {
-    if !names.is_unique() {
+// Compare existing collection lengths; no cached flag or field traversal.
+pub(crate) fn validate_evolution_source(indexed_names: usize, source_fields: usize) -> Result<()> {
+    if indexed_names != source_fields {
         return Err(crate::error::evolution_output_collision());
     }
     Ok(())
