@@ -32,7 +32,7 @@ pub fn schema() -> SchemaRef {
                     Field::new("is_retracted", DataType::Boolean, true),
                     Field::new("license_code", DataType::Utf8, true),
                     Field::new("xml_url", DataType::Utf8, true),
-                    Field::new("pdf_url", DataType::Utf8, true),
+                    Field::new("pdf", DataType::Utf8, true),
                     Field::new(
                         "media_urls",
                         DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),

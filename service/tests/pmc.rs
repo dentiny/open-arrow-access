@@ -36,6 +36,10 @@ async fn maps_metadata_without_fetching_content() {
         ("pmcid", " pmc00123 "),
         ("pmid", "36537061"),
         ("license_code", "CC BY"),
+        (
+            "pdf",
+            "s3://pmc-oa-opendata/PMC123.2/article%20%2B%2520.pdf?md5=example",
+        ),
     ] {
         assert_eq!(batch[field].as_string::<i32>().value(0), expected);
     }
@@ -44,12 +48,12 @@ async fn maps_metadata_without_fetching_content() {
     let batch = read(&fixture!("pmc", "metadata_only.json").await, None)
         .await
         .unwrap();
-    assert!(batch["pdf_url"].is_null(0));
+    assert!(batch["pdf"].is_null(0));
 }
 
 #[tokio::test]
 async fn projection_preserves_order_and_zero_column_rows() {
-    for names in [vec!["pdf_url".into(), "pmcid".into()], vec![]] {
+    for names in [vec!["pdf".into(), "pmcid".into()], vec![]] {
         let batch = read(RAW.as_bytes(), Some(names.clone())).await.unwrap();
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(
