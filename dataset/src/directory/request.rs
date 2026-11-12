@@ -12,6 +12,9 @@ pub struct DirectoryRequest {
     pub recursive: bool,
     /// Case-sensitive locator suffix, for example `.parquet`. None selects all files.
     pub suffix: Option<String>,
+    /// Glob relative to prefix; `*` stays within a component and `**` spans directories.
+    /// Combines with suffix filtering and respects the recursive listing setting.
+    pub glob: Option<String>,
     pub options: ReadOptions,
     pub byte_options: ByteReadOptions,
 }
@@ -22,9 +25,15 @@ impl DirectoryRequest {
             prefix: prefix.into(),
             recursive: true,
             suffix: None,
+            glob: None,
             options: ReadOptions::default(),
             byte_options: ByteReadOptions::default(),
         }
+    }
+
+    pub fn with_glob(mut self, pattern: impl Into<String>) -> Self {
+        self.glob = Some(pattern.into());
+        self
     }
 
     pub fn with_options(mut self, options: ReadOptions) -> Self {

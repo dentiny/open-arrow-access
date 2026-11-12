@@ -2809,6 +2809,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "futures",
+ "glob",
  "more-asserts",
  "open-arrow-access-core",
  "open-arrow-access-decompression",
