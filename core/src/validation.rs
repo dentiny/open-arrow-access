@@ -2,7 +2,7 @@ use std::{collections::HashSet, ops::Range};
 
 use arrow_schema::{DataType, Fields};
 
-use crate::{FieldNameIndex, Result, SchemaRef};
+use crate::{Result, SchemaRef};
 
 /// Validate a half-open byte range against the current representation's length.
 /// Empty ranges at or before EOF are valid. This performs no I/O and leaves
@@ -43,25 +43,6 @@ fn validate_record_batch_type(data_type: &DataType) -> Result<()> {
         }
         _ => Err(crate::error::unsupported_metadata_type(data_type)),
     }
-}
-
-pub(crate) fn validate_output_fields(
-    full: &Fields,
-    output: &Fields,
-    names: &FieldNameIndex,
-) -> Result<Vec<Option<usize>>> {
-    let mut output_indices = vec![None; full.len()];
-    for (index, field) in output.iter().enumerate() {
-        let source = names
-            .get(field.name())
-            .filter(|&source| &full[source] == field)
-            .ok_or_else(crate::error::invalid_output_schema)?;
-        if output_indices[source].replace(index).is_some() {
-            return Err(crate::error::invalid_output_schema());
-        }
-    }
-
-    Ok(output_indices)
 }
 
 pub(crate) fn validate_scan_schema(

@@ -128,7 +128,7 @@ struct StructLayout {
 impl StructLayout {
     fn new(full: &Fields, output: &Fields) -> Result<Self> {
         let names = FieldNameIndex::new(full);
-        let output_indices = crate::validation::validate_output_fields(full, output, &names)?;
+        let output_indices = resolve_output_indices(full, output, &names)?;
         let values = output
             .iter()
             .map(|field| ValueLayout::new(field.data_type()))
@@ -139,6 +139,25 @@ impl StructLayout {
             values,
         })
     }
+}
+
+fn resolve_output_indices(
+    full: &Fields,
+    output: &Fields,
+    names: &FieldNameIndex,
+) -> Result<Vec<Option<usize>>> {
+    let mut output_indices = vec![None; full.len()];
+    for (index, field) in output.iter().enumerate() {
+        let source = names
+            .get(field.name())
+            .filter(|&source| &full[source] == field)
+            .ok_or_else(crate::error::invalid_output_schema)?;
+        if output_indices[source].replace(index).is_some() {
+            return Err(crate::error::invalid_output_schema());
+        }
+    }
+
+    Ok(output_indices)
 }
 
 enum ValueLayout {
