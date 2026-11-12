@@ -178,18 +178,3 @@ This default-on facade deliberately includes the service crate's HTTP baseline
 (OpenDAL HTTP/reqwest transport, JSON/Serde, URL and supporting utilities).
 Provider features remain empty by default: making common code available does not
 enable Hugging Face, Zenodo, XML parsing, or other concrete providers.
-
-## Error and validation modules
-
-Keep error constructors, SDK error conversions, classification, and source-chain
-wrapping in the owning crate or component's `error.rs`. Keep input constraints
-and schema compatibility checks in `validation.rs`. Stateful trackers belong
-to their component modules and delegate pure checks to validators. I/O,
-parsing, reader scheduling, and state transitions call those modules at the
-point where the required data becomes available.
-
-Public entry points may delegate to a validator or re-export an error classifier
-to preserve their API paths. Moving a check must preserve when it runs, including
-pre-I/O configuration failures and streaming EOF validation, along with its error
-kind, operation, message, and original cause. Test assertions and parsing routines
-are not validators merely because they return `Result` or inspect an error.
