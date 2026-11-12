@@ -10,12 +10,11 @@ may be files, bytes, API documents, or Arrow batches.
 ## Read your first file
 
 Enable the format you need and an OpenDAL storage backend. Features are opt-in;
-the default feature set is empty. Use a Git dependency and pin `rev` to a tested
-commit for reproducible builds.
+the default feature set is empty. Add the published crate to your application:
 
 ```toml
 [dependencies]
-open-arrow-access = { git = "https://github.com/dentiny/open-arrow-access", default-features = false, features = ["format-parquet"] }
+open-arrow-access = { version = "0.1.0", default-features = false, features = ["format-parquet"] }
 opendal = { version = "=0.59.2", default-features = false, features = ["services-fs"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
@@ -91,7 +90,7 @@ storage operator separately.
 Set features on the dependency used by your application:
 
 ```toml
-open-arrow-access = { git = "https://github.com/dentiny/open-arrow-access", default-features = false, features = [
+open-arrow-access = { version = "0.1.0", default-features = false, features = [
     "format-json",
     "decompression-gzip",
     "dataset-directory",
