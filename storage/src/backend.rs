@@ -2,10 +2,11 @@
 
 use std::{collections::HashMap, num::NonZeroUsize, ops::Range, sync::Arc};
 
+use crate::error::{map_error, short_read};
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error,
-    ErrorKind, ListRequest, ObjectRef, ObjectStream, ReadState, Reader, Result, async_trait,
+    Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability,
+    ListRequest, ObjectRef, ObjectStream, ReadState, Reader, Result, async_trait,
     validate_byte_range,
 };
 use opendal::{
@@ -70,13 +71,7 @@ impl OpenDalAccessor {
             .stat(path)
             .await
             .map_err(|e| map_error("stat", path, e))?;
-        if !metadata.is_file() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "open",
-                "object is not a regular file",
-            ));
-        }
+        crate::validation::validate_file(&metadata)?;
         Ok(metadata.content_length())
     }
 }
@@ -143,13 +138,7 @@ impl Accessor for OpenDalAccessor {
 #[async_trait]
 impl ByteAccessor for OpenDalAccessor {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        if !self.capability().list {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "list",
-                "operator does not support listing",
-            ));
-        }
+        crate::validation::validate_listing(self.capability().list)?;
         let path = request.prefix.locator();
         let path = if path.is_empty() {
             String::new()
@@ -244,13 +233,10 @@ impl OpenDalReader {
                 else {
                     return Err(short_read("read"));
                 };
-                if buffer.len() as u64 > self.len - self.offset {
-                    return Err(Error::new(
-                        ErrorKind::Io,
-                        "read",
-                        "input exceeded its declared length",
-                    ));
-                }
+                crate::validation::validate_read_length(
+                    buffer.len() as u64,
+                    self.len - self.offset,
+                )?;
                 self.pending = buffer;
             }
             if written == 0 && self.pending.current().len() >= target {
@@ -274,13 +260,7 @@ impl OpenDalReader {
         if expected > MAX_FETCH_BATCH_SIZE {
             // Parquet requires contiguous Bytes. Copy incrementally into the
             // final allocation rather than retaining every fragment as well.
-            let capacity = usize::try_from(expected).map_err(|_| {
-                Error::new(
-                    ErrorKind::InvalidInput,
-                    "read_range",
-                    "range exceeds addressable memory",
-                )
-            })?;
+            let capacity = crate::validation::range_capacity(expected)?;
             let mut output = Vec::with_capacity(capacity);
             let read = self
                 .inner
@@ -412,20 +392,6 @@ impl ByteReader for OpenDalReader {
         }
         Ok(output)
     }
-}
-
-fn short_read(operation: &'static str) -> Error {
-    Error::new(
-        ErrorKind::Io,
-        operation,
-        "unexpected short read; input may have changed",
-    )
-}
-
-fn map_error(operation: &'static str, path: &str, error: opendal::Error) -> Error {
-    let kind =
-        ErrorKind::from_source(&error).unwrap_or_else(|| crate::opendal_error_kind(error.kind()));
-    Error::new(kind, operation, format!("object {path:?}")).with_source(error)
 }
 
 // Copy small responses so returned slices do not retain large network allocations.

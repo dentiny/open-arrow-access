@@ -67,16 +67,7 @@ impl HttpClient {
     ) -> Result<T> {
         let mut request = Self::get(url, "application/json", operation)?;
         if let Some(token) = token {
-            let mut value =
-                http::HeaderValue::from_str(&format!("Bearer {token}")).map_err(|error| {
-                    open_arrow_access_core::Error::new(
-                        open_arrow_access_core::ErrorKind::InvalidInput,
-                        operation,
-                        "invalid HTTP authentication token",
-                    )
-                    .with_source(error)
-                })?;
-            value.set_sensitive(true);
+            let value = validation::bearer_header(token, operation)?;
             request
                 .headers_mut()
                 .insert(http::header::AUTHORIZATION, value);

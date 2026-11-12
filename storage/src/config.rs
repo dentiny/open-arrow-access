@@ -53,11 +53,6 @@ impl Default for TimeoutConfig {
 }
 
 impl StorageConfig {
-    /// Validate policies without constructing a backend or performing I/O.
-    pub fn validate(&self) -> Result<()> {
-        crate::validation::validate_storage_config(self)
-    }
-
     /// Validate and apply policies without performing I/O. Timeout wraps the
     /// backend inside retry, so each attempt gets its own timeout. Retryability
     /// and backoff behavior are delegated to OpenDAL.
