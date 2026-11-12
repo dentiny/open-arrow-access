@@ -5,9 +5,10 @@ use arrow_array::{
 };
 use arrow_cast::{CastOptions, cast_with_options};
 use arrow_schema::{ArrowError, DataType, Schema};
+use futures::stream;
 use open_arrow_access_core::{
-    Accessor, Capability, Error, ErrorKind, Layer, ReadOptionsProvider, Reader, RecordCapability,
-    RecordMetadata, RecordReader, Result, async_trait,
+    Accessor, Error, ErrorKind, Layer, ReadOptionsProvider, RecordCapability, RecordMetadata,
+    RecordReader, Result, StreamReader, async_trait,
 };
 
 use crate::validation;
@@ -68,14 +69,7 @@ where
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> RecordCapability {
-        let inner = self.inner.capability();
-        Capability {
-            read: inner.read,
-            read_with_range: false,
-            read_parallel: inner.read_parallel,
-            list: false,
-        }
-        .with_ordering(self.inner.capability().ordering)
+        self.inner.capability()
     }
 
     async fn open(&self, mut request: A::Request) -> Result<Box<dyn RecordReader>> {
@@ -104,10 +98,7 @@ where
             let field = &fields[index];
             let target = spec.data_type.as_ref().unwrap_or(field.data_type());
             if field.data_type() != target {
-                casts.push(ColumnCast {
-                    source_index: index,
-                    target_type: target.clone(),
-                });
+                casts.push((index, target.clone()));
             }
             fields[index] = Arc::new(
                 field
@@ -131,43 +122,40 @@ where
             schema,
             source: inner.metadata().source.clone(),
         };
-        Ok(Box::new(SchemaRemapReader {
-            inner,
-            metadata,
+        let capability = inner.capability();
+        let plan = RemapPlan {
+            schema: Arc::clone(&metadata.schema),
             casts,
             projection,
-            done: false,
-        }))
+        };
+        let batches = stream::try_unfold((inner, plan), |(mut inner, plan)| async move {
+            let Some(batch) = inner.next().await? else {
+                return Ok(None);
+            };
+            Ok(Some((plan.convert(batch)?, (inner, plan))))
+        });
+        Ok(Box::new(
+            StreamReader::records(batches, metadata, capability.ordering)
+                .with_capability(capability),
+        ))
     }
 }
 
-struct ColumnCast {
-    /// Position in the inner reader's batch, before the final projection.
-    source_index: usize,
-    target_type: DataType,
-}
-
-struct SchemaRemapReader {
-    inner: Box<dyn RecordReader>,
-    metadata: RecordMetadata,
-    /// Casts planned at open, including configured columns omitted from the output.
-    casts: Vec<ColumnCast>,
-    /// Inner-batch column indices in output order. None keeps all columns;
-    /// Some([]) preserves row counts with zero columns.
+struct RemapPlan {
+    schema: Arc<Schema>,
+    casts: Vec<(usize, DataType)>,
     projection: Option<Vec<usize>>,
-    done: bool,
 }
 
-impl SchemaRemapReader {
+impl RemapPlan {
     fn convert(&self, batch: RecordBatch) -> Result<RecordBatch> {
         let mut columns = batch.columns().to_vec();
         let options = CastOptions {
             safe: false,
             ..CastOptions::default()
         };
-        for cast in &self.casts {
-            let index = cast.source_index;
-            let target = &cast.target_type;
+        for (index, target) in &self.casts {
+            let index = *index;
             columns[index] = cast_with_options(columns[index].as_ref(), target, &options)
                 .or_else(|error| match target {
                     // Keep Arrow's semantics, adding only the service's minute-precision fallback.
@@ -196,49 +184,13 @@ impl SchemaRemapReader {
                 .collect();
         }
         RecordBatch::try_new_with_options(
-            Arc::clone(&self.metadata.schema),
+            Arc::clone(&self.schema),
             columns,
             &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
         )
         .map_err(|error| {
             Error::new(ErrorKind::Decode, "cast", error.to_string()).with_source(error)
         })
-    }
-}
-
-#[async_trait]
-impl Reader for SchemaRemapReader {
-    type Item = RecordBatch;
-    type Metadata = RecordMetadata;
-    type Capability = RecordCapability;
-
-    fn capability(&self) -> RecordCapability {
-        let inner = self.inner.capability();
-        Capability {
-            read: inner.read,
-            read_with_range: false,
-            read_parallel: inner.read_parallel,
-            list: false,
-        }
-        .with_ordering(self.inner.capability().ordering)
-    }
-
-    fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
-    }
-
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.done {
-            return Ok(None);
-        }
-        let result = match self.inner.next().await {
-            Ok(Some(batch)) => self.convert(batch).map(Some),
-            other => other,
-        };
-        if !matches!(result, Ok(Some(_))) {
-            self.done = true;
-        }
-        result
     }
 }
 
