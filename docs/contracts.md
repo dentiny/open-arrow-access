@@ -343,9 +343,3 @@ Arrow, Parquet, OpenDAL, and the future DataFusion layer follow one recorded
 latest upstream Lance revision. Workspace requirements record the baseline, and
 the committed lockfile preserves resolved versions, including transitive family components. See
 [dependency alignment](dependencies.md) for the baseline and update procedure.
-
-## References
-
-- [OpenDAL Operator](https://opendal.apache.org/docs/rust/opendal/struct.Operator.html)
-- [OpenDAL Reader](https://opendal.apache.org/docs/rust/opendal/struct.Reader.html)
-- [Arrow Rust async Parquet reading](https://docs.rs/parquet/59.3.0/parquet/arrow/async_reader/index.html)

@@ -78,23 +78,3 @@ For internal parallel reads, compose in this order:
 Generation runs once over the ordered merged batches, sharing one query context.
 The generated wrapper forwards internal read concurrency but does not implement
 `ScanPlanner`, so placing `ParallelReadLayer` outside it is not supported.
-
-## Reference implementations and scope
-
-The design follows `ml-infra/lance/lance_migration/crates/converter/src/generated.rs`:
-ordered declarations, DataFusion physical expressions and field provenance.
-It adds the accessor/request protocol, final projection, explicit zero-column row
-counts, pre-simplification row-local validation and terminal input cleanup.
-The available older `duckdb_lance_conversion` checkout contains DuckDB's own
-generated table-column machinery but no analogous converter feature.
-
-Reader-provided private context fields (for example WARC path/offset) remain a
-separate extension: the current API has no virtual-field request contract.
-Imported source metadata never silently hides a field. Add explicit source-owned
-virtual-field requests together with a real reader, coordinate semantics and tests.
-
-## Validation
-
-Integration tests cover expressions, dependent columns, constants, nulls, quoting,
-metadata/buffer sharing, zero rows/columns, projection, invalid and hidden
-expressions, SQL casts, type conversion, and CSV with parallel reads.
