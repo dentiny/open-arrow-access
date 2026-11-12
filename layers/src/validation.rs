@@ -10,7 +10,7 @@ use open_arrow_access_core::{
     EmissionPolicy, Error, ErrorKind, FieldNameIndex, OrderRequirement, ParallelReadOptions, Result,
 };
 
-use crate::{ColumnTypeSpec, error::column_error};
+use crate::error::column_error;
 
 pub(crate) fn validate_sampling_probability(probability: f64) -> Result<()> {
     if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
@@ -47,28 +47,6 @@ pub(crate) fn validate_parallel_read_settings(
             "parallel_read",
             "conflicting parallel read settings on one scan",
         ));
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_specs(specs: &[ColumnTypeSpec]) -> Result<()> {
-    let mut names = HashSet::with_capacity(specs.len());
-    for spec in specs {
-        if spec.column.is_empty() || !names.insert(&spec.column) {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "configure_cast",
-                "cast columns must have nonempty, distinct names",
-            ));
-        }
-        validate_target(&spec.data_type).map_err(|error| {
-            column_error(
-                ErrorKind::InvalidInput,
-                "configure_cast",
-                &spec.column,
-                error,
-            )
-        })?;
     }
     Ok(())
 }
@@ -364,6 +342,73 @@ pub(crate) fn validate_generated_schema(
             ErrorKind::Decode,
             "plan_generated_column",
             "source schema does not match the supplied projection",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_remap_specs(specs: &[crate::FieldRemap]) -> Result<()> {
+    let mut sources = HashSet::new();
+    let mut targets = HashSet::new();
+    for spec in specs {
+        if spec.source_name.is_empty()
+            || spec.output_name().is_empty()
+            || !sources.insert(&spec.source_name)
+            || !targets.insert(spec.output_name())
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "configure_schema_remap",
+                "source names and target names must each be nonempty and unique",
+            ));
+        }
+        if let Some(target) = &spec.target_data_type {
+            validate_target(target).map_err(|error| {
+                column_error(
+                    ErrorKind::InvalidInput,
+                    "configure_schema_remap",
+                    &spec.source_name,
+                    error,
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_remap_sources(
+    specs: &[crate::FieldRemap],
+    schema: &arrow_schema::Schema,
+) -> Result<Vec<usize>> {
+    let fields = FieldNameIndex::new(schema.fields());
+    specs
+        .iter()
+        .map(|spec| {
+            let index = fields.index_of(&spec.source_name).map_err(|error| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    "plan_schema_remap",
+                    error.to_string(),
+                )
+                .with_source(error)
+            })?;
+            if let Some(target) = &spec.target_data_type
+                && schema.field(index).data_type() != target
+            {
+                validate_cast(schema.field(index), target)?;
+            }
+            Ok(index)
+        })
+        .collect()
+}
+
+pub(crate) fn validate_remap_output(fields: &[std::sync::Arc<arrow_schema::Field>]) -> Result<()> {
+    let mut names = HashSet::new();
+    if fields.iter().any(|field| !names.insert(field.name())) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "plan_schema_remap",
+            "remapped names collide with other output fields",
         ));
     }
     Ok(())

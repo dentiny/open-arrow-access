@@ -5,59 +5,61 @@ use arrow_array::{
 };
 use arrow_cast::{CastOptions, cast_with_options};
 use arrow_schema::{ArrowError, DataType, Schema};
+use futures::stream;
 use open_arrow_access_core::{
-    Accessor, Capability, Error, ErrorKind, FieldNameIndex, Layer, ReadOptionsProvider, Reader,
-    RecordCapability, RecordMetadata, RecordReader, Result, async_trait,
+    Accessor, Error, ErrorKind, Layer, ReadOptionsProvider, RecordCapability, RecordMetadata,
+    RecordReader, Result, StreamReader, async_trait,
 };
 
 use crate::validation;
 
-/// A top-level column's output type. Other columns retain their input types.
+/// Remap one top-level field; omitted fields remain unchanged.
 #[derive(Clone, Debug)]
-pub struct ColumnTypeSpec {
-    pub column: String,
-    pub data_type: DataType,
+pub struct FieldRemap {
+    pub source_name: String,
+    /// None preserves the source name.
+    pub target_name: Option<String>,
+    /// None preserves the source type.
+    pub target_data_type: Option<DataType>,
 }
 
-/// Casts Arrow columns with errors on invalid values, preserving row order and count.
-///
-/// Uses Arrow cast semantics: successful casts can still lose numeric or temporal
-/// precision. All declared casts run before the final projection, even for hidden
-/// columns. String-to-timestamp casts also accept ISO minute precision (for example,
-/// `2000-05-31T04:00Z`). Naive timestamps use the target timezone, or UTC if absent;
-/// invalid, ambiguous, or out-of-range values fail. Storage and decoding schemas
-/// are unchanged.
+impl FieldRemap {
+    pub(crate) fn output_name(&self) -> &str {
+        self.target_name.as_deref().unwrap_or(&self.source_name)
+    }
+}
+
+/// Rename top-level fields and optionally cast their types.
 #[derive(Clone, Debug, Default)]
-pub struct TypeConversionLayer {
-    specs: Arc<[ColumnTypeSpec]>,
+pub struct SchemaRemapLayer {
+    specs: Arc<[FieldRemap]>,
 }
 
-impl TypeConversionLayer {
-    /// Validate column declarations without opening a source.
-    pub fn try_new(specs: Vec<ColumnTypeSpec>) -> Result<Self> {
-        validation::validate_specs(&specs)?;
+impl SchemaRemapLayer {
+    pub fn try_new(specs: Vec<FieldRemap>) -> Result<Self> {
+        validation::validate_remap_specs(&specs)?;
         Ok(Self {
             specs: specs.into(),
         })
     }
 }
 
-/// A record accessor decorated by [`TypeConversionLayer`].
+/// A record accessor decorated by [`SchemaRemapLayer`].
 #[derive(Clone, Debug)]
-pub struct TypeConversionAccessor<A> {
+pub struct SchemaRemapAccessor<A> {
     inner: A,
-    specs: Arc<[ColumnTypeSpec]>,
+    specs: Arc<[FieldRemap]>,
 }
 
-impl<A> Layer<A> for TypeConversionLayer
+impl<A> Layer<A> for SchemaRemapLayer
 where
     A: Accessor<Reader = dyn RecordReader>,
     A::Request: ReadOptionsProvider,
 {
-    type Layered = TypeConversionAccessor<A>;
+    type Layered = SchemaRemapAccessor<A>;
 
     fn layer(&self, inner: A) -> Self::Layered {
-        TypeConversionAccessor {
+        SchemaRemapAccessor {
             inner,
             specs: Arc::clone(&self.specs),
         }
@@ -65,7 +67,7 @@ where
 }
 
 #[async_trait]
-impl<A> Accessor for TypeConversionAccessor<A>
+impl<A> Accessor for SchemaRemapAccessor<A>
 where
     A: Accessor<Reader = dyn RecordReader>,
     A::Request: ReadOptionsProvider,
@@ -74,14 +76,7 @@ where
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> RecordCapability {
-        let inner = self.inner.capability();
-        Capability {
-            read: inner.read,
-            read_with_range: false,
-            read_parallel: inner.read_parallel,
-            list: false,
-        }
-        .with_ordering(self.inner.capability().ordering)
+        self.inner.capability()
     }
 
     async fn open(&self, mut request: A::Request) -> Result<Box<dyn RecordReader>> {
@@ -89,79 +84,88 @@ where
             return self.inner.open(request).await;
         }
         let output_options = request.read_options().clone();
-        if let Some(columns) = &mut request.read_options_mut().projection {
+        // A rename needs the full schema to detect collisions with unchanged fields.
+        let renames = self
+            .specs
+            .iter()
+            .any(|spec| spec.source_name != spec.output_name());
+        if renames {
+            request.read_options_mut().projection = None;
+        } else if let Some(columns) = &mut request.read_options_mut().projection {
             let mut names: HashSet<_> = columns.iter().cloned().collect();
             for spec in self.specs.iter() {
-                if names.insert(spec.column.clone()) {
-                    columns.push(spec.column.clone());
+                if names.insert(spec.source_name.clone()) {
+                    columns.push(spec.source_name.clone());
                 }
             }
         }
         let inner = self.inner.open(request).await?;
         let source = &inner.metadata().schema;
-        let field_index = FieldNameIndex::new(source.fields());
+        let indices = validation::validate_remap_sources(&self.specs, source)?;
         let mut fields = source.fields().to_vec();
         let mut casts = Vec::with_capacity(self.specs.len());
-        for spec in self.specs.iter() {
-            let index = field_index.index_of(&spec.column).map_err(|error| {
-                Error::new(ErrorKind::InvalidInput, "plan_cast", error.to_string())
-                    .with_source(error)
-            })?;
+        for (spec, index) in self.specs.iter().zip(indices) {
             let field = &fields[index];
-            if field.data_type() == &spec.data_type {
-                continue;
+            let target = spec.target_data_type.as_ref().unwrap_or(field.data_type());
+            if field.data_type() != target {
+                casts.push(ColumnCast {
+                    source_index: index,
+                    target_data_type: target.clone(),
+                });
             }
-            validation::validate_cast(field, &spec.data_type)?;
             fields[index] = Arc::new(
                 field
                     .as_ref()
                     .clone()
-                    .with_data_type(spec.data_type.clone()),
+                    .with_name(spec.output_name())
+                    .with_data_type(target.clone()),
             );
-            casts.push(ColumnCast {
-                source_index: index,
-                target_type: spec.data_type.clone(),
-            });
+        }
+        if renames {
+            validation::validate_remap_output(&fields)?;
         }
         let schema = Arc::new(Schema::new_with_metadata(fields, source.metadata().clone()));
         let (schema, projection) = output_options.resolve_projection(&schema)?;
         let projection =
             projection.filter(|indices| indices.iter().copied().ne(0..source.fields().len()));
-        if casts.is_empty() && projection.is_none() {
+        if casts.is_empty() && projection.is_none() && schema == *source {
             return Ok(inner);
         }
         let metadata = RecordMetadata {
             schema,
             source: inner.metadata().source.clone(),
         };
-        Ok(Box::new(TypeConversionReader {
-            inner,
-            metadata,
+        let capability = inner.capability();
+        let plan = SchemaRemapPlan {
+            schema: Arc::clone(&metadata.schema),
             casts,
             projection,
-            done: false,
-        }))
+        };
+        let batches = stream::try_unfold((inner, plan), |(mut inner, plan)| async move {
+            let Some(batch) = inner.next().await? else {
+                return Ok(None);
+            };
+            Ok(Some((plan.convert(batch)?, (inner, plan))))
+        });
+        Ok(Box::new(
+            StreamReader::records(batches, metadata, capability.ordering)
+                .with_capability(capability),
+        ))
     }
 }
 
 struct ColumnCast {
-    /// Position in the inner reader's batch, before the final projection.
     source_index: usize,
-    target_type: DataType,
+    target_data_type: DataType,
 }
 
-struct TypeConversionReader {
-    inner: Box<dyn RecordReader>,
-    metadata: RecordMetadata,
-    /// Casts planned at open, including configured columns omitted from the output.
+struct SchemaRemapPlan {
+    schema: Arc<Schema>,
     casts: Vec<ColumnCast>,
-    /// Inner-batch column indices in output order. None keeps all columns;
-    /// Some([]) preserves row counts with zero columns.
     projection: Option<Vec<usize>>,
-    done: bool,
 }
 
-impl TypeConversionReader {
+impl SchemaRemapPlan {
     fn convert(&self, batch: RecordBatch) -> Result<RecordBatch> {
         let mut columns = batch.columns().to_vec();
         let options = CastOptions {
@@ -170,7 +174,7 @@ impl TypeConversionReader {
         };
         for cast in &self.casts {
             let index = cast.source_index;
-            let target = &cast.target_type;
+            let target = &cast.target_data_type;
             columns[index] = cast_with_options(columns[index].as_ref(), target, &options)
                 .or_else(|error| match target {
                     // Keep Arrow's semantics, adding only the service's minute-precision fallback.
@@ -199,49 +203,13 @@ impl TypeConversionReader {
                 .collect();
         }
         RecordBatch::try_new_with_options(
-            Arc::clone(&self.metadata.schema),
+            Arc::clone(&self.schema),
             columns,
             &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
         )
         .map_err(|error| {
             Error::new(ErrorKind::Decode, "cast", error.to_string()).with_source(error)
         })
-    }
-}
-
-#[async_trait]
-impl Reader for TypeConversionReader {
-    type Item = RecordBatch;
-    type Metadata = RecordMetadata;
-    type Capability = RecordCapability;
-
-    fn capability(&self) -> RecordCapability {
-        let inner = self.inner.capability();
-        Capability {
-            read: inner.read,
-            read_with_range: false,
-            read_parallel: inner.read_parallel,
-            list: false,
-        }
-        .with_ordering(self.inner.capability().ordering)
-    }
-
-    fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
-    }
-
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if self.done {
-            return Ok(None);
-        }
-        let result = match self.inner.next().await {
-            Ok(Some(batch)) => self.convert(batch).map(Some),
-            other => other,
-        };
-        if !matches!(result, Ok(Some(_))) {
-            self.done = true;
-        }
-        result
     }
 }
 
