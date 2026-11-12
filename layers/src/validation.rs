@@ -363,7 +363,7 @@ pub(crate) fn validate_generated_schema(
         return Err(Error::new(
             ErrorKind::Decode,
             "plan_generated_column",
-            "source or output schema changed during generated-column planning",
+            "source schema does not match the supplied projection",
         ));
     }
     Ok(())

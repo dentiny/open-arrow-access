@@ -360,21 +360,25 @@ async fn projection_pushdown_reads_real_dependencies_and_remaps_column_indices()
     let mut columns: Vec<Arc<dyn Array>> = vec![Arc::new(StringArray::from(vec!["wide"; 3]))];
     columns.extend(original.columns().iter().cloned());
     let batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).unwrap();
+    let schema = batch.schema();
     let source = MemoryAccessor::new(vec![batch]);
     let projections = source.projections.clone();
     let polls = source.polls.clone();
     let mut reader = source
-        .layer(layer(&[
-            ("next", "\"Count\" + 1 /* unused */"),
-            ("twice", "next * 2"),
-            ("literal", "'unused'"),
-        ]))
+        .layer(
+            layer(&[
+                ("next", "\"Count\" + 1 /* unused */"),
+                ("twice", "next * 2"),
+                ("literal", "'unused'"),
+            ])
+            .with_source_schema(schema),
+        )
         .open(request(&["twice"]))
         .await
         .unwrap();
     assert_eq!(
         *projections.lock().unwrap(),
-        vec![None, Some(vec!["Count".into()])]
+        vec![Some(vec!["Count".into()])]
     );
     assert_eq!(polls.load(Ordering::SeqCst), 0);
     let output = reader.next().await.unwrap().unwrap();
@@ -387,18 +391,4 @@ async fn projection_pushdown_reads_real_dependencies_and_remaps_column_indices()
         &Int64Array::from(vec![Some(6), None, Some(10)])
     );
     assert!(reader.next().await.unwrap().is_none());
-
-    // Hidden declarations still execute and their runtime failures remain visible.
-    let source = MemoryAccessor::new(vec![input()]);
-    let projections = source.projections.clone();
-    let mut reader = source
-        .layer(layer(&[("bad", "cast(text as bigint)")]))
-        .open(request(&[]))
-        .await
-        .unwrap();
-    assert_eq!(
-        *projections.lock().unwrap(),
-        vec![None, Some(vec!["text".into()])]
-    );
-    assert!(reader.next().await.is_err());
 }

@@ -30,13 +30,12 @@ pub struct GeneratedColumnSpec {
 
 /// Appends generated fields in declaration order, then applies the final projection.
 ///
-/// Expressions are evaluated batch by batch. With a projected, clonable request,
-/// inspect the full schema before reopening only visible inputs and expression
-/// dependencies. Sources must remain stable across both opens; schema inference
-/// may sample twice. Parallel readers retain the existing full-input path.
+/// Supply a complete source schema with `with_source_schema` to enable
+/// dependency projection pushdown without opening an extra reader.
 #[derive(Clone, Debug, Default)]
 pub struct GeneratedColumnsLayer {
     specs: Arc<[GeneratedColumnSpec]>,
+    source_schema: Option<SchemaRef>,
 }
 
 impl GeneratedColumnsLayer {
@@ -45,7 +44,13 @@ impl GeneratedColumnsLayer {
         validate_generated_specs(&specs)?;
         Ok(Self {
             specs: specs.into(),
+            source_schema: None,
         })
+    }
+
+    pub fn with_source_schema(mut self, schema: SchemaRef) -> Self {
+        self.source_schema = Some(schema);
+        self
     }
 }
 
@@ -54,12 +59,13 @@ impl GeneratedColumnsLayer {
 pub struct GeneratedColumnsAccessor<A> {
     inner: A,
     specs: Arc<[GeneratedColumnSpec]>,
+    source_schema: Option<SchemaRef>,
 }
 
 impl<A> Layer<A> for GeneratedColumnsLayer
 where
     A: Accessor<Reader = dyn RecordReader>,
-    A::Request: ReadOptionsProvider + Clone,
+    A::Request: ReadOptionsProvider,
 {
     type Layered = GeneratedColumnsAccessor<A>;
 
@@ -67,6 +73,7 @@ where
         GeneratedColumnsAccessor {
             inner,
             specs: Arc::clone(&self.specs),
+            source_schema: self.source_schema.clone(),
         }
     }
 }
@@ -75,7 +82,7 @@ where
 impl<A> Accessor for GeneratedColumnsAccessor<A>
 where
     A: Accessor<Reader = dyn RecordReader>,
-    A::Request: ReadOptionsProvider + Clone,
+    A::Request: ReadOptionsProvider,
 {
     type Request = A::Request;
     type Reader = dyn RecordReader;
@@ -90,41 +97,31 @@ where
         }
         let output_options = request.read_options().clone();
         request.read_options_mut().projection = None;
-        // A normal open must not start parallel workers just for inspection.
-        // Keep the existing single-open path for parallel readers.
-        let reopen = output_options.projection.is_some() && !self.inner.capability().read_parallel;
-        let original_request = reopen.then(|| request.clone());
-        let mut inner = self.inner.open(request).await?;
-        let source = Arc::clone(&inner.metadata().schema);
         let state = SessionContext::new().state();
-        let (mut schema, mut steps, dependencies) = plan_steps(&state, &self.specs, &source)?;
-        let (expected_output, _) = output_options.resolve_projection(&schema)?;
-        if let Some(mut request) = original_request {
-            let visible: HashSet<&str> = expected_output
-                .fields()
-                .iter()
-                .map(|f| f.name().as_str())
-                .collect();
-            let names: Vec<String> = source
-                .fields()
-                .iter()
-                .filter(|field| {
-                    visible.contains(field.name().as_str()) || dependencies.contains(field.name())
-                })
-                .map(|field| field.name().clone())
-                .collect();
-            request.read_options_mut().projection = Some(names);
-            let (expected_source, _) = request.read_options().resolve_projection(&source)?;
-            // Release the probe without polling batches before reopening.
-            drop(inner);
-            inner = self.inner.open(request).await?;
-            validate_generated_schema(&inner.metadata().schema, &expected_source)?;
-            // Recompile physical column indices for the reduced schema, using
-            // the same session so stable expressions retain one execution time.
-            (schema, steps, _) = plan_steps(&state, &self.specs, &expected_source)?;
+        let expected_source = if let (Some(source), Some(projection)) =
+            (&self.source_schema, &output_options.projection)
+        {
+            let (_, _, mut required) = plan_steps(&state, &self.specs, source)?;
+            required.extend(projection.iter().cloned());
+            request.read_options_mut().projection = Some(
+                source
+                    .fields()
+                    .iter()
+                    .filter(|field| required.contains(field.name()))
+                    .map(|field| field.name().clone())
+                    .collect(),
+            );
+            Some(request.read_options().resolve_projection(source)?.0)
+        } else {
+            None
+        };
+        let inner = self.inner.open(request).await?;
+        let source = &inner.metadata().schema;
+        if let Some(expected) = expected_source {
+            validate_generated_schema(source, &expected)?;
         }
+        let (schema, steps, _) = plan_steps(&state, &self.specs, source)?;
         let (schema, projection) = output_options.resolve_projection(&schema)?;
-        validate_generated_schema(&schema, &expected_output)?;
         let metadata = RecordMetadata {
             schema,
             source: inner.metadata().source.clone(),
