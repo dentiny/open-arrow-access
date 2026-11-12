@@ -153,7 +153,4 @@ implement `DocumentDecoder` and use `DocumentAccessor`. Keep provider identity,
 version checks, mapping, and pagination in the service.
 
 See [adding a service](../docs/extending.md#add-a-service) for implementation
-steps, feature wiring, and examples. Shared references:
-[API documents](api-document.md), [remote files](remote-files.md),
-[HTTP downloads](http-downloads.md), [transport](http-transport.md),
-[OAI-PMH](oai-protocol.md), and [validation](provider-validation.md).
+steps, feature wiring, and examples.
