@@ -374,3 +374,98 @@ async fn timestamp_fallback_rejects_invalid_ambiguous_and_overflowing_values() {
         assert!(reader.next().await.unwrap().is_none());
     }
 }
+
+#[tokio::test]
+async fn schema_remap_renames_casts_and_preserves_unmapped_fields() {
+    use open_arrow_access_layers::{FieldRemap, SchemaRemapLayer};
+    let input = RecordBatch::try_from_iter([
+        (
+            "count",
+            Arc::new(StringArray::from(vec![Some("42"), None])) as ArrayRef,
+        ),
+        (
+            "pdf_url",
+            Arc::new(StringArray::from(vec!["https://example.test/a.pdf"; 2])) as ArrayRef,
+        ),
+        ("keep", Arc::new(Int64Array::from(vec![7, 8])) as ArrayRef),
+    ])
+    .unwrap();
+    for names in [vec!["pdf", "count", "keep"], vec![]] {
+        let remap = SchemaRemapLayer::try_new(vec![
+            FieldRemap {
+                source: "pdf_url".into(),
+                target: "pdf".into(),
+                data_type: None,
+            },
+            FieldRemap {
+                source: "count".into(),
+                target: "count".into(),
+                data_type: Some(DataType::Int32),
+            },
+        ])
+        .unwrap();
+        let mut reader = MemoryAccessor::new(vec![input.clone()])
+            .layer(remap)
+            .open(ReadRequest::new("test").with_options(ReadOptions {
+                projection: Some(names.iter().map(|name| (*name).into()).collect()),
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+        let output = reader.next().await.unwrap().unwrap();
+        assert_eq!(output.num_rows(), 2);
+        assert_eq!(output.schema(), reader.metadata().schema);
+        assert_eq!(
+            output
+                .schema()
+                .fields()
+                .iter()
+                .map(|field| field.name().as_str())
+                .collect::<Vec<_>>(),
+            names
+        );
+        if !names.is_empty() {
+            assert!(Arc::ptr_eq(output.column(0), input.column(1)));
+            assert_eq!(
+                output.column(1).to_data(),
+                Int32Array::from(vec![Some(42), None]).to_data()
+            );
+            assert!(Arc::ptr_eq(output.column(2), input.column(2)));
+        }
+    }
+}
+
+#[tokio::test]
+async fn schema_remap_rejects_collisions_but_allows_simultaneous_swaps() {
+    use open_arrow_access_layers::{FieldRemap, SchemaRemapLayer};
+    let input = RecordBatch::try_from_iter([
+        ("a", Arc::new(Int64Array::from(vec![1])) as ArrayRef),
+        ("b", Arc::new(Int64Array::from(vec![2])) as ArrayRef),
+    ])
+    .unwrap();
+    let rename = |source: &str, target: &str| FieldRemap {
+        source: source.into(),
+        target: target.into(),
+        data_type: None,
+    };
+    let error = MemoryAccessor::new(vec![input.clone()])
+        .layer(SchemaRemapLayer::try_new(vec![rename("a", "b")]).unwrap())
+        .open(ReadRequest::new("test").with_options(ReadOptions {
+            projection: Some(vec!["b".into()]),
+            ..Default::default()
+        }))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    let mut reader = MemoryAccessor::new(vec![input.clone()])
+        .layer(SchemaRemapLayer::try_new(vec![rename("a", "b"), rename("b", "a")]).unwrap())
+        .open(ReadRequest::new("test"))
+        .await
+        .unwrap();
+    let output = reader.next().await.unwrap().unwrap();
+    assert_eq!(output.schema().field(0).name(), "b");
+    assert_eq!(output.schema().field(1).name(), "a");
+    assert!(Arc::ptr_eq(output.column(0), input.column(0)));
+    assert!(Arc::ptr_eq(output.column(1), input.column(1)));
+}

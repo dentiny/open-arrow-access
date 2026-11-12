@@ -17,3 +17,6 @@ pub use unordered_emission::{UnorderedEmissionAccessor, UnorderedEmissionLayer};
 
 mod sampling;
 pub use sampling::{SamplingAccessor, SamplingLayer};
+
+mod schema_remap;
+pub use schema_remap::{FieldRemap, SchemaRemapAccessor, SchemaRemapLayer};

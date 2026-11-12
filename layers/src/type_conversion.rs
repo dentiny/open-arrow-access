@@ -6,11 +6,11 @@ use arrow_array::{
 use arrow_cast::{CastOptions, cast_with_options};
 use arrow_schema::{ArrowError, DataType, Schema};
 use open_arrow_access_core::{
-    Accessor, Capability, Error, ErrorKind, FieldNameIndex, Layer, ReadOptionsProvider, Reader,
-    RecordCapability, RecordMetadata, RecordReader, Result, async_trait,
+    Accessor, Capability, Error, ErrorKind, Layer, ReadOptionsProvider, Reader, RecordCapability,
+    RecordMetadata, RecordReader, Result, async_trait,
 };
 
-use crate::validation;
+use crate::{FieldRemap, validation};
 
 /// A top-level column's output type. Other columns retain their input types.
 #[derive(Clone, Debug)]
@@ -29,7 +29,7 @@ pub struct ColumnTypeSpec {
 /// are unchanged.
 #[derive(Clone, Debug, Default)]
 pub struct TypeConversionLayer {
-    specs: Arc<[ColumnTypeSpec]>,
+    specs: Arc<[FieldRemap]>,
 }
 
 impl TypeConversionLayer {
@@ -37,16 +37,29 @@ impl TypeConversionLayer {
     pub fn try_new(specs: Vec<ColumnTypeSpec>) -> Result<Self> {
         validation::validate_specs(&specs)?;
         Ok(Self {
-            specs: specs.into(),
+            specs: specs
+                .into_iter()
+                .map(|spec| FieldRemap {
+                    source: spec.column.clone(),
+                    target: spec.column,
+                    data_type: Some(spec.data_type),
+                })
+                .collect(),
         })
     }
 }
 
-/// A record accessor decorated by [`TypeConversionLayer`].
+/// Shared record accessor for type conversion and schema remapping.
 #[derive(Clone, Debug)]
 pub struct TypeConversionAccessor<A> {
     inner: A,
-    specs: Arc<[ColumnTypeSpec]>,
+    specs: Arc<[FieldRemap]>,
+}
+
+impl<A> TypeConversionAccessor<A> {
+    pub(crate) fn with_remaps(inner: A, specs: Arc<[FieldRemap]>) -> Self {
+        Self { inner, specs }
+    }
 }
 
 impl<A> Layer<A> for TypeConversionLayer
@@ -89,45 +102,48 @@ where
             return self.inner.open(request).await;
         }
         let output_options = request.read_options().clone();
-        if let Some(columns) = &mut request.read_options_mut().projection {
+        // A rename needs the full schema to detect collisions with unchanged fields.
+        let renames = self.specs.iter().any(|spec| spec.source != spec.target);
+        if renames {
+            request.read_options_mut().projection = None;
+        } else if let Some(columns) = &mut request.read_options_mut().projection {
             let mut names: HashSet<_> = columns.iter().cloned().collect();
             for spec in self.specs.iter() {
-                if names.insert(spec.column.clone()) {
-                    columns.push(spec.column.clone());
+                if names.insert(spec.source.clone()) {
+                    columns.push(spec.source.clone());
                 }
             }
         }
         let inner = self.inner.open(request).await?;
         let source = &inner.metadata().schema;
-        let field_index = FieldNameIndex::new(source.fields());
+        let indices = validation::validate_remap_sources(&self.specs, source)?;
         let mut fields = source.fields().to_vec();
         let mut casts = Vec::with_capacity(self.specs.len());
-        for spec in self.specs.iter() {
-            let index = field_index.index_of(&spec.column).map_err(|error| {
-                Error::new(ErrorKind::InvalidInput, "plan_cast", error.to_string())
-                    .with_source(error)
-            })?;
+        for (spec, index) in self.specs.iter().zip(indices) {
             let field = &fields[index];
-            if field.data_type() == &spec.data_type {
-                continue;
+            let target = spec.data_type.as_ref().unwrap_or(field.data_type());
+            if field.data_type() != target {
+                casts.push(ColumnCast {
+                    source_index: index,
+                    target_type: target.clone(),
+                });
             }
-            validation::validate_cast(field, &spec.data_type)?;
             fields[index] = Arc::new(
                 field
                     .as_ref()
                     .clone()
-                    .with_data_type(spec.data_type.clone()),
+                    .with_name(&spec.target)
+                    .with_data_type(target.clone()),
             );
-            casts.push(ColumnCast {
-                source_index: index,
-                target_type: spec.data_type.clone(),
-            });
+        }
+        if renames {
+            validation::validate_remap_output(&fields)?;
         }
         let schema = Arc::new(Schema::new_with_metadata(fields, source.metadata().clone()));
         let (schema, projection) = output_options.resolve_projection(&schema)?;
         let projection =
             projection.filter(|indices| indices.iter().copied().ne(0..source.fields().len()));
-        if casts.is_empty() && projection.is_none() {
+        if casts.is_empty() && projection.is_none() && schema == *source {
             return Ok(inner);
         }
         let metadata = RecordMetadata {

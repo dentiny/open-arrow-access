@@ -368,3 +368,66 @@ pub(crate) fn validate_generated_schema(
     }
     Ok(())
 }
+
+pub(crate) fn validate_remap_specs(specs: &[crate::FieldRemap]) -> Result<()> {
+    let mut sources = HashSet::new();
+    let mut targets = HashSet::new();
+    for spec in specs {
+        if spec.source.is_empty()
+            || spec.target.is_empty()
+            || !sources.insert(&spec.source)
+            || !targets.insert(&spec.target)
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "configure_schema_remap",
+                "source names and target names must each be nonempty and unique",
+            ));
+        }
+        if let Some(target) = &spec.data_type {
+            validate_target(target).map_err(|error| {
+                column_error(
+                    ErrorKind::InvalidInput,
+                    "configure_schema_remap",
+                    &spec.source,
+                    error,
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_remap_sources(
+    specs: &[crate::FieldRemap],
+    schema: &arrow_schema::Schema,
+) -> Result<Vec<usize>> {
+    let fields = FieldNameIndex::new(schema.fields());
+    specs
+        .iter()
+        .map(|spec| {
+            let index = fields.index_of(&spec.source).map_err(|error| {
+                Error::new(ErrorKind::InvalidInput, "plan_cast", error.to_string())
+                    .with_source(error)
+            })?;
+            if let Some(target) = &spec.data_type
+                && schema.field(index).data_type() != target
+            {
+                validate_cast(schema.field(index), target)?;
+            }
+            Ok(index)
+        })
+        .collect()
+}
+
+pub(crate) fn validate_remap_output(fields: &[std::sync::Arc<arrow_schema::Field>]) -> Result<()> {
+    let mut names = HashSet::new();
+    if fields.iter().any(|field| !names.insert(field.name())) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "plan_schema_remap",
+            "remapped names collide with other output fields",
+        ));
+    }
+    Ok(())
+}
