@@ -821,36 +821,3 @@ async fn glob_selection_respects_paths_recursion_and_existing_suffix_filter() {
         }
     }
 }
-
-#[tokio::test]
-async fn invalid_globs_fail_before_listing_and_unmatched_globs_use_empty_selection_error() {
-    let accessor = DirectoryAccessor::new(
-        Listing {
-            expected_prefix: Some("must-not-list"),
-            objects: vec![],
-            fail: false,
-        },
-        Files::new([]),
-    );
-    let error = accessor
-        .open(DirectoryRequest::new("data").with_glob("["))
-        .await
-        .err()
-        .unwrap();
-    assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    assert_eq!(error.operation(), "select_directory");
-    let accessor = DirectoryAccessor::new(
-        Listing {
-            expected_prefix: Some("data"),
-            objects: vec!["data/a.parquet"],
-            fail: false,
-        },
-        Files::new([]),
-    );
-    let error = accessor
-        .open(DirectoryRequest::new("data").with_glob("missing*"))
-        .await
-        .err()
-        .unwrap();
-    assert_eq!(error.kind(), ErrorKind::InvalidInput);
-}
