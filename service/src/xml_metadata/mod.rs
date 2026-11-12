@@ -3,4 +3,5 @@ mod error;
 mod parser;
 mod validation;
 
-pub use parser::{XmlDocument, validate_root};
+pub use parser::XmlDocument;
+pub use validation::validate_root;

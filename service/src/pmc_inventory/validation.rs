@@ -4,7 +4,7 @@ use super::{
 };
 use arrow_array::{Array, cast::AsArray};
 use arrow_schema::Fields;
-use open_arrow_access_core::{Error, ErrorKind, FieldNameIndex, RecordBatch, Result};
+use open_arrow_access_core::{FieldNameIndex, RecordBatch, Result};
 use std::collections::HashSet;
 
 pub(super) fn validate_manifest(manifest: &Manifest) -> Result<()> {
@@ -16,11 +16,7 @@ pub(super) fn validate_manifest(manifest: &Manifest) -> Result<()> {
         ));
     }
     if manifest.file_format != InventoryFormat::Csv {
-        return Err(Error::new(
-            ErrorKind::Unsupported,
-            "open_pmc_inventory",
-            "only CSV inventory manifests are supported",
-        ));
+        return Err(super::error::unsupported_inventory_format());
     }
     if manifest.version.is_empty() {
         return Err(decode("missing inventory version"));
@@ -33,6 +29,7 @@ pub(super) fn validate_manifest(manifest: &Manifest) -> Result<()> {
     }
     Ok(())
 }
+
 fn validate_fields(fields: &Fields) -> Result<()> {
     let mut seen = HashSet::new();
     if fields
@@ -48,6 +45,7 @@ fn validate_fields(fields: &Fields) -> Result<()> {
     }
     Ok(())
 }
+
 fn validate_row(bucket: Option<&str>, key: Option<&str>) -> Result<()> {
     if bucket != Some("pmc-oa-opendata") {
         return Err(decode("inventory row has a missing or unexpected Bucket"));

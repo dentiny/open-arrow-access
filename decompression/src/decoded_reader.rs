@@ -1,9 +1,7 @@
 use std::num::NonZeroUsize;
 
 use futures::{TryStreamExt, io::AsyncRead};
-use open_arrow_access_core::{
-    ByteMetadata, ByteReader, Error, ErrorKind, StreamReader, read_chunks,
-};
+use open_arrow_access_core::{ByteMetadata, ByteReader, StreamReader, read_chunks};
 
 /// Wrap an owned decoder as a chunked, sequential byte reader.
 ///
@@ -20,13 +18,7 @@ pub fn decoded_reader<D>(
 where
     D: AsyncRead + Unpin + Send + 'static,
 {
-    let stream = read_chunks(decoder, chunk_size).map_err(move |error| {
-        Error::new(
-            ErrorKind::from_source(&error).unwrap_or(ErrorKind::Decode),
-            operation,
-            format!("{codec_name} decoding failed"),
-        )
-        .with_source(error)
-    });
+    let stream = read_chunks(decoder, chunk_size)
+        .map_err(move |error| crate::error::decoder_error(error, operation, codec_name));
     Box::new(StreamReader::new(stream, metadata))
 }

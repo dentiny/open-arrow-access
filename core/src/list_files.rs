@@ -1,27 +1,21 @@
 use futures::TryStreamExt;
 
-use crate::{ByteAccessor, Error, ErrorKind, ListRequest, ObjectRef, Result};
+use crate::{ByteAccessor, ListRequest, ObjectRef, Result};
 
 /// Collect sorted, unique objects beneath a directory prefix.
-/// Return [`ErrorKind::Unsupported`] before I/O if listing is unavailable.
+/// Return [`crate::ErrorKind::Unsupported`] before I/O if listing is unavailable.
 ///
 /// `select` filters each locator beneath the prefix. Empty results belong to
 /// the caller. The request is forwarded unchanged, including
 /// recursion; a trailing prefix slash is optional and an empty prefix selects root.
 /// Listing and callback errors pass through unchanged. Objects outside the prefix
-/// return [`ErrorKind::InvalidInput`]. Memory grows with the selected file count.
+/// return [`crate::ErrorKind::InvalidInput`]. Memory grows with the selected file count.
 pub async fn list_files<A: ByteAccessor + ?Sized>(
     accessor: &A,
     request: ListRequest,
     mut select: impl FnMut(&str) -> Result<bool> + Send,
 ) -> Result<Vec<ObjectRef>> {
-    if !accessor.capability().list {
-        return Err(Error::new(
-            ErrorKind::Unsupported,
-            "list_files",
-            "accessor does not support listing",
-        ));
-    }
+    crate::validation::validate_listing_capability(accessor.capability().list)?;
     let mut prefix = request.prefix.locator().to_owned();
     if !prefix.is_empty() && !prefix.ends_with('/') {
         prefix.push('/');
@@ -29,13 +23,7 @@ pub async fn list_files<A: ByteAccessor + ?Sized>(
     let mut listing = accessor.list(request).await?;
     let mut objects = Vec::new();
     while let Some(object) = listing.try_next().await? {
-        let relative = object.locator().strip_prefix(&prefix).ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidInput,
-                "list_files",
-                "listing returned an object outside its directory prefix",
-            )
-        })?;
+        let relative = crate::validation::relative_listing_path(object.locator(), &prefix)?;
         if select(relative)? {
             objects.push(object);
         }

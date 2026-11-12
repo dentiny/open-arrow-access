@@ -27,6 +27,6 @@ impl FieldNameIndex {
 
     pub fn index_of(&self, name: &str) -> Result<usize, ArrowError> {
         self.get(name)
-            .ok_or_else(|| ArrowError::SchemaError(format!("unknown field {name:?}")))
+            .ok_or_else(|| crate::error::unknown_field(name))
     }
 }

@@ -9,7 +9,7 @@ use open_arrow_access_core::{
 use super::{
     FileSetRequest,
     accessor::FilePlanner,
-    error::{empty_selection, schema_mismatch},
+    error::empty_selection,
     schema,
     validation::{validate_fields, validate_file_ordering, validate_file_policy},
 };
@@ -56,9 +56,7 @@ where
                 let plan = open_plan(inner, file_planner, request).await?;
                 validate_file_policy(&plan)?;
                 validate_file_ordering(ordering, plan.ordering)?;
-                if plan.metadata.schema != source {
-                    return Err(schema_mismatch());
-                }
+                super::validation::validate_schema(&plan.metadata.schema, &source)?;
                 Ok(plan.partitions.map(move |partition| {
                     let partition = partition?;
                     let source = source.clone();
@@ -92,9 +90,7 @@ fn align_reader(
     source: SchemaRef,
     target: SchemaRef,
 ) -> Result<Box<dyn RecordReader>> {
-    if reader.metadata().schema != source {
-        return Err(schema_mismatch());
-    }
+    super::validation::validate_schema(&reader.metadata().schema, &source)?;
     let ordering = reader.capability().ordering;
     let metadata = RecordMetadata {
         schema: target.clone(),
@@ -102,9 +98,7 @@ fn align_reader(
     };
     let batches = into_stream(reader).map(move |batch| {
         let batch = batch?;
-        if batch.schema() != source {
-            return Err(schema_mismatch());
-        }
+        super::validation::validate_schema(&batch.schema(), &source)?;
         schema::align(batch, target.clone())
     });
     Ok(Box::new(StreamReader::records(batches, metadata, ordering)))

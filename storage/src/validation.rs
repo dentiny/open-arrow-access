@@ -48,3 +48,46 @@ impl crate::StorageConfig {
         Ok(())
     }
 }
+
+pub(crate) fn validate_regular_file(is_file: bool) -> Result<()> {
+    if !is_file {
+        return Err(crate::error::not_regular_file());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_listing(supported: bool) -> Result<()> {
+    if !supported {
+        return Err(crate::error::listing_unsupported());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_listing_prefix(prefix: &str) -> Result<()> {
+    if !prefix.is_empty() {
+        return Err(crate::error::invalid_listing_prefix());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_read_length(
+    actual: u64,
+    expected: u64,
+    operation: &'static str,
+) -> Result<()> {
+    if actual != expected {
+        return Err(crate::error::short_read(operation));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_chunk_length(actual: u64, remaining: u64) -> Result<()> {
+    if actual > remaining {
+        return Err(crate::error::input_too_long());
+    }
+    Ok(())
+}
+
+pub(crate) fn range_capacity(expected: u64) -> Result<usize> {
+    usize::try_from(expected).map_err(|_| crate::error::unaddressable_range())
+}

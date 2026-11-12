@@ -14,7 +14,7 @@ use open_arrow_access_core::{
 use tokio::{sync::mpsc, task::JoinSet};
 
 use crate::{
-    error::{partition_task_error, schema_error},
+    error::partition_task_error,
     validation::{validate_emission_policy, validate_parallel_read_settings},
 };
 
@@ -133,9 +133,7 @@ impl ParallelReader {
         let schema = self.metadata.schema.clone();
         self.tasks.spawn(async move {
             let mut reader = open.await?;
-            if reader.metadata().schema != schema {
-                return Err(schema_error());
-            }
+            crate::validation::validate_partition_schema(&reader.metadata().schema, &schema)?;
             loop {
                 // Reserve before decoding so a full queue cannot hide an extra batch.
                 let Ok(permit) = sender.reserve().await else {
@@ -144,9 +142,7 @@ impl ParallelReader {
                 let Some(batch) = reader.next().await? else {
                     return Ok(());
                 };
-                if batch.schema() != schema {
-                    return Err(schema_error());
-                }
+                crate::validation::validate_partition_schema(&batch.schema(), &schema)?;
                 permit.send(batch);
             }
         });

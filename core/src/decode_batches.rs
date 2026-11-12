@@ -1,8 +1,8 @@
 use futures::stream;
 
 use crate::{
-    ByteReader, Bytes, Error, ErrorKind, OrderRequirement, RecordBatch, RecordMetadata,
-    RecordReader, Result, StreamReader,
+    ByteReader, Bytes, OrderRequirement, RecordBatch, RecordMetadata, RecordReader, Result,
+    StreamReader,
 };
 
 /// Format-specific decoding hooks for the shared input loop.
@@ -46,8 +46,7 @@ impl<D: BatchDecoder> DecodeState<D> {
                 }
                 match self.input.next().await? {
                     Some(bytes) if bytes.is_empty() => {
-                        return Err(Error::new(
-                            ErrorKind::Io,
+                        return Err(crate::error::decoder_empty_chunk(
                             D::INPUT_OPERATION,
                             D::EMPTY_CHUNK_MESSAGE,
                         ));
@@ -61,18 +60,10 @@ impl<D: BatchDecoder> DecodeState<D> {
             }
             let consumed = self.decoder.decode(&self.pending)?;
             if consumed > self.pending.len() {
-                return Err(Error::new(
-                    ErrorKind::Decode,
-                    D::INPUT_OPERATION,
-                    "decoder consumed more bytes than supplied",
-                ));
+                return Err(crate::error::decoder_overconsumed(D::INPUT_OPERATION));
             }
             if consumed == 0 && !self.decoder.is_ready() {
-                return Err(Error::new(
-                    ErrorKind::Decode,
-                    D::INPUT_OPERATION,
-                    "decoder made no progress",
-                ));
+                return Err(crate::error::decoder_no_progress(D::INPUT_OPERATION));
             }
             self.pending = self.pending.slice(consumed..);
         }

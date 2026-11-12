@@ -1,10 +1,10 @@
-use std::{collections::HashSet, io::Cursor, sync::Arc};
+use std::{io::Cursor, sync::Arc};
 
 use arrow_schema::{DataType, Schema};
 use futures::{StreamExt, stream};
-use open_arrow_access_core::{ByteReader, Error, ErrorKind, Result, SchemaRef, StreamReader};
+use open_arrow_access_core::{ByteReader, Result, SchemaRef, StreamReader};
 
-use super::{CsvDialect, CsvFormat, planning::CsvChunks};
+use super::{CsvDialect, CsvFormat, error::inference_error, planning::CsvChunks};
 
 /// Per-input schema sampling and header policy. Byte targets measure canonical
 /// CSV bytes and are checked between records, allowing one oversized record.
@@ -24,23 +24,6 @@ impl Default for CsvInferenceOptions {
             has_header: None,
         }
     }
-}
-
-impl CsvInferenceOptions {
-    pub(super) fn validate(self) -> Result<()> {
-        if self.max_records == 0 || self.max_bytes == 0 {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "infer_csv",
-                "inference record and byte limits must be positive",
-            ));
-        }
-        Ok(())
-    }
-}
-
-fn inference_error(source: arrow_schema::ArrowError) -> Error {
-    Error::new(ErrorKind::Decode, "infer_csv", source.to_string()).with_source(source)
 }
 
 fn infer_sample(sample: &[u8], has_header: bool, allow_truncated_rows: bool) -> Result<Schema> {
@@ -103,13 +86,7 @@ pub(super) async fn infer(
             break;
         }
     }
-    if sample.is_empty() {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "infer_csv",
-            "cannot infer a schema from empty CSV input; supply an explicit schema",
-        ));
-    }
+    super::validation::validate_sample(&sample)?;
     let has_header = match options.has_header {
         Some(value) => value,
         None => detect_header(
@@ -119,23 +96,7 @@ pub(super) async fn infer(
         )?,
     };
     let schema = infer_sample(&sample, has_header, dialect.allow_truncated_rows)?;
-    let mut names = HashSet::new();
-    for field in schema.fields() {
-        if field.name().is_empty() || !names.insert(field.name()) {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "infer_csv",
-                "CSV headers must be nonempty and distinct",
-            ));
-        }
-        if field.data_type() == &DataType::Null {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "infer_csv",
-                "cannot infer types for header-only or all-null CSV columns; supply an explicit schema",
-            ));
-        }
-    }
+    super::validation::validate_inferred_schema(&schema)?;
     // Canonicalization preserves field contents, but changes the byte representation.
     metadata.content_length = None;
     let remaining = stream::try_unfold(records, |mut records| async move {

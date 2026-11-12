@@ -1,4 +1,4 @@
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::Result;
 use serde::Deserialize;
 
 use crate::common::is_commit_sha;
@@ -28,13 +28,9 @@ impl HuggingFaceService {
     async fn info(&self, repository: &HuggingFaceRepository) -> Result<RepositoryInfo> {
         let mut url = endpoint(self.options.endpoint())?;
         {
-            let mut path = url.path_segments_mut().map_err(|_| {
-                Error::new(
-                    ErrorKind::InvalidInput,
-                    "configure_huggingface",
-                    "invalid Hub endpoint",
-                )
-            })?;
+            let mut path = url
+                .path_segments_mut()
+                .map_err(|_| super::error::endpoint_path())?;
             path.pop_if_empty().push("api").push("datasets");
             for part in repository.repository.split('/') {
                 path.push(part);

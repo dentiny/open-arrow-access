@@ -151,14 +151,7 @@ impl Accessor for MemoryAccessor {
             .unwrap()
             .push(request.clone());
         if let Some(kind) = self.open_failure {
-            return Err(
-                Error::new(kind, "memory_open", "injected open failure").with_source(
-                    std::io::Error::new(
-                        std::io::ErrorKind::ConnectionReset,
-                        "injected open failure",
-                    ),
-                ),
-            );
+            return Err(crate::error::injected_open(kind));
         }
         Ok(Box::new(MemoryReader {
             data: self.data.clone(),
@@ -183,13 +176,7 @@ impl Accessor for MemoryAccessor {
 #[async_trait]
 impl ByteAccessor for MemoryAccessor {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        if !self.listing {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "list",
-                "listing is disabled",
-            ));
-        }
+        crate::validation::validate_listing(self.listing)?;
         Ok(Box::pin(futures::stream::iter([Ok(request.prefix)])))
     }
 }
@@ -235,11 +222,7 @@ impl Reader for MemoryReader {
         match self.fault {
             Some(Fault::Failure { offset, kind }) if self.offset >= offset => {
                 self.finished = true;
-                return Err(Error::new(kind, "memory_read", "injected source failure")
-                    .with_source(std::io::Error::new(
-                        std::io::ErrorKind::ConnectionReset,
-                        "injected source failure",
-                    )));
+                return Err(crate::error::injected_read(kind));
             }
             Some(Fault::EmptyChunk { offset }) if self.offset >= offset => {
                 self.fault = None;
@@ -266,33 +249,13 @@ impl ByteReader for MemoryReader {
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         self.observations.range_reads.fetch_add(1, Ordering::SeqCst);
         self.observations.ranges.lock().unwrap().push(range.clone());
-        if !self.ranged {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "read_range",
-                "sequential only",
-            ));
-        }
-        if range.start > range.end || range.end > self.data.len() as u64 {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "read_range",
-                "invalid range",
-            ));
-        }
+        crate::validation::validate_range(self.ranged, &range, self.data.len() as u64)?;
         let call = self.range_calls;
         self.range_calls += 1;
         if let Some((after, kind)) = self.range_failure
             && call >= after
         {
-            return Err(
-                Error::new(kind, "memory_range", "injected range failure").with_source(
-                    std::io::Error::new(
-                        std::io::ErrorKind::ConnectionReset,
-                        "injected range failure",
-                    ),
-                ),
-            );
+            return Err(crate::error::injected_range(kind));
         }
         let mut bytes = self.data.slice(range.start as usize..range.end as usize);
         if self.short_ranges {
@@ -385,3 +348,6 @@ pub async fn collect_bytes(reader: &mut dyn ByteReader) -> Result<Vec<u8>> {
 
 /// HTTP route fixtures with isolated hosts and request observations.
 pub mod http;
+
+mod error;
+mod validation;

@@ -102,8 +102,3 @@ impl<'a> XmlDocument<'a> {
         .await
     }
 }
-
-/// Check the document root without fetching a DTD or decoding record values.
-pub fn validate_root(bytes: &[u8], expected: &str) -> Result<()> {
-    XmlDocument::new(bytes, expected).map(|_| ())
-}

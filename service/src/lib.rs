@@ -4,8 +4,8 @@
 //! selected JSON records with [`common::ApiDocument::records_at`]. Formats are
 //! explicit; metadata links are never followed automatically.
 
+mod error;
 mod file_manifest;
-mod opendal_error;
 mod resolved_files;
 pub use resolved_files::ResolvedFileSet;
 

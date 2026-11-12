@@ -1,4 +1,4 @@
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::Result;
 use open_arrow_access_storage::OpenDalAccessor;
 
 use super::url::parse_origin;
@@ -11,13 +11,6 @@ pub fn create_http_accessor(origin: &str) -> Result<OpenDalAccessor> {
     let operator = opendal::Operator::new(
         opendal_service_http::Http::default().endpoint(&url.origin().ascii_serialization()),
     )
-    .map_err(|error| {
-        Error::new(
-            ErrorKind::InvalidInput,
-            "configure_commoncrawl_http",
-            "invalid HTTP configuration",
-        )
-        .with_source(error)
-    })?;
+    .map_err(super::error::http_configuration)?;
     Ok(OpenDalAccessor::new(operator))
 }

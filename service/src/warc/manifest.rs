@@ -1,9 +1,7 @@
 use std::collections::HashSet;
 
 use futures::TryStreamExt;
-use open_arrow_access_core::{ByteReader, Error, ErrorKind, ObjectRef, Result, read_lines};
-
-use super::error::invalid_line;
+use open_arrow_access_core::{ByteReader, ObjectRef, Result, read_lines};
 
 pub(super) async fn read_manifest(
     input: Box<dyn ByteReader>,
@@ -18,13 +16,7 @@ pub(super) async fn read_manifest(
         append_line(&line, line_number, prefix, &mut selected, &mut seen)?;
         line_number += 1;
     }
-    if selected.is_empty() {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "resolve_commoncrawl_warc",
-            format!("manifest contains no files under {prefix:?}"),
-        ));
-    }
+    super::validation::validate_selection(&selected, prefix)?;
     Ok(selected)
 }
 
@@ -37,15 +29,12 @@ fn append_line(
 ) -> Result<()> {
     let bytes = bytes.strip_suffix(b"\n").unwrap_or(bytes);
     let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
-    let path = std::str::from_utf8(bytes)
-        .map_err(|e| invalid_line(number, "manifest is not UTF-8").with_source(e))?;
+    let path = std::str::from_utf8(bytes).map_err(|e| super::error::manifest_utf8(number, e))?;
     if path.is_empty() {
         return Ok(());
     }
     if path.starts_with(prefix) {
-        if !seen.insert(path.to_owned()) {
-            return Err(invalid_line(number, "duplicate selected file"));
-        }
+        super::validation::validate_unique_path(seen, path, number)?;
         selected.push(ObjectRef::new(path));
     }
     Ok(())

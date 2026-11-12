@@ -3,8 +3,7 @@ use std::ops::Range;
 use futures::stream::BoxStream;
 
 use crate::{
-    Bytes, Capability, Error, ErrorKind, ObjectRef, RecordBatch, RecordCapability, Result,
-    SchemaRef, async_trait,
+    Bytes, Capability, ObjectRef, RecordBatch, RecordCapability, Result, SchemaRef, async_trait,
 };
 
 /// A pull-based asynchronous reader. Metadata is available before the first item.
@@ -84,11 +83,7 @@ pub trait ByteReader:
     /// reversed or out-of-bounds ranges and report short reads or I/O failures
     /// instead of silently returning fewer bytes than requested.
     async fn read_range(&mut self, _range: Range<u64>) -> Result<Bytes> {
-        Err(Error::new(
-            ErrorKind::Unsupported,
-            "read_range",
-            "reader is sequential only",
-        ))
+        Err(crate::error::default_range_unsupported())
     }
 
     /// Read exact ranges in request order without moving the sequential cursor.

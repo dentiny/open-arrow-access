@@ -1,6 +1,6 @@
-use std::{collections::HashSet, num::NonZeroUsize, sync::Arc};
+use std::num::NonZeroUsize;
 
-use crate::{Error, ErrorKind, FieldNameIndex, Result, SchemaRef};
+use crate::{Result, SchemaRef};
 
 /// An opaque object locator interpreted by an accessor, not by a format reader.
 /// Filesystem accessors interpret this as a path relative to their configured root.
@@ -160,33 +160,7 @@ impl ReadOptions {
         &self,
         schema: &SchemaRef,
     ) -> Result<(SchemaRef, Option<Vec<usize>>)> {
-        let Some(columns) = &self.projection else {
-            return Ok((schema.clone(), None));
-        };
-        let mut seen = HashSet::new();
-        let mut indices = Vec::with_capacity(columns.len());
-        let field_index = FieldNameIndex::new(schema.fields());
-        for name in columns {
-            if !seen.insert(name) {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "project",
-                    format!("duplicate field {name:?}"),
-                ));
-            }
-            indices.push(field_index.index_of(name).map_err(|error| {
-                Error::new(
-                    ErrorKind::InvalidInput,
-                    "project",
-                    format!("unknown field {name:?}"),
-                )
-                .with_source(error)
-            })?);
-        }
-        let projected = schema.project(&indices).map_err(|error| {
-            Error::new(ErrorKind::InvalidInput, "project", error.to_string()).with_source(error)
-        })?;
-        Ok((Arc::new(projected), Some(indices)))
+        crate::validation::resolve_projection(&self.projection, schema)
     }
 }
 

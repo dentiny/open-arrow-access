@@ -64,3 +64,13 @@ pub(super) fn validate_field_names(left: &Field, right: &Field) -> Result<()> {
     }
     Ok(())
 }
+
+pub(super) fn validate_schema(
+    actual: &arrow_schema::SchemaRef,
+    expected: &arrow_schema::SchemaRef,
+) -> Result<()> {
+    if actual != expected {
+        return Err(super::error::schema_mismatch());
+    }
+    Ok(())
+}

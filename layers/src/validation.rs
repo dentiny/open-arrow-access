@@ -7,18 +7,14 @@ use arrow_array::types::{
 use arrow_cast::can_cast_types;
 use arrow_schema::{ArrowError, DataType, Field, TimeUnit};
 use open_arrow_access_core::{
-    EmissionPolicy, Error, ErrorKind, FieldNameIndex, OrderRequirement, ParallelReadOptions, Result,
+    EmissionPolicy, ErrorKind, FieldNameIndex, OrderRequirement, ParallelReadOptions, Result,
 };
 
 use crate::error::column_error;
 
 pub(crate) fn validate_sampling_probability(probability: f64) -> Result<()> {
     if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "sample",
-            "sampling probability must be finite and between 0 and 1",
-        ));
+        return Err(crate::error::invalid_probability());
     }
     Ok(())
 }
@@ -28,11 +24,7 @@ pub(crate) fn validate_emission_policy(
     ordering: OrderRequirement,
 ) -> Result<()> {
     if emission == EmissionPolicy::Unordered && ordering != OrderRequirement::Reorderable {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "unordered_emission",
-            "source requires global record order",
-        ));
+        return Err(crate::error::invalid_emission());
     }
     Ok(())
 }
@@ -42,11 +34,7 @@ pub(crate) fn validate_parallel_read_settings(
     settings: ParallelReadOptions,
 ) -> Result<()> {
     if previous.is_some_and(|previous| previous != settings) {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "parallel_read",
-            "conflicting parallel read settings on one scan",
-        ));
+        return Err(crate::error::conflicting_parallel_settings());
     }
     Ok(())
 }
@@ -54,21 +42,10 @@ pub(crate) fn validate_parallel_read_settings(
 pub(crate) fn validate_cast(field: &Field, target: &DataType) -> Result<()> {
     let from = field.data_type();
     if has_extension(field) || has_extension_type(target) {
-        return Err(Error::new(
-            ErrorKind::Unsupported,
-            "plan_cast",
-            format!(
-                "column {:?}: casts involving extension fields are unsupported",
-                field.name()
-            ),
-        ));
+        return Err(crate::error::extension_cast(field));
     }
     if !can_cast_types(from, target) {
-        return Err(Error::new(
-            ErrorKind::Unsupported,
-            "plan_cast",
-            format!("column {:?}: cannot cast {from} to {target}", field.name()),
-        ));
+        return Err(crate::error::unsupported_cast(field, from, target));
     }
     validate_decimal_cast(from, target)
         .map_err(|error| column_error(ErrorKind::Unsupported, "plan_cast", field.name(), error))
@@ -109,9 +86,7 @@ fn validate_decimal_cast(from: &DataType, to: &DataType) -> std::result::Result<
         if delta.abs() > i16::from(i8::MAX)
             || (delta >= 0 && precision + delta > i16::from(i8::MAX))
         {
-            return Err(ArrowError::CastError(format!(
-                "unsafe Decimal rescale from {from} to {to}: Arrow's i8 scale arithmetic would overflow"
-            )));
+            return Err(crate::error::unsafe_decimal_rescale(from, to));
         }
         return Ok(());
     }
@@ -177,9 +152,7 @@ fn validate_decimal_cast(from: &DataType, to: &DataType) -> std::result::Result<
 }
 
 fn validate_target(data_type: &DataType) -> std::result::Result<(), ArrowError> {
-    let invalid = || {
-        ArrowError::InvalidArgumentError(format!("invalid or unsupported cast target {data_type}"))
-    };
+    let invalid = || crate::error::invalid_cast_target(data_type);
     match data_type {
         DataType::Time32(unit) if !matches!(unit, TimeUnit::Second | TimeUnit::Millisecond) => {
             return Err(invalid());
@@ -284,16 +257,13 @@ pub(crate) fn validate_expression(
     expression: &datafusion::logical_expr::Expr,
 ) -> datafusion::error::Result<()> {
     use datafusion::{
-        common::{
-            plan_err,
-            tree_node::{TreeNode, TreeNodeRecursion},
-        },
+        common::tree_node::{TreeNode, TreeNodeRecursion},
         logical_expr::Expr,
     };
 
     expression.apply(|expr| {
         if expr.is_volatile_node() {
-            return plan_err!("volatile functions are not supported");
+            return Err(crate::error::volatile_expression());
         }
         if matches!(
             expr,
@@ -306,7 +276,7 @@ pub(crate) fn validate_expression(
                 | Expr::GroupingSet(_)
                 | Expr::Unnest(_)
         ) {
-            return plan_err!("only row-level expressions are supported");
+            return Err(crate::error::non_row_expression());
         }
         Ok(TreeNodeRecursion::Continue)
     })?;
@@ -338,11 +308,7 @@ pub(crate) fn validate_generated_schema(
     expected: &arrow_schema::Schema,
 ) -> Result<()> {
     if actual != expected {
-        return Err(Error::new(
-            ErrorKind::Decode,
-            "plan_generated_column",
-            "source schema does not match the supplied projection",
-        ));
+        return Err(crate::error::generated_schema_mismatch());
     }
     Ok(())
 }
@@ -356,11 +322,7 @@ pub(crate) fn validate_remap_specs(specs: &[crate::FieldRemap]) -> Result<()> {
             || !sources.insert(&spec.source_name)
             || !targets.insert(spec.output_name())
         {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "configure_schema_remap",
-                "source names and target names must each be nonempty and unique",
-            ));
+            return Err(crate::error::invalid_remap_names());
         }
         if let Some(target) = &spec.target_data_type {
             validate_target(target).map_err(|error| {
@@ -384,14 +346,9 @@ pub(crate) fn validate_remap_sources(
     specs
         .iter()
         .map(|spec| {
-            let index = fields.index_of(&spec.source_name).map_err(|error| {
-                Error::new(
-                    ErrorKind::InvalidInput,
-                    "plan_schema_remap",
-                    error.to_string(),
-                )
-                .with_source(error)
-            })?;
+            let index = fields
+                .index_of(&spec.source_name)
+                .map_err(crate::error::remap_source)?;
             if let Some(target) = &spec.target_data_type
                 && schema.field(index).data_type() != target
             {
@@ -405,11 +362,17 @@ pub(crate) fn validate_remap_sources(
 pub(crate) fn validate_remap_output(fields: &[std::sync::Arc<arrow_schema::Field>]) -> Result<()> {
     let mut names = HashSet::new();
     if fields.iter().any(|field| !names.insert(field.name())) {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "plan_schema_remap",
-            "remapped names collide with other output fields",
-        ));
+        return Err(crate::error::remap_output_collision());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_partition_schema(
+    actual: &arrow_schema::SchemaRef,
+    expected: &arrow_schema::SchemaRef,
+) -> Result<()> {
+    if actual != expected {
+        return Err(crate::error::schema_error());
     }
     Ok(())
 }

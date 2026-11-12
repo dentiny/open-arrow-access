@@ -5,10 +5,9 @@ use super::{
     reader::json_reader,
 };
 use arrow_json::{ReaderBuilder, reader::Decoder};
-use arrow_schema::ArrowError;
 use open_arrow_access_core::{
-    ByteReader, Capability, Error, ErrorKind, FactoryToken, OrderRequirement, ReadRequest,
-    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
+    ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
+    RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
 };
 
 /// Read whitespace-separated JSON objects, including JSONL, with an explicit or inferred fixed schema.
@@ -84,13 +83,7 @@ impl ReaderFactory for JsonFormat {
         let decoder = ReaderBuilder::new(schema.clone())
             .with_batch_size(options.batch_size.get())
             .build_decoder()
-            .map_err(|error| {
-                let kind = match &error {
-                    ArrowError::NotYetImplemented(_) => ErrorKind::Unsupported,
-                    _ => ErrorKind::InvalidInput,
-                };
-                Error::new(kind, "open_json", error.to_string()).with_source(error)
-            })?;
+            .map_err(super::error::open_error)?;
         Ok(Some((schema, decoder)))
     }
 

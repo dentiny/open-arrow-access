@@ -7,8 +7,8 @@ use arrow_cast::{CastOptions, cast_with_options};
 use arrow_schema::{ArrowError, DataType, Schema};
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, Error, ErrorKind, Layer, ReadOptionsProvider, RecordCapability, RecordMetadata,
-    RecordReader, Result, StreamReader, async_trait,
+    Accessor, Layer, ReadOptionsProvider, RecordCapability, RecordMetadata, RecordReader, Result,
+    StreamReader, async_trait,
 };
 
 use crate::validation;
@@ -184,16 +184,12 @@ impl SchemaRemapPlan {
                     _ => Err(error),
                 })
                 .map_err(|error| {
-                    Error::new(
-                        ErrorKind::Decode,
-                        "cast",
-                        format!(
-                            "column {:?}: {} to {target}: {error}",
-                            batch.schema().field(index).name(),
-                            columns[index].data_type(),
-                        ),
+                    crate::error::cast_error(
+                        batch.schema().field(index).name(),
+                        columns[index].data_type(),
+                        target,
+                        error,
                     )
-                    .with_source(error)
                 })?;
         }
         if let Some(indices) = &self.projection {
@@ -207,9 +203,7 @@ impl SchemaRemapPlan {
             columns,
             &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
         )
-        .map_err(|error| {
-            Error::new(ErrorKind::Decode, "cast", error.to_string()).with_source(error)
-        })
+        .map_err(crate::error::cast_batch)
     }
 }
 

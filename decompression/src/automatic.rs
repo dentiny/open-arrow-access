@@ -37,15 +37,7 @@ impl Compression {
                 }
                 #[cfg(not(feature = $feature))]
                 {
-                    Err(open_arrow_access_core::Error::new(
-                        open_arrow_access_core::ErrorKind::Unsupported,
-                        "auto_decompress",
-                        concat!(
-                            "compression requires enabling the `",
-                            $feature,
-                            "` codec feature"
-                        ),
-                    ))
+                    Err(crate::error::disabled_codec($feature))
                 }
             }};
         }

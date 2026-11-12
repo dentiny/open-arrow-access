@@ -1,4 +1,4 @@
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::Result;
 
 use super::{
     url::{parse_origin, parse_url},
@@ -27,14 +27,7 @@ impl CommonCrawl {
     /// Select a release URL such as `https://data.commoncrawl.org/crawl-data/CC-MAIN-2022-40/`.
     pub fn from_url(value: &str) -> Result<Self> {
         let url = parse_url(value)?;
-        let path = url.path().trim_end_matches('/');
-        let crawl = path.strip_prefix("/crawl-data/").ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidInput,
-                "configure_commoncrawl",
-                "expected /crawl-data/<crawl>/",
-            )
-        })?;
+        let crawl = super::validation::crawl_from_url(&url)?;
         Self::new(crawl)?.with_origin(&url.origin().ascii_serialization())
     }
 

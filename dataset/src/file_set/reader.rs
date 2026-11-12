@@ -6,8 +6,6 @@ use open_arrow_access_core::{
     StreamReader,
 };
 
-use super::error::schema_mismatch;
-
 struct FileSetState<A, I> {
     accessor: Arc<A>,
     current: Option<Box<dyn RecordReader>>,
@@ -24,9 +22,7 @@ where
         loop {
             if let Some(reader) = self.current.as_mut() {
                 if let Some(batch) = reader.next().await? {
-                    if batch.schema() != self.schema {
-                        return Err(schema_mismatch());
-                    }
+                    super::validation::validate_schema(&batch.schema(), &self.schema)?;
                     return Ok(Some(batch));
                 }
                 self.current = None;
@@ -35,9 +31,7 @@ where
                 return Ok(None);
             };
             let next = self.accessor.open(request).await?;
-            if next.metadata().schema != self.schema {
-                return Err(schema_mismatch());
-            }
+            super::validation::validate_schema(&next.metadata().schema, &self.schema)?;
             self.current = Some(next);
         }
     }

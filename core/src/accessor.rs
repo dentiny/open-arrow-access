@@ -2,10 +2,7 @@ use std::sync::Arc;
 
 use futures::stream::BoxStream;
 
-use crate::{
-    ByteReadRequest, ByteReader, Error, ErrorKind, ListRequest, ObjectRef, Reader, Result,
-    async_trait,
-};
+use crate::{ByteReadRequest, ByteReader, ListRequest, ObjectRef, Reader, Result, async_trait};
 
 /// Factory for independently owned readers, with typed requests and outputs.
 /// Use the re-exported `#[async_trait]` for `dyn` accessors with Send futures.
@@ -61,11 +58,7 @@ pub trait ByteAccessor: Accessor<Request = ByteReadRequest, Reader = dyn ByteRea
     /// Defaults to [`ErrorKind::Unsupported`]. Discovery failures may occur here
     /// or while consuming the stream.
     async fn list(&self, _request: ListRequest) -> Result<ObjectStream> {
-        Err(Error::new(
-            ErrorKind::Unsupported,
-            "list",
-            "accessor does not support discovery",
-        ))
+        Err(crate::error::default_listing_unsupported())
     }
 }
 

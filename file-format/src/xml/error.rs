@@ -1,4 +1,5 @@
 use open_arrow_access_core::Error;
+use open_arrow_access_core::ErrorKind;
 
 pub(super) fn xml_error(error: xml_arrow::ReadError) -> open_arrow_access_core::Error {
     use open_arrow_access_core::ErrorKind;
@@ -18,4 +19,16 @@ pub(super) fn conversion(source: xml_arrow::Error, record_index: u64, byte_offse
             source,
         },
     })
+}
+
+pub(super) fn invalid_inference_limits() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "read_xml",
+        "inference record and byte limits must be positive",
+    )
+}
+
+pub(super) fn configuration_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
+    Error::new(ErrorKind::InvalidInput, "read_xml", error.to_string()).with_source(error)
 }

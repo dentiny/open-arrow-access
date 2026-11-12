@@ -1,22 +1,15 @@
-use std::{collections::HashSet, ops::Range};
+use std::{collections::HashSet, ops::Range, sync::Arc};
 
 use arrow_schema::{DataType, Fields};
 
-use crate::{Error, ErrorKind, Result};
+use crate::{FieldNameIndex, Result, SchemaRef};
 
 /// Validate a half-open byte range against the current representation's length.
 /// Empty ranges at or before EOF are valid. This performs no I/O and leaves
 /// short-read detection to the caller; the supplied operation is kept in errors.
 pub fn validate_byte_range(range: &Range<u64>, len: u64, operation: &'static str) -> Result<()> {
     if range.start > range.end || range.end > len {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            operation,
-            format!(
-                "range {}..{} is outside object length {}",
-                range.start, range.end, len,
-            ),
-        ));
+        return Err(crate::error::invalid_byte_range(range, len, operation));
     }
     Ok(())
 }
@@ -26,11 +19,7 @@ pub(crate) fn validate_record_batch_fields(fields: &Fields) -> Result<()> {
     let mut seen = HashSet::new();
     for field in fields {
         if !seen.insert(field.name()) {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "build_record_batch",
-                "duplicate schema field name",
-            ));
+            return Err(crate::error::duplicate_schema_field());
         }
         validate_record_batch_type(field.data_type())?;
     }
@@ -52,10 +41,114 @@ fn validate_record_batch_type(data_type: &DataType) -> Result<()> {
         DataType::List(field) | DataType::LargeList(field) => {
             validate_record_batch_type(field.data_type())
         }
-        _ => Err(Error::new(
-            ErrorKind::Unsupported,
-            "build_record_batch",
-            format!("unsupported metadata type {data_type}"),
-        )),
+        _ => Err(crate::error::unsupported_metadata_type(data_type)),
     }
+}
+
+pub(crate) fn resolve_projection(
+    projection: &Option<Vec<String>>,
+    schema: &SchemaRef,
+) -> Result<(SchemaRef, Option<Vec<usize>>)> {
+    let Some(columns) = projection else {
+        return Ok((schema.clone(), None));
+    };
+    let mut seen = HashSet::new();
+    let mut indices = Vec::with_capacity(columns.len());
+    let field_index = FieldNameIndex::new(schema.fields());
+    for name in columns {
+        if !seen.insert(name) {
+            return Err(crate::error::duplicate_projection_field(name));
+        }
+        indices.push(
+            field_index
+                .index_of(name)
+                .map_err(|error| crate::error::unknown_projection_field(name, error))?,
+        );
+    }
+    let projected = schema
+        .project(&indices)
+        .map_err(crate::error::projection_error)?;
+    Ok((Arc::new(projected), Some(indices)))
+}
+
+pub(crate) fn validate_output_fields(
+    full: &Fields,
+    output: &Fields,
+    names: &FieldNameIndex,
+) -> Result<Vec<Option<usize>>> {
+    let mut output_indices = vec![None; full.len()];
+    for (index, field) in output.iter().enumerate() {
+        let source = names
+            .get(field.name())
+            .filter(|&source| &full[source] == field)
+            .ok_or_else(crate::error::invalid_output_schema)?;
+        if output_indices[source].replace(index).is_some() {
+            return Err(crate::error::invalid_output_schema());
+        }
+    }
+
+    Ok(output_indices)
+}
+
+pub(crate) fn validate_scan_schema(
+    actual: &arrow_schema::SchemaRef,
+    expected: &arrow_schema::SchemaRef,
+) -> Result<()> {
+    if actual != expected {
+        return Err(crate::error::scan_schema_mismatch());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_document_batch(
+    batch: &crate::RecordBatch,
+    schema: &SchemaRef,
+) -> Result<()> {
+    if batch.num_rows() != 1 || batch.schema() != *schema {
+        return Err(crate::error::invalid_document_batch());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_read_capability(supported: bool, operation: &'static str) -> Result<()> {
+    if !supported {
+        return Err(crate::error::reading_unsupported(operation));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_listing_capability(supported: bool) -> Result<()> {
+    if !supported {
+        return Err(crate::error::listing_unsupported());
+    }
+    Ok(())
+}
+
+pub(crate) fn relative_listing_path<'a>(path: &'a str, prefix: &str) -> Result<&'a str> {
+    path.strip_prefix(prefix)
+        .ok_or_else(crate::error::listing_outside_prefix)
+}
+
+pub(crate) fn validate_seek_input(
+    reader: &dyn crate::ByteReader,
+    operation: &'static str,
+) -> Result<u64> {
+    if !reader.capability().read_with_range {
+        return Err(crate::error::seek_requires_ranges(operation));
+    }
+    reader
+        .metadata()
+        .content_length
+        .ok_or_else(|| crate::error::seek_requires_length(operation))
+}
+
+pub(crate) fn validate_range_length(
+    actual: u64,
+    expected: u64,
+    operation: &'static str,
+) -> Result<()> {
+    if actual != expected {
+        return Err(crate::error::incorrect_range_length(operation));
+    }
+    Ok(())
 }

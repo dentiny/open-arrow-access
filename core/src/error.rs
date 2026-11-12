@@ -159,3 +159,194 @@ pub(crate) fn scan_schema_mismatch() -> Error {
         "partition schema differs from scan schema",
     )
 }
+
+pub(crate) fn record_batch_decode(message: impl Into<String>) -> Error {
+    Error::new(ErrorKind::Decode, "build_record_batch", message)
+}
+
+pub(crate) fn failed_builder() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "build_record_batch",
+        "builder is invalid after an append error",
+    )
+}
+
+pub(crate) fn invalid_byte_range(
+    range: &std::ops::Range<u64>,
+    len: u64,
+    operation: &'static str,
+) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        operation,
+        format!(
+            "range {}..{} is outside object length {}",
+            range.start, range.end, len,
+        ),
+    )
+}
+
+pub(crate) fn duplicate_schema_field() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "build_record_batch",
+        "duplicate schema field name",
+    )
+}
+
+pub(crate) fn unsupported_metadata_type(data_type: &arrow_schema::DataType) -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        "build_record_batch",
+        format!("unsupported metadata type {data_type}"),
+    )
+}
+
+pub(crate) fn duplicate_projection_field(name: &str) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "project",
+        format!("duplicate field {name:?}"),
+    )
+}
+
+pub(crate) fn unknown_projection_field(
+    name: &str,
+    error: impl std::error::Error + Send + Sync + 'static,
+) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "project",
+        format!("unknown field {name:?}"),
+    )
+    .with_source(error)
+}
+
+pub(crate) fn projection_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
+    Error::new(ErrorKind::InvalidInput, "project", error.to_string()).with_source(error)
+}
+
+pub(crate) fn decoder_empty_chunk(operation: &'static str, message: &'static str) -> Error {
+    Error::new(ErrorKind::Io, operation, message)
+}
+
+pub(crate) fn decoder_overconsumed(operation: &'static str) -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        operation,
+        "decoder consumed more bytes than supplied",
+    )
+}
+
+pub(crate) fn decoder_no_progress(operation: &'static str) -> Error {
+    Error::new(ErrorKind::Decode, operation, "decoder made no progress")
+}
+
+pub(crate) fn unknown_field(name: &str) -> arrow_schema::ArrowError {
+    arrow_schema::ArrowError::SchemaError(format!("unknown field {name:?}"))
+}
+
+pub(crate) fn empty_chunk(operation: &'static str) -> Error {
+    Error::new(
+        ErrorKind::Io,
+        operation,
+        "byte reader returned an empty chunk",
+    )
+}
+
+pub(crate) fn line_too_long(operation: &'static str, limit: usize) -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        operation,
+        format!("line exceeds configured {limit}-byte limit"),
+    )
+}
+
+pub(crate) fn reading_unsupported(operation: &'static str) -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        operation,
+        "accessor does not support reading",
+    )
+}
+
+pub(crate) fn listing_unsupported() -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        "list_files",
+        "accessor does not support listing",
+    )
+}
+
+pub(crate) fn listing_outside_prefix() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "list_files",
+        "listing returned an object outside its directory prefix",
+    )
+}
+
+pub(crate) fn invalid_document_batch() -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "decode_document",
+        "decoder must return one row with the projected schema",
+    )
+}
+
+pub(crate) fn document_batch_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
+    Error::new(ErrorKind::Decode, "decode_document", error.to_string()).with_source(error)
+}
+
+pub(crate) fn project_batch_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
+    Error::new(ErrorKind::Decode, "project_batch", error.to_string()).with_source(error)
+}
+
+pub(crate) fn seek_requires_ranges(operation: &'static str) -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        operation,
+        "range reads are required",
+    )
+}
+
+pub(crate) fn seek_requires_length(operation: &'static str) -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        operation,
+        "known input length is required",
+    )
+}
+
+pub(crate) fn incorrect_range_length(operation: &'static str) -> Error {
+    Error::new(
+        ErrorKind::Io,
+        operation,
+        "range reader returned an incorrect length",
+    )
+}
+
+pub(crate) fn invalid_seek() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid seek")
+}
+
+pub(crate) fn default_listing_unsupported() -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        "list",
+        "accessor does not support discovery",
+    )
+}
+
+pub(crate) fn default_range_unsupported() -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        "read_range",
+        "reader is sequential only",
+    )
+}
+
+pub(crate) fn record_batch_error(source: arrow_schema::ArrowError) -> Error {
+    record_batch_decode(source.to_string()).with_source(source)
+}
