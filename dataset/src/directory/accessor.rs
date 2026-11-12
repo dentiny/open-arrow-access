@@ -3,7 +3,7 @@ use open_arrow_access_core::{
     Result, ScanPlan, ScanPlanner, async_trait, list_files,
 };
 
-use super::{DirectoryRequest, validation::compile_glob};
+use super::{DirectoryRequest, validation::resolve_glob};
 use crate::file_set::{FileSetAccessor, FileSetRequest};
 
 /// Discover files through a byte accessor and read them through a supplied format.
@@ -71,7 +71,7 @@ where
     B: ByteAccessor,
 {
     async fn resolve(&self, request: DirectoryRequest) -> Result<FileSetRequest> {
-        let glob = compile_glob(request.glob.as_deref())?;
+        let (prefix, glob) = resolve_glob(request.prefix.locator())?;
         let match_options = glob::MatchOptions {
             case_sensitive: true,
             require_literal_separator: true,
@@ -79,7 +79,7 @@ where
         };
         let objects = list_files(
             &self.discovery,
-            ListRequest::new(request.prefix).with_recursive(request.recursive),
+            ListRequest::new(prefix).with_recursive(request.recursive),
             |relative| {
                 Ok(!relative.is_empty()
                     && !relative.ends_with('/')

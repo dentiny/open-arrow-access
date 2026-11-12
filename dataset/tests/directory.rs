@@ -794,7 +794,7 @@ async fn glob_selection_respects_paths_recursion_and_existing_suffix_filter() {
         }));
         let accessor = DirectoryAccessor::new(
             Listing {
-                expected_prefix: Some("data"),
+                expected_prefix: Some("data/"),
                 objects: names
                     .iter()
                     .map(|(name, _)| *name)
@@ -804,7 +804,7 @@ async fn glob_selection_respects_paths_recursion_and_existing_suffix_filter() {
             },
             files,
         );
-        let mut request = DirectoryRequest::new("data").with_glob(pattern);
+        let mut request = DirectoryRequest::new(format!("data/{pattern}"));
         request.recursive = recursive;
         request.suffix = suffix.map(str::to_owned);
         let reader = accessor.open(request).await.unwrap();
