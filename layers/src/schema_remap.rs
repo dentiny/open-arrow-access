@@ -108,7 +108,10 @@ where
             let field = &fields[index];
             let target = spec.target_data_type.as_ref().unwrap_or(field.data_type());
             if field.data_type() != target {
-                casts.push((index, target.clone()));
+                casts.push(ColumnCast {
+                    source_index: index,
+                    target_data_type: target.clone(),
+                });
             }
             fields[index] = Arc::new(
                 field
@@ -151,9 +154,14 @@ where
     }
 }
 
+struct ColumnCast {
+    source_index: usize,
+    target_data_type: DataType,
+}
+
 struct SchemaRemapPlan {
     schema: Arc<Schema>,
-    casts: Vec<(usize, DataType)>,
+    casts: Vec<ColumnCast>,
     projection: Option<Vec<usize>>,
 }
 
@@ -164,8 +172,9 @@ impl SchemaRemapPlan {
             safe: false,
             ..CastOptions::default()
         };
-        for (index, target) in &self.casts {
-            let index = *index;
+        for cast in &self.casts {
+            let index = cast.source_index;
+            let target = &cast.target_data_type;
             columns[index] = cast_with_options(columns[index].as_ref(), target, &options)
                 .or_else(|error| match target {
                     // Keep Arrow's semantics, adding only the service's minute-precision fallback.
