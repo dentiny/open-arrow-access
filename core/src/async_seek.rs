@@ -6,7 +6,7 @@ use std::{
     task::{Context, Poll, ready},
 };
 
-use crate::{ByteReader, Bytes, Error, ErrorKind, Result, validate_byte_range};
+use crate::{ByteReader, Bytes, Result, validate_byte_range};
 use futures::{
     TryStreamExt,
     io::{AsyncBufRead, AsyncRead, AsyncSeek},
@@ -36,20 +36,7 @@ pub fn into_async_seek(
     chunk_size: NonZeroUsize,
     operation: &'static str,
 ) -> Result<SeekableInput> {
-    if !reader.capability().read_with_range {
-        return Err(Error::new(
-            ErrorKind::Unsupported,
-            operation,
-            "range reads are required",
-        ));
-    }
-    let len = reader.metadata().content_length.ok_or_else(|| {
-        Error::new(
-            ErrorKind::Unsupported,
-            operation,
-            "known input length is required",
-        )
-    })?;
+    let len = crate::validation::validate_seek_input(reader.as_ref(), operation)?;
     Ok(SeekableInput {
         reader: Arc::new(Mutex::new(reader)),
         len,
@@ -100,13 +87,7 @@ async fn exact_range(
 ) -> Result<Bytes> {
     let expected = range.end - range.start;
     let bytes = reader.lock().await.read_range(range).await?;
-    if bytes.len() as u64 != expected {
-        return Err(Error::new(
-            ErrorKind::Io,
-            operation,
-            "range reader returned an incorrect length",
-        ));
-    }
+    crate::validation::validate_range_length(bytes.len() as u64, expected, operation)?;
     Ok(bytes)
 }
 
@@ -173,7 +154,7 @@ impl AsyncSeek for SeekableInput {
             SeekFrom::Current(offset) => this.position.checked_add_signed(offset),
             SeekFrom::End(offset) => this.len.checked_add_signed(offset),
         }
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid seek"))?;
+        .ok_or_else(crate::error::invalid_seek)?;
         if this.position != position {
             this.position = position;
             this.buffered = None;

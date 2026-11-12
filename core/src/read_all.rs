@@ -1,4 +1,4 @@
-use crate::{ByteReader, Error, ErrorKind, Result};
+use crate::{ByteReader, Result};
 
 const MAX_PREALLOCATION_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -21,11 +21,7 @@ where
     let mut output = Vec::new();
     while let Some(bytes) = reader.next().await? {
         if bytes.is_empty() {
-            return Err(Error::new(
-                ErrorKind::Io,
-                operation,
-                "byte reader returned an empty chunk",
-            ));
+            return Err(crate::error::empty_chunk(operation));
         }
         if output.is_empty() {
             output.reserve_exact(initial_capacity);

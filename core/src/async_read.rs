@@ -2,7 +2,7 @@ use std::io;
 
 use futures::{TryStreamExt, io::AsyncBufRead};
 
-use crate::{ByteReader, Error, ErrorKind};
+use crate::ByteReader;
 
 /// Adapt an owned byte reader to the futures I/O traits used by streaming parsers.
 ///
@@ -11,7 +11,7 @@ use crate::{ByteReader, Error, ErrorKind};
 /// EOF, source errors and empty chunks terminate input.
 ///
 /// Source errors retain their context inside [`io::Error::other`]; recover their
-/// categories and chains with [`ErrorKind::from_source`]. `operation` supplies
+/// categories and chains with [`crate::ErrorKind::from_source`]. `operation` supplies
 /// context for empty-chunk errors.
 ///
 /// ```no_run
@@ -37,11 +37,7 @@ where
             return Ok(None);
         };
         if bytes.is_empty() {
-            return Err(io::Error::other(Error::new(
-                ErrorKind::Io,
-                operation,
-                "byte reader returned an empty chunk",
-            )));
+            return Err(io::Error::other(crate::error::empty_chunk(operation)));
         }
         Ok(Some((bytes, reader)))
     });

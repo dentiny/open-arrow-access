@@ -1,8 +1,8 @@
 use super::xml_error;
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    ByteReader, Capability, Error, ErrorKind, FactoryToken, OrderRequirement, ReadRequest,
-    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
+    ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
+    RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
     into_async_read, record_stream_reader,
 };
 use xml_arrow::{InferenceOptions, NamespaceBinding, ReaderOptions, XmlReader, XmlSchema};
@@ -123,17 +123,9 @@ impl ReaderFactory for XmlFormat {
         let validation_schema = match &self.schema {
             Some(schema) => schema.clone(),
             None => {
-                if self.inference.max_records == 0 || self.inference.max_bytes == 0 {
-                    return Err(Error::new(
-                        ErrorKind::InvalidInput,
-                        "read_xml",
-                        "inference record and byte limits must be positive",
-                    ));
-                }
-                XmlSchema::with_namespaces(vec![], &bindings).map_err(|error| {
-                    Error::new(ErrorKind::InvalidInput, "read_xml", error.to_string())
-                        .with_source(error)
-                })?
+                super::validation::validate_inference(&self.inference)?;
+                XmlSchema::with_namespaces(vec![], &bindings)
+                    .map_err(super::error::configuration_error)?
             }
         };
         // Explicit mappings allow projection validation before storage I/O.

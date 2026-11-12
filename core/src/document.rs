@@ -3,9 +3,9 @@ use std::sync::Arc;
 use futures::stream;
 
 use crate::{
-    Accessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ReadOptionsProvider,
-    RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner,
-    SchemaRef, StreamReader, async_trait, read_object,
+    Accessor, ByteReadRequest, ByteReader, Capability, ReadOptionsProvider, RecordBatch,
+    RecordCapability, RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, SchemaRef,
+    StreamReader, async_trait, read_object,
 };
 
 /// Decode one whole object into one Arrow row.
@@ -89,17 +89,10 @@ where
         let stream = stream::once(async move {
             let bytes = read_object(storage.as_ref(), byte_request, "read_document").await?;
             let batch = decoder.decode(&bytes, request, schema.clone()).await?;
-            if batch.num_rows() != 1 || batch.schema() != schema {
-                return Err(Error::new(
-                    ErrorKind::Decode,
-                    "decode_document",
-                    "decoder must return one row with the projected schema",
-                ));
-            }
-            batch.with_schema(schema).map_err(|error| {
-                Error::new(ErrorKind::Decode, "decode_document", error.to_string())
-                    .with_source(error)
-            })
+            crate::validation::validate_document_batch(&batch, &schema)?;
+            batch
+                .with_schema(schema)
+                .map_err(crate::error::document_batch_error)
         });
         Ok(Box::new(StreamReader::records(stream, metadata, ordering)))
     }

@@ -2,6 +2,7 @@
 
 mod accessor;
 mod automatic;
+mod error;
 pub use automatic::{AutoDecompressionAccessor, AutoDecompressionLayer, Compression};
 #[cfg(any(feature = "tar", feature = "zip"))]
 mod archive;

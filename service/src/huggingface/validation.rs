@@ -1,4 +1,4 @@
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::Result;
 
 use url::Url;
 
@@ -22,11 +22,7 @@ fn validate_repository_id(repository: &str) -> Result<()> {
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
         })
     {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "configure_huggingface",
-            "expected a repository ID in owner/name form",
-        ));
+        return Err(super::error::invalid_repository());
     }
     Ok(())
 }
@@ -37,11 +33,7 @@ fn validate_revision(revision: &str) -> Result<()> {
         || revision.contains(['\0', '\\'])
         || matches!(revision, "." | "..")
     {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "configure_huggingface",
-            "invalid repository revision",
-        ));
+        return Err(super::error::invalid_revision());
     }
     Ok(())
 }
@@ -51,23 +43,13 @@ pub(super) fn validate_options(options: &HuggingFaceOptions) -> Result<()> {
     if let Some(token) = &options.token
         && (token.is_empty() || http::HeaderValue::from_str(&format!("Bearer {token}")).is_err())
     {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "configure_huggingface",
-            "invalid Hub authentication token",
-        ));
+        return Err(super::error::invalid_token());
     }
     Ok(())
 }
 
 pub(super) fn endpoint(value: &str) -> Result<Url> {
-    let invalid = || {
-        Error::new(
-            ErrorKind::InvalidInput,
-            "configure_huggingface",
-            "expected an HTTP(S) Hub endpoint without credentials, query or fragment",
-        )
-    };
+    let invalid = super::error::invalid_endpoint;
     let url = Url::parse(value).map_err(|_| invalid())?;
     if !crate::http_client::validation::is_http_endpoint(&url) {
         return Err(invalid());
@@ -81,22 +63,21 @@ pub(super) fn validate_dataset_request(
 ) -> Result<()> {
     validate_repository(repository)?;
     if request.split.starts_with("partial-") && !request.allow_partial {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "open_huggingface_dataset",
-            "partial exports require explicit opt-in",
-        ));
+        return Err(super::error::partial_export_requires_opt_in());
     }
     Ok(())
 }
 
 pub(super) fn validate_commit_sha(sha: &str) -> Result<()> {
     if !is_commit_sha(sha) {
-        return Err(Error::new(
-            ErrorKind::Decode,
-            "resolve_huggingface",
-            "revision metadata did not contain a commit SHA",
-        ));
+        return Err(super::error::missing_commit_sha());
+    }
+    Ok(())
+}
+
+pub(super) fn validate_split(objects: &[open_arrow_access_core::ObjectRef]) -> Result<()> {
+    if objects.is_empty() {
+        return Err(super::error::empty_split());
     }
     Ok(())
 }

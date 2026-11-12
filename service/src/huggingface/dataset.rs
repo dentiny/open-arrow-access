@@ -1,7 +1,7 @@
 use open_arrow_access_core::{
-    Accessor, Capability, Error, ErrorKind, ListRequest, ObjectRef, OrderRequirement,
-    RecordCapability, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait,
-    into_stream, list_files,
+    Accessor, Capability, ErrorKind, ListRequest, ObjectRef, OrderRequirement, RecordCapability,
+    RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait, into_stream,
+    list_files,
 };
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
 use open_arrow_access_file_format::parquet::ParquetAccessor;
@@ -92,13 +92,7 @@ impl HuggingFaceAccessor {
             |relative| Ok(!relative.contains('/') && relative.ends_with(".parquet")),
         )
         .await?;
-        if objects.is_empty() {
-            return Err(Error::new(
-                ErrorKind::NotFound,
-                "resolve_huggingface",
-                "selected split contains no Parquet shards",
-            ));
-        }
+        super::validation::validate_split(&objects)?;
         Ok(objects)
     }
 }

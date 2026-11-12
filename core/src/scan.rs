@@ -11,7 +11,6 @@ use crate::{
     into_stream,
 };
 
-use crate::error::scan_schema_mismatch;
 /// Requested output policy; permission still comes from `ScanPlan::ordering`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum EmissionPolicy {
@@ -64,18 +63,14 @@ impl ScanPlan {
                 let schema = schema.clone();
                 async move {
                     let reader = partition.await?;
-                    if reader.metadata().schema != schema {
-                        return Err(scan_schema_mismatch());
-                    }
+                    crate::validation::validate_scan_schema(&reader.metadata().schema, &schema)?;
                     Ok(into_stream(reader))
                 }
             })
             .try_flatten()
             .map(move |result| {
                 let batch = result?;
-                if batch.schema() != batch_schema {
-                    return Err(scan_schema_mismatch());
-                }
+                crate::validation::validate_scan_schema(&batch.schema(), &batch_schema)?;
                 Ok(batch)
             });
         StreamReader::records(batches, self.metadata, self.ordering)

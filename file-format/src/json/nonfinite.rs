@@ -1,5 +1,5 @@
 use futures::stream;
-use open_arrow_access_core::{ByteReader, Bytes, Error, ErrorKind, StreamReader};
+use open_arrow_access_core::{ByteReader, Bytes, StreamReader};
 
 /// Adapt nonfinite value tokens before either serde_json framing or Arrow decoding.
 /// Keep only a partial token between chunks; the downstream parser validates JSON.
@@ -12,11 +12,7 @@ pub(super) fn normalize_input(input: Box<dyn ByteReader>) -> Box<dyn ByteReader>
             loop {
                 let output = match input.next().await? {
                     Some(bytes) if bytes.is_empty() => {
-                        return Err(Error::new(
-                            ErrorKind::Io,
-                            "read_json",
-                            "byte reader emitted an empty chunk",
-                        ));
+                        return Err(super::error::empty_read_chunk());
                     }
                     Some(bytes) => state.decode(&bytes),
                     None if state.token.is_empty() => return Ok(None),

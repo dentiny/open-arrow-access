@@ -23,7 +23,7 @@ pub(crate) struct ResolvedFilesPlan<M> {
 impl<M> ResolvedFilesPlan<M> {
     pub(crate) fn new(root: impl Into<String>, files: Vec<FileSpec>, metadata: M) -> Result<Self> {
         open_arrow_access_storage::validate_file_names(files.iter().map(|file| file.name.as_str()))
-            .map_err(|source| super::error::empty_or_dup_filename().with_source(source))?;
+            .map_err(super::error::file_namespace)?;
         Ok(Self {
             root: root.into(),
             files,

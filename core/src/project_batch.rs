@@ -1,4 +1,4 @@
-use crate::{Error, ErrorKind, RecordBatch, Result, SchemaRef};
+use crate::{RecordBatch, Result, SchemaRef};
 
 /// Project or reorder columns and attach the supplied output schema.
 /// `None` retains all columns; an empty projection preserves the row count.
@@ -15,7 +15,5 @@ pub fn project_batch(
         };
         batch.with_schema(schema)
     };
-    project().map_err(|error| {
-        Error::new(ErrorKind::Decode, "project_batch", error.to_string()).with_source(error)
-    })
+    project().map_err(crate::error::project_batch_error)
 }

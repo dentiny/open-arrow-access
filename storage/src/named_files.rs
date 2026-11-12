@@ -5,8 +5,8 @@ use indexmap::IndexMap;
 use crate::validation::index_files;
 
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind, ListRequest,
-    ObjectRef, ObjectStream, Result, async_trait,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectRef,
+    ObjectStream, Result, async_trait,
 };
 
 /// A fixed, ordered namespace of opaque, nonempty, unique names mapped to byte objects.
@@ -44,13 +44,10 @@ where
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        let object = self.files.get(request.object.locator()).ok_or_else(|| {
-            Error::new(
-                ErrorKind::NotFound,
-                "open_named_file",
-                "filename is absent from manifest",
-            )
-        })?;
+        let object = self
+            .files
+            .get(request.object.locator())
+            .ok_or_else(crate::error::unknown_named_file)?;
         self.inner
             .open(ByteReadRequest::new(object.clone()).with_options(request.options))
             .await
@@ -65,13 +62,7 @@ where
     /// Names form a flat namespace; both recursion modes return manifest order.
     /// Only the empty root is a valid listing prefix. Listing performs no I/O.
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        if !request.prefix.locator().is_empty() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "list_named_files",
-                "expected an empty root prefix",
-            ));
-        }
+        crate::validation::validate_listing_prefix(request.prefix.locator())?;
         let files = Arc::clone(&self.files);
         let len = files.len();
         Ok(Box::pin(futures::stream::iter((0..len).map(

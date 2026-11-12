@@ -1,8 +1,8 @@
 use arrow_array::BooleanArray;
 use arrow_select::filter::filter_record_batch;
 use open_arrow_access_core::{
-    Accessor, Error, ErrorKind, Layer, Reader, RecordBatch, RecordCapability, RecordMetadata,
-    RecordReader, Result, async_trait,
+    Accessor, Layer, Reader, RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result,
+    async_trait,
 };
 
 /// Seeded Bernoulli sampling: independently retain each row with `probability`.
@@ -139,8 +139,7 @@ impl Reader for SamplingReader {
                 Ok(_) => {}
                 Err(error) => {
                     self.inner = None;
-                    return Err(Error::new(ErrorKind::Decode, "sample", error.to_string())
-                        .with_source(error));
+                    return Err(crate::error::sample_error(error));
                 }
             }
         }

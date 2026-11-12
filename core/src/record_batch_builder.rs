@@ -1,8 +1,11 @@
 use arrow_array::{RecordBatchOptions, builder::*};
 use arrow_schema::{DataType, Field, Fields};
 
-use crate::{Error, ErrorKind, FieldNameIndex, ReadOptions, RecordBatch, Result, SchemaRef};
-use crate::{error::invalid_output_schema, validation::validate_record_batch_fields};
+use crate::{FieldNameIndex, ReadOptions, RecordBatch, Result, SchemaRef};
+use crate::{
+    error::{failed_builder, record_batch_decode as decode},
+    validation::validate_record_batch_fields,
+};
 
 /// Build metadata batches using Arrow's native builders and named fields.
 ///
@@ -110,7 +113,7 @@ impl RecordBatchBuilder {
             columns,
             &RecordBatchOptions::new().with_row_count(Some(self.rows)),
         )
-        .map_err(|error| decode(error.to_string()).with_source(error))
+        .map_err(crate::error::record_batch_error)
     }
 }
 
@@ -125,16 +128,7 @@ struct StructLayout {
 impl StructLayout {
     fn new(full: &Fields, output: &Fields) -> Result<Self> {
         let names = FieldNameIndex::new(full);
-        let mut output_indices = vec![None; full.len()];
-        for (index, field) in output.iter().enumerate() {
-            let source = names
-                .get(field.name())
-                .filter(|&source| &full[source] == field)
-                .ok_or_else(invalid_output_schema)?;
-            if output_indices[source].replace(index).is_some() {
-                return Err(invalid_output_schema());
-            }
-        }
+        let output_indices = resolve_output_indices(full, output, &names)?;
         let values = output
             .iter()
             .map(|field| ValueLayout::new(field.data_type()))
@@ -145,6 +139,25 @@ impl StructLayout {
             values,
         })
     }
+}
+
+fn resolve_output_indices(
+    full: &Fields,
+    output: &Fields,
+    names: &FieldNameIndex,
+) -> Result<Vec<Option<usize>>> {
+    let mut output_indices = vec![None; full.len()];
+    for (index, field) in output.iter().enumerate() {
+        let source = names
+            .get(field.name())
+            .filter(|&source| &full[source] == field)
+            .ok_or_else(crate::error::invalid_output_schema)?;
+        if output_indices[source].replace(index).is_some() {
+            return Err(crate::error::invalid_output_schema());
+        }
+    }
+
+    Ok(output_indices)
 }
 
 enum ValueLayout {
@@ -496,15 +509,4 @@ impl FieldWriter<'_> {
             _ => unreachable!("unsupported types fail at construction"),
         }
     }
-}
-
-fn decode(message: impl Into<String>) -> Error {
-    Error::new(ErrorKind::Decode, "build_record_batch", message)
-}
-fn failed_builder() -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "build_record_batch",
-        "builder is invalid after an append error",
-    )
 }

@@ -1,8 +1,8 @@
 use open_arrow_access_core::{Error, ErrorKind};
 
 pub(crate) fn transport_error(operation: &'static str, error: opendal::Error) -> Error {
-    let kind = ErrorKind::from_source(&error)
-        .unwrap_or_else(|| crate::opendal_error::error_kind(error.kind()));
+    let kind =
+        ErrorKind::from_source(&error).unwrap_or_else(|| crate::error::error_kind(error.kind()));
     Error::new(kind, operation, "provider HTTP operation failed").with_source(error)
 }
 
@@ -32,9 +32,11 @@ pub(crate) fn client_error(error: reqwest::Error) -> Error {
     )
     .with_source(error)
 }
+
 pub(crate) fn request_error(operation: &'static str, error: http::Error) -> Error {
     Error::new(ErrorKind::InvalidInput, operation, "invalid HTTP request").with_source(error)
 }
+
 pub(crate) fn json_error(operation: &'static str, error: serde_json::Error) -> Error {
     Error::new(ErrorKind::Decode, operation, "invalid JSON metadata").with_source(error)
 }
@@ -138,4 +140,8 @@ pub(super) fn finish_response(
         Err(Failure::Response(response)) => Ok(*response),
         Err(Failure::Transport(error)) => Err(error),
     }
+}
+
+pub(super) fn file_namespace(source: Error) -> Error {
+    empty_or_dup_filename().with_source(source)
 }

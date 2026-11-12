@@ -1,6 +1,6 @@
 use futures::{Stream, stream};
 
-use crate::{ByteReader, Bytes, Error, ErrorKind, Result};
+use crate::{ByteReader, Bytes, Result};
 
 /// Stream lines from an owned byte reader, retaining LF and CRLF endings.
 ///
@@ -13,8 +13,8 @@ use crate::{ByteReader, Bytes, Error, ErrorKind, Result};
 ///
 /// # Errors
 ///
-/// Oversized lines return [`ErrorKind::Decode`] before copying the offending
-/// bytes. Empty chunks return [`ErrorKind::Io`]. Both use `operation`;
+/// Oversized lines return [`crate::ErrorKind::Decode`] before copying the offending
+/// bytes. Empty chunks return [`crate::ErrorKind::Io`]. Both use `operation`;
 /// upstream errors pass through unchanged. An error ends the stream.
 ///
 /// ```no_run
@@ -69,11 +69,7 @@ impl<R: ByteReader + ?Sized> LineState<R> {
                 };
                 match input.next().await? {
                     Some(bytes) if bytes.is_empty() => {
-                        return Err(Error::new(
-                            ErrorKind::Io,
-                            operation,
-                            "byte reader returned an empty chunk",
-                        ));
+                        return Err(crate::error::empty_chunk(operation));
                     }
                     Some(bytes) => self.pending = bytes,
                     None => {
@@ -87,11 +83,7 @@ impl<R: ByteReader + ?Sized> LineState<R> {
             if let Some(limit) = max_line_bytes
                 && consumed > limit - line.len()
             {
-                return Err(Error::new(
-                    ErrorKind::Decode,
-                    operation,
-                    format!("line exceeds configured {limit}-byte limit"),
-                ));
+                return Err(crate::error::line_too_long(operation, limit));
             }
             let bytes = self.pending.split_to(consumed);
             if line.is_empty() && newline.is_some() {

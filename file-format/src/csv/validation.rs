@@ -1,13 +1,12 @@
+use std::collections::HashSet;
+
+use super::inference::CsvInferenceOptions;
 use arrow_schema::{DataType, Schema, TimeUnit};
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::Result;
 
 pub(super) fn validate_input_schema(schema: &Schema) -> Result<()> {
     if schema.fields().is_empty() {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "open_csv",
-            "CSV requires an input schema with at least one field",
-        ));
+        return Err(super::error::empty_input_schema());
     }
     Ok(())
 }
@@ -17,15 +16,7 @@ pub(super) fn validate_input_schema(schema: &Schema) -> Result<()> {
 pub(super) fn validate_selected_schema(schema: &Schema) -> Result<()> {
     for field in schema.fields() {
         if !supported_type(field.data_type()) {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "open_csv",
-                format!(
-                    "CSV does not support field {:?} of type {:?}",
-                    field.name(),
-                    field.data_type()
-                ),
-            ));
+            return Err(super::error::unsupported_field(field));
         }
     }
     Ok(())
@@ -73,4 +64,38 @@ fn supported_type(data_type: &DataType) -> bool {
         }
         _ => false,
     }
+}
+
+impl CsvInferenceOptions {
+    pub(super) fn validate(self) -> Result<()> {
+        if self.max_records == 0 || self.max_bytes == 0 {
+            return Err(super::error::invalid_inference_limits());
+        }
+        Ok(())
+    }
+}
+
+pub(super) fn validate_sample(sample: &[u8]) -> Result<()> {
+    if sample.is_empty() {
+        return Err(super::error::empty_inference_sample());
+    }
+    Ok(())
+}
+
+pub(super) fn validate_inferred_schema(schema: &Schema) -> Result<()> {
+    let mut names = HashSet::new();
+    for field in schema.fields() {
+        if field.name().is_empty() || !names.insert(field.name()) {
+            return Err(super::error::invalid_inferred_headers());
+        }
+        if field.data_type() == &DataType::Null {
+            return Err(super::error::null_inferred_column());
+        }
+    }
+
+    Ok(())
+}
+
+pub(super) fn require_dialect(dialect: Option<super::CsvDialect>) -> Result<super::CsvDialect> {
+    dialect.ok_or_else(super::error::uninspectable_dialect)
 }

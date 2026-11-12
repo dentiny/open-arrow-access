@@ -4,7 +4,7 @@ use futures::future::BoxFuture;
 use open_arrow_access_core::{ByteReader, Bytes};
 use parquet::{
     arrow::{arrow_reader::ArrowReaderOptions, async_reader::AsyncFileReader},
-    errors::{ParquetError, Result as ParquetResult},
+    errors::Result as ParquetResult,
     file::metadata::{PageIndexPolicy, ParquetMetaData, ParquetMetaDataReader},
 };
 
@@ -22,14 +22,14 @@ impl ParquetInput {
         self.inner
             .read_range(range)
             .await
-            .map_err(|e| ParquetError::External(Box::new(e)))
+            .map_err(super::error::external_error)
     }
 
     async fn read_byte_ranges(&mut self, ranges: Vec<Range<u64>>) -> ParquetResult<Vec<Bytes>> {
         self.inner
             .read_ranges(ranges)
             .await
-            .map_err(|e| ParquetError::External(Box::new(e)))
+            .map_err(super::error::external_error)
     }
 
     async fn read_metadata(
@@ -40,7 +40,7 @@ impl ParquetInput {
             .inner
             .metadata()
             .content_length
-            .ok_or_else(|| ParquetError::General("input length is unknown".to_owned()))?;
+            .ok_or_else(super::error::unknown_input_length)?;
         let metadata = ParquetMetaDataReader::new()
             .with_metadata_options(options.map(|o| o.metadata_options().clone()))
             .with_column_index_policy(

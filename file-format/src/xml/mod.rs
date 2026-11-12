@@ -7,6 +7,7 @@ mod accessor;
 mod error;
 mod format;
 mod planning;
+mod validation;
 use error::xml_error;
 
 pub use accessor::XmlAccessor;

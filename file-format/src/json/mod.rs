@@ -7,6 +7,7 @@ mod inference;
 mod nonfinite;
 mod planning;
 mod reader;
+mod validation;
 
 pub use accessor::JsonAccessor;
 pub use format::JsonFormat;

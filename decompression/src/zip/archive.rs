@@ -4,7 +4,7 @@ use async_zip::base::read1::{
     ZipOptions,
     seek::{ZipArchiveInner, ZipArchiveReader},
 };
-use open_arrow_access_core::{ByteReader, Error, ErrorKind, Result};
+use open_arrow_access_core::{ByteReader, Result};
 
 use super::{ZipEntry, ZipLimits, error::zip_error};
 use crate::{archive::ArchiveSource, decoded_reader};
@@ -75,34 +75,18 @@ impl ZipArchive {
         entry_index: usize,
         chunk_size: NonZeroUsize,
     ) -> Result<Box<dyn ByteReader>> {
-        let entry = self.directory.cdrs().get(entry_index).ok_or_else(|| {
-            Error::new(
-                ErrorKind::NotFound,
-                "open_zip_entry",
-                "ZIP entry index is out of bounds",
-            )
-        })?;
+        let entry = self
+            .directory
+            .cdrs()
+            .get(entry_index)
+            .ok_or_else(super::error::entry_not_found)?;
         let mut metadata = self.source.metadata;
         metadata.content_length = Some(entry.uncompressed_size().map_err(zip_error)?);
         // ZIP local file header (offsets relative to lfh_offset):
         // | signature (4 B) | version (2 B) | flags (2 B) | ... |
         // 0                 4               6             8
-        let flags_offset = entry
-            .lfh_offset()
-            .map_err(zip_error)?
-            .checked_add(6)
-            .filter(|offset| {
-                offset
-                    .checked_add(2)
-                    .is_some_and(|end| end <= self.source.input.content_length())
-            })
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::Decode,
-                    "open_zip_entry",
-                    "invalid local header offset",
-                )
-            })?;
+        let flags_offset =
+            super::validation::header_flags_offset(entry, self.source.input.content_length())?;
         let flags = self
             .source
             .input
@@ -110,13 +94,7 @@ impl ZipArchive {
             .await?;
         // SeekableInput validates the exact range length. Encryption flags are
         // bits 0 and 6 of the little-endian field's first byte.
-        if flags[0] & 0x41 != 0 {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "open_zip_entry",
-                "encrypted ZIP entries are unsupported",
-            ));
-        }
+        super::validation::validate_encryption(flags[0])?;
         let parser = ZipArchiveReader::new_with_inner(self.source.input, self.directory);
         let file = parser.file_oneshot(entry_index).await.map_err(zip_error)?;
         Ok(decoded_reader(

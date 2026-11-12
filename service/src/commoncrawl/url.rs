@@ -1,7 +1,7 @@
 use open_arrow_access_core::Result;
 use url::Url;
 
-use super::{error::invalid_url, validation};
+use super::validation;
 
 pub(super) fn parse_origin(value: &str, operation: &'static str) -> Result<Url> {
     let url = parse_url(value)?;
@@ -10,7 +10,7 @@ pub(super) fn parse_origin(value: &str, operation: &'static str) -> Result<Url> 
 }
 
 pub(super) fn parse_url(value: &str) -> Result<Url> {
-    let url = Url::parse(value).map_err(|error| invalid_url().with_source(error))?;
+    let url = Url::parse(value).map_err(super::error::url_parse)?;
     validation::validate_url(value, &url)?;
     Ok(url)
 }

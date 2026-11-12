@@ -8,8 +8,8 @@ use super::{
 };
 use arrow_csv::{ReaderBuilder, reader::Decoder};
 use open_arrow_access_core::{
-    ByteReader, Capability, Error, ErrorKind, FactoryToken, OrderRequirement, ReadRequest,
-    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
+    ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
+    RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
 };
 
 /// Incrementally read CSV or TSV using an explicit or inferred positional schema.
@@ -85,7 +85,7 @@ impl SchemaInference for CsvFileFormat {
         if self.schema.is_some() {
             return Ok((self.clone(), input));
         }
-        let dialect = self.parallel_dialect().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "infer_csv", "schema inference requires an inspectable CsvDialect; use with_dialect instead of with_format"))?;
+        let dialect = validation::require_dialect(self.parallel_dialect())?;
         let (schema, has_header, input) = inference::infer(input, dialect, self.inference).await?;
         let format = Self::new(schema).with_dialect(CsvDialect {
             has_header,
@@ -116,13 +116,7 @@ impl ReaderFactory for CsvFileFormat {
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
         let Some(input_schema) = &self.schema else {
             self.inference.validate()?;
-            if self.parallel_dialect().is_none() {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "infer_csv",
-                    "schema inference requires an inspectable CsvDialect; use with_dialect instead of with_format",
-                ));
-            }
+            validation::require_dialect(self.parallel_dialect())?;
             return Ok(None);
         };
         let options = &request.options;

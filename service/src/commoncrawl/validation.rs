@@ -1,4 +1,4 @@
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::Result;
 use url::Url;
 
 use super::error::invalid_url;
@@ -9,11 +9,7 @@ pub(super) fn validate_crawl(crawl: &str) -> Result<()> {
         .strip_prefix("CC-MAIN-")
         .and_then(|value| value.split_once('-'));
     if !matches!(parts, Some((year, run)) if is_digits(year, 4) && is_digits(run, 2)) {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "configure_commoncrawl",
-            "expected CC-MAIN-YYYY-NN",
-        ));
+        return Err(super::error::invalid_crawl());
     }
     Ok(())
 }
@@ -24,11 +20,7 @@ fn is_digits(value: &str, len: usize) -> bool {
 
 pub(super) fn validate_origin_path(url: &Url, operation: &'static str) -> Result<()> {
     if url.path() != "/" {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            operation,
-            "expected an HTTP(S) origin without a path",
-        ));
+        return Err(super::error::invalid_origin_path(operation));
     }
     Ok(())
 }
@@ -48,4 +40,13 @@ pub(super) fn validate_url(value: &str, url: &Url) -> Result<()> {
         return Err(invalid_url());
     }
     Ok(())
+}
+
+pub(super) fn crawl_from_url(url: &Url) -> Result<&str> {
+    let path = url.path().trim_end_matches('/');
+    let crawl = path
+        .strip_prefix("/crawl-data/")
+        .ok_or_else(super::error::invalid_crawl_path)?;
+
+    Ok(crawl)
 }

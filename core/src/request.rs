@@ -1,6 +1,6 @@
 use std::{collections::HashSet, num::NonZeroUsize, sync::Arc};
 
-use crate::{Error, ErrorKind, FieldNameIndex, Result, SchemaRef};
+use crate::{FieldNameIndex, Result, SchemaRef};
 
 /// An opaque object locator interpreted by an accessor, not by a format reader.
 /// Filesystem accessors interpret this as a path relative to their configured root.
@@ -168,24 +168,17 @@ impl ReadOptions {
         let field_index = FieldNameIndex::new(schema.fields());
         for name in columns {
             if !seen.insert(name) {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "project",
-                    format!("duplicate field {name:?}"),
-                ));
+                return Err(crate::error::duplicate_projection_field(name));
             }
-            indices.push(field_index.index_of(name).map_err(|error| {
-                Error::new(
-                    ErrorKind::InvalidInput,
-                    "project",
-                    format!("unknown field {name:?}"),
-                )
-                .with_source(error)
-            })?);
+            indices.push(
+                field_index
+                    .index_of(name)
+                    .map_err(|error| crate::error::unknown_projection_field(name, error))?,
+            );
         }
-        let projected = schema.project(&indices).map_err(|error| {
-            Error::new(ErrorKind::InvalidInput, "project", error.to_string()).with_source(error)
-        })?;
+        let projected = schema
+            .project(&indices)
+            .map_err(crate::error::projection_error)?;
         Ok((Arc::new(projected), Some(indices)))
     }
 }

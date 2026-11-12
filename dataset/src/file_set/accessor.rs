@@ -9,7 +9,7 @@ use open_arrow_access_core::{
 
 use super::{
     FileSetRequest,
-    error::{empty_selection, schema_mismatch},
+    error::empty_selection,
     reader::create_reader,
     validation::{validate_file_ordering, validate_file_policy},
 };
@@ -144,9 +144,7 @@ where
                     let plan = plan_file(inner, request).await?;
                     validate_file_policy(&plan)?;
                     validate_file_ordering(ordering, plan.ordering)?;
-                    if plan.metadata.schema != schema {
-                        return Err(schema_mismatch());
-                    }
+                    super::validation::validate_schema(&plan.metadata.schema, &schema)?;
                     Ok(plan.partitions)
                 }
             });
