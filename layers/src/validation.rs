@@ -313,66 +313,99 @@ pub(crate) fn validate_generated_schema(
     Ok(())
 }
 
-pub(crate) fn validate_remap_specs(specs: &[crate::FieldRemap]) -> Result<()> {
-    let mut sources = HashSet::new();
-    let mut targets = HashSet::new();
-    for spec in specs {
-        if spec.source_name.is_empty()
-            || spec.output_name().is_empty()
-            || !sources.insert(&spec.source_name)
-            || !targets.insert(spec.output_name())
-        {
-            return Err(crate::error::invalid_remap_names());
-        }
-        if let Some(target) = &spec.target_data_type {
-            validate_target(target).map_err(|error| {
-                column_error(
-                    ErrorKind::InvalidInput,
-                    "configure_schema_remap",
-                    &spec.source_name,
-                    error,
-                )
-            })?;
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_remap_sources(
-    specs: &[crate::FieldRemap],
-    schema: &arrow_schema::Schema,
-) -> Result<Vec<usize>> {
-    let fields = FieldNameIndex::new(schema.fields());
-    specs
-        .iter()
-        .map(|spec| {
-            let index = fields
-                .index_of(&spec.source_name)
-                .map_err(crate::error::remap_source)?;
-            if let Some(target) = &spec.target_data_type
-                && schema.field(index).data_type() != target
-            {
-                validate_cast(schema.field(index), target)?;
-            }
-            Ok(index)
-        })
-        .collect()
-}
-
-pub(crate) fn validate_remap_output(fields: &[std::sync::Arc<arrow_schema::Field>]) -> Result<()> {
-    let mut names = HashSet::new();
-    if fields.iter().any(|field| !names.insert(field.name())) {
-        return Err(crate::error::remap_output_collision());
-    }
-    Ok(())
-}
-
 pub(crate) fn validate_partition_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,
 ) -> Result<()> {
     if actual != expected {
         return Err(crate::error::schema_error());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Result<()> {
+    use crate::ColumnEvolution;
+    let mut additions = HashSet::new();
+    let mut removals = HashSet::new();
+    let mut renames = HashSet::new();
+    let mut targets = HashSet::new();
+    let mut casts = HashSet::new();
+    for change in changes {
+        let (name, unique) = match change {
+            ColumnEvolution::AddColumn { name, .. } => (name, additions.insert(name)),
+            ColumnEvolution::RemoveColumn { name } => (name, removals.insert(name)),
+            ColumnEvolution::RenameColumn { name, target_name } => {
+                if target_name.is_empty() || !targets.insert(target_name) {
+                    return Err(crate::error::invalid_evolution(
+                        "rename targets must be nonempty and unique",
+                    ));
+                }
+                (name, renames.insert(name))
+            }
+            ColumnEvolution::ChangeDataType { name, data_type } => {
+                validate_target(data_type).map_err(|error| {
+                    column_error(
+                        ErrorKind::InvalidInput,
+                        "configure_schema_evolution",
+                        name,
+                        error,
+                    )
+                })?;
+                (name, casts.insert(name))
+            }
+        };
+        if name.is_empty() || !unique {
+            return Err(crate::error::invalid_evolution(
+                "column names must be nonempty and each operation may occur only once per column",
+            ));
+        }
+    }
+    if removals
+        .iter()
+        .any(|name| renames.contains(name) || casts.contains(name))
+    {
+        return Err(crate::error::invalid_evolution(
+            "a removed column cannot also be renamed or cast",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_evolution_output(fields: &[std::sync::Arc<Field>]) -> Result<()> {
+    let mut names = HashSet::new();
+    if fields.iter().any(|field| !names.insert(field.name())) {
+        return Err(crate::error::evolution_output_collision());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_evolution_batch_schema(
+    actual: &arrow_schema::SchemaRef,
+    expected: &arrow_schema::SchemaRef,
+) -> Result<()> {
+    if actual != expected {
+        return Err(crate::error::evolution_schema_mismatch());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_added_column(
+    name: &str,
+    array: &dyn arrow_array::Array,
+    expected: &DataType,
+    rows: usize,
+) -> Result<()> {
+    if array.data_type() != expected {
+        return Err(crate::error::invalid_added_column(
+            name,
+            format!("expected type {expected}, got {}", array.data_type()),
+        ));
+    }
+    if array.len() != rows {
+        return Err(crate::error::invalid_added_column(
+            name,
+            format!("expected {rows} rows, got {}", array.len()),
+        ));
     }
     Ok(())
 }

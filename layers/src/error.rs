@@ -112,31 +112,6 @@ pub(crate) fn generated_schema_mismatch() -> Error {
     )
 }
 
-pub(crate) fn invalid_remap_names() -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "configure_schema_remap",
-        "source names and target names must each be nonempty and unique",
-    )
-}
-
-pub(crate) fn remap_source(error: impl std::error::Error + Send + Sync + 'static) -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "plan_schema_remap",
-        error.to_string(),
-    )
-    .with_source(error)
-}
-
-pub(crate) fn remap_output_collision() -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "plan_schema_remap",
-        "remapped names collide with other output fields",
-    )
-}
-
 pub(crate) fn sample_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
     Error::new(ErrorKind::Decode, "sample", error.to_string()).with_source(error)
 }
@@ -153,10 +128,6 @@ pub(crate) fn cast_error(
         format!("column {:?}: {} to {target}: {error}", name, from,),
     )
     .with_source(error)
-}
-
-pub(crate) fn cast_batch(error: impl std::error::Error + Send + Sync + 'static) -> Error {
-    Error::new(ErrorKind::Decode, "cast", error.to_string()).with_source(error)
 }
 
 pub(crate) fn unsafe_decimal_rescale(
@@ -178,4 +149,52 @@ pub(crate) fn volatile_expression() -> datafusion::error::DataFusionError {
 
 pub(crate) fn non_row_expression() -> datafusion::error::DataFusionError {
     datafusion::common::plan_datafusion_err!("only row-level expressions are supported")
+}
+
+pub(crate) fn invalid_evolution(message: &str) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "configure_schema_evolution",
+        message,
+    )
+}
+pub(crate) fn evolution_source(error: arrow_schema::ArrowError) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "plan_schema_evolution",
+        error.to_string(),
+    )
+    .with_source(error)
+}
+pub(crate) fn evolution_output_collision() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "plan_schema_evolution",
+        "evolved column names collide",
+    )
+}
+pub(crate) fn evolution_schema_mismatch() -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "evolve_schema",
+        "source batch schema differs from the opened schema",
+    )
+}
+pub(crate) fn invalid_added_column(name: &str, message: impl std::fmt::Display) -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "evolve_schema",
+        format!("added column {name:?}: {message}"),
+    )
+}
+pub(crate) fn evolution_functor(name: &str, source: Error) -> Error {
+    Error::new(
+        source.kind(),
+        "evolve_schema",
+        format!("added column {name:?}: {source}"),
+    )
+    .with_source(source)
+}
+pub(crate) fn evolution_batch(source: ArrowError) -> Error {
+    Error::new(ErrorKind::Decode, "evolve_schema", source.to_string()).with_source(source)
 }

@@ -1,11 +1,11 @@
-//! Rename and cast columns, then project using the output names.
-//! Run: cargo run --locked --example schema_remap --features format-json
+//! Add, remove, rename, and cast columns, then project using output names.
+//! Run: cargo run --locked --example schema_evolution --features format-json
 
 use arrow_schema::DataType;
 use open_arrow_access::{
     Accessor, AccessorExt, ReadOptions, ReadRequest,
     file_format::json::JsonAccessor,
-    layers::{FieldRemap, SchemaRemapLayer},
+    layers::{ColumnEvolution, SchemaEvolutionLayer},
     storage::{OpenDalAccessor, opendal},
 };
 
@@ -18,21 +18,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let source = JsonAccessor::infer(OpenDalAccessor::new(operator));
     // Layers are always available. Enabling format-json only enables the decoder.
-    let records = source.layer(SchemaRemapLayer::try_new(vec![
-        FieldRemap {
-            source_name: "id".into(),
-            target_name: Some("record_id".into()),
-            target_data_type: Some(DataType::Int32),
-        },
-        FieldRemap {
-            source_name: "title".into(),
-            target_name: Some("text".into()),
-            target_data_type: None, // Rename only; preserve the source type.
-        },
+    let records = source.layer(SchemaEvolutionLayer::try_new(vec![
+        ColumnEvolution::rename_column("id", "record_id"),
+        ColumnEvolution::change_data_type("id", DataType::Int32),
+        ColumnEvolution::add_column("batch_rows", DataType::UInt64, |batch| {
+            Ok(std::sync::Arc::new(arrow_array::UInt64Array::from(
+                vec![batch.num_rows() as u64; batch.num_rows()],
+            )))
+        }),
+        ColumnEvolution::remove_column("title"),
     ])?);
-    // Unlisted fields are preserved. Projection uses remapped names and order.
+    // Unlisted fields are preserved. Projection uses evolved names and order.
     let request = ReadRequest::new("projection.jsonl").with_options(ReadOptions {
-        projection: Some(vec!["text".into(), "record_id".into()]),
+        projection: Some(vec!["batch_rows".into(), "record_id".into()]),
         ..Default::default()
     });
     let mut reader = records.open(request).await?;

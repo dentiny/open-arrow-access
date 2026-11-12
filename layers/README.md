@@ -9,7 +9,7 @@ Byte decompression layers use the same contract but require [codec features](../
 
 | Layer | Use it for | Key behavior |
 | --- | --- | --- |
-| `SchemaRemapLayer` | Rename or cast top-level columns | Plans a fixed output schema; invalid values terminate reading |
+| `SchemaEvolutionLayer` | Add, remove, rename, or cast top-level columns | Fixed output schema; added columns use batch functors |
 | `GeneratedColumnsLayer` | Append row-level SQL expressions | Declarations see earlier generated fields; uses DataFusion |
 | `SamplingLayer` | Seeded Bernoulli row sampling | Approximate count; preserves selected row order |
 | `ParallelReadLayer` | Execute independent scan partitions concurrently | Requires `ScanPlanner`; preserves output order by default |
@@ -71,27 +71,55 @@ over one merged scan. They do not implement `ScanPlanner`; putting the parallel
 layer outside either is unsupported. Generated columns currently read all source
 columns and evaluate all declarations before final projection.
 
-## Rename or cast columns
+## Evolve a schema
 
-Add a matching `arrow-schema = "59.3.0"` dependency to name Arrow types directly.
-For an existing record accessor `source`, this configuration renames `count` and
-casts it to `Int64`:
+Add matching `arrow-array = "59.3.0"` and `arrow-schema = "59.3.0"`
+dependencies to work with Arrow values directly. For a record accessor `source`
+with `count` and `obsolete` columns:
 
 ```rust,ignore
+use std::sync::Arc;
+use arrow_array::StringArray;
 use arrow_schema::DataType;
-use open_arrow_access::{AccessorExt, layers::{FieldRemap, SchemaRemapLayer}};
+use open_arrow_access::{AccessorExt, layers::{ColumnEvolution, SchemaEvolutionLayer}};
 
-let records = source.layer(SchemaRemapLayer::try_new(vec![FieldRemap {
-    source_name: "count".into(),
-    target_name: Some("row_count".into()),
-    target_data_type: Some(DataType::Int64),
-}])?);
+let records = source.layer(SchemaEvolutionLayer::try_new(vec![
+    ColumnEvolution::add_column("source", DataType::Utf8, |batch| {
+        Ok(Arc::new(StringArray::from(vec!["import"; batch.num_rows()])))
+    }),
+    ColumnEvolution::remove_column("obsolete"),
+    ColumnEvolution::rename_column("count", "row_count"),
+    ColumnEvolution::change_data_type("count", DataType::Int64),
+])?);
 ```
 
-Unchanged arrays share buffers. Unsupported casts fail at open; invalid values
-and overflows fail during reading. Arrow casts can lose precision. Casts do not
-implicitly reconcile schemas across files. See [generated columns](../docs/generated-columns.md)
-and [parallel reading](../docs/parallel-read.md) for detailed constraints.
+Names in removal, rename, and type-change declarations refer to the original
+source schema. Changes are declarative: a column can be renamed and cast in the
+same layer, and simultaneous name swaps are supported. Removing a column while
+also renaming or casting it is rejected. Final output names must be unique;
+a new column may reuse a source name freed by removal or renaming.
+
+Unchanged columns keep their source order and share array buffers. New columns
+are appended in declaration order and are nullable. The batch functor is a
+`Fn(&RecordBatch) -> Result<ArrayRef> + Send + Sync + 'static`; it sees the
+**original source batch**, including removed columns and original names/types.
+It cannot reference other added columns. Its array must have the declared type
+and exactly the input row count, including for empty batches. Schema and field
+metadata are retained for existing columns.
+
+Projection uses the evolved output names and order. Functors and casts run even
+when their columns are omitted by the final projection. An arbitrary functor
+needs every source column, so additions read the full source schema. Removing
+all columns and empty projections retain row counts. Callback errors and invalid
+arrays terminate the reader while retaining error context.
+
+Unsupported casts fail at open; invalid values and overflows fail during reading.
+Arrow casts can lose precision and do not implicitly reconcile schemas across
+files. This API replaces `SchemaRemapLayer`/`FieldRemap`; use separate rename and
+type-change declarations instead of a combined remap. See the runnable
+[schema evolution example](../examples/schema_evolution.rs),
+[generated columns](../docs/generated-columns.md), and
+[parallel reading](../docs/parallel-read.md).
 
 ## Add a layer
 

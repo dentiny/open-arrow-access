@@ -15,7 +15,7 @@ use open_arrow_access_core::{
     RecordCapability, RecordMetadata, RecordReader, Result, async_trait, record_stream_reader,
 };
 use open_arrow_access_layers::{
-    FieldRemap, GeneratedColumnSpec, GeneratedColumnsLayer, SchemaRemapLayer,
+    ColumnEvolution, GeneratedColumnSpec, GeneratedColumnsLayer, SchemaEvolutionLayer,
 };
 use open_arrow_access_test_support::reader::assert_finished;
 
@@ -270,14 +270,13 @@ async fn invalid_expressions_fail_at_open_even_when_hidden() {
 }
 
 #[tokio::test]
-async fn composes_after_schema_remap() {
+async fn composes_after_schema_evolution() {
     let mut reader = MemoryAccessor::new(vec![input()])
         .layer(
-            SchemaRemapLayer::try_new(vec![FieldRemap {
-                source_name: "Count".into(),
-                target_name: None,
-                target_data_type: Some(DataType::Float64),
-            }])
+            SchemaEvolutionLayer::try_new(vec![ColumnEvolution::change_data_type(
+                "Count",
+                DataType::Float64,
+            )])
             .unwrap(),
         )
         .layer(layer(&[("x", "\"Count\" * 2")]))
