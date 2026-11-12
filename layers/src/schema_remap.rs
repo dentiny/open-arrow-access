@@ -133,7 +133,7 @@ where
             source: inner.metadata().source.clone(),
         };
         let capability = inner.capability();
-        let plan = RemapPlan {
+        let plan = SchemaRemapPlan {
             schema: Arc::clone(&metadata.schema),
             casts,
             projection,
@@ -151,13 +151,13 @@ where
     }
 }
 
-struct RemapPlan {
+struct SchemaRemapPlan {
     schema: Arc<Schema>,
     casts: Vec<(usize, DataType)>,
     projection: Option<Vec<usize>>,
 }
 
-impl RemapPlan {
+impl SchemaRemapPlan {
     fn convert(&self, batch: RecordBatch) -> Result<RecordBatch> {
         let mut columns = batch.columns().to_vec();
         let options = CastOptions {
