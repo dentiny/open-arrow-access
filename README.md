@@ -114,8 +114,10 @@ Enabling a feature compiles an API; construct the accessor/layer to use it.
 | Fs, S3, or another storage backend | Enable `services-fs`, `services-s3`, etc. on your **OpenDAL** dependency |
 
 Always-available layers include schema remapping, generated columns, sampling,
-parallel reads, and unordered emission. The baseline includes service HTTP/JSON
-utilities and DataFusion-backed generated columns, even with defaults disabled.
+parallel reads, and unordered emission. See the
+[runnable layer examples](layers/README.md#run-the-examples) for schema remapping,
+SQL generated columns, and parallel sampling. The baseline includes service
+HTTP/JSON utilities and DataFusion-backed generated columns, even with defaults disabled.
 
 Facade and component-crate feature names differ: `format-json` becomes `json` on
 `open-arrow-access-file-format`, `decompression-gzip` becomes `gzip` on

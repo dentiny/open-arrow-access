@@ -149,6 +149,7 @@ open-arrow-access-service.workspace = true
 open-arrow-access-storage.workspace = true
 
 [dev-dependencies]
+arrow-schema.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
 tokio.workspace = true
 
@@ -213,3 +214,15 @@ required-features = ["service-arxiv"]
 [[example]]
 name = "read_internet_archive"
 required-features = ["service-internet-archive"]
+
+[[example]]
+name = "schema_remap"
+required-features = ["format-json"]
+
+[[example]]
+name = "generated_columns"
+required-features = ["format-json"]
+
+[[example]]
+name = "parallel_sampling"
+required-features = ["format-json"]

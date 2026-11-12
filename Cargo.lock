@@ -2782,6 +2782,7 @@ checksum = "269bca4c2591a28585d6bf10d9ed0332b7d76900a1b02bec41bdc3a2cdcda107"
 name = "open-arrow-access"
 version = "0.1.0"
 dependencies = [
+ "arrow-schema",
  "open-arrow-access-core",
  "open-arrow-access-dataset",
  "open-arrow-access-decompression",

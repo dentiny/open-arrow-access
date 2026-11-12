@@ -18,6 +18,41 @@ Byte decompression layers use the same contract but require [codec features](../
 Enabling Cargo features does not install a layer. Construct it and call `.layer`.
 OpenDAL layers belong on the OpenDAL operator and configure a separate I/O boundary.
 
+## Run the examples
+
+No `layers` Cargo feature is needed. Import `AccessorExt` and attach a layer with
+`source.layer(...)`; constructing a layer alone does not change the source.
+The examples below use the facade API, local filesystem storage, and checked-in
+JSON fixtures. From the repository root:
+
+```sh
+cargo run --locked --example schema_remap --features format-json
+cargo run --locked --example generated_columns --features format-json
+cargo run --locked --example parallel_sampling --features format-json
+```
+
+| Example | What to look for |
+| --- | --- |
+| [Schema remapping](../examples/schema_remap.rs) | Rename `id` → `record_id`, cast `Int64` → `Int32`, rename `title` → `text`, and project in output-name order. The two output rows have `text` values `"one"` and null, and `record_id` values 1 and 2. |
+| [Generated columns](../examples/generated_columns.rs) | Compute `next_id = id + 1`, then `doubled_next_id = next_id * 2`; project only generated fields. The two output rows are `(2, 4)` and `(3, 6)`. |
+| [Parallel reads and sampling](../examples/parallel_sampling.rs) | Decode multiple partitions with four workers, then retain each row with probability 0.25 and seed 42. Selected IDs stay in input order; the count is approximate. |
+
+These examples need `format-json` for their input decoder and use the root
+crate's development dependencies for Tokio and the OpenDAL filesystem backend.
+For your own application, enable those dependencies explicitly:
+
+```toml
+[dependencies]
+open-arrow-access = { git = "https://github.com/dentiny/open-arrow-access", default-features = false, features = ["format-json"] }
+arrow-schema = "59.3.0" # Only needed when naming types such as DataType::Int32.
+opendal = { version = "=0.59.2", default-features = false, features = ["services-fs"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+Pin the Git dependency's `rev` to a tested commit for reproducible builds.
+Replace the example's fixture root and filename with your own JSON input; schema
+remapping expects `id` and `title`, and the other examples expect `id`.
+
 ## Compose layers
 
 ```mermaid
