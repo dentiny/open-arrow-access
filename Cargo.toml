@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Composable read access to Apache Arrow streams"
+exclude = [".github/**", "testdata/**"]
 repository.workspace = true
 
 [workspace]
@@ -226,3 +227,6 @@ required-features = ["format-json"]
 [[example]]
 name = "parallel_sampling"
 required-features = ["format-json"]
+
+[package.metadata.docs.rs]
+all-features = true

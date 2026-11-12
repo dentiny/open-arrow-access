@@ -212,3 +212,6 @@ required-features = ["bhl"]
 [[test]]
 name = "regulations"
 required-features = ["regulations"]
+
+[package.metadata.docs.rs]
+all-features = true

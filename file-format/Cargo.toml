@@ -80,3 +80,6 @@ required-features = ["json"]
 [[test]]
 name = "parquet_compression"
 required-features = ["parquet"]
+
+[package.metadata.docs.rs]
+all-features = true

@@ -53,3 +53,6 @@ required-features = ["zip"]
 [[test]]
 name = "tar"
 required-features = ["tar"]
+
+[package.metadata.docs.rs]
+all-features = true

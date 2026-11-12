@@ -1,0 +1,132 @@
+name: Release Rust Packages
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+  pull_request:
+    paths:
+      - '.github/scripts/release_rust/**'
+      - '.github/workflows/release_rust.yml'
+      - '.github/workflows/bootstrap_rust_crates.yml'
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - '**/*.rs'
+      - 'rust-toolchain.toml'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable release tag to publish or resume, e.g. v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-registry-publication
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.plan.outputs.packages }}
+      commit: ${{ steps.plan.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: automation
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Test release helpers
+        run: python3 -m unittest discover -s automation/.github/scripts/release_rust -p 'test_*.py'
+      - name: Validate source and plan dependency order
+        id: plan
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+        run: |
+          if [ "$IS_PR" = true ]; then
+            python3 automation/.github/scripts/release_rust/plan.py --project-dir source --github-output
+          else
+            git -C source rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}"
+            test "$(git -C source rev-parse HEAD)" = "$(git -C source rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+            python3 automation/.github/scripts/release_rust/plan.py --project-dir source --tag "$RELEASE_TAG" --github-output
+          fi
+          echo "commit=$(git -C source rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  verify:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          path: source
+          persist-credentials: false
+      - name: Install pinned toolchain
+        run: rustup show
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Minimal-feature build
+        run: cargo check --workspace --no-default-features --locked
+      - name: All-feature tests
+        run: cargo test --workspace --all-features --locked
+      - name: Independently verify release packages
+        run: cargo publish --workspace --exclude open-arrow-access-test-support --dry-run --all-features --locked
+
+  publish:
+    if: ${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') && !contains(inputs.tag || github.ref_name, '-') }}
+    needs: [plan, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: automation
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install pinned source toolchain
+        working-directory: source
+        run: rustup show
+      - name: Verify Trusted Publishing identity without uploading
+        env:
+          PYTHONPATH: automation/.github/scripts/release_rust
+        run: |
+          python3 - <<'PYTHON'
+          from trusted_publishing import temporary_trusted_publishing_token
+          with temporary_trusted_publishing_token():
+              print("Trusted Publishing identity verified; temporary credential will be revoked")
+          PYTHON
+      - name: Publish or resume with short-lived OIDC credentials
+        env:
+          PACKAGES: ${{ needs.plan.outputs.packages }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: python3 automation/.github/scripts/release_rust/publish.py --project-dir source --tag "$RELEASE_TAG"

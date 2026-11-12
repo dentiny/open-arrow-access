@@ -1,0 +1,45 @@
+name: Bootstrap Rust Crates
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-registry-publication
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Require main
+        run: test "$GITHUB_REF" = refs/heads/main
+      - name: Discover new names
+        run: python3 .github/scripts/release_rust/bootstrap.py discover
+
+  bootstrap:
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    environment: rust-bootstrap
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Require main
+        run: test "$GITHUB_REF" = refs/heads/main
+      - name: Audit and reserve new crate names
+        env:
+          CARGO_REGISTRY_BOOTSTRAP_TOKEN: ${{ secrets.CARGO_REGISTRY_BOOTSTRAP_TOKEN }}
+        run: python3 .github/scripts/release_rust/bootstrap.py apply

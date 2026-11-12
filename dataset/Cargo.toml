@@ -46,3 +46,6 @@ required-features = ["directory"]
 [[test]]
 name = "union_by_name"
 required-features = ["directory"]
+
+[package.metadata.docs.rs]
+all-features = true
