@@ -1,4 +1,4 @@
-//! Optional dynamic source/format resolution over the typed access APIs.
+//! Dynamic source/format resolution over the typed access APIs.
 //!
 //! Backends, formats, and providers are enabled independently. Applications
 //! register handlers to select identity, pagination, and record representation.

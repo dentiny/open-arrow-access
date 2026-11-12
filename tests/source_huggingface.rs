@@ -1,4 +1,4 @@
-#![cfg(all(feature = "source", feature = "service-huggingface"))]
+#![cfg(feature = "service-huggingface")]
 use http::StatusCode;
 use open_arrow_access::{
     Bytes,

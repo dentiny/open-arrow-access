@@ -38,5 +38,4 @@ pub use open_arrow_access_storage as storage;
 pub use open_arrow_access_layers as layers;
 
 /// URI-based source and format resolution with extensible handlers.
-#[cfg(feature = "source")]
 pub mod source;

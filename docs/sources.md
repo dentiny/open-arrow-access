@@ -1,16 +1,16 @@
 # Unified source resolution
 
-Enable facade feature `source` to use `source::{SourceRegistry, SourceRequest}`.
+`source::{SourceRegistry, SourceRequest}` is always available on the facade.
 This is an application-facing adapter over the existing typed storage, decoder,
 and provider APIs. It does not change those contracts.
 
 ```toml
 [dependencies]
-open-arrow-access = { path = "/path/to/open-arrow-access", features = ["source", "format-json", "service-huggingface"] }
+open-arrow-access = { path = "/path/to/open-arrow-access", features = ["format-json", "service-huggingface"] }
 opendal = { version = "=0.59.2", default-features = false, features = ["services-fs", "services-http", "http-transport-reqwest"] }
 ```
 
-The `source` feature requires a version containing this API; it is not available
+The registry requires a version containing this API; it is not available
 in the published 0.1.0 release yet. Backend features remain on the application's
 OpenDAL dependency, as with the typed accessors.
 

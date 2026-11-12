@@ -1,4 +1,3 @@
-#![cfg(feature = "source")]
 use open_arrow_access::{
     Bytes, ErrorKind, ObjectRef, OrderRequirement, RecordBatch, RecordMetadata, RecordReader,
     Result, Schema, StreamReader, async_trait, bytes_reader,
