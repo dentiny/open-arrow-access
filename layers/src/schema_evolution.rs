@@ -29,7 +29,7 @@ pub enum ColumnEvolution {
         name: String,
     },
     RenameColumn {
-        name: String,
+        source_name: String,
         target_name: String,
     },
     ChangeDataType {
@@ -43,7 +43,9 @@ impl ColumnEvolution {
         match self {
             Self::AddColumn { name, .. }
             | Self::RemoveColumn { name }
-            | Self::RenameColumn { name, .. }
+            | Self::RenameColumn {
+                source_name: name, ..
+            }
             | Self::ChangeDataType { name, .. } => name,
         }
     }
@@ -66,9 +68,9 @@ impl ColumnEvolution {
         Self::RemoveColumn { name: name.into() }
     }
 
-    pub fn rename_column(name: impl Into<String>, target_name: impl Into<String>) -> Self {
+    pub fn rename_column(source_name: impl Into<String>, target_name: impl Into<String>) -> Self {
         Self::RenameColumn {
-            name: name.into(),
+            source_name: source_name.into(),
             target_name: target_name.into(),
         }
     }
@@ -83,14 +85,16 @@ impl ColumnEvolution {
 
 impl fmt::Debug for ColumnEvolution {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (operation, name) = match self {
-            Self::AddColumn { name, .. } => ("AddColumn", name),
-            Self::RemoveColumn { name } => ("RemoveColumn", name),
-            Self::RenameColumn { name, .. } => ("RenameColumn", name),
-            Self::ChangeDataType { name, .. } => ("ChangeDataType", name),
+        let (operation, field, name) = match self {
+            Self::AddColumn { name, .. } => ("AddColumn", "name", name),
+            Self::RemoveColumn { name } => ("RemoveColumn", "name", name),
+            Self::RenameColumn {
+                source_name: name, ..
+            } => ("RenameColumn", "source_name", name),
+            Self::ChangeDataType { name, .. } => ("ChangeDataType", "name", name),
         };
         f.debug_struct(operation)
-            .field("name", name)
+            .field(field, name)
             .finish_non_exhaustive()
     }
 }

@@ -334,13 +334,16 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
         let (name, unique) = match change {
             ColumnEvolution::AddColumn { name, .. } => (name, additions.insert(name)),
             ColumnEvolution::RemoveColumn { name } => (name, removals.insert(name)),
-            ColumnEvolution::RenameColumn { name, target_name } => {
+            ColumnEvolution::RenameColumn {
+                source_name,
+                target_name,
+            } => {
                 if target_name.is_empty() || !targets.insert(target_name) {
                     return Err(crate::error::invalid_evolution(
                         "rename targets must be nonempty and unique",
                     ));
                 }
-                (name, renames.insert(name))
+                (source_name, renames.insert(source_name))
             }
             ColumnEvolution::ChangeDataType { name, data_type } => {
                 validate_target(data_type).map_err(|error| {
