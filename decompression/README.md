@@ -1,275 +1,148 @@
-# Streaming decompression
+# Decompression and archives
 
-Features are default-off. Apply a codec explicitly; file extensions do not
-select a decoder. Use streaming codecs for a decoded byte stream, or the
-[ZIP](#zip-entries) and [TAR](#tar-entries) APIs to select archive members.
+Compose byte decoding before your file format. Enable only the codecs/archive
+APIs you use. All outputs here are bytes; the next format determines Arrow rows.
 
-| Codec | Facade feature | Crate feature | Marker |
+## Enable a codec
+
+| Codec / archive | Facade feature | Component-crate feature | API |
 | --- | --- | --- | --- |
-| Gzip | `decompression-gzip` | `gzip` | `Gzip` |
-| Bzip2 | `decompression-bz2` | `bz2` | `Bzip2` |
-| LZ4 | `decompression-lz4` | `lz4` | `Lz4` |
-| Zstandard | `decompression-zstd` | `zstd` | `Zstd` |
+| Gzip | `decompression-gzip` | `gzip` | `DecompressionLayer::new(gzip::Gzip)` |
+| Bzip2 | `decompression-bz2` | `bz2` | `DecompressionLayer::new(bz2::Bzip2)` |
+| LZ4 frames | `decompression-lz4` | `lz4` | `DecompressionLayer::new(lz4::Lz4)` |
+| Zstandard frames | `decompression-zstd` | `zstd` | `DecompressionLayer::new(zstd::Zstd)` |
+| ZIP | `decompression-zip` | `zip` | `zip::ZipAccessor` / `zip::ZipArchive` |
+| TAR | `decompression-tar` | `tar` | `tar::TarStream` / `tar::TarArchive` |
+
+## Read gzip-compressed JSONL
+
+Enable `format-json` and `decompression-gzip`. Supply a configured OpenDAL
+operator, with its backend feature enabled on your OpenDAL dependency:
 
 ```rust,no_run
 use open_arrow_access::{
-    Accessor, AccessorExt, ByteReadRequest,
-    decompression::{DecompressionLayer, gzip::Gzip}, storage::{OpenDalAccessor, opendal},
+    Accessor, AccessorExt, ReadRequest,
+    decompression::{DecompressionLayer, gzip::Gzip},
+    file_format::json::JsonAccessor,
+    storage::{OpenDalAccessor, opendal},
 };
 
-async fn read() -> Result<(), Box<dyn std::error::Error>> {
-    let operator = opendal::Operator::new(
-        opendal::services::Fs::default().root("/absolute/data/root"),
-    )?;
-    let files = OpenDalAccessor::new(operator);
-    let gzip = files.layer(DecompressionLayer::new(Gzip));
-    let mut reader = gzip.open(ByteReadRequest::new("records.jsonl.gz")).await?;
-    while let Some(bytes) = reader.next().await? {
-        // Pass decoded bytes to a sequential consumer.
+async fn read(operator: opendal::Operator) -> open_arrow_access::Result<()> {
+    let bytes = OpenDalAccessor::new(operator).layer(DecompressionLayer::new(Gzip));
+    let records = JsonAccessor::infer(bytes);
+    let mut reader = records.open(ReadRequest::new("records.jsonl.gz")).await?;
+    while let Some(batch) = reader.next().await? {
+        println!("{} rows", batch.num_rows());
     }
     Ok(())
 }
 ```
 
-OpenDAL storage is always available; enable the upstream `services-fs` backend
-for this example. The layer implements the existing
-`Layer`, `Accessor` and `ByteReader` protocols, so custom storage and nested
-compression wrappers work without format-specific code. Requests and storage
-I/O options pass through unchanged. Discovery delegates to the underlying byte
-accessor and retains its locator semantics; discovery does not filter inputs.
+```mermaid
+flowchart LR
+    Storage["Storage: compressed bytes"] --> Layer["DecompressionLayer: sequential decoded bytes"]
+    Layer --> Format["JSON / CSV / XML / other sequential format"]
+    Format --> Arrow["Arrow batches"]
+```
 
-Gzip uses `async-compression`'s futures decoder with multi-member decoding,
-matching the decoder configuration in ml-infra's
-`lance/lance_migration/crates/inspector/src/compression.rs`. Concatenated members,
-including empty members, decode through EOF. Truncated headers/trailers, invalid
-checksums and non-gzip trailing bytes are errors. A valid empty gzip member is
-EOF; an empty compressed object is invalid. Validation finishes only when the
-consumer reads through EOF, so a later member/checksum can fail after earlier
-decoded bytes were delivered.
+The explicit layer uses the selected codec regardless of filename. For mixed
+plain/compressed objects, use `AutoDecompressionLayer::new()` instead. It routes
+by the final, case-sensitive suffix: `.gz` / `.tgz`, `.bz2`, `.lz4`, `.zst` /
+`.zstd`. Enable each corresponding codec feature; a recognized but disabled codec
+fails before opening storage. Other suffixes pass through. This removes one
+compression layer, without sniffing bytes, stripping URL query strings, guessing
+record formats, or opening archive members.
 
-Decoded `content_length` is unknown. The source locator and version still
-identify the original compressed object; the version is not a decoded-content
-hash. Accessor and reader range capabilities are cleared. Exact range methods
-return Unsupported without moving the sequential cursor. Listing remains an
-accessor-only capability. External `.parquet.gz` therefore needs a future
-explicit indexing/materialization strategy before the Parquet range reader can
-use it; this layer provides neither.
+Decoded readers are sequential and have unknown decoded length; exact ranges
+are unsupported. Source/version still identify the compressed object. Listing
+and byte request options pass through. Parquet/ZIP cannot directly consume this
+sequential representation: they require exact ranges and known length.
+Parquet page compression uses separate `format-parquet-*` features.
 
-Decoding is pull-based, with no background tasks or whole-input collection.
-Decoded output chunks are at most 64 KiB by default; `with_chunk_size` changes
-that limit independently of compressed I/O chunking. Codec state, upstream
-chunks and consumer-held outputs are additional memory. Upstream errors retain
-their category and original source; codec corruption uses Decode. Errors and
-EOF are terminal. Drop a decoder after cancelling an in-flight read.
+Decoding is pull-based. Default output chunks are at most 64 KiB; `with_chunk_size`
+changes that limit, not total memory. Read through EOF to validate checksums and
+trailing data; an error can occur after earlier chunks were delivered.
 
-`DecompressionFactory<C>` implements core `ReaderFactory` for byte requests and
-byte output. Both decompression and file accessors use the blanket
-`ReaderFactoryExt::open_reader` implementation to prepare configuration before
-opening storage, then create the output reader.
-The factory uses `read_chunks` for decoded output and `StreamReader` for metadata,
-sequential capabilities and terminal handling. Codec error mapping stays here;
-listing remains delegated by `DecompressionAccessor`.
+| Codec | Stream behavior |
+| --- | --- |
+| Gzip / bzip2 | Concatenated members, including empty members |
+| LZ4 | Standard, concatenated, and skippable frames; no raw/legacy blocks |
+| Zstandard | Standard, concatenated, and skippable frames; no custom dictionary configuration |
 
-To add a codec, implement `Codec` using an upstream streaming decoder in its
-own module and enable its dependency feature. `DecompressionLayer` and its
-accessor/factory adapters remain shared. The `CompressedInput`/`DecodedInput`
-aliases expose the futures I/O boundary without coupling a codec to storage,
-Arrow or a closed core compression enumeration.
+A valid empty member/frame yields no bytes; an empty compressed object is
+invalid. Corrupt/truncated streams terminate with decode errors. Upstream errors
+retain their category and source chain.
 
-## Bzip2 members
+<a id="zip-entries"></a>
 
-Bzip2 uses `async-compression`'s `BzDecoder` with multi-member decoding, matching
-ml-infra's existing compression adapter. Concatenated members, including empty
-members, are decoded in order. Invalid headers, truncated members, checksum
-failures and non-bzip2 trailing bytes produce terminal decode errors. Empty
-compressed input is invalid; a valid empty member yields EOF. As with gzip,
-checksum validation completes only when the consumer reads through EOF.
+## Select archive members
 
-Use `DecompressionLayer::new(Bzip2)` with the same byte-layer API. Bzip2 codec
-state includes a compression block, so bounded output chunks do not bound total
-memory or guarantee that compressed input consumption stops within one output
-chunk. The decoder is pull-based and does not collect whole objects or create
-background tasks.
+```mermaid
+flowchart TD
+    Input["Archive bytes"] --> ZIP["ZIP: ranges + known length"]
+    Input --> TAR["TAR: sequential or ranged"]
+    ZIP --> Directory["Inspect directory once; select entry index"]
+    TAR --> Stream["TarStream: physical entry order"]
+    TAR --> Ranged["TarArchive: inspect headers; select entry index"]
+    Directory --> Member["Selected member: sequential ByteReader"]
+    Stream --> Member
+    Ranged --> Member
+    Member --> Format["Explicit format decoder"]
+```
 
-## LZ4 frames
-
-`Lz4` uses `async-compression`'s futures decoder backed by liblz4. It supports
-standard LZ4 frames, concatenated frames, and skippable frames. Raw LZ4 blocks
-and legacy frames are rejected; there is no external-dictionary configuration.
-Checksums are validated when present. Truncated frames, corrupt checksums and
-non-frame trailing bytes are errors. An empty or skippable frame produces no
-bytes; an empty compressed object is invalid. Read through EOF to validate all
-frames. The shared layer's metadata, error and memory contracts above apply.
-
-Use `DecompressionLayer::new(Lz4)` in the example above. This follows the existing
-ml-infra approach of adapting upstream asynchronous compression decoders, adding
-LZ4 to the same generic wrapper rather than implementing another codec.
-
-## Zstandard frames
-
-For Zstandard, enable `decompression-zstd` and replace `Gzip` with `Zstd` in
-the example. The adapter uses `async-compression`'s futures `ZstdDecoder` with
-multi-frame decoding, as in ml-infra's compression helper. Standard frames,
-concatenated frames, empty frames and skippable frames are supported. Invalid
-checksums, truncated frames and trailing non-frame bytes are decode errors.
-An empty frame or a skippable-only input is valid EOF; an empty compressed object
-is invalid. Validation completes only when the consumer reads through EOF.
-Raw blocks, legacy format and custom dictionary/decoder-parameter configuration
-are outside this adapter. A stream requiring an unavailable dictionary fails
-with a decode error. Codec state, including its frame window, is additional to
-the emitted chunk limit.
-
-## ZIP entries
-
-Enable `decompression-zip` on the facade or `zip` on this crate for
-`ZipAccessor`. ZIP contains named entries, so select a central-directory index
-instead of concatenating files through `DecompressionLayer`.
+For ZIP, enable `decompression-zip`:
 
 ```rust,no_run
 use open_arrow_access::{
-    Accessor, ByteReadRequest, decompression::zip::ZipAccessor,
+    ByteReadRequest, decompression::zip::ZipAccessor,
     storage::{OpenDalAccessor, opendal},
 };
 
 async fn read(operator: opendal::Operator) -> open_arrow_access::Result<()> {
     let zip = ZipAccessor::new(OpenDalAccessor::new(operator), 0);
-    let request = ByteReadRequest::new("paper.meca.zip");
-    for entry in zip.entries(request.clone()).await? {
+    let archive = zip.archive(ByteReadRequest::new("papers.zip")).await?;
+    for entry in archive.entries() {
         println!("{}: {:?}", entry.index, entry.name);
     }
-    let mut reader = zip.open(request).await?;
-    while let Some(bytes) = reader.next().await? {
-        // Original decompressed bytes of entry 0, including binary PDF content.
+    let mut member = archive.open_entry(0, std::num::NonZeroUsize::new(65536).unwrap()).await?;
+    while let Some(bytes) = member.next().await? {
+        println!("{} member bytes", bytes.len());
     }
     Ok(())
 }
 ```
 
-`entries` returns the central directory in order, retaining raw filename bytes,
-duplicate names, directories, and compressed/uncompressed lengths. Select by
-index to distinguish duplicate names. Names are data; no filesystem extraction,
-path normalization, symlink following, or recursive archive expansion occurs.
-The archive's storage identity must remain stable between inspection and open.
+A ZIP session caches the directory and supports independently owned entry
+readers. Select by index because names may repeat. Stored/Deflate entries,
+ZIP64, and data descriptors are supported; encrypted/split archives and other
+codecs are unsupported. Default `ZipLimits` cap compressed and decoded entry size
+at 1 GiB each. CRC/decoded-length checks finish at EOF.
 
-Stored and Deflate entries, ZIP64, and data descriptors are supported through
-the published `async_zip` parser. Encrypted entries, split archives, and other
-compression methods are unsupported. Input requires exact ranges and a known
-length, including for Stored entries. Sequential-only sources and an outer
-gzip layer need explicit materialization before this accessor can read them.
-
-The directory is read at inspection/open time; entry decompression is pulled
-on demand. Each compressed range fetch is at most 64 KiB; decoded output chunks
-are at most 64 KiB by default (`with_chunk_size` changes the latter). Only ZIP
-metadata, decoder state and read-ahead are retained, without collecting the
-archive or whole entry. No background tasks are started.
-
-`ZipLimits` defaults to 1 GiB each for compressed/decoded entry size.
-`with_limits` overrides that value. The parser also checks actual decoded length against the limit.
-CRC and declared decoded length are validated when the entry reaches EOF;
-earlier chunks may already have been emitted. Read through EOF for validation.
-Errors and EOF are terminal and upstream error categories are preserved.
-
-The output implements `ByteReader` and `ZipAccessor` implements `ByteAccessor`,
-so a selected entry composes with `JsonAccessor`, `XmlAccessor`, or other
-sequential consumers. Output ranges and prefix listing are unsupported.
-`ByteMetadata.content_length` is the declared decoded entry size; source and
-version identify the archive. Storage requests and byte options pass through
-unchanged. The selected index belongs to the accessor, never to a synthetic
-storage path.
-
-Run the local example to inspect a ZIP and read one entry:
-
-```sh
-cargo run --example read_zip --features decompression-zip -- testdata/zip mixed.zip 1
-```
-
-## Decoder output adapter
-
-`decoded_reader(decoder, metadata, chunk_size, operation, codec_name)` wraps any
-owned futures AsyncRead decoder in the standard sequential ByteReader contract.
-It shares chunking, source-error preservation and terminal handling between
-stream codecs and selected archive entries. Callers supply decoded-coordinate
-metadata and codec-specific configuration; the helper performs no eager I/O.
-
-## Reusing a ZIP directory
-
-`ZipAccessor::archive(request).await` opens one `ZipArchive` session. Its
-`entries()` borrows the cached directory, and `open_entry(index, chunk_size)`
-returns an independently owned reader over the same opened source. Cloning a
-session shares metadata and the source without reparsing the directory. Readers
-can be interleaved and outlive the session. The direct entry futures are owned
-and Send; existing source-version guarantees are retained.
-
-For an already opened ByteReader, use `ZipArchive::open(input, limits).await`.
-Existing `ZipAccessor::entries` and `open` convenience methods remain available;
-use a session when reading multiple entries to avoid repeated storage opens and
-directory parsing. The `read_zip` example demonstrates this session path.
-
-## TAR entries
-
-Enable `decompression-tar` for two access patterns over regular GNU/USTAR files
-and directories. Links, sparse files, and extension headers are unsupported.
-Entry names remain raw metadata; neither API extracts paths to the filesystem.
-
-| API | Input | Use when |
+| TAR API | Input | When to use |
 | --- | --- | --- |
-| `TarStream::new(input, limits)` | Any sequential `ByteReader` | Reading an archive once in physical entry order, including after gzip for `.tar.gz` |
-| `TarArchive::open(input, limits).await` | Exact ranges and known length | Inspecting headers once and opening selected entries independently |
+| `TarStream::new(input, limits)` | Sequential bytes, including gzip-decoded `.tar.gz` | One physical-order scan; consume/drop the current body before advancing |
+| `TarArchive::open(input, limits).await` | Exact ranges and known length | Inspect headers once and independently open selected entries |
 
-`TarStream::next_entry().await` returns a header and lazy body reader without
-building an upfront index. Consume or drop the active body before advancing;
-unread bytes from a dropped body are drained by the next call. If a body read is
-cancelled, drop that body reader. Header/skip progress is retained across
-cancellation of archive advancement.
+TAR supports regular GNU/USTAR files and directories; links, sparse files, and
+extension headers are unsupported. Default limits are 65,536 entries and 1 GiB
+per entry. Ranged inspection issues a header request per entry. Selected TAR
+and ZIP member readers remain sequential. Names are raw metadata; these APIs
+perform no filesystem extraction or recursive expansion.
 
-`TarArchive::entries()` borrows cached headers; `open_entry(index, chunk_size)`
-returns an owned sequential byte reader. Entry readers have independent cursors
-and can outlive the archive. Header inspection uses range requests rather than
-collecting entry bodies. The current implementation issues one header request
-per entry, so use `TarStream` for a sequential bulk scan.
-
-`TarLimits` defaults to 65,536 entries and 1 GiB per entry. Entry metadata retains
-the archive's source/version and declares the selected entry's byte length.
-Selected entry readers are sequential; they do not provide Parquet-compatible
-range access. No checksum metadata supplied by a provider is automatically
-verified by TAR reading.
-
-Run the [TAR example](../examples/read_tar.rs) against an uncompressed archive:
+Run local examples from the repository:
 
 ```sh
-cargo run --example read_tar --features decompression-tar -- /absolute/data/root archive.tar
+cargo run --locked --example read_zip --features decompression-zip -- testdata/zip mixed.zip 1
+cargo run --locked --example read_tar --features decompression-tar -- /absolute/data/root archive.tar
 ```
 
-For a compressed archive, open it through `DecompressionLayer::new(Gzip)` and
-pass the decoded byte reader to `TarStream`. Ranged `TarArchive` cannot consume
-that sequential decoded representation directly.
+Use `ReaderFactoryExt::open_input` to decode an already-open member. See
+[archive composition](../docs/usage.md#work-with-archives-and-other-providers).
 
-## Per-object automatic decompression
+## Add a codec
 
-Use `AutoDecompressionLayer` when one storage accessor supplies a mixture of
-plain and compressed objects. Each `open` selects a codec from the object's final,
-case-sensitive suffix: `.gz`/`.tgz`, `.bz2`, `.lz4`, or `.zst`/`.zstd`.
-`Compression::from_path` returns `Result<Compression>` without performing I/O;
-codec variants exist only when their corresponding features are enabled.
-Enable the corresponding codec Cargo features. A recognized suffix whose codec
-is disabled returns `Unsupported` before storage opens. Other suffixes pass through.
-
-```rust,ignore
-use open_arrow_access::{AccessorExt, decompression::AutoDecompressionLayer};
-let bytes = storage.layer(AutoDecompressionLayer::new());
-let records = JsonAccessor::infer(bytes);
-```
-
-The layer preserves listing, source identity, storage options, and error chains.
-Compressed readers use the existing codec implementations and expose sequential,
-unknown-length decoded bytes. Plain readers retain their original length and
-range access. Because an accessor can open either representation, its advertised
-range capability is conservatively false; inspect an opened reader for its exact
-capabilities. `with_chunk_size` limits decoded output chunks, not plain chunks.
-
-This is suffix routing, not magic-byte sniffing. Locators remain opaque (URL
-queries/fragments are not stripped), and the layer neither infers record formats
-nor selects archive members. `.tar.gz` produces TAR bytes for `TarStream`; ZIP/TAR
-selection uses the existing explicit archive APIs. It removes one compression
-layer. For extensionless objects or noncanonical names, keep using
-`DecompressionLayer::new(codec)` to select the codec explicitly.
+Implement `Codec` in a new module using an upstream futures `AsyncRead` decoder.
+Reuse `DecompressionLayer` and its factory; expose a component feature for the
+codec dependency and forward it as `decompression-<name>` on the facade. Validate
+fragmented input, concatenated streams, corruption, and source-error propagation
+with [shared test helpers](../test-support/README.md).

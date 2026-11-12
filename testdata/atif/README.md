@@ -1,30 +1,30 @@
 # ATIF fixtures
 
-Project-authored synthetic ATIF v1.8 trajectories, with Unicode text, a tool
-call and observation, and an unknown root field. No external dataset is used.
+Synthetic ATIF v1.8 trajectories with Unicode, tool calls/observations, and an
+unknown root field. Trajectory IDs are `first`, `second`, and `third`.
 
-- `trajectory.json`: one pretty-printed document.
-- `trajectories.jsonl`: three ordered documents, CRLF, blank lines, no final newline.
-- `trajectories.jsonl.gz`: gzip-compressed `trajectories.jsonl`, for independent
-  compressed-file parallel reads.
-- `repeated-trajectories.jsonl.gz`: gzip-compressed whitespace followed by two
-  copies of `trajectories.jsonl`, separated by blank lines. Tests parallel
-  framing, global record indices, raw JSON and projection across six records.
-  Both gzip fixtures are project-authored with a zero timestamp.
+| Input | Case |
+| --- | --- |
+| `trajectory.json` | One pretty-printed trajectory. |
+| `trajectories.jsonl` | Three ordered trajectories; CRLF, blank lines, no final newline. |
+| `trajectories.jsonl.gz` | Gzip version for independent compressed-file reads. |
+| `repeated-trajectories.jsonl.gz` | Whitespace and two copies of the JSONL fixture; six records for global indices, raw JSON, projection, and parallel framing. |
+| `bad_truncated.jsonl`, `bad_array.jsonl`, `bad_utf8.jsonl` | Valid first record, then `{`, `[]`, or invalid UTF-8 byte `ff`. |
+| `bad_missing_fields.jsonl`, `bad_version.jsonl` | Second record is `{}` or uses `ATIF-v9.0`. |
+| `bad_late_record.jsonl` | Valid first record followed by `{` and a newline; failure after an emitted batch. |
+| `empty.jsonl`, `whitespace.jsonl` | Zero bytes or space/tab/CR/LF/LF; valid empty JSONL, invalid single-document ATIF. |
 
-The fixture trajectory IDs are `first`, `second`, `third`.
+Invalid JSONL cases begin with the physical newlines removed from the valid
+trajectory, followed by an invalid second record. Both gzip fixtures were
+prepared with a zero timestamp; all inputs are project-authored.
 
-Invalid JSONL files start with `trajectory.json` with its physical newlines
-removed, then a newline and one invalid second record. They exercise discarding
-an incomplete batch while preserving the record-2 error context:
+## Use these inputs
 
-- `bad_truncated.jsonl`: second record is `{`, without a final newline.
-- `bad_array.jsonl`: second record is `[]`.
-- `bad_utf8.jsonl`: second record is the invalid UTF-8 byte `ff`.
-- `bad_missing_fields.jsonl`: second record is `{}`.
-- `bad_version.jsonl`: second record uses `ATIF-v9.0` instead of `ATIF-v1.8`.
-- `bad_late_record.jsonl`: valid first record, then `{` and a final newline;
-  exercises returning the first batch before a later failure.
-- `empty.jsonl`: zero bytes.
-- `whitespace.jsonl`: space, tab, CR, LF, LF. These last two are valid empty
-  JSONL streams but invalid single-document ATIF JSON.
+Facade feature: `format-atif`. Run the owning component tests from the repository root:
+
+```sh
+cargo test --locked -p open-arrow-access-file-format --no-default-features --features atif
+```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

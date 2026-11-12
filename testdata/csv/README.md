@@ -1,7 +1,7 @@
-# CSV test fixtures
+# CSV / TSV fixtures
 
-Small, checked-in files exercise the reader without downloading data during tests.
-All fixtures use an `id: Int64, title: Utf8` schema.
+Inputs use `id: Int64, title: Utf8`. They cover header policies, dialects,
+fragmentation, projections, and strict conversion failures.
 
 | File | Case |
 | --- | --- |
@@ -18,14 +18,13 @@ All fixtures use an `id: Int64, title: Utf8` schema.
 | `bad_utf8.csv` | Literal invalid UTF-8 byte `0xff` in the title. |
 | `bad_header.csv` | Header name does not match the schema. |
 
-Preserve the exact bytes, including line endings, missing final newlines, and
-invalid UTF-8. The local `.gitattributes` disables line-ending conversion.
+## Use these inputs
 
-`file-format/src/csv/tests.rs` loads these files into the shared memory accessor
-to control chunk sizes and inject I/O failures. Its filesystem composition tests
-use caller-configured filesystem OpenDAL operators to read the valid CSV and strict invalid
-files through the filesystem-to-decoder path.
+Facade feature: `format-csv`. Run the owning component tests from the repository root:
 
 ```sh
-cargo test --locked -p open-arrow-access-file-format --no-default-features --features csv csv::tests::
+cargo test --locked -p open-arrow-access-file-format --no-default-features --features csv
 ```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

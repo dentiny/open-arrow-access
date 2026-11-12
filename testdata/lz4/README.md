@@ -1,7 +1,7 @@
 # LZ4 fixtures
 
-Fixed streams read by `decompression/tests/lz4.rs`; tests do not encode frames,
-construct skippable frames, or mutate compressed data at runtime.
+Frame streams prepared with `lz4_flex` 0.13, block/content checksums, explicit
+skippable headers, and byte changes for malformed or unsupported cases.
 
 | File | Case / decoded bytes |
 | --- | --- |
@@ -20,6 +20,13 @@ construct skippable frames, or mutate compressed data at runtime.
 | `bad_legacy.lz4` | Legacy LZ4 stream, unsupported by the frame reader. |
 | `bad_truncated_skippable.lz4` | Truncated skippable-frame payload. |
 
-Prepared once using `lz4_flex` 0.13, with block/content checksums enabled, plus
-explicit headers and byte mutations for malformed/unsupported inputs.
-Preserve exact bytes; `.gitattributes` disables line-ending conversion.
+## Use these inputs
+
+Facade feature: `decompression-lz4`. Run the owning component tests from the repository root:
+
+```sh
+cargo test --locked -p open-arrow-access-decompression --no-default-features --features lz4
+```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

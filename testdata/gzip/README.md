@@ -1,8 +1,8 @@
 # Gzip fixtures
 
-Fixed gzip byte streams used by `decompression/tests/gzip.rs`. Files are read
-from disk during tests; compression and corruption happen only when preparing
-these checked-in fixtures.
+Member streams for streaming decompression and nested byte layers. Prepared
+with Python `gzip.compress(..., mtime=0)` and explicit byte changes for invalid
+cases. UTF-8 decoded text and member boundaries are part of the expectations.
 
 | File | Case / decoded bytes |
 | --- | --- |
@@ -19,7 +19,13 @@ these checked-in fixtures.
 | `bad_truncated_member.gz` | Valid member followed by a truncated second member. |
 | `bad_late_member.gz` | Member containing `ab`, followed by an invalid next member; tests lazy decoding. |
 
-Prepared once using Python's `gzip.compress(..., mtime=0)` and explicit byte
-mutations for malformed inputs. Preserve the exact bytes; `.gitattributes`
-disables line-ending conversion. Mock byte readers still fragment file contents
-and inject I/O failures so tests cover streaming and error propagation.
+## Use these inputs
+
+Facade feature: `decompression-gzip`. Run the owning component tests from the repository root:
+
+```sh
+cargo test --locked -p open-arrow-access-decompression --no-default-features --features gzip
+```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

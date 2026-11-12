@@ -1,7 +1,8 @@
 # Bzip2 fixtures
 
-Fixed streams read by `decompression/tests/bz2.rs`; tests do not compress,
-concatenate, truncate, or corrupt format input at runtime.
+Member streams for fragmented decoding, concatenation, corruption, and source
+error propagation. Prepared with Python `bz2.compress(..., compresslevel=1)`
+and deliberate byte changes for invalid cases.
 
 | File | Case / decoded bytes |
 | --- | --- |
@@ -17,7 +18,13 @@ concatenate, truncate, or corrupt format input at runtime.
 | `bad_trailing.bz2` | Payload member followed by invalid trailing bytes. |
 | `bad_truncated_member.bz2` | Payload member followed by a truncated second member. |
 
-Prepared once with Python's `bz2.compress(..., compresslevel=1)` and explicit
-byte mutations for malformed inputs. Preserve exact bytes; `.gitattributes`
-disables line-ending conversion. Memory accessors still exercise fragmented
-input and injected I/O errors while reading these files.
+## Use these inputs
+
+Facade feature: `decompression-bz2`. Run the owning component tests from the repository root:
+
+```sh
+cargo test --locked -p open-arrow-access-decompression --no-default-features --features bz2
+```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

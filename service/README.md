@@ -1,304 +1,159 @@
-# Dataset services
+# Services
 
-## Service and data
+Services add source-specific IDs, revisions, discovery, and metadata above the
+shared storage/format contracts. Start by choosing the output you need: provider
+metadata, original files, native records, or Arrow batches.
 
-This crate connects external data sources to Open Arrow Access. A provider can
-return discovery metadata, a named set of original files, archive members, or
-Arrow batches. The individual guide states exactly which representation it reads.
-All service guides live directly in this `service/` directory; `src/` contains
-implementation code.
+<a id="service-and-data"></a>
 
-### Directory layout
+## Choose a service
 
-```text
-service/
-  README.md                 Service catalogue, interaction model and setup
-  <provider>.md             Data, request/response and usage for one provider
-  response-schemas.md        Shared response families and schema references
-  src/
-    lib.rs                  Public modules and provider feature gates
-    <provider>/             Provider-specific requests, discovery and metadata mapping
-    common/                 Public Connection, ApiDocument and file-link helpers
-    http_client.rs          Shared HTTP requests over OpenDAL transport
-    http_body.rs            Shared response-body handling
-    resolved_files.rs       Metadata plus a lazy named-file accessor
-    oai/                    OAI-PMH protocol shared by several providers
-  tests/                    Provider and shared-contract tests
-```
+Enable the listed feature on `open-arrow-access`. On `open-arrow-access-service`
+directly, remove the `service-` prefix. Common Crawl shares `service-warc`.
 
-### Included services
+| Provider | Facade feature | Output / purpose | Guide |
+| --- | --- | --- | --- |
+| Hugging Face | `service-huggingface` | Dataset repository files and Parquet config/split exports | [Hugging Face](huggingface.md) |
+| Zenodo | `service-zenodo` | Attachments of a public published research record | [Zenodo](zenodo.md) |
+| Dataverse | `service-dataverse` | Original files of an explicit released research dataset version | [Dataverse](dataverse.md) |
+| Internet Archive | `service-internet-archive` | Public item file membership and original files | [Internet Archive](internet-archive.md) |
+| Figshare | `service-figshare` | Versioned research article files and collection pages | [Figshare](figshare.md) |
+| PMC | `service-pmc` | One article-version metadata JSON as one Arrow row | [Article metadata](pmc.md) |
+| PMC inventory | `service-pmc` | Manifest-selected inventory CSV shards as Arrow rows | [Inventory](pmc-inventory.md) |
+| arXiv bulk | `service-arxiv` | PDF/source TAR manifests and archive member bytes | [Bulk archives](arxiv.md) |
+| arXiv metadata | `service-arxiv` | Raw OAI-PMH article metadata XML pages | [Metadata](arxiv-metadata.md) |
+| bioRxiv / medRxiv | `service-biorxiv` | Dated preprint metadata pages and JATS XML links | [Preprints](biorxiv.md) |
+| MECA | `service-meca` | Scholarly ZIP package manifests and selected members | [MECA](meca.md) |
+| Semantic Scholar | `service-semantic-scholar` | Release-pinned bulk partitions and diff manifests | [Bulk datasets](semantic-scholar.md) |
+| Project Gutenberg | `service-gutenberg` | Per-book RDF metadata as one Arrow row | [Gutenberg](gutenberg.md) |
+| DOAB | `service-doab` | Open-access book metadata via OAI-PMH | [DOAB](doab.md) |
+| OAPEN | `service-oapen` | Book metadata via OAI-PMH and selected hosted book bytes | [OAPEN](oapen.md) |
+| HathiTrust | `service-hathifiles` | Full/update Hathifiles catalogue exports | [Hathifiles](hathifiles.md) |
+| OpenStax | `service-openstax` | Commit-pinned textbook source ZIP archives | [OpenStax](openstax.md) |
+| BHL | `service-bhl` | Biodiversity literature metadata, item links and OCR export files | [BHL](bhl.md) |
+| Common Crawl | `service-warc` | Crawl/segment WARC membership and separately composed record reads | [Common Crawl](commoncrawl.md) |
+| CourtListener | `service-courtlistener` | Dated bulk table exports as decompressed CSV bytes | [CourtListener](courtlistener.md) |
+| Federal Register | `service-federal-register` | Rule/notice metadata and advertised document representations | [Federal Register](federal-register.md) |
+| GovInfo | `service-govinfo` | Government bulk directories and package representations | [GovInfo](govinfo.md) |
+| Library of Congress | `service-library-of-congress` | Digital-collection metadata, resource files and OCR JSON | [Library of Congress](library-of-congress.md) |
+| USPTO | `service-uspto` | Patent/trademark bulk product pages and original files | [USPTO](uspto.md) |
+| Regulations.gov | `service-regulations` | Documents, comments, dockets and attachment representations | [Regulations.gov](regulations.md) |
 
-| Source | Data available through this library | Guide |
-| --- | --- | --- |
-| Hugging Face | Dataset repository files and Parquet config/split exports | [Hugging Face](huggingface.md) |
-| Zenodo | Attachments of a public published research record | [Zenodo](zenodo.md) |
-| Dataverse | Original files of an explicit released research dataset version | [Dataverse](dataverse.md) |
-| Internet Archive | Public item file membership and original files | [Internet Archive](internet-archive.md) |
-| Figshare | Versioned research article files and collection pages | [Figshare](figshare.md) |
-| PMC | One article-version metadata JSON as one Arrow row | [Article metadata](pmc.md) |
-| PMC inventory | Manifest-selected inventory CSV shards as Arrow rows | [Inventory](pmc-inventory.md) |
-| arXiv bulk | PDF/source TAR manifests and archive member bytes | [Bulk archives](arxiv.md) |
-| arXiv metadata | Raw OAI-PMH article metadata XML pages | [Metadata](arxiv-metadata.md) |
-| bioRxiv / medRxiv | Dated preprint metadata pages and JATS XML links | [Preprints](biorxiv.md) |
-| MECA | Scholarly ZIP package manifests and selected members | [MECA](meca.md) |
-| Semantic Scholar | Release-pinned bulk partitions and diff manifests | [Bulk datasets](semantic-scholar.md) |
-| Project Gutenberg | Per-book RDF metadata as one Arrow row | [Gutenberg](gutenberg.md) |
-| DOAB | Open-access book metadata via OAI-PMH | [DOAB](doab.md) |
-| OAPEN | Book metadata via OAI-PMH and selected hosted book bytes | [OAPEN](oapen.md) |
-| HathiTrust | Full/update Hathifiles catalogue exports | [Hathifiles](hathifiles.md) |
-| OpenStax | Commit-pinned textbook source ZIP archives | [OpenStax](openstax.md) |
-| BHL | Biodiversity literature metadata, item links and OCR export files | [BHL](bhl.md) |
-| Common Crawl | Crawl/segment WARC membership and separately composed record reads | [Common Crawl](commoncrawl.md) |
-| CourtListener | Dated bulk table exports as decompressed CSV bytes | [CourtListener](courtlistener.md) |
-| Federal Register | Rule/notice metadata and advertised document representations | [Federal Register](federal-register.md) |
-| GovInfo | Government bulk directories and package representations | [GovInfo](govinfo.md) |
-| Library of Congress | Digital-collection metadata, resource files and OCR JSON | [Library of Congress](library-of-congress.md) |
-| USPTO | Patent/trademark bulk product pages and original files | [USPTO](uspto.md) |
-| Regulations.gov | Documents, comments, dockets and attachment representations | [Regulations.gov](regulations.md) |
+The linked guides document credentials, version selection, request types, and
+response schemas. Shared `service::common` HTTP/JSON utilities are always
+available; concrete providers are feature-gated.
 
-Each guide follows the same order: what the source contains, request/response
-formats, then a complete Rust usage example and an explanation of its result.
+## Example setup
 
-## Request and response
-
-### How services interact with OpenDAL
-
-OpenDAL supplies two parts of the I/O layer:
-
-- **Storage operators:** an `opendal::Operator` configures a backend such as Fs,
-  S3, HTTP or Hf. `storage::OpenDalAccessor` adapts its operations to our
-  `ByteAccessor` / `ByteReader` interfaces, including listing and exact ranges
-  when supported by the configured source.
-- **HTTP transport:** provider metadata requests and sequential downloads use
-  OpenDAL's `OperationContext` / `HttpTransporter`, with a reqwest transport by
-  default. Our shared HTTP client and `Connection` add provider request rules,
-  response parsing and origin-scoped credentials above that transport.
-  `Connection::with_http_config(StorageConfig)` adds shared opt-in retry/timeout
-  policies, including `Retry-After`; see [connection policies](provider-connection.md#retry-and-timeout-policy).
-
-The provider adds the source-specific meaning: which endpoint or manifest to
-read, which ID/version/split was selected, which files belong to that selection,
-and which metadata to retain. A logical filename returned by a provider maps to
-a backend object key or download URL; callers use that name with `open`.
-
-```mermaid
-flowchart TD
-    App[Application: select provider and source] --> Provider[Provider discovery or manifest selection]
-    Provider --> Selection[Metadata and selected file access]
-    Selection --> Managed[Provider-configured OpenDAL Operator]
-    Selection --> HTTP[Connection GET through OpenDAL HttpTransporter]
-    Caller[Caller-configured Operator: Fs / S3 / HTTP] --> Adapter[OpenDalAccessor]
-    Managed --> Adapter
-    Adapter --> Bytes[ByteReader]
-    HTTP --> Bytes
-    Bytes --> Decode[Explicit decompression / archive / format reader]
-    Decode --> Output[Member bytes, native records or Arrow batches]
-```
-
-| Integration pattern | Services / entry points | What the caller configures |
-| --- | --- | --- |
-| Caller supplies byte storage, usually an OpenDAL operator wrapped by `OpenDalAccessor` | PMC article/inventory, Gutenberg, CourtListener, arXiv bulk | Backend root, endpoint, credentials, region and any requester-pays settings; provider requests select keys/manifests |
-| Provider creates the operator for its file namespace | Hugging Face repository/dataset; Zenodo, Dataverse, Internet Archive | Provider ID/revision/version and supported endpoint/token options; the provider configures the Hf or HTTP backend |
-| Provider calls APIs and opens advertised URLs through `Connection` | Figshare, GovInfo, BHL, bioRxiv, LoC, OpenStax, Semantic Scholar, USPTO, Regulations.gov and other JSON/OAI providers | Provider API settings/keys; optional custom Connection/transport; downloads are sequential |
-| Caller supplies an already opened byte reader | MECA archive inspection | A ranged, known-length source reader; this can come from OpenDAL or another compatible accessor |
-
-Common Crawl provides an HTTP-operator helper and also accepts caller-supplied
-manifest/record accessors, so a local mirror or another byte backend can be used.
-The core accessor traits also allow application-defined storage implementations.
-
-A typical interaction has three stages:
-
-1. **Select/discover:** request a record, dataset version, crawl or manifest.
-   The provider returns metadata, file membership or an opened record reader,
-   according to its API.
-2. **Read bytes:** open an exact selected file name/object. OpenDAL operators or
-   the shared HTTP transport perform the I/O; provider metadata resolution does
-   not eagerly download every attachment.
-3. **Decode when needed:** compose decompression, archive or format readers.
-   Some providers already return Arrow metadata/dataset readers; their guides
-   identify the schema and what they read internally.
-
-### Enable an entry point
-
-Enable a concrete provider with its facade feature, for example
-`service-figshare`. On `open-arrow-access-service` directly, the corresponding
-feature is `figshare`. Shared `service::common` utilities are available without a
-provider feature. Credentials, when required, are described in the provider guide;
-Hugging Face additionally supports its environment/cached-token settings.
-
-| Response family | How to consume it | What it contains |
-| --- | --- | --- |
-| `ApiDocument` | `document.value()` | Parsed upstream JSON, including unknown fields |
-| `RemoteFiles<M>` / `ResolvedFileSet<A, M>` | `metadata()`, `list("")`, `open(name)` | Provider metadata plus a fixed logical file namespace; file bodies are lazy |
-| `ByteReader` | `next().await` | Original or explicitly decoded byte chunks; a chunk is not a record |
-| `RecordReader` | `metadata().schema`, `next().await` | Arrow batches with the declared schema |
-| `OaiPage` | `bytes`, `record_count`, `resumption_token` | Exact XML response and continuation information |
-| Archive session | inspect entries, then open a member | Original member names/metadata and decoded member bytes |
-
-All fallible calls use the library's `Result<T>`. Readers return `Some(item)`
-until EOF (`None`); errors and EOF terminate them. Byte readers from public
-`Connection` are sequential; OpenDAL-backed providers can support exact ranges.
-ZIP/Parquet consumers need an appropriate ranged source, not just any HTTP reader.
-
-JSON-retaining providers expose parsed responses through `ApiDocument`.
-Zenodo, Dataverse and Internet Archive instead retain their documented typed
-metadata subsets. Arrow schemas are provider-specific or come from the selected
-file format; downloading a PDF/XML/ZIP does not automatically create Arrow rows.
-See [response shapes](response-schemas.md) for a common reference.
-
-Shared guides: [connections](provider-connection.md), [API metadata](api-document.md),
-[named files](remote-files.md), [downloads](http-downloads.md),
-[custom transport](http-transport.md), [validation helpers](provider-validation.md),
-[OAI-PMH](oai-protocol.md), [OAI provider configuration](oai-provider.md), and
-[development fixtures](provider-test-fixtures.md).
-
-## Usage and results
-
-### Example setup
-
-Examples use the root facade and ordinary async Rust functions. Add the feature
-listed in your provider guide. For the executable Figshare example below:
+The following example discovers files and reads bytes.
 
 ```toml
 [dependencies]
-open-arrow-access = { git = "https://github.com/dentiny/open-arrow-access", features = ["service-figshare"] }
+open-arrow-access = { git = "https://github.com/dentiny/open-arrow-access", default-features = false, features = ["service-figshare"] }
 futures = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-```rust
+```rust,no_run
 use futures::TryStreamExt;
 use open_arrow_access::{Accessor, ByteAccessor, Result, service::figshare::FigshareService};
 use std::num::NonZeroU64;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // BHL's public OCR export is published as this Figshare article.
     let files = FigshareService::new()?
         .article(NonZeroU64::new(21422193).unwrap(), None)
         .await?;
-    println!("selected version: {}", files.metadata().value()["version"]);
+    println!("version: {}", files.metadata().value()["version"]);
     let mut names = files.list("".into()).await?;
     if let Some(name) = names.try_next().await? {
-        println!("available file: {}", name.locator());
+        println!("file: {}", name.locator());
         let mut reader = files.open(name.into()).await?;
         if let Some(chunk) = reader.next().await? {
-            println!("first original chunk: {} bytes", chunk.len());
+            println!("first chunk: {} original bytes", chunk.len());
         }
     }
     Ok(())
 }
 ```
 
-This resolves one public article, prints its observed version and one file name,
-and reads at most one original byte chunk. `None` intentionally selects the
-current version; use an explicit version for repeatable selection. The bytes
-may still be compressed. The provider does not infer a format or extract text.
+This resolves an article and reads at most one original chunk. `None` selects
+the current version; select an explicit version for repeatable membership.
+Files remain lazy, may be compressed, and are not automatically parsed or
+converted to text. A byte chunk is not a logical record.
 
-### Example with caller-configured OpenDAL storage
+## Where storage and decoding belong
 
-For a provider backed by a local mirror, enable `service-pmc` on the facade and
-add OpenDAL's filesystem backend to the dependency configuration above:
-
-```toml
-opendal = { version = "=0.59.2", default-features = false, features = ["services-fs"] }
+```mermaid
+flowchart TD
+    App["Application: provider ID + version / selection"] --> Service["Service: validate identity, fetch metadata, resolve membership"]
+    Service --> Metadata["Provider metadata / ApiDocument"]
+    Service --> Files["Selected logical file namespace"]
+    Files --> Managed["Provider-configured OpenDAL operator"]
+    Files --> HTTP["Connection: sequential HTTP download"]
+    Caller["Caller-configured Fs / S3 / HTTP operator"] --> Storage["OpenDalAccessor"]
+    Managed --> Storage
+    Storage --> Bytes["ByteReader"]
+    HTTP --> Bytes
+    Bytes --> Decode["Explicit decompression / archive / format"]
+    Decode --> Arrow["Arrow batches or native records"]
 ```
 
-```rust
-use open_arrow_access::{
-    Accessor, ReadRequest,
-    service::pmc::PmcAccessor,
-    storage::{OpenDalAccessor, opendal},
-};
+| Access pattern | Examples | Your configuration |
+| --- | --- | --- |
+| Caller supplies storage | PMC, Gutenberg, CourtListener, arXiv bulk | Operator root, endpoint, region, credentials, requester-pays settings |
+| Provider constructs storage | Hugging Face, Zenodo, Dataverse, Internet Archive | Provider ID/version/revision and supported endpoint/token options |
+| API metadata plus advertised download URLs | Figshare, BHL, GovInfo, bioRxiv, LoC, OpenStax, Semantic Scholar, USPTO, Regulations.gov | Provider configuration and optional custom `Connection` |
+| Already-open archive input | MECA | Ranged byte reader with known length |
 
-async fn read_pmc_mirror(root: &str, metadata_key: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // OpenDAL owns the backend/root; the provider interprets the selected object.
-    let operator = opendal::Operator::new(opendal::services::Fs::default().root(root))?;
-    let bytes = OpenDalAccessor::new(operator);
-    let articles = PmcAccessor::with_default_decoder(bytes);
-    let mut reader = articles.open(ReadRequest::new(metadata_key)).await?;
-    println!("Arrow schema: {:?}", reader.metadata().schema);
-    if let Some(batch) = reader.next().await? {
-        println!("article metadata rows: {}", batch.num_rows());
-    }
-    Ok(())
-}
+OpenDAL supplies storage I/O and the HTTP transport used by `Connection`.
+Provider requests determine the source's identity and membership. Connection
+credentials are origin-scoped; its downloads are sequential. Ranged consumers
+such as ZIP/Parquet need an appropriate OpenDAL-backed or custom ranged source.
+See [connection configuration](provider-connection.md) for transport, retry,
+timeout, and authentication settings.
+
+## Consume the returned type
+
+| Return type | Consume with | Meaning |
+| --- | --- | --- |
+| `ApiDocument` | `value()` | Parsed upstream JSON retaining unknown fields |
+| `RemoteFiles<M>` / `ResolvedFileSet<A, M>` | `metadata()`, `list`, `open` | Fixed logical membership with lazy byte downloads |
+| `ByteReader` | `next().await` | Original or explicitly decoded bytes |
+| `RecordReader` | `metadata().schema`, `next().await` | Fixed-schema Arrow batches |
+| `OaiPage` | `bytes`, `record_count`, `resumption_token` | XML envelope and protocol continuation |
+| Archive session | Inspect entries, open selected member | Member metadata and bytes |
+
+Bind an explicit format through `ResolvedFileSet::records(format)` and select
+names with `FileSetRequest` to decode resolved files. For API metadata use
+`ApiDocument::records_at(pointer, format)`; OAI pages expose `records(format)`.
+These bindings do not follow PDF/HTML URLs, infer content mappings, or discover
+additional pages. See [response shapes](response-schemas.md).
+
+Independent API requests can be wrapped in `common::PageSetAccessor`, then
+executed through `ParallelReadLayer`. Supply independently addressable requests
+and one schema. Cursor/resumption-token chains must still be discovered in
+protocol order. [Parallel reading](../docs/parallel-read.md) covers planning.
+
+## Add a service
+
+```mermaid
+flowchart LR
+    Request["Typed provider ID / version"] --> Connection["Connection: fetch metadata"]
+    Connection --> Validate["Validate identity and selected membership"]
+    Validate --> Links["MetadataLink values"]
+    Links --> Files["Connection::files / resolve_json_files"]
+    Files --> Consumer["Lazy bytes; caller chooses decoder"]
 ```
 
-With root `/data/pmc-mirror` and key `metadata/PMC123.2.json`, OpenDAL reads that
-mirror object and the PMC decoder emits one article-metadata row. Content URL
-fields remain metadata. To use S3 or another backend, configure its operator and
-retain the same `OpenDalAccessor` / provider composition.
+Reuse public `Connection` methods for API-backed services. Use
+`resolve_json_files` for one JSON response mapped to download links, or `json`
+and `files` for multi-request discovery. For one-document-to-one-row providers,
+implement `DocumentDecoder` and use `DocumentAccessor`. Keep provider identity,
+version checks, mapping, and pagination in the service.
 
-The Figshare example above demonstrates provider-managed HTTP access; this
-example demonstrates caller-managed storage. See each provider guide for its
-configuration boundary and return type. [Repository examples](../examples/) show
-complete command-line readers.
-
-### Independent API page requests
-
-`common::PageSetAccessor::new(open_page)` binds an async provider callback to an
-ordered `Vec<Request>`. The callback returns a record reader using the existing
-provider methods and explicit format/schema. Planning fetches only the first page
-to fix the output schema. Install `ParallelReadLayer` to fetch and decode remaining
-pages concurrently under the same resident-partition and batch-queue budget.
-Request order and duplicates are preserved; page and batch schemas must match.
-
-Supply independently addressable requests, such as explicit offsets, IDs or
-separate time windows. The adapter does not guess offsets, totals, snapshot
-consistency or rate limits, and never follows continuation links. Cursor chains
-must still be discovered in protocol order. Dropping the parallel reader cancels
-owned page futures; callbacks must not spawn detached background requests.
-
-```no_run
-# use std::num::NonZeroUsize;
-# use open_arrow_access_core::{Accessor, AccessorExt, ReadRequest, Result};
-# use open_arrow_access_file_format::json::JsonFormat;
-# use open_arrow_access_layers::ParallelReadLayer;
-# use open_arrow_access_service::common::{Connection, PageSetAccessor};
-# async fn example(connection: Connection, schema: open_arrow_access_core::SchemaRef) -> Result<()> {
-let pages = PageSetAccessor::new(move |offset: u64| {
-    let connection = connection.clone();
-    let schema = schema.clone();
-    async move {
-        let offset_text = offset.to_string();
-        let document = connection.json("search", &[("offset", &offset_text)]).await?;
-        document.records_at("/results", JsonFormat::new(schema))?
-            .open(ReadRequest::new(format!("page-{offset}"))).await
-    }
-});
-let mut reader = pages.layer(ParallelReadLayer::new(
-    NonZeroUsize::new(4).unwrap(), NonZeroUsize::MIN,
-)).open(vec![0, 100, 200]).await?;
-while let Some(batch) = reader.next().await? { /* consume in selection order */ }
-# Ok(())
-# }
-```
-
-
-### Planning resolved files and API pages
-
-`ResolvedFileSet::records(format)` is always available: bind an explicit
-Arrow format/schema, select logical names with `FileSetRequest`, then install
-`ParallelReadLayer` or call `plan_scan`. Provider resolution still validates the
-revision, membership, names and availability before planning; no file extension
-or content decoder is guessed. Explicit duplicate selections retain their order.
-
-For already fetched JSON API metadata, `ApiDocument::records_at(pointer, format)`
-selects one object or an ordered array at a JSON pointer. OAI pages expose
-`page.records(format)` for an explicit XML record path/schema. These page plans do
-not follow continuation URLs or make cursor-dependent page requests independent.
-Use provider protocol methods to discover subsequent pages in the required order.
-
-These are explicit decoding bindings, not new per-provider metadata schemas.
-Referenced PDF/HTML links remain URL fields under the selected schema and are
-never followed automatically. Already embedded document bodies require a native
-content mapping to `LargeBinary`; an ordinary JSON string is not silently treated
-as Arrow's hexadecimal binary representation. The binding does not perform that
-source-specific content mapping.
-
-`RecordPage::plan_scan()` delegates to the native format planner, so installing
-`ParallelReadLayer` directly on a JSON/XML page uses file-internal framing.
-`into_file_accessor()` exposes format-specific settings. Application-defined
-formats without a native planner can use `plan_whole_page()` explicitly.
-These methods do not acquire additional API pages or follow continuation tokens.
+See [adding a service](../docs/extending.md#add-a-service) for implementation
+steps, feature wiring, and examples. Shared references:
+[API documents](api-document.md), [remote files](remote-files.md),
+[HTTP downloads](http-downloads.md), [transport](http-transport.md),
+[OAI-PMH](oai-protocol.md), and [validation](provider-validation.md).

@@ -1,9 +1,8 @@
-# WARC test fixtures
+# WARC fixtures
 
-These small, checked-in WARC/1.1 files are the inputs to `file-format/tests/warc.rs`.
-Tests read them from disk and feed their bytes through the mock accessor to
-exercise fragmentation, lazy reading, and injected I/O errors. Tests do not
-serialize WARC records or construct malformed inputs at runtime.
+Small WARC/1.1 physical-record inputs for native and Arrow readers. They cover
+binary bodies, fragmentation, lazy failures, and independent reader ownership.
+CRLF framing and intentional invalid bytes must remain exact.
 
 | File | Case |
 | --- | --- |
@@ -17,9 +16,13 @@ serialize WARC records or construct malformed inputs at runtime.
 | `bad_terminator.warc` | Invalid final record-terminator byte. |
 | `bad_missing_date.warc` | Missing required WARC-Date header. |
 
-Preserve exact bytes, including CRLF framing and the intentionally invalid
-records. The local `.gitattributes` disables line-ending conversion.
+## Use these inputs
+
+Facade feature: `format-warc`. Run the owning component tests from the repository root:
 
 ```sh
-cargo test --locked --features format-warc --test warc
+cargo test --locked -p open-arrow-access-file-format --no-default-features --features warc
 ```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

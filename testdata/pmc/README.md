@@ -1,15 +1,9 @@
-# Synthetic PMC article metadata
+# PMC metadata fixtures
 
-`metadata.json` is an invented article-version object with upstream fields,
-content URLs, a string PMID, Unicode, unknown large numbers, and duplicate keys.
-There are no content fixtures: the article service reads only the supplied JSON.
-Tests also cover missing/null PDF URLs, manuscript and non-open-access flags,
-optional fields, arbitrary URL metadata, and duplicate-field handling.
-
-`metadata.json.gz` is the same JSON compressed with `gzip.compress(data, mtime=0)`
-for composition and decoded-limit tests. All fixtures are synthetic and local.
-
-Additional committed inputs replace the inline documents in the metadata tests:
+Synthetic article-version documents and inventory manifests; no article
+content or live downloads. `metadata.json` includes content URL fields, a string
+PMID, Unicode, unknown large numbers, and duplicate keys.
+`metadata.json.gz` is the same document compressed with a zero gzip timestamp.
 
 | Fixture | Purpose |
 | --- | --- |
@@ -21,18 +15,29 @@ Additional committed inputs replace the inline documents in the metadata tests:
 | `bad_zero_version.json`, `bad_overflow_version.json` | Versions outside the supported positive 32-bit range. |
 | `bad_doi.json`, `bad_manuscript.json`, `bad_media.json` | Wrong field or list-element types. |
 
-`inventory/` contains the manifest and precompressed shards for inventory tests:
+## Inventory inputs
 
-- `manifest.json` declares the five columns ETag, Key, Bucket, LastModifiedDate,
-  FutureField and the first/second shards. The first shard repeats PMC1 twice;
-  the second contains PMC2. Keys retain their original percent encoding.
-- `bad_bucket.json`, `bad_timestamp.json`, `bad_schema.json`, and
-  `bad_shard_path.json` change the source bucket, timestamp, schema (duplicate Key),
-  and shard path (`../escape.csv.gz`), respectively.
-- `empty_manifest.json` declares the same schema with no shards.
-- `bad_bucket.csv.gz` and `bad_empty_key.csv.gz` contain a row with the wrong
-  bucket or an empty key, even when all columns are projected away.
-- `empty.csv.gz` is a valid gzip member with zero decoded bytes.
+`inventory/manifest.json` declares ETag, Key, Bucket, LastModifiedDate, and
+FutureField. The first shard repeats PMC1 twice; the second contains PMC2.
+Keys retain their original percent encoding.
 
-All inventory shards use `gzip.compress(csv_bytes, mtime=0)`. They are loaded
-directly; tests never encode or alter their CSV/JSON contents at runtime.
+| Input under `inventory/` | Case |
+| --- | --- |
+| `bad_bucket.json`, `bad_timestamp.json` | Incorrect source bucket or timestamp. |
+| `bad_schema.json`, `bad_shard_path.json` | Duplicate Key column or `../escape.csv.gz` shard. |
+| `empty_manifest.json` | Valid declared schema with no shards. |
+| `bad_bucket.csv.gz`, `bad_empty_key.csv.gz` | Invalid row bucket/key even with zero-column projection. |
+| `empty.csv.gz` | Valid empty gzip member. |
+
+Inventory shards use `gzip.compress(csv_bytes, mtime=0)`.
+
+## Use these inputs
+
+Facade feature: `service-pmc`. Run the owning component tests from the repository root:
+
+```sh
+cargo test --locked -p open-arrow-access-service --no-default-features --features pmc
+```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

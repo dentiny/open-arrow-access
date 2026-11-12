@@ -1,92 +1,97 @@
-### Parquet row-group planning
+# File formats
 
-`ParquetAccessor` implements `ScanPlanner` when its byte accessor is cloneable
-(use `Arc` for a shared non-cloneable accessor). Planning reads the footer once,
-fixes the projected schema, and creates one independently opened partition per
-row group. Install `ParallelReadLayer` to execute these partitions while preserving
-row order. Normal `open` remains sequential. Range reads and known input length
-are required after byte layers; ordinary sequential gzip input is rejected.
-Known input length/version changes are rejected when partitions open; absent a
-storage version, this does not provide a snapshot of a mutable object.
+Use a format accessor to turn one `ByteReader` into records. Storage selection
+and credentials stay on the byte accessor. Enable each format on the facade;
+component-crate users enable the shorter feature name shown below.
 
-### JSON object partitions
+## Choose a format
 
-`JsonAccessor::plan_scan` frames complete whitespace-separated JSON objects,
-including JSONL and pretty-printed objects, and emits owned decode partitions
-lazily. Each partition uses an independent Arrow decoder with the fixed projected
-schema. Framing uses serde_json RawValue sequentially; Arrow decoding runs in
-executor workers. Incomplete records are rescanned when more input arrives, so
-large records delivered in tiny chunks can increase framing cost.
-This works over sequential decompression and does not require range access.
+| Input | Facade feature | Component feature | Entry point / output |
+| --- | --- | --- | --- |
+| CSV / TSV | `format-csv` | `csv` | `csv::CsvAccessor`; Arrow, explicit or inferred schema |
+| JSON objects / JSONL | `format-json` | `json` | `json::JsonAccessor`; Arrow, explicit or inferred schema |
+| Parquet | `format-parquet` | `parquet` | `parquet::ParquetAccessor`; Arrow schema from file |
+| XML | `format-xml` | `xml` | `xml::XmlAccessor`; Arrow, record path and explicit or inferred mappings |
+| ATIF | `format-atif` | `atif` | `atif::AtifAccessor`; trajectory Arrow mapping |
+| WARC | `format-warc` | `warc` | `warc::WarcAccessor` for native records; `warc::WarcArrowAccessor` for Arrow |
 
-Use `FileAccessor::with_partition_options` to configure a soft chunk-byte target
-(default 4 MiB); the row target is the request's batch size. A complete record can
-exceed the byte target and is never rejected for its size. The resident task window
-bounds the number of retained chunks, with one pending lookahead record plus the
-upstream input buffer. This is not a cap on input bytes, Arrow allocations, or decoder state. Scalar/array top-level inputs
-remain unsupported. Output stays ordered and batch boundaries may change.
+JSON expects whitespace-separated objects, including pretty-printed objects;
+a top-level array/scalar is unsupported. WARC Arrow output preserves physical
+records and binary bodies; it does not extract HTML text. See [format behavior](../docs/formats.md)
+for schema inference, mappings, supported layouts, and limits.
 
-### CSV decode partitions
+## Read JSONL
 
-The default CSV configuration and explicit `CsvDialect` configurations support
-file-internal parallel decoding. `csv-async` reads complete byte records using the
-source dialect, including quoted multiline fields. The `csv` writer serializes
-partition records as canonical CSV with every field quoted, retaining field bytes
-and replaying headers where required. Arrow workers convert these partitions to
-batches in input order. This adds sequential record parsing and re-encoding before
-parallel Arrow conversion; original CSV spelling and line endings are not retained.
+Enable `format-json` and OpenDAL's `services-fs`. This complete function accepts
+a caller-configured operator:
 
-For opaque Arrow `CsvFormat` configurations installed through `with_format`,
-planning keeps the input whole because their private dialect settings cannot be
-inspected safely. Use `with_dialect` for supported parallel parsing. No storage
-range access is required. Soft byte targets apply to the encoded partition bytes.
+```rust,no_run
+use open_arrow_access::{
+    Accessor, ReadOptions, ReadRequest,
+    file_format::json::JsonAccessor,
+    storage::{OpenDalAccessor, opendal},
+};
+use std::num::NonZeroUsize;
 
-### XML inferred-schema partitions
+async fn read(operator: opendal::Operator) -> open_arrow_access::Result<()> {
+    let records = JsonAccessor::infer(OpenDalAccessor::new(operator));
+    let mut reader = records.open(ReadRequest::new("records.jsonl").with_options(ReadOptions {
+        batch_size: NonZeroUsize::new(1024).unwrap(),
+        projection: Some(vec!["id".into(), "title".into()]),
+    })).await?;
+    println!("schema: {:?}", reader.metadata().schema);
+    while let Some(batch) = reader.next().await? {
+        println!("{} rows", batch.num_rows());
+    }
+    Ok(())
+}
+```
 
-XML scan planning infers native mappings once from the configured bounded sample,
-then replays sampled records before unread input. Both inferred and explicit
-schemas group complete records into independent conversion partitions, bounded by
-`ReadOptions::batch_size` and the smaller of `DecodePartitionOptions::target_bytes`
-and `XmlLimits::max_batch_bytes`. One record may exceed the soft partition target.
-Partitions retain namespace mappings, record order and source offsets. Projection
-names are resolved after inference.
+The example expects `id` and `title` in the inferred schema. Use an explicit
+schema when the input contract is known. Projection uses top-level field names
+in caller order; an empty projection retains row counts with zero columns.
+Metadata declares a fixed schema before the first batch.
 
-### ATIF trajectory partitions
+## Composition and parallel reads
 
-ATIF JSON Lines plans frame bounded groups of complete nonblank trajectories,
-assign global source record indices before scheduling, and decode each group
-independently. Output remains globally ordered, including raw_json, source URI,
-projection, and zero-column row counts. The original line endings are retained.
-Single-document ATIF JSON remains a whole-input partition. Framing can consume
-sequential decoded bytes; it does not require random reads or parallel gzip.
+```mermaid
+flowchart LR
+    Storage["Any byte accessor"] --> Bytes["Optional decompression / archive member"]
+    Bytes --> Factory["ReaderFactory: validate → inspect → create reader"]
+    Factory --> Reader["RecordReader: fixed schema + batches"]
+    Factory -. "optional ScanPlanner" .-> Partitions["Independent decode partitions"]
+    Partitions --> Parallel["ParallelReadLayer: execute and merge"]
+```
+
+Ordinary `open` reads sequentially. Install [`ParallelReadLayer`](../docs/parallel-read.md)
+on a planner-capable accessor to execute partitions. Parquet plans row groups;
+JSON, CSV, XML, ATIF JSONL, and WARC Arrow frame complete records before parallel
+conversion. Framing and upstream stream decompression can remain sequential.
+`DecodePartitionOptions` controls a soft byte target; a complete record may
+exceed it. CSV configured through opaque `with_format` settings uses a whole-input
+plan; use `with_dialect` for supported record partitioning. ATIF retains global order.
+
+Parquet needs exact byte ranges and known input length. Other sequential formats
+can read after streaming decompression. Snappy and uncompressed Parquet pages are
+included; enable `format-parquet-zstd`, `format-parquet-lz4`,
+`format-parquet-gzip`, or `format-parquet-brotli` for other page codecs. On this
+crate those features are `parquet-zstd`, `parquet-lz4`, `parquet-gzip`, and
+`parquet-brotli`. They also enable the base Parquet feature.
 
 ### WARC Arrow partitions
 
-`WarcArrowAccessor::plan_scan` uses the upstream WARC parser to discover complete
-physical header/body records, grouping them by batch rows and the soft
-`DecodePartitionOptions::target_bytes` target. Owned header and body sizes count
-toward that estimate; a complete oversized record is accepted. One lookahead
-record, parser scratch space, and the upstream byte chunk may also be retained.
-This is not a hard memory limit or a maximum WARC body size.
+`WarcArrowAccessor::plan_scan` frames complete physical WARC records, then
+converts independent groups to Arrow. Bodies remain binary and physical order
+is preserved with ordered execution. Framing/decompression remain sequential;
+the partition byte target is soft and permits an oversized complete record.
 
-`ParallelReadLayer` converts each group independently to the native Arrow schema,
-preserving physical order, unmodified LargeBinary bodies, source identity and
-projection. Required-header/date conversion and Arrow building run in workers;
-byte framing and any upstream decompression remain sequential. No range access
-or custom WARC parser is required. Ordinary `open` keeps its sequential behavior.
+## Add a format
 
-### Parquet page compression
+1. Implement `ReaderFactory`: choose request, prepared state, reader type, and effective capabilities/order.
+2. Validate settings in `prepare`; inspect bytes and establish metadata in `create_reader`.
+3. Bind it with `FileAccessor::from_format(storage, format)`. Use `ReaderFactoryExt::open_input` for an already-open archive member or byte reader.
+4. Reuse `decode_batches` for incremental Arrow conversion or `record_stream_reader` for a native Arrow stream.
+5. Add a feature-gated module and facade feature if integrating it into this workspace.
 
-Plain `parquet` / `format-parquet` supports uncompressed and Snappy pages.
-Enable a codec feature to read additional compressed pages; each also enables
-the Parquet reader.
-
-| Codec | File-format feature | Facade feature |
-| --- | --- | --- |
-| Brotli | `parquet-brotli` | `format-parquet-brotli` |
-| Gzip | `parquet-gzip` | `format-parquet-gzip` |
-| LZ4 | `parquet-lz4` | `format-parquet-lz4` |
-| Zstandard | `parquet-zstd` | `format-parquet-zstd` |
-
-This uses the upstream Parquet codecs and preserves range reads, projection, and
-row-group planning. It is independent of external byte decompression layers.
+See the [extension guide](../docs/extending.md#add-a-format) for the opening
+sequence, trait hooks, tests, and reference implementations.

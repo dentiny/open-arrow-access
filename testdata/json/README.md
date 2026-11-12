@@ -1,10 +1,8 @@
-# JSON and JSONL test fixtures
+# JSON / JSONL fixtures
 
-Tests read these checked-in files directly or pass their bytes to the memory
-accessor to control chunk sizes and inject read failures. No JSON fixture is
-constructed or written during a test run.
-
-The input schema is `id: Int64` (non-nullable), `title: Utf8` (nullable).
+Inputs use non-nullable `id: Int64` and nullable `title: Utf8`. They cover
+whitespace-separated objects, incremental reading, projection, and invalid
+syntax/types. Syntax is validated even with zero output columns.
 
 | File | Case |
 | --- | --- |
@@ -21,12 +19,13 @@ The input schema is `id: Int64` (non-nullable), `title: Utf8` (nullable).
 | `bad-type.json` | A string where the schema requires an integer. |
 | `bad-utf8.json` | Literal invalid UTF-8 byte `0xff` in the title string. |
 
-Syntax errors are rejected even with zero-column projections; selected fields
-also validate types and UTF-8. Preserve the fixture bytes,
-including invalid UTF-8, line endings, and missing final newlines. The local
-`.gitattributes` disables text conversion and permits intentional whitespace.
+## Use these inputs
+
+Facade feature: `format-json`. Run the owning component tests from the repository root:
 
 ```sh
-cargo test --locked --features format-json --test json
-cargo test -p open-arrow-access-file-format --locked --features json --test json
+cargo test --locked -p open-arrow-access-file-format --no-default-features --features json
 ```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.
