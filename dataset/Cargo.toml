@@ -19,8 +19,8 @@ open-arrow-access-core.workspace = true
 
 [dev-dependencies]
 more-asserts.workspace = true
-open-arrow-access-decompression = { workspace = true, features = ["gzip"] }
-open-arrow-access-file-format = { workspace = true, features = ["atif", "json", "parquet"] }
+open-arrow-access-decompression = { path = "../decompression", default-features = false, features = ["gzip"] }
+open-arrow-access-file-format = { path = "../file-format", default-features = false, features = ["atif", "json", "parquet"] }
 open-arrow-access-layers.workspace = true
 open-arrow-access-storage.workspace = true
 open-arrow-access-test-support.workspace = true

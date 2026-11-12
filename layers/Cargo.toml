@@ -17,7 +17,7 @@ open-arrow-access-core.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
-open-arrow-access-file-format = { workspace = true, features = ["csv"] }
+open-arrow-access-file-format = { path = "../file-format", default-features = false, features = ["csv"] }
 open-arrow-access-test-support.workspace = true
 
 [lints]

@@ -87,7 +87,7 @@ url.workspace = true
 arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
-open-arrow-access-file-format = { workspace = true, features = ["csv", "json"] }
+open-arrow-access-file-format = { path = "../file-format", default-features = false, features = ["csv", "json"] }
 open-arrow-access-layers.workspace = true
 
 arrow-array.workspace = true
@@ -95,7 +95,7 @@ arrow-schema.workspace = true
 futures.workspace = true
 open-arrow-access-test-support.workspace = true
 
-open-arrow-access-decompression = { workspace = true, features = ["gzip", "zip"] }
+open-arrow-access-decompression = { path = "../decompression", default-features = false, features = ["gzip", "zip"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 [[test]]

@@ -49,7 +49,7 @@ The following example discovers files and reads bytes.
 
 ```toml
 [dependencies]
-open-arrow-access = { git = "https://github.com/dentiny/open-arrow-access", default-features = false, features = ["service-figshare"] }
+open-arrow-access = { version = "0.1.0", default-features = false, features = ["service-figshare"] }
 futures = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
