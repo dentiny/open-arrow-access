@@ -4,9 +4,9 @@ use super::{
     validation::validate_archive,
 };
 use crate::xml_metadata::XmlDocument;
-use arrow_array::{Array, StructArray, cast::AsArray};
+use arrow_array::{Array, cast::AsArray};
 use arrow_schema::DataType::Utf8;
-use open_arrow_access_core::Result;
+use open_arrow_access_core::{FieldNameIndex, Result};
 use open_arrow_access_file_format::xml::XmlField;
 use std::{collections::HashSet, str::FromStr};
 
@@ -28,17 +28,24 @@ pub(super) async fn parse_manifest(
         .await?;
     let values = batch.column(0).as_list::<i32>().value(0);
     let files = values.as_struct();
+    let field_index = FieldNameIndex::new(files.fields());
+    let [filename, month_column, sequence, size, num_items, checksum] =
+        ["filename", "yymm", "seq_num", "size", "num_items", "md5sum"].map(|name| {
+            files
+                .column(field_index.index_of(name).unwrap())
+                .as_string::<i32>()
+        });
     let mut names = HashSet::new();
     let mut selected = Vec::new();
     for index in 0..files.len() {
         let archive = ArxivArchive {
             kind,
-            filename: text(files, "filename", index).into(),
-            month: number(files, "yymm", index)?,
-            sequence: number(files, "seq_num", index)?,
-            size: number(files, "size", index)?,
-            num_items: number(files, "num_items", index)?,
-            checksum: text(files, "md5sum", index).into(),
+            filename: filename.value(index).into(),
+            month: number(month_column.value(index))?,
+            sequence: number(sequence.value(index))?,
+            size: number(size.value(index))?,
+            num_items: number(num_items.value(index))?,
+            checksum: checksum.value(index).into(),
         };
         validate_archive(&archive)?;
         if !names.insert(archive.filename.clone()) {
@@ -51,17 +58,9 @@ pub(super) async fn parse_manifest(
     Ok(selected)
 }
 
-fn text<'a>(files: &'a StructArray, field: &str, index: usize) -> &'a str {
-    files
-        .column_by_name(field)
-        .unwrap()
-        .as_string::<i32>()
-        .value(index)
-}
-
-fn number<T: FromStr>(files: &StructArray, field: &str, index: usize) -> Result<T>
+fn number<T: FromStr>(value: &str) -> Result<T>
 where
     T::Err: std::error::Error + Send + Sync + 'static,
 {
-    text(files, field, index).trim().parse().map_err(xml_error)
+    value.trim().parse().map_err(xml_error)
 }

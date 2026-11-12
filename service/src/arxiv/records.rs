@@ -6,10 +6,10 @@ use std::{
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, ObjectRef,
-    OrderRequirement, ReadOptions, ReadOptionsProvider, RecordBatchBuilder, RecordCapability,
-    RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef,
-    StreamReader, async_trait, read_all,
+    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, FieldNameIndex,
+    ObjectRef, OrderRequirement, ReadOptions, ReadOptionsProvider, RecordBatchBuilder,
+    RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner,
+    SchemaRef, StreamReader, async_trait, read_all,
 };
 
 use super::{ArxivKind, ArxivService};
@@ -124,6 +124,7 @@ where
 {
     async fn plan_scan(&self, request: ArxivReadRequest) -> Result<ScanPlan> {
         let (schema, _) = request.options.resolve_projection(&record_schema())?;
+        let include_data = FieldNameIndex::new(schema.fields()).get("data").is_some();
         let archives = self
             .service
             .manifest(request.kind, request.month, request.byte_options)
@@ -163,7 +164,7 @@ where
                                 continue;
                             }
                             payload_bytes = payload_bytes.saturating_add(entry.size);
-                            let data = if builder.schema().column_with_name("data").is_some() {
+                            let data = if include_data {
                                 Bytes::from(read_all(body, "read_arxiv_entry").await?)
                             } else {
                                 while body.next().await?.is_some() {}
