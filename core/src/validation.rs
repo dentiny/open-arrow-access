@@ -1,4 +1,4 @@
-use std::{collections::HashSet, ops::Range, sync::Arc};
+use std::{collections::HashSet, ops::Range};
 
 use arrow_schema::{DataType, Fields};
 
@@ -43,32 +43,6 @@ fn validate_record_batch_type(data_type: &DataType) -> Result<()> {
         }
         _ => Err(crate::error::unsupported_metadata_type(data_type)),
     }
-}
-
-pub(crate) fn resolve_projection(
-    projection: &Option<Vec<String>>,
-    schema: &SchemaRef,
-) -> Result<(SchemaRef, Option<Vec<usize>>)> {
-    let Some(columns) = projection else {
-        return Ok((schema.clone(), None));
-    };
-    let mut seen = HashSet::new();
-    let mut indices = Vec::with_capacity(columns.len());
-    let field_index = FieldNameIndex::new(schema.fields());
-    for name in columns {
-        if !seen.insert(name) {
-            return Err(crate::error::duplicate_projection_field(name));
-        }
-        indices.push(
-            field_index
-                .index_of(name)
-                .map_err(|error| crate::error::unknown_projection_field(name, error))?,
-        );
-    }
-    let projected = schema
-        .project(&indices)
-        .map_err(crate::error::projection_error)?;
-    Ok((Arc::new(projected), Some(indices)))
 }
 
 pub(crate) fn validate_output_fields(
