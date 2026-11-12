@@ -7,10 +7,8 @@ use arrow_array::types::{
 use arrow_cast::can_cast_types;
 use arrow_schema::{ArrowError, DataType, Field, TimeUnit};
 use open_arrow_access_core::{
-    EmissionPolicy, ErrorKind, FieldNameIndex, OrderRequirement, ParallelReadOptions, Result,
+    EmissionPolicy, FieldNameIndex, OrderRequirement, ParallelReadOptions, Result,
 };
-
-use crate::error::column_error;
 
 pub(crate) fn validate_sampling_probability(probability: f64) -> Result<()> {
     if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
@@ -48,7 +46,7 @@ pub(crate) fn validate_cast(field: &Field, target: &DataType) -> Result<()> {
         return Err(crate::error::unsupported_cast(field, from, target));
     }
     validate_decimal_cast(from, target)
-        .map_err(|error| column_error(ErrorKind::Unsupported, "plan_cast", field.name(), error))
+        .map_err(|error| crate::error::cast_plan_error(field.name(), error))
 }
 
 fn decimal_params(data_type: &DataType) -> Option<(i16, i16)> {
@@ -342,14 +340,8 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
                 source_name
             }
             ColumnEvolution::ChangeDataType { name, data_type } => {
-                validate_target(data_type).map_err(|error| {
-                    column_error(
-                        ErrorKind::InvalidInput,
-                        "configure_schema_evolution",
-                        name,
-                        error,
-                    )
-                })?;
+                validate_target(data_type)
+                    .map_err(|error| crate::error::evolution_config_error(name, error))?;
                 name
             }
         };
