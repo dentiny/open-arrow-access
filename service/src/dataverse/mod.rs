@@ -18,6 +18,15 @@ pub struct DataverseService {
 }
 
 impl DataverseService {
+    /// Apply the same HTTP policy to metadata and lazy file requests.
+    pub fn with_http_config(
+        mut self,
+        config: open_arrow_access_storage::StorageConfig,
+    ) -> Result<Self> {
+        self.http = self.http.with_http_config(config)?;
+        Ok(self)
+    }
+
     /// Configure a Dataverse installation origin without performing network I/O.
     pub fn new(endpoint: &str) -> Result<Self> {
         Ok(Self {

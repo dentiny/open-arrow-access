@@ -44,6 +44,7 @@ impl HuggingFaceService {
         url.query_pairs_mut().append_pair("expand", "sha");
         let metadata: RepositoryInfo = crate::http_client::HttpClient {
             context: self.context.clone(),
+            config: self.http_config.clone(),
         }
         .json(
             url.as_str(),

@@ -22,6 +22,15 @@ pub struct InternetArchiveService {
 }
 
 impl InternetArchiveService {
+    /// Apply the same HTTP policy to metadata and lazy file requests.
+    pub fn with_http_config(
+        mut self,
+        config: open_arrow_access_storage::StorageConfig,
+    ) -> Result<Self> {
+        self.http = self.http.with_http_config(config)?;
+        Ok(self)
+    }
+
     pub fn new() -> Result<Self> {
         Self::with_endpoint("https://archive.org")
     }

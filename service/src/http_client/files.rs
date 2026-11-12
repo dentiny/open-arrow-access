@@ -67,6 +67,15 @@ impl HttpFileService {
         })
     }
 
+    pub(crate) fn with_http_config(
+        mut self,
+        config: open_arrow_access_storage::StorageConfig,
+    ) -> Result<Self> {
+        config.validate()?;
+        self.client.config = config;
+        Ok(self)
+    }
+
     pub(crate) fn endpoint(&self) -> &Url {
         &self.endpoint
     }

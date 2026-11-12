@@ -8,6 +8,7 @@ use super::{HuggingFaceAccessor, HuggingFaceOptions, HuggingFaceRepository, vali
 pub struct HuggingFaceService {
     pub(super) options: HuggingFaceOptions,
     pub(super) context: OperationContext,
+    pub(super) http_config: open_arrow_access_storage::StorageConfig,
 }
 
 impl HuggingFaceService {
@@ -20,7 +21,19 @@ impl HuggingFaceService {
         Ok(Self {
             options,
             context: client.context,
+            http_config: Default::default(),
         })
+    }
+
+    /// Apply an OpenDAL transport policy to Hub metadata and repository files.
+    /// Do not also install an OpenDAL RetryLayer on this transport's operators.
+    pub fn with_http_config(
+        mut self,
+        config: open_arrow_access_storage::StorageConfig,
+    ) -> Result<Self> {
+        config.validate()?;
+        self.http_config = config;
+        Ok(self)
     }
 
     /// Access explicit files in a dataset repository. A floating revision is
@@ -40,6 +53,9 @@ impl HuggingFaceService {
         if let Some(token) = &self.options.token {
             builder = builder.token(token);
         }
-        HuggingFaceAccessor::new(builder, self.context.clone())
+        HuggingFaceAccessor::new(
+            builder,
+            crate::http_client::policy::apply(&self.http_config, self.context.clone())?,
+        )
     }
 }

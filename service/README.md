@@ -73,6 +73,8 @@ OpenDAL supplies two parts of the I/O layer:
   OpenDAL's `OperationContext` / `HttpTransporter`, with a reqwest transport by
   default. Our shared HTTP client and `Connection` add provider request rules,
   response parsing and origin-scoped credentials above that transport.
+  `Connection::with_http_config(StorageConfig)` adds shared opt-in retry/timeout
+  policies, including `Retry-After`; see [connection policies](provider-connection.md#retry-and-timeout-policy).
 
 The provider adds the source-specific meaning: which endpoint or manifest to
 read, which ID/version/split was selected, which files belong to that selection,
