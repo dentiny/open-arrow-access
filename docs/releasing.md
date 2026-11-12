@@ -60,7 +60,11 @@ The expected publisher for every crate is:
 
 For crates published before this workflow existed, configure this exact publisher
 in crates.io settings and enable Trusted Publishing only before the next normal
-release. Do not replace an unrelated publisher or change crate ownership as part
+release. To verify the workflow identity before restricting credentials, dispatch
+**Release Rust Packages** from `main` with an existing stable tag and
+`audit_only=true`. This validates the tag and exchanges/revokes an OIDC credential
+without building or uploading any crate. Then enable Trusted Publishing only.
+Do not replace an unrelated publisher or change crate ownership as part
 of release automation. Configure GitHub environment reviewers according to the
 repository's maintainer policy. Bootstrap and normal publication share a
 concurrency group and cannot write to the registry concurrently.
