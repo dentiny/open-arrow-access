@@ -115,8 +115,9 @@ Enabling a feature compiles an API; construct the accessor/layer to use it.
 
 Always-available layers include schema remapping, generated columns, sampling,
 parallel reads, and unordered emission. See the
-[runnable layer examples](layers/README.md#run-the-examples) for schema remapping,
-SQL generated columns, and parallel sampling. The baseline includes service
+[schema remapping](examples/schema_remap.rs),
+[SQL generated columns](examples/generated_columns.rs), and
+[parallel sampling](examples/parallel_sampling.rs) examples for runnable layer usage. The baseline includes service
 HTTP/JSON utilities and DataFusion-backed generated columns, even with defaults disabled.
 
 Facade and component-crate feature names differ: `format-json` becomes `json` on
