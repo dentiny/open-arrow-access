@@ -14,11 +14,11 @@ use open_arrow_access_core::{
 };
 
 use crate::{
-    error::{
-        generated_batch_error, generated_column_error, generated_plan_error,
-        invalid_generated_column,
+    error::{generated_batch_error, generated_column_error, generated_plan_error},
+    validation::{
+        validate_expression, validate_generated_names, validate_generated_schema,
+        validate_generated_specs,
     },
-    validation::{validate_expression, validate_generated_specs},
 };
 
 /// One row-level SQL expression. May reference source and earlier generated fields.
@@ -30,11 +30,12 @@ pub struct GeneratedColumnSpec {
 
 /// Appends generated fields in declaration order, then applies the final projection.
 ///
-/// Expressions are compiled once per open and evaluated batch by batch. This first
-/// implementation reads all source columns to validate against the complete schema.
+/// Supply a complete source schema with `with_source_schema` to enable
+/// dependency projection pushdown without opening an extra reader.
 #[derive(Clone, Debug, Default)]
 pub struct GeneratedColumnsLayer {
     specs: Arc<[GeneratedColumnSpec]>,
+    source_schema: Option<SchemaRef>,
 }
 
 impl GeneratedColumnsLayer {
@@ -43,7 +44,13 @@ impl GeneratedColumnsLayer {
         validate_generated_specs(&specs)?;
         Ok(Self {
             specs: specs.into(),
+            source_schema: None,
         })
+    }
+
+    pub fn with_source_schema(mut self, schema: SchemaRef) -> Self {
+        self.source_schema = Some(schema);
+        self
     }
 }
 
@@ -52,6 +59,7 @@ impl GeneratedColumnsLayer {
 pub struct GeneratedColumnsAccessor<A> {
     inner: A,
     specs: Arc<[GeneratedColumnSpec]>,
+    source_schema: Option<SchemaRef>,
 }
 
 impl<A> Layer<A> for GeneratedColumnsLayer
@@ -65,6 +73,7 @@ where
         GeneratedColumnsAccessor {
             inner,
             specs: Arc::clone(&self.specs),
+            source_schema: self.source_schema.clone(),
         }
     }
 }
@@ -87,48 +96,31 @@ where
             return self.inner.open(request).await;
         }
         let output_options = request.read_options().clone();
-        // Generated names are not physical inputs. Inspect all fields, including
-        // hidden ones, so projection cannot hide an invalid declaration/collision.
         request.read_options_mut().projection = None;
+        let state = SessionContext::new().state();
+        let expected_source = if let (Some(source), Some(projection)) =
+            (&self.source_schema, &output_options.projection)
+        {
+            let (_, _, mut required) = plan_steps(&state, &self.specs, source)?;
+            required.extend(projection.iter().cloned());
+            request.read_options_mut().projection = Some(
+                source
+                    .fields()
+                    .iter()
+                    .filter(|field| required.contains(field.name()))
+                    .map(|field| field.name().clone())
+                    .collect(),
+            );
+            Some(request.read_options().resolve_projection(source)?.0)
+        } else {
+            None
+        };
         let inner = self.inner.open(request).await?;
         let source = &inner.metadata().schema;
-        let state = SessionContext::new().state();
-        let mut schema = Arc::clone(source);
-        let mut column_names: HashSet<&str> = source
-            .fields()
-            .iter()
-            .map(|field| field.name().as_str())
-            .collect();
-        let mut steps = Vec::with_capacity(self.specs.len());
-        for spec in self.specs.iter() {
-            if !column_names.insert(&spec.column) {
-                return Err(invalid_generated_column(
-                    &spec.column,
-                    "column already exists",
-                ));
-            }
-            let (expression, output) = plan_expression(&state, &spec.expression, &schema)
-                .map_err(|error| generated_plan_error(&spec.column, error))?;
-            let mut metadata = output.metadata().clone();
-            metadata.insert(
-                "open_arrow_access:generated_expression".into(),
-                spec.expression.clone(),
-            );
-            let mut fields = schema.fields().to_vec();
-            fields.push(Arc::new(
-                output
-                    .as_ref()
-                    .clone()
-                    .with_name(&spec.column)
-                    .with_metadata(metadata),
-            ));
-            schema = Arc::new(Schema::new_with_metadata(fields, source.metadata().clone()));
-            steps.push(GeneratedStep {
-                output: Arc::clone(&schema),
-                expression,
-                column: spec.column.clone(),
-            });
+        if let Some(expected) = expected_source {
+            validate_generated_schema(source, &expected)?;
         }
+        let (schema, steps, _) = plan_steps(&state, &self.specs, source)?;
         let (schema, projection) = output_options.resolve_projection(&schema)?;
         let metadata = RecordMetadata {
             schema,
@@ -145,6 +137,47 @@ where
     }
 }
 
+fn plan_steps(
+    state: &SessionState,
+    specs: &[GeneratedColumnSpec],
+    source: &SchemaRef,
+) -> Result<(SchemaRef, Vec<GeneratedStep>, HashSet<String>)> {
+    validate_generated_names(specs, source)?;
+    let mut schema = Arc::clone(source);
+    let source_names: HashSet<&str> = source.fields().iter().map(|f| f.name().as_str()).collect();
+    let mut dependencies = HashSet::new();
+    let mut steps = Vec::with_capacity(specs.len());
+    for spec in specs {
+        let (expression, output, columns) = plan_expression(state, &spec.expression, &schema)
+            .map_err(|error| generated_plan_error(&spec.column, error))?;
+        dependencies.extend(
+            columns
+                .into_iter()
+                .filter(|name| source_names.contains(name.as_str())),
+        );
+        let mut metadata = output.metadata().clone();
+        metadata.insert(
+            "open_arrow_access:generated_expression".into(),
+            spec.expression.clone(),
+        );
+        let mut fields = schema.fields().to_vec();
+        fields.push(Arc::new(
+            output
+                .as_ref()
+                .clone()
+                .with_name(&spec.column)
+                .with_metadata(metadata),
+        ));
+        schema = Arc::new(Schema::new_with_metadata(fields, source.metadata().clone()));
+        steps.push(GeneratedStep {
+            output: Arc::clone(&schema),
+            expression,
+            column: spec.column.clone(),
+        });
+    }
+    Ok((schema, steps, dependencies))
+}
+
 /// Plans one row-level SQL expression against the source and earlier generated fields.
 ///
 /// Rejects non-row-level and volatile expressions before DataFusion coerces,
@@ -155,12 +188,17 @@ fn plan_expression(
     state: &SessionState,
     expression: &str,
     input: &SchemaRef,
-) -> datafusion::error::Result<(Arc<dyn PhysicalExpr>, FieldRef)> {
+) -> datafusion::error::Result<(Arc<dyn PhysicalExpr>, FieldRef, HashSet<String>)> {
     let df_schema = DFSchema::try_from(Arc::clone(input))?;
     let logical = state.create_logical_expr(expression, &df_schema)?;
     // Validate before simplification: a dead branch must not hide an
     // aggregate, subquery, or volatile function.
     validate_expression(&logical)?;
+    let columns = logical
+        .column_refs()
+        .into_iter()
+        .map(|column| column.name.clone())
+        .collect();
     let simplify_context = SimplifyContext::builder()
         .with_schema(Arc::new(df_schema.clone()))
         .with_config_options(Arc::clone(state.config_options()))
@@ -171,7 +209,7 @@ fn plan_expression(
     let logical = simplifier.simplify(logical)?;
     let physical = state.create_physical_expr(logical, &df_schema)?;
     let output = physical.return_field(input)?;
-    Ok((physical, output))
+    Ok((physical, output, columns))
 }
 
 fn record_capability(inner: RecordCapability) -> RecordCapability {

@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
     task::Poll,
@@ -35,6 +35,7 @@ fn layer(specs: &[(&str, &str)]) -> GeneratedColumnsLayer {
 struct MemoryAccessor {
     batches: Vec<RecordBatch>,
     polls: Arc<AtomicUsize>,
+    projections: Arc<Mutex<Vec<Option<Vec<String>>>>>,
 }
 
 impl MemoryAccessor {
@@ -42,6 +43,7 @@ impl MemoryAccessor {
         Self {
             batches,
             polls: Arc::default(),
+            projections: Arc::default(),
         }
     }
 }
@@ -60,6 +62,10 @@ impl Accessor for MemoryAccessor {
         .with_ordering(OrderRequirement::Reorderable)
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
+        self.projections
+            .lock()
+            .unwrap()
+            .push(request.options.projection.clone());
         let (schema, projection) = request
             .options
             .resolve_projection(&self.batches[0].schema())?;
@@ -344,4 +350,45 @@ async fn casts_preserve_values_and_nulls() {
             "{expression}"
         );
     }
+}
+
+#[tokio::test]
+async fn projection_pushdown_reads_real_dependencies_and_remaps_column_indices() {
+    let original = input();
+    let mut fields = vec![Arc::new(Field::new("unused", DataType::Utf8, false))];
+    fields.extend(original.schema().fields().iter().cloned());
+    let mut columns: Vec<Arc<dyn Array>> = vec![Arc::new(StringArray::from(vec!["wide"; 3]))];
+    columns.extend(original.columns().iter().cloned());
+    let batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).unwrap();
+    let schema = batch.schema();
+    let source = MemoryAccessor::new(vec![batch]);
+    let projections = source.projections.clone();
+    let polls = source.polls.clone();
+    let mut reader = source
+        .layer(
+            layer(&[
+                ("next", "\"Count\" + 1 /* unused */"),
+                ("twice", "next * 2"),
+                ("literal", "'unused'"),
+            ])
+            .with_source_schema(schema),
+        )
+        .open(request(&["twice"]))
+        .await
+        .unwrap();
+    assert_eq!(
+        *projections.lock().unwrap(),
+        vec![Some(vec!["Count".into()])]
+    );
+    assert_eq!(polls.load(Ordering::SeqCst), 0);
+    let output = reader.next().await.unwrap().unwrap();
+    assert_eq!(
+        output
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap(),
+        &Int64Array::from(vec![Some(6), None, Some(10)])
+    );
+    assert!(reader.next().await.unwrap().is_none());
 }
