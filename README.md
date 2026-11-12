@@ -62,7 +62,7 @@ See [architecture](docs/architecture.md) for component boundaries and execution 
 | Area | Available today | Details |
 | --- | --- | --- |
 | Arrow formats | Parquet, CSV/TSV, JSON/JSONL, XML, ATIF | [Formats and schema requirements](docs/support.md#file-formats) |
-| WARC | Native WARC records; Arrow conversion planned | [WARC behavior](docs/formats.md#warc-parser) |
+| WARC | Native WARC records or projected Arrow batches | [WARC behavior](docs/formats.md#warc-parser) |
 | Storage | One OpenDAL adapter; configure filesystem, S3, HTTP, or other upstream backends | [Backend configuration and requirements](docs/support.md#storage) |
 | Compression | Gzip, bzip2, LZ4 frames, Zstandard | [Byte layers](decompression/README.md) |
 | Archives | ZIP Stored/Deflate entries; sequential or ranged TAR access | [Archive requirements](docs/support.md#compression-and-archives) |
@@ -131,7 +131,7 @@ pipelines:
 - Dependency-aware projection pushdown for generated columns.
 - Metrics, timeout, and read-budget layers.
 - File-internal partition planning and optional unordered emission.
-- WARC-to-Arrow conversion and format-specific indexing/splitting.
+- Format-specific indexing/splitting.
 
 These are planned capabilities, with no release-date commitment. The
 [roadmap](docs/roadmap.md) separates implemented foundations from proposed work

@@ -294,3 +294,113 @@ async fn parallel_record_partitions_are_lazy_and_preserve_binary_projection_and_
     assert_eq!(bodies, [vec![], vec![0, 255, 13, 10], b"end".to_vec()]);
     assert!(reader.next().await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn invalid_arrow_projections_fail_before_opening_or_planning_input() {
+    for projection in [vec!["missing".into()], vec!["body".into(), "body".into()]] {
+        let input = MemoryAccessor::new(b"not a WARC file", 1);
+        let observed = input.observations.clone();
+        let accessor = WarcArrowAccessor::new(input);
+        let request = ReadRequest::new("unused.warc").with_options(ReadOptions {
+            projection: Some(projection),
+            ..Default::default()
+        });
+        assert_eq!(
+            accessor.open(request.clone()).await.err().unwrap().kind(),
+            ErrorKind::InvalidInput,
+        );
+        assert_eq!(
+            accessor.plan_scan(request).await.err().unwrap().kind(),
+            ErrorKind::InvalidInput,
+        );
+        assert!(observed.requests.lock().unwrap().is_empty());
+        assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn five_metadata_columns_preserve_order_and_optional_header_nulls_without_body() {
+    let input = fixture!("warc", "good_physical_records.warc").await;
+    let fields = [
+        "target_uri",
+        "record_type",
+        "content_type",
+        "record_id",
+        "date",
+    ];
+    let mut reader = WarcArrowAccessor::new(MemoryAccessor::new(&input, 1))
+        .open(ReadRequest::new("records.warc").with_options(ReadOptions {
+            projection: Some(fields.iter().map(|name| (*name).into()).collect()),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(batch.num_rows(), 3);
+    assert_eq!(
+        batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| field.name().as_str())
+            .collect::<Vec<_>>(),
+        fields,
+    );
+    assert_eq!(
+        batch["target_uri"]
+            .as_string::<i64>()
+            .iter()
+            .collect::<Vec<_>>(),
+        [None, Some("https://example.com/"), None]
+    );
+    assert_eq!(
+        batch["content_type"]
+            .as_string::<i32>()
+            .iter()
+            .collect::<Vec<_>>(),
+        [None, Some("application/octet-stream"), None]
+    );
+    assert_eq!(
+        batch["record_type"]
+            .as_string::<i32>()
+            .iter()
+            .collect::<Vec<_>>(),
+        [Some("warcinfo"), Some("resource"), Some("continuation")]
+    );
+    assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn empty_parallel_projection_preserves_rows_and_validates_unselected_bodies() {
+    for (fixture_name, expected_rows) in [
+        ("good_physical_records.warc", Some(3)),
+        ("bad_truncated_body.warc", None),
+    ] {
+        let input = fixture!("warc", fixture_name).await;
+        let mut reader = WarcArrowAccessor::new(MemoryAccessor::new(&input, 1))
+            .with_partition_options(DecodePartitionOptions {
+                target_bytes: NonZeroUsize::MIN,
+            })
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::MIN,
+            ))
+            .open(ReadRequest::new(fixture_name).with_options(ReadOptions {
+                projection: Some(vec![]),
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+        if let Some(expected_rows) = expected_rows {
+            let mut rows = 0;
+            while let Some(batch) = reader.next().await.unwrap() {
+                assert_eq!(batch.num_columns(), 0);
+                rows += batch.num_rows();
+            }
+            assert_eq!(rows, expected_rows);
+        } else {
+            assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
+        }
+        assert!(reader.next().await.unwrap().is_none());
+    }
+}

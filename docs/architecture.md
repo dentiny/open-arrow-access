@@ -32,7 +32,8 @@ flowchart TD
 The diagram shows data flow. In code, an accessor is a factory: `open(request)`
 returns an owned reader, and the consumer pulls items with `next().await`.
 Providers may return bytes or metadata rather than Arrow. WARC uses the same
-factory contract but currently emits native `WarcRecord` values.
+factory contract, exposing native `WarcRecord` values through `WarcAccessor`
+or projected Arrow batches through `WarcArrowAccessor`.
 
 ## Component boundaries
 

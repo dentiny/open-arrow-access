@@ -17,7 +17,7 @@ is listed in the [roadmap](roadmap.md).
 | JSON / JSONL | `format-json` | Arrow batches | Explicit or sampled Arrow schema; whitespace-separated objects, not top-level arrays; bare NaN/Infinity/-Infinity accepted; sequential bytes |
 | XML | `format-xml` | Arrow batches | Explicit record path; bounded schema inference or explicit mappings; sequential UTF-8 bytes |
 | ATIF JSON / JSONL | `format-atif` | Arrow batches | Fixed trajectory schema; one complete trajectory per document or nonblank line; sequential bytes |
-| WARC | `format-warc` | Native `WarcRecord` values | Sequential bytes; preserves headers and binary bodies; no built-in Arrow conversion |
+| WARC | `format-warc` | Native `WarcRecord` values or Arrow batches | Sequential bytes; `WarcArrowAccessor` supports projection and retains unmodified binary bodies |
 
 Projection selects top-level fields in caller order. Record readers expose a
 fixed schema at open. CSV and JSON support bounded per-input schema inference;
@@ -97,7 +97,8 @@ metadata fail. See the [union-by-name contract](../dataset/README.md#union-by-na
 Multi-file contents are read lazily and sequentially. Directory discovery collects
 the selected paths before reading to establish order. It is not an atomic
 snapshot of a mutable prefix. These record datasets require an accessor returning
-`RecordReader`; the native WARC parser has a different output type.
+`RecordReader`; use `WarcArrowAccessor` for WARC, since the native
+`WarcAccessor` has a different output type.
 
 ## Dataset providers
 
@@ -108,7 +109,7 @@ and release metadata with your downstream corpus manifest.
 | Provider | Feature | Available access / output | Guide |
 | --- | --- | --- | --- |
 | Hugging Face | `service-huggingface` | Repository file bytes; Parquet config/split as Arrow | [Guide](../service/huggingface.md) |
-| Common Crawl | `service-warc` | Crawl/segment membership; Arrow reads through a caller-supplied record accessor | [Guide](../service/commoncrawl.md) |
+| Common Crawl | `service-warc` | Crawl/segment membership; native WARC Arrow view or a caller-supplied record accessor | [Guide](../service/commoncrawl.md) |
 | PMC | `service-pmc` | Article-version metadata and inventory shards as Arrow; article content is separate | [Article metadata](../service/pmc.md), [inventory](../service/pmc-inventory.md) |
 | Gutenberg | `service-gutenberg` | Per-book RDF metadata as one Arrow row; content URIs remain metadata | [Guide](../service/gutenberg.md) |
 | CourtListener | `service-courtlistener` | Bulk snapshot discovery and decoded CSV bytes | [Guide](../service/courtlistener.md) |

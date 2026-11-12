@@ -225,7 +225,58 @@ the same core `ReaderFactory` contract as Arrow formats, using byte requests and
 native WARC records. Shared opening handles request forwarding and preparation;
 the parser retains its own record conversion and errors.
 
-This stage provides parser records, without an Arrow schema, Arrow batches,
-projection, or batch-size controls. Arrow conversion, record locators and generated
-columns are deferred. Supply external decompression separately. The parser buffers
-one complete body per record, so this is not a maximum-record-size or memory bound.
+The native accessor provides parser records without Arrow projection or batch-size
+controls. To select columns, use `WarcArrowAccessor` with a `ReadRequest` instead:
+
+```rust,ignore
+use open_arrow_access::{Accessor, ReadOptions, ReadRequest};
+use open_arrow_access::file_format::warc::WarcArrowAccessor;
+
+// `bytes` is any sequential byte accessor, such as OpenDalAccessor.
+let warc = WarcArrowAccessor::new(bytes);
+let request = ReadRequest::new("part.warc").with_options(ReadOptions {
+    projection: Some(vec![
+        "record_id".into(),
+        "record_type".into(),
+        "date".into(),
+        "target_uri".into(),
+        "content_type".into(),
+    ]),
+    ..Default::default()
+});
+let mut reader = warc.open(request).await?;
+while let Some(batch) = reader.next().await? {
+    // Exactly the five requested columns, in caller order; no body Arrow array.
+}
+```
+
+The fixed schema has eight top-level fields:
+
+| Field | Arrow type | Nullable |
+| --- | --- | --- |
+| `record_id` | Utf8 | No |
+| `record_type` | Utf8 | No |
+| `warc_version` | Utf8 | No |
+| `date` | Utf8 (RFC 3339) | No |
+| `source_uri` | LargeUtf8 (input locator) | No |
+| `target_uri` | LargeUtf8 | Yes |
+| `content_type` | Utf8 | Yes |
+| `body` | LargeBinary | No |
+
+Each physical WARC record produces one row, including warcinfo and continuation
+records. Bodies retain their original bytes; embedded HTTP messages are not
+extracted or decoded, target URIs are not fetched, and revisits are not resolved.
+Use the native accessor for headers outside this schema. `projection: None`
+selects all eight fields; an empty projection preserves row counts with zero
+columns. Unknown and duplicate field names fail before source I/O.
+
+Projection avoids building Arrow arrays for omitted fields. The parser still
+reads, buffers and validates complete physical records, including unselected
+bodies; omitting `body` does not avoid downloading it or impose a body-size limit.
+`batch_size` targets rows, not bytes or total memory. Arrow decoding also supports
+`plan_scan` and `ParallelReadLayer`; see [WARC partitions](../file-format/README.md#warc-arrow-partitions).
+
+Supply external decompression separately. For `.warc.gz`, construct the byte
+accessor with `bytes.layer(DecompressionLayer::new(Gzip))` before passing it to
+`WarcArrowAccessor::new`, importing `AccessorExt` and enabling
+`decompression-gzip`. Decompression and WARC framing remain sequential.
