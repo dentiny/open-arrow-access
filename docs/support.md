@@ -148,5 +148,5 @@ one metadata page at a time; callers own continuation, pacing, and retry policy.
 | Partition planning / parallel scans | Planned | Source-aware work units and bounded execution |
 | Unordered emission | Implemented | Explicit `UnorderedEmissionLayer`; requires a reorderable scan; independent of parallel execution |
 
-`layers/` includes Arrow type conversion and generated-column record layers. Backend-specific OpenDAL layers can already be configured on the
+`layers/` includes schema evolution and generated-column record layers. Backend-specific OpenDAL layers can already be configured on the
 operator; they are distinct from this project's accessor layers.

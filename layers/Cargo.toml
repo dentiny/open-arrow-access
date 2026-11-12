@@ -24,7 +24,7 @@ open-arrow-access-test-support.workspace = true
 workspace = true
 
 [[test]]
-name = "type_conversion"
+name = "schema_evolution"
 
 [[test]]
 name = "generated_columns"

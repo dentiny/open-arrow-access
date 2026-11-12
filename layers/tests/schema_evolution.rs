@@ -208,12 +208,12 @@ async fn projection_keeps_cast_dependencies_and_zero_column_row_counts() {
 #[tokio::test]
 async fn identity_casts_share_batches() {
     let input = batch(Arc::new(StringArray::from(vec!["42"])));
-    for conversion in [
+    for evolution in [
         SchemaEvolutionLayer::default(),
         layer("value", DataType::Utf8),
     ] {
         let mut reader = MemoryAccessor::new(vec![input.clone()])
-            .layer(conversion)
+            .layer(evolution)
             .open(ReadRequest::new("test"))
             .await
             .unwrap();
