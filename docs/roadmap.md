@@ -16,7 +16,7 @@ public implementations or reserved Cargo feature flags.
 - Bounded CSV schema inference with automatic header detection and sample replay.
 - Bounded JSON schema inference with sample replay and fixed-schema native scans.
 - Caller-configured OpenDAL storage, exact ranges, discovery, and per-reader I/O settings.
-- Parquet, CSV/TSV, JSON/JSONL, XML, and ATIF Arrow readers; native WARC parsing.
+- Parquet, CSV/TSV, JSON/JSONL, XML, ATIF, and WARC Arrow readers; native WARC parsing.
 - Streaming gzip, bzip2, LZ4, and Zstandard; ZIP and TAR entry access.
 - Ordered directory/file-set reads with strict projected-schema compatibility by default,
   plus opt-in cross-file union, nested Struct/List alignment, and missing-field nulls.
@@ -37,7 +37,7 @@ new project-specific storage implementation.
 | Source attributes and planning | Describe legal partitions and ordering constraints | Resolve source requirements before admitting execution/emission policies |
 | Parallel reads | Read independent files/partitions concurrently | Bounded scheduling, cancellation, and ordered merging by default |
 | Unordered emission | Implemented: emit ready batches when source semantics allow | Explicit opt-in; reject sources requiring global order |
-| WARC Arrow conversion | Feed web-archive records into Arrow pipelines and existing record datasets | Defined schema, binary payload policy, provenance/record locator semantics |
+| WARC Arrow conversion | Implemented: `WarcArrowAccessor` feeds physical records into Arrow pipelines and record datasets | Fixed schema, top-level projection, unmodified binary bodies, and source URI; no HTTP extraction or revisit resolution |
 | Indexing and splitting | Plan format-specific independent work units | Validate index identity, compression coordinates, and source-order compatibility |
 
 ## Schema inference and union by name
