@@ -97,7 +97,7 @@ open-arrow-access-test-support.workspace = true
 
 open-arrow-access-decompression = { workspace = true, features = ["gzip", "zip"] }
 tempfile.workspace = true
-tokio = { workspace = true, features = ["fs", "test-util"] }
+tokio = { workspace = true, features = ["fs"] }
 [[test]]
 name = "huggingface"
 required-features = ["huggingface"]
