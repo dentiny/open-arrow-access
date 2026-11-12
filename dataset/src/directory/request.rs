@@ -4,9 +4,11 @@ use open_arrow_access_core::{ByteReadOptions, ObjectRef, ReadOptions, ReadOption
 ///
 /// Selected locators are sorted lexicographically and duplicates removed. This
 /// is a declared scan order, not an atomic snapshot of a mutable directory.
-/// Prefixes and listed locators are backend-defined and passed through unchanged.
+/// Non-pattern prefixes and listed locators are passed through unchanged.
 #[derive(Clone, Debug)]
 pub struct DirectoryRequest {
+    /// Directory prefix or glob, for example `data/topic*/**/*.parquet`.
+    /// Glob patterns are supported directly; no separate option is required.
     pub prefix: ObjectRef,
     /// Traverse child directories during discovery. Defaults to true.
     pub recursive: bool,

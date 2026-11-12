@@ -768,3 +768,46 @@ async fn union_by_name_rejects_a_schema_that_changes_after_preflight() {
     );
     assert!(reader.next().await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn glob_selection_respects_paths_recursion_and_existing_suffix_filter() {
+    let schema = schema("same");
+    let names = [
+        ("data/a.parquet", 1),
+        ("data/b.parquet", 2),
+        ("data/topic-x/train.parquet", 3),
+        ("data/topic-x/deep/train.parquet", 4),
+        ("data/topic-y/test.json", 5),
+        ("data/.hidden.parquet", 6),
+    ];
+    for (pattern, recursive, suffix, expected) in [
+        ("*.parquet", true, None, vec![6, 1, 2]),
+        ("topic*/**/*.parquet", true, None, vec![4, 3]),
+        ("topic*/**/*", true, Some(".parquet"), vec![4, 3]),
+        ("**/*.parquet", false, None, vec![6, 1, 2]),
+    ] {
+        let files = Files::new(names.map(|(name, id)| {
+            (
+                name,
+                FileData::new(schema.clone(), vec![batch(schema.clone(), &[id])]),
+            )
+        }));
+        let accessor = DirectoryAccessor::new(
+            Listing {
+                expected_prefix: Some("data/"),
+                objects: names
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .chain(["data/b.parquet"])
+                    .collect(),
+                fail: false,
+            },
+            files,
+        );
+        let mut request = DirectoryRequest::new(format!("data/{pattern}"));
+        request.recursive = recursive;
+        request.suffix = suffix.map(str::to_owned);
+        let reader = accessor.open(request).await.unwrap();
+        assert_eq!(values(reader).await, expected, "{pattern}");
+    }
+}

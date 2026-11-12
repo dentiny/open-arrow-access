@@ -8,12 +8,13 @@ description = "Sequential file-set and directory datasets for Open Arrow Access"
 
 [features]
 default = []
-directory = []
+directory = ["dep:glob"]
 
 [dependencies]
 arrow-array.workspace = true
 arrow-schema.workspace = true
 futures.workspace = true
+glob = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 
 [dev-dependencies]
