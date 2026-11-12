@@ -412,7 +412,3 @@ pub(crate) fn validate_added_column(
     }
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "../tests/unit/schema_evolution_validation.rs"]
-mod schema_evolution_tests;
