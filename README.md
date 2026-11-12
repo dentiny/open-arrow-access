@@ -167,7 +167,7 @@ for the Arrow, Parquet, and OpenDAL version baseline.
 
 ## Output type conversion
 
-The [`TypeConversionLayer`](layers/README.md) wraps record accessors
+The [`SchemaRemapLayer`](layers/README.md) wraps record accessors
 through the shared `Layer<A>` contract. It casts explicitly named top-level columns
 using Arrow kernels, plans a fixed output schema before the first batch, and shares
 unchanged array buffers. It is always available, including with `default-features = false`.

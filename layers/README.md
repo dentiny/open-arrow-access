@@ -8,7 +8,7 @@ must forward optional operations or remove their advertised capabilities.
 
 - The public layer contract, verified by test wrappers for byte and record accessors.
 - [`ParallelReadLayer`](../docs/parallel-read.md) for bounded concurrent partition execution with ordered output.
-- `TypeConversionLayer` for explicit Arrow column casts; it is always exported by the facade.
+- `SchemaRemapLayer` for explicit Arrow column casts; it is always exported by the facade.
 - `GeneratedColumnsLayer` for ordered row-level SQL expressions; it is always exported by the facade.
   See the [design and usage](../docs/generated-columns.md).
 - `decompression::DecompressionLayer<C>` for gzip, bzip2, LZ4, and Zstandard byte
@@ -16,13 +16,13 @@ must forward optional operations or remove their advertised capabilities.
 - Caller-configured OpenDAL policies on the storage operator. These belong to
   OpenDAL's layer system, independently of this library's accessor layers.
 
-`TypeConversionLayer`, `ParallelReadLayer`, and `GeneratedColumnsLayer` are the
+`SchemaRemapLayer`, `ParallelReadLayer`, and `GeneratedColumnsLayer` are the
 production record layers in this crate. Type conversion and generated columns
 compose over any compatible record accessor.
 
 ## Type conversion
 
-`TypeConversionLayer` is always available through `open_arrow_access::layers`,
+`SchemaRemapLayer` is always available through `open_arrow_access::layers`,
 including with `default-features = false`. It wraps any
 `Accessor<Reader = dyn RecordReader>` whose request implements
 `ReadOptionsProvider`. An empty configuration and same-type conversions pass
@@ -32,11 +32,12 @@ their existing buffers.
 
 ```rust,ignore
 use arrow_schema::DataType;
-use open_arrow_access::{AccessorExt, layers::{ColumnTypeSpec, TypeConversionLayer}};
+use open_arrow_access::{AccessorExt, layers::{FieldRemap, SchemaRemapLayer}};
 
-let typed = source.layer(TypeConversionLayer::try_new(vec![ColumnTypeSpec {
-    column: "count".into(),
-    data_type: DataType::Int32,
+let typed = source.layer(SchemaRemapLayer::try_new(vec![FieldRemap {
+    source: "count".into(),
+    target: "count".into(),
+    data_type: Some(DataType::Int32),
 }])?);
 ```
 
@@ -54,7 +55,7 @@ back. Nested casts follow Arrow kernel behavior, including child-field mapping;
 the supplied nested target type defines its child fields and metadata. Casts
 that change extension fields, including nested ones, are rejected.
 
-Conversion preserves row counts, order, top-level field names/nullability and
+Conversion preserves row counts, order, field nullability and
 ordinary field/schema metadata. Arrow semantics are not a losslessness guarantee:
 numeric casts and reduced timestamp precision may lose information without an
 error. String-to-timestamp parsing uses Arrow's parser, with named timezones
@@ -68,7 +69,7 @@ Casts run before the caller's final projection, including casts on hidden column
 The inner projection includes only requested output columns and declared cast
 columns; no unrelated fields are added. An empty final projection retains row
 counts. Decoder/source schema overrides, cross-file schema reconciliation,
-renaming, generated columns and writer-specific restrictions remain separate.
+generated columns and writer-specific restrictions remain separate.
 
 ## Planned
 

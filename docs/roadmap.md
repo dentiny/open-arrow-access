@@ -57,7 +57,7 @@ schema drift. Type and metadata conflicts fail without implicit casts. See the
 
 ## Generated columns and observation
 
-[`TypeConversionLayer`](../layers/README.md) is implemented and always available.
+[`SchemaRemapLayer`](../layers/README.md) is implemented and always available.
 It uses the existing layer contract for explicit Arrow output casts.
 
 `GeneratedColumnsLayer` is implemented and always available, with

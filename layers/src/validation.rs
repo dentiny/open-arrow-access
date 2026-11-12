@@ -10,7 +10,7 @@ use open_arrow_access_core::{
     EmissionPolicy, Error, ErrorKind, FieldNameIndex, OrderRequirement, ParallelReadOptions, Result,
 };
 
-use crate::{ColumnTypeSpec, error::column_error};
+use crate::error::column_error;
 
 pub(crate) fn validate_sampling_probability(probability: f64) -> Result<()> {
     if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
@@ -47,28 +47,6 @@ pub(crate) fn validate_parallel_read_settings(
             "parallel_read",
             "conflicting parallel read settings on one scan",
         ));
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_specs(specs: &[ColumnTypeSpec]) -> Result<()> {
-    let mut names = HashSet::with_capacity(specs.len());
-    for spec in specs {
-        if spec.column.is_empty() || !names.insert(&spec.column) {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "configure_cast",
-                "cast columns must have nonempty, distinct names",
-            ));
-        }
-        validate_target(&spec.data_type).map_err(|error| {
-            column_error(
-                ErrorKind::InvalidInput,
-                "configure_cast",
-                &spec.column,
-                error,
-            )
-        })?;
     }
     Ok(())
 }
@@ -407,8 +385,12 @@ pub(crate) fn validate_remap_sources(
         .iter()
         .map(|spec| {
             let index = fields.index_of(&spec.source).map_err(|error| {
-                Error::new(ErrorKind::InvalidInput, "plan_cast", error.to_string())
-                    .with_source(error)
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    "plan_schema_remap",
+                    error.to_string(),
+                )
+                .with_source(error)
             })?;
             if let Some(target) = &spec.data_type
                 && schema.field(index).data_type() != target

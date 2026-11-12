@@ -18,12 +18,13 @@ use open_arrow_access_core::{
     ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result, async_trait,
     record_stream_reader,
 };
-use open_arrow_access_layers::{ColumnTypeSpec, TypeConversionLayer};
+use open_arrow_access_layers::{FieldRemap, SchemaRemapLayer};
 
-fn layer(name: &str, data_type: DataType) -> TypeConversionLayer {
-    TypeConversionLayer::try_new(vec![ColumnTypeSpec {
-        column: name.into(),
-        data_type,
+fn layer(name: &str, data_type: DataType) -> SchemaRemapLayer {
+    SchemaRemapLayer::try_new(vec![FieldRemap {
+        source: name.into(),
+        target: name.into(),
+        data_type: Some(data_type),
     }])
     .unwrap()
 }
@@ -212,10 +213,7 @@ async fn projection_keeps_cast_dependencies_and_zero_column_row_counts() {
 #[tokio::test]
 async fn identity_casts_share_batches() {
     let input = batch(Arc::new(StringArray::from(vec!["42"])));
-    for conversion in [
-        TypeConversionLayer::default(),
-        layer("value", DataType::Utf8),
-    ] {
+    for conversion in [SchemaRemapLayer::default(), layer("value", DataType::Utf8)] {
         let mut reader = MemoryAccessor::new(vec![input.clone()])
             .layer(conversion)
             .open(ReadRequest::new("test"))
@@ -377,7 +375,6 @@ async fn timestamp_fallback_rejects_invalid_ambiguous_and_overflowing_values() {
 
 #[tokio::test]
 async fn schema_remap_renames_casts_and_preserves_unmapped_fields() {
-    use open_arrow_access_layers::{FieldRemap, SchemaRemapLayer};
     let input = RecordBatch::try_from_iter([
         (
             "count",
@@ -437,7 +434,6 @@ async fn schema_remap_renames_casts_and_preserves_unmapped_fields() {
 
 #[tokio::test]
 async fn schema_remap_rejects_collisions_but_allows_simultaneous_swaps() {
-    use open_arrow_access_layers::{FieldRemap, SchemaRemapLayer};
     let input = RecordBatch::try_from_iter([
         ("a", Arc::new(Int64Array::from(vec![1])) as ArrayRef),
         ("b", Arc::new(Int64Array::from(vec![2])) as ArrayRef),
