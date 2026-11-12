@@ -332,11 +332,7 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
                 source_name,
                 target_name,
             } => {
-                if target_name.is_empty() {
-                    return Err(crate::error::invalid_evolution(
-                        "rename target must be nonempty",
-                    ));
-                }
+                validate_evolution_name(target_name)?;
                 source_name
             }
             ColumnEvolution::ChangeDataType { name, data_type } => {
@@ -345,11 +341,16 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
                 name
             }
         };
-        if name.is_empty() {
-            return Err(crate::error::invalid_evolution(
-                "column name must be nonempty",
-            ));
-        }
+        validate_evolution_name(name)?;
+    }
+    Ok(())
+}
+
+fn validate_evolution_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        return Err(crate::error::invalid_evolution(
+            "column name must be nonempty",
+        ));
     }
     Ok(())
 }
