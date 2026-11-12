@@ -20,15 +20,6 @@ impl FieldNameIndex {
         Self { indices }
     }
 
-    /// Number of distinct indexed names. O(1).
-    pub fn len(&self) -> usize {
-        self.indices.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.indices.is_empty()
-    }
-
     /// Look up a borrowed name without allocating or scanning the fields.
     pub fn get(&self, name: &str) -> Option<usize> {
         self.indices.get(name).copied()

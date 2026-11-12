@@ -325,25 +325,21 @@ pub(crate) fn validate_partition_schema(
 
 pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Result<()> {
     use crate::ColumnEvolution;
-    let mut additions = HashSet::new();
-    let mut removals = HashSet::new();
-    let mut renames = HashSet::new();
-    let mut targets = HashSet::new();
-    let mut casts = HashSet::new();
     for change in changes {
-        let (name, unique) = match change {
-            ColumnEvolution::AddColumn { name, .. } => (name, additions.insert(name)),
-            ColumnEvolution::RemoveColumn { name } => (name, removals.insert(name)),
+        let name = match change {
+            ColumnEvolution::AddColumn { name, .. } | ColumnEvolution::RemoveColumn { name } => {
+                name
+            }
             ColumnEvolution::RenameColumn {
                 source_name,
                 target_name,
             } => {
-                if target_name.is_empty() || !targets.insert(target_name) {
+                if target_name.is_empty() {
                     return Err(crate::error::invalid_evolution(
-                        "rename targets must be nonempty and unique",
+                        "rename target must be nonempty",
                     ));
                 }
-                (source_name, renames.insert(source_name))
+                source_name
             }
             ColumnEvolution::ChangeDataType { name, data_type } => {
                 validate_target(data_type).map_err(|error| {
@@ -354,22 +350,14 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
                         error,
                     )
                 })?;
-                (name, casts.insert(name))
+                name
             }
         };
-        if name.is_empty() || !unique {
+        if name.is_empty() {
             return Err(crate::error::invalid_evolution(
-                "column names must be nonempty and each operation may occur only once per column",
+                "column name must be nonempty",
             ));
         }
-    }
-    if removals
-        .iter()
-        .any(|name| renames.contains(name) || casts.contains(name))
-    {
-        return Err(crate::error::invalid_evolution(
-            "a removed column cannot also be renamed or cast",
-        ));
     }
     Ok(())
 }
@@ -382,45 +370,13 @@ pub(crate) fn validate_evolution_source(indexed_names: usize, source_fields: usi
     Ok(())
 }
 
-// O(K) expected for K changes; never visits untouched source fields.
-pub(crate) fn validate_evolution_names(
-    changes: &[crate::ColumnEvolution],
-    names: &FieldNameIndex,
-    removed: &HashSet<usize>,
+// O(1) expected: check only the target name in the current namespace.
+pub(crate) fn validate_evolution_target(
+    source: Option<usize>,
+    target: Option<usize>,
 ) -> Result<()> {
-    use crate::ColumnEvolution;
-    let mut vacated = removed.clone();
-    for change in changes {
-        if let ColumnEvolution::RenameColumn {
-            source_name,
-            target_name,
-        } = change
-            && source_name != target_name
-        {
-            vacated.insert(
-                names
-                    .index_of(source_name)
-                    .map_err(crate::error::evolution_source)?,
-            );
-        }
-    }
-    let mut targets = HashSet::new();
-    for change in changes {
-        let (target, own_index) = match change {
-            ColumnEvolution::AddColumn { name, .. } => (name, None),
-            ColumnEvolution::RenameColumn {
-                source_name,
-                target_name,
-            } => (target_name, names.get(source_name)),
-            _ => continue,
-        };
-        if !targets.insert(target)
-            || names
-                .get(target)
-                .is_some_and(|index| Some(index) != own_index && !vacated.contains(&index))
-        {
-            return Err(crate::error::evolution_output_collision());
-        }
+    if target.is_some() && target != source {
+        return Err(crate::error::evolution_output_collision());
     }
     Ok(())
 }

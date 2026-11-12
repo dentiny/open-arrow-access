@@ -89,18 +89,20 @@ let records = source.layer(SchemaEvolutionLayer::try_new(vec![
     }),
     ColumnEvolution::remove_column("obsolete"),
     ColumnEvolution::rename_column("count", "row_count"),
-    ColumnEvolution::change_data_type("count", DataType::Int64),
+    ColumnEvolution::change_data_type("row_count", DataType::Int64),
 ])?);
 ```
 
-Changes refer to original source names; renames are simultaneous. A column can
-be renamed and cast together, but cannot also be removed. Output names must be
-unique; removed or renamed source names can be reused by additions.
+Changes execute in vector order. Each name refers to the schema produced by
+preceding changes. For example, cast `row_count` after renaming `count` to
+`row_count`. Rename targets must be unoccupied at that step; swapping names
+requires a temporary name. Removed names can be reused by later additions.
 
-Added columns are nullable and appended in declaration order. Their functors
-(`Fn(&RecordBatch) -> Result<ArrayRef> + Send + Sync + 'static`) see the original
-batch, including removed fields, and must return the declared type and row count.
-They cannot reference other additions. Empty batches are supported.
+Added columns are nullable and appended in vector order. Their functors
+(`Fn(&RecordBatch) -> Result<ArrayRef> + Send + Sync + 'static`) see the current
+batch, including earlier additions, renames, and casts, with removed fields
+absent. Each must return the declared type and row count. Empty batches are
+supported.
 
 Projection uses evolved names. Functors read all source columns and, like casts,
 run even when omitted from the final projection. Unchanged arrays share buffers;
@@ -109,13 +111,16 @@ Unsupported casts fail at open; invalid values, overflows, and callback failures
 terminate reading with error context. Arrow casts can lose precision and do not
 reconcile schemas across files.
 
-Opening builds the source index and output schema once. Layer-owned validation
-checks changed columns only, not every source field: expected O(K) for K changes,
-plus structural checks within changed nested types. Per-batch metadata assembly
-is expected O(K + P) for P output columns, excluding casts and functor computation.
-Untouched fields rely on the source reader's fixed-schema contract. Arrow's
-safe batch constructor also checks those P output columns. Planning still
-costs O(F + K) for F source fields; the entire layer is not O(1).
+Opening builds a mutable name index once. Layer-owned validation checks changed
+columns only: expected O(K) for K changes, plus structural checks within changed
+nested types. Untouched fields rely on the source reader's fixed-schema contract.
+The initial index and final schema take O(F + K) for F source fields. An addition
+after earlier changes also needs a snapshot of the current schema and a current
+batch view; these visit the fields in that view during planning and reading.
+A functor before any effective changes borrows the source batch directly.
+Final batch assembly visits P projected fields. Arrow's safe batch constructors
+also check the fields in each assembled view. Casts and user functors have their
+own computation costs.
 
 See the [runnable example](../examples/schema_evolution.rs),
 [generated columns](../docs/generated-columns.md), and

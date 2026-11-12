@@ -1,43 +1,26 @@
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use arrow_schema::{DataType, Field, Schema};
-use open_arrow_access_core::FieldNameIndex;
 
-use super::{validate_evolution_batch_schema, validate_evolution_names, validate_evolution_source};
-use crate::ColumnEvolution;
+use super::{
+    validate_evolution_batch_schema, validate_evolution_source, validate_evolution_target,
+};
 
 #[test]
-fn names_check_only_change_targets_against_the_existing_index() {
-    let schema = Schema::new(
-        (0..4096)
-            .map(|i| Field::new(format!("c{i}"), DataType::Int32, true))
-            .collect::<Vec<_>>(),
-    );
-    let names = FieldNameIndex::new(schema.fields());
-    validate_evolution_source(names.len(), schema.fields().len()).unwrap();
-    let changes = vec![
-        ColumnEvolution::rename_column("c0", "c1"),
-        ColumnEvolution::remove_column("c1"),
-        ColumnEvolution::add_column("c0", DataType::Int32, |_| unreachable!()),
-    ];
-    validate_evolution_names(&changes, &names, &HashSet::from([1])).unwrap();
-    let collision = [ColumnEvolution::add_column(
-        "c4095",
-        DataType::Int32,
-        |_| unreachable!(),
-    )];
-    assert!(validate_evolution_names(&collision, &names, &HashSet::new()).is_err());
+fn target_checks_use_the_current_slot_without_scanning_fields() {
+    for (source, target) in [(None, None), (Some(0), None), (Some(0), Some(0))] {
+        validate_evolution_target(source, target).unwrap();
+    }
+    for (source, target) in [(None, Some(0)), (Some(0), Some(1))] {
+        assert!(validate_evolution_target(source, target).is_err());
+    }
 }
 
 #[test]
-fn source_uniqueness_uses_index_size_and_preserves_first_lookup() {
-    let schema = Schema::new(vec![
-        Field::new("a", DataType::Int32, true),
-        Field::new("a", DataType::Utf8, true),
-    ]);
-    let names = FieldNameIndex::new(schema.fields());
-    assert_eq!(names.get("a"), Some(0));
-    assert!(validate_evolution_source(names.len(), schema.fields().len()).is_err());
+fn source_uniqueness_uses_index_size() {
+    validate_evolution_source(4096, 4096).unwrap();
+    validate_evolution_source(0, 0).unwrap();
+    assert!(validate_evolution_source(1, 2).is_err());
 }
 
 #[test]

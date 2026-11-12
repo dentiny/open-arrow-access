@@ -46,7 +46,7 @@ or projected Arrow batches through `WarcArrowAccessor`.
 | `file-format/` | Parser configuration, schemas, projection, and decoding | Byte readers and format libraries |
 | `dataset/` | Directory discovery and explicit ordered file sets | Supplied single-file record accessor |
 | `service/` | Provider discovery, identities, metadata, and source-specific composition | Storage, formats, archives, and datasets |
-| `layers/` | Arrow schema evolution; future record and execution enhancements | Core layer contract and Arrow kernels |
+| `layers/` | Arrow output type conversion; future record and execution enhancements | Core layer contract and Arrow kernels |
 | `test-support/` | Unpublished shared test fixtures and contract assertions | Component test suites |
 
 A format receives a `ByteReader`, not an OpenDAL operator. Storage knows object

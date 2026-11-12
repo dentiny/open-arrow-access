@@ -13,9 +13,6 @@ fn owns_names_and_matches_first_duplicate_without_scanning() {
         ]);
         FieldNameIndex::new(schema.fields())
     };
-    assert_eq!(index.len(), 2);
-    assert!(!index.is_empty());
-    assert!(FieldNameIndex::new(Schema::empty().fields()).is_empty());
     assert_eq!(index.get("same"), Some(0));
     assert_eq!(index.index_of("other").unwrap(), 2);
     assert_eq!(index.get("missing"), None);
@@ -35,7 +32,6 @@ fn wide_projections_keep_requested_order_metadata_and_errors() {
             .collect::<Vec<_>>(),
         HashMap::from([("snapshot".into(), "wide".into())]),
     ));
-    assert_eq!(FieldNameIndex::new(schema.fields()).len(), count);
     let columns = (0..count)
         .rev()
         .map(|i| format!("c{i}"))

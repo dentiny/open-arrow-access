@@ -158,7 +158,8 @@ pub(crate) fn invalid_evolution(message: &str) -> Error {
         message,
     )
 }
-pub(crate) fn evolution_source(error: arrow_schema::ArrowError) -> Error {
+pub(crate) fn evolution_source(name: &str) -> Error {
+    let error = ArrowError::SchemaError(format!("unknown field {name:?}"));
     Error::new(
         ErrorKind::InvalidInput,
         "plan_schema_evolution",

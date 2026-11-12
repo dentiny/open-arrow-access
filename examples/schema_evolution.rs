@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Layers are always available. Enabling format-json only enables the decoder.
     let records = source.layer(SchemaEvolutionLayer::try_new(vec![
         ColumnEvolution::rename_column("id", "record_id"),
-        ColumnEvolution::change_data_type("id", DataType::Int32),
+        ColumnEvolution::change_data_type("record_id", DataType::Int32),
         ColumnEvolution::add_column("batch_rows", DataType::UInt64, |batch| {
             Ok(std::sync::Arc::new(arrow_array::UInt64Array::from(
                 vec![batch.num_rows() as u64; batch.num_rows()],

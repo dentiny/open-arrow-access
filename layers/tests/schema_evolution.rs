@@ -448,7 +448,7 @@ async fn schema_evolution_renames_casts_and_preserves_unmapped_fields() {
 }
 
 #[tokio::test]
-async fn schema_evolution_rejects_collisions_but_allows_simultaneous_swaps() {
+async fn schema_evolution_swaps_require_a_temporary_name() {
     let input = RecordBatch::try_from_iter([
         ("a", Arc::new(Int64Array::from(vec![1])) as ArrayRef),
         ("b", Arc::new(Int64Array::from(vec![2])) as ArrayRef),
@@ -467,7 +467,10 @@ async fn schema_evolution_rejects_collisions_but_allows_simultaneous_swaps() {
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
     for projection in [None, Some(vec!["a".into(), "b".into()])] {
         let mut reader = MemoryAccessor::new(vec![input.clone()])
-            .open_evolved(vec![rename("a", "b"), rename("b", "a")], projection.clone())
+            .open_evolved(
+                vec![rename("a", "tmp"), rename("b", "a"), rename("tmp", "b")],
+                projection.clone(),
+            )
             .await
             .unwrap();
         let output = reader.next().await.unwrap().unwrap();
@@ -483,7 +486,7 @@ async fn schema_evolution_rejects_collisions_but_allows_simultaneous_swaps() {
 }
 
 #[tokio::test]
-async fn evolution_combines_all_operations_and_functors_see_the_original_batch() {
+async fn evolution_combines_all_operations_and_functors_see_previous_changes() {
     let source_schema = Arc::new(Schema::new_with_metadata(
         vec![
             Field::new("value", DataType::Utf8, true)
@@ -502,28 +505,32 @@ async fn evolution_combines_all_operations_and_functors_see_the_original_batch()
         ],
     )
     .unwrap();
-    for (projection, reverse) in [
-        (None, false),
-        (Some(vec!["added".into(), "count".into()]), true),
-        (Some(vec![]), false),
+    for projection in [
+        None,
+        Some(vec!["copied".into(), "count".into()]),
+        Some(vec![]),
     ] {
         let calls = Arc::new(AtomicUsize::new(0));
         let seen = calls.clone();
-        let expected = source_schema.clone();
-        let mut changes = vec![
+        let copied = calls.clone();
+        let changes = vec![
             ColumnEvolution::rename_column("value", "count"),
-            ColumnEvolution::change_data_type("value", DataType::Int32),
-            ColumnEvolution::remove_column("remove"),
+            ColumnEvolution::change_data_type("count", DataType::Int32),
             ColumnEvolution::add_column("added", DataType::Int32, move |batch| {
                 seen.fetch_add(1, Ordering::SeqCst);
-                assert_eq!(batch.schema(), expected);
-                assert!(batch.column_by_name("count").is_none());
-                Ok(batch.column_by_name("remove").unwrap().clone())
+                assert!(batch.column_by_name("value").is_none());
+                assert!(batch.column_by_name("remove").is_some());
+                let count = batch.column_by_name("count").unwrap();
+                assert_eq!(count.data_type(), &DataType::Int32);
+                Ok(count.clone())
+            }),
+            ColumnEvolution::remove_column("remove"),
+            ColumnEvolution::add_column("copied", DataType::Int32, move |batch| {
+                copied.fetch_add(1, Ordering::SeqCst);
+                assert!(batch.column_by_name("remove").is_none());
+                Ok(batch.column_by_name("added").unwrap().clone())
             }),
         ];
-        if reverse {
-            changes.reverse();
-        }
         let mut reader = MemoryAccessor::new(vec![input.clone(), input.slice(0, 0)])
             .open_evolved(changes, projection.clone())
             .await
@@ -546,7 +553,12 @@ async fn evolution_combines_all_operations_and_functors_see_the_original_batch()
             .collect();
         assert_eq!(
             names,
-            projection.unwrap_or_else(|| vec!["count".into(), "keep".into(), "added".into()])
+            projection.unwrap_or_else(|| vec![
+                "count".into(),
+                "keep".into(),
+                "added".into(),
+                "copied".into()
+            ])
         );
         if let Some(column) = output.column_by_name("count") {
             assert_eq!(
@@ -561,14 +573,22 @@ async fn evolution_combines_all_operations_and_functors_see_the_original_batch()
         if let Some(column) = output.column_by_name("keep") {
             assert!(Arc::ptr_eq(column, input.column(1)));
         }
-        if let Some(column) = output.column_by_name("added") {
-            assert!(Arc::ptr_eq(column, input.column(2)));
+        for name in ["added", "copied"] {
+            if let Some(column) = output.column_by_name(name) {
+                assert_eq!(
+                    column.to_data(),
+                    Int32Array::from(vec![Some(42), None]).to_data()
+                );
+                if let Some(count) = output.column_by_name("count") {
+                    assert!(Arc::ptr_eq(column, count));
+                }
+            }
         }
         let empty = reader.next().await.unwrap().unwrap();
         assert_eq!(empty.num_rows(), 0);
         assert_eq!(empty.schema(), reader.metadata().schema);
         assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
     }
 }
 
@@ -585,7 +605,7 @@ async fn evolution_can_reuse_removed_and_renamed_source_names() {
                 ColumnEvolution::remove_column("b"),
                 ColumnEvolution::rename_column("a", "b"),
                 ColumnEvolution::add_column("a", DataType::Int64, |batch| {
-                    Ok(batch.column(1).clone())
+                    Ok(batch.column_by_name("b").unwrap().clone())
                 }),
             ],
             None,
@@ -596,11 +616,11 @@ async fn evolution_can_reuse_removed_and_renamed_source_names() {
     assert_eq!(output.schema().field(0).name(), "b");
     assert_eq!(output.schema().field(1).name(), "a");
     assert!(Arc::ptr_eq(output.column(0), input.column(0)));
-    assert!(Arc::ptr_eq(output.column(1), input.column(1)));
+    assert!(Arc::ptr_eq(output.column(1), input.column(0)));
 }
 
 #[test]
-fn evolution_rejects_ambiguous_declarations() {
+fn evolution_rejects_invalid_names_and_types() {
     for changes in [
         vec![ColumnEvolution::remove_column("")],
         vec![ColumnEvolution::change_data_type("", DataType::Int32)],
@@ -611,35 +631,8 @@ fn evolution_rejects_ambiguous_declarations() {
             "a",
             DataType::Time32(arrow_schema::TimeUnit::Nanosecond),
         )],
-        vec![
-            ColumnEvolution::rename_column("a", "c"),
-            ColumnEvolution::rename_column("b", "c"),
-        ],
         vec![ColumnEvolution::rename_column("a", "")],
-        vec![
-            ColumnEvolution::remove_column("a"),
-            ColumnEvolution::remove_column("a"),
-        ],
-        vec![
-            ColumnEvolution::remove_column("a"),
-            ColumnEvolution::rename_column("a", "b"),
-        ],
-        vec![
-            ColumnEvolution::change_data_type("a", DataType::Int32),
-            ColumnEvolution::remove_column("a"),
-        ],
-        vec![
-            ColumnEvolution::rename_column("a", "b"),
-            ColumnEvolution::rename_column("a", "c"),
-        ],
-        vec![
-            ColumnEvolution::change_data_type("a", DataType::Int32),
-            ColumnEvolution::change_data_type("a", DataType::Int64),
-        ],
-        vec![
-            ColumnEvolution::add_column("a", DataType::Int32, |b| Ok(b.column(0).clone())),
-            ColumnEvolution::add_column("a", DataType::Int32, |b| Ok(b.column(0).clone())),
-        ],
+        vec![ColumnEvolution::rename_column("", "a")],
     ] {
         assert_eq!(
             SchemaEvolutionLayer::try_new(changes).unwrap_err().kind(),
@@ -755,8 +748,7 @@ async fn evolution_appends_functors_in_order_and_reuses_them_across_readers() {
         }),
         ColumnEvolution::add_column("second", DataType::Int32, move |batch| {
             assert_eq!(second.fetch_add(1, Ordering::SeqCst) % 2, 1);
-            assert!(batch.column_by_name("first").is_none());
-            Ok(batch.column(0).clone())
+            Ok(batch.column_by_name("first").unwrap().clone())
         }),
     ])
     .unwrap();
@@ -887,10 +879,10 @@ async fn evolution_supports_sparse_changes_and_projection_on_wide_batches() {
         .open_evolved(
             vec![
                 ColumnEvolution::rename_column("c0", "renamed"),
-                ColumnEvolution::change_data_type("c0", DataType::Int64),
+                ColumnEvolution::change_data_type("renamed", DataType::Int64),
                 ColumnEvolution::remove_column("c1"),
                 ColumnEvolution::add_column("added", DataType::Int32, |batch| {
-                    Ok(batch.column(1).clone())
+                    Ok(batch.column_by_name("c2").unwrap().clone())
                 }),
             ],
             Some(vec!["added".into(), "renamed".into(), "c4095".into()]),
@@ -905,4 +897,138 @@ async fn evolution_supports_sparse_changes_and_projection_on_wide_batches() {
         Int64Array::from(vec![1, 2]).to_data()
     );
     assert!(Arc::ptr_eq(output.column(2), &array));
+}
+
+#[tokio::test]
+async fn evolution_chains_add_cast_rename_and_repeated_casts() {
+    let input = batch(Arc::new(StringArray::from(vec!["001"])));
+    let mut reader = MemoryAccessor::new(vec![input])
+        .open_evolved(
+            vec![
+                ColumnEvolution::add_column("added", DataType::Utf8, |batch| {
+                    Ok(batch.column_by_name("value").unwrap().clone())
+                }),
+                ColumnEvolution::change_data_type("added", DataType::Int32),
+                ColumnEvolution::rename_column("added", "intermediate"),
+                ColumnEvolution::rename_column("intermediate", "final"),
+                ColumnEvolution::change_data_type("final", DataType::Utf8),
+                ColumnEvolution::add_column("copied", DataType::Utf8, |batch| {
+                    assert!(batch.column_by_name("added").is_none());
+                    assert!(batch.column_by_name("intermediate").is_none());
+                    Ok(batch.column_by_name("final").unwrap().clone())
+                }),
+            ],
+            Some(vec!["copied".into(), "final".into()]),
+        )
+        .await
+        .unwrap();
+    let output = reader.next().await.unwrap().unwrap();
+    // The intermediate numeric cast must execute, rather than collapse to Utf8 -> Utf8.
+    assert_eq!(
+        output.column(0).to_data(),
+        StringArray::from(vec!["1"]).to_data()
+    );
+    assert!(Arc::ptr_eq(output.column(0), output.column(1)));
+}
+
+#[tokio::test]
+async fn evolution_allows_add_remove_add_and_evaluates_removed_additions() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let mut reader = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1])))])
+        .open_evolved(
+            vec![
+                ColumnEvolution::add_column("added", DataType::Int32, move |batch| {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    Ok(batch.column(0).clone())
+                }),
+                ColumnEvolution::remove_column("added"),
+                ColumnEvolution::add_column("added", DataType::Int64, |batch| {
+                    assert!(batch.column_by_name("added").is_none());
+                    Ok(Arc::new(Int64Array::from(vec![2; batch.num_rows()])))
+                }),
+                ColumnEvolution::remove_column("value"),
+            ],
+            None,
+        )
+        .await
+        .unwrap();
+    let output = reader.next().await.unwrap().unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(output.num_columns(), 1);
+    assert_eq!(output.schema().field(0).name(), "added");
+    assert_eq!(
+        output.column(0).to_data(),
+        Int64Array::from(vec![2]).to_data()
+    );
+}
+
+#[tokio::test]
+async fn evolution_checks_names_at_each_step_before_reading() {
+    for changes in [
+        vec![
+            ColumnEvolution::remove_column("a"),
+            ColumnEvolution::remove_column("a"),
+        ],
+        vec![
+            ColumnEvolution::remove_column("a"),
+            ColumnEvolution::rename_column("a", "c"),
+        ],
+        vec![
+            ColumnEvolution::remove_column("a"),
+            ColumnEvolution::change_data_type("a", DataType::Int32),
+        ],
+        vec![
+            ColumnEvolution::rename_column("a", "c"),
+            ColumnEvolution::change_data_type("a", DataType::Int32),
+        ],
+        vec![
+            ColumnEvolution::rename_column("a", "b"),
+            ColumnEvolution::remove_column("b"),
+        ],
+        vec![
+            ColumnEvolution::rename_column("a", "b"),
+            ColumnEvolution::rename_column("b", "a"),
+        ],
+        vec![
+            ColumnEvolution::add_column("c", DataType::Int32, |batch| Ok(batch.column(0).clone())),
+            ColumnEvolution::add_column("c", DataType::Int32, |batch| Ok(batch.column(0).clone())),
+        ],
+    ] {
+        let input = RecordBatch::try_from_iter([
+            ("a", Arc::new(Int32Array::from(vec![1])) as ArrayRef),
+            ("b", Arc::new(Int32Array::from(vec![2])) as ArrayRef),
+        ])
+        .unwrap();
+        let source = MemoryAccessor::new(vec![input]);
+        let reads = source.calls.clone();
+        let error = source.open_evolved(changes, None).await.err().unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn evolution_preserves_runtime_order_between_casts_and_functors() {
+    for cast_first in [false, true] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = calls.clone();
+        let mut changes = vec![
+            ColumnEvolution::add_column("marker", DataType::Utf8, move |batch| {
+                seen.fetch_add(1, Ordering::SeqCst);
+                Ok(batch.column(0).clone())
+            }),
+            ColumnEvolution::change_data_type("value", DataType::Int32),
+        ];
+        if cast_first {
+            changes.reverse();
+        }
+        let mut reader = MemoryAccessor::new(vec![batch(Arc::new(StringArray::from(vec!["bad"])))])
+            .open_evolved(changes, Some(vec![]))
+            .await
+            .unwrap();
+        assert!(reader.next().await.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), usize::from(!cast_first));
+        assert!(reader.next().await.unwrap().is_none());
+    }
 }
