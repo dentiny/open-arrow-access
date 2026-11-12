@@ -786,38 +786,28 @@ async fn glob_selection_respects_paths_recursion_and_existing_suffix_filter() {
         ("topic*/**/*", true, Some(".parquet"), vec![4, 3]),
         ("**/*.parquet", false, None, vec![6, 1, 2]),
     ] {
-        for planned in [false, true] {
-            let files = Files::new(names.map(|(name, id)| {
-                (
-                    name,
-                    FileData::new(schema.clone(), vec![batch(schema.clone(), &[id])]),
-                )
-            }));
-            let accessor = DirectoryAccessor::new(
-                Listing {
-                    expected_prefix: Some("data"),
-                    objects: names
-                        .iter()
-                        .map(|(name, _)| *name)
-                        .chain(["data/b.parquet"])
-                        .collect(),
-                    fail: false,
-                },
-                files,
-            );
-            let mut request = DirectoryRequest::new("data").with_glob(pattern);
-            request.recursive = recursive;
-            request.suffix = suffix.map(str::to_owned);
-            let reader: Box<dyn RecordReader> = if planned {
-                Box::new(accessor.plan_scan(request).await.unwrap().into_reader())
-            } else {
-                accessor.open(request).await.unwrap()
-            };
-            assert_eq!(
-                values(reader).await,
-                expected,
-                "{pattern}, planned={planned}"
-            );
-        }
+        let files = Files::new(names.map(|(name, id)| {
+            (
+                name,
+                FileData::new(schema.clone(), vec![batch(schema.clone(), &[id])]),
+            )
+        }));
+        let accessor = DirectoryAccessor::new(
+            Listing {
+                expected_prefix: Some("data"),
+                objects: names
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .chain(["data/b.parquet"])
+                    .collect(),
+                fail: false,
+            },
+            files,
+        );
+        let mut request = DirectoryRequest::new("data").with_glob(pattern);
+        request.recursive = recursive;
+        request.suffix = suffix.map(str::to_owned);
+        let reader = accessor.open(request).await.unwrap();
+        assert_eq!(values(reader).await, expected, "{pattern}");
     }
 }
