@@ -22,9 +22,9 @@ use open_arrow_access_layers::{FieldRemap, SchemaRemapLayer};
 
 fn layer(name: &str, data_type: DataType) -> SchemaRemapLayer {
     SchemaRemapLayer::try_new(vec![FieldRemap {
-        source: name.into(),
-        target: name.into(),
-        data_type: Some(data_type),
+        source_name: name.into(),
+        target_name: None,
+        target_data_type: Some(data_type),
     }])
     .unwrap()
 }
@@ -390,14 +390,14 @@ async fn schema_remap_renames_casts_and_preserves_unmapped_fields() {
     for names in [vec!["pdf", "count", "keep"], vec![]] {
         let remap = SchemaRemapLayer::try_new(vec![
             FieldRemap {
-                source: "pdf_url".into(),
-                target: "pdf".into(),
-                data_type: None,
+                source_name: "pdf_url".into(),
+                target_name: Some("pdf".into()),
+                target_data_type: None,
             },
             FieldRemap {
-                source: "count".into(),
-                target: "count".into(),
-                data_type: Some(DataType::Int32),
+                source_name: "count".into(),
+                target_name: None,
+                target_data_type: Some(DataType::Int32),
             },
         ])
         .unwrap();
@@ -440,9 +440,9 @@ async fn schema_remap_rejects_collisions_but_allows_simultaneous_swaps() {
     ])
     .unwrap();
     let rename = |source: &str, target: &str| FieldRemap {
-        source: source.into(),
-        target: target.into(),
-        data_type: None,
+        source_name: source.into(),
+        target_name: Some(target.into()),
+        target_data_type: None,
     };
     let error = MemoryAccessor::new(vec![input.clone()])
         .layer(SchemaRemapLayer::try_new(vec![rename("a", "b")]).unwrap())

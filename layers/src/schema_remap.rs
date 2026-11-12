@@ -16,10 +16,17 @@ use crate::validation;
 /// Remap one top-level field; omitted fields remain unchanged.
 #[derive(Clone, Debug)]
 pub struct FieldRemap {
-    pub source: String,
-    pub target: String,
+    pub source_name: String,
+    /// None preserves the source name.
+    pub target_name: Option<String>,
     /// None preserves the source type.
-    pub data_type: Option<DataType>,
+    pub target_data_type: Option<DataType>,
+}
+
+impl FieldRemap {
+    pub(crate) fn output_name(&self) -> &str {
+        self.target_name.as_deref().unwrap_or(&self.source_name)
+    }
 }
 
 /// Rename top-level fields and optionally cast their types.
@@ -78,14 +85,17 @@ where
         }
         let output_options = request.read_options().clone();
         // A rename needs the full schema to detect collisions with unchanged fields.
-        let renames = self.specs.iter().any(|spec| spec.source != spec.target);
+        let renames = self
+            .specs
+            .iter()
+            .any(|spec| spec.source_name != spec.output_name());
         if renames {
             request.read_options_mut().projection = None;
         } else if let Some(columns) = &mut request.read_options_mut().projection {
             let mut names: HashSet<_> = columns.iter().cloned().collect();
             for spec in self.specs.iter() {
-                if names.insert(spec.source.clone()) {
-                    columns.push(spec.source.clone());
+                if names.insert(spec.source_name.clone()) {
+                    columns.push(spec.source_name.clone());
                 }
             }
         }
@@ -96,7 +106,7 @@ where
         let mut casts = Vec::with_capacity(self.specs.len());
         for (spec, index) in self.specs.iter().zip(indices) {
             let field = &fields[index];
-            let target = spec.data_type.as_ref().unwrap_or(field.data_type());
+            let target = spec.target_data_type.as_ref().unwrap_or(field.data_type());
             if field.data_type() != target {
                 casts.push((index, target.clone()));
             }
@@ -104,7 +114,7 @@ where
                 field
                     .as_ref()
                     .clone()
-                    .with_name(&spec.target)
+                    .with_name(spec.output_name())
                     .with_data_type(target.clone()),
             );
         }

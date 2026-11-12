@@ -35,9 +35,9 @@ use arrow_schema::DataType;
 use open_arrow_access::{AccessorExt, layers::{FieldRemap, SchemaRemapLayer}};
 
 let typed = source.layer(SchemaRemapLayer::try_new(vec![FieldRemap {
-    source: "count".into(),
-    target: "count".into(),
-    data_type: Some(DataType::Int32),
+    source_name: "count".into(),
+    target_name: None,
+    target_data_type: Some(DataType::Int32),
 }])?);
 ```
 

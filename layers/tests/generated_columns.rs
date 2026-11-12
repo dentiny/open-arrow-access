@@ -274,9 +274,9 @@ async fn composes_after_schema_remap() {
     let mut reader = MemoryAccessor::new(vec![input()])
         .layer(
             SchemaRemapLayer::try_new(vec![FieldRemap {
-                source: "Count".into(),
-                target: "Count".into(),
-                data_type: Some(DataType::Float64),
+                source_name: "Count".into(),
+                target_name: None,
+                target_data_type: Some(DataType::Float64),
             }])
             .unwrap(),
         )

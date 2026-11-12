@@ -351,10 +351,10 @@ pub(crate) fn validate_remap_specs(specs: &[crate::FieldRemap]) -> Result<()> {
     let mut sources = HashSet::new();
     let mut targets = HashSet::new();
     for spec in specs {
-        if spec.source.is_empty()
-            || spec.target.is_empty()
-            || !sources.insert(&spec.source)
-            || !targets.insert(&spec.target)
+        if spec.source_name.is_empty()
+            || spec.output_name().is_empty()
+            || !sources.insert(&spec.source_name)
+            || !targets.insert(spec.output_name())
         {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -362,12 +362,12 @@ pub(crate) fn validate_remap_specs(specs: &[crate::FieldRemap]) -> Result<()> {
                 "source names and target names must each be nonempty and unique",
             ));
         }
-        if let Some(target) = &spec.data_type {
+        if let Some(target) = &spec.target_data_type {
             validate_target(target).map_err(|error| {
                 column_error(
                     ErrorKind::InvalidInput,
                     "configure_schema_remap",
-                    &spec.source,
+                    &spec.source_name,
                     error,
                 )
             })?;
@@ -384,7 +384,7 @@ pub(crate) fn validate_remap_sources(
     specs
         .iter()
         .map(|spec| {
-            let index = fields.index_of(&spec.source).map_err(|error| {
+            let index = fields.index_of(&spec.source_name).map_err(|error| {
                 Error::new(
                     ErrorKind::InvalidInput,
                     "plan_schema_remap",
@@ -392,7 +392,7 @@ pub(crate) fn validate_remap_sources(
                 )
                 .with_source(error)
             })?;
-            if let Some(target) = &spec.data_type
+            if let Some(target) = &spec.target_data_type
                 && schema.field(index).data_type() != target
             {
                 validate_cast(schema.field(index), target)?;
