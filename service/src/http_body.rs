@@ -1,10 +1,11 @@
 //! Response-body framing shared by buffered metadata and sequential downloads.
 mod error;
+mod length;
 mod validation;
 use http::Response;
+use length::BodyLength;
 use open_arrow_access_core::{Bytes, Result};
 use opendal::{Buffer, HttpBody, raw::oio::ReadStream};
-use validation::BodyLength;
 
 const MAX_INITIAL_BODY_CAPACITY: u64 = 64 * 1024 * 1024;
 

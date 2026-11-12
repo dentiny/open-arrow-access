@@ -182,8 +182,9 @@ enable Hugging Face, Zenodo, XML parsing, or other concrete providers.
 ## Error and validation modules
 
 Keep error constructors, SDK error conversions, classification, and source-chain
-wrapping in the owning crate or component's `error.rs`. Keep input constraints,
-schema compatibility checks, and validation state in `validation.rs`. I/O,
+wrapping in the owning crate or component's `error.rs`. Keep input constraints
+and schema compatibility checks in `validation.rs`. Stateful trackers belong
+to their component modules and delegate pure checks to validators. I/O,
 parsing, reader scheduling, and state transitions call those modules at the
 point where the required data becomes available.
 
