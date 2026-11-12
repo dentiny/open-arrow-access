@@ -93,31 +93,23 @@ let records = source.layer(SchemaEvolutionLayer::try_new(vec![
 ])?);
 ```
 
-Names in removal, rename, and type-change declarations refer to the original
-source schema. Changes are declarative: a column can be renamed and cast in the
-same layer, and simultaneous name swaps are supported. Removing a column while
-also renaming or casting it is rejected. Final output names must be unique;
-a new column may reuse a source name freed by removal or renaming.
+Changes refer to original source names; renames are simultaneous. A column can
+be renamed and cast together, but cannot also be removed. Output names must be
+unique; removed or renamed source names can be reused by additions.
 
-Unchanged columns keep their source order and share array buffers. New columns
-are appended in declaration order and are nullable. The batch functor is a
-`Fn(&RecordBatch) -> Result<ArrayRef> + Send + Sync + 'static`; it sees the
-**original source batch**, including removed columns and original names/types.
-It cannot reference other added columns. Its array must have the declared type
-and exactly the input row count, including for empty batches. Schema and field
-metadata are retained for existing columns.
+Added columns are nullable and appended in declaration order. Their functors
+(`Fn(&RecordBatch) -> Result<ArrayRef> + Send + Sync + 'static`) see the original
+batch, including removed fields, and must return the declared type and row count.
+They cannot reference other additions. Empty batches are supported.
 
-Projection uses the evolved output names and order. Functors and casts run even
-when their columns are omitted by the final projection. An arbitrary functor
-needs every source column, so additions read the full source schema. Removing
-all columns and empty projections retain row counts. Callback errors and invalid
-arrays terminate the reader while retaining error context.
+Projection uses evolved names. Functors read all source columns and, like casts,
+run even when omitted from the final projection. Unchanged arrays share buffers;
+existing field/schema metadata and zero-column row counts are preserved.
+Unsupported casts fail at open; invalid values, overflows, and callback failures
+terminate reading with error context. Arrow casts can lose precision and do not
+reconcile schemas across files.
 
-Unsupported casts fail at open; invalid values and overflows fail during reading.
-Arrow casts can lose precision and do not implicitly reconcile schemas across
-files. This API replaces `SchemaRemapLayer`/`FieldRemap`; use separate rename and
-type-change declarations instead of a combined remap. See the runnable
-[schema evolution example](../examples/schema_evolution.rs),
+See the [runnable example](../examples/schema_evolution.rs),
 [generated columns](../docs/generated-columns.md), and
 [parallel reading](../docs/parallel-read.md).
 

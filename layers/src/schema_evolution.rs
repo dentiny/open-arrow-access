@@ -4,7 +4,7 @@ use arrow_array::{
     Array, ArrayRef, LargeStringArray, RecordBatch, RecordBatchOptions, cast::AsArray,
 };
 use arrow_cast::{CastOptions, cast_with_options};
-use arrow_schema::{ArrowError, DataType, Field, Schema, SchemaRef};
+use arrow_schema::{ArrowError, DataType, Field, FieldRef, Schema, SchemaRef};
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, Layer, ReadOptionsProvider, RecordCapability, RecordMetadata, RecordReader, Result,
@@ -39,6 +39,15 @@ pub enum ColumnEvolution {
 }
 
 impl ColumnEvolution {
+    fn name(&self) -> &str {
+        match self {
+            Self::AddColumn { name, .. }
+            | Self::RemoveColumn { name }
+            | Self::RenameColumn { name, .. }
+            | Self::ChangeDataType { name, .. } => name,
+        }
+    }
+
     /// Append a nullable column. The callback must return the declared type and
     /// exactly one value per input row, including for empty batches.
     pub fn add_column(
@@ -74,28 +83,15 @@ impl ColumnEvolution {
 
 impl fmt::Debug for ColumnEvolution {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::AddColumn {
-                name, data_type, ..
-            } => f
-                .debug_struct("AddColumn")
-                .field("name", name)
-                .field("data_type", data_type)
-                .finish_non_exhaustive(),
-            Self::RemoveColumn { name } => {
-                f.debug_struct("RemoveColumn").field("name", name).finish()
-            }
-            Self::RenameColumn { name, target_name } => f
-                .debug_struct("RenameColumn")
-                .field("name", name)
-                .field("target_name", target_name)
-                .finish(),
-            Self::ChangeDataType { name, data_type } => f
-                .debug_struct("ChangeDataType")
-                .field("name", name)
-                .field("data_type", data_type)
-                .finish(),
-        }
+        let (operation, name) = match self {
+            Self::AddColumn { name, .. } => ("AddColumn", name),
+            Self::RemoveColumn { name } => ("RemoveColumn", name),
+            Self::RenameColumn { name, .. } => ("RenameColumn", name),
+            Self::ChangeDataType { name, .. } => ("ChangeDataType", name),
+        };
+        f.debug_struct(operation)
+            .field("name", name)
+            .finish_non_exhaustive()
     }
 }
 
@@ -209,20 +205,11 @@ where
     }
 }
 
-struct ColumnCast {
-    source_index: usize,
-    target_data_type: DataType,
-}
-struct AddedColumn {
-    name: String,
-    data_type: DataType,
-    functor: Arc<ColumnFunctor>,
-}
 struct SchemaEvolutionPlan {
     source: SchemaRef,
     schema: SchemaRef,
-    casts: Vec<ColumnCast>,
-    additions: Vec<AddedColumn>,
+    casts: Vec<(usize, DataType)>,
+    additions: Vec<(FieldRef, Arc<ColumnFunctor>)>,
     output_indices: Vec<usize>,
 }
 
@@ -232,58 +219,52 @@ fn plan_evolution(
     options: &open_arrow_access_core::ReadOptions,
 ) -> Result<SchemaEvolutionPlan> {
     validation::validate_evolution_output(source.fields())?;
-    let indices = resolve_source_indices(changes, source)?;
-    let mut fields: Vec<_> = source.fields().iter().cloned().map(Some).collect();
+    let names = open_arrow_access_core::FieldNameIndex::new(source.fields());
+    let mut fields = source.fields().to_vec();
+    let mut removed = HashSet::new();
     let mut casts = Vec::new();
     let mut additions = Vec::new();
-    for (change, index) in changes.iter().zip(indices) {
+    for change in changes {
+        let index = || {
+            names
+                .index_of(change.name())
+                .map_err(crate::error::evolution_source)
+        };
         match change {
             ColumnEvolution::AddColumn {
                 name,
                 data_type,
                 functor,
-            } => additions.push(AddedColumn {
-                name: name.clone(),
-                data_type: data_type.clone(),
-                functor: Arc::clone(functor),
-            }),
-            ColumnEvolution::RemoveColumn { .. } => fields[index.unwrap()] = None,
+            } => {
+                let field = Arc::new(Field::new(name, data_type.clone(), true));
+                fields.push(field.clone());
+                additions.push((field, functor.clone()));
+            }
+            ColumnEvolution::RemoveColumn { .. } => {
+                removed.insert(index()?);
+            }
             ColumnEvolution::RenameColumn { target_name, .. } => {
-                let field = fields[index.unwrap()].as_ref().unwrap();
-                fields[index.unwrap()] =
-                    Some(Arc::new(field.as_ref().clone().with_name(target_name)));
+                let index = index()?;
+                fields[index] = Arc::new(fields[index].as_ref().clone().with_name(target_name));
             }
             ColumnEvolution::ChangeDataType { data_type, .. } => {
-                let index = index.unwrap();
-                let field = fields[index].as_ref().unwrap();
+                let index = index()?;
+                let field = fields[index].as_ref();
                 if field.data_type() != data_type {
-                    casts.push(ColumnCast {
-                        source_index: index,
-                        target_data_type: data_type.clone(),
-                    });
+                    validation::validate_cast(source.field(index), data_type)?;
+                    casts.push((index, data_type.clone()));
                 }
-                fields[index] = Some(Arc::new(
-                    field.as_ref().clone().with_data_type(data_type.clone()),
-                ));
+                fields[index] = Arc::new(field.clone().with_data_type(data_type.clone()));
             }
         }
     }
-    let mut output_indices = Vec::new();
-    let mut output_fields = Vec::new();
-    for (index, field) in fields.into_iter().enumerate() {
-        if let Some(field) = field {
-            output_indices.push(index);
-            output_fields.push(field);
-        }
-    }
-    for (index, added) in additions.iter().enumerate() {
-        output_indices.push(source.fields().len() + index);
-        output_fields.push(Arc::new(Field::new(
-            &added.name,
-            added.data_type.clone(),
-            true,
-        )));
-    }
+    let mut output_indices: Vec<_> = (0..fields.len())
+        .filter(|index| !removed.contains(index))
+        .collect();
+    let output_fields: Vec<_> = output_indices
+        .iter()
+        .map(|&index| fields[index].clone())
+        .collect();
     validation::validate_evolution_output(&output_fields)?;
     let schema = Arc::new(Schema::new_with_metadata(
         output_fields,
@@ -305,34 +286,6 @@ fn plan_evolution(
     })
 }
 
-// Resolve source indices here; validation helpers only check constraints.
-fn resolve_source_indices(
-    changes: &[ColumnEvolution],
-    schema: &Schema,
-) -> Result<Vec<Option<usize>>> {
-    let fields = open_arrow_access_core::FieldNameIndex::new(schema.fields());
-    changes
-        .iter()
-        .map(|change| {
-            let name = match change {
-                ColumnEvolution::AddColumn { .. } => return Ok(None),
-                ColumnEvolution::RemoveColumn { name }
-                | ColumnEvolution::RenameColumn { name, .. }
-                | ColumnEvolution::ChangeDataType { name, .. } => name,
-            };
-            let index = fields
-                .index_of(name)
-                .map_err(crate::error::evolution_source)?;
-            if let ColumnEvolution::ChangeDataType { data_type, .. } = change
-                && schema.field(index).data_type() != data_type
-            {
-                validation::validate_cast(schema.field(index), data_type)?;
-            }
-            Ok(Some(index))
-        })
-        .collect()
-}
-
 impl SchemaEvolutionPlan {
     fn convert(&self, batch: RecordBatch) -> Result<RecordBatch> {
         validation::validate_evolution_batch_schema(batch.schema_ref(), &self.source)?;
@@ -341,9 +294,7 @@ impl SchemaEvolutionPlan {
             safe: false,
             ..CastOptions::default()
         };
-        for cast in &self.casts {
-            let index = cast.source_index;
-            let target = &cast.target_data_type;
+        for &(index, ref target) in &self.casts {
             columns[index] = cast_with_options(columns[index].as_ref(), target, &options)
                 .or_else(|error| match target {
                     // Keep Arrow's semantics, adding only the service's minute-precision fallback.
@@ -362,13 +313,13 @@ impl SchemaEvolutionPlan {
                 })?;
         }
 
-        for added in &self.additions {
-            let array = (added.functor)(&batch)
-                .map_err(|error| crate::error::evolution_functor(&added.name, error))?;
+        for (field, functor) in &self.additions {
+            let array = functor(&batch)
+                .map_err(|error| crate::error::evolution_functor(field.name(), error))?;
             validation::validate_added_column(
-                &added.name,
+                field.name(),
                 array.as_ref(),
-                &added.data_type,
+                field.data_type(),
                 batch.num_rows(),
             )?;
             columns.push(array);
