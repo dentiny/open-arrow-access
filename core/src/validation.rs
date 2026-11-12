@@ -79,11 +79,6 @@ pub(crate) fn validate_listing_capability(supported: bool) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn relative_listing_path<'a>(path: &'a str, prefix: &str) -> Result<&'a str> {
-    path.strip_prefix(prefix)
-        .ok_or_else(crate::error::listing_outside_prefix)
-}
-
 pub(crate) fn validate_seek_input(
     reader: &dyn crate::ByteReader,
     operation: &'static str,

@@ -23,7 +23,7 @@ pub async fn list_files<A: ByteAccessor + ?Sized>(
     let mut listing = accessor.list(request).await?;
     let mut objects = Vec::new();
     while let Some(object) = listing.try_next().await? {
-        let relative = crate::validation::relative_listing_path(object.locator(), &prefix)?;
+        let relative = relative_listing_path(object.locator(), &prefix)?;
         if select(relative)? {
             objects.push(object);
         }
@@ -31,4 +31,9 @@ pub async fn list_files<A: ByteAccessor + ?Sized>(
     objects.sort_unstable_by(|a, b| a.locator().cmp(b.locator()));
     objects.dedup();
     Ok(objects)
+}
+
+pub(crate) fn relative_listing_path<'a>(path: &'a str, prefix: &str) -> Result<&'a str> {
+    path.strip_prefix(prefix)
+        .ok_or_else(crate::error::listing_outside_prefix)
 }
