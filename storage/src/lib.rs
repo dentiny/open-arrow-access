@@ -2,6 +2,7 @@
 
 mod backend;
 mod config;
+mod error;
 pub use config::{RetryConfig, StorageConfig, TimeoutConfig};
 mod validation;
 

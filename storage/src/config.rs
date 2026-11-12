@@ -57,7 +57,7 @@ impl StorageConfig {
     /// backend inside retry, so each attempt gets its own timeout. Retryability
     /// and backoff behavior are delegated to OpenDAL.
     pub fn apply(&self, mut operator: Operator) -> Result<Operator> {
-        crate::validation::validate_storage_config(self)?;
+        self.validate()?;
         if let Some(timeout) = &self.timeout {
             operator = operator.layer(
                 TimeoutLayer::new()

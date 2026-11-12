@@ -3,6 +3,7 @@
 mod error;
 pub(crate) mod files;
 mod parser;
+pub(crate) mod policy;
 pub(crate) use parser::parse_json;
 mod query;
 mod url_util;
@@ -14,7 +15,7 @@ pub(crate) mod validation;
 pub(crate) use error::{json_error, request_error, transport_error};
 use http::Request;
 use open_arrow_access_core::Result;
-use open_arrow_access_storage::OpenDalAccessor;
+use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext};
 use serde::de::DeserializeOwned;
 use url::Url;
@@ -22,6 +23,7 @@ use url::Url;
 #[derive(Clone, Debug)]
 pub(crate) struct HttpClient {
     pub(crate) context: OperationContext,
+    pub(crate) config: StorageConfig,
 }
 
 impl HttpClient {
@@ -30,6 +32,7 @@ impl HttpClient {
         opendal::install_default();
         Ok(Self {
             context: OperationContext::new(),
+            config: Default::default(),
         })
     }
 
@@ -39,7 +42,7 @@ impl HttpClient {
         root: &str,
         query: Vec<(String, String)>,
     ) -> Result<OpenDalAccessor> {
-        let mut context = self.context.clone();
+        let mut context = policy::apply(&self.config, self.context.clone())?;
         if !query.is_empty() {
             context = context.with_http_transport(HttpTransporter::new(query::QueryTransport {
                 inner: context.http_transport().clone(),
@@ -64,16 +67,7 @@ impl HttpClient {
     ) -> Result<T> {
         let mut request = Self::get(url, "application/json", operation)?;
         if let Some(token) = token {
-            let mut value =
-                http::HeaderValue::from_str(&format!("Bearer {token}")).map_err(|error| {
-                    open_arrow_access_core::Error::new(
-                        open_arrow_access_core::ErrorKind::InvalidInput,
-                        operation,
-                        "invalid HTTP authentication token",
-                    )
-                    .with_source(error)
-                })?;
-            value.set_sensitive(true);
+            let value = validation::bearer_header(token, operation)?;
             request
                 .headers_mut()
                 .insert(http::header::AUTHORIZATION, value);
@@ -97,8 +91,8 @@ impl HttpClient {
         request: Request<Buffer>,
         operation: &'static str,
     ) -> Result<http::Response<HttpBody>> {
-        let response = self
-            .context
+        let context = policy::apply(&self.config, self.context.clone())?;
+        let response = context
             .http_transport()
             .fetch(request)
             .await

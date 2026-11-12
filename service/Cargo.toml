@@ -26,7 +26,6 @@ gutenberg = ["format-xml", "dep:chrono"]
 hathifiles = []
 huggingface = [
     "opendal/services-hf",
-    "dep:tokio",
     "tokio/fs",
     "open-arrow-access-file-format/parquet",
 ]
@@ -64,9 +63,11 @@ oai = ["format-xml"]
 
 [dependencies]
 arrow-array = { workspace = true, optional = true }
+backon = { version = "1.6", default-features = false, features = ["std", "tokio-sleep"] }
 chrono = { workspace = true, optional = true }
 futures.workspace = true
 http.workspace = true
+httpdate = "1"
 open-arrow-access-core.workspace = true
 open-arrow-access-dataset = { workspace = true, features = ["directory"] }
 open-arrow-access-decompression = { workspace = true, optional = true }
@@ -80,7 +81,7 @@ quick-xml = { workspace = true, optional = true }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["time"] }
 url.workspace = true
 
 arrow-schema = { workspace = true, optional = true }

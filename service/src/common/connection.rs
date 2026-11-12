@@ -10,6 +10,7 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes,
     Capability, Result, StreamReader, async_trait,
 };
+use open_arrow_access_storage::StorageConfig;
 use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext};
 use url::Url;
 
@@ -42,7 +43,10 @@ impl Connection {
             origin,
             headers: HeaderMap::new(),
             query: vec![],
-            client: HttpClient { context },
+            client: HttpClient {
+                context,
+                config: Default::default(),
+            },
         })
     }
     /// Override transport, for custom TLS/proxy configuration or deterministic tests.
@@ -50,6 +54,13 @@ impl Connection {
     pub fn with_context(mut self, context: OperationContext) -> Self {
         self.client.context = transport::follow_redirects(context);
         self
+    }
+    /// Configure retries and per-attempt/stream-read timeouts for this connection.
+    /// Preserved when replacing the transport with `with_context`.
+    pub fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
+        config.validate()?;
+        self.client.config = config;
+        Ok(self)
     }
     pub fn origin(&self) -> &Url {
         &self.origin

@@ -8,7 +8,7 @@ mod validation;
 use std::num::NonZeroU64;
 
 use open_arrow_access_core::Result;
-use open_arrow_access_storage::OpenDalAccessor;
+use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 
 use serde::Deserialize;
 
@@ -24,6 +24,12 @@ pub struct ZenodoService {
 }
 
 impl ZenodoService {
+    /// Apply the same HTTP policy to metadata and lazy file requests.
+    pub fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
+        self.http = self.http.with_http_config(config)?;
+        Ok(self)
+    }
+
     pub fn new() -> Result<Self> {
         Self::with_endpoint("https://zenodo.org")
     }

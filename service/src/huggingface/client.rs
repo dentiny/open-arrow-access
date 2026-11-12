@@ -1,5 +1,6 @@
+use crate::http_client::HttpClient;
 use open_arrow_access_core::Result;
-use opendal::OperationContext;
+use open_arrow_access_storage::StorageConfig;
 
 use super::{HuggingFaceAccessor, HuggingFaceOptions, HuggingFaceRepository, validation};
 
@@ -7,7 +8,7 @@ use super::{HuggingFaceAccessor, HuggingFaceOptions, HuggingFaceRepository, vali
 #[derive(Clone, Debug)]
 pub struct HuggingFaceService {
     pub(super) options: HuggingFaceOptions,
-    pub(super) context: OperationContext,
+    pub(super) client: HttpClient,
 }
 
 impl HuggingFaceService {
@@ -17,10 +18,15 @@ impl HuggingFaceService {
         options.resolve_environment().await;
         validation::validate_options(&options)?;
         let client = crate::http_client::HttpClient::new()?;
-        Ok(Self {
-            options,
-            context: client.context,
-        })
+        Ok(Self { options, client })
+    }
+
+    /// Apply an OpenDAL transport policy to Hub metadata and repository files.
+    /// Do not also install an OpenDAL RetryLayer on this transport's operators.
+    pub fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
+        config.validate()?;
+        self.client.config = config;
+        Ok(self)
     }
 
     /// Access explicit files in a dataset repository. A floating revision is
@@ -40,6 +46,9 @@ impl HuggingFaceService {
         if let Some(token) = &self.options.token {
             builder = builder.token(token);
         }
-        HuggingFaceAccessor::new(builder, self.context.clone())
+        HuggingFaceAccessor::new(
+            builder,
+            crate::http_client::policy::apply(&self.client.config, self.client.context.clone())?,
+        )
     }
 }

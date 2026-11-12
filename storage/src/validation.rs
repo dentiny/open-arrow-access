@@ -1,6 +1,7 @@
 use indexmap::{IndexMap, map::Entry};
 
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use crate::error;
+use open_arrow_access_core::Result;
 
 /// Reject empty or duplicate opaque names without interpreting them as paths.
 pub fn validate_file_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Result<()> {
@@ -16,51 +17,34 @@ where
     let mut indexed = IndexMap::with_capacity(files.size_hint().0);
     for (name, object) in files {
         if name.as_ref().is_empty() {
-            return Err(invalid_names());
+            return Err(error::invalid_names());
         }
         match indexed.entry(name) {
             Entry::Vacant(entry) => {
                 entry.insert(object);
             }
-            Entry::Occupied(_) => return Err(invalid_names()),
+            Entry::Occupied(_) => return Err(error::invalid_names()),
         }
     }
     Ok(indexed)
 }
 
-fn invalid_names() -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "configure_named_files",
-        "empty or duplicate filename",
-    )
-}
-
-pub(crate) fn validate_storage_config(config: &crate::StorageConfig) -> Result<()> {
-    if let Some(retry) = &config.retry {
-        if !retry.factor.is_finite() || retry.factor < 1.0 {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "configure_storage",
-                "retry factor must be finite and at least 1",
-            ));
+impl crate::StorageConfig {
+    /// Validate policies without constructing a backend or performing I/O.
+    pub fn validate(&self) -> Result<()> {
+        if let Some(retry) = &self.retry {
+            if !retry.factor.is_finite() || retry.factor < 1.0 {
+                return Err(error::invalid_retry_factor());
+            }
+            if retry.min_delay > retry.max_delay {
+                return Err(error::invalid_retry_delays());
+            }
         }
-        if retry.min_delay > retry.max_delay {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "configure_storage",
-                "retry min_delay must not exceed max_delay",
-            ));
+        if let Some(timeout) = &self.timeout
+            && (timeout.operation_timeout.is_zero() || timeout.io_timeout.is_zero())
+        {
+            return Err(error::invalid_timeouts());
         }
+        Ok(())
     }
-    if let Some(timeout) = &config.timeout
-        && (timeout.operation_timeout.is_zero() || timeout.io_timeout.is_zero())
-    {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "configure_storage",
-            "storage timeouts must be positive",
-        ));
-    }
-    Ok(())
 }

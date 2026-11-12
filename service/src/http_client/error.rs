@@ -66,3 +66,76 @@ pub(super) fn empty_or_dup_filename() -> Error {
         "empty or duplicate filename",
     )
 }
+
+// Keep failed responses intact so exhausted retries retain HTTP metadata.
+pub(super) enum Failure {
+    Transport(opendal::Error),
+    Response(Box<http::Response<opendal::HttpBody>>),
+}
+
+impl Failure {
+    pub(super) fn retry_after(&self) -> Option<std::time::Duration> {
+        match self {
+            Self::Response(response) => {
+                super::validation::retry_after(response.headers(), std::time::SystemTime::now())
+            }
+            Self::Transport(_) => None,
+        }
+    }
+
+    pub(super) fn is_retryable(&self) -> bool {
+        match self {
+            Self::Transport(error) => error.is_temporary(),
+            Self::Response(_) => true,
+        }
+    }
+}
+
+pub(super) fn classify_response(
+    result: opendal::Result<http::Response<opendal::HttpBody>>,
+) -> std::result::Result<http::Response<opendal::HttpBody>, Failure> {
+    match result {
+        Ok(response)
+            if matches!(
+                response.status().as_u16(),
+                408 | 429 | 500 | 502 | 503 | 504
+            ) =>
+        {
+            Err(Failure::Response(Box::new(response)))
+        }
+        Ok(response) => Ok(response),
+        Err(error) => Err(Failure::Transport(error)),
+    }
+}
+
+pub(super) fn timeout_error() -> opendal::Error {
+    opendal::Error::new(opendal::ErrorKind::Unexpected, "provider HTTP timeout")
+        .set_source(Error::new(
+            ErrorKind::Timeout,
+            "provider_http",
+            "provider HTTP timeout",
+        ))
+        .set_temporary()
+}
+
+pub(super) fn invalid_token(
+    operation: &'static str,
+    source: http::header::InvalidHeaderValue,
+) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        operation,
+        "invalid HTTP authentication token",
+    )
+    .with_source(source)
+}
+
+pub(super) fn finish_response(
+    result: std::result::Result<http::Response<opendal::HttpBody>, Failure>,
+) -> opendal::Result<http::Response<opendal::HttpBody>> {
+    match result {
+        Ok(response) => Ok(response),
+        Err(Failure::Response(response)) => Ok(*response),
+        Err(Failure::Transport(error)) => Err(error),
+    }
+}

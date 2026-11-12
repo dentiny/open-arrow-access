@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, num::NonZeroUsize, ops::Range, sync::Arc};
 
+use crate::error::map_error;
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, Error,
@@ -420,11 +421,6 @@ fn short_read(operation: &'static str) -> Error {
         operation,
         "unexpected short read; input may have changed",
     )
-}
-
-fn map_error(operation: &'static str, path: &str, error: opendal::Error) -> Error {
-    let kind = crate::opendal_error_kind(error.kind());
-    Error::new(kind, operation, format!("object {path:?}")).with_source(error)
 }
 
 // Copy small responses so returned slices do not retain large network allocations.

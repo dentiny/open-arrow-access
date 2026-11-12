@@ -4,7 +4,7 @@ mod error;
 mod validation;
 
 use open_arrow_access_core::Result;
-use open_arrow_access_storage::OpenDalAccessor;
+use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 use serde::Deserialize;
 
 use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
@@ -18,6 +18,12 @@ pub struct DataverseService {
 }
 
 impl DataverseService {
+    /// Apply the same HTTP policy to metadata and lazy file requests.
+    pub fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
+        self.http = self.http.with_http_config(config)?;
+        Ok(self)
+    }
+
     /// Configure a Dataverse installation origin without performing network I/O.
     pub fn new(endpoint: &str) -> Result<Self> {
         Ok(Self {
