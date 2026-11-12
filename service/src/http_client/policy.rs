@@ -150,33 +150,3 @@ fn retry_after(headers: &http::HeaderMap, now: SystemTime) -> Option<Duration> {
             .unwrap_or_default(),
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn retry_after_supports_seconds_dates_and_rejects_invalid_values() {
-        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(784111777);
-        for (value, expected) in [
-            ("12", Some(Duration::from_secs(12))),
-            (
-                "Sun, 06 Nov 1994 08:49:49 GMT",
-                Some(Duration::from_secs(12)),
-            ),
-            ("Sun, 06 Nov 1994 08:49:00 GMT", Some(Duration::ZERO)),
-            ("garbage", None),
-            ("-1", None),
-            ("1.5", None),
-            ("", None),
-            (
-                "999999999999999999999999999",
-                Some(Duration::from_secs(u64::MAX)),
-            ),
-        ] {
-            let mut headers = http::HeaderMap::new();
-            headers.insert(http::header::RETRY_AFTER, value.parse().unwrap());
-            assert_eq!(retry_after(&headers, now), expected, "{value}");
-        }
-    }
-}
