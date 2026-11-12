@@ -6,9 +6,9 @@ use std::{
 use arrow_schema::{DataType, Field, Schema};
 use futures::{lock::Mutex, stream};
 use open_arrow_access_core::{
-    Accessor, Bytes, Capability, OrderRequirement, ReadOptions, ReadOptionsProvider,
-    RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition,
-    ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, read_all,
+    Accessor, Bytes, Capability, FieldNameIndex, OrderRequirement, ReadOptions,
+    ReadOptionsProvider, RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader,
+    Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, read_all,
 };
 
 use super::MecaArchive;
@@ -106,6 +106,7 @@ impl Accessor for MecaRecords {
 impl ScanPlanner for MecaRecords {
     async fn plan_scan(&self, request: MecaReadRequest) -> Result<ScanPlan> {
         let (schema, _) = request.options.resolve_projection(&record_schema())?;
+        let include_data = FieldNameIndex::new(schema.fields()).get("data").is_some();
         let metadata = RecordMetadata {
             schema: schema.clone(),
             source: None,
@@ -129,7 +130,7 @@ impl ScanPlanner for MecaRecords {
                         .await?;
                     let mut builder =
                         RecordBatchBuilder::new(record_schema(), request.options.projection)?;
-                    let data = if builder.schema().column_with_name("data").is_some() {
+                    let data = if include_data {
                         Bytes::from(read_all(body, "read_meca_entry").await?)
                     } else {
                         while body.next().await?.is_some() {}

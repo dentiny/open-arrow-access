@@ -4,7 +4,7 @@ use super::{
 };
 use arrow_array::{Array, cast::AsArray};
 use arrow_schema::Fields;
-use open_arrow_access_core::{Error, ErrorKind, RecordBatch, Result};
+use open_arrow_access_core::{Error, ErrorKind, FieldNameIndex, RecordBatch, Result};
 use std::collections::HashSet;
 
 pub(super) fn validate_manifest(manifest: &Manifest) -> Result<()> {
@@ -58,9 +58,13 @@ fn validate_row(bucket: Option<&str>, key: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn validate_batch(batch: &RecordBatch) -> Result<()> {
-    let buckets = batch.column_by_name("Bucket").unwrap().as_string::<i32>();
-    let keys = batch.column_by_name("Key").unwrap().as_string::<i32>();
+pub(super) fn validate_batch(batch: &RecordBatch, fields: &FieldNameIndex) -> Result<()> {
+    let buckets = batch
+        .column(fields.index_of("Bucket").unwrap())
+        .as_string::<i32>();
+    let keys = batch
+        .column(fields.index_of("Key").unwrap())
+        .as_string::<i32>();
     for row in 0..batch.num_rows() {
         validate_row(
             (!buckets.is_null(row)).then(|| buckets.value(row)),

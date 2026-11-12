@@ -18,9 +18,9 @@ pub(super) async fn decode_batch(
         ReadRequest::new(path),
     )
     .await?;
-    validation::validate_metadata(&batch, path)?;
     static FIELD_INDEX: OnceLock<FieldNameIndex> = OnceLock::new();
     let field_index = FIELD_INDEX.get_or_init(|| FieldNameIndex::new(schema.fields()));
+    validation::validate_metadata(&batch, path, field_index)?;
     let projection = output_schema
         .fields()
         .iter()
