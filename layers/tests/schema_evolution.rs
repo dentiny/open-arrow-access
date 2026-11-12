@@ -877,3 +877,32 @@ async fn evolution_preserves_upstream_errors_and_terminates() {
     assert!(reader.next().await.unwrap().is_none());
     assert_eq!(reads.load(Ordering::SeqCst), 1);
 }
+
+#[tokio::test]
+async fn evolution_supports_sparse_changes_and_projection_on_wide_batches() {
+    let array = Arc::new(Int32Array::from(vec![1, 2])) as ArrayRef;
+    let input =
+        RecordBatch::try_from_iter((0..4096).map(|i| (format!("c{i}"), array.clone()))).unwrap();
+    let mut reader = MemoryAccessor::new(vec![input])
+        .open_evolved(
+            vec![
+                ColumnEvolution::rename_column("c0", "renamed"),
+                ColumnEvolution::change_data_type("c0", DataType::Int64),
+                ColumnEvolution::remove_column("c1"),
+                ColumnEvolution::add_column("added", DataType::Int32, |batch| {
+                    Ok(batch.column(1).clone())
+                }),
+            ],
+            Some(vec!["added".into(), "renamed".into(), "c4095".into()]),
+        )
+        .await
+        .unwrap();
+    let output = reader.next().await.unwrap().unwrap();
+    assert_eq!(output.num_columns(), 3);
+    assert!(Arc::ptr_eq(output.column(0), &array));
+    assert_eq!(
+        output.column(1).to_data(),
+        Int64Array::from(vec![1, 2]).to_data()
+    );
+    assert!(Arc::ptr_eq(output.column(2), &array));
+}

@@ -374,19 +374,70 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
     Ok(())
 }
 
-pub(crate) fn validate_evolution_output(fields: &[std::sync::Arc<Field>]) -> Result<()> {
-    let mut names = HashSet::new();
-    if fields.iter().any(|field| !names.insert(field.name())) {
+// Input indexing already counted unique names; no additional field traversal.
+pub(crate) fn validate_evolution_source(names: &FieldNameIndex) -> Result<()> {
+    if !names.is_unique() {
         return Err(crate::error::evolution_output_collision());
     }
     Ok(())
 }
 
+// O(K) expected for K changes; never visits untouched source fields.
+pub(crate) fn validate_evolution_names(
+    changes: &[crate::ColumnEvolution],
+    names: &FieldNameIndex,
+    removed: &HashSet<usize>,
+) -> Result<()> {
+    use crate::ColumnEvolution;
+    let mut vacated = removed.clone();
+    for change in changes {
+        if let ColumnEvolution::RenameColumn {
+            source_name,
+            target_name,
+        } = change
+            && source_name != target_name
+        {
+            vacated.insert(
+                names
+                    .index_of(source_name)
+                    .map_err(crate::error::evolution_source)?,
+            );
+        }
+    }
+    let mut targets = HashSet::new();
+    for change in changes {
+        let (target, own_index) = match change {
+            ColumnEvolution::AddColumn { name, .. } => (name, None),
+            ColumnEvolution::RenameColumn {
+                source_name,
+                target_name,
+            } => (target_name, names.get(source_name)),
+            _ => continue,
+        };
+        if !targets.insert(target)
+            || names
+                .get(target)
+                .is_some_and(|index| Some(index) != own_index && !vacated.contains(&index))
+        {
+            return Err(crate::error::evolution_output_collision());
+        }
+    }
+    Ok(())
+}
+
+// O(K) field comparisons at most, with an O(1) schema-identity fast path.
+// The upstream RecordReader owns the fixed-schema contract for untouched fields.
 pub(crate) fn validate_evolution_batch_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,
+    affected: &[usize],
 ) -> Result<()> {
-    if actual != expected {
+    if !std::sync::Arc::ptr_eq(actual, expected)
+        && (actual.fields().len() != expected.fields().len()
+            || affected
+                .iter()
+                .any(|&index| actual.field(index) != expected.field(index)))
+    {
         return Err(crate::error::evolution_schema_mismatch());
     }
     Ok(())
@@ -412,3 +463,7 @@ pub(crate) fn validate_added_column(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/schema_evolution_validation.rs"]
+mod schema_evolution_tests;

@@ -109,6 +109,14 @@ Unsupported casts fail at open; invalid values, overflows, and callback failures
 terminate reading with error context. Arrow casts can lose precision and do not
 reconcile schemas across files.
 
+Opening builds the source index and output schema once. Layer-owned validation
+checks changed columns only, not every source field: expected O(K) for K changes,
+plus structural checks within changed nested types. Per-batch metadata assembly
+is expected O(K + P) for P output columns, excluding casts and functor computation.
+Untouched fields rely on the source reader's fixed-schema contract. Arrow's
+safe batch constructor also checks those P output columns. Planning still
+costs O(F + K) for F source fields; the entire layer is not O(1).
+
 See the [runnable example](../examples/schema_evolution.rs),
 [generated columns](../docs/generated-columns.md), and
 [parallel reading](../docs/parallel-read.md).

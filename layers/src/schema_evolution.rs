@@ -1,4 +1,8 @@
-use std::{collections::HashSet, fmt, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    sync::Arc,
+};
 
 use arrow_array::{
     Array, ArrayRef, LargeStringArray, RecordBatch, RecordBatchOptions, cast::AsArray,
@@ -212,6 +216,7 @@ where
 struct SchemaEvolutionPlan {
     source: SchemaRef,
     schema: SchemaRef,
+    affected: Vec<usize>,
     casts: Vec<(usize, DataType)>,
     additions: Vec<(FieldRef, Arc<ColumnFunctor>)>,
     output_indices: Vec<usize>,
@@ -222,17 +227,20 @@ fn plan_evolution(
     source: &SchemaRef,
     options: &open_arrow_access_core::ReadOptions,
 ) -> Result<SchemaEvolutionPlan> {
-    validation::validate_evolution_output(source.fields())?;
     let names = open_arrow_access_core::FieldNameIndex::new(source.fields());
+    validation::validate_evolution_source(&names)?;
+    let mut affected = HashSet::new();
     let mut fields = source.fields().to_vec();
     let mut removed = HashSet::new();
     let mut casts = Vec::new();
     let mut additions = Vec::new();
     for change in changes {
-        let index = || {
-            names
+        let mut index = || -> Result<usize> {
+            let index = names
                 .index_of(change.name())
-                .map_err(crate::error::evolution_source)
+                .map_err(crate::error::evolution_source)?;
+            affected.insert(index);
+            Ok(index)
         };
         match change {
             ColumnEvolution::AddColumn {
@@ -262,6 +270,7 @@ fn plan_evolution(
             }
         }
     }
+    validation::validate_evolution_names(changes, &names, &removed)?;
     let mut output_indices: Vec<_> = (0..fields.len())
         .filter(|index| !removed.contains(index))
         .collect();
@@ -269,7 +278,6 @@ fn plan_evolution(
         .iter()
         .map(|&index| fields[index].clone())
         .collect();
-    validation::validate_evolution_output(&output_fields)?;
     let schema = Arc::new(Schema::new_with_metadata(
         output_fields,
         source.metadata().clone(),
@@ -283,6 +291,7 @@ fn plan_evolution(
     }
     Ok(SchemaEvolutionPlan {
         source: Arc::clone(source),
+        affected: affected.into_iter().collect(),
         schema,
         casts,
         additions,
@@ -292,31 +301,38 @@ fn plan_evolution(
 
 impl SchemaEvolutionPlan {
     fn convert(&self, batch: RecordBatch) -> Result<RecordBatch> {
-        validation::validate_evolution_batch_schema(batch.schema_ref(), &self.source)?;
-        let mut columns = batch.columns().to_vec();
+        validation::validate_evolution_batch_schema(
+            batch.schema_ref(),
+            &self.source,
+            &self.affected,
+        )?;
+        let mut casted = HashMap::with_capacity(self.casts.len());
         let options = CastOptions {
             safe: false,
             ..CastOptions::default()
         };
         for &(index, ref target) in &self.casts {
-            columns[index] = cast_with_options(columns[index].as_ref(), target, &options)
+            let column = batch.column(index);
+            let array = cast_with_options(column.as_ref(), target, &options)
                 .or_else(|error| match target {
                     // Keep Arrow's semantics, adding only the service's minute-precision fallback.
-                    DataType::Timestamp(_, _) if columns[index].data_type().is_string() => {
-                        cast_minute_timestamps(columns[index].as_ref(), target, &options)
+                    DataType::Timestamp(_, _) if column.data_type().is_string() => {
+                        cast_minute_timestamps(column.as_ref(), target, &options)
                     }
                     _ => Err(error),
                 })
                 .map_err(|error| {
                     crate::error::cast_error(
                         batch.schema().field(index).name(),
-                        columns[index].data_type(),
+                        column.data_type(),
                         target,
                         error,
                     )
                 })?;
+            casted.insert(index, array);
         }
 
+        let mut added = Vec::with_capacity(self.additions.len());
         for (field, functor) in &self.additions {
             let array = functor(&batch)
                 .map_err(|error| crate::error::evolution_functor(field.name(), error))?;
@@ -326,12 +342,18 @@ impl SchemaEvolutionPlan {
                 field.data_type(),
                 batch.num_rows(),
             )?;
-            columns.push(array);
+            added.push(array);
         }
         let columns = self
             .output_indices
             .iter()
-            .map(|&index| Arc::clone(&columns[index]))
+            .map(|&index| {
+                if index < batch.num_columns() {
+                    Arc::clone(casted.get(&index).unwrap_or_else(|| batch.column(index)))
+                } else {
+                    Arc::clone(&added[index - batch.num_columns()])
+                }
+            })
             .collect();
         RecordBatch::try_new_with_options(
             Arc::clone(&self.schema),

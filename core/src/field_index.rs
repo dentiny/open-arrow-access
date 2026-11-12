@@ -9,6 +9,7 @@ use arrow_schema::{ArrowError, Fields};
 pub struct FieldNameIndex {
     /// Maps field names to their first zero-based positions in the field list.
     indices: HashMap<String, usize>,
+    unique: bool,
 }
 
 impl FieldNameIndex {
@@ -17,7 +18,13 @@ impl FieldNameIndex {
         for (index, field) in fields.iter().enumerate() {
             indices.entry(field.name().clone()).or_insert(index);
         }
-        Self { indices }
+        let unique = indices.len() == fields.len();
+        Self { indices, unique }
+    }
+
+    /// Whether every input field had a distinct name. O(1), using index metadata.
+    pub fn is_unique(&self) -> bool {
+        self.unique
     }
 
     /// Look up a borrowed name without allocating or scanning the fields.
