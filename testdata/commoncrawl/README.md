@@ -1,23 +1,26 @@
-# Common Crawl manifest fixtures
+# Common Crawl fixtures
 
-These small, checked-in manifests exercise crawl-wide WARC discovery and segment selection without a network
-request. They use the example crawl `CC-MAIN-2022-40` and segment
-`1664030338280.51`; they are deterministic test samples, not downloaded crawl data.
+Deterministic manifest examples for crawl `CC-MAIN-2022-40`, segment
+`1664030338280.51`; these are synthetic membership samples, not crawl downloads.
 
-- `crawl.paths`, `other_crawl.paths`: crawl-wide membership and exclusion of another release.
-- `good.paths`: original order, CRLF, a blank line, another segment, no final newline.
-- `one.paths`: one matching entry, also used by the injected HTTP transport.
-- `error_sequence.paths`: first/bad/last records for injected downstream failures.
-- `duplicate.paths`, `bad_*.paths`: duplicate entries, traversal, whitespace,
-  absolute paths, external origins, query strings, percent encoding, suffix,
-  oversized lines, and invalid UTF-8.
-- `empty.paths`, `blank.paths`, `other_crawl.paths`: selections without matching files.
-- `raw_manifest.paths.gz`: a valid gzip file deliberately supplied to the manifest
-  text parser without a decompression layer; it must be rejected.
+| Input | Case |
+| --- | --- |
+| `crawl.paths`, `other_crawl.paths` | Crawl-wide membership and release filtering. |
+| `good.paths` | Original order, CRLF, blank line, another segment, no final newline. |
+| `one.paths` | One matching entry, also served by the injected HTTP transport. |
+| `error_sequence.paths` | First/bad/last selections for downstream source errors. |
+| `duplicate.paths`, `bad_*.paths` | Duplicate names, traversal, whitespace, absolute/external paths, query strings, percent encoding, suffixes, oversized lines, invalid UTF-8. |
+| `empty.paths`, `blank.paths`, `other_crawl.paths`, `no_match.paths` | No matching selected files; the last uses a neighboring segment. |
+| `other_duplicate.paths` | Duplicates outside the selected segment do not invalidate that segment. |
+| `raw_manifest.paths.gz` | Gzip supplied directly to the text parser; must fail without decompression. |
 
-Tests read the exact bytes from disk, then use mocks only for chunk boundaries,
-HTTP behavior, and injected failures. Preserve line endings and binary contents.
+## Use these inputs
 
-`no_match.paths` contains only a neighboring segment. `other_duplicate.paths`
-contains one selected entry and duplicates belonging to another segment; those
-duplicates do not invalidate a segment-only selection.
+Facade feature: `service-warc`. Run the owning component tests from the repository root:
+
+```sh
+cargo test --locked -p open-arrow-access-service --no-default-features --features warc
+```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

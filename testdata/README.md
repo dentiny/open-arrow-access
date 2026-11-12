@@ -1,24 +1,37 @@
-# Committed test inputs
+# Test fixtures
 
-Read serialized input from this directory in both valid and invalid test cases.
-Use `fixture!(format, name)` for bytes or `fixture_path!(format, name)` when a
-filesystem backend needs to copy a fixture into an isolated temporary directory.
-Tests must not create their input with inline documents, encoders, string
-replacement, or binary corruption. Commit the resulting sample instead, with a
-name and README entry describing the case it covers.
+These local inputs exercise readers, formats, byte layers, and services without
+network access. Each directory documents its cases and a command for running
+the owning component tests. Most samples are project-authored; the
+[CourtListener excerpt](courtlistener/README.md) records its external source.
 
-These are local regression samples; see each directory's README for provenance.
-Many are project-authored examples, not captures from an external dataset. They
-require no network access. Invalid files are intentional: preserve duplicate
-keys, invalid UTF-8, whitespace, missing final newlines, and corrupt binary fields.
+## Find an input
 
-Keep expected values, schemas, projections, request parameters, and assertions
-in test code. Test doubles may still model invalid decoder output, split fixture
-bytes into chunks, inject I/O failures, or truncate a temporary copy after opening
-it: these exercise reader behavior rather than define serialized file contents.
-HTTP transports may select, paginate, and serialize entries loaded from fixtures.
+| Area | Fixtures |
+| --- | --- |
+| Byte contracts | [Bytes](bytes/README.md) |
+| Formats | [CSV](csv/README.md), [JSON](json/README.md), [Parquet](parquet/README.md), [XML](xml/README.md), [ATIF](atif/README.md), [WARC](warc/README.md) |
+| Compression / archives | [Gzip](gzip/README.md), [bzip2](bz2/README.md), [LZ4](lz4/README.md), [Zstandard](zstd/README.md), [ZIP](zip/README.md) |
+| Providers | [Hugging Face](huggingface/README.md), [PMC](pmc/README.md), [Gutenberg](gutenberg/README.md), [Common Crawl](commoncrawl/README.md), [CourtListener](courtlistener/README.md) |
+| Provider XML | [XML envelopes](xml-metadata/README.md) |
 
-Format and provider directories contain their own samples. `bytes/` contains
-format-independent inputs for byte-reader, storage, and decoder contracts.
+`openstax/book.zip` is a project-authored minimal GitHub source ZIP containing
+one CNXML module; it verifies provider-to-ZIP composition without upstream book
+content. Other provider directories contain their own API/manifest inputs.
 
-`openstax/book.zip` is a project-authored minimal GitHub source ZIP layout with one CNXML module, used to verify provider-to-ZIP composition. It contains no upstream book content.
+## Use or add fixtures
+
+Load bytes with `fixture!(directory, name)` or filesystem paths with
+`fixture_path!(directory, name)` from [test support](../test-support/README.md).
+Tests may copy files to isolated temporary roots. Keep expected values, schemas,
+projections, requests, and assertions in test code.
+
+Commit serialized inputs for both valid and invalid cases, and document their
+purpose and provenance. Preserve duplicate keys, invalid UTF-8, line endings,
+missing final newlines, and corrupt binary fields. Tests should not generate
+inputs with encoders, inline documents, replacements, or binary corruption.
+
+Test doubles may fragment bytes, inject I/O failures, model invalid decoder
+output, or truncate an already-open temporary copy. Fixture HTTP transports may
+select, paginate, and serialize committed entries. These controls test reader
+behavior without replacing the recorded source inputs.

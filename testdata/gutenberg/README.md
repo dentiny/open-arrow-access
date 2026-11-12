@@ -1,4 +1,4 @@
-# Gutenberg fixture
+# Gutenberg RDF fixtures
 
 `book.rdf` is synthetic per-eBook metadata using Gutenberg's RDF namespace
 layout. It covers nested metadata, alternate namespace prefixes, multiple file
@@ -14,3 +14,14 @@ The invalid samples are copies of `book.rdf` with one deliberate change:
 | `bad_file_uri.rdf` | Text URI `https://example.invalid/42.txt` is emptied. |
 | `bad_namespace.rdf` | The ebook element overrides prefix `p` with `urn:wrong`. |
 | `bad_multiple_books.rdf` | A second ebook, ID 43, is added before the RDF closing tag. |
+
+## Use these inputs
+
+Facade feature: `service-gutenberg`. Run the owning component tests from the repository root:
+
+```sh
+cargo test --locked -p open-arrow-access-service --no-default-features --features gutenberg
+```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

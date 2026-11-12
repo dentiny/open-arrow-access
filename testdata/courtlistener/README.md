@@ -1,18 +1,26 @@
-# CourtListener bulk fixture
+# CourtListener fixtures
 
 Source: [official courts export](https://com-courtlistener-storage.s3-us-west-2.amazonaws.com/bulk-data/courts-2026-09-30.csv.bz2), retrieved 2026-11-08.
 
-`courts-2026-09-30.csv` contains the original header and first three complete
-records (`nc`, `minnag`, `arizsuper`), copied without rewriting CSV fields or
-line endings. The first record includes a multiline notes field. Unquoted NULLs
-and quoted empty strings remain distinct.
+`courts-2026-09-30.csv` preserves the original header and first three complete
+records (`nc`, `minnag`, `arizsuper`), including multiline notes, line endings,
+unquoted NULLs, and quoted empty strings. The `.csv.bz2` is this excerpt
+recompressed with Python `bz2.compress(sample, compresslevel=9)`; it is not the
+complete upstream dump.
 
-The `.csv.bz2` file is this excerpt recompressed once with Python
-`bz2.compress(sample, compresslevel=9)`. It is not the complete upstream dump.
-The original compressed download has SHA-256:
+Original download SHA-256:
 `f33e4c12e5a1d73574f7ecaafa8676887321dccae3ea29cc91d6a5935508baf3`.
-
-Tests read these committed files offline and compare decoded bytes exactly.
-Discovery tests use synthetic filenames for date/table filtering cases.
 The [upstream documentation](https://wiki.free.law/c/courtlistener/help/api/bulk-data/bulk-legal-data)
-marks bulk data as free of known copyright restrictions.
+marks bulk data as free of known copyright restrictions. Tests compare decoded
+bytes exactly; discovery tests use synthetic filenames.
+
+## Use these inputs
+
+Facade feature: `service-courtlistener`. Run the owning component tests from the repository root:
+
+```sh
+cargo test --locked -p open-arrow-access-service --no-default-features --features courtlistener
+```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

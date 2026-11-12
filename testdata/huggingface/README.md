@@ -1,8 +1,8 @@
-# Hugging Face export fixtures
+# Hugging Face fixtures
 
-Project-authored local API response examples, using the pinned commit of forty
-`a` characters and the Parquet files already committed under `../parquet/`.
-No credentials or upstream dataset content are included.
+Project-authored API examples using a pinned revision of forty `a` characters
+and the committed [Parquet files](../parquet/README.md). No credentials or upstream
+dataset bodies are included.
 
 | Fixture | Purpose |
 | --- | --- |
@@ -16,7 +16,17 @@ No credentials or upstream dataset content are included.
 | `exports/complete.json` | Complete and partial exports with different row values. |
 | `exports/empty.json` | No exported files. |
 
-Export entries pair a `fixture` path relative to `testdata/parquet/` with the
-`metadata` returned by the API. The test transport verifies the stored size against
-the file, serves only the metadata object, and reverses/paginates the selected
-entries to exercise ordering. HTTP status and I/O behavior remain test controls.
+Export entries pair a `fixture` path relative to `testdata/parquet/` with API
+`metadata`. The transport verifies sizes, serves metadata, and reverses/paginates
+entries to exercise ordering. Status and I/O faults are test controls.
+
+## Use these inputs
+
+Facade feature: `service-huggingface`. Run the owning component tests from the repository root:
+
+```sh
+cargo test --locked -p open-arrow-access-service --no-default-features --features huggingface
+```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

@@ -1,7 +1,7 @@
 # Zstandard fixtures
 
-Fixed streams read by `decompression/tests/zstd.rs` through mock byte readers.
-No compression or corruption is performed during tests.
+Frame streams prepared with `zstd` 0.14's streaming encoder at level 1 with
+checksums, explicit skippable-frame headers, and byte changes for invalid cases.
 
 | File | Case / decoded bytes |
 | --- | --- |
@@ -18,6 +18,13 @@ No compression or corruption is performed during tests.
 | `bad_truncated_second.zst` | Payload frame followed by a truncated second frame. |
 | `bad_truncated_skippable.zst` | Skippable frame with its final byte removed. |
 
-Prepared once with `zstd` 0.14's streaming encoder at level 1 with checksums,
-plus explicit skippable-frame headers and byte mutations for invalid inputs.
-Preserve the exact file bytes; `.gitattributes` disables line-ending conversion.
+## Use these inputs
+
+Facade feature: `decompression-zstd`. Run the owning component tests from the repository root:
+
+```sh
+cargo test --locked -p open-arrow-access-decompression --no-default-features --features zstd
+```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

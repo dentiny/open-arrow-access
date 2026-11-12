@@ -1,20 +1,27 @@
-# XML metadata fixtures
+# Service XML fixtures
 
-These project-authored inputs cover service XML envelope validation and document
-decoding. They use fictional data and are covered by the repository's MIT license.
-No network access is required; external DTD declarations must not be fetched.
+Project-authored fictional metadata envelopes under the repository MIT license.
+External DTD declarations must not trigger network fetches.
 
-- `namespaced-header.xml`: a prefixed manifest with an XML declaration, comment,
-  and external DTD declaration.
-- `oai.xml`: an OAI-PMH envelope with an empty ListRecords element.
-- `namespaces-entities.xml`: a prefixed manifest with an external DTD declaration
-  and a title containing `&amp;`, decoded as `A & B`.
-- `wrong-root.xml`: a valid XML document whose root is not `manifest`.
-- `empty.xml`: an intentionally empty input with no root element.
-- `multiple-roots.xml`: two root elements; full-document decoding must fail.
-- `truncated.xml`: a manifest missing its closing tag.
-- `trailing-entity.xml`: an unknown entity after the closed root element.
-- `internal-dtd.xml`: an unsupported internal DTD subset defining an entity.
+| Input | Case |
+| --- | --- |
+| `namespaced-header.xml` | Prefixed manifest, declaration, comment, external DTD. |
+| `oai.xml` | OAI-PMH envelope with an empty ListRecords element. |
+| `namespaces-entities.xml` | Namespaces, external DTD, and `&amp;` decoded as `A & B`. |
+| `wrong-root.xml` | Valid XML with a root other than `manifest`. |
+| `empty.xml`, `multiple-roots.xml`, `truncated.xml` | No root, multiple roots, or missing closing tag. |
+| `trailing-entity.xml` | Unknown entity after the closed root. |
+| `internal-dtd.xml` | Unsupported internal DTD subset. |
 
-The fixture bytes match the original inline test inputs exactly, including the
-absence of final newlines. Keep malformed and empty inputs unchanged.
+Several inputs intentionally have no final newline.
+
+## Use these inputs
+
+Facade feature: `format-xml`. Run the owning component tests from the repository root:
+
+```sh
+cargo test --locked -p open-arrow-access-service --no-default-features --features format-xml
+```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

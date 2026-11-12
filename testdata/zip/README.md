@@ -1,5 +1,8 @@
 # ZIP fixtures
 
+Local archive samples for member selection, sessions, limits, and CRC/length
+validation. Corrupt archives are independent committed inputs.
+
 | Fixture | Contents |
 | --- | --- |
 | `mixed.zip` | Stored padding, Deflate XML, binary PDF bytes, empty file, directory, duplicate name, relative name, compressible text. The 256 KiB padding proves selected reads do not collect the archive. |
@@ -14,5 +17,13 @@
 | `bad_crc.zip` | `mixed.zip` with the first byte of the stored `%PDF-` payload XORed with 1; forces a terminal CRC mismatch. |
 | `bad_expansion_size.zip` | `mixed.zip` with `expanded.txt`'s uncompressed size set to little-endian u32 value 1 in both local and central headers; actual expansion must still obey the limit. |
 
-All malformed archives are committed inputs. Tests read them directly without
-mutating a valid archive, so each corrupt case can be inspected independently.
+## Use these inputs
+
+Facade feature: `decompression-zip`. Run the owning component tests from the repository root:
+
+```sh
+cargo test --locked -p open-arrow-access-decompression --no-default-features --features zip
+```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

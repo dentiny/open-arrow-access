@@ -1,38 +1,54 @@
 # Documentation
 
-open-arrow-access is for **pretraining data preparation**. It gives data engineers
-and developers a shared source-access and decoding interface for turning raw
-corpus inputs into Arrow batches for downstream preprocessing.
+Start with the [quick start](../README.md#read-your-first-file), then choose the
+components your application needs. Features compile APIs; accessor and layer
+construction selects the runtime composition.
 
-Start with the [usage guide](usage.md) to build a corpus ingestion reader, or use
-the [support matrix](support.md) to check a particular source or representation.
-The [README workflow](../README.md#where-it-fits-in-data-preparation) shows how the
-library fits before cleaning, deduplication, tokenization, and sample packing.
+## Use the library
 
-## Guides
-
-| Document | What it answers |
+| Goal | Guide |
 | --- | --- |
-| [Architecture](architecture.md) | How do storage, formats, providers, datasets, and layers compose? |
-| [Support matrix](support.md) | What is implemented, which features enable it, and what does it return? |
-| [Usage](usage.md) | How do I read files, compressed records, multiple shards, or a provider dataset? |
-| [Format behavior](formats.md) | Which layouts, schema policies, and limits apply to each decoder? |
-| [Decompression and ZIP](../decompression/README.md) | How do byte layers and selected ZIP entries behave? |
-| [Provider guide](../service/README.md) | How do I discover files and preserve provider metadata? |
-| [Roadmap](roadmap.md) | Which capabilities are planned and what must precede them? |
+| Configure Cargo features and storage backends | [Feature selection](../README.md#enable-features) |
+| Read files, project fields, configure batches, or use S3 | [Usage](usage.md) |
+| Choose a decoder and understand schema behavior | [Formats](../file-format/README.md), [format reference](formats.md) |
+| Decode compressed objects or archive members | [Decompression and archives](../decompression/README.md) |
+| Combine shards with strict schemas or union by name | [Datasets](../dataset/README.md) |
+| Discover provider metadata and original files | [Services](../service/README.md) |
+| Cast, generate columns, sample, or configure execution | [Layers](../layers/README.md) |
+| Configure bounded parallel scans and ordering | [Parallel reads](parallel-read.md) |
+| Use row-level SQL expressions | [Generated columns](generated-columns.md) |
+| Check supported representations and limitations | [Support matrix](support.md) |
 
-## Contributing
+## Understand and extend
 
-| Document | Scope |
+```mermaid
+flowchart LR
+    Storage["Storage: ByteReader"] --> Format["Format: ReaderFactory"]
+    Format --> Dataset["Dataset: combine file readers"]
+    Dataset --> Layers["Layers: wrap accessors / readers"]
+    Service["Service: source discovery and identity"] -. "resolves inputs" .-> Storage
+```
+
+| Goal | Guide |
 | --- | --- |
-| [Extending the library](extending.md) | Format factories, document decoders, storage adapters, and layers |
-| [API contracts](contracts.md) | Detailed reader lifecycle, capabilities, and factory orchestration |
-| [Testing](testing.md) | Test ownership, fixtures, and commands |
-| [Dependency alignment](dependencies.md) | Pinned upstream baseline and update procedure |
+| Understand boundaries, resource ownership, and execution | [Architecture](architecture.md) |
+| Add a format, service, byte backend, codec, or layer | [Extension guide](extending.md) |
+| Implement request, reader, capability, and planning contracts | [API contracts](contracts.md) |
 
-## Design proposals
+## Develop the library
 
-These describe future APIs and behavior; they are not available features.
+Use the toolchain pinned in `rust-toolchain.toml`. Development checks from the
+repository root:
 
-- [Generated columns](generated-columns.md): expressions, projection dependencies, and output schema.
-- [Source attributes and scan planning](source-attributes.md): partition strategies, ordering requirements, and policy admission.
+```sh
+cargo install taplo-cli --version 0.10.0 --locked
+make lint
+cargo check --workspace --no-default-features --locked
+cargo test --workspace --all-features --locked
+```
+
+[Test guidance](testing.md) explains suite ownership and fixture usage;
+[test helpers](../test-support/README.md) provide shared contracts.
+[Dependency alignment](dependencies.md) describes upstream version updates.
+[Roadmap](roadmap.md) and [source-attribute design](source-attributes.md) track
+future work; consult the public APIs and usage guides for available behavior.

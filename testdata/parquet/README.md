@@ -1,7 +1,9 @@
-# Parquet test fixtures
+# Parquet fixtures
 
-These checked-in files are read by the integration tests. Tests may copy them
-into a temporary storage root, but never write or encode Parquet records.
+Generated with Arrow/Parquet 59.3.0 `ArrowWriter`. The `ordered-*` schema is
+non-nullable `id: Int64`, nullable `title: Utf8`, with metadata `fixture=ordered`.
+Both files have row-group sizes `2, 2, 2, 1` using a maximum row-group count of 2.
+Directory/storage fixtures use uncompressed columns.
 
 | File | Contents |
 | --- | --- |
@@ -14,9 +16,6 @@ into a temporary storage root, but never write or encode Parquet records.
 | `directory/hidden.parquet` | The same schema with value `99`, for dot-prefixed directory entries. |
 | `ids.parquet` | Non-nullable `id: Int64` values `1, 2, 3`, with no schema metadata, for storage adapter tests. |
 
-Both `ordered-*` files have schema `id: Int64` (non-nullable), `title: Utf8`
-(nullable), and schema metadata `fixture=ordered`. The records are:
-
 | id | title |
 | --- | --- |
 | 0 | zero |
@@ -27,16 +26,13 @@ Both `ordered-*` files have schema `id: Int64` (non-nullable), `title: Utf8`
 | 5 | five |
 | 6 | six |
 
-The row-group sizes are `2, 2, 2, 1`. These files were generated once with
-Arrow/Parquet 59.3.0 `ArrowWriter`, using
-`WriterProperties::builder().set_max_row_group_row_count(Some(2))` and the
-compression named in each file. Preserve the bytes when editing the repository;
-the local `.gitattributes` disables text conversion for Parquet files.
-The directory and storage adapter files were also generated once with
-Arrow/Parquet 59.3.0 `ArrowWriter`, using uncompressed columns.
+## Use these inputs
 
-Run the filesystem and Parquet tests with:
+Facade feature: `format-parquet`. Run the owning component tests from the repository root:
 
 ```sh
-cargo test --locked --features format-parquet --test reading
+cargo test --locked -p open-arrow-access-file-format --no-default-features --features parquet
 ```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

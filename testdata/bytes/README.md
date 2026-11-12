@@ -1,7 +1,8 @@
-# Byte contract fixtures
+# Byte-reader fixtures
 
-Project-authored deterministic binary inputs, shared by the core, storage, and
-layer-composition tests. They preserve the original byte offsets and values.
+Project-authored deterministic inputs for core, storage, and layer contracts.
+Lengths and byte offsets are part of the test expectations. The large files
+cross backend I/O boundaries and must retain their sizes.
 
 | Fixture | Contents and purpose |
 | --- | --- |
@@ -18,5 +19,13 @@ layer-composition tests. They preserve the original byte offsets and values.
 | `large.bin` | 5 MiB + 7 bytes, byte `i` equals `i % 251`; multi-MiB ranges and truncation after open. |
 | `gaps.bin` | 1 MiB + 2 dots, with `ab` at offset 0, `cd` at 512 KiB, and `ef` at 1 MiB; disjoint range coalescing. |
 
-The large fixtures are repetitive and compress well in Git. Their lengths cross
-the backend's I/O boundaries; do not shorten them to reduce the test inputs.
+## Use these inputs
+
+Run the owning component tests from the repository root:
+
+```sh
+cargo test --locked -p open-arrow-access-core
+```
+
+Read fixtures directly or through the shared memory accessor. Preserve exact
+bytes; the [fixture policy](../README.md) covers new cases and fault injection.

@@ -1,66 +1,86 @@
 # Multi-file datasets
 
-Enable `dataset-directory` on the facade (`directory` on this crate) to combine
-files through a supplied single-file Arrow accessor.
+Enable `dataset-directory` on `open-arrow-access` (`directory` on this component
+crate) to combine a single-file Arrow accessor across multiple objects.
 
-| Accessor | Selection | Order |
+| Accessor | Selection | Output order |
 | --- | --- | --- |
-| `DirectoryAccessor` | Prefix, optional case-sensitive suffix, recursion setting | Lexicographic paths, deduplicated |
-| `FileSetAccessor` | Explicit nonempty object list | Caller order, duplicates retained |
+| `file_set::FileSetAccessor` | Explicit nonempty object list | Caller order; duplicates retained |
+| `directory::DirectoryAccessor` | Prefix, optional case-sensitive suffix, recursion | Lexicographic locators; duplicates removed |
 
-Both expose the shared async accessor/reader contracts and read files lazily and
-sequentially. The first file fixes the projected schema; every later file must
-match exactly, including schema metadata. Directory
-discovery collects selected paths to establish order before opening the first file.
-Recursion defaults to true. Prefixes and listed locators are backend-defined and
-passed through unchanged.
+## Read selected shards
 
-Use `with_options` for batch rows/projection and `with_byte_options` for per-file
-I/O settings. Empty file selections are invalid; an empty file with a known schema
-is supported. File-set output metadata has no single source object.
+Enable `format-json` and `dataset-directory`. This function reads two files with
+the same inferred schema from a caller-configured storage operator:
 
-See [multi-shard examples](../docs/usage.md#read-multiple-shards) and
-[architecture](../docs/architecture.md). Install
-[`ParallelReadLayer`](../docs/parallel-read.md) for bounded file-level concurrency
-with the same output order. Unordered emission remains planned.
+```rust,no_run
+use open_arrow_access::{
+    Accessor,
+    dataset::file_set::{FileSetAccessor, FileSetRequest},
+    file_format::json::JsonAccessor,
+    storage::{OpenDalAccessor, opendal},
+};
 
-## Union by name
-
-Call `.with_union_by_name()` on `FileSetAccessor` or `DirectoryAccessor` to union
-compatible file schemas before emitting any rows. This works with inferred JSONL
-schemas and Parquet schemas, and composes with `.with_file_planning()` and the
-existing parallel/unordered execution layers.
-
-```rust,ignore
-let files = FileSetAccessor::new(JsonAccessor::infer(storage))
-    .with_union_by_name();
-let reader = files.open(FileSetRequest::new(["a.jsonl", "b.jsonl"])).await?;
+async fn read(operator: opendal::Operator) -> open_arrow_access::Result<()> {
+    let format = JsonAccessor::infer(OpenDalAccessor::new(operator));
+    let files = FileSetAccessor::new(format);
+    let mut reader = files.open(FileSetRequest::new(["a.jsonl", "b.jsonl"])).await?;
+    println!("schema: {:?}", reader.metadata().schema);
+    while let Some(batch) = reader.next().await? {
+        println!("{} rows", batch.num_rows());
+    }
+    Ok(())
+}
 ```
 
-Fields retain first-seen order. Struct children are combined by name, recursively
-through List, LargeList, list views and equal-size FixedSizeList elements. Missing
-fields become nullable and receive null arrays; existing parent/list validity,
-offsets and row counts are retained. Fields present everywhere keep their original
-nullability unless a source already permits null. Null-only types may acquire a
-concrete type from another file. Other differing types, list element names, and
-conflicting field/schema metadata fail preflight; there is no implicit numeric or
-string cast. Map, dictionary and other compound types must match exactly.
+```mermaid
+flowchart LR
+    Request["Explicit names / directory discovery"] --> Select["Establish selected file order"]
+    Select --> Format["Supplied single-file accessor"]
+    Format --> Align["Validate schemas / optional union by name"]
+    Align --> Output["One fixed-schema Arrow reader"]
+    Format -. "optional scan planning" .-> Parallel["ParallelReadLayer"]
+    Parallel --> Output
+```
 
-Union-by-name mode opens/plans each file in sequence to inspect its full schema,
-then drops the reader/plan before inspecting the next. Actual reads reopen files lazily; JSON
-inference may sample each file twice. This bounds retained preflight resources
-independently of file count, but still stores the selected requests and schemas.
-Sources must remain stable throughout the operation. Reopened reader/partition
-metadata and every emitted batch must match the inspected source schema; drift
-fails the stream instead of changing its fixed output schema.
+Ordinary reads open files lazily and sequentially. Directory discovery collects
+locators before reading to establish order; recursion defaults to true. Prefix
+and locator syntax belongs to the byte backend. File-set output has no single
+source object. An empty selection is invalid; a selected empty file with a known
+schema is valid.
 
-Projection is resolved against the complete union, so a selected column may be
-absent from individual files. The union-by-name path reads complete file schemas
-and columns before alignment/projection; conflicts in unselected columns still
-fail preflight. An empty projection retains row counts. Duplicate file selections
-and declared file/record order are preserved. Schema inference failures, including
-empty JSON inputs without an explicit schema, remain the format reader's policy.
+Use request `with_options` for projection and batch rows, and `with_byte_options`
+for per-file I/O settings. See [multi-shard usage](../docs/usage.md#read-multiple-shards)
+for directory construction and complete request examples.
 
-Union by name combines decoded file outputs; each format retains its
-reading-schema and unknown-field policy. It does not recover JSON keys omitted by that file's
-inference sample, nor widen its decoder schema using samples from other files.
+<a id="union-by-name"></a>
+
+## Choose a schema policy
+
+The default is strict: the first file establishes the projected schema and later
+files must match, including schema metadata. Opt into union by name on the
+accessor when fields may be missing:
+
+```rust,ignore
+let files = FileSetAccessor::new(JsonAccessor::infer(storage)).with_union_by_name();
+```
+
+Union mode inspects every full schema before emitting rows, then reopens files
+lazily. Missing fields receive nulls; fields follow first-seen order. Structs and
+supported lists combine recursively; other differing types or conflicting
+metadata fail. There is no implicit numeric/string cast. Projection is resolved
+after union, and conflicts in unselected fields still fail preflight.
+
+Keep source files stable between inspection and reading; observed schema drift
+fails the reader. JSON inference cannot recover keys outside each file's sample.
+Union may sample a file twice and stores selected requests/schemas, while keeping
+preflight readers/plans one at a time.
+
+## Execute in parallel
+
+Install [`ParallelReadLayer`](../docs/parallel-read.md) to run files concurrently
+while preserving order. Use `.with_file_planning()` on a planner-capable dataset
+to expose file-internal partitions too. `UnorderedEmissionLayer` can opt eligible
+sources into ready-batch emission; sources requiring global order reject it.
+See [layer composition](../layers/README.md) for placement of sampling and
+generated columns after parallel execution.
