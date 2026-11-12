@@ -48,35 +48,3 @@ impl crate::StorageConfig {
         Ok(())
     }
 }
-
-pub(crate) fn validate_file(metadata: &opendal::Metadata) -> Result<()> {
-    if !metadata.is_file() {
-        return Err(error::not_a_file());
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_listing(supported: bool) -> Result<()> {
-    if !supported {
-        return Err(error::listing_unsupported());
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_read_length(length: u64, remaining: u64) -> Result<()> {
-    if length > remaining {
-        return Err(error::excessive_read_length());
-    }
-    Ok(())
-}
-
-pub(crate) fn range_capacity(length: u64) -> Result<usize> {
-    usize::try_from(length).map_err(|_| error::range_too_large())
-}
-
-pub(crate) fn validate_named_prefix(prefix: &str) -> Result<()> {
-    if !prefix.is_empty() {
-        return Err(error::invalid_named_prefix());
-    }
-    Ok(())
-}

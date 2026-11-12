@@ -130,26 +130,6 @@ pub(super) fn invalid_token(
     .with_source(source)
 }
 
-pub(super) fn invalid_content_length(operation: &'static str) -> Error {
-    Error::new(ErrorKind::Decode, operation, "invalid Content-Length")
-}
-
-pub(super) fn body_length_overflow(operation: &'static str) -> Error {
-    Error::new(ErrorKind::Decode, operation, "body length overflow")
-}
-
-pub(super) fn excessive_body_length(operation: &'static str) -> Error {
-    Error::new(
-        ErrorKind::Decode,
-        operation,
-        "HTTP body exceeds Content-Length",
-    )
-}
-
-pub(super) fn truncated_body(operation: &'static str) -> Error {
-    Error::new(ErrorKind::Decode, operation, "truncated HTTP body")
-}
-
 pub(super) fn finish_response(
     result: std::result::Result<http::Response<opendal::HttpBody>, Failure>,
 ) -> opendal::Result<http::Response<opendal::HttpBody>> {

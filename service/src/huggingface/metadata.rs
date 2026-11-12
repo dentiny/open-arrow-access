@@ -42,16 +42,14 @@ impl HuggingFaceService {
             path.push("revision").push(&repository.revision);
         }
         url.query_pairs_mut().append_pair("expand", "sha");
-        let metadata: RepositoryInfo = crate::http_client::HttpClient {
-            context: self.context.clone(),
-            config: self.http_config.clone(),
-        }
-        .json(
-            url.as_str(),
-            self.options.token.as_deref(),
-            "resolve_huggingface",
-        )
-        .await?;
+        let metadata: RepositoryInfo = self
+            .client
+            .json(
+                url.as_str(),
+                self.options.token.as_deref(),
+                "resolve_huggingface",
+            )
+            .await?;
         validate_commit_sha(&metadata.sha)?;
         Ok(metadata)
     }

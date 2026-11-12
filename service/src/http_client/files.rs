@@ -1,7 +1,7 @@
 //! Bind a provider's validated manifest to lazy HTTP file access.
 
 use open_arrow_access_core::{Error, Result};
-use open_arrow_access_storage::OpenDalAccessor;
+use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 use serde::de::DeserializeOwned;
 use url::Url;
 
@@ -67,10 +67,7 @@ impl HttpFileService {
         })
     }
 
-    pub(crate) fn with_http_config(
-        mut self,
-        config: open_arrow_access_storage::StorageConfig,
-    ) -> Result<Self> {
+    pub(crate) fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
         config.validate()?;
         self.client.config = config;
         Ok(self)

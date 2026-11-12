@@ -65,27 +65,14 @@ fn configured() -> Result<Connection> {
 }
 ```
 
-Policies are opt-in; defaults preserve one attempt and no added timeout. Only
-GET/HEAD requests are retried, on temporary transport errors or HTTP
-408/429/500/502/503/504. `max_retries` excludes the first attempt. Exponential
-backoff, factor and jitter use the same `backon` library as OpenDAL's RetryLayer.
-A valid `Retry-After` delta-seconds or HTTP-date supplies a minimum wait. Invalid
-values use normal backoff. A server wait above `max_delay` ends retries and
-returns the response instead of retrying earlier than requested. The final
-metadata error retains its HTTP status and original header.
+Policies are opt-in. GET/HEAD retry temporary transport errors and HTTP
+408/429/500/502/503/504 with the configured backoff. `Retry-After` seconds/dates
+set a minimum wait; a wait above `max_delay` returns the original response.
+`operation_timeout` bounds each fetch through headers (including redirects), and
+`io_timeout` bounds each body chunk. Body failures never replay a response.
+Custom contexts preserve the policy regardless of builder order.
 
-`operation_timeout` bounds each fetch attempt through response headers, including
-redirects; `io_timeout` bounds each next response-body chunk. Backoff sleeps are
-outside the attempt timeout. Once headers succeed, body failures propagate
-without replaying the request, including for buffered metadata. Dropping the
-request/reader cancels its active wait; no background retries are spawned.
-`with_context` keeps these policies regardless of builder order.
-
-This is a policy adapter on OpenDAL's transport plane, not a second HTTP client.
-OpenDAL's HTTP file backend constructs file paths, HEAD and Range requests;
-provider APIs need exact URLs, scoped credentials and original response headers.
-Native `RetryLayer`/`TimeoutLayer` apply to operators, not direct transport calls.
-Caller-supplied operators still use `StorageConfig::apply`. Avoid adding native
-retry layers to operators already using this HTTP retry policy, which would
-multiply attempts. Hugging Face's separate Xet transfer path, when selected by
-OpenDAL, is outside this HTTP transport policy.
+This adapter uses OpenDAL's transport and the same backon library as RetryLayer.
+Native operator layers do not cover direct API calls. Caller-owned operators
+still use `StorageConfig::apply`; avoid stacking retries on the same requests.
+Hugging Face's separate Xet transfer path is outside this HTTP policy.

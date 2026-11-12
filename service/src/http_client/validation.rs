@@ -1,4 +1,3 @@
-use http::HeaderMap;
 use open_arrow_access_core::Result;
 use std::time::{Duration, SystemTime};
 
@@ -50,47 +49,6 @@ pub(super) fn bearer_header(token: &str, operation: &'static str) -> Result<http
         .map_err(|source| super::error::invalid_token(operation, source))?;
     value.set_sensitive(true);
     Ok(value)
-}
-
-pub(crate) struct BodyLength {
-    pub(crate) expected: Option<u64>,
-    read: u64,
-    pub(crate) operation: &'static str,
-}
-impl BodyLength {
-    pub(crate) fn new(headers: &HeaderMap, operation: &'static str) -> Result<Self> {
-        let expected = headers
-            .get("content-length")
-            .map(|value| {
-                value
-                    .to_str()
-                    .ok()
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .ok_or_else(|| super::error::invalid_content_length(operation))
-            })
-            .transpose()?;
-        Ok(Self {
-            expected,
-            read: 0,
-            operation,
-        })
-    }
-    pub(crate) fn push(&mut self, bytes: usize) -> Result<()> {
-        self.read = self
-            .read
-            .checked_add(bytes as u64)
-            .ok_or_else(|| super::error::body_length_overflow(self.operation))?;
-        if self.expected.is_some_and(|length| self.read > length) {
-            return Err(super::error::excessive_body_length(self.operation));
-        }
-        Ok(())
-    }
-    pub(crate) fn finish(&self) -> Result<()> {
-        if self.expected.is_some_and(|length| self.read != length) {
-            return Err(super::error::truncated_body(self.operation));
-        }
-        Ok(())
-    }
 }
 
 pub(super) fn is_retry_safe_method(method: &http::Method) -> bool {

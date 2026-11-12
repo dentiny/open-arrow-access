@@ -1,5 +1,6 @@
+use crate::http_client::HttpClient;
 use open_arrow_access_core::Result;
-use opendal::OperationContext;
+use open_arrow_access_storage::StorageConfig;
 
 use super::{HuggingFaceAccessor, HuggingFaceOptions, HuggingFaceRepository, validation};
 
@@ -7,8 +8,7 @@ use super::{HuggingFaceAccessor, HuggingFaceOptions, HuggingFaceRepository, vali
 #[derive(Clone, Debug)]
 pub struct HuggingFaceService {
     pub(super) options: HuggingFaceOptions,
-    pub(super) context: OperationContext,
-    pub(super) http_config: open_arrow_access_storage::StorageConfig,
+    pub(super) client: HttpClient,
 }
 
 impl HuggingFaceService {
@@ -18,21 +18,14 @@ impl HuggingFaceService {
         options.resolve_environment().await;
         validation::validate_options(&options)?;
         let client = crate::http_client::HttpClient::new()?;
-        Ok(Self {
-            options,
-            context: client.context,
-            http_config: Default::default(),
-        })
+        Ok(Self { options, client })
     }
 
     /// Apply an OpenDAL transport policy to Hub metadata and repository files.
     /// Do not also install an OpenDAL RetryLayer on this transport's operators.
-    pub fn with_http_config(
-        mut self,
-        config: open_arrow_access_storage::StorageConfig,
-    ) -> Result<Self> {
+    pub fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
         config.validate()?;
-        self.http_config = config;
+        self.client.config = config;
         Ok(self)
     }
 
@@ -55,7 +48,7 @@ impl HuggingFaceService {
         }
         HuggingFaceAccessor::new(
             builder,
-            crate::http_client::policy::apply(&self.http_config, self.context.clone())?,
+            crate::http_client::policy::apply(&self.client.config, self.client.context.clone())?,
         )
     }
 }

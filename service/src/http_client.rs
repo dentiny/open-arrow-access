@@ -15,7 +15,7 @@ pub(crate) mod validation;
 pub(crate) use error::{json_error, request_error, transport_error};
 use http::Request;
 use open_arrow_access_core::Result;
-use open_arrow_access_storage::OpenDalAccessor;
+use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext};
 use serde::de::DeserializeOwned;
 use url::Url;
@@ -23,7 +23,7 @@ use url::Url;
 #[derive(Clone, Debug)]
 pub(crate) struct HttpClient {
     pub(crate) context: OperationContext,
-    pub(crate) config: open_arrow_access_storage::StorageConfig,
+    pub(crate) config: StorageConfig,
 }
 
 impl HttpClient {

@@ -10,6 +10,7 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes,
     Capability, Result, StreamReader, async_trait,
 };
+use open_arrow_access_storage::StorageConfig;
 use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext};
 use url::Url;
 
@@ -56,10 +57,7 @@ impl Connection {
     }
     /// Configure retries and per-attempt/stream-read timeouts for this connection.
     /// Preserved when replacing the transport with `with_context`.
-    pub fn with_http_config(
-        mut self,
-        config: open_arrow_access_storage::StorageConfig,
-    ) -> Result<Self> {
+    pub fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
         config.validate()?;
         self.client.config = config;
         Ok(self)
