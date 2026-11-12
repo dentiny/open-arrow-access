@@ -175,6 +175,12 @@ this workspace, add its module/export and any optional Cargo dependency features
 then forward those features from the facade. See the [step-by-step extension
 guide](docs/extending.md) for contracts, diagrams, and reference implementations.
 
+## Unified application entry point
+
+The optional `source` feature adds a [source registry](docs/sources.md) for URI-based
+reads, enabled formats/storage backends, Hugging Face datasets, and custom source
+or decoder handlers. The existing typed APIs remain available.
+
 ## More documentation
 
 See the [documentation index](docs/README.md) for detailed contracts, format limits,

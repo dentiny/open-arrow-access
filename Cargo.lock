@@ -2783,6 +2783,8 @@ name = "open-arrow-access"
 version = "0.1.0"
 dependencies = [
  "arrow-schema",
+ "futures",
+ "http",
  "open-arrow-access-core",
  "open-arrow-access-dataset",
  "open-arrow-access-decompression",
@@ -2790,8 +2792,12 @@ dependencies = [
  "open-arrow-access-layers",
  "open-arrow-access-service",
  "open-arrow-access-storage",
+ "open-arrow-access-test-support",
  "opendal",
+ "percent-encoding",
+ "tempfile",
  "tokio",
+ "url",
 ]
 
 [[package]]

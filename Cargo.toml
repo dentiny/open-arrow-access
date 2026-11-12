@@ -138,6 +138,7 @@ service-semantic-scholar = ["open-arrow-access-service/semantic-scholar"]
 service-uspto = ["open-arrow-access-service/uspto"]
 service-warc = ["open-arrow-access-service/warc"]
 service-zenodo = ["open-arrow-access-service/zenodo"]
+source = ["dep:url", "dep:percent-encoding"]
 
 [dependencies]
 open-arrow-access-core.workspace = true
@@ -147,10 +148,16 @@ open-arrow-access-file-format = { workspace = true, optional = true }
 open-arrow-access-layers.workspace = true
 open-arrow-access-service.workspace = true
 open-arrow-access-storage.workspace = true
+percent-encoding = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
 
 [dev-dependencies]
 arrow-schema.workspace = true
+futures.workspace = true
+http.workspace = true
+open-arrow-access-test-support.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
+tempfile.workspace = true
 tokio.workspace = true
 
 [[example]]
