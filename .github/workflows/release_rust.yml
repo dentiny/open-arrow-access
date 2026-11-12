@@ -42,6 +42,7 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
           path: source
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
@@ -79,9 +80,13 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.commit }}
           path: source
+          fetch-depth: 0
           persist-credentials: false
       - name: Install pinned toolchain
         run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: source -> target
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Minimal-feature build
@@ -109,6 +114,7 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.commit }}
           path: source
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v6
         with:
