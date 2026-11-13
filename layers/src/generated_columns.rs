@@ -213,6 +213,8 @@ struct GeneratedStep {
     column: String,
     input: (SchemaRef, Vec<usize>),
     index: usize,
+    // Generated-value slot indices whose last use is this step. Removing them
+    // afterward frees hidden intermediate arrays before final batch assembly.
     release: Vec<usize>,
 }
 
