@@ -5,12 +5,12 @@ use std::{
 
 use arrow_schema::{Field, FieldRef, Schema, SchemaRef};
 use datafusion::common::DFSchema;
-use indexmap::IndexSet;
 use open_arrow_access_core::Result;
 
 use super::ColumnEvolution;
 use crate::{
     expression::{BoundRowExpression, DependencyView, ExpressionPlanner},
+    source_projection::SourceProjection,
     validation,
 };
 
@@ -39,28 +39,6 @@ pub(super) enum EvolutionStep {
     Remove(usize),
 }
 
-/// Assign compact input indices on first use; computed slots stay unchanged.
-struct SourceProjection {
-    source_len: usize,
-    columns: Option<IndexSet<usize>>,
-}
-
-impl SourceProjection {
-    fn bind(&mut self, slot: usize) -> usize {
-        match &mut self.columns {
-            Some(columns) if slot < self.source_len => columns.insert_full(slot).0,
-            _ => slot,
-        }
-    }
-
-    fn lookup(&self, slot: usize) -> Option<usize> {
-        match &self.columns {
-            Some(columns) if slot < self.source_len => columns.get_index_of(&slot),
-            _ => Some(slot),
-        }
-    }
-}
-
 impl SchemaEvolutionPlan {
     pub(super) fn new(
         changes: &[ColumnEvolution],
@@ -76,10 +54,7 @@ impl SchemaEvolutionPlan {
             .collect();
         validation::validate_evolution_source(names.len(), source.fields().len())?;
         let mut fields = source.fields().to_vec();
-        let mut inputs = SourceProjection {
-            source_len: fields.len(),
-            columns: project_source.then(IndexSet::new),
-        };
+        let mut inputs = SourceProjection::new(source.clone(), project_source);
         let mut affected = HashSet::new();
         let mut steps = Vec::new();
         let mut planner = None;
@@ -132,9 +107,7 @@ impl SchemaEvolutionPlan {
                         output.data_type(),
                         data_type,
                     )?;
-                    indices
-                        .iter_mut()
-                        .for_each(|index| *index = inputs.bind(*index));
+                    inputs.bind_all(&mut indices);
                     let index = fields.len();
                     let field = Arc::new(Field::new(name, data_type.clone(), true));
                     steps.push(EvolutionStep::Add {
@@ -203,21 +176,12 @@ impl SchemaEvolutionPlan {
                 .map(|index| output_indices[index])
                 .collect();
         }
-        output_indices
-            .iter_mut()
-            .for_each(|index| *index = inputs.bind(*index));
+        inputs.bind_all(&mut output_indices);
         let affected = affected
             .into_iter()
             .filter_map(|index| inputs.lookup(index))
             .collect();
-        let source_schema = match inputs.columns {
-            Some(columns) => Arc::new(
-                source
-                    .project(&columns.into_iter().collect::<Vec<_>>())
-                    .map_err(crate::error::evolution_batch)?,
-            ),
-            None => source.clone(),
-        };
+        let source_schema = inputs.schema().map_err(crate::error::evolution_batch)?;
         let lifetimes = crate::value_lifetime::ValueLifetimePlan::new(
             steps.iter().map(|step| match step {
                 EvolutionStep::Add {

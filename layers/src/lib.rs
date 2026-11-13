@@ -3,6 +3,7 @@
 mod batch;
 mod error;
 mod expression;
+mod source_projection;
 mod validation;
 mod value_lifetime;
 

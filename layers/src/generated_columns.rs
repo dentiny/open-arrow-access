@@ -16,6 +16,7 @@ use crate::{
     batch::assemble_batch,
     error::{generated_batch_error, generated_column_error, generated_plan_error},
     expression::{BoundRowExpression, ExpressionPlanner, PlannedExpression},
+    source_projection::SourceProjection,
     validation::{validate_generated_names, validate_generated_schema, validate_generated_specs},
 };
 
@@ -102,29 +103,19 @@ where
         {
             let (schema, mut steps, mut required) = plan_steps(&planner, &self.specs, source)?;
             required.extend(projection.iter().cloned());
-            let indices = source
-                .fields()
-                .iter()
-                .enumerate()
-                .filter(|(_, field)| required.contains(field.name()))
-                .map(|(index, _)| index)
-                .collect::<Vec<_>>();
-            let positions = indices
-                .iter()
-                .enumerate()
-                .map(|(projected, &original)| (original, projected))
-                .collect::<HashMap<_, _>>();
-            for step in &mut steps {
-                remap_source_indices(&mut step.expression.input.slots, &positions);
+            let mut inputs = SourceProjection::new(source.clone(), true);
+            for (index, field) in source.fields().iter().enumerate() {
+                if required.contains(field.name()) {
+                    inputs.bind(index);
+                }
             }
-            request.read_options_mut().projection = Some(
-                indices
-                    .iter()
-                    .map(|&index| source.field(index).name().clone())
-                    .collect(),
-            );
-            planned = Some((schema, steps, positions));
-            Some(request.read_options().resolve_projection(source)?.0)
+            for step in &mut steps {
+                inputs.bind_all(&mut step.expression.input.slots);
+            }
+            request.read_options_mut().projection = Some(inputs.column_names());
+            let expected = inputs.schema().map_err(generated_batch_error)?;
+            planned = Some((schema, steps, inputs));
+            Some(expected)
         } else {
             None
         };
@@ -133,16 +124,16 @@ where
         if let Some(expected) = expected_source {
             validate_generated_schema(source, &expected)?;
         }
-        let (schema, steps, positions) = match planned {
+        let (schema, steps, mut inputs) = match planned {
             Some(planned) => planned,
             None => {
                 let (schema, steps, _) = plan_steps(&planner, &self.specs, source)?;
-                (schema, steps, HashMap::new())
+                (schema, steps, SourceProjection::new(source.clone(), false))
             }
         };
         let (schema, mut projection) = output_options.resolve_projection(&schema)?;
         if let Some(indices) = &mut projection {
-            remap_source_indices(indices, &positions);
+            inputs.bind_all(indices);
         }
         let metadata = RecordMetadata {
             schema,
@@ -157,15 +148,6 @@ where
             StreamReader::records(batches, metadata, capability.ordering)
                 .with_capability(capability),
         ))
-    }
-}
-
-fn remap_source_indices(indices: &mut [usize], positions: &HashMap<usize, usize>) {
-    // Computed slots retain their full-schema indices; only source slots move.
-    for index in indices {
-        if let Some(&projected) = positions.get(index) {
-            *index = projected;
-        }
     }
 }
 
