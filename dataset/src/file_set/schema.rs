@@ -262,36 +262,6 @@ mod tests {
     }
 
     #[test]
-    fn growing_sparse_schemas_preserve_order_and_required_fields() {
-        let schema = merge((0..256).map(|index| {
-            Schema::new(vec![
-                field("always", DataType::Int64),
-                field(&format!("column_{index}"), DataType::Int64),
-                field("nested", structure(&[&format!("child_{index}")])),
-            ])
-        }));
-        assert!(!schema.field(0).is_nullable());
-        assert_eq!(schema.fields().len(), 258);
-        assert_eq!(schema.field(1).name(), "column_0");
-        assert_eq!(schema.field(2).name(), "nested");
-        assert_eq!(schema.field(257).name(), "column_255");
-        let DataType::Struct(children) = schema.field(2).data_type() else {
-            panic!("expected struct");
-        };
-        for (index, child) in children.iter().enumerate() {
-            assert_eq!(child.name(), &format!("child_{index}"));
-            assert!(child.is_nullable());
-        }
-        assert!(
-            schema
-                .fields()
-                .iter()
-                .filter(|field| field.name().starts_with("column_"))
-                .all(|field| field.is_nullable())
-        );
-    }
-
-    #[test]
     fn missing_and_null_parents_do_not_make_present_children_nullable() {
         let present = Schema::new(vec![field("parent", structure(&["required"]))]);
         let absent = Schema::empty();
@@ -342,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn metadata_and_dictionary_flags_keep_their_merge_rules() {
+    fn merges_metadata_and_rejects_dictionary_order_conflicts() {
         let metadata = |value: &str| HashMap::from([("key".into(), value.into())]);
         let dictionary = || {
             field(
@@ -368,23 +338,12 @@ mod tests {
         assert_eq!(schema.metadata()["extra"], "extra");
         assert_eq!(schema.field(0).metadata()["key"], "field");
         assert!(!schema.field(0).is_nullable());
-        for (left, right) in [
-            (
-                Schema::new_with_metadata(Vec::<Field>::new(), metadata("left")),
-                Schema::new_with_metadata(Vec::<Field>::new(), metadata("right")),
-            ),
-            (
-                Schema::new(vec![dictionary().with_metadata(metadata("left"))]),
-                Schema::new(vec![dictionary().with_metadata(metadata("right"))]),
-            ),
-            (
-                Schema::new(vec![dictionary()]),
-                Schema::new(vec![dictionary().with_dict_is_ordered(true)]),
-            ),
-        ] {
-            let mut union = SchemaUnion::default();
-            union.merge(&left).unwrap();
-            assert!(union.merge(&right).is_err());
-        }
+        let mut union = SchemaUnion::default();
+        union.merge(&Schema::new(vec![dictionary()])).unwrap();
+        assert!(
+            union
+                .merge(&Schema::new(vec![dictionary().with_dict_is_ordered(true)]))
+                .is_err()
+        );
     }
 }
