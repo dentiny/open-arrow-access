@@ -1,40 +1,13 @@
 use std::{collections::HashMap, sync::Arc};
 
-use arrow_array::{
-    Array, ArrayRef, LargeStringArray, RecordBatch, RecordBatchOptions, cast::AsArray,
-};
+use arrow_array::{Array, ArrayRef, LargeStringArray, RecordBatch, cast::AsArray};
 use arrow_cast::{CastOptions, cast_with_options};
-use arrow_schema::{ArrowError, DataType, SchemaRef};
+use arrow_schema::{ArrowError, DataType};
 use futures::stream;
 use open_arrow_access_core::{RecordMetadata, RecordReader, Result, StreamReader};
 
 use super::plan::{EvolutionStep, SchemaEvolutionPlan};
-use crate::validation;
-
-fn assemble_batch(
-    schema: &SchemaRef,
-    indices: &[usize],
-    source: &RecordBatch,
-    // Arrays produced by preceding add/cast steps, keyed by the slots in `indices`.
-    // Missing entries read from `source`; added-column slots must have an entry.
-    values: &HashMap<usize, ArrayRef>,
-) -> Result<RecordBatch> {
-    let columns = indices
-        .iter()
-        .map(|&index| {
-            values
-                .get(&index)
-                .unwrap_or_else(|| source.column(index))
-                .clone()
-        })
-        .collect();
-    RecordBatch::try_new_with_options(
-        schema.clone(),
-        columns,
-        &RecordBatchOptions::new().with_row_count(Some(source.num_rows())),
-    )
-    .map_err(crate::error::evolution_batch)
-}
+use crate::{batch::assemble_batch, validation};
 
 impl SchemaEvolutionPlan {
     pub(super) fn into_reader(
@@ -90,7 +63,8 @@ impl SchemaEvolutionPlan {
                     expression,
                     input,
                 } => {
-                    let view = assemble_batch(&input.0, &input.1, &batch, &values)?;
+                    let view = assemble_batch(&input.0, &input.1, &batch, &values)
+                        .map_err(crate::error::evolution_batch)?;
                     let array = expression
                         .evaluate(&view)
                         .and_then(|value| value.into_array(batch.num_rows()))
@@ -131,6 +105,7 @@ impl SchemaEvolutionPlan {
             }
         }
         assemble_batch(&self.target_schema, &self.output_indices, &batch, &values)
+            .map_err(crate::error::evolution_batch)
     }
 }
 
