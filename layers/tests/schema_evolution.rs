@@ -497,6 +497,21 @@ fn evolution_rejects_invalid_names_and_types() {
             "a",
             DataType::Time32(arrow_schema::TimeUnit::Nanosecond),
         ),
+        ColumnEvolution::add_column(
+            "bad",
+            DataType::Time32(arrow_schema::TimeUnit::Nanosecond),
+            |_| unreachable!(),
+        ),
+        ColumnEvolution::add_column(
+            "bad",
+            DataType::List(item(DataType::Time64(arrow_schema::TimeUnit::Second))),
+            |_| unreachable!(),
+        ),
+        ColumnEvolution::add_column(
+            "bad",
+            DataType::RunEndEncoded(item(DataType::UInt32), item(DataType::Int32)),
+            |_| unreachable!(),
+        ),
         ColumnEvolution::rename_column("a", ""),
         ColumnEvolution::rename_column("", "a"),
     ] {
@@ -634,6 +649,10 @@ async fn evolution_adds_nullable_and_nested_arrays_without_casting_them() {
         DataType::Int32,
         DataType::List(item(DataType::Utf8)),
         DataType::Struct(vec![item(DataType::Int32)].into()),
+        DataType::RunEndEncoded(
+            Arc::new(Field::new("run_ends", DataType::Int32, false)),
+            item(DataType::Int32),
+        ),
     ] {
         for rows in [0, 2] {
             let input = batch(Arc::new(Int32Array::from(vec![1; rows])));

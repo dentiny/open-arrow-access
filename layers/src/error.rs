@@ -152,8 +152,8 @@ pub(crate) fn unsafe_decimal_rescale(
     ))
 }
 
-pub(crate) fn invalid_cast_target(data_type: &arrow_schema::DataType) -> ArrowError {
-    ArrowError::InvalidArgumentError(format!("invalid or unsupported cast target {data_type}"))
+pub(crate) fn invalid_evolution_type(data_type: &arrow_schema::DataType) -> ArrowError {
+    ArrowError::InvalidArgumentError(format!("invalid or unsupported column type {data_type}"))
 }
 
 pub(crate) fn volatile_expression() -> datafusion::error::DataFusionError {

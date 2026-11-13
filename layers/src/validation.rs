@@ -149,8 +149,11 @@ fn validate_decimal_cast(from: &DataType, to: &DataType) -> std::result::Result<
     Ok(())
 }
 
-fn validate_target(data_type: &DataType) -> std::result::Result<(), ArrowError> {
-    let invalid = || crate::error::invalid_cast_target(data_type);
+fn validate_evolution_type(
+    data_type: &DataType,
+    for_cast: bool,
+) -> std::result::Result<(), ArrowError> {
+    let invalid = || crate::error::invalid_evolution_type(data_type);
     match data_type {
         DataType::Time32(unit) if !matches!(unit, TimeUnit::Second | TimeUnit::Millisecond) => {
             return Err(invalid());
@@ -169,12 +172,20 @@ fn validate_target(data_type: &DataType) -> std::result::Result<(), ArrowError> 
         },
         DataType::Union(fields, _) => {
             let mut ids = HashSet::with_capacity(fields.len());
-            if fields.is_empty() || fields.iter().any(|(id, _)| id < 0 || !ids.insert(id)) {
+            if (for_cast && fields.is_empty())
+                || fields.iter().any(|(id, _)| id < 0 || !ids.insert(id))
+            {
                 return Err(invalid());
             }
         }
-        // Arrow's null-to-run-end cast can panic when the batch exceeds the key range.
-        DataType::RunEndEncoded(_, _) => return Err(invalid()),
+        DataType::RunEndEncoded(run_ends, values) => {
+            // Arrow's null-to-run-end cast can panic beyond the key range.
+            // Functor-provided arrays do not use that cast path.
+            if for_cast || run_ends.is_nullable() || !run_ends.data_type().is_run_ends_type() {
+                return Err(invalid());
+            }
+            return validate_evolution_type(values.data_type(), for_cast);
+        }
         DataType::Decimal32(precision, scale) => {
             return validate_decimal_precision_and_scale::<Decimal32Type>(*precision, *scale);
         }
@@ -195,18 +206,18 @@ fn validate_target(data_type: &DataType) -> std::result::Result<(), ArrowError> 
         | DataType::ListView(field)
         | DataType::LargeListView(field)
         | DataType::FixedSizeList(field, _)
-        | DataType::Map(field, _) => validate_target(field.data_type())?,
+        | DataType::Map(field, _) => validate_evolution_type(field.data_type(), for_cast)?,
         DataType::Struct(fields) => {
             for field in fields {
-                validate_target(field.data_type())?;
+                validate_evolution_type(field.data_type(), for_cast)?;
             }
         }
         DataType::Union(fields, _) => {
             for (_, field) in fields.iter() {
-                validate_target(field.data_type())?;
+                validate_evolution_type(field.data_type(), for_cast)?;
             }
         }
-        DataType::Dictionary(_, value) => validate_target(value)?,
+        DataType::Dictionary(_, value) => validate_evolution_type(value, for_cast)?,
         _ => {}
     }
     Ok(())
@@ -325,7 +336,12 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
     use crate::ColumnEvolution;
     for change in changes {
         let name = match change {
-            ColumnEvolution::AddColumn { name, .. } | ColumnEvolution::RemoveColumn { name } => {
+            ColumnEvolution::RemoveColumn { name } => name,
+            ColumnEvolution::AddColumn {
+                name, data_type, ..
+            } => {
+                validate_evolution_type(data_type, false)
+                    .map_err(|error| crate::error::evolution_config_error(name, error))?;
                 name
             }
             ColumnEvolution::RenameColumn {
@@ -336,7 +352,7 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
                 source_name
             }
             ColumnEvolution::ChangeDataType { name, data_type } => {
-                validate_target(data_type)
+                validate_evolution_type(data_type, true)
                     .map_err(|error| crate::error::evolution_config_error(name, error))?;
                 name
             }
