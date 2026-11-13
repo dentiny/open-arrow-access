@@ -1,5 +1,6 @@
 //! Format-independent transformations following the shared `Layer` contract.
 
+mod batch;
 mod error;
 mod expression;
 mod validation;

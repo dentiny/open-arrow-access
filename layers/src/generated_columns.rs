@@ -1,8 +1,11 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use arrow_array::{RecordBatch, RecordBatchOptions};
 use arrow_schema::{Schema, SchemaRef};
-use datafusion::physical_expr::PhysicalExpr;
+use datafusion::{common::DFSchema, physical_expr::PhysicalExpr};
 use futures::StreamExt;
 use open_arrow_access_core::{
     Accessor, Capability, Layer, ReadOptionsProvider, RecordCapability, RecordMetadata,
@@ -10,8 +13,9 @@ use open_arrow_access_core::{
 };
 
 use crate::{
+    batch::assemble_batch,
     error::{generated_batch_error, generated_column_error, generated_plan_error},
-    expression::ExpressionPlanner,
+    expression::{ExpressionPlanner, PlannedExpression},
     validation::{validate_generated_names, validate_generated_schema, validate_generated_specs},
 };
 
@@ -121,7 +125,13 @@ where
             source: inner.metadata().source.clone(),
         };
         let capability = record_capability(inner.capability());
-        let plan = GeneratedColumnsPlan { steps, projection };
+        let output_indices =
+            projection.unwrap_or_else(|| (0..metadata.schema.fields().len()).collect());
+        let plan = GeneratedColumnsPlan {
+            steps,
+            schema: metadata.schema.clone(),
+            output_indices,
+        };
         let batches = into_stream(inner).map(move |batch| plan.generate(batch?));
         Ok(Box::new(
             StreamReader::records(batches, metadata, capability.ordering)
@@ -136,40 +146,58 @@ fn plan_steps(
     source: &SchemaRef,
 ) -> Result<(SchemaRef, Vec<GeneratedStep>, HashSet<String>)> {
     validate_generated_names(specs, source)?;
-    let mut schema = Arc::clone(source);
-    let source_names: HashSet<&str> = source.fields().iter().map(|f| f.name().as_str()).collect();
+    DFSchema::try_from(source.clone())
+        .map_err(|error| generated_plan_error(&specs[0].column, error))?;
+    let mut fields = source.fields().to_vec();
+    let mut names: HashMap<String, usize> = fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| (field.name().clone(), index))
+        .collect();
     let mut dependencies = HashSet::new();
     let mut steps = Vec::with_capacity(specs.len());
     for spec in specs {
-        let (expression, output, columns) = planner
-            .plan_sql(&spec.expression, &schema)
+        let PlannedExpression {
+            expression,
+            output,
+            input: (input_schema, indices),
+        } = planner
+            .plan_sql(&spec.expression, &fields, &names)
             .map_err(|error| generated_plan_error(&spec.column, error))?;
         dependencies.extend(
-            columns
-                .into_iter()
-                .filter(|name| source_names.contains(name.as_str())),
+            indices
+                .iter()
+                .filter(|&&index| index < source.fields().len())
+                .map(|&index| fields[index].name().clone()),
         );
         let mut metadata = output.metadata().clone();
         metadata.insert(
             "open_arrow_access:generated_expression".into(),
             spec.expression.clone(),
         );
-        let mut fields = schema.fields().to_vec();
-        fields.push(Arc::new(
+        let field = Arc::new(
             output
                 .as_ref()
                 .clone()
                 .with_name(&spec.column)
                 .with_metadata(metadata),
-        ));
-        schema = Arc::new(Schema::new_with_metadata(fields, source.metadata().clone()));
+        );
+        let index = fields.len();
+        names.insert(spec.column.clone(), index);
+        fields.push(field.clone());
         steps.push(GeneratedStep {
-            output: Arc::clone(&schema),
+            output: Arc::new(Schema::new(vec![field])),
             expression,
+            input: (input_schema, indices),
+            index,
             column: spec.column.clone(),
         });
     }
-    Ok((schema, steps, dependencies))
+    Ok((
+        Arc::new(Schema::new_with_metadata(fields, source.metadata().clone())),
+        steps,
+        dependencies,
+    ))
 }
 
 fn record_capability(inner: RecordCapability) -> RecordCapability {
@@ -186,31 +214,106 @@ struct GeneratedStep {
     output: SchemaRef,
     expression: Arc<dyn PhysicalExpr>,
     column: String,
+    input: (SchemaRef, Vec<usize>),
+    index: usize,
 }
 
 struct GeneratedColumnsPlan {
     steps: Vec<GeneratedStep>,
-    projection: Option<Vec<usize>>,
+    schema: SchemaRef,
+    // Source-column or generated-value slot for each field in the output schema.
+    output_indices: Vec<usize>,
 }
 
 impl GeneratedColumnsPlan {
-    fn generate(&self, mut batch: RecordBatch) -> Result<RecordBatch> {
+    fn generate(&self, batch: RecordBatch) -> Result<RecordBatch> {
         let rows = batch.num_rows();
         let options = RecordBatchOptions::new().with_row_count(Some(rows));
+        let mut values = HashMap::with_capacity(self.steps.len());
         for step in &self.steps {
+            let view = assemble_batch(&step.input.0, &step.input.1, &batch, &values)
+                .map_err(generated_batch_error)?;
             let array = step
                 .expression
-                .evaluate(&batch)
+                .evaluate(&view)
                 .and_then(|value| value.into_array(rows))
                 .map_err(|error| generated_column_error(&step.column, error))?;
-            let (_, mut columns, _) = batch.into_parts();
-            columns.push(array);
-            batch = RecordBatch::try_new_with_options(Arc::clone(&step.output), columns, &options)
-                .map_err(generated_batch_error)?;
+            // Validate hidden results too, without revisiting unrelated columns.
+            let result =
+                RecordBatch::try_new_with_options(step.output.clone(), vec![array], &options)
+                    .map_err(generated_batch_error)?;
+            values.insert(step.index, result.column(0).clone());
         }
-        match &self.projection {
-            Some(indices) => batch.project(indices).map_err(generated_batch_error),
-            None => Ok(batch),
+        assemble_batch(&self.schema, &self.output_indices, &batch, &values)
+            .map_err(generated_batch_error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_array::{Array, ArrayRef, Int64Array};
+    use arrow_schema::{DataType, Field};
+
+    #[test]
+    fn single_dependency_steps_keep_compact_schemas_and_slots() {
+        const WIDTH: usize = 256;
+        let source = Arc::new(Schema::new(
+            (0..WIDTH)
+                .map(|i| Field::new(format!("c{i}"), DataType::Int64, false))
+                .collect::<Vec<_>>(),
+        ));
+        let specs = (0..WIDTH)
+            .map(|i| GeneratedColumnSpec {
+                column: format!("g{i}"),
+                expression: format!(
+                    "{} + 1",
+                    if i == 0 {
+                        format!("c{}", WIDTH - 1)
+                    } else {
+                        format!("g{}", i - 1)
+                    }
+                ),
+            })
+            .collect::<Vec<_>>();
+        let (schema, steps, dependencies) =
+            plan_steps(&ExpressionPlanner::new(), &specs, &source).unwrap();
+        assert_eq!(schema.fields().len(), WIDTH * 2);
+        assert_eq!(dependencies, HashSet::from([format!("c{}", WIDTH - 1)]));
+        assert_eq!(
+            steps
+                .iter()
+                .map(|step| step.input.0.fields().len())
+                .sum::<usize>(),
+            WIDTH
+        );
+        assert_eq!(
+            steps
+                .iter()
+                .map(|step| step.output.fields().len())
+                .sum::<usize>(),
+            WIDTH
+        );
+        for (i, step) in steps.iter().enumerate() {
+            assert_eq!(step.input.1, vec![WIDTH - 1 + i]);
+            assert_eq!(step.index, WIDTH + i);
         }
+        let batch = RecordBatch::try_new(
+            source,
+            (0..WIDTH)
+                .map(|i| Arc::new(Int64Array::from(vec![i as i64])) as ArrayRef)
+                .collect(),
+        )
+        .unwrap();
+        let plan = GeneratedColumnsPlan {
+            schema: Arc::new(schema.project(&[WIDTH * 2 - 1]).unwrap()),
+            output_indices: vec![WIDTH * 2 - 1],
+            steps,
+        };
+        let output = plan.generate(batch).unwrap();
+        assert_eq!(
+            output.column(0).to_data(),
+            Int64Array::from(vec![(WIDTH * 2 - 1) as i64]).to_data()
+        );
     }
 }

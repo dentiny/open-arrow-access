@@ -392,3 +392,48 @@ async fn projection_pushdown_reads_real_dependencies_and_remaps_column_indices()
     );
     assert!(reader.next().await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn compact_inputs_preserve_sql_names_nested_access_and_constants() {
+    use arrow_array::{ArrayRef, StructArray};
+    let nested = Arc::new(StructArray::from(vec![(
+        Arc::new(Field::new("Count", DataType::Int64, false)),
+        Arc::new(Int64Array::from(vec![4])) as ArrayRef,
+    )]));
+    let input = RecordBatch::try_from_iter([
+        ("record", nested as ArrayRef),
+        ("Count", Arc::new(Int64Array::from(vec![9])) as ArrayRef),
+        (
+            "unused",
+            Arc::new(StringArray::from(vec!["payload"])) as ArrayRef,
+        ),
+    ])
+    .unwrap();
+    let config = layer(&[
+        ("nested", "record.\"Count\""),
+        ("combined", "coalesce(nested, \"Count\") + 1 AS ignored"),
+        ("constant", "'unused Count' /* record */"),
+    ])
+    .with_source_schema(input.schema());
+    let source = MemoryAccessor::new(vec![input]);
+    let projections = source.projections.clone();
+    let mut reader = source
+        .layer(config)
+        .open(request(&["combined", "constant"]))
+        .await
+        .unwrap();
+    assert_eq!(
+        *projections.lock().unwrap(),
+        vec![Some(vec!["record".into(), "Count".into()])]
+    );
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(
+        batch.column(0).to_data(),
+        Int64Array::from(vec![5]).to_data()
+    );
+    assert_eq!(
+        batch.column(1).to_data(),
+        StringArray::from(vec!["unused Count"]).to_data()
+    );
+    assert!(reader.next().await.unwrap().is_none());
+}

@@ -59,10 +59,11 @@ implements `ReadOptionsProvider`; it does not depend on formats or storage.
 4. Expose the fixed augmented/projected schema before reading a batch.
 5. Evaluate physical expressions on Arrow arrays, then apply the final projection.
 
-Source arrays share their buffers. Each declaration appends its array by moving
-the batch's column vector, without cloning earlier arrays. Memory is bounded by
-one input batch, its generated arrays and expression/kernel state. There is no
-DataFrame execution plan, materialized table, dependency graph or per-row SQL.
+Source arrays share their buffers. Each declaration evaluates a compact view of
+its dependencies and stores its result in a column slot. Hidden results are
+validated as they are produced; the final projected batch is assembled once.
+Memory is bounded by one input batch, its generated arrays and expression/kernel
+state. There is no DataFrame execution plan, materialized table or per-row SQL.
 
 **Projection limitation:** a nonempty configuration reads every source column and
 evaluates every declaration, including outputs omitted by the final projection.
