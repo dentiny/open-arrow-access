@@ -292,6 +292,47 @@ pub(crate) fn validate_expression(
     Ok(())
 }
 
+pub(crate) fn validate_expression_casts(
+    expression: &datafusion::logical_expr::Expr,
+    schema: &datafusion::common::DFSchema,
+) -> datafusion::error::Result<()> {
+    use datafusion::{
+        common::tree_node::{TreeNode, TreeNodeRecursion},
+        functions::core::{
+            arrow_cast::ArrowCastFunc, arrow_try_cast::ArrowTryCastFunc,
+            cast_to_type::CastToTypeFunc, try_cast_to_type::TryCastToTypeFunc,
+        },
+        logical_expr::{Expr, ExprSchemable},
+    };
+
+    expression.apply(|expr| {
+        let source = match expr {
+            Expr::Cast(cast) => Some(cast.expr.as_ref()),
+            Expr::TryCast(cast) => Some(cast.expr.as_ref()),
+            Expr::ScalarFunction(function) => {
+                let function_impl = function.func.inner();
+                (function_impl.downcast_ref::<ArrowCastFunc>().is_some()
+                    || function_impl.downcast_ref::<ArrowTryCastFunc>().is_some()
+                    || function_impl.downcast_ref::<CastToTypeFunc>().is_some()
+                    || function_impl.downcast_ref::<TryCastToTypeFunc>().is_some())
+                .then(|| function.args.first())
+                .flatten()
+            }
+            _ => None,
+        };
+        if let Some(source) = source {
+            let from = source.get_type(schema)?;
+            let to = expr.get_type(schema)?;
+            // Check before simplification can fold constants or lower cast UDFs.
+            if can_cast_types(&from, &to) {
+                validate_decimal_cast(&from, &to)?;
+            }
+        }
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+    Ok(())
+}
+
 pub(crate) fn validate_generated_names(
     specs: &[crate::GeneratedColumnSpec],
     source: &arrow_schema::Schema,
