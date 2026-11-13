@@ -2882,6 +2882,7 @@ dependencies = [
  "arrow-select",
  "datafusion",
  "futures",
+ "indexmap",
  "open-arrow-access-core",
  "open-arrow-access-file-format",
  "open-arrow-access-test-support",

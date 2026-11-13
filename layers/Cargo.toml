@@ -9,6 +9,7 @@ description = "Composable Arrow record layers for Open Arrow Access"
 [dependencies]
 datafusion = { workspace = true, features = ["sql"] }
 futures.workspace = true
+indexmap.workspace = true
 arrow-array = { workspace = true, features = ["chrono-tz"] }
 arrow-cast.workspace = true
 arrow-schema.workspace = true

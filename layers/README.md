@@ -117,8 +117,10 @@ Arrow casts can lose precision and do not reconcile schemas across files.
 
 Opening indexes source names once. Layer-owned per-batch validation checks only
 affected fields, with a schema-identity fast path. Type checks recurse only within
-changed types. An ordered map retains active slots; updates take O(log(F + K))
-for F source fields and K changes. Expression dependency discovery visits its
+changed types. A name index and append-only field slots preserve vector order.
+The final schema scans those slots once in O(F + K) for F source fields and K
+changes. Source projection indices are assigned on first use during planning;
+there is no later rebinding pass. Expression dependency discovery visits its
 expression tree, and each input view visits only that expression's dependencies.
 Final assembly visits P output columns. Arrow's safe batch constructors check
 those assembled views; DataFusion planning and computation have their own costs.

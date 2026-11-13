@@ -5,7 +5,7 @@ fn column_error(
     kind: ErrorKind,
     operation: &'static str,
     column: &str,
-    error: ArrowError,
+    error: impl std::error::Error + Send + Sync + 'static,
 ) -> Error {
     Error::new(kind, operation, format!("column {column:?}: {error}")).with_source(error)
 }
@@ -58,12 +58,7 @@ pub(crate) fn generated_column_error(
     column: &str,
     error: datafusion::error::DataFusionError,
 ) -> Error {
-    Error::new(
-        ErrorKind::Decode,
-        "generate_column",
-        format!("column {column:?}: {error}"),
-    )
-    .with_source(error)
+    column_error(ErrorKind::Decode, "generate_column", column, error)
 }
 
 pub(crate) fn generated_batch_error(error: ArrowError) -> Error {
@@ -205,23 +200,18 @@ pub(crate) fn evolution_plan_error(
     name: &str,
     source: datafusion::error::DataFusionError,
 ) -> Error {
-    Error::new(
+    column_error(
         ErrorKind::InvalidInput,
         "plan_schema_evolution",
-        format!("column {name:?}: {source}"),
+        name,
+        source,
     )
-    .with_source(source)
 }
 pub(crate) fn evolution_expression_error(
     name: &str,
     source: datafusion::error::DataFusionError,
 ) -> Error {
-    Error::new(
-        ErrorKind::Decode,
-        "evolve_schema",
-        format!("added column {name:?}: {source}"),
-    )
-    .with_source(source)
+    invalid_added_column(name, &source).with_source(source)
 }
 pub(crate) fn evolution_expression_type(
     name: &str,

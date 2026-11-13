@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     sync::Arc,
 };
 
@@ -10,6 +10,7 @@ use arrow_cast::{CastOptions, cast_with_options};
 use arrow_schema::{ArrowError, DataType, Field, FieldRef, Schema, SchemaRef};
 use datafusion::{common::DFSchema, logical_expr::Expr, physical_expr::PhysicalExpr};
 use futures::stream;
+use indexmap::IndexSet;
 use open_arrow_access_core::{
     Accessor, Layer, ReadOptionsProvider, RecordCapability, RecordMetadata, RecordReader, Result,
     StreamReader, async_trait,
@@ -150,14 +151,20 @@ where
             return self.inner.open(request).await;
         }
         let output_options = request.read_options().clone();
-        let mut planned = self
+        let planned = self
             .source_schema
             .as_ref()
-            .map(|source| plan_evolution(&self.changes, source, &output_options))
+            .map(|source| plan_evolution(&self.changes, source, &output_options, true))
             .transpose()?;
         // A supplied schema separates namespace checks from source data reads.
-        if let Some(plan) = &mut planned {
-            request.read_options_mut().projection = Some(plan.project_source()?);
+        if let Some(plan) = &planned {
+            request.read_options_mut().projection = Some(
+                plan.source_schema
+                    .fields()
+                    .iter()
+                    .map(|field| field.name().clone())
+                    .collect(),
+            );
         } else if self.changes.iter().any(|change| match change {
             ColumnEvolution::ChangeDataType { .. } => false,
             ColumnEvolution::RenameColumn {
@@ -183,7 +190,7 @@ where
             plan.source_schema = source.clone();
             plan
         } else {
-            plan_evolution(&self.changes, source, &output_options)?
+            plan_evolution(&self.changes, source, &output_options, false)?
         };
         if plan.steps.is_empty()
             && plan.target_schema == *source
@@ -238,20 +245,46 @@ enum EvolutionStep {
     Remove(usize),
 }
 
+/// Assign compact input indices on first use; computed slots stay unchanged.
+struct SourceProjection {
+    source_len: usize,
+    columns: Option<IndexSet<usize>>,
+}
+
+impl SourceProjection {
+    fn bind(&mut self, slot: usize) -> usize {
+        match &mut self.columns {
+            Some(columns) if slot < self.source_len => columns.insert_full(slot).0,
+            _ => slot,
+        }
+    }
+
+    fn lookup(&self, slot: usize) -> Option<usize> {
+        match &self.columns {
+            Some(columns) if slot < self.source_len => columns.get_index_of(&slot),
+            _ => Some(slot),
+        }
+    }
+}
+
 fn plan_evolution(
     changes: &[ColumnEvolution],
     source: &SchemaRef,
     options: &open_arrow_access_core::ReadOptions,
+    project_source: bool,
 ) -> Result<SchemaEvolutionPlan> {
     let mut names: HashMap<_, _> = source
         .fields()
         .iter()
         .enumerate()
-        .map(|(index, field)| (field.name().clone(), index))
+        .map(|(index, field)| (field.name().as_str(), index))
         .collect();
     validation::validate_evolution_source(names.len(), source.fields().len())?;
-    let mut fields: BTreeMap<_, _> = source.fields().iter().cloned().enumerate().collect();
-    let mut next_index = source.fields().len();
+    let mut fields = source.fields().to_vec();
+    let mut inputs = SourceProjection {
+        source_len: fields.len(),
+        columns: project_source.then(IndexSet::new),
+    };
     let mut affected = HashSet::new();
     let mut steps = Vec::new();
     let mut planner = None;
@@ -275,7 +308,7 @@ fn plan_evolution(
                     .into_iter()
                     .map(|column| {
                         names
-                            .get(&column.name)
+                            .get(column.name.as_str())
                             .copied()
                             .ok_or_else(|| crate::error::evolution_source(&column.name))
                     })
@@ -291,7 +324,7 @@ fn plan_evolution(
                 let input_schema = Arc::new(Schema::new_with_metadata(
                     indices
                         .iter()
-                        .map(|index| fields[index].clone())
+                        .map(|index| fields[*index].clone())
                         .collect::<Vec<_>>(),
                     source.metadata().clone(),
                 ));
@@ -306,9 +339,11 @@ fn plan_evolution(
                     output.data_type(),
                     data_type,
                 )?;
+                indices
+                    .iter_mut()
+                    .for_each(|index| *index = inputs.bind(*index));
                 let input = (input_schema, indices);
-                let index = next_index;
-                next_index += 1;
+                let index = fields.len();
                 let field = Arc::new(Field::new(name, data_type.clone(), true));
                 steps.push(EvolutionStep::Add {
                     index,
@@ -316,14 +351,15 @@ fn plan_evolution(
                     expression,
                     input,
                 });
-                names.insert(name.clone(), index);
-                fields.insert(index, field);
+                names.insert(name.as_str(), index);
+                fields.push(field);
             }
             ColumnEvolution::RemoveColumn { name } => {
                 let index = resolve()?;
-                names.remove(name);
-                fields.remove(&index);
-                steps.push(EvolutionStep::Remove(index));
+                names.remove(name.as_str());
+                if let Some(index) = inputs.lookup(index) {
+                    steps.push(EvolutionStep::Remove(index));
+                }
             }
             ColumnEvolution::RenameColumn {
                 source_name,
@@ -332,57 +368,73 @@ fn plan_evolution(
                 let index = resolve()?;
                 validation::validate_evolution_target(
                     Some(index),
-                    names.get(target_name).copied(),
+                    names.get(target_name.as_str()).copied(),
                 )?;
                 if source_name != target_name {
-                    names.remove(source_name);
-                    names.insert(target_name.clone(), index);
-                    fields.insert(
-                        index,
-                        Arc::new(fields[&index].as_ref().clone().with_name(target_name)),
-                    );
+                    names.remove(source_name.as_str());
+                    names.insert(target_name.as_str(), index);
+                    fields[index] = Arc::new(fields[index].as_ref().clone().with_name(target_name));
                 }
             }
             ColumnEvolution::ChangeDataType { data_type, .. } => {
                 let index = resolve()?;
-                let field = fields[&index].as_ref();
+                let field = fields[index].as_ref();
                 if field.data_type() != data_type {
                     validation::validate_cast(field, data_type)?;
                     let field = Arc::new(field.clone().with_data_type(data_type.clone()));
-                    fields.insert(index, field.clone());
-                    steps.push(EvolutionStep::Cast { index, field });
+                    fields[index] = field.clone();
+                    steps.push(EvolutionStep::Cast {
+                        index: inputs.bind(index),
+                        field,
+                    });
                 }
             }
         }
     }
-    let mut output_indices: Vec<_> = fields.keys().copied().collect();
-    let schema = Arc::new(Schema::new_with_metadata(
-        fields.into_values().collect::<Vec<_>>(),
-        source.metadata().clone(),
-    ));
-    let (schema, projection) = options.resolve_projection(&schema)?;
+    // Scan slots only once; removed or reused names no longer own their old slot.
+    let (mut output_indices, fields): (Vec<_>, Vec<_>) = fields
+        .into_iter()
+        .enumerate()
+        .filter(|(index, field)| names.get(field.name().as_str()) == Some(index))
+        .unzip();
+    let target_schema = Arc::new(Schema::new_with_metadata(fields, source.metadata().clone()));
+    let (target_schema, projection) = options.resolve_projection(&target_schema)?;
     if let Some(projection) = projection {
         output_indices = projection
             .into_iter()
             .map(|index| output_indices[index])
             .collect();
     }
+    output_indices
+        .iter_mut()
+        .for_each(|index| *index = inputs.bind(*index));
+    let affected = affected
+        .into_iter()
+        .filter_map(|index| inputs.lookup(index))
+        .collect();
+    let source_schema = match inputs.columns {
+        Some(columns) => Arc::new(
+            source
+                .project(&columns.into_iter().collect::<Vec<_>>())
+                .map_err(crate::error::evolution_batch)?,
+        ),
+        None => source.clone(),
+    };
     Ok(SchemaEvolutionPlan {
-        source_schema: source.clone(),
-        target_schema: schema,
-        affected: affected.into_iter().collect(),
+        source_schema,
+        target_schema,
+        affected,
         steps,
         output_indices,
     })
 }
 
-/// `values` contains arrays from preceding add/cast steps, keyed by the same
-/// column slots as `indices`. Entries override source columns; missing entries
-/// read directly from `source`. Added-column slots must have an entry.
 fn assemble_batch(
     schema: &SchemaRef,
     indices: &[usize],
     source: &RecordBatch,
+    // Arrays produced by preceding add/cast steps, keyed by the slots in `indices`.
+    // Missing entries read from `source`; added-column slots must have an entry.
     values: &HashMap<usize, ArrayRef>,
 ) -> Result<RecordBatch> {
     let columns = indices
@@ -403,69 +455,6 @@ fn assemble_batch(
 }
 
 impl SchemaEvolutionPlan {
-    /// Bind stable source slots to the compact projection sent upstream.
-    fn project_source(&mut self) -> Result<Vec<String>> {
-        let mut required: HashSet<_> = self.output_indices.iter().copied().collect();
-        for step in &self.steps {
-            match step {
-                EvolutionStep::Add { input, .. } => required.extend(input.1.iter().copied()),
-                EvolutionStep::Cast { index, .. } => {
-                    required.insert(*index);
-                }
-                EvolutionStep::Remove(_) => {}
-            }
-        }
-        let mut indices: Vec<_> = required
-            .into_iter()
-            .filter(|&index| index < self.source_schema.fields().len())
-            .collect();
-        indices.sort_unstable();
-        let names = indices
-            .iter()
-            .map(|&index| self.source_schema.field(index).name().clone())
-            .collect();
-        let input_indices: HashMap<_, _> = indices
-            .iter()
-            .enumerate()
-            .map(|(input, &slot)| (slot, input))
-            .collect();
-        self.affected = self
-            .affected
-            .iter()
-            .filter_map(|index| input_indices.get(index).copied())
-            .collect();
-        let rebind = |index: &mut usize| {
-            if let Some(&input) = input_indices.get(index) {
-                *index = input;
-            }
-        };
-        // Removed source columns may not be read at all. Computed slots keep
-        // their original indices, which cannot overlap compact input indices.
-        self.steps.retain_mut(|step| match step {
-            EvolutionStep::Remove(index)
-                if *index < self.source_schema.fields().len()
-                    && !input_indices.contains_key(index) =>
-            {
-                false
-            }
-            EvolutionStep::Add { input, .. } => {
-                input.1.iter_mut().for_each(&rebind);
-                true
-            }
-            EvolutionStep::Cast { index, .. } | EvolutionStep::Remove(index) => {
-                rebind(index);
-                true
-            }
-        });
-        self.output_indices.iter_mut().for_each(rebind);
-        self.source_schema = Arc::new(
-            self.source_schema
-                .project(&indices)
-                .map_err(crate::error::evolution_batch)?,
-        );
-        Ok(names)
-    }
-
     fn convert(&self, batch: RecordBatch) -> Result<RecordBatch> {
         validation::validate_evolution_batch_schema(
             batch.schema_ref(),
