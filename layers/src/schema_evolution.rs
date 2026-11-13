@@ -8,17 +8,14 @@ use arrow_array::{
 };
 use arrow_cast::{CastOptions, cast_with_options};
 use arrow_schema::{ArrowError, DataType, Field, FieldRef, Schema, SchemaRef};
-use datafusion::{
-    common::DFSchema, execution::context::SessionContext, logical_expr::Expr,
-    physical_expr::PhysicalExpr,
-};
+use datafusion::{common::DFSchema, logical_expr::Expr, physical_expr::PhysicalExpr};
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, Layer, ReadOptionsProvider, RecordCapability, RecordMetadata, RecordReader, Result,
     StreamReader, async_trait,
 };
 
-use crate::validation;
+use crate::{expression::ExpressionPlanner, validation};
 
 /// One ordered change to the current top-level schema.
 /// Names refer to the schema produced by preceding vector items.
@@ -254,7 +251,7 @@ fn plan_evolution(
     let mut next_index = source.fields().len();
     let mut affected = HashSet::new();
     let mut steps = Vec::new();
-    let mut state = None;
+    let mut planner = None;
     for change in changes {
         let index = names.get(change.name()).copied();
         if let Some(index) = index
@@ -295,12 +292,12 @@ fn plan_evolution(
                         .collect::<Vec<_>>(),
                     source.metadata().clone(),
                 ));
-                let state = state.get_or_insert_with(|| SessionContext::new().state());
+                let planner = planner.get_or_insert_with(ExpressionPlanner::new);
                 let df_schema = DFSchema::try_from(input_schema.clone())
                     .map_err(|error| crate::error::evolution_plan_error(name, error))?;
-                let (expression, output) =
-                    crate::expression::plan_expression(state, expression.clone(), &df_schema)
-                        .map_err(|error| crate::error::evolution_plan_error(name, error))?;
+                let (expression, output) = planner
+                    .plan(expression.clone(), &df_schema)
+                    .map_err(|error| crate::error::evolution_plan_error(name, error))?;
                 validation::validate_evolution_expression_type(
                     name,
                     output.data_type(),
