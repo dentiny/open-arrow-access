@@ -282,10 +282,10 @@ extension, not a required method for every byte reader.
 
 ## Implementation boundaries
 
-Generated columns are a required record-layer extension. The core
+Computed columns are provided by `SchemaEvolutionLayer`. The core
 `ReadOptionsProvider` trait lets a layer adjust common projection settings on
 file, dataset or service request types. `ReadRequest` implements it; expression
-evaluation and DataFusion integration remain a separate PR. See
+evaluation and DataFusion integration remain in the layers crate. See
 [generated-column design](generated-columns.md) for dependency/projection,
 schema and optional reader-context contracts.
 

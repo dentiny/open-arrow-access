@@ -58,14 +58,11 @@ schema drift. Type and metadata conflicts fail without implicit casts. See the
 ## Generated columns and observation
 
 [`SchemaEvolutionLayer`](../layers/README.md) is implemented and always available.
-It adds DataFusion expression columns, removes or renames fields, and applies explicit
-Arrow casts through the existing layer contract.
-
-`GeneratedColumnsLayer` is implemented and always available, with
-ordered row-level SQL expressions, a fixed output schema, and final projection.
-Dependency projection pushdown is available with a complete `with_source_schema`
-and an output projection; all declarations still run. See the
-[generated-column design](generated-columns.md).
+It adds DataFusion `Expr` or SQL columns, removes or renames fields, and applies
+explicit Arrow casts through one layer. SQL and inferred `Expr` additions derive
+their output type, nullability and metadata. Supplying a complete
+`with_source_schema` enables dependency projection pushdown; all configured
+computations still run. See the [computed-column design](generated-columns.md).
 
 Metrics can be developed independently. Byte counts, record batches, row counts,
 latency, and failures describe different stages and should remain separate.

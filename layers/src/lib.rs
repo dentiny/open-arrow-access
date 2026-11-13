@@ -4,9 +4,7 @@ mod batch;
 mod error;
 mod expression;
 mod validation;
-
-mod generated_columns;
-pub use generated_columns::{GeneratedColumnSpec, GeneratedColumnsAccessor, GeneratedColumnsLayer};
+mod value_lifetime;
 
 mod parallel_read;
 pub use parallel_read::{ParallelReadAccessor, ParallelReadLayer};
@@ -18,4 +16,6 @@ mod sampling;
 pub use sampling::{SamplingAccessor, SamplingLayer};
 
 mod schema_evolution;
-pub use schema_evolution::{ColumnEvolution, SchemaEvolutionAccessor, SchemaEvolutionLayer};
+pub use schema_evolution::{
+    ColumnEvolution, ColumnExpression, SchemaEvolutionAccessor, SchemaEvolutionLayer,
+};

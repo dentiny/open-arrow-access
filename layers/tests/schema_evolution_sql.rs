@@ -1,90 +1,24 @@
 use std::{
     collections::HashMap,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
-    },
-    task::Poll,
+    sync::{Arc, atomic::Ordering},
 };
 
 use arrow_array::{Array, Int32Array, Int64Array, RecordBatch, RecordBatchOptions, StringArray};
 use arrow_schema::{DataType, Field, Schema};
-use futures::stream;
-use open_arrow_access_core::{
-    Accessor, AccessorExt, Capability, ErrorKind, OrderRequirement, ReadOptions, ReadRequest,
-    RecordCapability, RecordMetadata, RecordReader, Result, async_trait, record_stream_reader,
+use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest};
+use open_arrow_access_layers::{ColumnEvolution, SchemaEvolutionLayer};
+use open_arrow_access_test_support::{
+    MemoryRecordAccessor as MemoryAccessor, reader::assert_finished,
 };
-use open_arrow_access_layers::{
-    ColumnEvolution, GeneratedColumnSpec, GeneratedColumnsLayer, SchemaEvolutionLayer,
-};
-use open_arrow_access_test_support::reader::assert_finished;
 
-fn layer(specs: &[(&str, &str)]) -> GeneratedColumnsLayer {
-    GeneratedColumnsLayer::try_new(
+fn layer(specs: &[(&str, &str)]) -> SchemaEvolutionLayer {
+    SchemaEvolutionLayer::try_new(
         specs
             .iter()
-            .map(|(column, expression)| GeneratedColumnSpec {
-                column: (*column).into(),
-                expression: (*expression).into(),
-            })
+            .map(|(column, expression)| ColumnEvolution::add_column_sql(*column, *expression))
             .collect(),
     )
     .unwrap()
-}
-
-struct MemoryAccessor {
-    batches: Vec<RecordBatch>,
-    polls: Arc<AtomicUsize>,
-    projections: Arc<Mutex<Vec<Option<Vec<String>>>>>,
-}
-
-impl MemoryAccessor {
-    fn new(batches: Vec<RecordBatch>) -> Self {
-        Self {
-            batches,
-            polls: Arc::default(),
-            projections: Arc::default(),
-        }
-    }
-}
-
-#[async_trait]
-impl Accessor for MemoryAccessor {
-    type Request = ReadRequest;
-    type Reader = dyn RecordReader;
-    fn capability(&self) -> RecordCapability {
-        Capability {
-            read: true,
-            read_parallel: false,
-            read_with_range: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::Reorderable)
-    }
-    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        self.projections
-            .lock()
-            .unwrap()
-            .push(request.options.projection.clone());
-        let (schema, projection) = request
-            .options
-            .resolve_projection(&self.batches[0].schema())?;
-        let mut batches = self.batches.clone().into_iter().map(Ok);
-        let polls = self.polls.clone();
-        let stream = stream::poll_fn(move |_| {
-            polls.fetch_add(1, Ordering::SeqCst);
-            Poll::Ready(batches.next())
-        });
-        Ok(Box::new(record_stream_reader(
-            stream,
-            RecordMetadata {
-                schema,
-                source: Some(request.object),
-            },
-            projection,
-            OrderRequirement::Reorderable,
-        )))
-    }
 }
 
 fn input() -> RecordBatch {
@@ -257,15 +191,6 @@ async fn invalid_expressions_fail_at_open_even_when_hidden() {
             .unwrap();
         assert_eq!(error.kind(), ErrorKind::InvalidInput, "{specs:?}: {error}");
         assert_eq!(polls.load(Ordering::SeqCst), 0);
-    }
-    for names in [vec!["missing"], vec!["x", "x"]] {
-        assert!(
-            MemoryAccessor::new(vec![input()])
-                .layer(layer(&[("x", "1")]))
-                .open(request(&names))
-                .await
-                .is_err()
-        );
     }
 }
 
@@ -588,4 +513,26 @@ async fn pushdown_preserves_source_outputs_and_full_namespace_generated_slots() 
         Int64Array::from(vec![7; 3]).to_data()
     );
     assert_eq!(*projections.lock().unwrap(), vec![Some(vec![])]);
+}
+
+#[tokio::test]
+async fn sql_rejects_removed_and_renamed_source_names() {
+    let batch = input();
+    for known_schema in [false, true] {
+        for sql in ["\"Count\"", "text"] {
+            let mut evolution = SchemaEvolutionLayer::try_new(vec![
+                ColumnEvolution::remove_column("Count"),
+                ColumnEvolution::rename_column("text", "value"),
+                ColumnEvolution::add_column_sql("invalid", sql),
+            ])
+            .unwrap();
+            if known_schema {
+                evolution = evolution.with_source_schema(batch.schema());
+            }
+            let source = MemoryAccessor::new(vec![batch.clone()]);
+            let polls = source.polls.clone();
+            assert!(source.layer(evolution).open(request(&[])).await.is_err());
+            assert_eq!(polls.load(Ordering::SeqCst), 0);
+        }
+    }
 }

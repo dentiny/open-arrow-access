@@ -112,7 +112,7 @@ Enabling a feature compiles an API; construct the accessor/layer to use it.
 | Core contracts, storage, shared service HTTP utilities, record layers | Always available; no extra facade feature |
 | Fs, S3, or another storage backend | Enable `services-fs`, `services-s3`, etc. on your **OpenDAL** dependency |
 
-Always-available layers include schema evolution, generated columns, sampling,
+Always-available layers include schema evolution with SQL/Expr computed columns, sampling,
 parallel reads, and unordered emission. See the
 [schema evolution](examples/schema_evolution.rs),
 [SQL generated columns](examples/generated_columns.rs), and

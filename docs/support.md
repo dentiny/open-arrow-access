@@ -143,10 +143,10 @@ one metadata page at a time; callers own continuation, pacing, and retry policy.
 | `Layer<A>` / `AccessorExt::layer` | Implemented | Type-preserving accessor wrappers with explicit capabilities |
 | `DecompressionLayer<C>` | Implemented | Streaming byte transformation; range capability removed |
 | Per-reader byte I/O concurrency | Implemented | `ByteReadOptions`; ordered output, default concurrency one |
-| Generated columns | Implemented | Row-level SQL expressions and final projection; [source projection pushdown with a supplied schema](generated-columns.md) |
+| Generated columns | Implemented | `SchemaEvolutionLayer` SQL/Expr additions and final projection; [source projection pushdown with a supplied schema](generated-columns.md) |
 | Metrics, timeout, read budgets | Planned | Observation and resource policies |
 | Partition planning / parallel scans | Planned | Source-aware work units and bounded execution |
 | Unordered emission | Implemented | Explicit `UnorderedEmissionLayer`; requires a reorderable scan; independent of parallel execution |
 
-`layers/` includes schema evolution and generated-column record layers. Backend-specific OpenDAL layers can already be configured on the
+`layers/` includes schema evolution with computed columns. Backend-specific OpenDAL layers can already be configured on the
 operator; they are distinct from this project's accessor layers.

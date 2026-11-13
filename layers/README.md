@@ -9,8 +9,7 @@ Byte decompression layers use the same contract but require [codec features](../
 
 | Layer | Use it for | Key behavior |
 | --- | --- | --- |
-| `SchemaEvolutionLayer` | Add, remove, rename, or cast top-level columns | Fixed output schema; added columns use DataFusion expressions |
-| `GeneratedColumnsLayer` | Append row-level SQL expressions | Declarations see earlier generated fields; uses DataFusion |
+| `SchemaEvolutionLayer` | Add computed columns, remove, rename, or cast top-level columns | Ordered DataFusion Expr / SQL operations; fixed output schema |
 | `SamplingLayer` | Seeded Bernoulli row sampling | Approximate count; preserves selected row order |
 | `ParallelReadLayer` | Execute independent scan partitions concurrently | Requires `ScanPlanner`; preserves output order by default |
 | `UnorderedEmissionLayer` | Emit ready batches from a reorderable scan | Use with parallel execution; global-order sources reject it |
@@ -24,7 +23,7 @@ OpenDAL layers belong on the OpenDAL operator and configure a separate I/O bound
 flowchart LR
     Storage["Storage"] --> Format["Format / dataset accessor"]
     Format --> Parallel["ParallelReadLayer: execute partitions"]
-    Parallel --> Generated["GeneratedColumnsLayer: evaluate after merge"]
+    Parallel --> Generated["SchemaEvolutionLayer: compute after merge"]
     Generated --> Sampling["SamplingLayer: one seeded stream"]
     Sampling --> App["Application"]
 ```
@@ -38,20 +37,19 @@ Enable `format-json` for this complete composition function:
 use open_arrow_access::{
     Accessor, AccessorExt, ReadRequest,
     file_format::json::JsonAccessor,
-    layers::{GeneratedColumnSpec, GeneratedColumnsLayer, ParallelReadLayer, SamplingLayer},
+    layers::{ColumnEvolution, SchemaEvolutionLayer, ParallelReadLayer, SamplingLayer},
     storage::{OpenDalAccessor, opendal},
 };
 use std::num::NonZeroUsize;
 
 async fn read(operator: opendal::Operator) -> open_arrow_access::Result<()> {
     let source = JsonAccessor::infer(OpenDalAccessor::new(operator));
-    let generated = GeneratedColumnsLayer::try_new(vec![GeneratedColumnSpec {
-        column: "title_length".into(),
-        expression: "character_length(title)".into(),
-    }])?;
+    let evolution = SchemaEvolutionLayer::try_new(vec![
+        ColumnEvolution::add_column_sql("title_length", "character_length(title)"),
+    ])?;
     let records = source
         .layer(ParallelReadLayer::new(NonZeroUsize::new(4).unwrap(), NonZeroUsize::MIN))
-        .layer(generated)
+        .layer(evolution)
         .layer(SamplingLayer::try_new(0.1, 42)?);
     let mut reader = records.open(ReadRequest::new("records.jsonl")).await?;
     while let Some(batch) = reader.next().await? {
@@ -66,11 +64,12 @@ This expects a string `title` column. Sampling keeps each row with probability
 produce the same selection across different batch boundaries. Unordered input
 can change the sample.
 
-Keep generated columns and sampling **outside** `ParallelReadLayer` so they run
+Keep schema evolution and sampling **outside** `ParallelReadLayer` so they run
 over one merged scan. They do not implement `ScanPlanner`; putting the parallel
-layer outside either is unsupported. With a complete `with_source_schema` and an
-output projection, generated columns read only required source columns. Otherwise,
-they read all source columns. All declarations run before final projection.
+layer outside either is unsupported. Supply a complete `with_source_schema` to
+read only the source columns needed by all changes and the final output. Without
+it, adding, removing or renaming columns requires reading the full source schema.
+All configured computations run before final projection.
 
 ## Evolve a schema
 
@@ -95,8 +94,11 @@ Changes execute in vector order. Each name refers to the schema produced by
 preceding changes. Rename targets must be unoccupied at that step; swapping names
 requires a temporary name. Removed names can be reused by later additions.
 
-Added columns are nullable and appended in vector order. Each takes a DataFusion
-`Expr` whose result must match the declared data type. Expressions can reference
+Added columns append in vector order. `add_column(name, type, expr)` produces a
+nullable column and checks that the DataFusion `Expr` returns the declared type.
+`add_column_expr(name, expr)` and `add_column_sql(name, sql)` infer the output
+type, nullability and field metadata; SQL additions also record the original
+expression in `open_arrow_access:generated_expression`. Expressions can reference
 earlier additions, renames, and casts; removed columns are unavailable. Scalars
 expand to the batch row count, including zero. Use a `ScalarUDF` for custom
 computation, with its input columns represented as expression arguments.

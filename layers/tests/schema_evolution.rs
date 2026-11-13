@@ -8,15 +8,15 @@ use datafusion::{
     logical_expr::{ColumnarValue, Expr, Volatility, create_udf},
     prelude::{col, lit},
 };
-use futures::{StreamExt, stream};
 
 use arrow_array::{Array, ArrayRef, Int32Array, Int64Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, UnionFields, UnionMode};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ErrorKind, ObjectRef, OrderRequirement, ReadOptions, ReadRequest,
-    RecordCapability, RecordMetadata, RecordReader, Result, async_trait, record_stream_reader,
+    RecordReader, Result,
 };
 use open_arrow_access_layers::{ColumnEvolution, SchemaEvolutionLayer};
+use open_arrow_access_test_support::MemoryRecordAccessor as MemoryAccessor;
 
 fn layer(name: &str, data_type: DataType) -> SchemaEvolutionLayer {
     SchemaEvolutionLayer::try_new(vec![ColumnEvolution::change_data_type(name, data_type)]).unwrap()
@@ -52,23 +52,7 @@ fn counted_column(name: &str, data_type: DataType, calls: Arc<AtomicUsize>) -> E
     .call(vec![col(name)])
 }
 
-struct MemoryAccessor {
-    schema: Arc<Schema>,
-    batches: Vec<RecordBatch>,
-    calls: Arc<AtomicUsize>,
-    requested_projection: Arc<std::sync::Mutex<Option<Vec<String>>>>,
-}
-
-impl MemoryAccessor {
-    fn new(batches: Vec<RecordBatch>) -> Self {
-        Self {
-            schema: batches[0].schema(),
-            batches,
-            calls: Arc::default(),
-            requested_projection: Arc::default(),
-        }
-    }
-
+trait EvolutionTestExt: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + Sized {
     async fn open_evolved(
         self,
         changes: Vec<ColumnEvolution>,
@@ -96,33 +80,7 @@ impl MemoryAccessor {
     }
 }
 
-#[async_trait]
-impl Accessor for MemoryAccessor {
-    type Request = ReadRequest;
-    type Reader = dyn RecordReader;
-
-    fn capability(&self) -> RecordCapability {
-        RecordCapability::sequential(OrderRequirement::Reorderable)
-    }
-
-    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        *self.requested_projection.lock().unwrap() = request.options.projection.clone();
-        let (schema, projection) = request.options.resolve_projection(&self.schema)?;
-        let calls = self.calls.clone();
-        let stream = stream::iter(self.batches.clone().into_iter().map(Ok)).inspect(move |_| {
-            calls.fetch_add(1, Ordering::SeqCst);
-        });
-        Ok(Box::new(record_stream_reader(
-            stream,
-            RecordMetadata {
-                schema,
-                source: Some(request.object),
-            },
-            projection,
-            OrderRequirement::Reorderable,
-        )))
-    }
-}
+impl EvolutionTestExt for MemoryAccessor {}
 
 fn batch(array: ArrayRef) -> RecordBatch {
     RecordBatch::try_from_iter([("value", array)]).unwrap()
@@ -237,7 +195,7 @@ async fn cast_validation_rejects_unsupported_and_unsafe_types_before_reading() {
         ),
     ] {
         let source = MemoryAccessor::new(vec![batch(arrow_array::new_empty_array(&from))]);
-        let reads = source.calls.clone();
+        let reads = source.batches_read.clone();
         let result = source.open_cast(to.clone()).await;
         if rejected {
             let error = result.err().unwrap();
@@ -267,7 +225,7 @@ async fn added_expressions_reject_unsafe_decimal_casts_even_when_hidden() {
             &DataType::Decimal256(76, 0),
             1,
         ))]);
-        let reads = source.calls.clone();
+        let reads = source.batches_read.clone();
         let error = source
             .open_evolved(
                 vec![ColumnEvolution::add_column(
@@ -303,7 +261,7 @@ async fn added_expressions_reject_run_end_casts_before_reading() {
         ] {
             let source =
                 MemoryAccessor::new(vec![batch(Arc::new(arrow_array::NullArray::new(32768)))]);
-            let reads = source.calls.clone();
+            let reads = source.batches_read.clone();
             let error = source
                 .open_evolved(
                     vec![ColumnEvolution::add_column(
@@ -465,14 +423,14 @@ async fn evolution_combines_all_operations_and_expressions_see_previous_changes(
             ),
         ];
         let source = MemoryAccessor::new(vec![input.clone(), input.slice(0, 0), input.slice(1, 1)]);
-        let requested = source.requested_projection.clone();
+        let requested = source.projections.clone();
         let mut layer = SchemaEvolutionLayer::try_new(changes).unwrap();
         if known_schema {
             layer = layer.with_source_schema(source_schema.clone());
         }
         let mut reader = source.open_layer(layer, projection.clone()).await.unwrap();
         assert_eq!(
-            *requested.lock().unwrap(),
+            requested.lock().unwrap().last().cloned().unwrap(),
             known_schema.then(|| vec!["value".into(), "keep".into()])
         );
         let schema = &reader.metadata().schema;
@@ -518,6 +476,8 @@ async fn evolution_combines_all_operations_and_expressions_see_previous_changes(
 #[test]
 fn evolution_rejects_invalid_names_and_types() {
     for change in [
+        ColumnEvolution::add_column_sql("x", " "),
+        ColumnEvolution::add_column_sql(" ", "1"),
         ColumnEvolution::remove_column(""),
         ColumnEvolution::change_data_type("", DataType::Int32),
         ColumnEvolution::add_column("", DataType::Int32, lit(1i32)),
@@ -567,28 +527,26 @@ async fn evolution_checks_udf_results_and_preserves_errors_when_hidden() {
             }),
         )
         .call(vec![col("value")]);
-        let source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1, 2])))]);
-        let reads = source.calls.clone();
-        let mut reader = source
-            .open_evolved(
-                vec![ColumnEvolution::add_column(
-                    "added",
-                    DataType::Int32,
-                    expression,
-                )],
-                Some(vec![]),
-            )
-            .await
-            .unwrap();
-        let error = reader.next().await.unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Decode);
-        assert!(error.to_string().contains("added"));
-        if failure == "error" {
-            assert!(std::error::Error::source(&error).is_some());
-            assert!(error.to_string().contains("custom failure"));
+        for change in [
+            ColumnEvolution::add_column("added", DataType::Int32, expression.clone()),
+            ColumnEvolution::add_column_expr("added", expression),
+        ] {
+            let source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1, 2])))]);
+            let reads = source.batches_read.clone();
+            let mut reader = source
+                .open_evolved(vec![change], Some(vec![]))
+                .await
+                .unwrap();
+            let error = reader.next().await.unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::Decode);
+            assert!(error.to_string().contains("added"));
+            if failure == "error" {
+                assert!(std::error::Error::source(&error).is_some());
+                assert!(error.to_string().contains("custom failure"));
+            }
+            assert!(reader.next().await.unwrap().is_none());
+            assert_eq!(reads.load(Ordering::SeqCst), 1);
         }
-        assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(reads.load(Ordering::SeqCst), 1);
     }
 }
 
@@ -718,7 +676,7 @@ async fn evolution_checks_names_at_each_step_before_reading() {
         ])
         .unwrap();
         let source = MemoryAccessor::new(vec![input]);
-        let reads = source.calls.clone();
+        let reads = source.batches_read.clone();
         let error = source
             .open_evolved(changes, Some(vec![]))
             .await
@@ -773,7 +731,7 @@ async fn identity_renames_preserve_projection_pushdown_and_dependencies() {
         (vec!["value"], true, vec!["value", "keep"]),
     ] {
         let source = MemoryAccessor::new(vec![input.clone()]);
-        let requested = source.requested_projection.clone();
+        let requested = source.projections.clone();
         let mut changes = vec![ColumnEvolution::rename_column("value", "value")];
         if cast {
             changes.push(ColumnEvolution::change_data_type("keep", DataType::Int64));
@@ -786,7 +744,10 @@ async fn identity_renames_preserve_projection_pushdown_and_dependencies() {
             .await
             .unwrap();
         let expected: Vec<String> = expected.into_iter().map(String::from).collect();
-        assert_eq!(*requested.lock().unwrap(), Some(expected));
+        assert_eq!(
+            requested.lock().unwrap().last().cloned().unwrap(),
+            Some(expected)
+        );
         let output = reader.next().await.unwrap().unwrap();
         assert_eq!(column_names(&output), names);
         if let Some(keep) = output.column_by_name("keep") {
@@ -799,7 +760,7 @@ async fn identity_renames_preserve_projection_pushdown_and_dependencies() {
 async fn scalar_expressions_preserve_rows_with_no_source_columns() {
     let input = batch(Arc::new(Int32Array::from(vec![1, 2, 3])));
     let source = MemoryAccessor::new(vec![input.clone(), input.slice(0, 0)]);
-    let requested = source.requested_projection.clone();
+    let requested = source.projections.clone();
     let layer = SchemaEvolutionLayer::try_new(vec![
         ColumnEvolution::remove_column("value"),
         ColumnEvolution::add_column(
@@ -811,7 +772,10 @@ async fn scalar_expressions_preserve_rows_with_no_source_columns() {
     .unwrap()
     .with_source_schema(input.schema());
     let mut reader = source.open_layer(layer, None).await.unwrap();
-    assert_eq!(*requested.lock().unwrap(), Some(vec![]));
+    assert_eq!(
+        requested.lock().unwrap().last().cloned().unwrap(),
+        Some(vec![])
+    );
     for rows in [3, 0] {
         let output = reader.next().await.unwrap().unwrap();
         assert_eq!(output.num_rows(), rows);
@@ -848,7 +812,7 @@ async fn invalid_expression_types_and_source_schemas_fail_before_reading() {
         ),
     ] {
         let source = MemoryAccessor::new(vec![input.clone()]);
-        let reads = source.calls.clone();
+        let reads = source.batches_read.clone();
         let mut layer = SchemaEvolutionLayer::try_new(vec![change]).unwrap();
         if let Some(schema) = schema {
             layer = layer.with_source_schema(schema);
@@ -856,5 +820,104 @@ async fn invalid_expression_types_and_source_schemas_fail_before_reading() {
         let error = source.open_layer(layer, Some(vec![])).await.err().unwrap();
         assert_eq!(error.kind(), kind);
         assert_eq!(reads.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn hidden_expression_chain_releases_arrays_after_their_last_use() {
+    for known_schema in [false, true] {
+        let arrays = Arc::new(std::sync::Mutex::new(
+            Vec::<std::sync::Weak<dyn Array>>::new(),
+        ));
+        let observed = arrays.clone();
+        let expression = create_udf(
+            "track_live_arrays",
+            vec![DataType::Int32],
+            DataType::Int32,
+            Volatility::Stable,
+            Arc::new(move |args| {
+                let mut arrays = observed.lock().unwrap();
+                // When the third expression runs, the first result must be gone.
+                if arrays.len() == 2 {
+                    assert_eq!(arrays[0].strong_count(), 0);
+                }
+                let input = args[0].clone().into_array(2)?;
+                let input = input.as_any().downcast_ref::<Int32Array>().unwrap();
+                let output = Arc::new(Int32Array::from_iter(
+                    input.iter().map(|value| value.map(|value| value + 1)),
+                )) as ArrayRef;
+                arrays.push(Arc::downgrade(&output));
+                Ok(ColumnarValue::Array(output))
+            }),
+        );
+        let changes = [("a", "value"), ("b", "a"), ("c", "b")]
+            .into_iter()
+            .map(|(name, input)| {
+                ColumnEvolution::add_column(
+                    name,
+                    DataType::Int32,
+                    expression.call(vec![col(input)]),
+                )
+            })
+            .collect();
+        let source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1, 2])))]);
+        let mut layer = SchemaEvolutionLayer::try_new(changes).unwrap();
+        if known_schema {
+            layer = layer.with_source_schema(source.schema.clone());
+        }
+        let mut reader = source
+            .open_layer(layer, Some(vec!["c".into()]))
+            .await
+            .unwrap();
+        let output = reader.next().await.unwrap().unwrap();
+        assert_eq!(
+            output.column(0).to_data(),
+            Int32Array::from(vec![4, 5]).to_data()
+        );
+        let arrays = arrays.lock().unwrap();
+        assert_eq!(arrays.len(), 3);
+        assert!(arrays[..2].iter().all(|array| array.strong_count() == 0));
+        assert!(arrays[2].upgrade().is_some());
+    }
+}
+
+#[tokio::test]
+async fn sql_and_inferred_exprs_share_ordered_schema_changes_and_metadata() {
+    let input = batch(Arc::new(Int32Array::from(vec![1, 2])));
+    for known_schema in [false, true] {
+        let changes = vec![
+            ColumnEvolution::rename_column("value", "n"),
+            ColumnEvolution::add_column_sql("next", "n + 1"),
+            ColumnEvolution::change_data_type("next", DataType::Int64),
+            ColumnEvolution::add_column_expr("alias", col("next")),
+            ColumnEvolution::remove_column("n"),
+            ColumnEvolution::add_column_sql("final", "alias + 1"),
+            ColumnEvolution::add_column_sql("n", "final * 2"),
+            ColumnEvolution::rename_column("final", "result"),
+        ];
+        let mut evolution = SchemaEvolutionLayer::try_new(changes).unwrap();
+        if known_schema {
+            evolution = evolution.with_source_schema(input.schema());
+        }
+        let mut reader = MemoryAccessor::new(vec![input.clone()])
+            .open_layer(
+                evolution,
+                Some(vec!["result".into(), "n".into(), "alias".into()]),
+            )
+            .await
+            .unwrap();
+        let schema = &reader.metadata().schema;
+        assert!(!schema.field(2).is_nullable());
+        assert_eq!(
+            schema.field(2).metadata()["open_arrow_access:generated_expression"],
+            "n + 1"
+        );
+        let output = reader.next().await.unwrap().unwrap();
+        for (column, expected) in [vec![3, 4], vec![6, 8], vec![2, 3]].iter().enumerate() {
+            assert_eq!(
+                output.column(column).to_data(),
+                Int64Array::from(expected.clone()).to_data()
+            );
+        }
     }
 }

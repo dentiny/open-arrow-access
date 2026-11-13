@@ -28,4 +28,4 @@ workspace = true
 name = "schema_evolution"
 
 [[test]]
-name = "generated_columns"
+name = "schema_evolution_sql"

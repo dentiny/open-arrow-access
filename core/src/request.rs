@@ -203,7 +203,7 @@ pub trait ReadOptionsProvider: Send {
 
     /// Mutably borrow settings used when the request is subsequently opened.
     ///
-    /// For example, a generated-column layer can retain its caller's projection
+    /// For example, the schema-evolution layer can retain its caller's projection
     /// and widen the inner projection to read expression dependencies. Changes
     /// to this request do not reconfigure readers that have already been opened.
     fn read_options_mut(&mut self) -> &mut ReadOptions;
