@@ -2783,6 +2783,7 @@ name = "open-arrow-access"
 version = "0.1.0"
 dependencies = [
  "arrow-schema",
+ "datafusion",
  "open-arrow-access-core",
  "open-arrow-access-dataset",
  "open-arrow-access-decompression",
@@ -2881,6 +2882,7 @@ dependencies = [
  "arrow-select",
  "datafusion",
  "futures",
+ "indexmap",
  "open-arrow-access-core",
  "open-arrow-access-file-format",
  "open-arrow-access-test-support",

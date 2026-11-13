@@ -12,7 +12,7 @@ crate whose behavior they exercise. The workspace root has no test directory.
 | JSON and JSONL | [`file-format/tests/json.rs`](../file-format/tests/json.rs) |
 | XML | [`file-format/tests/xml.rs`](../file-format/tests/xml.rs) |
 | ATIF format | [`file-format/tests/atif.rs`](../file-format/tests/atif.rs) |
-| Arrow type conversion | [`layers/tests/type_conversion.rs`](../layers/tests/type_conversion.rs) |
+| Schema evolution | [`layers/tests/schema_evolution.rs`](../layers/tests/schema_evolution.rs) |
 | Parquet and byte/record layer composition | [`file-format/tests/parquet.rs`](../file-format/tests/parquet.rs) |
 | Directory and file-set behavior | [`dataset/tests/directory.rs`](../dataset/tests/directory.rs) |
 | Directory, storage and Parquet composition | [`dataset/tests/directory_parquet.rs`](../dataset/tests/directory_parquet.rs) |

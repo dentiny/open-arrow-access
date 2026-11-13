@@ -1,13 +1,8 @@
 use std::{collections::HashSet, sync::Arc};
 
 use arrow_array::{RecordBatch, RecordBatchOptions};
-use arrow_schema::{FieldRef, Schema, SchemaRef};
-use datafusion::{
-    common::DFSchema,
-    execution::{SessionState, context::SessionContext},
-    optimizer::simplify_expressions::{ExprSimplifier, SimplifyContext},
-    physical_expr::PhysicalExpr,
-};
+use arrow_schema::{Schema, SchemaRef};
+use datafusion::physical_expr::PhysicalExpr;
 use futures::StreamExt;
 use open_arrow_access_core::{
     Accessor, Capability, Layer, ReadOptionsProvider, RecordCapability, RecordMetadata,
@@ -16,10 +11,8 @@ use open_arrow_access_core::{
 
 use crate::{
     error::{generated_batch_error, generated_column_error, generated_plan_error},
-    validation::{
-        validate_expression, validate_generated_names, validate_generated_schema,
-        validate_generated_specs,
-    },
+    expression::ExpressionPlanner,
+    validation::{validate_generated_names, validate_generated_schema, validate_generated_specs},
 };
 
 /// One row-level SQL expression. May reference source and earlier generated fields.
@@ -98,11 +91,11 @@ where
         }
         let output_options = request.read_options().clone();
         request.read_options_mut().projection = None;
-        let state = SessionContext::new().state();
+        let planner = ExpressionPlanner::new();
         let expected_source = if let (Some(source), Some(projection)) =
             (&self.source_schema, &output_options.projection)
         {
-            let (_, _, mut required) = plan_steps(&state, &self.specs, source)?;
+            let (_, _, mut required) = plan_steps(&planner, &self.specs, source)?;
             required.extend(projection.iter().cloned());
             request.read_options_mut().projection = Some(
                 source
@@ -121,7 +114,7 @@ where
         if let Some(expected) = expected_source {
             validate_generated_schema(source, &expected)?;
         }
-        let (schema, steps, _) = plan_steps(&state, &self.specs, source)?;
+        let (schema, steps, _) = plan_steps(&planner, &self.specs, source)?;
         let (schema, projection) = output_options.resolve_projection(&schema)?;
         let metadata = RecordMetadata {
             schema,
@@ -138,7 +131,7 @@ where
 }
 
 fn plan_steps(
-    state: &SessionState,
+    planner: &ExpressionPlanner,
     specs: &[GeneratedColumnSpec],
     source: &SchemaRef,
 ) -> Result<(SchemaRef, Vec<GeneratedStep>, HashSet<String>)> {
@@ -148,7 +141,8 @@ fn plan_steps(
     let mut dependencies = HashSet::new();
     let mut steps = Vec::with_capacity(specs.len());
     for spec in specs {
-        let (expression, output, columns) = plan_expression(state, &spec.expression, &schema)
+        let (expression, output, columns) = planner
+            .plan_sql(&spec.expression, &schema)
             .map_err(|error| generated_plan_error(&spec.column, error))?;
         dependencies.extend(
             columns
@@ -176,40 +170,6 @@ fn plan_steps(
         });
     }
     Ok((schema, steps, dependencies))
-}
-
-/// Plans one row-level SQL expression against the source and earlier generated fields.
-///
-/// Rejects non-row-level and volatile expressions before DataFusion coerces,
-/// simplifies, and compiles the expression. The shared session state keeps stable
-/// functions consistent across declarations. Returns the physical expression and
-/// its inferred output field.
-fn plan_expression(
-    state: &SessionState,
-    expression: &str,
-    input: &SchemaRef,
-) -> datafusion::error::Result<(Arc<dyn PhysicalExpr>, FieldRef, HashSet<String>)> {
-    let df_schema = DFSchema::try_from(Arc::clone(input))?;
-    let logical = state.create_logical_expr(expression, &df_schema)?;
-    // Validate before simplification: a dead branch must not hide an
-    // aggregate, subquery, or volatile function.
-    validate_expression(&logical)?;
-    let columns = logical
-        .column_refs()
-        .into_iter()
-        .map(|column| column.name.clone())
-        .collect();
-    let simplify_context = SimplifyContext::builder()
-        .with_schema(Arc::new(df_schema.clone()))
-        .with_config_options(Arc::clone(state.config_options()))
-        .with_query_execution_start_time(state.execution_props().query_execution_start_time)
-        .build();
-    let simplifier = ExprSimplifier::new(simplify_context);
-    let logical = simplifier.coerce(logical, &df_schema)?;
-    let logical = simplifier.simplify(logical)?;
-    let physical = state.create_physical_expr(logical, &df_schema)?;
-    let output = physical.return_field(input)?;
-    Ok((physical, output, columns))
 }
 
 fn record_capability(inner: RecordCapability) -> RecordCapability {

@@ -107,7 +107,7 @@ Opened record readers retain their source's constraint. `ScanPlan::whole_input`
 derives its ordering from the reader, and enclosing execution/emission layers
 combine the source capability with the resolved plan before admission. A source
 requirement cannot be weakened by requesting unordered output. Row-local generated
-columns and type conversion preserve the inner capability's ordering.
+columns and schema evolution preserve the inner capability's ordering.
 
 ## Execution and emission settings
 

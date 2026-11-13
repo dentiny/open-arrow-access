@@ -150,6 +150,7 @@ open-arrow-access-storage.workspace = true
 
 [dev-dependencies]
 arrow-schema.workspace = true
+datafusion.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
 tokio.workspace = true
 
@@ -216,7 +217,7 @@ name = "read_internet_archive"
 required-features = ["service-internet-archive"]
 
 [[example]]
-name = "schema_remap"
+name = "schema_evolution"
 required-features = ["format-json"]
 
 [[example]]

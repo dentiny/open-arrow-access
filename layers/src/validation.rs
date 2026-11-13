@@ -7,10 +7,8 @@ use arrow_array::types::{
 use arrow_cast::can_cast_types;
 use arrow_schema::{ArrowError, DataType, Field, TimeUnit};
 use open_arrow_access_core::{
-    EmissionPolicy, ErrorKind, FieldNameIndex, OrderRequirement, ParallelReadOptions, Result,
+    EmissionPolicy, FieldNameIndex, OrderRequirement, ParallelReadOptions, Result,
 };
-
-use crate::error::column_error;
 
 pub(crate) fn validate_sampling_probability(probability: f64) -> Result<()> {
     if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
@@ -48,7 +46,7 @@ pub(crate) fn validate_cast(field: &Field, target: &DataType) -> Result<()> {
         return Err(crate::error::unsupported_cast(field, from, target));
     }
     validate_decimal_cast(from, target)
-        .map_err(|error| column_error(ErrorKind::Unsupported, "plan_cast", field.name(), error))
+        .map_err(|error| crate::error::cast_plan_error(field.name(), error))
 }
 
 fn decimal_params(data_type: &DataType) -> Option<(i16, i16)> {
@@ -151,8 +149,11 @@ fn validate_decimal_cast(from: &DataType, to: &DataType) -> std::result::Result<
     Ok(())
 }
 
-fn validate_target(data_type: &DataType) -> std::result::Result<(), ArrowError> {
-    let invalid = || crate::error::invalid_cast_target(data_type);
+fn validate_evolution_type(
+    data_type: &DataType,
+    for_cast: bool,
+) -> std::result::Result<(), ArrowError> {
+    let invalid = || crate::error::invalid_evolution_type(data_type);
     match data_type {
         DataType::Time32(unit) if !matches!(unit, TimeUnit::Second | TimeUnit::Millisecond) => {
             return Err(invalid());
@@ -171,12 +172,20 @@ fn validate_target(data_type: &DataType) -> std::result::Result<(), ArrowError> 
         },
         DataType::Union(fields, _) => {
             let mut ids = HashSet::with_capacity(fields.len());
-            if fields.is_empty() || fields.iter().any(|(id, _)| id < 0 || !ids.insert(id)) {
+            if (for_cast && fields.is_empty())
+                || fields.iter().any(|(id, _)| id < 0 || !ids.insert(id))
+            {
                 return Err(invalid());
             }
         }
-        // Arrow's null-to-run-end cast can panic when the batch exceeds the key range.
-        DataType::RunEndEncoded(_, _) => return Err(invalid()),
+        DataType::RunEndEncoded(run_ends, values) => {
+            // Arrow's null-to-run-end cast can panic beyond the key range.
+            // Expression-provided arrays do not use that cast path.
+            if for_cast || run_ends.is_nullable() || !run_ends.data_type().is_run_ends_type() {
+                return Err(invalid());
+            }
+            return validate_evolution_type(values.data_type(), for_cast);
+        }
         DataType::Decimal32(precision, scale) => {
             return validate_decimal_precision_and_scale::<Decimal32Type>(*precision, *scale);
         }
@@ -197,18 +206,18 @@ fn validate_target(data_type: &DataType) -> std::result::Result<(), ArrowError> 
         | DataType::ListView(field)
         | DataType::LargeListView(field)
         | DataType::FixedSizeList(field, _)
-        | DataType::Map(field, _) => validate_target(field.data_type())?,
+        | DataType::Map(field, _) => validate_evolution_type(field.data_type(), for_cast)?,
         DataType::Struct(fields) => {
             for field in fields {
-                validate_target(field.data_type())?;
+                validate_evolution_type(field.data_type(), for_cast)?;
             }
         }
         DataType::Union(fields, _) => {
             for (_, field) in fields.iter() {
-                validate_target(field.data_type())?;
+                validate_evolution_type(field.data_type(), for_cast)?;
             }
         }
-        DataType::Dictionary(_, value) => validate_target(value)?,
+        DataType::Dictionary(_, value) => validate_evolution_type(value, for_cast)?,
         _ => {}
     }
     Ok(())
@@ -313,66 +322,133 @@ pub(crate) fn validate_generated_schema(
     Ok(())
 }
 
-pub(crate) fn validate_remap_specs(specs: &[crate::FieldRemap]) -> Result<()> {
-    let mut sources = HashSet::new();
-    let mut targets = HashSet::new();
-    for spec in specs {
-        if spec.source_name.is_empty()
-            || spec.output_name().is_empty()
-            || !sources.insert(&spec.source_name)
-            || !targets.insert(spec.output_name())
-        {
-            return Err(crate::error::invalid_remap_names());
-        }
-        if let Some(target) = &spec.target_data_type {
-            validate_target(target).map_err(|error| {
-                column_error(
-                    ErrorKind::InvalidInput,
-                    "configure_schema_remap",
-                    &spec.source_name,
-                    error,
-                )
-            })?;
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_remap_sources(
-    specs: &[crate::FieldRemap],
-    schema: &arrow_schema::Schema,
-) -> Result<Vec<usize>> {
-    let fields = FieldNameIndex::new(schema.fields());
-    specs
-        .iter()
-        .map(|spec| {
-            let index = fields
-                .index_of(&spec.source_name)
-                .map_err(crate::error::remap_source)?;
-            if let Some(target) = &spec.target_data_type
-                && schema.field(index).data_type() != target
-            {
-                validate_cast(schema.field(index), target)?;
-            }
-            Ok(index)
-        })
-        .collect()
-}
-
-pub(crate) fn validate_remap_output(fields: &[std::sync::Arc<arrow_schema::Field>]) -> Result<()> {
-    let mut names = HashSet::new();
-    if fields.iter().any(|field| !names.insert(field.name())) {
-        return Err(crate::error::remap_output_collision());
-    }
-    Ok(())
-}
-
 pub(crate) fn validate_partition_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,
 ) -> Result<()> {
     if actual != expected {
         return Err(crate::error::schema_error());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Result<()> {
+    use crate::ColumnEvolution;
+    for change in changes {
+        let name = match change {
+            ColumnEvolution::RemoveColumn { name } => name,
+            ColumnEvolution::AddColumn {
+                name, data_type, ..
+            } => {
+                validate_evolution_type(data_type, false)
+                    .map_err(|error| crate::error::evolution_config_error(name, error))?;
+                name
+            }
+            ColumnEvolution::RenameColumn {
+                source_name,
+                target_name,
+            } => {
+                validate_evolution_name(target_name)?;
+                source_name
+            }
+            ColumnEvolution::ChangeDataType { name, data_type } => {
+                validate_evolution_type(data_type, true)
+                    .map_err(|error| crate::error::evolution_config_error(name, error))?;
+                name
+            }
+        };
+        validate_evolution_name(name)?;
+    }
+    Ok(())
+}
+
+fn validate_evolution_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        return Err(crate::error::invalid_evolution(
+            "column name must be nonempty",
+        ));
+    }
+    Ok(())
+}
+
+// Compare existing collection lengths; no cached flag or field traversal.
+pub(crate) fn validate_evolution_source(indexed_names: usize, source_fields: usize) -> Result<()> {
+    if indexed_names != source_fields {
+        return Err(crate::error::evolution_output_collision());
+    }
+    Ok(())
+}
+
+// O(1) expected: check only the target name in the current namespace.
+pub(crate) fn validate_evolution_target(
+    source: Option<usize>,
+    target: Option<usize>,
+) -> Result<()> {
+    if target.is_some() && target != source {
+        return Err(crate::error::evolution_output_collision());
+    }
+    Ok(())
+}
+
+// O(K) field comparisons at most, with an O(1) schema-identity fast path.
+// The upstream RecordReader owns the fixed-schema contract for untouched fields.
+pub(crate) fn validate_evolution_batch_schema(
+    actual: &arrow_schema::SchemaRef,
+    expected: &arrow_schema::SchemaRef,
+    affected: &[usize],
+) -> Result<()> {
+    if !std::sync::Arc::ptr_eq(actual, expected)
+        && (actual.fields().len() != expected.fields().len()
+            || affected
+                .iter()
+                .any(|&index| actual.field(index) != expected.field(index)))
+    {
+        return Err(crate::error::evolution_schema_mismatch());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_added_column(
+    name: &str,
+    array: &dyn arrow_array::Array,
+    expected: &DataType,
+    rows: usize,
+) -> Result<()> {
+    if array.data_type() != expected {
+        return Err(crate::error::invalid_added_column(
+            name,
+            format!("expected type {expected}, got {}", array.data_type()),
+        ));
+    }
+    if array.len() != rows {
+        return Err(crate::error::invalid_added_column(
+            name,
+            format!("expected {rows} rows, got {}", array.len()),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_evolution_expression_type(
+    name: &str,
+    actual: &DataType,
+    expected: &DataType,
+) -> Result<()> {
+    if actual != expected {
+        return Err(crate::error::evolution_expression_type(
+            name, expected, actual,
+        ));
+    }
+    Ok(())
+}
+
+// Validate the supplied projected schema once at open, not for each batch.
+pub(crate) fn validate_evolution_input_schema(
+    actual: &arrow_schema::SchemaRef,
+    expected: &arrow_schema::SchemaRef,
+) -> Result<()> {
+    if actual != expected {
+        return Err(crate::error::evolution_schema_mismatch());
     }
     Ok(())
 }

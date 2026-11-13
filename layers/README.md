@@ -9,7 +9,7 @@ Byte decompression layers use the same contract but require [codec features](../
 
 | Layer | Use it for | Key behavior |
 | --- | --- | --- |
-| `SchemaRemapLayer` | Rename or cast top-level columns | Plans a fixed output schema; invalid values terminate reading |
+| `SchemaEvolutionLayer` | Add, remove, rename, or cast top-level columns | Fixed output schema; added columns use DataFusion expressions |
 | `GeneratedColumnsLayer` | Append row-level SQL expressions | Declarations see earlier generated fields; uses DataFusion |
 | `SamplingLayer` | Seeded Bernoulli row sampling | Approximate count; preserves selected row order |
 | `ParallelReadLayer` | Execute independent scan partitions concurrently | Requires `ScanPlanner`; preserves output order by default |
@@ -71,27 +71,63 @@ over one merged scan. They do not implement `ScanPlanner`; putting the parallel
 layer outside either is unsupported. Generated columns currently read all source
 columns and evaluate all declarations before final projection.
 
-## Rename or cast columns
+## Evolve a schema
 
-Add a matching `arrow-schema = "59.3.0"` dependency to name Arrow types directly.
-For an existing record accessor `source`, this configuration renames `count` and
-casts it to `Int64`:
+Add matching `datafusion = { version = "55.2.0", default-features = false }`
+and `arrow-schema = "59.3.0"` dependencies. For a record accessor `source` and
+its complete `source_schema` containing `count` and `obsolete` columns:
 
 ```rust,ignore
 use arrow_schema::DataType;
-use open_arrow_access::{AccessorExt, layers::{FieldRemap, SchemaRemapLayer}};
+use datafusion::prelude::{col, lit};
+use open_arrow_access::{AccessorExt, layers::{ColumnEvolution, SchemaEvolutionLayer}};
 
-let records = source.layer(SchemaRemapLayer::try_new(vec![FieldRemap {
-    source_name: "count".into(),
-    target_name: Some("row_count".into()),
-    target_data_type: Some(DataType::Int64),
-}])?);
+let records = source.layer(SchemaEvolutionLayer::try_new(vec![
+    ColumnEvolution::remove_column("obsolete"),
+    ColumnEvolution::rename_column("count", "row_count"),
+    ColumnEvolution::change_data_type("row_count", DataType::Int64),
+    ColumnEvolution::add_column("next_count", DataType::Int64, col("row_count") + lit(1i64)),
+])?.with_source_schema(source_schema));
 ```
 
-Unchanged arrays share buffers. Unsupported casts fail at open; invalid values
-and overflows fail during reading. Arrow casts can lose precision. Casts do not
-implicitly reconcile schemas across files. See [generated columns](../docs/generated-columns.md)
-and [parallel reading](../docs/parallel-read.md) for detailed constraints.
+Changes execute in vector order. Each name refers to the schema produced by
+preceding changes. Rename targets must be unoccupied at that step; swapping names
+requires a temporary name. Removed names can be reused by later additions.
+
+Added columns are nullable and appended in vector order. Each takes a DataFusion
+`Expr` whose result must match the declared data type. Expressions can reference
+earlier additions, renames, and casts; removed columns are unavailable. Scalars
+expand to the batch row count, including zero. Use a `ScalarUDF` for custom
+computation, with its input columns represented as expression arguments.
+Aggregates, window functions, subqueries, and volatile expressions are rejected.
+
+Projection uses evolved names. With `with_source_schema`, the layer traces source
+dependencies through the ordered changes and reads only columns needed by
+expressions, casts, or final output. Each expression is compiled against its own
+dependency schema, so its physical column indices match the compact input view.
+All configured expressions and casts run even when hidden by final projection.
+The supplied schema must describe the complete current source; selected input
+fields are checked once at open. Without it, namespace changes require an
+unprojected open because `Accessor` has no separate schema-discovery API.
+
+Unchanged arrays share buffers; field/schema metadata and zero-column row counts
+are preserved. Invalid expression types and unsupported casts fail at open;
+invalid values, overflows, and expression failures terminate reading with context.
+Arrow casts can lose precision and do not reconcile schemas across files.
+
+Opening indexes source names once. Layer-owned per-batch validation checks only
+affected fields, with a schema-identity fast path. Type checks recurse only within
+changed types. A name index and append-only field slots preserve vector order.
+The final schema scans those slots once in O(F + K) for F source fields and K
+changes. Source projection indices are assigned on first use during planning;
+there is no later rebinding pass. Expression dependency discovery visits its
+expression tree, and each input view visits only that expression's dependencies.
+Final assembly visits P output columns. Arrow's safe batch constructors check
+those assembled views; DataFusion planning and computation have their own costs.
+
+See the [runnable example](../examples/schema_evolution.rs),
+[generated columns](../docs/generated-columns.md), and
+[parallel reading](../docs/parallel-read.md).
 
 ## Add a layer
 
