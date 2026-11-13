@@ -60,6 +60,41 @@ impl ExpressionPlanner {
         Ok((physical, output))
     }
 
+    /// Bind an Expr to a compact view of the current namespace.
+    pub(crate) fn plan_expr(
+        &self,
+        expression: &Expr,
+        fields: &[FieldRef],
+        names: &HashMap<String, usize>,
+        metadata: &HashMap<String, String>,
+    ) -> datafusion::error::Result<PlannedExpression> {
+        let mut indices = expression
+            .column_refs()
+            .into_iter()
+            .map(|column| {
+                names.get(&column.name).copied().ok_or_else(|| {
+                    DataFusionError::Plan(format!("unknown field {:?}", column.name))
+                })
+            })
+            .collect::<datafusion::error::Result<Vec<_>>>()?;
+        indices.sort_unstable();
+        indices.dedup();
+        let input = Arc::new(Schema::new_with_metadata(
+            indices
+                .iter()
+                .map(|&index| fields[index].clone())
+                .collect::<Vec<_>>(),
+            metadata.clone(),
+        ));
+        let (expression, output) =
+            self.plan(expression.clone(), &DFSchema::try_from(input.clone())?)?;
+        Ok(PlannedExpression {
+            expression,
+            output,
+            input: (input, indices),
+        })
+    }
+
     pub(crate) fn plan_sql(
         &self,
         expression: &str,
