@@ -371,7 +371,6 @@ fn validate_evolution_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-// Compare existing collection lengths; no cached flag or field traversal.
 pub(crate) fn validate_evolution_source(indexed_names: usize, source_fields: usize) -> Result<()> {
     if indexed_names != source_fields {
         return Err(crate::error::evolution_output_collision());
@@ -379,7 +378,6 @@ pub(crate) fn validate_evolution_source(indexed_names: usize, source_fields: usi
     Ok(())
 }
 
-// O(1) expected: check only the target name in the current namespace.
 pub(crate) fn validate_evolution_target(
     source: Option<usize>,
     target: Option<usize>,
@@ -390,7 +388,6 @@ pub(crate) fn validate_evolution_target(
     Ok(())
 }
 
-// O(K) field comparisons at most, with an O(1) schema-identity fast path.
 // The upstream RecordReader owns the fixed-schema contract for untouched fields.
 pub(crate) fn validate_evolution_batch_schema(
     actual: &arrow_schema::SchemaRef,
@@ -442,7 +439,6 @@ pub(crate) fn validate_evolution_expression_type(
     Ok(())
 }
 
-// Validate the supplied projected schema once at open, not for each batch.
 pub(crate) fn validate_evolution_input_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,
