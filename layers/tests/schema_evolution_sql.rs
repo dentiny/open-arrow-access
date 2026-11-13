@@ -14,19 +14,14 @@ use open_arrow_access_core::{
     Accessor, AccessorExt, Capability, ErrorKind, OrderRequirement, ReadOptions, ReadRequest,
     RecordCapability, RecordMetadata, RecordReader, Result, async_trait, record_stream_reader,
 };
-use open_arrow_access_layers::{
-    ColumnEvolution, GeneratedColumnSpec, GeneratedColumnsLayer, SchemaEvolutionLayer,
-};
+use open_arrow_access_layers::{ColumnEvolution, SchemaEvolutionLayer};
 use open_arrow_access_test_support::reader::assert_finished;
 
-fn layer(specs: &[(&str, &str)]) -> GeneratedColumnsLayer {
-    GeneratedColumnsLayer::try_new(
+fn layer(specs: &[(&str, &str)]) -> SchemaEvolutionLayer {
+    SchemaEvolutionLayer::try_new(
         specs
             .iter()
-            .map(|(column, expression)| GeneratedColumnSpec {
-                column: (*column).into(),
-                expression: (*expression).into(),
-            })
+            .map(|(column, expression)| ColumnEvolution::add_column_sql(*column, *expression))
             .collect(),
     )
     .unwrap()
@@ -588,4 +583,49 @@ async fn pushdown_preserves_source_outputs_and_full_namespace_generated_slots() 
         Int64Array::from(vec![7; 3]).to_data()
     );
     assert_eq!(*projections.lock().unwrap(), vec![Some(vec![])]);
+}
+
+#[tokio::test]
+async fn sql_namespace_and_wildcards_follow_removals_and_renames() {
+    use arrow_array::StructArray;
+    let batch = input();
+    for known_schema in [false, true] {
+        let changes = || {
+            vec![
+                ColumnEvolution::remove_column("Count"),
+                ColumnEvolution::rename_column("text", "value"),
+            ]
+        };
+        for sql in ["\"Count\"", "text"] {
+            let mut invalid = changes();
+            invalid.push(ColumnEvolution::add_column_sql("invalid", sql));
+            let mut evolution = SchemaEvolutionLayer::try_new(invalid).unwrap();
+            if known_schema {
+                evolution = evolution.with_source_schema(batch.schema());
+            }
+            let source = MemoryAccessor::new(vec![batch.clone()]);
+            let polls = source.polls.clone();
+            assert!(source.layer(evolution).open(request(&[])).await.is_err());
+            assert_eq!(polls.load(Ordering::SeqCst), 0);
+        }
+        let mut valid = changes();
+        valid.push(ColumnEvolution::add_column_sql("snapshot", "struct(*)"));
+        let mut evolution = SchemaEvolutionLayer::try_new(valid).unwrap();
+        if known_schema {
+            evolution = evolution.with_source_schema(batch.schema());
+        }
+        let mut reader = MemoryAccessor::new(vec![batch.clone()])
+            .layer(evolution)
+            .open(request(&["snapshot"]))
+            .await
+            .unwrap();
+        let output = reader.next().await.unwrap().unwrap();
+        let nested = output
+            .column(0)
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        assert_eq!(nested.num_columns(), 1);
+        assert_eq!(nested.column(0).to_data(), batch.column(1).to_data());
+    }
 }

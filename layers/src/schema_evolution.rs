@@ -12,14 +12,25 @@ use plan::SchemaEvolutionPlan;
 mod execute;
 mod plan;
 
+/// Input to a row-level computed column.
+#[derive(Clone, Debug)]
+pub enum ColumnExpression {
+    /// A DataFusion expression, including custom scalar UDF calls.
+    Expr(Expr),
+    /// A row-level SQL expression resolved when the reader opens.
+    Sql(String),
+}
+
 /// One ordered change to the current top-level schema.
 /// Names refer to the schema produced by preceding vector items.
 #[derive(Clone, Debug)]
 pub enum ColumnEvolution {
     AddColumn {
         name: String,
-        data_type: DataType,
-        expression: Expr,
+        /// None infers the output field; Some requires this exact type and
+        /// declares the added field nullable.
+        data_type: Option<DataType>,
+        expression: ColumnExpression,
     },
     RemoveColumn {
         name: String,
@@ -51,8 +62,27 @@ impl ColumnEvolution {
     pub fn add_column(name: impl Into<String>, data_type: DataType, expression: Expr) -> Self {
         Self::AddColumn {
             name: name.into(),
-            data_type,
-            expression,
+            data_type: Some(data_type),
+            expression: ColumnExpression::Expr(expression),
+        }
+    }
+
+    /// Append an expression column, inferring its type, nullability and metadata.
+    pub fn add_column_expr(name: impl Into<String>, expression: Expr) -> Self {
+        Self::AddColumn {
+            name: name.into(),
+            data_type: None,
+            expression: ColumnExpression::Expr(expression),
+        }
+    }
+
+    /// Append a SQL expression column with inferred type, nullability and metadata.
+    /// SQL names resolve against the schema left by preceding changes.
+    pub fn add_column_sql(name: impl Into<String>, expression: impl Into<String>) -> Self {
+        Self::AddColumn {
+            name: name.into(),
+            data_type: None,
+            expression: ColumnExpression::Sql(expression.into()),
         }
     }
 

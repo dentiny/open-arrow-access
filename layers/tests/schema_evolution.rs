@@ -518,6 +518,8 @@ async fn evolution_combines_all_operations_and_expressions_see_previous_changes(
 #[test]
 fn evolution_rejects_invalid_names_and_types() {
     for change in [
+        ColumnEvolution::add_column_sql("x", " "),
+        ColumnEvolution::add_column_sql(" ", "1"),
         ColumnEvolution::remove_column(""),
         ColumnEvolution::change_data_type("", DataType::Int32),
         ColumnEvolution::add_column("", DataType::Int32, lit(1i32)),
@@ -924,5 +926,52 @@ async fn hidden_expression_chain_releases_arrays_after_their_last_use() {
                 .all(|array| array.strong_count() == 0)
         );
         assert!(arrays[LENGTH - 1].upgrade().is_some());
+    }
+}
+
+#[tokio::test]
+async fn sql_and_inferred_exprs_share_ordered_schema_changes_and_metadata() {
+    let field = Field::new("value", DataType::Int32, false)
+        .with_metadata([("unit".into(), "items".into())].into());
+    let input = RecordBatch::try_new(
+        Arc::new(Schema::new(vec![field])),
+        vec![Arc::new(Int32Array::from(vec![1, 2]))],
+    )
+    .unwrap();
+    for known_schema in [false, true] {
+        let changes = vec![
+            ColumnEvolution::rename_column("value", "n"),
+            ColumnEvolution::add_column_sql("next", "n + 1"),
+            ColumnEvolution::change_data_type("next", DataType::Int64),
+            ColumnEvolution::add_column_expr("alias", col("next")),
+            ColumnEvolution::remove_column("n"),
+            ColumnEvolution::add_column_sql("final", "alias + 1"),
+            ColumnEvolution::add_column_sql("n", "final * 2"),
+            ColumnEvolution::rename_column("final", "result"),
+        ];
+        let mut evolution = SchemaEvolutionLayer::try_new(changes).unwrap();
+        if known_schema {
+            evolution = evolution.with_source_schema(input.schema());
+        }
+        let mut reader = MemoryAccessor::new(vec![input.clone()])
+            .open_layer(
+                evolution,
+                Some(vec!["result".into(), "n".into(), "alias".into()]),
+            )
+            .await
+            .unwrap();
+        let schema = &reader.metadata().schema;
+        assert!(!schema.field(2).is_nullable());
+        assert_eq!(
+            schema.field(2).metadata()["open_arrow_access:generated_expression"],
+            "n + 1"
+        );
+        let output = reader.next().await.unwrap().unwrap();
+        for (column, expected) in [vec![3, 4], vec![6, 8], vec![2, 3]].iter().enumerate() {
+            assert_eq!(
+                output.column(column).to_data(),
+                Int64Array::from(expected.clone()).to_data()
+            );
+        }
     }
 }

@@ -35,32 +35,6 @@ pub(crate) fn partition_task_error(error: tokio::task::JoinError) -> Error {
     )
 }
 
-pub(crate) fn invalid_generated_column(column: &str, message: impl std::fmt::Display) -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "plan_generated_column",
-        format!("column {column:?}: {message}"),
-    )
-}
-
-pub(crate) fn generated_plan_error(
-    column: &str,
-    error: datafusion::error::DataFusionError,
-) -> Error {
-    invalid_generated_column(column, &error).with_source(error)
-}
-
-pub(crate) fn generated_column_error(
-    column: &str,
-    error: datafusion::error::DataFusionError,
-) -> Error {
-    column_error(ErrorKind::Decode, "generate_column", column, error)
-}
-
-pub(crate) fn generated_batch_error(error: ArrowError) -> Error {
-    Error::new(ErrorKind::Decode, "generate_column", error.to_string()).with_source(error)
-}
-
 pub(crate) fn invalid_probability() -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -114,14 +88,6 @@ pub(crate) fn cannot_cast(
     target: &arrow_schema::DataType,
 ) -> ArrowError {
     ArrowError::CastError(format!("cannot cast {from} to {target}"))
-}
-
-pub(crate) fn generated_schema_mismatch() -> Error {
-    Error::new(
-        ErrorKind::Decode,
-        "plan_generated_column",
-        "source schema does not match the supplied projection",
-    )
 }
 
 pub(crate) fn sample_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {

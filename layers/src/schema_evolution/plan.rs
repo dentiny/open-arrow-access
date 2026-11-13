@@ -8,8 +8,11 @@ use datafusion::{common::DFSchema, physical_expr::PhysicalExpr};
 use indexmap::IndexSet;
 use open_arrow_access_core::Result;
 
-use super::ColumnEvolution;
-use crate::{expression::ExpressionPlanner, validation};
+use super::{ColumnEvolution, ColumnExpression};
+use crate::{
+    expression::{ExpressionPlanner, PlannedExpression},
+    validation,
+};
 
 pub(super) struct SchemaEvolutionPlan {
     pub(super) source_schema: SchemaRef,
@@ -70,7 +73,7 @@ impl SchemaEvolutionPlan {
             .fields()
             .iter()
             .enumerate()
-            .map(|(index, field)| (field.name().as_str(), index))
+            .map(|(index, field)| (field.name().clone(), index))
             .collect();
         validation::validate_evolution_source(names.len(), source.fields().len())?;
         let mut fields = source.fields().to_vec();
@@ -96,52 +99,85 @@ impl SchemaEvolutionPlan {
                     expression,
                 } => {
                     validation::validate_evolution_target(None, index)?;
-                    let mut indices = expression
-                        .column_refs()
-                        .into_iter()
-                        .map(|column| {
-                            names
-                                .get(column.name.as_str())
-                                .copied()
-                                .ok_or_else(|| crate::error::evolution_source(&column.name))
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-                    indices.sort_unstable();
-                    indices.dedup();
+                    let planner = planner.get_or_insert_with(ExpressionPlanner::new);
+                    let PlannedExpression {
+                        expression: physical,
+                        output,
+                        input: (input_schema, mut indices),
+                    } = match expression {
+                        ColumnExpression::Sql(sql) => planner.plan_sql(sql, &fields, &names),
+                        ColumnExpression::Expr(expression) => (|| {
+                            let indices = expression
+                                .column_refs()
+                                .into_iter()
+                                .map(|column| {
+                                    names.get(&column.name).copied().ok_or_else(|| {
+                                        datafusion::error::DataFusionError::Plan(format!(
+                                            "unknown field {:?}",
+                                            column.name
+                                        ))
+                                    })
+                                })
+                                .collect::<datafusion::error::Result<Vec<_>>>()?;
+                            let mut indices = indices;
+                            indices.sort_unstable();
+                            indices.dedup();
+                            let input = Arc::new(Schema::new_with_metadata(
+                                indices
+                                    .iter()
+                                    .map(|&index| fields[index].clone())
+                                    .collect::<Vec<_>>(),
+                                source.metadata().clone(),
+                            ));
+                            // Keep the logical expression bound to its compact dependency schema.
+                            DFSchema::try_from(input.clone())
+                                .and_then(|schema| planner.plan(expression.clone(), &schema))
+                                .map(|(expression, output)| PlannedExpression {
+                                    expression,
+                                    output,
+                                    input: (input, indices),
+                                })
+                        })(),
+                    }
+                    .map_err(|error| crate::error::evolution_plan_error(name, error))?;
                     affected.extend(
                         indices
                             .iter()
                             .copied()
                             .filter(|&index| index < source.fields().len()),
                     );
-                    let input_schema = Arc::new(Schema::new_with_metadata(
-                        indices
-                            .iter()
-                            .map(|index| fields[*index].clone())
-                            .collect::<Vec<_>>(),
-                        source.metadata().clone(),
-                    ));
-                    let planner = planner.get_or_insert_with(ExpressionPlanner::new);
-                    let (expression, output) = DFSchema::try_from(input_schema.clone())
-                        .and_then(|schema| planner.plan(expression.clone(), &schema))
-                        .map_err(|error| crate::error::evolution_plan_error(name, error))?;
-                    validation::validate_evolution_expression_type(
-                        name,
-                        output.data_type(),
-                        data_type,
-                    )?;
+                    let field = if let Some(data_type) = data_type {
+                        validation::validate_evolution_expression_type(
+                            name,
+                            output.data_type(),
+                            data_type,
+                        )?;
+                        Field::new(name, data_type.clone(), true)
+                    } else {
+                        validation::validate_evolution_type(output.data_type(), false)
+                            .map_err(|error| crate::error::evolution_config_error(name, error))?;
+                        output.as_ref().clone().with_name(name)
+                    };
+                    let field = if let ColumnExpression::Sql(sql) = expression {
+                        let mut metadata = field.metadata().clone();
+                        metadata
+                            .insert("open_arrow_access:generated_expression".into(), sql.clone());
+                        field.with_metadata(metadata)
+                    } else {
+                        field
+                    };
                     indices
                         .iter_mut()
                         .for_each(|index| *index = inputs.bind(*index));
                     let index = fields.len();
-                    let field = Arc::new(Field::new(name, data_type.clone(), true));
+                    let field = Arc::new(field);
                     steps.push(EvolutionStep::Add {
                         index,
                         field: field.clone(),
-                        expression,
+                        expression: physical,
                         input: (input_schema, indices),
                     });
-                    names.insert(name.as_str(), index);
+                    names.insert(name.clone(), index);
                     fields.push(field);
                 }
                 ColumnEvolution::RemoveColumn { name } => {
@@ -162,7 +198,7 @@ impl SchemaEvolutionPlan {
                     )?;
                     if source_name != target_name {
                         names.remove(source_name.as_str());
-                        names.insert(target_name.as_str(), index);
+                        names.insert(target_name.clone(), index);
                         fields[index] =
                             Arc::new(fields[index].as_ref().clone().with_name(target_name));
                     }

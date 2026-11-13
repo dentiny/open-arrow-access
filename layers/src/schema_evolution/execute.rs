@@ -71,12 +71,7 @@ impl SchemaEvolutionPlan {
                         .map_err(|error| {
                             crate::error::evolution_expression_error(field.name(), error)
                         })?;
-                    validation::validate_added_column(
-                        field.name(),
-                        array.as_ref(),
-                        field.data_type(),
-                        batch.num_rows(),
-                    )?;
+                    validation::validate_added_column(field, array.as_ref(), batch.num_rows())?;
                     values.insert(*index, array);
                 }
                 EvolutionStep::Cast { index, field } => {
@@ -135,4 +130,110 @@ fn cast_minute_timestamps(
         })
     }));
     cast_with_options(&normalized, target, options)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ColumnEvolution;
+    use arrow_array::Int64Array;
+    use arrow_schema::{Field, Schema};
+    use open_arrow_access_core::ReadOptions;
+
+    #[test]
+    fn sql_branching_dependencies_keep_outputs_and_release_dead_values() {
+        let batch =
+            RecordBatch::try_from_iter([("n", Arc::new(Int64Array::from(vec![1])) as ArrayRef)])
+                .unwrap();
+        let changes = [
+            ("a", "n + 1"),
+            ("b", "a + 1"),
+            ("dead", "100"),
+            ("c", "a + b"),
+            ("d", "c + 1"),
+        ]
+        .map(|(name, sql)| ColumnEvolution::add_column_sql(name, sql));
+        let plan = SchemaEvolutionPlan::new(
+            &changes,
+            &batch.schema(),
+            &ReadOptions {
+                projection: Some(vec!["a".into(), "d".into()]),
+                ..ReadOptions::default()
+            },
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            plan.lifetimes.releases,
+            [vec![], vec![], vec![3], vec![2], vec![4]]
+        );
+        let output = plan.convert(batch).unwrap();
+        assert_eq!(
+            output.column(0).to_data(),
+            Int64Array::from(vec![2]).to_data()
+        );
+        assert_eq!(
+            output.column(1).to_data(),
+            Int64Array::from(vec![6]).to_data()
+        );
+    }
+
+    #[test]
+    fn sql_chain_keeps_compact_dependencies_and_releases_intermediates() {
+        const WIDTH: usize = 256;
+        let source = Arc::new(Schema::new(
+            (0..WIDTH)
+                .map(|i| Field::new(format!("c{i}"), DataType::Int64, false))
+                .collect::<Vec<_>>(),
+        ));
+        let changes = (0..WIDTH)
+            .map(|i| {
+                ColumnEvolution::add_column_sql(
+                    format!("g{i}"),
+                    format!(
+                        "{} + 1",
+                        if i == 0 {
+                            format!("c{}", WIDTH - 1)
+                        } else {
+                            format!("g{}", i - 1)
+                        }
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let plan = SchemaEvolutionPlan::new(
+            &changes,
+            &source,
+            &ReadOptions {
+                projection: Some(vec![format!("g{}", WIDTH - 1)]),
+                ..ReadOptions::default()
+            },
+            false,
+        )
+        .unwrap();
+        for (i, step) in plan.steps.iter().enumerate() {
+            let EvolutionStep::Add { index, input, .. } = step else {
+                panic!("expected add")
+            };
+            assert_eq!(input.0.fields().len(), 1);
+            assert_eq!(input.1, [WIDTH - 1 + i]);
+            assert_eq!(*index, WIDTH + i);
+            assert_eq!(
+                plan.lifetimes.releases[i],
+                if i == 0 { vec![] } else { vec![WIDTH + i - 1] }
+            );
+        }
+        let batch = RecordBatch::try_new(
+            source,
+            (0..WIDTH)
+                .map(|i| Arc::new(Int64Array::from(vec![i as i64])) as ArrayRef)
+                .collect(),
+        )
+        .unwrap();
+        let output = plan.convert(batch).unwrap();
+        assert_eq!(
+            output.column(0).to_data(),
+            Int64Array::from(vec![(WIDTH * 2 - 1) as i64]).to_data()
+        );
+    }
 }

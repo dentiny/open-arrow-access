@@ -149,6 +149,17 @@ fn is_safe_decimal_cast(from: &DataType, to: &DataType) -> bool {
     }
 }
 
+pub(crate) fn validate_evolution_type(
+    data_type: &DataType,
+    for_cast: bool,
+) -> std::result::Result<(), arrow_schema::ArrowError> {
+    if is_valid_evolution_type(data_type, for_cast) {
+        Ok(())
+    } else {
+        Err(crate::error::invalid_evolution_type(data_type))
+    }
+}
+
 fn is_valid_evolution_type(data_type: &DataType, for_cast: bool) -> bool {
     match data_type {
         DataType::Time32(unit) => matches!(unit, TimeUnit::Second | TimeUnit::Millisecond),
@@ -229,25 +240,6 @@ fn has_extension_type(data_type: &DataType) -> bool {
     }
 }
 
-pub(crate) fn validate_generated_specs(specs: &[crate::GeneratedColumnSpec]) -> Result<()> {
-    let mut names = HashSet::with_capacity(specs.len());
-    for spec in specs {
-        if spec.column.trim().is_empty() || !names.insert(&spec.column) {
-            return Err(crate::error::invalid_generated_column(
-                &spec.column,
-                "column names must be nonempty and distinct",
-            ));
-        }
-        if spec.expression.trim().is_empty() {
-            return Err(crate::error::invalid_generated_column(
-                &spec.column,
-                "expression must not be blank",
-            ));
-        }
-    }
-    Ok(())
-}
-
 pub(crate) fn validate_expression(
     expression: &datafusion::logical_expr::Expr,
 ) -> datafusion::error::Result<()> {
@@ -319,36 +311,6 @@ pub(crate) fn validate_expression_casts(
     Ok(())
 }
 
-pub(crate) fn validate_generated_names(
-    specs: &[crate::GeneratedColumnSpec],
-    source: &arrow_schema::Schema,
-) -> Result<()> {
-    let mut names: HashSet<&str> = source
-        .fields()
-        .iter()
-        .map(|field| field.name().as_str())
-        .collect();
-    for spec in specs {
-        if !names.insert(&spec.column) {
-            return Err(crate::error::invalid_generated_column(
-                &spec.column,
-                "column already exists",
-            ));
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_generated_schema(
-    actual: &arrow_schema::Schema,
-    expected: &arrow_schema::Schema,
-) -> Result<()> {
-    if actual != expected {
-        return Err(crate::error::generated_schema_mismatch());
-    }
-    Ok(())
-}
-
 pub(crate) fn validate_partition_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,
@@ -365,14 +327,19 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
         let name = match change {
             ColumnEvolution::RemoveColumn { name } => name,
             ColumnEvolution::AddColumn {
-                name, data_type, ..
-            }
-            | ColumnEvolution::ChangeDataType { name, data_type } => {
-                let for_cast = matches!(change, ColumnEvolution::ChangeDataType { .. });
-                if !is_valid_evolution_type(data_type, for_cast) {
-                    return Err(crate::error::evolution_config_error(
-                        name,
-                        crate::error::invalid_evolution_type(data_type),
+                name,
+                data_type,
+                expression,
+            } => {
+                if let Some(data_type) = data_type {
+                    validate_evolution_type(data_type, false)
+                        .map_err(|error| crate::error::evolution_config_error(name, error))?;
+                }
+                if let crate::ColumnExpression::Sql(sql) = expression
+                    && sql.trim().is_empty()
+                {
+                    return Err(crate::error::invalid_evolution(
+                        "SQL expression must not be blank",
                     ));
                 }
                 name
@@ -384,6 +351,11 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
                 validate_evolution_name(target_name)?;
                 source_name
             }
+            ColumnEvolution::ChangeDataType { name, data_type } => {
+                validate_evolution_type(data_type, true)
+                    .map_err(|error| crate::error::evolution_config_error(name, error))?;
+                name
+            }
         };
         validate_evolution_name(name)?;
     }
@@ -391,7 +363,7 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
 }
 
 fn validate_evolution_name(name: &str) -> Result<()> {
-    if name.is_empty() {
+    if name.trim().is_empty() {
         return Err(crate::error::invalid_evolution(
             "column name must be nonempty",
         ));
@@ -434,15 +406,22 @@ pub(crate) fn validate_evolution_batch_schema(
 }
 
 pub(crate) fn validate_added_column(
-    name: &str,
+    field: &Field,
     array: &dyn arrow_array::Array,
-    expected: &DataType,
     rows: usize,
 ) -> Result<()> {
+    let name = field.name();
+    let expected = field.data_type();
     if array.data_type() != expected {
         return Err(crate::error::invalid_added_column(
             name,
             format!("expected type {expected}, got {}", array.data_type()),
+        ));
+    }
+    if !field.is_nullable() && array.null_count() != 0 {
+        return Err(crate::error::invalid_added_column(
+            name,
+            "non-nullable expression returned nulls",
         ));
     }
     if array.len() != rows {

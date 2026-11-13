@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 /// Plans when to release computed Arrow arrays within one batch.
-/// A "value" is an array produced by a generated-column expression or a schema
-/// evolution add/cast step, stored in the executor's `values` map under a column
+/// A "value" is an array produced by a schema evolution add/cast step, stored
+/// in the executor's `values` map under a column
 /// slot ID. A cast may replace the array in an existing slot after reading it.
 /// Final output values remain available until the output batch is assembled.
 pub(crate) struct ValueLifetimePlan {

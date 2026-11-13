@@ -65,7 +65,7 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 warc = { package = "warc-rs", version = "0.3.3", default-features = false }
 xml-arrow = "0.2.8"
 
-# Used by the generated-column layer.
+# Used by schema evolution expressions.
 datafusion = { version = "55.2.0", default-features = false }
 
 bytes = "1"

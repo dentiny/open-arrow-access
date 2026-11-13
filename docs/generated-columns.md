@@ -1,30 +1,31 @@
 # Generated columns
 
-`GeneratedColumnsLayer` appends Arrow fields using row-level DataFusion SQL
-expressions. It is always available through `open_arrow_access::layers` and
+`SchemaEvolutionLayer` adds computed Arrow fields using row-level DataFusion
+SQL or `Expr` inputs alongside ordered remove, rename and cast operations. It is
+always available through `open_arrow_access::layers` and
 `open-arrow-access-layers`, including with `default-features = false`.
 Core remains Arrow-only; the layers crate depends on DataFusion.
 
 ```rust,ignore
-use open_arrow_access::{AccessorExt, layers::{GeneratedColumnSpec, GeneratedColumnsLayer}};
+use open_arrow_access::{AccessorExt, layers::{ColumnEvolution, SchemaEvolutionLayer}};
 
-let generated = source.layer(GeneratedColumnsLayer::try_new(vec![
-    GeneratedColumnSpec {
-        column: "text_length".into(),
-        expression: "character_length(text)".into(),
-    },
-    GeneratedColumnSpec {
-        column: "doubled".into(),
-        expression: "text_length * 2".into(),
-    },
+let generated = source.layer(SchemaEvolutionLayer::try_new(vec![
+    ColumnEvolution::add_column_sql("text_length", "character_length(text)"),
+    ColumnEvolution::add_column_sql("doubled", "text_length * 2"),
 ])?);
 ```
 
+Use `add_column_expr(name, expr)` to infer the output field from a DataFusion
+expression, including custom scalar UDFs. `add_column(name, data_type, expr)`
+checks an explicit output type and declares the added field nullable.
+All three forms use the same dependency planning and batch execution.
+
 ## Semantics
 
-Declarations run in order. Each sees source fields and earlier generated fields;
-forward references and cycles are errors. Names are exact, nonempty and distinct,
-and may not collide with any source field, even one hidden by output projection.
+Changes run in order. Each sees the schema left by preceding additions, renames,
+removals and casts; forward references and cycles are errors. Names are exact and
+must not be blank. Additions may not collide with any currently live field, even
+one hidden by output projection. Removed names may be reused.
 Blank expressions fail at construction; SQL/schema errors fail at `open`.
 Unquoted SQL identifiers are lowercased; quote mixed-case names: `"Count" * 2`.
 
@@ -38,8 +39,8 @@ batches; separate opens need not produce identical values.
 
 Output preserves row count, batch boundaries, logical order, source identity,
 source field metadata and schema metadata. Scalar results broadcast to the batch
-row count, including zero-row and zero-column inputs. Generated fields retain
-inferred metadata (including extension metadata for identity expressions) and add
+row count, including zero-row and zero-column inputs. Inferred fields retain metadata
+(including extension metadata for identity expressions). SQL additions also add
 `open_arrow_access:generated_expression` with the original expression text.
 
 Runtime data errors retain their source chain and column name. An error ends the
@@ -53,13 +54,14 @@ The wrapper works with any `Accessor<Reader = dyn RecordReader>` whose request
 implements `ReadOptionsProvider`; it does not depend on formats or storage.
 
 1. Empty configuration delegates directly, without an expression context.
-2. Retain the final projection. With a supplied complete source schema and an
-   output projection, select the source columns needed by all declarations and
-   the requested output; otherwise, clear the inner projection before opening.
+2. Retain the final projection. With a supplied complete source schema, select
+   the source columns needed by all changes and the requested output; otherwise,
+   additions require clearing the inner projection before opening.
 3. Compile declarations once against source fields plus earlier outputs, using
    each expression's dependency schema. Coerce and simplify before physical
-   planning. Pushdown reuses this plan and remaps only source-column slots to
-   the selected reader; generated slots and physical expressions stay unchanged.
+   planning. Source slots are bound to projected reader positions on first use;
+   computed slots retain their indices. SQL identifiers resolve against the
+   current namespace, including earlier renames and removals.
 4. Expose the fixed augmented/projected schema before reading a batch.
 5. Evaluate physical expressions on Arrow arrays, then apply the final projection.
 
@@ -72,11 +74,10 @@ Memory is bounded by one input batch, its generated arrays and expression/kernel
 state. There is no DataFrame execution plan, materialized table or per-row SQL.
 
 For dependency projection pushdown, supply the complete source schema with
-`with_source_schema` and request an output projection. Dependencies come from the
-parsed expressions, including references through earlier generated columns.
+`with_source_schema`. Dependencies come from parsed expressions, including references through earlier generated columns.
 Declarations are checked against the complete schema before opening, and the
-selected reader schema is checked at open. Without both settings, a nonempty
-configuration reads every source column.
+selected reader schema is checked at open. Without a supplied schema, adding
+columns reads every source column.
 
 Every declaration still runs, including outputs omitted by the final projection.
 Pushdown reduces source I/O and decoding, not the set of expressions evaluated.
@@ -84,5 +85,5 @@ Pushdown reduces source I/O and decoding, not the set of expressions evaluated.
 For internal parallel reads, compose in this order:
 `source.layer(ParallelReadLayer::new(...)).layer(generated_layer)`.
 Generation runs once over the ordered merged batches, sharing one query context.
-The generated wrapper forwards internal read concurrency but does not implement
-`ScanPlanner`, so placing `ParallelReadLayer` outside it is not supported.
+The schema evolution wrapper forwards internal read concurrency but does not
+implement `ScanPlanner`, so placing `ParallelReadLayer` outside it is not supported.
