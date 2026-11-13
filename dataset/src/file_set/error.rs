@@ -34,6 +34,12 @@ pub(super) fn schema_metadata_conflict(key: &str) -> Error {
     union_error(format!("conflicting schema metadata for key '{key}'"))
 }
 
+pub(super) fn field_metadata_conflict(name: &str, key: &str) -> Error {
+    arrow_error(ArrowError::SchemaError(format!(
+        "Fail to merge field '{name}' due to conflicting metadata data value for key {key}",
+    )))
+}
+
 pub(super) fn field_names_mismatch(left: &str, right: &str) -> Error {
     union_error(format!("list element names differ: '{left}' and '{right}'"))
 }

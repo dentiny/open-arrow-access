@@ -9,6 +9,7 @@ use open_arrow_access_core::{
 use super::{
     FileSetRequest,
     accessor::FilePlanner,
+    alignment,
     error::empty_selection,
     schema,
     validation::{validate_fields, validate_file_ordering, validate_file_policy},
@@ -26,7 +27,7 @@ where
     // A requested column may be absent in one file and present in another.
     request.options.projection = None;
     let mut files = Vec::new();
-    let mut union_schema = None;
+    let mut union_schema = schema::SchemaUnion::default();
     let mut ordering = inner.capability().ordering;
     // Drop each inspected reader/plan before opening the next file, so JSON
     // samples and native partitions are not retained across the entire dataset.
@@ -36,13 +37,13 @@ where
         ordering = ordering.combine(inspected.ordering);
         let source = inspected.metadata.schema;
         validate_fields(source.fields())?;
-        union_schema = Some(match union_schema {
-            None => source.as_ref().clone(),
-            Some(ref previous) => schema::union_by_name(previous, source.as_ref())?,
-        });
+        union_schema.merge(source.as_ref())?;
         files.push((request, source));
     }
-    let union_schema = Arc::new(union_schema.ok_or_else(|| empty_selection("union_by_name"))?);
+    if files.is_empty() {
+        return Err(empty_selection("union_by_name"));
+    }
+    let union_schema = Arc::new(union_schema.finish());
     let (target, _) = options.resolve_projection(&union_schema)?;
     let metadata = RecordMetadata {
         schema: target.clone(),
@@ -99,7 +100,7 @@ fn align_reader(
     let batches = into_stream(reader).map(move |batch| {
         let batch = batch?;
         super::validation::validate_schema(&batch.schema(), &source)?;
-        schema::align(batch, target.clone())
+        alignment::align(batch, target.clone())
     });
     Ok(Box::new(StreamReader::records(batches, metadata, ordering)))
 }
