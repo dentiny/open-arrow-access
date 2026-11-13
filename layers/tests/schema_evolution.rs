@@ -858,3 +858,71 @@ async fn invalid_expression_types_and_source_schemas_fail_before_reading() {
         assert_eq!(reads.load(Ordering::SeqCst), 0);
     }
 }
+
+#[tokio::test]
+async fn hidden_expression_chain_releases_arrays_after_their_last_use() {
+    const LENGTH: usize = 128;
+    for known_schema in [false, true] {
+        let arrays = Arc::new(std::sync::Mutex::new(
+            Vec::<std::sync::Weak<dyn Array>>::new(),
+        ));
+        let mut changes = Vec::new();
+        for position in 0..LENGTH {
+            let arrays = arrays.clone();
+            let expression = create_udf(
+                "track_live_arrays",
+                vec![DataType::Int32],
+                DataType::Int32,
+                Volatility::Stable,
+                Arc::new(move |args| {
+                    let mut arrays = arrays.lock().unwrap();
+                    // Only the preceding result is still an input to this expression.
+                    assert!(
+                        arrays[..arrays.len().saturating_sub(1)]
+                            .iter()
+                            .all(|array| array.strong_count() == 0)
+                    );
+                    let input = args[0].clone().into_array(2)?;
+                    let input = input.as_any().downcast_ref::<Int32Array>().unwrap();
+                    let output = Arc::new(Int32Array::from_iter(
+                        input.iter().map(|value| value.map(|value| value + 1)),
+                    )) as ArrayRef;
+                    arrays.push(Arc::downgrade(&output));
+                    Ok(ColumnarValue::Array(output))
+                }),
+            )
+            .call(vec![col(if position == 0 {
+                "value".into()
+            } else {
+                format!("g{}", position - 1)
+            })]);
+            changes.push(ColumnEvolution::add_column(
+                format!("g{position}"),
+                DataType::Int32,
+                expression,
+            ));
+        }
+        let source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1, 2])))]);
+        let mut layer = SchemaEvolutionLayer::try_new(changes).unwrap();
+        if known_schema {
+            layer = layer.with_source_schema(source.schema.clone());
+        }
+        let mut reader = source
+            .open_layer(layer, Some(vec![format!("g{}", LENGTH - 1)]))
+            .await
+            .unwrap();
+        let output = reader.next().await.unwrap().unwrap();
+        assert_eq!(
+            output.column(0).to_data(),
+            Int32Array::from(vec![LENGTH as i32 + 1, LENGTH as i32 + 2]).to_data()
+        );
+        let arrays = arrays.lock().unwrap();
+        assert_eq!(arrays.len(), LENGTH);
+        assert!(
+            arrays[..LENGTH - 1]
+                .iter()
+                .all(|array| array.strong_count() == 0)
+        );
+        assert!(arrays[LENGTH - 1].upgrade().is_some());
+    }
+}
