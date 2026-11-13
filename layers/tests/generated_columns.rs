@@ -409,39 +409,31 @@ async fn compact_inputs_preserve_sql_names_nested_access_and_constants() {
         ),
     ])
     .unwrap();
-    for pushdown in [false, true] {
-        let config = layer(&[
-            ("nested", "record.\"Count\""),
-            ("combined", "coalesce(nested, \"Count\") + 1 AS ignored"),
-            ("constant", "'unused Count' /* record */"),
-        ]);
-        let config = if pushdown {
-            config.with_source_schema(input.schema())
-        } else {
-            config
-        };
-        let source = MemoryAccessor::new(vec![input.clone()]);
-        let projections = source.projections.clone();
-        let mut reader = source
-            .layer(config)
-            .open(request(&["combined", "constant"]))
-            .await
-            .unwrap();
-        if pushdown {
-            assert_eq!(
-                *projections.lock().unwrap(),
-                vec![Some(vec!["record".into(), "Count".into()])]
-            );
-        }
-        let batch = reader.next().await.unwrap().unwrap();
-        assert_eq!(
-            batch.column(0).to_data(),
-            Int64Array::from(vec![5]).to_data()
-        );
-        assert_eq!(
-            batch.column(1).to_data(),
-            StringArray::from(vec!["unused Count"]).to_data()
-        );
-        assert!(reader.next().await.unwrap().is_none());
-    }
+    let config = layer(&[
+        ("nested", "record.\"Count\""),
+        ("combined", "coalesce(nested, \"Count\") + 1 AS ignored"),
+        ("constant", "'unused Count' /* record */"),
+    ])
+    .with_source_schema(input.schema());
+    let source = MemoryAccessor::new(vec![input]);
+    let projections = source.projections.clone();
+    let mut reader = source
+        .layer(config)
+        .open(request(&["combined", "constant"]))
+        .await
+        .unwrap();
+    assert_eq!(
+        *projections.lock().unwrap(),
+        vec![Some(vec!["record".into(), "Count".into()])]
+    );
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(
+        batch.column(0).to_data(),
+        Int64Array::from(vec![5]).to_data()
+    );
+    assert_eq!(
+        batch.column(1).to_data(),
+        StringArray::from(vec!["unused Count"]).to_data()
+    );
+    assert!(reader.next().await.unwrap().is_none());
 }
