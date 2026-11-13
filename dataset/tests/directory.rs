@@ -277,6 +277,61 @@ struct Listing {
     fail: bool,
 }
 
+#[tokio::test]
+async fn union_null_fills_report_run_end_overflow_and_terminate() {
+    use arrow_schema::{UnionFields, UnionMode};
+    let encoded = DataType::RunEndEncoded(
+        Arc::new(Field::new("run_ends", DataType::Int16, false)),
+        Arc::new(Field::new("values", DataType::Int64, true)),
+    );
+    let item = Arc::new(Field::new("item", encoded.clone(), true));
+    let types = [
+        encoded,
+        DataType::Struct(vec![item.clone()].into()),
+        DataType::FixedSizeList(item.clone(), 2),
+        DataType::Union(
+            UnionFields::try_new(
+                [0, 1],
+                [Arc::new(Field::new("plain", DataType::Int64, true)), item],
+            )
+            .unwrap(),
+            UnionMode::Sparse,
+        ),
+    ];
+    for data_type in types {
+        for replace_null in [false, true] {
+            let id = Field::new("id", DataType::Int64, false);
+            let target = Arc::new(Schema::new(vec![
+                id.clone(),
+                Field::new("encoded", data_type.clone(), true),
+            ]));
+            let mut fields = vec![id];
+            let mut columns: Vec<ArrayRef> = vec![Arc::new(Int64Array::from(vec![0; 32768]))];
+            if replace_null {
+                fields.push(Field::new("encoded", DataType::Null, true));
+                columns.push(arrow_array::new_null_array(&DataType::Null, 32768));
+            }
+            let source = Arc::new(Schema::new(fields));
+            let batch = RecordBatch::try_new(source.clone(), columns).unwrap();
+            let files = Files::new([
+                ("present", FileData::new(target, vec![])),
+                ("missing", FileData::new(source, vec![batch])),
+            ]);
+            let active = files.active.clone();
+            let mut reader = FileSetAccessor::new(files)
+                .with_union_by_name()
+                .open(FileSetRequest::new(["present", "missing"]))
+                .await
+                .unwrap();
+            let error = reader.next().await.unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::Unsupported, "{data_type}: {error}");
+            assert!(error.to_string().contains("encoded length would overflow"));
+            assert!(reader.next().await.unwrap().is_none());
+            assert_eq!(active.load(Ordering::SeqCst), 0);
+        }
+    }
+}
+
 #[async_trait]
 impl Accessor for Listing {
     type Request = ByteReadRequest;

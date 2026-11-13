@@ -6,7 +6,7 @@ use arrow_array::{
 use arrow_schema::{DataType, Fields};
 use open_arrow_access_core::{Result, SchemaRef};
 
-use super::error;
+use super::{error, validation::validate_null_array};
 
 pub(super) fn align(batch: RecordBatch, target: SchemaRef) -> Result<RecordBatch> {
     if batch.schema() == target {
@@ -41,7 +41,7 @@ fn align_fields(
         .iter()
         .map(|field| match positions.get(field.name()) {
             Some(&index) => align_array(&columns[index], field.data_type()),
-            None => Ok(new_null_array(field.data_type(), len)),
+            None => null_array(field.data_type(), len),
         })
         .collect()
 }
@@ -51,7 +51,7 @@ fn align_array(array: &ArrayRef, target: &DataType) -> Result<ArrayRef> {
         return Ok(array.clone());
     }
     if array.data_type() == &DataType::Null {
-        return Ok(new_null_array(target, array.len()));
+        return null_array(target, array.len());
     }
     if let (DataType::Struct(source), DataType::Struct(target)) = (array.data_type(), target) {
         let values = array
@@ -85,5 +85,49 @@ fn align_array(array: &ArrayRef, target: &DataType) -> Result<ArrayRef> {
                 .map_err(error::arrow_error)
         }
         _ => Err(error::array_schema_mismatch()),
+    }
+}
+
+fn null_array(data_type: &DataType, len: usize) -> Result<ArrayRef> {
+    validate_null_array(data_type, len)?;
+    Ok(new_null_array(data_type, len))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_schema::{Field, UnionFields, UnionMode};
+
+    #[test]
+    fn null_fills_keep_supported_run_end_lengths_and_empty_children() {
+        let encoded = |key| {
+            DataType::RunEndEncoded(
+                Arc::new(Field::new("run_ends", key, false)),
+                Arc::new(Field::new("values", DataType::Int64, true)),
+            )
+        };
+        let item = Arc::new(Field::new("item", encoded(DataType::Int16), true));
+        for (data_type, len) in [
+            (encoded(DataType::Int16), 0),
+            (encoded(DataType::Int16), 32767),
+            (encoded(DataType::Int32), 32768),
+            (DataType::FixedSizeList(item.clone(), 2), 16383),
+            (DataType::List(item.clone()), 32768),
+            (
+                DataType::Union(
+                    UnionFields::try_new(
+                        [0, 1],
+                        [Arc::new(Field::new("plain", DataType::Int64, true)), item],
+                    )
+                    .unwrap(),
+                    UnionMode::Dense,
+                ),
+                32768,
+            ),
+        ] {
+            let array = null_array(&data_type, len).unwrap();
+            assert_eq!(array.len(), len);
+            assert_eq!(array.logical_null_count(), len);
+        }
     }
 }
