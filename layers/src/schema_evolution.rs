@@ -193,7 +193,7 @@ where
             && plan
                 .output_indices
                 .iter()
-                .map(|index| plan.input_indices.get(index).copied().unwrap_or(*index))
+                .copied()
                 .eq(0..source.fields().len())
         {
             return Ok(inner);
@@ -220,7 +220,6 @@ struct SchemaEvolutionPlan {
     source: SchemaRef,
     schema: SchemaRef,
     affected: Vec<usize>,
-    input_indices: HashMap<usize, usize>,
     steps: Vec<EvolutionStep>,
     output_indices: Vec<usize>,
 }
@@ -356,7 +355,11 @@ fn plan_evolution(
             }
         }
     }
-    let (schema, mut output_indices) = resolve_schema(&fields, source);
+    let mut output_indices: Vec<_> = fields.keys().copied().collect();
+    let schema = Arc::new(Schema::new_with_metadata(
+        fields.into_values().collect::<Vec<_>>(),
+        source.metadata().clone(),
+    ));
     let (schema, projection) = options.resolve_projection(&schema)?;
     if let Some(projection) = projection {
         output_indices = projection
@@ -368,23 +371,9 @@ fn plan_evolution(
         source: source.clone(),
         schema,
         affected: affected.into_iter().collect(),
-        input_indices: HashMap::new(),
         steps,
         output_indices,
     })
-}
-
-// Slots are stable across removals and renames; only batch views need dense positions.
-fn resolve_schema(
-    fields: &BTreeMap<usize, FieldRef>,
-    source: &SchemaRef,
-) -> (SchemaRef, Vec<usize>) {
-    let indices = fields.keys().copied().collect();
-    let fields: Vec<_> = fields.values().cloned().collect();
-    (
-        Arc::new(Schema::new_with_metadata(fields, source.metadata().clone())),
-        indices,
-    )
 }
 
 fn assemble_batch(
@@ -392,16 +381,13 @@ fn assemble_batch(
     indices: &[usize],
     source: &RecordBatch,
     values: &HashMap<usize, ArrayRef>,
-    input_indices: &HashMap<usize, usize>,
 ) -> Result<RecordBatch> {
     let columns = indices
         .iter()
         .map(|&index| {
             values
                 .get(&index)
-                .unwrap_or_else(|| {
-                    source.column(input_indices.get(&index).copied().unwrap_or(index))
-                })
+                .unwrap_or_else(|| source.column(index))
                 .clone()
         })
         .collect();
@@ -435,7 +421,7 @@ impl SchemaEvolutionPlan {
             .iter()
             .map(|&index| self.source.field(index).name().clone())
             .collect();
-        self.input_indices = indices
+        let input_indices: HashMap<_, _> = indices
             .iter()
             .enumerate()
             .map(|(input, &slot)| (slot, input))
@@ -443,8 +429,31 @@ impl SchemaEvolutionPlan {
         self.affected = self
             .affected
             .iter()
-            .filter_map(|index| self.input_indices.get(index).copied())
+            .filter_map(|index| input_indices.get(index).copied())
             .collect();
+        let rebind = |index: &mut usize| {
+            if let Some(&input) = input_indices.get(index) {
+                *index = input;
+            }
+        };
+        // Removed source columns may not be read at all. Computed slots keep
+        // their original indices, which cannot overlap compact input indices.
+        self.steps.retain_mut(|step| match step {
+            EvolutionStep::Remove(index)
+                if *index < self.source.fields().len() && !input_indices.contains_key(index) =>
+            {
+                false
+            }
+            EvolutionStep::Add { input, .. } => {
+                input.1.iter_mut().for_each(&rebind);
+                true
+            }
+            EvolutionStep::Cast { index, .. } | EvolutionStep::Remove(index) => {
+                rebind(index);
+                true
+            }
+        });
+        self.output_indices.iter_mut().for_each(rebind);
         self.source = Arc::new(
             self.source
                 .project(&indices)
@@ -472,8 +481,7 @@ impl SchemaEvolutionPlan {
                     expression,
                     input,
                 } => {
-                    let view =
-                        assemble_batch(&input.0, &input.1, &batch, &values, &self.input_indices)?;
+                    let view = assemble_batch(&input.0, &input.1, &batch, &values)?;
                     let array = expression
                         .evaluate(&view)
                         .and_then(|value| value.into_array(batch.num_rows()))
@@ -489,9 +497,7 @@ impl SchemaEvolutionPlan {
                     values.insert(*index, array);
                 }
                 EvolutionStep::Cast { index, field } => {
-                    let column = values.get(index).unwrap_or_else(|| {
-                        batch.column(self.input_indices.get(index).copied().unwrap_or(*index))
-                    });
+                    let column = values.get(index).unwrap_or_else(|| batch.column(*index));
                     let target = field.data_type();
                     let array = cast_with_options(column.as_ref(), target, &options)
                         .or_else(|error| match target {
@@ -515,13 +521,7 @@ impl SchemaEvolutionPlan {
                 }
             }
         }
-        assemble_batch(
-            &self.schema,
-            &self.output_indices,
-            &batch,
-            &values,
-            &self.input_indices,
-        )
+        assemble_batch(&self.schema, &self.output_indices, &batch, &values)
     }
 }
 
