@@ -437,3 +437,48 @@ async fn compact_inputs_preserve_sql_names_nested_access_and_constants() {
     );
     assert!(reader.next().await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn pushdown_preserves_source_outputs_and_full_namespace_generated_slots() {
+    let original = input();
+    let mut fields = vec![Arc::new(Field::new("unused", DataType::Int64, false))];
+    fields.extend(original.schema().fields().iter().cloned());
+    let mut columns: Vec<Arc<dyn Array>> = vec![Arc::new(Int64Array::from(vec![0; 3]))];
+    columns.extend(original.columns().iter().cloned());
+    let batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), columns).unwrap();
+    let source = MemoryAccessor::new(vec![batch.clone()]);
+    let projections = source.projections.clone();
+    let mut reader = source
+        .layer(
+            layer(&[("first", "\"Count\" + 1"), ("twice", "first * 2")])
+                .with_source_schema(batch.schema()),
+        )
+        .open(request(&["text", "twice", "Count"]))
+        .await
+        .unwrap();
+    let output = reader.next().await.unwrap().unwrap();
+    assert!(Arc::ptr_eq(output.column(0), original.column(1)));
+    assert!(Arc::ptr_eq(output.column(2), original.column(0)));
+    assert_eq!(
+        output.column(1).to_data(),
+        Int64Array::from(vec![Some(6), None, Some(10)]).to_data()
+    );
+    assert_eq!(
+        *projections.lock().unwrap(),
+        vec![Some(vec!["Count".into(), "text".into()])]
+    );
+
+    let source = MemoryAccessor::new(vec![batch.clone()]);
+    let projections = source.projections.clone();
+    let mut reader = source
+        .layer(layer(&[("constant", "7")]).with_source_schema(batch.schema()))
+        .open(request(&["constant"]))
+        .await
+        .unwrap();
+    let output = reader.next().await.unwrap().unwrap();
+    assert_eq!(
+        output.column(0).to_data(),
+        Int64Array::from(vec![7; 3]).to_data()
+    );
+    assert_eq!(*projections.lock().unwrap(), vec![Some(vec![])]);
+}
