@@ -89,20 +89,27 @@ async fn disabled_codec_is_rejected_before_storage_opens() {
 
 #[cfg(feature = "gzip")]
 #[tokio::test]
-async fn gzip_chunks_and_corruption_use_the_existing_decoder() {
+async fn routes_gzip_with_chunk_limit_metadata_and_terminal_errors() {
     use open_arrow_access_test_support::fixture;
     use std::num::NonZeroUsize;
-    for size in [1, 7, 4096] {
-        let accessor = MemoryAccessor::new(&fixture!("gzip", "payload.gz").await, size)
-            .layer(AutoDecompressionLayer::new().with_chunk_size(NonZeroUsize::new(3).unwrap()));
-        let mut reader = accessor.open("input.gz".into()).await.unwrap();
-        let mut output = Vec::new();
-        while let Some(chunk) = reader.next().await.unwrap() {
-            assert!(chunk.len() <= 3);
-            output.extend_from_slice(&chunk);
-        }
-        assert_eq!(output, b"payload");
+
+    // Fragmentation matrices belong to the codec suite; this checks the auto
+    // route and its chunk-size option with one representative fragmented input.
+    let accessor = MemoryAccessor::new(&fixture!("gzip", "payload.gz").await, 1)
+        .layer(AutoDecompressionLayer::new().with_chunk_size(NonZeroUsize::new(3).unwrap()));
+    let mut reader = accessor.open("input.gz".into()).await.unwrap();
+    assert!(!reader.capability().read_with_range);
+    assert_eq!(reader.metadata().content_length, None);
+    assert_eq!(
+        reader.metadata().source.as_ref().unwrap().locator(),
+        "input.gz"
+    );
+    let mut output = Vec::new();
+    while let Some(chunk) = reader.next().await.unwrap() {
+        assert!(chunk.len() <= 3);
+        output.extend_from_slice(&chunk);
     }
+    assert_eq!(output, b"payload");
     let accessor = MemoryAccessor::new(&fixture!("gzip", "bad_truncated.gz").await, 1)
         .layer(AutoDecompressionLayer::new());
     let mut reader = accessor.open("input.gz".into()).await.unwrap();
@@ -136,7 +143,6 @@ macro_rules! codec_route_test {
         }
     };
 }
-codec_route_test!(routes_gzip, "gzip", "gzip", "payload.gz", "data.gz");
 codec_route_test!(routes_bzip2, "bz2", "bz2", "payload.bz2", "data.bz2");
 codec_route_test!(routes_lz4, "lz4", "lz4", "payload.lz4", "data.lz4");
 codec_route_test!(routes_zstd, "zstd", "zstd", "payload.zst", "data.zstd");
