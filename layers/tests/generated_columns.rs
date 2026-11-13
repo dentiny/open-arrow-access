@@ -270,6 +270,24 @@ async fn invalid_expressions_fail_at_open_even_when_hidden() {
 }
 
 #[tokio::test]
+async fn unused_generated_values_still_execute_and_fail_terminally() {
+    let source = MemoryAccessor::new(vec![input(), input()]);
+    let polls = source.polls.clone();
+    let mut reader = source
+        .layer(layer(&[("unused", "CAST(text AS BIGINT)"), ("x", "1")]))
+        .open(request(&["x"]))
+        .await
+        .unwrap();
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert!(error.to_string().contains("unused"), "{error}");
+    assert_finished(reader.as_mut(), &polls, |m| {
+        (m.schema.clone(), m.source.clone())
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn composes_after_schema_evolution() {
     let mut reader = MemoryAccessor::new(vec![input()])
         .layer(

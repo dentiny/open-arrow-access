@@ -64,6 +64,8 @@ implements `ReadOptionsProvider`; it does not depend on formats or storage.
 Source arrays share their buffers. Each declaration evaluates a compact view of
 its dependencies and stores its result in a column slot. Hidden results are
 validated as they are produced; the final projected batch is assembled once.
+Hidden arrays are released after their last dependency use; selected generated
+outputs remain live until final assembly. Every declaration still executes.
 Memory is bounded by one input batch, its generated arrays and expression/kernel
 state. There is no DataFrame execution plan, materialized table or per-row SQL.
 

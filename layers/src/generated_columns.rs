@@ -127,11 +127,7 @@ where
         let capability = record_capability(inner.capability());
         let output_indices =
             projection.unwrap_or_else(|| (0..metadata.schema.fields().len()).collect());
-        let plan = GeneratedColumnsPlan {
-            steps,
-            schema: metadata.schema.clone(),
-            output_indices,
-        };
+        let plan = GeneratedColumnsPlan::new(steps, metadata.schema.clone(), output_indices);
         let batches = into_stream(inner).map(move |batch| plan.generate(batch?));
         Ok(Box::new(
             StreamReader::records(batches, metadata, capability.ordering)
@@ -191,6 +187,7 @@ fn plan_steps(
             input: (input_schema, indices),
             index,
             column: spec.column.clone(),
+            release: Vec::new(),
         });
     }
     Ok((
@@ -216,6 +213,7 @@ struct GeneratedStep {
     column: String,
     input: (SchemaRef, Vec<usize>),
     index: usize,
+    release: Vec<usize>,
 }
 
 struct GeneratedColumnsPlan {
@@ -226,10 +224,38 @@ struct GeneratedColumnsPlan {
 }
 
 impl GeneratedColumnsPlan {
+    fn new(mut steps: Vec<GeneratedStep>, schema: SchemaRef, output_indices: Vec<usize>) -> Self {
+        let source_len = steps[0].index;
+        let mut last_uses = (0..steps.len()).collect::<Vec<_>>();
+        for (position, step) in steps.iter().enumerate() {
+            for &index in &step.input.1 {
+                if index >= source_len {
+                    last_uses[index - source_len] = position;
+                }
+            }
+        }
+        // Final outputs stay live until assembly; every other slot has one release.
+        for &index in &output_indices {
+            if index >= source_len {
+                last_uses[index - source_len] = usize::MAX;
+            }
+        }
+        for (index, position) in last_uses.into_iter().enumerate() {
+            if position != usize::MAX {
+                steps[position].release.push(source_len + index);
+            }
+        }
+        Self {
+            steps,
+            schema,
+            output_indices,
+        }
+    }
+
     fn generate(&self, batch: RecordBatch) -> Result<RecordBatch> {
         let rows = batch.num_rows();
         let options = RecordBatchOptions::new().with_row_count(Some(rows));
-        let mut values = HashMap::with_capacity(self.steps.len());
+        let mut values = HashMap::new();
         for step in &self.steps {
             let view = assemble_batch(&step.input.0, &step.input.1, &batch, &values)
                 .map_err(generated_batch_error)?;
@@ -243,6 +269,9 @@ impl GeneratedColumnsPlan {
                 RecordBatch::try_new_with_options(step.output.clone(), vec![array], &options)
                     .map_err(generated_batch_error)?;
             values.insert(step.index, result.column(0).clone());
+            for index in &step.release {
+                values.remove(index);
+            }
         }
         assemble_batch(&self.schema, &self.output_indices, &batch, &values)
             .map_err(generated_batch_error)
@@ -254,6 +283,45 @@ mod tests {
     use super::*;
     use arrow_array::{Array, ArrayRef, Int64Array};
     use arrow_schema::{DataType, Field};
+
+    #[test]
+    fn branching_dependencies_keep_outputs_and_release_dead_values() {
+        let batch =
+            RecordBatch::try_from_iter([("n", Arc::new(Int64Array::from(vec![1])) as ArrayRef)])
+                .unwrap();
+        let specs = [
+            ("a", "n + 1"),
+            ("b", "a + 1"),
+            ("dead", "100"),
+            ("c", "a + b"),
+            ("d", "c + 1"),
+        ]
+        .map(|(column, expression)| GeneratedColumnSpec {
+            column: column.into(),
+            expression: expression.into(),
+        });
+        let (schema, steps, _) =
+            plan_steps(&ExpressionPlanner::new(), &specs, &batch.schema()).unwrap();
+        let plan = GeneratedColumnsPlan::new(
+            steps,
+            Arc::new(schema.project(&[1, 5]).unwrap()),
+            vec![1, 5],
+        );
+        assert!(plan.steps[0].release.is_empty());
+        assert!(plan.steps[1].release.is_empty());
+        assert_eq!(plan.steps[2].release, [3]);
+        assert_eq!(plan.steps[3].release, [2]);
+        assert_eq!(plan.steps[4].release, [4]);
+        let output = plan.generate(batch).unwrap();
+        assert_eq!(
+            output.column(0).to_data(),
+            Int64Array::from(vec![2]).to_data()
+        );
+        assert_eq!(
+            output.column(1).to_data(),
+            Int64Array::from(vec![6]).to_data()
+        );
+    }
 
     #[test]
     fn single_dependency_steps_keep_compact_schemas_and_slots() {
@@ -305,11 +373,15 @@ mod tests {
                 .collect(),
         )
         .unwrap();
-        let plan = GeneratedColumnsPlan {
-            schema: Arc::new(schema.project(&[WIDTH * 2 - 1]).unwrap()),
-            output_indices: vec![WIDTH * 2 - 1],
+        let plan = GeneratedColumnsPlan::new(
             steps,
-        };
+            Arc::new(schema.project(&[WIDTH * 2 - 1]).unwrap()),
+            vec![WIDTH * 2 - 1],
+        );
+        assert!(plan.steps[0].release.is_empty());
+        for (i, step) in plan.steps.iter().enumerate().skip(1) {
+            assert_eq!(step.release, [WIDTH + i - 1]);
+        }
         let output = plan.generate(batch).unwrap();
         assert_eq!(
             output.column(0).to_data(),
