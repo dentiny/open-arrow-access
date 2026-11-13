@@ -113,26 +113,25 @@ impl<'a> EvolutionPlanner<'a> {
         let PlannedExpression {
             expression: physical,
             output,
-            input: (input_schema, mut indices),
+            mut input,
         } = self
             .plan_expression(expression)
             .map_err(|error| crate::error::evolution_plan_error(name, error))?;
         self.affected.extend(
-            indices
+            input
+                .slots()
                 .iter()
                 .copied()
                 .filter(|&index| index < self.source.fields().len()),
         );
         let field = Arc::new(added_field(name, data_type, expression, &output)?);
-        indices
-            .iter_mut()
-            .for_each(|index| *index = self.inputs.bind(*index));
+        input.rebind(|index| self.inputs.bind(index));
         let index = self.fields.len();
         self.steps.push(EvolutionStep::Add {
             index,
             field: field.clone(),
             expression: physical,
-            input: (input_schema, indices),
+            input,
         });
         self.names.insert(name.to_owned(), index);
         self.fields.push(field);
@@ -205,7 +204,7 @@ impl<'a> EvolutionPlanner<'a> {
         let source_schema = self.inputs.into_schema(self.source)?;
         let lifetimes = ValueLifetimePlan::new(
             self.steps.iter().map(|step| match step {
-                EvolutionStep::Add { index, input, .. } => (Some(*index), input.1.as_slice()),
+                EvolutionStep::Add { index, input, .. } => (Some(*index), input.slots()),
                 EvolutionStep::Cast { index, .. } => (Some(*index), std::slice::from_ref(index)),
                 EvolutionStep::Remove(_) => (None, &[][..]),
             }),

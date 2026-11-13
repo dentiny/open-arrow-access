@@ -6,6 +6,7 @@ use indexmap::IndexSet;
 use open_arrow_access_core::Result;
 
 use super::ColumnEvolution;
+use crate::expression::ExpressionInput;
 
 mod builder;
 
@@ -28,7 +29,7 @@ pub(super) enum EvolutionStep {
         index: usize,
         field: FieldRef,
         expression: Arc<dyn PhysicalExpr>,
-        input: (SchemaRef, Vec<usize>),
+        input: ExpressionInput,
     },
     /// Cast the current array at `index` to `field.data_type()` and cache the result.
     Cast { index: usize, field: FieldRef },

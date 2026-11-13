@@ -4,7 +4,8 @@ use std::{
     sync::Arc,
 };
 
-use arrow_schema::{FieldRef, Schema, SchemaRef};
+use arrow_array::{ArrayRef, RecordBatch};
+use arrow_schema::{ArrowError, FieldRef, Schema, SchemaRef};
 use datafusion::{
     common::DFSchema,
     error::DataFusionError,
@@ -21,7 +22,74 @@ use datafusion::{
 pub(crate) struct PlannedExpression {
     pub(crate) expression: Arc<dyn PhysicalExpr>,
     pub(crate) output: FieldRef,
-    pub(crate) input: (SchemaRef, Vec<usize>),
+    pub(crate) input: ExpressionInput,
+}
+
+/// A compact dependency schema paired with the array slots in exactly its field order.
+/// Rebinding changes only the slots; physical expression column indices stay compact.
+pub(crate) struct ExpressionInput {
+    schema: SchemaRef,
+    slots: Vec<usize>,
+}
+
+impl ExpressionInput {
+    fn new(
+        fields: &[FieldRef],
+        slots: impl IntoIterator<Item = usize>,
+        metadata: HashMap<String, String>,
+    ) -> Self {
+        let mut slots: Vec<_> = slots.into_iter().collect();
+        slots.sort_unstable();
+        slots.dedup();
+        let schema = Arc::new(Schema::new_with_metadata(
+            slots
+                .iter()
+                .map(|&index| fields[index].clone())
+                .collect::<Vec<_>>(),
+            metadata,
+        ));
+        Self { schema, slots }
+    }
+
+    fn for_expression(
+        expression: &Expr,
+        fields: &[FieldRef],
+        names: &HashMap<String, usize>,
+        metadata: HashMap<String, String>,
+        missing: impl Fn(&str) -> DataFusionError,
+    ) -> datafusion::error::Result<Self> {
+        let slots = expression
+            .column_refs()
+            .into_iter()
+            .map(|column| {
+                names
+                    .get(&column.name)
+                    .copied()
+                    .ok_or_else(|| missing(&column.name))
+            })
+            .collect::<datafusion::error::Result<Vec<_>>>()?;
+        Ok(Self::new(fields, slots, metadata))
+    }
+
+    pub(crate) fn schema(&self) -> &SchemaRef {
+        &self.schema
+    }
+
+    pub(crate) fn slots(&self) -> &[usize] {
+        &self.slots
+    }
+
+    pub(crate) fn rebind(&mut self, mut bind: impl FnMut(usize) -> usize) {
+        self.slots.iter_mut().for_each(|slot| *slot = bind(*slot));
+    }
+
+    pub(crate) fn assemble(
+        &self,
+        source: &RecordBatch,
+        values: &HashMap<usize, ArrayRef>,
+    ) -> Result<RecordBatch, ArrowError> {
+        crate::batch::assemble_batch(&self.schema, &self.slots, source, values)
+    }
 }
 
 /// Share one planning session across expressions in an ordered transformation.
@@ -68,30 +136,18 @@ impl ExpressionPlanner {
         names: &HashMap<String, usize>,
         metadata: &HashMap<String, String>,
     ) -> datafusion::error::Result<PlannedExpression> {
-        let mut indices = expression
-            .column_refs()
-            .into_iter()
-            .map(|column| {
-                names.get(&column.name).copied().ok_or_else(|| {
-                    DataFusionError::Plan(format!("unknown field {:?}", column.name))
-                })
-            })
-            .collect::<datafusion::error::Result<Vec<_>>>()?;
-        indices.sort_unstable();
-        indices.dedup();
-        let input = Arc::new(Schema::new_with_metadata(
-            indices
-                .iter()
-                .map(|&index| fields[index].clone())
-                .collect::<Vec<_>>(),
-            metadata.clone(),
-        ));
-        let (expression, output) =
-            self.plan(expression.clone(), &DFSchema::try_from(input.clone())?)?;
+        let input =
+            ExpressionInput::for_expression(expression, fields, names, metadata.clone(), |name| {
+                DataFusionError::Plan(format!("unknown field {name:?}"))
+            })?;
+        let (expression, output) = self.plan(
+            expression.clone(),
+            &DFSchema::try_from(input.schema().clone())?,
+        )?;
         Ok(PlannedExpression {
             expression,
             output,
-            input: (input, indices),
+            input,
         })
     }
 
@@ -116,39 +172,22 @@ impl ExpressionPlanner {
             wildcard: false,
         };
         let _ = sql.expr.visit(&mut candidates);
-        let schema_for = |indices: &[usize]| {
-            Arc::new(Schema::new(
-                indices
-                    .iter()
-                    .map(|&index| fields[index].clone())
-                    .collect::<Vec<_>>(),
-            ))
-        };
-        let mut indices = candidates.indices.into_iter().collect::<Vec<_>>();
-        indices.sort_unstable();
-        let schema = DFSchema::try_from(schema_for(&indices))?;
+        let mut input = ExpressionInput::new(fields, candidates.indices, HashMap::new());
+        let schema = DFSchema::try_from(input.schema().clone())?;
         let logical = self.state.create_logical_expr_from_sql_expr(sql, &schema)?;
         // A compound name can include both a source name and a nested field
         // name. Keep only the columns DataFusion actually resolved.
         if !candidates.wildcard {
-            indices = logical
-                .column_refs()
-                .into_iter()
-                .map(|column| {
-                    names.get(&column.name).copied().ok_or_else(|| {
-                        DataFusionError::Plan(format!("No field named {}", column.name))
-                    })
-                })
-                .collect::<datafusion::error::Result<Vec<_>>>()?;
-            indices.sort_unstable();
-            indices.dedup();
+            input =
+                ExpressionInput::for_expression(&logical, fields, names, HashMap::new(), |name| {
+                    DataFusionError::Plan(format!("No field named {name}"))
+                })?;
         }
-        let input = schema_for(&indices);
-        let (physical, field) = self.plan(logical, &DFSchema::try_from(input.clone())?)?;
+        let (physical, field) = self.plan(logical, &DFSchema::try_from(input.schema().clone())?)?;
         Ok(PlannedExpression {
             expression: physical,
             output: field,
-            input: (input, indices),
+            input,
         })
     }
 }
@@ -253,14 +292,13 @@ mod tests {
                 Ok((original, _)),
                 Ok(PlannedExpression {
                     expression: compact,
-                    input: (schema, indices),
+                    input,
                     ..
                 }),
             ) = (original, compact)
             {
                 let expected = original.evaluate(&batch).unwrap().into_array(1).unwrap();
-                let view = crate::batch::assemble_batch(&schema, &indices, &batch, &HashMap::new())
-                    .unwrap();
+                let view = input.assemble(&batch, &HashMap::new()).unwrap();
                 let actual = compact.evaluate(&view).unwrap().into_array(1).unwrap();
                 assert_eq!(actual.to_data(), expected.to_data(), "{sql}");
             }

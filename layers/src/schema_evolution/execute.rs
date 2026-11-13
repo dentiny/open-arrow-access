@@ -63,7 +63,8 @@ impl SchemaEvolutionPlan {
                     expression,
                     input,
                 } => {
-                    let view = assemble_batch(&input.0, &input.1, &batch, &values)
+                    let view = input
+                        .assemble(&batch, &values)
                         .map_err(crate::error::evolution_batch)?;
                     let array = expression
                         .evaluate(&view)
@@ -215,8 +216,8 @@ mod tests {
             let EvolutionStep::Add { index, input, .. } = step else {
                 panic!("expected add")
             };
-            assert_eq!(input.0.fields().len(), 1);
-            assert_eq!(input.1, [WIDTH - 1 + i]);
+            assert_eq!(input.schema().fields().len(), 1);
+            assert_eq!(input.slots(), [WIDTH - 1 + i]);
             assert_eq!(*index, WIDTH + i);
             assert_eq!(
                 plan.lifetimes.releases[i],
