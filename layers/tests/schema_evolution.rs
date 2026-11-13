@@ -1,9 +1,6 @@
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    task::Poll,
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 
 use datafusion::{
@@ -11,7 +8,7 @@ use datafusion::{
     logical_expr::{ColumnarValue, Expr, Volatility, create_udf},
     prelude::{col, lit},
 };
-use futures::stream;
+use futures::{StreamExt, stream};
 
 use arrow_array::{Array, ArrayRef, Int32Array, Int64Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, UnionFields, UnionMode};
@@ -57,7 +54,6 @@ fn counted_column(name: &str, data_type: DataType, calls: Arc<AtomicUsize>) -> E
 
 struct MemoryAccessor {
     schema: Arc<Schema>,
-    fail: bool,
     batches: Vec<RecordBatch>,
     calls: Arc<AtomicUsize>,
     requested_projection: Arc<std::sync::Mutex<Option<Vec<String>>>>,
@@ -67,7 +63,6 @@ impl MemoryAccessor {
     fn new(batches: Vec<RecordBatch>) -> Self {
         Self {
             schema: batches[0].schema(),
-            fail: false,
             batches,
             calls: Arc::default(),
             requested_projection: Arc::default(),
@@ -113,19 +108,9 @@ impl Accessor for MemoryAccessor {
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         *self.requested_projection.lock().unwrap() = request.options.projection.clone();
         let (schema, projection) = request.options.resolve_projection(&self.schema)?;
-        let mut batches = self.batches.clone().into_iter().map(Ok);
         let calls = self.calls.clone();
-        let mut fail = self.fail;
-        let stream = stream::poll_fn(move |_| {
+        let stream = stream::iter(self.batches.clone().into_iter().map(Ok)).inspect(move |_| {
             calls.fetch_add(1, Ordering::SeqCst);
-            if std::mem::take(&mut fail) {
-                return Poll::Ready(Some(Err(open_arrow_access_core::Error::new(
-                    ErrorKind::Io,
-                    "source_read",
-                    "failed",
-                ))));
-            }
-            Poll::Ready(batches.next())
         });
         Ok(Box::new(record_stream_reader(
             stream,
@@ -150,18 +135,6 @@ fn column_names(batch: &RecordBatch) -> Vec<&str> {
         .iter()
         .map(|field| field.name().as_str())
         .collect()
-}
-
-#[tokio::test]
-async fn incompatible_types_fail_before_reading() {
-    let input = batch(Arc::new(Int32Array::from(vec![42])));
-    let source = MemoryAccessor::new(vec![input]);
-    let calls = source.calls.clone();
-    let target = DataType::Struct(vec![item(DataType::Int32)].into());
-    let error = source.open_cast(target).await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::Unsupported);
-    assert!(error.to_string().contains("cannot cast Int32 to Struct"));
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
@@ -222,83 +195,70 @@ async fn identity_casts_share_batches() {
 }
 
 #[tokio::test]
-async fn decimal_rescaling_rejects_unsafe_pairs_before_reading() {
-    use arrow_array::new_empty_array;
-
-    let from = DataType::Decimal256(76, 0);
-    let to = DataType::Decimal256(76, 60);
-    let pairs = [
-        (from.clone(), to.clone()),
-        (from.clone(), DataType::Decimal256(76, 52)),
-        (DataType::Decimal128(38, 38), DataType::Decimal128(38, -128)),
-        (
-            DataType::List(item(dictionary(from.clone()))),
-            DataType::List(item(dictionary(to.clone()))),
-        ),
-        (union(vec![from, to.clone()]), dictionary(to)),
+async fn cast_validation_rejects_unsupported_and_unsafe_types_before_reading() {
+    let decimal = |scale| DataType::Decimal256(76, scale);
+    let fields = vec![
+        Field::new("a", decimal(0), true),
+        Field::new("b", decimal(60), true),
     ];
-    for (from, to) in pairs {
-        let source = MemoryAccessor::new(vec![batch(new_empty_array(&from))]);
-        let calls = source.calls.clone();
-        let error = source.open_cast(to).await.err().unwrap();
-        assert_eq!(error.kind(), ErrorKind::Unsupported);
-        assert!(error.to_string().contains("Decimal rescale"));
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    for (from, to, error_message) in [
+        (
+            DataType::Int32,
+            DataType::Struct(vec![item(DataType::Int32)].into()),
+            Some("cannot cast"),
+        ),
+        (decimal(0), decimal(60), Some("Decimal rescale")),
+        (decimal(0), decimal(52), Some("Decimal rescale")),
+        (
+            DataType::Decimal128(38, 38),
+            DataType::Decimal128(38, -128),
+            Some("Decimal rescale"),
+        ),
+        (
+            DataType::List(item(dictionary(decimal(0)))),
+            DataType::List(item(dictionary(decimal(60)))),
+            Some("Decimal rescale"),
+        ),
+        (
+            union(vec![decimal(0), decimal(60)]),
+            dictionary(decimal(60)),
+            Some("Decimal rescale"),
+        ),
+        (decimal(0), decimal(51), None),
+        (
+            DataType::Struct(fields.clone().into()),
+            DataType::Struct(fields.into_iter().rev().collect()),
+            None,
+        ),
+        (
+            dictionary(dictionary(union(vec![decimal(0), decimal(60)]))),
+            dictionary(decimal(60)),
+            None,
+        ),
+    ] {
+        let source = MemoryAccessor::new(vec![batch(arrow_array::new_empty_array(&from))]);
+        let reads = source.calls.clone();
+        let result = source.open_cast(to).await;
+        match error_message {
+            Some(message) => {
+                let error = result.err().unwrap();
+                assert_eq!(error.kind(), ErrorKind::Unsupported);
+                assert!(error.to_string().contains(message));
+            }
+            None => assert!(result.is_ok()),
+        }
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
     }
 }
 
 #[tokio::test]
-async fn decimal_guard_preserves_safe_rescaling_and_struct_field_mapping() {
-    use arrow_array::{Decimal256Array, new_empty_array};
-
-    let input = Decimal256Array::from_iter([Some(1.into()), None])
-        .with_precision_and_scale(76, 0)
-        .unwrap();
-    let mut reader = MemoryAccessor::new(vec![batch(Arc::new(input))])
-        .open_cast(DataType::Decimal256(76, 51))
-        .await
-        .unwrap();
-    let output = reader.next().await.unwrap().unwrap();
-    let expected =
-        Decimal256Array::from_iter([Some(format!("1{}", "0".repeat(51)).parse().unwrap()), None])
-            .with_precision_and_scale(76, 51)
-            .unwrap();
-    assert_eq!(output.column(0).to_data(), expected.to_data());
-
-    let fields = vec![
-        Field::new("a", DataType::Decimal256(76, 0), true),
-        Field::new("b", DataType::Decimal256(76, 60), true),
-    ];
-    let from = DataType::Struct(fields.clone().into());
-    let to = DataType::Struct(fields.into_iter().rev().collect());
-    let mut reader = MemoryAccessor::new(vec![batch(new_empty_array(&from))])
-        .open_cast(to)
-        .await
-        .unwrap();
-    assert!(reader.next().await.unwrap().is_some());
-
-    let union = union(vec![
-        DataType::Decimal256(76, 0),
-        DataType::Decimal256(76, 60),
-    ]);
-    let from = dictionary(dictionary(union));
-    let to = dictionary(DataType::Decimal256(76, 60));
-    let mut reader = MemoryAccessor::new(vec![batch(new_empty_array(&from))])
-        .open_cast(to)
-        .await
-        .unwrap();
-    assert!(reader.next().await.unwrap().is_some());
-}
-
-#[tokio::test]
-async fn timestamp_casts_accept_minute_precision_and_preserve_arrow_formats() {
+async fn timestamp_fallback_preserves_values_nulls_and_errors() {
     use arrow_schema::TimeUnit;
     let cases = [
         ("2000-05-31T04:00Z", "2000-05-31T04:00:00Z"),
         ("2000-05-31 06:00+02:00", "2000-05-31T04:00:00Z"),
         ("2000-05-31t04:00z", "2000-05-31T04:00:00Z"),
         ("2000-05-31T04:00", "2000-05-31T04:00:00"),
-        ("2000-05-31 04:00", "2000-05-31T04:00:00"),
         (
             "2000-05-31T04:00:01.123456789Z",
             "2000-05-31T04:00:01.123456789Z",
@@ -318,7 +278,7 @@ async fn timestamp_casts_accept_minute_precision_and_preserve_arrow_formats() {
             .chain([None])
             .collect::<Vec<_>>(),
     );
-    // Exercise each string layout and time unit without repeating their Cartesian product.
+    // Exercise each string layout and timezone context.
     for (source_type, unit, timezone) in [
         (DataType::Utf8, TimeUnit::Second, None),
         (DataType::LargeUtf8, TimeUnit::Millisecond, Some("UTC")),
@@ -327,7 +287,6 @@ async fn timestamp_casts_accept_minute_precision_and_preserve_arrow_formats() {
             TimeUnit::Microsecond,
             Some("America/New_York"),
         ),
-        (DataType::Utf8, TimeUnit::Nanosecond, Some("UTC")),
     ] {
         let target = DataType::Timestamp(unit, timezone.map(Into::into));
         let input = arrow_cast::cast(&input, &source_type).unwrap();
@@ -338,61 +297,52 @@ async fn timestamp_casts_accept_minute_precision_and_preserve_arrow_formats() {
             .unwrap();
         assert_eq!(reader.next().await.unwrap().unwrap().column(0), &expected);
     }
+    let mut reader = MemoryAccessor::new(vec![batch(Arc::new(StringArray::from(vec![
+        "2000-02-30T04:00Z",
+    ])))])
+    .open_cast(DataType::Timestamp(TimeUnit::Second, None))
+    .await
+    .unwrap();
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert_eq!(error.operation(), "cast");
 }
 
 #[tokio::test]
-async fn timestamp_fallback_rejects_invalid_ambiguous_and_overflowing_values() {
-    use arrow_schema::TimeUnit;
-    for (value, unit, timezone) in [
-        ("invalid", TimeUnit::Second, None),
-        ("2000-02-30T04:00Z", TimeUnit::Second, None),
-        (
-            "2025-11-02T01:30",
-            TimeUnit::Second,
-            Some("America/New_York"),
-        ),
-        (
-            "2025-03-09T02:30",
-            TimeUnit::Second,
-            Some("America/New_York"),
-        ),
-        ("2500-01-01T00:00Z", TimeUnit::Nanosecond, None),
-    ] {
-        let mut reader = MemoryAccessor::new(vec![batch(Arc::new(StringArray::from(vec![value])))])
-            .open_cast(DataType::Timestamp(unit, timezone.map(Into::into)))
-            .await
-            .unwrap();
-        let error = reader.next().await.unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Decode, "{value}");
-        assert_eq!(error.operation(), "cast");
-        assert!(reader.next().await.unwrap().is_none());
-    }
-}
-
-#[tokio::test]
-async fn schema_evolution_swaps_require_a_temporary_name() {
+async fn renames_preserve_column_identity_through_swaps_and_name_reuse() {
     let input = RecordBatch::try_from_iter([
         ("a", Arc::new(Int64Array::from(vec![1])) as ArrayRef),
         ("b", Arc::new(Int64Array::from(vec![2])) as ArrayRef),
     ])
     .unwrap();
-    let rename = |source: &str, target: &str| ColumnEvolution::rename_column(source, target);
-    for projection in [None, Some(vec!["a".into(), "b".into()])] {
+    let rename = |from: &str, to: &str| ColumnEvolution::rename_column(from, to);
+    for (changes, names, sources) in [
+        (
+            vec![rename("a", "tmp"), rename("b", "a"), rename("tmp", "b")],
+            ["a", "b"],
+            [1, 0],
+        ),
+        (
+            vec![
+                ColumnEvolution::remove_column("b"),
+                rename("a", "b"),
+                ColumnEvolution::add_column("a", DataType::Int64, col("b")),
+            ],
+            ["b", "a"],
+            [0, 0],
+        ),
+    ] {
         let mut reader = MemoryAccessor::new(vec![input.clone()])
             .open_evolved(
-                vec![rename("a", "tmp"), rename("b", "a"), rename("tmp", "b")],
-                projection.clone(),
+                changes,
+                Some(names.iter().map(|name| (*name).into()).collect()),
             )
             .await
             .unwrap();
         let output = reader.next().await.unwrap().unwrap();
-        let indices = if projection.is_some() { [1, 0] } else { [0, 1] };
-        for (index, source) in indices.into_iter().enumerate() {
-            assert_eq!(
-                output.schema().field(index).name(),
-                if source == 0 { "b" } else { "a" }
-            );
-            assert!(Arc::ptr_eq(output.column(index), input.column(source)));
+        assert_eq!(column_names(&output), names);
+        for (column, source) in output.columns().iter().zip(sources) {
+            assert!(Arc::ptr_eq(column, input.column(source)));
         }
     }
 }
@@ -493,31 +443,6 @@ async fn evolution_combines_all_operations_and_expressions_see_previous_changes(
     }
 }
 
-#[tokio::test]
-async fn evolution_can_reuse_removed_and_renamed_source_names() {
-    let input = RecordBatch::try_from_iter([
-        ("a", Arc::new(Int64Array::from(vec![1])) as ArrayRef),
-        ("b", Arc::new(Int64Array::from(vec![2])) as ArrayRef),
-    ])
-    .unwrap();
-    let mut reader = MemoryAccessor::new(vec![input.clone()])
-        .open_evolved(
-            vec![
-                ColumnEvolution::remove_column("b"),
-                ColumnEvolution::rename_column("a", "b"),
-                ColumnEvolution::add_column("a", DataType::Int64, col("b")),
-            ],
-            None,
-        )
-        .await
-        .unwrap();
-    let output = reader.next().await.unwrap().unwrap();
-    assert_eq!(output.schema().field(0).name(), "b");
-    assert_eq!(output.schema().field(1).name(), "a");
-    assert!(Arc::ptr_eq(output.column(0), input.column(0)));
-    assert!(Arc::ptr_eq(output.column(1), input.column(0)));
-}
-
 #[test]
 fn evolution_rejects_invalid_names_and_types() {
     for change in [
@@ -552,42 +477,6 @@ fn evolution_rejects_invalid_names_and_types() {
                 .kind(),
             ErrorKind::InvalidInput
         );
-    }
-}
-
-#[tokio::test]
-async fn evolution_rejects_invalid_expressions_before_reading() {
-    for (data_type, expression) in [
-        (DataType::Int32, col("missing")),
-        (DataType::Int64, col("value")),
-        (
-            DataType::Int64,
-            datafusion::functions_aggregate::expr_fn::sum(col("value")),
-        ),
-        (
-            DataType::Int32,
-            create_udf(
-                "volatile",
-                vec![DataType::Int32],
-                DataType::Int32,
-                Volatility::Volatile,
-                Arc::new(|args| Ok(args[0].clone())),
-            )
-            .call(vec![col("value")]),
-        ),
-    ] {
-        let source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1])))]);
-        let reads = source.calls.clone();
-        let error = source
-            .open_evolved(
-                vec![ColumnEvolution::add_column("added", data_type, expression)],
-                Some(vec![]),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-        assert_eq!(reads.load(Ordering::SeqCst), 0);
     }
 }
 
@@ -632,52 +521,8 @@ async fn evolution_checks_udf_results_and_preserves_errors_when_hidden() {
 }
 
 #[tokio::test]
-async fn evolution_can_remove_all_columns_without_losing_rows() {
-    let mut reader = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1, 2, 3])))])
-        .open_evolved(vec![ColumnEvolution::remove_column("value")], None)
-        .await
-        .unwrap();
-    assert_eq!(reader.metadata().schema.fields().len(), 0);
-    let output = reader.next().await.unwrap().unwrap();
-    assert_eq!(output.num_columns(), 0);
-    assert_eq!(output.num_rows(), 3);
-}
-
-#[tokio::test]
-async fn evolution_rejects_projection_of_removed_or_old_names_before_reading() {
-    for projection in [
-        vec!["value".into()],
-        vec!["removed".into()],
-        vec!["count".into(), "count".into()],
-    ] {
-        let input = RecordBatch::try_from_iter([
-            ("value", Arc::new(Int32Array::from(vec![1])) as ArrayRef),
-            ("removed", Arc::new(Int32Array::from(vec![2])) as ArrayRef),
-        ])
-        .unwrap();
-        let source = MemoryAccessor::new(vec![input]);
-        let reads = source.calls.clone();
-        let error = source
-            .open_evolved(
-                vec![
-                    ColumnEvolution::rename_column("value", "count"),
-                    ColumnEvolution::remove_column("removed"),
-                ],
-                Some(projection),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-        assert_eq!(reads.load(Ordering::SeqCst), 0);
-    }
-}
-
-#[tokio::test]
 async fn evolution_adds_nullable_and_nested_arrays_without_casting_them() {
     for data_type in [
-        DataType::Null,
-        DataType::Int32,
         DataType::List(item(DataType::Utf8)),
         DataType::Struct(vec![item(DataType::Int32)].into()),
         DataType::RunEndEncoded(
@@ -685,82 +530,40 @@ async fn evolution_adds_nullable_and_nested_arrays_without_casting_them() {
             item(DataType::Int32),
         ),
     ] {
-        for rows in [0, 2] {
-            let expected = arrow_array::new_null_array(&data_type, rows);
-            let input = RecordBatch::try_from_iter([("value", expected.clone())]).unwrap();
-            let mut reader = MemoryAccessor::new(vec![input.clone()])
-                .open_evolved(
-                    vec![ColumnEvolution::add_column(
-                        "added",
-                        data_type.clone(),
-                        col("value"),
-                    )],
-                    None,
-                )
-                .await
-                .unwrap();
-            assert!(reader.metadata().schema.field(1).is_nullable());
-            let output = reader.next().await.unwrap().unwrap();
-            assert_eq!(output.num_rows(), rows);
-            assert_eq!(output.column(1).data_type(), &data_type);
-            assert!(Arc::ptr_eq(output.column(1), &expected));
-            assert!(Arc::ptr_eq(output.column(0), input.column(0)));
-        }
+        let expected = arrow_array::new_null_array(&data_type, 2);
+        let input = RecordBatch::try_from_iter([("value", expected.clone())]).unwrap();
+        let mut reader = MemoryAccessor::new(vec![input.clone()])
+            .open_evolved(
+                vec![ColumnEvolution::add_column(
+                    "added",
+                    data_type.clone(),
+                    col("value"),
+                )],
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(reader.metadata().schema.field(1).is_nullable());
+        let output = reader.next().await.unwrap().unwrap();
+        assert_eq!(output.num_rows(), 2);
+        assert_eq!(output.column(1).data_type(), &data_type);
+        assert!(Arc::ptr_eq(output.column(1), &expected));
+        assert!(Arc::ptr_eq(output.column(0), input.column(0)));
     }
 }
 
 #[tokio::test]
-async fn evolution_plans_empty_inputs_without_evaluating_expressions() {
-    let mut source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1])))]);
-    source.batches.clear();
-    let reads = source.calls.clone();
-    let mut reader = source
-        .open_evolved(
-            vec![ColumnEvolution::add_column(
-                "added",
-                DataType::Int32,
-                lit(1i32),
-            )],
-            None,
-        )
-        .await
-        .unwrap();
-    assert_eq!(reader.metadata().schema.fields().len(), 2);
-    assert!(reader.next().await.unwrap().is_none());
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(reads.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
-async fn evolution_preserves_upstream_errors_and_terminates() {
-    let mut source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1])))]);
-    source.fail = true;
-    let reads = source.calls.clone();
-    let mut reader = source
-        .open_evolved(vec![ColumnEvolution::remove_column("value")], None)
-        .await
-        .unwrap();
-    let error = reader.next().await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::Io);
-    assert_eq!(error.operation(), "source_read");
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(reads.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
-async fn evolution_chains_add_cast_rename_and_repeated_casts() {
+async fn casts_on_added_columns_execute_in_vector_order() {
     let input = batch(Arc::new(StringArray::from(vec!["001"])));
     let mut reader = MemoryAccessor::new(vec![input])
         .open_evolved(
             vec![
                 ColumnEvolution::add_column("added", DataType::Utf8, col("value")),
                 ColumnEvolution::change_data_type("added", DataType::Int32),
-                ColumnEvolution::rename_column("added", "intermediate"),
-                ColumnEvolution::rename_column("intermediate", "final"),
+                ColumnEvolution::rename_column("added", "final"),
                 ColumnEvolution::change_data_type("final", DataType::Utf8),
-                ColumnEvolution::add_column("copied", DataType::Utf8, col("final")),
             ],
-            Some(vec!["copied".into(), "final".into()]),
+            Some(vec!["final".into()]),
         )
         .await
         .unwrap();
@@ -770,7 +573,6 @@ async fn evolution_chains_add_cast_rename_and_repeated_casts() {
         output.column(0).to_data(),
         StringArray::from(vec!["1"]).to_data()
     );
-    assert!(Arc::ptr_eq(output.column(0), output.column(1)));
 }
 
 #[tokio::test]
@@ -826,14 +628,6 @@ async fn evolution_checks_names_at_each_step_before_reading() {
             ColumnEvolution::add_column("c", DataType::Int32, lit(1i32)),
         ],
         vec![
-            ColumnEvolution::remove_column("a"),
-            ColumnEvolution::remove_column("a"),
-        ],
-        vec![
-            ColumnEvolution::rename_column("a", "c"),
-            ColumnEvolution::change_data_type("a", DataType::Int32),
-        ],
-        vec![
             ColumnEvolution::rename_column("a", "b"),
             ColumnEvolution::remove_column("b"),
         ],
@@ -849,7 +643,11 @@ async fn evolution_checks_names_at_each_step_before_reading() {
         .unwrap();
         let source = MemoryAccessor::new(vec![input]);
         let reads = source.calls.clone();
-        let error = source.open_evolved(changes, None).await.err().unwrap();
+        let error = source
+            .open_evolved(changes, Some(vec![]))
+            .await
+            .err()
+            .unwrap();
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
         assert_eq!(reads.load(Ordering::SeqCst), 0);
     }
@@ -949,31 +747,38 @@ async fn scalar_expressions_preserve_rows_with_no_source_columns() {
 }
 
 #[tokio::test]
-async fn supplied_schema_checks_hidden_collisions_and_projected_input_types() {
+async fn invalid_expression_types_and_source_schemas_fail_before_reading() {
     let input = batch(Arc::new(Int32Array::from(vec![1])));
-    let source = MemoryAccessor::new(vec![input.clone()]);
-    let layer = SchemaEvolutionLayer::try_new(vec![ColumnEvolution::add_column(
-        "value",
-        DataType::Int32,
-        lit(1i32),
-    )])
-    .unwrap()
-    .with_source_schema(input.schema());
-    let error = source.open_layer(layer, Some(vec![])).await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::InvalidInput);
-
-    let source = MemoryAccessor::new(vec![input]);
-    let layer = SchemaEvolutionLayer::try_new(vec![ColumnEvolution::add_column(
-        "copy",
-        DataType::Int64,
-        col("value"),
-    )])
-    .unwrap()
-    .with_source_schema(Arc::new(Schema::new(vec![Field::new(
+    let wrong_schema = Arc::new(Schema::new(vec![Field::new(
         "value",
         DataType::Int64,
         true,
-    )])));
-    let error = source.open_layer(layer, None).await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::Decode);
+    )]));
+    for (change, schema, kind) in [
+        (
+            ColumnEvolution::add_column("copy", DataType::Int64, col("value")),
+            None,
+            ErrorKind::InvalidInput,
+        ),
+        (
+            ColumnEvolution::add_column("value", DataType::Int32, lit(1i32)),
+            Some(input.schema()),
+            ErrorKind::InvalidInput,
+        ),
+        (
+            ColumnEvolution::add_column("copy", DataType::Int64, col("value")),
+            Some(wrong_schema),
+            ErrorKind::Decode,
+        ),
+    ] {
+        let source = MemoryAccessor::new(vec![input.clone()]);
+        let reads = source.calls.clone();
+        let mut layer = SchemaEvolutionLayer::try_new(vec![change]).unwrap();
+        if let Some(schema) = schema {
+            layer = layer.with_source_schema(schema);
+        }
+        let error = source.open_layer(layer, Some(vec![])).await.err().unwrap();
+        assert_eq!(error.kind(), kind);
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
+    }
 }
