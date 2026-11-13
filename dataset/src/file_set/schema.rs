@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use arrow_array::{
     Array, ArrayRef, RecordBatch, RecordBatchOptions, StructArray, make_array, new_null_array,
@@ -11,79 +8,233 @@ use open_arrow_access_core::{Result, SchemaRef};
 
 use super::{error, validation};
 
-pub(super) fn union_by_name(left: &Schema, right: &Schema) -> Result<Schema> {
-    let mut metadata = left.metadata().clone();
-    validation::validate_schema_metadata(left.metadata(), right.metadata())?;
-    metadata.extend(right.metadata().clone());
-    Ok(Schema::new_with_metadata(
-        union_fields(left.fields(), right.fields())?,
-        metadata,
-    ))
+#[derive(Default)]
+pub(super) struct SchemaUnion {
+    fields: FieldUnion,
+    metadata: HashMap<String, String>,
 }
 
-fn union_fields(left: &Fields, right: &Fields) -> Result<Fields> {
-    let right_by_name: HashMap<_, _> = right.iter().map(|field| (field.name(), field)).collect();
-    let left_names: HashSet<_> = left.iter().map(|field| field.name()).collect();
-    let mut fields = Vec::with_capacity(left.len() + right.len());
-    for field in left {
-        fields.push(match right_by_name.get(field.name()) {
-            Some(other) => Arc::new(union_field(field, other)?),
-            None => Arc::new(field.as_ref().clone().with_nullable(true)),
-        });
+impl SchemaUnion {
+    pub(super) fn merge(&mut self, schema: &Schema) -> Result<()> {
+        validation::validate_schema_metadata(&self.metadata, schema.metadata())?;
+        self.metadata.extend(schema.metadata().clone());
+        self.fields.merge(schema.fields())
     }
-    for field in right {
-        if !left_names.contains(field.name()) {
-            fields.push(Arc::new(field.as_ref().clone().with_nullable(true)));
-        }
+
+    pub(super) fn finish(self) -> Schema {
+        Schema::new_with_metadata(self.fields.finish(), self.metadata)
     }
-    Ok(fields.into())
 }
 
-fn union_field(left: &Field, right: &Field) -> Result<Field> {
-    validation::validate_field_names(left, right)?;
-    let data_type = union_type(left.data_type(), right.data_type())
-        .map_err(|source| error::field_union_error(left.name(), source))?;
-    let nullable = left.is_nullable()
-        || right.is_nullable()
-        || left.data_type() == &DataType::Null
-        || right.data_type() == &DataType::Null;
-    let mut field = left
-        .clone()
-        .with_data_type(data_type.clone())
-        .with_nullable(nullable);
-    // Arrow enforces field metadata and dictionary-order compatibility.
-    field
-        .try_merge(&right.clone().with_data_type(data_type))
-        .map_err(error::arrow_error)?;
-    Ok(field)
+#[derive(Default)]
+struct FieldUnion {
+    fields: Vec<UnionField>,
+    positions: HashMap<String, usize>,
+    inputs: usize,
 }
 
-fn union_type(left: &DataType, right: &DataType) -> Result<DataType> {
-    if left == right {
-        return Ok(left.clone());
+impl FieldUnion {
+    fn merge(&mut self, fields: &Fields) -> Result<()> {
+        self.inputs += 1;
+        for field in fields {
+            match self.positions.get(field.name()) {
+                Some(&index) => self.fields[index].merge(field)?,
+                None => {
+                    self.positions
+                        .insert(field.name().clone(), self.fields.len());
+                    self.fields.push(UnionField::new(field));
+                }
+            }
+        }
+        Ok(())
     }
-    Ok(match (left, right) {
-        (DataType::Null, other) | (other, DataType::Null) => other.clone(),
-        (DataType::Struct(left), DataType::Struct(right)) => {
-            DataType::Struct(union_fields(left, right)?)
+
+    fn finish(self) -> Fields {
+        self.fields
+            .into_iter()
+            .map(|field| Arc::new(field.finish(Some(self.inputs))))
+            .collect()
+    }
+}
+
+struct UnionField {
+    field: Field,
+    metadata: HashMap<String, String>,
+    data_type: UnionType,
+    occurrences: usize,
+}
+
+impl UnionField {
+    fn new(field: &Field) -> Self {
+        Self {
+            // Keep Arrow's field flags, but merge types and metadata incrementally.
+            field: field
+                .clone()
+                .with_data_type(DataType::Boolean)
+                .with_metadata(HashMap::new()),
+            metadata: field.metadata().clone(),
+            data_type: UnionType::new(field.data_type()),
+            occurrences: 1,
         }
-        (DataType::List(left), DataType::List(right)) => {
-            DataType::List(Arc::new(union_field(left, right)?))
+    }
+
+    fn merge(&mut self, field: &Field) -> Result<()> {
+        validation::validate_field_names(&self.field, field)?;
+        let nullable = self.field.is_nullable()
+            || field.is_nullable()
+            || matches!(self.data_type, UnionType::Leaf(DataType::Null))
+            || field.data_type() == &DataType::Null;
+        self.data_type
+            .merge(field.data_type())
+            .map_err(|source| error::field_union_error(field.name(), source))?;
+        // A primitive placeholder avoids rebuilding accumulated nested fields in try_merge.
+        self.field
+            .try_merge(
+                &field
+                    .clone()
+                    .with_data_type(DataType::Boolean)
+                    .with_metadata(HashMap::new()),
+            )
+            .map_err(error::arrow_error)?;
+        for (key, value) in field.metadata() {
+            if self
+                .metadata
+                .get(key)
+                .is_some_and(|existing| existing != value)
+            {
+                return Err(error::field_metadata_conflict(field.name(), key));
+            }
+            self.metadata.insert(key.clone(), value.clone());
         }
-        (DataType::LargeList(left), DataType::LargeList(right)) => {
-            DataType::LargeList(Arc::new(union_field(left, right)?))
+        self.field.set_nullable(nullable);
+        self.occurrences += 1;
+        Ok(())
+    }
+
+    fn finish(self, inputs: Option<usize>) -> Field {
+        let nullable =
+            self.field.is_nullable() || inputs.is_some_and(|inputs| self.occurrences < inputs);
+        self.field
+            .with_nullable(nullable)
+            .with_data_type(self.data_type.finish())
+            .with_metadata(self.metadata)
+    }
+}
+
+enum UnionType {
+    Leaf(DataType),
+    Struct(FieldUnion),
+    List {
+        kind: ListKind,
+        item: Box<UnionField>,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ListKind {
+    List,
+    LargeList,
+    ListView,
+    LargeListView,
+    FixedSizeList(i32),
+}
+
+impl ListKind {
+    fn from_type(data_type: &DataType) -> Option<(Self, &Field)> {
+        Some(match data_type {
+            DataType::List(item) => (Self::List, item),
+            DataType::LargeList(item) => (Self::LargeList, item),
+            DataType::ListView(item) => (Self::ListView, item),
+            DataType::LargeListView(item) => (Self::LargeListView, item),
+            DataType::FixedSizeList(item, size) => (Self::FixedSizeList(*size), item),
+            _ => return None,
+        })
+    }
+
+    fn finish(self, item: Field) -> DataType {
+        let item = Arc::new(item);
+        match self {
+            Self::List => DataType::List(item),
+            Self::LargeList => DataType::LargeList(item),
+            Self::ListView => DataType::ListView(item),
+            Self::LargeListView => DataType::LargeListView(item),
+            Self::FixedSizeList(size) => DataType::FixedSizeList(item, size),
         }
-        (DataType::ListView(left), DataType::ListView(right)) => {
-            DataType::ListView(Arc::new(union_field(left, right)?))
+    }
+}
+
+impl UnionType {
+    fn new(data_type: &DataType) -> Self {
+        if let DataType::Struct(fields) = data_type {
+            let mut union = FieldUnion::default();
+            union.merge(fields).expect("a new field has no conflicts");
+            Self::Struct(union)
+        } else if let Some((kind, item)) = ListKind::from_type(data_type) {
+            Self::List {
+                kind,
+                item: Box::new(UnionField::new(item)),
+            }
+        } else {
+            Self::Leaf(data_type.clone())
         }
-        (DataType::LargeListView(left), DataType::LargeListView(right)) => {
-            DataType::LargeListView(Arc::new(union_field(left, right)?))
+    }
+
+    fn merge(&mut self, data_type: &DataType) -> Result<()> {
+        if data_type == &DataType::Null {
+            return Ok(());
         }
-        (DataType::FixedSizeList(left, n), DataType::FixedSizeList(right, m)) if n == m => {
-            DataType::FixedSizeList(Arc::new(union_field(left, right)?), *n)
+        if matches!(self, Self::Leaf(DataType::Null)) {
+            *self = Self::new(data_type);
+            return Ok(());
         }
-        _ => return Err(error::incompatible_types(left, right)),
-    })
+        match (self, data_type) {
+            (Self::Struct(union), DataType::Struct(fields)) => union.merge(fields),
+            (Self::List { kind, item }, other)
+                if ListKind::from_type(other).is_some_and(|(other, _)| *kind == other) =>
+            {
+                item.merge(ListKind::from_type(other).unwrap().1)
+            }
+            (Self::Leaf(left), right) if left == right => Ok(()),
+            (left, right) => {
+                // Materialize the accumulated type only to explain an incompatible input.
+                Err(error::incompatible_types(&left.as_data_type(), right))
+            }
+        }
+    }
+
+    fn as_data_type(&self) -> DataType {
+        // Only used on an error path; finishing successful unions consumes their state.
+        match self {
+            Self::Leaf(data_type) => data_type.clone(),
+            Self::Struct(union) => DataType::Struct(
+                union
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        Arc::new(
+                            field
+                                .field
+                                .clone()
+                                .with_data_type(field.data_type.as_data_type()),
+                        )
+                    })
+                    .collect(),
+            ),
+            Self::List { kind, item } => kind.finish(
+                item.field
+                    .clone()
+                    .with_data_type(item.data_type.as_data_type()),
+            ),
+        }
+    }
+
+    fn finish(self) -> DataType {
+        match self {
+            Self::Leaf(data_type) => data_type,
+            Self::Struct(union) => DataType::Struct(union.finish()),
+            Self::List { kind, item } => kind.finish(item.finish(None)),
+        }
+    }
 }
 
 pub(super) fn align(batch: RecordBatch, target: SchemaRef) -> Result<RecordBatch> {
@@ -165,3 +316,7 @@ fn align_array(array: &ArrayRef, target: &DataType) -> Result<ArrayRef> {
         _ => Err(error::array_schema_mismatch()),
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/schema_union.rs"]
+mod tests;
