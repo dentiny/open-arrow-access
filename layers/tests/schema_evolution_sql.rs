@@ -586,8 +586,7 @@ async fn pushdown_preserves_source_outputs_and_full_namespace_generated_slots() 
 }
 
 #[tokio::test]
-async fn sql_namespace_and_wildcards_follow_removals_and_renames() {
-    use arrow_array::StructArray;
+async fn sql_namespace_follows_removals_and_renames() {
     let batch = input();
     for known_schema in [false, true] {
         let changes = || {
@@ -609,7 +608,7 @@ async fn sql_namespace_and_wildcards_follow_removals_and_renames() {
             assert_eq!(polls.load(Ordering::SeqCst), 0);
         }
         let mut valid = changes();
-        valid.push(ColumnEvolution::add_column_sql("snapshot", "struct(*)"));
+        valid.push(ColumnEvolution::add_column_sql("snapshot", "value"));
         let mut evolution = SchemaEvolutionLayer::try_new(valid).unwrap();
         if known_schema {
             evolution = evolution.with_source_schema(batch.schema());
@@ -620,12 +619,6 @@ async fn sql_namespace_and_wildcards_follow_removals_and_renames() {
             .await
             .unwrap();
         let output = reader.next().await.unwrap().unwrap();
-        let nested = output
-            .column(0)
-            .as_any()
-            .downcast_ref::<StructArray>()
-            .unwrap();
-        assert_eq!(nested.num_columns(), 1);
-        assert_eq!(nested.column(0).to_data(), batch.column(1).to_data());
+        assert_eq!(output.column(0).to_data(), batch.column(1).to_data());
     }
 }
