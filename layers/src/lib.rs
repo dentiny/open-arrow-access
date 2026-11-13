@@ -4,6 +4,7 @@ mod batch;
 mod error;
 mod expression;
 mod validation;
+mod value_lifetime;
 
 mod generated_columns;
 pub use generated_columns::{GeneratedColumnSpec, GeneratedColumnsAccessor, GeneratedColumnsLayer};

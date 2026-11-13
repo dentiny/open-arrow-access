@@ -260,25 +260,14 @@ struct GeneratedColumnsPlan {
 
 impl GeneratedColumnsPlan {
     fn new(mut steps: Vec<GeneratedStep>, schema: SchemaRef, output_indices: Vec<usize>) -> Self {
-        let source_len = steps[0].index;
-        let mut last_uses = (0..steps.len()).collect::<Vec<_>>();
-        for (position, step) in steps.iter().enumerate() {
-            for &index in &step.input.1 {
-                if index >= source_len {
-                    last_uses[index - source_len] = position;
-                }
-            }
-        }
-        // Final outputs stay live until assembly; every other slot has one release.
-        for &index in &output_indices {
-            if index >= source_len {
-                last_uses[index - source_len] = usize::MAX;
-            }
-        }
-        for (index, position) in last_uses.into_iter().enumerate() {
-            if position != usize::MAX {
-                steps[position].release.push(source_len + index);
-            }
+        let lifetimes = crate::value_lifetime::ValueLifetimePlan::new(
+            steps
+                .iter()
+                .map(|step| (Some(step.index), step.input.1.as_slice())),
+            &output_indices,
+        );
+        for (step, release) in steps.iter_mut().zip(lifetimes.releases) {
+            step.release = release;
         }
         Self {
             steps,

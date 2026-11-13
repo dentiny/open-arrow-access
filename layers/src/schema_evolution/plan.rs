@@ -20,6 +20,7 @@ pub(super) struct SchemaEvolutionPlan {
     pub(super) steps: Vec<EvolutionStep>,
     // Source-column or computed-value slot for each field in target_schema.
     pub(super) output_indices: Vec<usize>,
+    pub(super) lifetimes: crate::value_lifetime::ValueLifetimePlan,
 }
 
 pub(super) enum EvolutionStep {
@@ -210,7 +211,16 @@ impl SchemaEvolutionPlan {
             ),
             None => source.clone(),
         };
+        let lifetimes = crate::value_lifetime::ValueLifetimePlan::new(
+            steps.iter().map(|step| match step {
+                EvolutionStep::Add { index, input, .. } => (Some(*index), input.1.as_slice()),
+                EvolutionStep::Cast { index, .. } => (Some(*index), std::slice::from_ref(index)),
+                EvolutionStep::Remove(_) => (None, &[][..]),
+            }),
+            &output_indices,
+        );
         Ok(Self {
+            lifetimes,
             source_schema,
             target_schema,
             affected,
