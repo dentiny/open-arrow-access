@@ -63,8 +63,8 @@ Arrow casts through the existing layer contract.
 
 `GeneratedColumnsLayer` is implemented and always available, with
 ordered row-level SQL expressions, a fixed output schema, and final projection.
-It currently reads all source columns for complete schema validation;
-dependency-aware pushdown remains planned. See the
+Dependency projection pushdown is available with a complete `with_source_schema`
+and an output projection; all declarations still run. See the
 [generated-column design](generated-columns.md).
 
 Metrics can be developed independently. Byte counts, record batches, row counts,

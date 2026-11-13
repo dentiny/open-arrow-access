@@ -68,8 +68,9 @@ can change the sample.
 
 Keep generated columns and sampling **outside** `ParallelReadLayer` so they run
 over one merged scan. They do not implement `ScanPlanner`; putting the parallel
-layer outside either is unsupported. Generated columns currently read all source
-columns and evaluate all declarations before final projection.
+layer outside either is unsupported. With a complete `with_source_schema` and an
+output projection, generated columns read only required source columns. Otherwise,
+they read all source columns. All declarations run before final projection.
 
 ## Evolve a schema
 

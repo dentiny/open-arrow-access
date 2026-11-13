@@ -53,8 +53,10 @@ The wrapper works with any `Accessor<Reader = dyn RecordReader>` whose request
 implements `ReadOptionsProvider`; it does not depend on formats or storage.
 
 1. Empty configuration delegates directly, without an expression context.
-2. Retain the final projection and clear the inner projection before opening.
-3. Compile declarations against the complete source schema plus earlier outputs.
+2. Retain the final projection. With a supplied complete source schema and an
+   output projection, select the source columns needed by all declarations and
+   the requested output; otherwise, clear the inner projection before opening.
+3. Compile declarations against the selected source schema plus earlier outputs.
    Coerce and simplify each logical expression before physical planning.
 4. Expose the fixed augmented/projected schema before reading a batch.
 5. Evaluate physical expressions on Arrow arrays, then apply the final projection.
@@ -65,14 +67,15 @@ validated as they are produced; the final projected batch is assembled once.
 Memory is bounded by one input batch, its generated arrays and expression/kernel
 state. There is no DataFrame execution plan, materialized table or per-row SQL.
 
-**Projection limitation:** a nonempty configuration reads every source column and
-evaluates every declaration, including outputs omitted by the final projection.
-This can add substantial I/O/decoding cost for wide columnar inputs. It ensures
-full-schema collision/type checking with one open and the current accessor API.
-Dependency-aware pushdown is deferred until accessors can supply a complete source
-schema independently of the selected data. SQL literals/comments must never be
-inferred as dependencies by regex. Timing the in-memory kernel path does not
-measure this source-I/O cost.
+For dependency projection pushdown, supply the complete source schema with
+`with_source_schema` and request an output projection. Dependencies come from the
+parsed expressions, including references through earlier generated columns.
+Declarations are checked against the complete schema before opening, and the
+selected reader schema is checked at open. Without both settings, a nonempty
+configuration reads every source column.
+
+Every declaration still runs, including outputs omitted by the final projection.
+Pushdown reduces source I/O and decoding, not the set of expressions evaluated.
 
 For internal parallel reads, compose in this order:
 `source.layer(ParallelReadLayer::new(...)).layer(generated_layer)`.
