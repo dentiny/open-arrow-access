@@ -397,10 +397,7 @@ async fn unsafe_decimal_casts_fail_before_reading_or_constant_folding() {
             ErrorKind::InvalidInput,
             "{expression}: {error}"
         );
-        assert!(
-            error.to_string().contains("unsafe Decimal rescale"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("cannot cast"), "{error}");
         assert_eq!(polls.load(Ordering::SeqCst), 0);
     }
     let mut reader = MemoryAccessor::new(vec![input])
@@ -448,10 +445,7 @@ async fn run_end_cast_helpers_fail_before_reading_or_constant_folding() {
             ErrorKind::InvalidInput,
             "{expression}: {error}"
         );
-        assert!(
-            error.to_string().contains("unsupported column type"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("cannot cast"), "{error}");
         assert_eq!(polls.load(Ordering::SeqCst), 0);
     }
     let mut reader = MemoryAccessor::new(vec![input])

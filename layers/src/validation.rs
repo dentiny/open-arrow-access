@@ -4,8 +4,7 @@ use arrow_array::types::{
     Decimal32Type, Decimal64Type, Decimal128Type, Decimal256Type,
     validate_decimal_precision_and_scale,
 };
-use arrow_cast::can_cast_types;
-use arrow_schema::{ArrowError, DataType, Field, TimeUnit};
+use arrow_schema::{DataType, Field, TimeUnit};
 use open_arrow_access_core::{
     EmissionPolicy, FieldNameIndex, OrderRequirement, ParallelReadOptions, Result,
 };
@@ -45,8 +44,17 @@ pub(crate) fn validate_cast(field: &Field, target: &DataType) -> Result<()> {
     if !can_cast_types(from, target) {
         return Err(crate::error::unsupported_cast(field, from, target));
     }
-    validate_decimal_cast(from, target)
-        .map_err(|error| crate::error::cast_plan_error(field.name(), error))
+    Ok(())
+}
+
+fn can_cast_types(from: &DataType, to: &DataType) -> bool {
+    arrow_cast::can_cast_types(from, to)
+        && is_valid_cast_target(from, to)
+        && is_safe_decimal_cast(from, to)
+}
+
+fn is_valid_cast_target(from: &DataType, to: &DataType) -> bool {
+    from == to || is_valid_evolution_type(to, true)
 }
 
 fn decimal_params(data_type: &DataType) -> Option<(i16, i16)> {
@@ -72,42 +80,36 @@ fn list_item(data_type: &DataType) -> Option<&DataType> {
     }
 }
 
-fn validate_decimal_cast(from: &DataType, to: &DataType) -> std::result::Result<(), ArrowError> {
+fn is_safe_decimal_cast(from: &DataType, to: &DataType) -> bool {
     if from == to || from.is_null() {
-        return Ok(());
+        return true;
     }
     if let (Some((precision, from_scale)), Some((_, to_scale))) =
         (decimal_params(from), decimal_params(to))
     {
         // Arrow 59.3 computes both expressions in i8, which can panic or select wrapping multiplication.
         let delta = to_scale - from_scale;
-        if delta.abs() > i16::from(i8::MAX)
-            || (delta >= 0 && precision + delta > i16::from(i8::MAX))
-        {
-            return Err(crate::error::unsafe_decimal_rescale(from, to));
-        }
-        return Ok(());
+        return delta.abs() <= i16::from(i8::MAX)
+            && (delta < 0 || precision + delta <= i16::from(i8::MAX));
     }
     match (from, to) {
-        (DataType::RunEndEncoded(_, values), _) => validate_decimal_cast(values.data_type(), to)?,
+        (DataType::RunEndEncoded(_, values), _) => is_safe_decimal_cast(values.data_type(), to),
         (DataType::Union(fields, _), _) => {
-            if !fields.iter().any(|(_, field)| field.data_type() == to)
-                && let Some((_, field)) = fields
+            fields.iter().any(|(_, field)| field.data_type() == to)
+                || fields
                     .iter()
-                    .find(|(_, field)| can_cast_types(field.data_type(), to))
-            {
-                validate_decimal_cast(field.data_type(), to)?;
-            }
+                    .find(|(_, field)| arrow_cast::can_cast_types(field.data_type(), to))
+                    .is_none_or(|(_, field)| is_safe_decimal_cast(field.data_type(), to))
         }
         (DataType::Dictionary(_, from), DataType::Dictionary(_, to)) => {
             let mut from = from.as_ref();
             while let DataType::Dictionary(_, values) = from {
                 from = values;
             }
-            validate_decimal_cast(from, to)?;
+            is_safe_decimal_cast(from, to)
         }
-        (DataType::Dictionary(_, value), _) => validate_decimal_cast(value, to)?,
-        (_, DataType::Dictionary(_, value)) => validate_decimal_cast(from, value)?,
+        (DataType::Dictionary(_, value), _) => is_safe_decimal_cast(value, to),
+        (_, DataType::Dictionary(_, value)) => is_safe_decimal_cast(from, value),
         (DataType::Struct(from_fields), DataType::Struct(to_fields)) => {
             let in_order = from_fields
                 .iter()
@@ -120,107 +122,91 @@ fn validate_decimal_cast(from: &DataType, to: &DataType) -> std::result::Result<
                         .iter()
                         .all(|field| index.get(field.name()).is_some())
                 });
-            for (position, to) in to_fields.iter().enumerate() {
+            to_fields.iter().enumerate().all(|(position, to)| {
                 let index = by_name
                     .as_ref()
                     .map_or(position, |index| index.get(to.name()).unwrap());
-                let from = &from_fields[index];
-                validate_decimal_cast(from.data_type(), to.data_type())?;
-            }
+                is_safe_decimal_cast(from_fields[index].data_type(), to.data_type())
+            })
         }
         (DataType::Map(from, _), DataType::Map(to, _)) => {
-            if let (DataType::Struct(from), DataType::Struct(to)) =
-                (from.data_type(), to.data_type())
-            {
-                for (from, to) in from.iter().zip(to) {
-                    validate_decimal_cast(from.data_type(), to.data_type())?;
-                }
+            match (from.data_type(), to.data_type()) {
+                (DataType::Struct(from), DataType::Struct(to)) => from
+                    .iter()
+                    .zip(to)
+                    .all(|(from, to)| is_safe_decimal_cast(from.data_type(), to.data_type())),
+                _ => true,
             }
         }
         _ => match (list_item(from), list_item(to)) {
-            (Some(from), Some(to)) => validate_decimal_cast(from, to)?,
-            (_, Some(to)) => validate_decimal_cast(from, to)?,
+            (Some(from), Some(to)) => is_safe_decimal_cast(from, to),
+            (_, Some(to)) => is_safe_decimal_cast(from, to),
             (Some(item), None) if matches!(from, DataType::FixedSizeList(_, 1)) => {
-                validate_decimal_cast(item, to)?
+                is_safe_decimal_cast(item, to)
             }
-            _ => {}
+            _ => true,
         },
     }
-    Ok(())
 }
 
-fn validate_evolution_type(
-    data_type: &DataType,
-    for_cast: bool,
-) -> std::result::Result<(), ArrowError> {
-    let invalid = || crate::error::invalid_evolution_type(data_type);
+fn is_valid_evolution_type(data_type: &DataType, for_cast: bool) -> bool {
     match data_type {
-        DataType::Time32(unit) if !matches!(unit, TimeUnit::Second | TimeUnit::Millisecond) => {
-            return Err(invalid());
+        DataType::Time32(unit) => matches!(unit, TimeUnit::Second | TimeUnit::Millisecond),
+        DataType::Time64(unit) => matches!(unit, TimeUnit::Microsecond | TimeUnit::Nanosecond),
+        DataType::FixedSizeBinary(size) => *size >= 0,
+        DataType::FixedSizeList(field, size) => {
+            *size >= 0 && is_valid_evolution_type(field.data_type(), for_cast)
         }
-        DataType::Time64(unit) if !matches!(unit, TimeUnit::Microsecond | TimeUnit::Nanosecond) => {
-            return Err(invalid());
+        DataType::Dictionary(key, value) => {
+            key.is_dictionary_key_type() && is_valid_evolution_type(value, for_cast)
         }
-        DataType::FixedSizeBinary(size) | DataType::FixedSizeList(_, size) if *size < 0 => {
-            return Err(invalid());
-        }
-        DataType::Dictionary(key, _) if !key.is_dictionary_key_type() => return Err(invalid()),
         DataType::Map(entries, _) => match entries.data_type() {
-            DataType::Struct(fields)
-                if !entries.is_nullable() && fields.len() == 2 && !fields[0].is_nullable() => {}
-            _ => return Err(invalid()),
+            DataType::Struct(fields) => {
+                !entries.is_nullable()
+                    && fields.len() == 2
+                    && !fields[0].is_nullable()
+                    && is_valid_evolution_type(entries.data_type(), for_cast)
+            }
+            _ => false,
         },
         DataType::Union(fields, _) => {
             let mut ids = HashSet::with_capacity(fields.len());
-            if (for_cast && fields.is_empty())
-                || fields.iter().any(|(id, _)| id < 0 || !ids.insert(id))
-            {
-                return Err(invalid());
-            }
+            (!for_cast || !fields.is_empty())
+                && fields.iter().all(|(id, field)| {
+                    id >= 0
+                        && ids.insert(id)
+                        && is_valid_evolution_type(field.data_type(), for_cast)
+                })
         }
         DataType::RunEndEncoded(run_ends, values) => {
             // Arrow's null-to-run-end cast can panic beyond the key range.
             // Passthrough and UDF-produced arrays do not use that cast path.
-            if for_cast || run_ends.is_nullable() || !run_ends.data_type().is_run_ends_type() {
-                return Err(invalid());
-            }
-            return validate_evolution_type(values.data_type(), for_cast);
+            !for_cast
+                && !run_ends.is_nullable()
+                && run_ends.data_type().is_run_ends_type()
+                && is_valid_evolution_type(values.data_type(), for_cast)
         }
         DataType::Decimal32(precision, scale) => {
-            return validate_decimal_precision_and_scale::<Decimal32Type>(*precision, *scale);
+            validate_decimal_precision_and_scale::<Decimal32Type>(*precision, *scale).is_ok()
         }
         DataType::Decimal64(precision, scale) => {
-            return validate_decimal_precision_and_scale::<Decimal64Type>(*precision, *scale);
+            validate_decimal_precision_and_scale::<Decimal64Type>(*precision, *scale).is_ok()
         }
         DataType::Decimal128(precision, scale) => {
-            return validate_decimal_precision_and_scale::<Decimal128Type>(*precision, *scale);
+            validate_decimal_precision_and_scale::<Decimal128Type>(*precision, *scale).is_ok()
         }
         DataType::Decimal256(precision, scale) => {
-            return validate_decimal_precision_and_scale::<Decimal256Type>(*precision, *scale);
+            validate_decimal_precision_and_scale::<Decimal256Type>(*precision, *scale).is_ok()
         }
-        _ => {}
-    }
-    match data_type {
         DataType::List(field)
         | DataType::LargeList(field)
         | DataType::ListView(field)
-        | DataType::LargeListView(field)
-        | DataType::FixedSizeList(field, _)
-        | DataType::Map(field, _) => validate_evolution_type(field.data_type(), for_cast)?,
-        DataType::Struct(fields) => {
-            for field in fields {
-                validate_evolution_type(field.data_type(), for_cast)?;
-            }
-        }
-        DataType::Union(fields, _) => {
-            for (_, field) in fields.iter() {
-                validate_evolution_type(field.data_type(), for_cast)?;
-            }
-        }
-        DataType::Dictionary(_, value) => validate_evolution_type(value, for_cast)?,
-        _ => {}
+        | DataType::LargeListView(field) => is_valid_evolution_type(field.data_type(), for_cast),
+        DataType::Struct(fields) => fields
+            .iter()
+            .all(|field| is_valid_evolution_type(field.data_type(), for_cast)),
+        _ => true,
     }
-    Ok(())
 }
 
 fn has_extension(field: &Field) -> bool {
@@ -324,11 +310,8 @@ pub(crate) fn validate_expression_casts(
             let from = source.get_type(schema)?;
             let to = expr.get_type(schema)?;
             // Check before simplification can fold constants or lower cast UDFs.
-            if can_cast_types(&from, &to) {
-                if from != to {
-                    validate_evolution_type(&to, true)?;
-                }
-                validate_decimal_cast(&from, &to)?;
+            if !can_cast_types(&from, &to) {
+                return Err(crate::error::cannot_cast(&from, &to).into());
             }
         }
         Ok(TreeNodeRecursion::Continue)
@@ -383,9 +366,15 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
             ColumnEvolution::RemoveColumn { name } => name,
             ColumnEvolution::AddColumn {
                 name, data_type, ..
-            } => {
-                validate_evolution_type(data_type, false)
-                    .map_err(|error| crate::error::evolution_config_error(name, error))?;
+            }
+            | ColumnEvolution::ChangeDataType { name, data_type } => {
+                let for_cast = matches!(change, ColumnEvolution::ChangeDataType { .. });
+                if !is_valid_evolution_type(data_type, for_cast) {
+                    return Err(crate::error::evolution_config_error(
+                        name,
+                        crate::error::invalid_evolution_type(data_type),
+                    ));
+                }
                 name
             }
             ColumnEvolution::RenameColumn {
@@ -394,11 +383,6 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
             } => {
                 validate_evolution_name(target_name)?;
                 source_name
-            }
-            ColumnEvolution::ChangeDataType { name, data_type } => {
-                validate_evolution_type(data_type, true)
-                    .map_err(|error| crate::error::evolution_config_error(name, error))?;
-                name
             }
         };
         validate_evolution_name(name)?;

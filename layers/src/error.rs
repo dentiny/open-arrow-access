@@ -19,10 +19,6 @@ pub(crate) fn evolution_config_error(column: &str, error: ArrowError) -> Error {
     )
 }
 
-pub(crate) fn cast_plan_error(column: &str, error: ArrowError) -> Error {
-    column_error(ErrorKind::Unsupported, "plan_cast", column, error)
-}
-
 pub(crate) fn schema_error() -> Error {
     Error::new(
         ErrorKind::Decode,
@@ -105,11 +101,19 @@ pub(crate) fn unsupported_cast(
     from: &arrow_schema::DataType,
     target: &arrow_schema::DataType,
 ) -> Error {
-    Error::new(
+    column_error(
         ErrorKind::Unsupported,
         "plan_cast",
-        format!("column {:?}: cannot cast {from} to {target}", field.name()),
+        field.name(),
+        cannot_cast(from, target),
     )
+}
+
+pub(crate) fn cannot_cast(
+    from: &arrow_schema::DataType,
+    target: &arrow_schema::DataType,
+) -> ArrowError {
+    ArrowError::CastError(format!("cannot cast {from} to {target}"))
 }
 
 pub(crate) fn generated_schema_mismatch() -> Error {
@@ -136,15 +140,6 @@ pub(crate) fn cast_error(
         format!("column {:?}: {} to {target}: {error}", name, from,),
     )
     .with_source(error)
-}
-
-pub(crate) fn unsafe_decimal_rescale(
-    from: &arrow_schema::DataType,
-    to: &arrow_schema::DataType,
-) -> ArrowError {
-    ArrowError::CastError(format!(
-        "unsafe Decimal rescale from {from} to {to}: Arrow's i8 scale arithmetic would overflow"
-    ))
 }
 
 pub(crate) fn invalid_evolution_type(data_type: &arrow_schema::DataType) -> ArrowError {

@@ -201,51 +201,55 @@ async fn cast_validation_rejects_unsupported_and_unsafe_types_before_reading() {
         Field::new("a", decimal(0), true),
         Field::new("b", decimal(60), true),
     ];
-    for (from, to, error_message) in [
+    for (from, to, rejected) in [
         (
             DataType::Int32,
             DataType::Struct(vec![item(DataType::Int32)].into()),
-            Some("cannot cast"),
+            true,
         ),
-        (decimal(0), decimal(60), Some("Decimal rescale")),
-        (decimal(0), decimal(52), Some("Decimal rescale")),
+        (decimal(0), decimal(60), true),
+        (decimal(0), decimal(52), true),
         (
             DataType::Decimal128(38, 38),
             DataType::Decimal128(38, -128),
-            Some("Decimal rescale"),
+            true,
         ),
         (
             DataType::List(item(dictionary(decimal(0)))),
             DataType::List(item(dictionary(decimal(60)))),
-            Some("Decimal rescale"),
+            true,
         ),
         (
             union(vec![decimal(0), decimal(60)]),
             dictionary(decimal(60)),
-            Some("Decimal rescale"),
+            true,
         ),
-        (decimal(0), decimal(51), None),
+        (decimal(0), decimal(51), false),
         (
             DataType::Struct(fields.clone().into()),
             DataType::Struct(fields.into_iter().rev().collect()),
-            None,
+            false,
         ),
         (
             dictionary(dictionary(union(vec![decimal(0), decimal(60)]))),
             dictionary(decimal(60)),
-            None,
+            false,
         ),
     ] {
         let source = MemoryAccessor::new(vec![batch(arrow_array::new_empty_array(&from))]);
         let reads = source.calls.clone();
-        let result = source.open_cast(to).await;
-        match error_message {
-            Some(message) => {
-                let error = result.err().unwrap();
-                assert_eq!(error.kind(), ErrorKind::Unsupported);
-                assert!(error.to_string().contains(message));
-            }
-            None => assert!(result.is_ok()),
+        let result = source.open_cast(to.clone()).await;
+        if rejected {
+            let error = result.err().unwrap();
+            assert_eq!(error.kind(), ErrorKind::Unsupported);
+            assert_eq!(error.operation(), "plan_cast");
+            let message = error.to_string();
+            assert!(message.contains("cannot cast"), "{error}");
+            assert!(message.contains("value"), "{error}");
+            assert!(message.contains(&from.to_string()), "{error}");
+            assert!(message.contains(&to.to_string()), "{error}");
+        } else {
+            assert!(result.is_ok());
         }
         assert_eq!(reads.load(Ordering::SeqCst), 0);
     }
@@ -277,10 +281,7 @@ async fn added_expressions_reject_unsafe_decimal_casts_even_when_hidden() {
             .err()
             .unwrap();
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
-        assert!(
-            error.to_string().contains("unsafe Decimal rescale"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("cannot cast"), "{error}");
         assert_eq!(reads.load(Ordering::SeqCst), 0);
     }
 }
@@ -316,10 +317,7 @@ async fn added_expressions_reject_run_end_casts_before_reading() {
                 .err()
                 .unwrap();
             assert_eq!(error.kind(), ErrorKind::InvalidInput);
-            assert!(
-                error.to_string().contains("unsupported column type"),
-                "{error}"
-            );
+            assert!(error.to_string().contains("cannot cast"), "{error}");
             assert_eq!(reads.load(Ordering::SeqCst), 0);
         }
     }
