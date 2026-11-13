@@ -1,8 +1,14 @@
 use std::collections::HashSet;
 
-/// Releases computed slots after their last use, including overwritten values.
-/// Each step reads its inputs before replacing its optional output slot.
+/// Plans when to release computed Arrow arrays within one batch.
+/// A "value" is an array produced by a generated-column expression or a schema
+/// evolution add/cast step, stored in the executor's `values` map under a column
+/// slot ID. A cast may replace the array in an existing slot after reading it.
+/// Final output values remain available until the output batch is assembled.
 pub(crate) struct ValueLifetimePlan {
+    /// `releases[step_index]` lists the slot IDs to remove from `values` after
+    /// that step executes and validates its result. Removal drops the executor's
+    /// array reference; other arrays or output batches may still share its buffers.
     pub(crate) releases: Vec<Vec<usize>>,
 }
 
