@@ -179,14 +179,14 @@ where
         let inner = self.inner.open(request).await?;
         let source = &inner.metadata().schema;
         let plan = if let Some(mut plan) = planned {
-            validation::validate_evolution_input_schema(source, &plan.source)?;
-            plan.source = source.clone();
+            validation::validate_evolution_input_schema(source, &plan.source_schema)?;
+            plan.source_schema = source.clone();
             plan
         } else {
             plan_evolution(&self.changes, source, &output_options)?
         };
         if plan.steps.is_empty()
-            && plan.schema == *source
+            && plan.target_schema == *source
             && plan
                 .output_indices
                 .iter()
@@ -196,7 +196,7 @@ where
             return Ok(inner);
         }
         let metadata = RecordMetadata {
-            schema: Arc::clone(&plan.schema),
+            schema: Arc::clone(&plan.target_schema),
             source: inner.metadata().source.clone(),
         };
         let capability = inner.capability();
@@ -214,10 +214,13 @@ where
 }
 
 struct SchemaEvolutionPlan {
-    source: SchemaRef,
-    schema: SchemaRef,
+    source_schema: SchemaRef,
+    target_schema: SchemaRef,
+    // Source column indices checked when a batch has a different schema instance.
     affected: Vec<usize>,
+    // Runtime operations in caller order; renames are resolved during planning.
     steps: Vec<EvolutionStep>,
+    // Source-column or computed-value slot for each field in target_schema.
     output_indices: Vec<usize>,
 }
 
@@ -365,8 +368,8 @@ fn plan_evolution(
             .collect();
     }
     Ok(SchemaEvolutionPlan {
-        source: source.clone(),
-        schema,
+        source_schema: source.clone(),
+        target_schema: schema,
         affected: affected.into_iter().collect(),
         steps,
         output_indices,
@@ -411,12 +414,12 @@ impl SchemaEvolutionPlan {
         }
         let mut indices: Vec<_> = required
             .into_iter()
-            .filter(|&index| index < self.source.fields().len())
+            .filter(|&index| index < self.source_schema.fields().len())
             .collect();
         indices.sort_unstable();
         let names = indices
             .iter()
-            .map(|&index| self.source.field(index).name().clone())
+            .map(|&index| self.source_schema.field(index).name().clone())
             .collect();
         let input_indices: HashMap<_, _> = indices
             .iter()
@@ -437,7 +440,8 @@ impl SchemaEvolutionPlan {
         // their original indices, which cannot overlap compact input indices.
         self.steps.retain_mut(|step| match step {
             EvolutionStep::Remove(index)
-                if *index < self.source.fields().len() && !input_indices.contains_key(index) =>
+                if *index < self.source_schema.fields().len()
+                    && !input_indices.contains_key(index) =>
             {
                 false
             }
@@ -451,8 +455,8 @@ impl SchemaEvolutionPlan {
             }
         });
         self.output_indices.iter_mut().for_each(rebind);
-        self.source = Arc::new(
-            self.source
+        self.source_schema = Arc::new(
+            self.source_schema
                 .project(&indices)
                 .map_err(crate::error::evolution_batch)?,
         );
@@ -462,7 +466,7 @@ impl SchemaEvolutionPlan {
     fn convert(&self, batch: RecordBatch) -> Result<RecordBatch> {
         validation::validate_evolution_batch_schema(
             batch.schema_ref(),
-            &self.source,
+            &self.source_schema,
             &self.affected,
         )?;
         let mut values = HashMap::new();
@@ -518,7 +522,7 @@ impl SchemaEvolutionPlan {
                 }
             }
         }
-        assemble_batch(&self.schema, &self.output_indices, &batch, &values)
+        assemble_batch(&self.target_schema, &self.output_indices, &batch, &values)
     }
 }
 
