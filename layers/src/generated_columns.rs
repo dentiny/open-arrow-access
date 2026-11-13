@@ -221,6 +221,7 @@ struct GeneratedStep {
 struct GeneratedColumnsPlan {
     steps: Vec<GeneratedStep>,
     schema: SchemaRef,
+    // Source-column or generated-value slot for each field in the output schema.
     output_indices: Vec<usize>,
 }
 
