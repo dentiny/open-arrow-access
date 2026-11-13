@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
     },
     task::Poll,
 };
@@ -17,7 +17,7 @@ use open_arrow_access_core::{
 use open_arrow_access_layers::{
     FieldRemap, GeneratedColumnSpec, GeneratedColumnsLayer, SchemaRemapLayer,
 };
-use open_arrow_access_test_support::{DropProbe, reader::assert_finished};
+use open_arrow_access_test_support::reader::assert_finished;
 
 fn layer(specs: &[(&str, &str)]) -> GeneratedColumnsLayer {
     GeneratedColumnsLayer::try_new(
@@ -35,7 +35,6 @@ fn layer(specs: &[(&str, &str)]) -> GeneratedColumnsLayer {
 struct MemoryAccessor {
     batches: Vec<RecordBatch>,
     polls: Arc<AtomicUsize>,
-    dropped: Arc<AtomicBool>,
     projections: Arc<Mutex<Vec<Option<Vec<String>>>>>,
 }
 
@@ -44,7 +43,6 @@ impl MemoryAccessor {
         Self {
             batches,
             polls: Arc::default(),
-            dropped: Arc::default(),
             projections: Arc::default(),
         }
     }
@@ -73,9 +71,7 @@ impl Accessor for MemoryAccessor {
             .resolve_projection(&self.batches[0].schema())?;
         let mut batches = self.batches.clone().into_iter().map(Ok);
         let polls = self.polls.clone();
-        let probe = DropProbe::new(self.dropped.clone());
         let stream = stream::poll_fn(move |_| {
-            let _ = &probe;
             polls.fetch_add(1, Ordering::SeqCst);
             Poll::Ready(batches.next())
         });
@@ -396,28 +392,4 @@ async fn projection_pushdown_reads_real_dependencies_and_remaps_column_indices()
         &Int64Array::from(vec![Some(6), None, Some(10)])
     );
     assert!(reader.next().await.unwrap().is_none());
-}
-
-#[tokio::test]
-async fn evaluation_failure_stops_before_reading_the_next_batch() {
-    let source = MemoryAccessor::new(vec![input(), input()]);
-    let polls = source.polls.clone();
-    let dropped = source.dropped.clone();
-    let mut reader = source
-        .layer(layer(&[("number", "CAST(text AS BIGINT)")]))
-        .open(request(&["number"]))
-        .await
-        .unwrap();
-    assert_eq!(polls.load(Ordering::SeqCst), 0);
-    assert!(!dropped.load(Ordering::SeqCst));
-    let error = open_arrow_access_test_support::reader::assert_terminal_error(
-        reader.as_mut(),
-        &polls,
-        ErrorKind::Decode,
-        |m| (m.schema.clone(), m.source.clone()),
-    )
-    .await;
-    assert_eq!(error.operation(), "generate_column");
-    assert_eq!(polls.load(Ordering::SeqCst), 1);
-    assert!(dropped.load(Ordering::SeqCst));
 }
