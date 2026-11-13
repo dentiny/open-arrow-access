@@ -1,4 +1,4 @@
-//! Shared byte fixtures and operator setup for integration tests.
+//! Shared byte and record fixtures and operator setup for integration tests.
 //! Depend on this crate only through dev-dependencies.
 
 use std::{
@@ -281,6 +281,7 @@ pub mod reader;
 
 /// Shared helpers for record-reader values.
 pub mod record;
+pub use record::MemoryRecordAccessor;
 
 fn memory_error<'a>(error: &'a Error, operation: &str) -> &'a Error {
     let mut source: &(dyn std::error::Error + 'static) = error;

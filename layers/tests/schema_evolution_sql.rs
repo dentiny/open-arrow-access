@@ -1,21 +1,15 @@
 use std::{
     collections::HashMap,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
-    },
-    task::Poll,
+    sync::{Arc, atomic::Ordering},
 };
 
 use arrow_array::{Array, Int32Array, Int64Array, RecordBatch, RecordBatchOptions, StringArray};
 use arrow_schema::{DataType, Field, Schema};
-use futures::stream;
-use open_arrow_access_core::{
-    Accessor, AccessorExt, Capability, ErrorKind, OrderRequirement, ReadOptions, ReadRequest,
-    RecordCapability, RecordMetadata, RecordReader, Result, async_trait, record_stream_reader,
-};
+use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest};
 use open_arrow_access_layers::{ColumnEvolution, SchemaEvolutionLayer};
-use open_arrow_access_test_support::reader::assert_finished;
+use open_arrow_access_test_support::{
+    MemoryRecordAccessor as MemoryAccessor, reader::assert_finished,
+};
 
 fn layer(specs: &[(&str, &str)]) -> SchemaEvolutionLayer {
     SchemaEvolutionLayer::try_new(
@@ -25,61 +19,6 @@ fn layer(specs: &[(&str, &str)]) -> SchemaEvolutionLayer {
             .collect(),
     )
     .unwrap()
-}
-
-struct MemoryAccessor {
-    batches: Vec<RecordBatch>,
-    polls: Arc<AtomicUsize>,
-    projections: Arc<Mutex<Vec<Option<Vec<String>>>>>,
-}
-
-impl MemoryAccessor {
-    fn new(batches: Vec<RecordBatch>) -> Self {
-        Self {
-            batches,
-            polls: Arc::default(),
-            projections: Arc::default(),
-        }
-    }
-}
-
-#[async_trait]
-impl Accessor for MemoryAccessor {
-    type Request = ReadRequest;
-    type Reader = dyn RecordReader;
-    fn capability(&self) -> RecordCapability {
-        Capability {
-            read: true,
-            read_parallel: false,
-            read_with_range: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::Reorderable)
-    }
-    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        self.projections
-            .lock()
-            .unwrap()
-            .push(request.options.projection.clone());
-        let (schema, projection) = request
-            .options
-            .resolve_projection(&self.batches[0].schema())?;
-        let mut batches = self.batches.clone().into_iter().map(Ok);
-        let polls = self.polls.clone();
-        let stream = stream::poll_fn(move |_| {
-            polls.fetch_add(1, Ordering::SeqCst);
-            Poll::Ready(batches.next())
-        });
-        Ok(Box::new(record_stream_reader(
-            stream,
-            RecordMetadata {
-                schema,
-                source: Some(request.object),
-            },
-            projection,
-            OrderRequirement::Reorderable,
-        )))
-    }
 }
 
 fn input() -> RecordBatch {
