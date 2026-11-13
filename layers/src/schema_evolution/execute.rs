@@ -55,7 +55,7 @@ impl SchemaEvolutionPlan {
             safe: false,
             ..CastOptions::default()
         };
-        for step in &self.steps {
+        for (step, release) in self.steps.iter().zip(&self.release) {
             match step {
                 EvolutionStep::Add {
                     index,
@@ -99,9 +99,9 @@ impl SchemaEvolutionPlan {
                         })?;
                     values.insert(*index, array);
                 }
-                EvolutionStep::Remove(index) => {
-                    values.remove(index);
-                }
+            }
+            for index in release {
+                values.remove(index);
             }
         }
         assemble_batch(&self.target_schema, &self.output_indices, &batch, &values)

@@ -1,5 +1,5 @@
 use std::sync::{
-    Arc,
+    Arc, Mutex, Weak,
     atomic::{AtomicUsize, Ordering},
 };
 
@@ -815,4 +815,129 @@ async fn invalid_expression_types_and_source_schemas_fail_before_reading() {
         assert_eq!(error.kind(), kind);
         assert_eq!(reads.load(Ordering::SeqCst), 0);
     }
+}
+
+#[tokio::test]
+async fn hidden_intermediates_are_released_while_selected_outputs_stay_live() {
+    let arrays: Arc<Mutex<Vec<Weak<dyn Array>>>> = Arc::default();
+    let seen = arrays.clone();
+    let peak = Arc::new(AtomicUsize::new(0));
+    let observed_peak = peak.clone();
+    let increment = create_udf(
+        "increment",
+        vec![DataType::Int64],
+        DataType::Int64,
+        Volatility::Stable,
+        Arc::new(move |args| {
+            let mut arrays = seen.lock().unwrap();
+            observed_peak.fetch_max(
+                arrays
+                    .iter()
+                    .filter(|array| array.strong_count() != 0)
+                    .count(),
+                Ordering::SeqCst,
+            );
+            let ColumnarValue::Array(input) = &args[0] else {
+                panic!("expected an array");
+            };
+            let input = input.as_any().downcast_ref::<Int64Array>().unwrap();
+            let array: ArrayRef = Arc::new(Int64Array::from_iter(
+                input.iter().map(|value| value.map(|value| value + 1)),
+            ));
+            arrays.push(Arc::downgrade(&array));
+            Ok(ColumnarValue::Array(array))
+        }),
+    );
+    let mut changes = Vec::new();
+    for index in 0..64 {
+        let input = if index == 0 {
+            "value".into()
+        } else {
+            format!("g{}", index - 1)
+        };
+        changes.push(ColumnEvolution::add_column(
+            format!("g{index}"),
+            DataType::Int64,
+            increment.call(vec![col(input)]),
+        ));
+        if index == 31 {
+            changes.push(ColumnEvolution::add_column(
+                "unused",
+                DataType::Int64,
+                increment.call(vec![col("g31")]),
+            ));
+        }
+    }
+    let mut reader = MemoryAccessor::new(vec![batch(Arc::new(Int64Array::from(vec![1; 128])))])
+        .open_evolved(changes, Some(vec!["g0".into(), "g63".into()]))
+        .await
+        .unwrap();
+    let output = reader.next().await.unwrap().unwrap();
+    assert_eq!(
+        output.column(0).to_data(),
+        Int64Array::from(vec![2; 128]).to_data()
+    );
+    assert_eq!(
+        output.column(1).to_data(),
+        Int64Array::from(vec![65; 128]).to_data()
+    );
+    assert!(peak.load(Ordering::SeqCst) <= 2);
+    let arrays = arrays.lock().unwrap();
+    assert_eq!(arrays.len(), 65);
+    assert_eq!(
+        arrays
+            .iter()
+            .filter(|array| array.strong_count() != 0)
+            .count(),
+        2
+    );
+    drop(output);
+    assert!(arrays.iter().all(|array| array.strong_count() == 0));
+}
+
+#[tokio::test]
+async fn release_scheduling_preserves_cast_versions_and_reused_names_with_pushdown() {
+    let input = RecordBatch::try_from_iter([
+        ("unused", Arc::new(Int64Array::from(vec![0])) as ArrayRef),
+        (
+            "value",
+            Arc::new(StringArray::from(vec!["001"])) as ArrayRef,
+        ),
+    ])
+    .unwrap();
+    let layer = SchemaEvolutionLayer::try_new(vec![
+        ColumnEvolution::change_data_type("value", DataType::Int32),
+        ColumnEvolution::add_column("before", DataType::Int32, col("value")),
+        ColumnEvolution::change_data_type("value", DataType::Int64),
+        ColumnEvolution::add_column("after", DataType::Int64, col("value") + lit(1i64)),
+        ColumnEvolution::change_data_type("before", DataType::Utf8),
+        ColumnEvolution::rename_column("before", "saved"),
+        ColumnEvolution::remove_column("value"),
+        ColumnEvolution::add_column("value", DataType::Int64, col("after") + lit(1i64)),
+    ])
+    .unwrap()
+    .with_source_schema(input.schema());
+    let source = MemoryAccessor::new(vec![input]);
+    let projection = source.requested_projection.clone();
+    let mut reader = source
+        .open_layer(
+            layer,
+            Some(vec!["saved".into(), "value".into(), "after".into()]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(*projection.lock().unwrap(), Some(vec!["value".into()]));
+    let output = reader.next().await.unwrap().unwrap();
+    assert_eq!(
+        output.column(0).to_data(),
+        StringArray::from(vec!["1"]).to_data()
+    );
+    assert_eq!(
+        output.column(1).to_data(),
+        Int64Array::from(vec![3]).to_data()
+    );
+    assert_eq!(
+        output.column(2).to_data(),
+        Int64Array::from(vec![2]).to_data()
+    );
 }

@@ -16,8 +16,10 @@ pub(super) struct SchemaEvolutionPlan {
     pub(super) target_schema: SchemaRef,
     // Source column indices checked when a batch has a different schema instance.
     pub(super) affected: Vec<usize>,
-    // Runtime operations in caller order; renames are resolved during planning.
+    // Computations in caller order; name changes are resolved during planning.
     pub(super) steps: Vec<EvolutionStep>,
+    // Slots released after their last computation or dependency use.
+    pub(super) release: Vec<Vec<usize>>,
     // Source-column or computed-value slot for each field in target_schema.
     pub(super) output_indices: Vec<usize>,
 }
@@ -33,7 +35,6 @@ pub(super) enum EvolutionStep {
         index: usize,
         field: FieldRef,
     },
-    Remove(usize),
 }
 
 /// Assign compact input indices on first use; computed slots stay unchanged.
@@ -144,11 +145,8 @@ impl SchemaEvolutionPlan {
                     fields.push(field);
                 }
                 ColumnEvolution::RemoveColumn { name } => {
-                    let index = resolve()?;
+                    resolve()?;
                     names.remove(name.as_str());
-                    if let Some(index) = inputs.lookup(index) {
-                        steps.push(EvolutionStep::Remove(index));
-                    }
                 }
                 ColumnEvolution::RenameColumn {
                     source_name,
@@ -198,6 +196,7 @@ impl SchemaEvolutionPlan {
         output_indices
             .iter_mut()
             .for_each(|index| *index = inputs.bind(*index));
+        let release = plan_releases(&steps, &output_indices);
         let affected = affected
             .into_iter()
             .filter_map(|index| inputs.lookup(index))
@@ -215,6 +214,7 @@ impl SchemaEvolutionPlan {
             target_schema,
             affected,
             steps,
+            release,
             output_indices,
         })
     }
@@ -226,4 +226,32 @@ impl SchemaEvolutionPlan {
             .map(|field| field.name().clone())
             .collect()
     }
+}
+
+fn plan_releases(steps: &[EvolutionStep], output_indices: &[usize]) -> Vec<Vec<usize>> {
+    let mut last_uses = HashMap::new();
+    for (position, step) in steps.iter().enumerate() {
+        match step {
+            EvolutionStep::Add { index, input, .. } => {
+                last_uses.insert(*index, position);
+                for index in &input.1 {
+                    if let Some(last_use) = last_uses.get_mut(index) {
+                        *last_use = position;
+                    }
+                }
+            }
+            // A later cast still needs the preceding value, even when its result is hidden.
+            EvolutionStep::Cast { index, .. } => {
+                last_uses.insert(*index, position);
+            }
+        }
+    }
+    for index in output_indices {
+        last_uses.remove(index);
+    }
+    let mut release = vec![Vec::new(); steps.len()];
+    for (index, position) in last_uses {
+        release[position].push(index);
+    }
+    release
 }
