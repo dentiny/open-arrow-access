@@ -22,16 +22,17 @@ pub(super) struct SchemaEvolutionPlan {
 }
 
 pub(super) enum EvolutionStep {
+    /// Evaluate the compiled expression using `input`'s dependency schema and
+    /// array slots, validate against `field`, and store the result at `index`.
     Add {
         index: usize,
         field: FieldRef,
         expression: Arc<dyn PhysicalExpr>,
         input: (SchemaRef, Vec<usize>),
     },
-    Cast {
-        index: usize,
-        field: FieldRef,
-    },
+    /// Cast the current array at `index` to `field.data_type()` and cache the result.
+    Cast { index: usize, field: FieldRef },
+    /// Drop the slot's cached array; the source batch itself remains unchanged.
     Remove(usize),
 }
 

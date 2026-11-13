@@ -16,12 +16,26 @@ use crate::{
 
 /// Mutable namespace and execution steps for one ordered schema transformation.
 pub(super) struct EvolutionPlanner<'a> {
+    /// Complete input schema before projection; its fields occupy the initial
+    /// logical slots and its metadata is carried into the output schema.
     source: &'a SchemaRef,
+    /// Current live column name -> logical slot index in `fields`.
+    /// Renames replace keys, removals delete keys, and additions allocate new slots.
     names: HashMap<String, usize>,
+    /// Stable logical slots: source fields first, followed by added fields.
+    /// Renames/casts update entries; removed slots stay until final schema assembly.
     fields: Vec<FieldRef>,
+    /// Binds logical source slots to projected reader positions on first use.
+    /// Without pushdown this is an identity mapping; computed slot IDs never move.
     inputs: SourceProjection,
+    /// Original source slot IDs touched by changes or read by expressions.
+    /// `finish` rebinds these to reader positions for per-batch schema checks.
     affected: HashSet<usize>,
+    /// Per-batch Add/Cast/Remove operations in caller order; renames are planning-only.
+    /// Source indices are reader positions, while computed indices are logical slots.
     steps: Vec<EvolutionStep>,
+    /// One shared expression-planning session, created on the first addition.
+    /// Sharing it keeps stable functions such as `now()` consistent across expressions.
     expressions: Option<ExpressionPlanner>,
 }
 
