@@ -56,8 +56,10 @@ implements `ReadOptionsProvider`; it does not depend on formats or storage.
 2. Retain the final projection. With a supplied complete source schema and an
    output projection, select the source columns needed by all declarations and
    the requested output; otherwise, clear the inner projection before opening.
-3. Compile declarations against the selected source schema plus earlier outputs.
-   Coerce and simplify each logical expression before physical planning.
+3. Compile declarations once against source fields plus earlier outputs, using
+   each expression's dependency schema. Coerce and simplify before physical
+   planning. Pushdown reuses this plan and remaps only source-column slots to
+   the selected reader; generated slots and physical expressions stay unchanged.
 4. Expose the fixed augmented/projected schema before reading a batch.
 5. Evaluate physical expressions on Arrow arrays, then apply the final projection.
 
