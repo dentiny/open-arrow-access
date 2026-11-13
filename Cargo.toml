@@ -149,8 +149,8 @@ open-arrow-access-service.workspace = true
 open-arrow-access-storage.workspace = true
 
 [dev-dependencies]
-arrow-array.workspace = true
 arrow-schema.workspace = true
+datafusion.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
 tokio.workspace = true
 

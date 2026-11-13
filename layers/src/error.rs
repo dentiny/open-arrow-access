@@ -201,13 +201,38 @@ pub(crate) fn invalid_added_column(name: &str, message: impl std::fmt::Display) 
         format!("added column {name:?}: {message}"),
     )
 }
-pub(crate) fn evolution_functor(name: &str, source: Error) -> Error {
+pub(crate) fn evolution_plan_error(
+    name: &str,
+    source: datafusion::error::DataFusionError,
+) -> Error {
     Error::new(
-        source.kind(),
+        ErrorKind::InvalidInput,
+        "plan_schema_evolution",
+        format!("column {name:?}: {source}"),
+    )
+    .with_source(source)
+}
+pub(crate) fn evolution_expression_error(
+    name: &str,
+    source: datafusion::error::DataFusionError,
+) -> Error {
+    Error::new(
+        ErrorKind::Decode,
         "evolve_schema",
         format!("added column {name:?}: {source}"),
     )
     .with_source(source)
+}
+pub(crate) fn evolution_expression_type(
+    name: &str,
+    expected: &arrow_schema::DataType,
+    actual: &arrow_schema::DataType,
+) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "plan_schema_evolution",
+        format!("column {name:?}: expected type {expected}, expression returns {actual}"),
+    )
 }
 pub(crate) fn evolution_batch(source: ArrowError) -> Error {
     Error::new(ErrorKind::Decode, "evolve_schema", source.to_string()).with_source(source)

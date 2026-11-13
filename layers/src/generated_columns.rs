@@ -5,7 +5,6 @@ use arrow_schema::{FieldRef, Schema, SchemaRef};
 use datafusion::{
     common::DFSchema,
     execution::{SessionState, context::SessionContext},
-    optimizer::simplify_expressions::{ExprSimplifier, SimplifyContext},
     physical_expr::PhysicalExpr,
 };
 use open_arrow_access_core::{
@@ -15,10 +14,7 @@ use open_arrow_access_core::{
 
 use crate::{
     error::{generated_batch_error, generated_column_error, generated_plan_error},
-    validation::{
-        validate_expression, validate_generated_names, validate_generated_schema,
-        validate_generated_specs,
-    },
+    validation::{validate_generated_names, validate_generated_schema, validate_generated_specs},
 };
 
 /// One row-level SQL expression. May reference source and earlier generated fields.
@@ -191,24 +187,12 @@ fn plan_expression(
 ) -> datafusion::error::Result<(Arc<dyn PhysicalExpr>, FieldRef, HashSet<String>)> {
     let df_schema = DFSchema::try_from(Arc::clone(input))?;
     let logical = state.create_logical_expr(expression, &df_schema)?;
-    // Validate before simplification: a dead branch must not hide an
-    // aggregate, subquery, or volatile function.
-    validate_expression(&logical)?;
     let columns = logical
         .column_refs()
         .into_iter()
         .map(|column| column.name.clone())
         .collect();
-    let simplify_context = SimplifyContext::builder()
-        .with_schema(Arc::new(df_schema.clone()))
-        .with_config_options(Arc::clone(state.config_options()))
-        .with_query_execution_start_time(state.execution_props().query_execution_start_time)
-        .build();
-    let simplifier = ExprSimplifier::new(simplify_context);
-    let logical = simplifier.coerce(logical, &df_schema)?;
-    let logical = simplifier.simplify(logical)?;
-    let physical = state.create_physical_expr(logical, &df_schema)?;
-    let output = physical.return_field(input)?;
+    let (physical, output) = crate::expression::plan_expression(state, logical, &df_schema)?;
     Ok((physical, output, columns))
 }
 

@@ -180,7 +180,7 @@ fn validate_evolution_type(
         }
         DataType::RunEndEncoded(run_ends, values) => {
             // Arrow's null-to-run-end cast can panic beyond the key range.
-            // Functor-provided arrays do not use that cast path.
+            // Expression-provided arrays do not use that cast path.
             if for_cast || run_ends.is_nullable() || !run_ends.data_type().is_run_ends_type() {
                 return Err(invalid());
             }
@@ -425,6 +425,30 @@ pub(crate) fn validate_added_column(
             name,
             format!("expected {rows} rows, got {}", array.len()),
         ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_evolution_expression_type(
+    name: &str,
+    actual: &DataType,
+    expected: &DataType,
+) -> Result<()> {
+    if actual != expected {
+        return Err(crate::error::evolution_expression_type(
+            name, expected, actual,
+        ));
+    }
+    Ok(())
+}
+
+// Validate the supplied projected schema once at open, not for each batch.
+pub(crate) fn validate_evolution_input_schema(
+    actual: &arrow_schema::SchemaRef,
+    expected: &arrow_schema::SchemaRef,
+) -> Result<()> {
+    if actual != expected {
+        return Err(crate::error::evolution_schema_mismatch());
     }
     Ok(())
 }

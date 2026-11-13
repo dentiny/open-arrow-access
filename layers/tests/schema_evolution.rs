@@ -6,6 +6,11 @@ use std::{
     task::Poll,
 };
 
+use datafusion::{
+    error::DataFusionError,
+    logical_expr::{ColumnarValue, Expr, Volatility, create_udf},
+    prelude::{col, lit},
+};
 use futures::stream;
 
 use arrow_array::{Array, ArrayRef, Int32Array, Int64Array, RecordBatch, StringArray};
@@ -35,6 +40,20 @@ fn union(types: Vec<DataType>) -> DataType {
         UnionFields::try_new(ids, types.into_iter().map(item)).unwrap(),
         UnionMode::Sparse,
     )
+}
+
+fn counted_column(name: &str, data_type: DataType, calls: Arc<AtomicUsize>) -> Expr {
+    create_udf(
+        "observe",
+        vec![data_type.clone()],
+        data_type,
+        Volatility::Stable,
+        Arc::new(move |args| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(args[0].clone())
+        }),
+    )
+    .call(vec![col(name)])
 }
 
 struct MemoryAccessor {
@@ -379,7 +398,7 @@ async fn schema_evolution_swaps_require_a_temporary_name() {
 }
 
 #[tokio::test]
-async fn evolution_combines_all_operations_and_functors_see_previous_changes() {
+async fn evolution_combines_all_operations_and_expressions_see_previous_changes() {
     let source_schema = Arc::new(Schema::new_with_metadata(
         vec![
             Field::new("value", DataType::Utf8, true)
@@ -409,20 +428,17 @@ async fn evolution_combines_all_operations_and_functors_see_previous_changes() {
         let changes = vec![
             ColumnEvolution::rename_column("value", "count"),
             ColumnEvolution::change_data_type("count", DataType::Int32),
-            ColumnEvolution::add_column("added", DataType::Int32, move |batch| {
-                seen.fetch_add(1, Ordering::SeqCst);
-                assert!(batch.column_by_name("value").is_none());
-                assert!(batch.column_by_name("remove").is_some());
-                let count = batch.column_by_name("count").unwrap();
-                assert_eq!(count.data_type(), &DataType::Int32);
-                Ok(count.clone())
-            }),
+            ColumnEvolution::add_column(
+                "added",
+                DataType::Int32,
+                counted_column("count", DataType::Int32, seen),
+            ),
             ColumnEvolution::remove_column("remove"),
-            ColumnEvolution::add_column("copied", DataType::Int32, move |batch| {
-                copied.fetch_add(1, Ordering::SeqCst);
-                assert!(batch.column_by_name("remove").is_none());
-                Ok(batch.column_by_name("added").unwrap().clone())
-            }),
+            ColumnEvolution::add_column(
+                "copied",
+                DataType::Int32,
+                counted_column("added", DataType::Int32, copied) + lit(1i32),
+            ),
         ];
         let mut reader =
             MemoryAccessor::new(vec![input.clone(), input.slice(0, 0), input.slice(1, 1)])
@@ -449,7 +465,11 @@ async fn evolution_combines_all_operations_and_functors_see_previous_changes() {
             assert_eq!(column_names(&output), expected_names);
             for name in ["count", "added", "copied"] {
                 if let Some(column) = output.column_by_name(name) {
-                    assert_eq!(column.to_data(), Int32Array::from(values.clone()).to_data());
+                    let expected: Vec<_> = values
+                        .iter()
+                        .map(|value| value.map(|value| value + i32::from(name == "copied")))
+                        .collect();
+                    assert_eq!(column.to_data(), Int32Array::from(expected).to_data());
                 }
             }
             if values.len() == 2
@@ -475,9 +495,7 @@ async fn evolution_can_reuse_removed_and_renamed_source_names() {
             vec![
                 ColumnEvolution::remove_column("b"),
                 ColumnEvolution::rename_column("a", "b"),
-                ColumnEvolution::add_column("a", DataType::Int64, |batch| {
-                    Ok(batch.column_by_name("b").unwrap().clone())
-                }),
+                ColumnEvolution::add_column("a", DataType::Int64, col("b")),
             ],
             None,
         )
@@ -495,7 +513,7 @@ fn evolution_rejects_invalid_names_and_types() {
     for change in [
         ColumnEvolution::remove_column(""),
         ColumnEvolution::change_data_type("", DataType::Int32),
-        ColumnEvolution::add_column("", DataType::Int32, |b| Ok(b.column(0).clone())),
+        ColumnEvolution::add_column("", DataType::Int32, lit(1i32)),
         ColumnEvolution::change_data_type(
             "a",
             DataType::Time32(arrow_schema::TimeUnit::Nanosecond),
@@ -503,17 +521,17 @@ fn evolution_rejects_invalid_names_and_types() {
         ColumnEvolution::add_column(
             "bad",
             DataType::Time32(arrow_schema::TimeUnit::Nanosecond),
-            |_| unreachable!(),
+            lit(1i32),
         ),
         ColumnEvolution::add_column(
             "bad",
             DataType::List(item(DataType::Time64(arrow_schema::TimeUnit::Second))),
-            |_| unreachable!(),
+            lit(1i32),
         ),
         ColumnEvolution::add_column(
             "bad",
             DataType::RunEndEncoded(item(DataType::UInt32), item(DataType::Int32)),
-            |_| unreachable!(),
+            lit(1i32),
         ),
         ColumnEvolution::rename_column("a", ""),
         ColumnEvolution::rename_column("", "a"),
@@ -528,54 +546,77 @@ fn evolution_rejects_invalid_names_and_types() {
 }
 
 #[tokio::test]
-async fn evolution_validates_functors_and_preserves_errors_even_when_not_projected() {
-    for (data_type, rows, failure) in [
-        (DataType::Int64, 2, false),
-        (DataType::Int32, 1, false),
-        (DataType::Int32, 2, true),
+async fn evolution_rejects_invalid_expressions_before_reading() {
+    for (data_type, expression) in [
+        (DataType::Int32, col("missing")),
+        (DataType::Int64, col("value")),
+        (
+            DataType::Int64,
+            datafusion::functions_aggregate::expr_fn::sum(col("value")),
+        ),
+        (
+            DataType::Int32,
+            create_udf(
+                "volatile",
+                vec![DataType::Int32],
+                DataType::Int32,
+                Volatility::Volatile,
+                Arc::new(|args| Ok(args[0].clone())),
+            )
+            .call(vec![col("value")]),
+        ),
     ] {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let seen = calls.clone();
+        let source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1])))]);
+        let reads = source.calls.clone();
+        let error = source
+            .open_evolved(
+                vec![ColumnEvolution::add_column("added", data_type, expression)],
+                Some(vec![]),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn evolution_checks_udf_results_and_preserves_errors_when_hidden() {
+    for failure in ["type", "length", "error"] {
+        let expression = create_udf(
+            "broken",
+            vec![DataType::Int32],
+            DataType::Int32,
+            Volatility::Stable,
+            Arc::new(move |_| match failure {
+                "type" => Ok(ColumnarValue::Array(Arc::new(Int64Array::from(vec![1, 2])))),
+                "length" => Ok(ColumnarValue::Array(Arc::new(Int32Array::from(vec![1])))),
+                _ => Err(DataFusionError::Execution("custom failure".into())),
+            }),
+        )
+        .call(vec![col("value")]);
         let source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1, 2])))]);
         let reads = source.calls.clone();
         let mut reader = source
             .open_evolved(
-                vec![ColumnEvolution::add_column("added", data_type, move |_| {
-                    seen.fetch_add(1, Ordering::SeqCst);
-                    if failure {
-                        Err(open_arrow_access_core::Error::new(
-                            ErrorKind::Io,
-                            "custom_functor",
-                            "failed",
-                        ))
-                    } else {
-                        Ok(Arc::new(Int32Array::from(vec![1; rows])))
-                    }
-                })],
+                vec![ColumnEvolution::add_column(
+                    "added",
+                    DataType::Int32,
+                    expression,
+                )],
                 Some(vec![]),
             )
             .await
             .unwrap();
         let error = reader.next().await.unwrap_err();
-        assert_eq!(
-            error.kind(),
-            if failure {
-                ErrorKind::Io
-            } else {
-                ErrorKind::Decode
-            }
-        );
-        assert_eq!(error.operation(), "evolve_schema");
+        assert_eq!(error.kind(), ErrorKind::Decode);
         assert!(error.to_string().contains("added"));
-        if failure {
-            let cause = std::error::Error::source(&error)
-                .unwrap()
-                .downcast_ref::<open_arrow_access_core::Error>()
-                .unwrap();
-            assert_eq!(cause.operation(), "custom_functor");
+        if failure == "error" {
+            assert!(std::error::Error::source(&error).is_some());
+            assert!(error.to_string().contains("custom failure"));
         }
         assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(reads.load(Ordering::SeqCst), 1);
     }
 }
@@ -593,17 +634,14 @@ async fn evolution_can_remove_all_columns_without_losing_rows() {
 }
 
 #[tokio::test]
-async fn evolution_functors_are_reusable_across_readers() {
+async fn evolution_expressions_are_reusable_across_readers() {
     let source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1, 2])))]);
     let calls = Arc::new(AtomicUsize::new(0));
     let seen = calls.clone();
     let layer = SchemaEvolutionLayer::try_new(vec![ColumnEvolution::add_column(
         "added",
         DataType::Int32,
-        move |batch| {
-            seen.fetch_add(1, Ordering::SeqCst);
-            Ok(batch.column(0).clone())
-        },
+        counted_column("value", DataType::Int32, seen),
     )])
     .unwrap();
     let accessor = source.layer(layer.clone());
@@ -658,15 +696,14 @@ async fn evolution_adds_nullable_and_nested_arrays_without_casting_them() {
         ),
     ] {
         for rows in [0, 2] {
-            let input = batch(Arc::new(Int32Array::from(vec![1; rows])));
-            let array = arrow_array::new_null_array(&data_type, rows);
-            let expected = array.clone();
+            let expected = arrow_array::new_null_array(&data_type, rows);
+            let input = RecordBatch::try_from_iter([("value", expected.clone())]).unwrap();
             let mut reader = MemoryAccessor::new(vec![input.clone()])
                 .open_evolved(
                     vec![ColumnEvolution::add_column(
                         "added",
                         data_type.clone(),
-                        move |_| Ok(array.clone()),
+                        col("value"),
                     )],
                     None,
                 )
@@ -683,7 +720,7 @@ async fn evolution_adds_nullable_and_nested_arrays_without_casting_them() {
 }
 
 #[tokio::test]
-async fn evolution_plans_empty_inputs_without_calling_functors() {
+async fn evolution_plans_empty_inputs_without_evaluating_expressions() {
     let mut source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1])))]);
     source.batches.clear();
     let reads = source.calls.clone();
@@ -692,7 +729,7 @@ async fn evolution_plans_empty_inputs_without_calling_functors() {
             vec![ColumnEvolution::add_column(
                 "added",
                 DataType::Int32,
-                |_| panic!("no batch to evaluate"),
+                lit(1i32),
             )],
             None,
         )
@@ -726,18 +763,12 @@ async fn evolution_chains_add_cast_rename_and_repeated_casts() {
     let mut reader = MemoryAccessor::new(vec![input])
         .open_evolved(
             vec![
-                ColumnEvolution::add_column("added", DataType::Utf8, |batch| {
-                    Ok(batch.column_by_name("value").unwrap().clone())
-                }),
+                ColumnEvolution::add_column("added", DataType::Utf8, col("value")),
                 ColumnEvolution::change_data_type("added", DataType::Int32),
                 ColumnEvolution::rename_column("added", "intermediate"),
                 ColumnEvolution::rename_column("intermediate", "final"),
                 ColumnEvolution::change_data_type("final", DataType::Utf8),
-                ColumnEvolution::add_column("copied", DataType::Utf8, |batch| {
-                    assert!(batch.column_by_name("added").is_none());
-                    assert!(batch.column_by_name("intermediate").is_none());
-                    Ok(batch.column_by_name("final").unwrap().clone())
-                }),
+                ColumnEvolution::add_column("copied", DataType::Utf8, col("final")),
             ],
             Some(vec!["copied".into(), "final".into()]),
         )
@@ -759,15 +790,13 @@ async fn evolution_allows_add_remove_add_and_evaluates_removed_additions() {
     let mut reader = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1])))])
         .open_evolved(
             vec![
-                ColumnEvolution::add_column("added", DataType::Int32, move |batch| {
-                    seen.fetch_add(1, Ordering::SeqCst);
-                    Ok(batch.column(0).clone())
-                }),
+                ColumnEvolution::add_column(
+                    "added",
+                    DataType::Int32,
+                    counted_column("value", DataType::Int32, seen),
+                ),
                 ColumnEvolution::remove_column("added"),
-                ColumnEvolution::add_column("added", DataType::Int64, |batch| {
-                    assert!(batch.column_by_name("added").is_none());
-                    Ok(Arc::new(Int64Array::from(vec![2; batch.num_rows()])))
-                }),
+                ColumnEvolution::add_column("added", DataType::Int64, lit(2i64)),
                 ColumnEvolution::remove_column("value"),
             ],
             None,
@@ -787,18 +816,24 @@ async fn evolution_allows_add_remove_add_and_evaluates_removed_additions() {
 #[tokio::test]
 async fn evolution_checks_names_at_each_step_before_reading() {
     for changes in [
+        vec![
+            ColumnEvolution::rename_column("a", "c"),
+            ColumnEvolution::add_column("copy", DataType::Int32, col("a")),
+        ],
+        vec![
+            ColumnEvolution::remove_column("a"),
+            ColumnEvolution::add_column("copy", DataType::Int32, col("a")),
+        ],
         vec![ColumnEvolution::remove_column("missing")],
         vec![ColumnEvolution::rename_column("missing", "renamed")],
         vec![ColumnEvolution::change_data_type(
             "missing",
             DataType::Int32,
         )],
-        vec![ColumnEvolution::add_column("a", DataType::Int32, |batch| {
-            Ok(batch.column(0).clone())
-        })],
+        vec![ColumnEvolution::add_column("a", DataType::Int32, lit(1i32))],
         vec![
             ColumnEvolution::rename_column("a", "c"),
-            ColumnEvolution::add_column("c", DataType::Int32, |batch| Ok(batch.column(0).clone())),
+            ColumnEvolution::add_column("c", DataType::Int32, lit(1i32)),
         ],
         vec![
             ColumnEvolution::remove_column("a"),
@@ -821,8 +856,8 @@ async fn evolution_checks_names_at_each_step_before_reading() {
             ColumnEvolution::remove_column("b"),
         ],
         vec![
-            ColumnEvolution::add_column("c", DataType::Int32, |batch| Ok(batch.column(0).clone())),
-            ColumnEvolution::add_column("c", DataType::Int32, |batch| Ok(batch.column(0).clone())),
+            ColumnEvolution::add_column("c", DataType::Int32, lit(1i32)),
+            ColumnEvolution::add_column("c", DataType::Int32, lit(1i32)),
         ],
     ] {
         let input = RecordBatch::try_from_iter([
@@ -839,15 +874,16 @@ async fn evolution_checks_names_at_each_step_before_reading() {
 }
 
 #[tokio::test]
-async fn evolution_preserves_runtime_order_between_casts_and_functors() {
+async fn evolution_preserves_runtime_order_between_casts_and_expressions() {
     for cast_first in [false, true] {
         let calls = Arc::new(AtomicUsize::new(0));
         let seen = calls.clone();
         let mut changes = vec![
-            ColumnEvolution::add_column("marker", DataType::Utf8, move |batch| {
-                seen.fetch_add(1, Ordering::SeqCst);
-                Ok(batch.column(0).clone())
-            }),
+            ColumnEvolution::add_column(
+                "marker",
+                DataType::Utf8,
+                counted_column("value", DataType::Utf8, seen),
+            ),
             ColumnEvolution::change_data_type("value", DataType::Int32),
         ];
         if cast_first {
@@ -901,4 +937,125 @@ async fn identity_renames_preserve_projection_pushdown_and_dependencies() {
             assert_eq!(keep.data_type(), &DataType::Int64);
         }
     }
+}
+
+#[tokio::test]
+async fn expressions_push_transitive_dependencies_through_ordered_changes() {
+    let input = RecordBatch::try_from_iter([
+        (
+            "unused",
+            Arc::new(StringArray::from(vec!["large"; 2])) as ArrayRef,
+        ),
+        (
+            "id",
+            Arc::new(StringArray::from(vec!["2", "3"])) as ArrayRef,
+        ),
+        ("keep", Arc::new(Int32Array::from(vec![4, 5])) as ArrayRef),
+        ("drop", Arc::new(Int32Array::from(vec![0, 0])) as ArrayRef),
+    ])
+    .unwrap();
+    for names in [vec!["result", "keep"], vec!["result"], vec![]] {
+        let source = MemoryAccessor::new(vec![input.clone()]);
+        let requested = source.requested_projection.clone();
+        let layer = SchemaEvolutionLayer::try_new(vec![
+            ColumnEvolution::remove_column("drop"),
+            ColumnEvolution::rename_column("id", "amount"),
+            ColumnEvolution::change_data_type("amount", DataType::Int32),
+            ColumnEvolution::add_column("doubled", DataType::Int32, col("amount") * lit(2i32)),
+            ColumnEvolution::rename_column("doubled", "score"),
+            ColumnEvolution::remove_column("amount"),
+            ColumnEvolution::add_column("result", DataType::Int32, col("score") + col("keep")),
+            ColumnEvolution::remove_column("score"),
+        ])
+        .unwrap()
+        .with_source_schema(input.schema());
+        let mut reader = source
+            .layer(layer)
+            .open(ReadRequest::new("test").with_options(ReadOptions {
+                projection: Some(names.iter().map(|name| (*name).into()).collect()),
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+        assert_eq!(
+            *requested.lock().unwrap(),
+            Some(vec!["id".into(), "keep".into()])
+        );
+        let output = reader.next().await.unwrap().unwrap();
+        assert_eq!(column_names(&output), names);
+        assert_eq!(output.num_rows(), 2);
+        if let Some(result) = output.column_by_name("result") {
+            assert_eq!(result.to_data(), Int32Array::from(vec![8, 11]).to_data());
+        }
+    }
+}
+
+#[tokio::test]
+async fn scalar_expressions_preserve_rows_with_no_source_columns() {
+    let input = batch(Arc::new(Int32Array::from(vec![1, 2, 3])));
+    let source = MemoryAccessor::new(vec![input.clone(), input.slice(0, 0)]);
+    let requested = source.requested_projection.clone();
+    let layer = SchemaEvolutionLayer::try_new(vec![
+        ColumnEvolution::remove_column("value"),
+        ColumnEvolution::add_column("value", DataType::Int32, lit(7i32)),
+    ])
+    .unwrap()
+    .with_source_schema(input.schema());
+    let mut reader = source
+        .layer(layer)
+        .open(ReadRequest::new("test"))
+        .await
+        .unwrap();
+    assert_eq!(*requested.lock().unwrap(), Some(vec![]));
+    for rows in [3, 0] {
+        let output = reader.next().await.unwrap().unwrap();
+        assert_eq!(output.num_rows(), rows);
+        assert_eq!(
+            output.column(0).to_data(),
+            Int32Array::from(vec![7; rows]).to_data()
+        );
+    }
+}
+
+#[tokio::test]
+async fn supplied_schema_checks_hidden_collisions_and_projected_input_types() {
+    let input = batch(Arc::new(Int32Array::from(vec![1])));
+    let source = MemoryAccessor::new(vec![input.clone()]);
+    let layer = SchemaEvolutionLayer::try_new(vec![ColumnEvolution::add_column(
+        "value",
+        DataType::Int32,
+        lit(1i32),
+    )])
+    .unwrap()
+    .with_source_schema(input.schema());
+    let error = source
+        .layer(layer)
+        .open(ReadRequest::new("test").with_options(ReadOptions {
+            projection: Some(vec![]),
+            ..Default::default()
+        }))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+
+    let source = MemoryAccessor::new(vec![input]);
+    let layer = SchemaEvolutionLayer::try_new(vec![ColumnEvolution::add_column(
+        "copy",
+        DataType::Int64,
+        col("value"),
+    )])
+    .unwrap()
+    .with_source_schema(Arc::new(Schema::new(vec![Field::new(
+        "value",
+        DataType::Int64,
+        true,
+    )])));
+    let error = source
+        .layer(layer)
+        .open(ReadRequest::new("test"))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Decode);
 }

@@ -1,6 +1,5 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    fmt,
     sync::Arc,
 };
 
@@ -9,6 +8,10 @@ use arrow_array::{
 };
 use arrow_cast::{CastOptions, cast_with_options};
 use arrow_schema::{ArrowError, DataType, Field, FieldRef, Schema, SchemaRef};
+use datafusion::{
+    common::DFSchema, execution::context::SessionContext, logical_expr::Expr,
+    physical_expr::PhysicalExpr,
+};
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, Layer, ReadOptionsProvider, RecordCapability, RecordMetadata, RecordReader, Result,
@@ -17,17 +20,14 @@ use open_arrow_access_core::{
 
 use crate::validation;
 
-/// Compute one added column from the batch after preceding changes.
-pub type ColumnFunctor = dyn Fn(&RecordBatch) -> Result<ArrayRef> + Send + Sync + 'static;
-
 /// One ordered change to the current top-level schema.
 /// Names refer to the schema produced by preceding vector items.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ColumnEvolution {
     AddColumn {
         name: String,
         data_type: DataType,
-        functor: Arc<ColumnFunctor>,
+        expression: Expr,
     },
     RemoveColumn {
         name: String,
@@ -54,17 +54,13 @@ impl ColumnEvolution {
         }
     }
 
-    /// Append a nullable column. The callback must return the declared type and
-    /// exactly one value per input row, including for empty batches.
-    pub fn add_column(
-        name: impl Into<String>,
-        data_type: DataType,
-        functor: impl Fn(&RecordBatch) -> Result<ArrayRef> + Send + Sync + 'static,
-    ) -> Self {
+    /// Append a nullable column computed from the current schema. The expression
+    /// must produce the declared type; scalar results expand to the batch row count.
+    pub fn add_column(name: impl Into<String>, data_type: DataType, expression: Expr) -> Self {
         Self::AddColumn {
             name: name.into(),
             data_type,
-            functor: Arc::new(functor),
+            expression,
         }
     }
 
@@ -87,30 +83,15 @@ impl ColumnEvolution {
     }
 }
 
-impl fmt::Debug for ColumnEvolution {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (operation, field, name) = match self {
-            Self::AddColumn { name, .. } => ("AddColumn", "name", name),
-            Self::RemoveColumn { name } => ("RemoveColumn", "name", name),
-            Self::RenameColumn {
-                source_name: name, ..
-            } => ("RenameColumn", "source_name", name),
-            Self::ChangeDataType { name, .. } => ("ChangeDataType", "name", name),
-        };
-        f.debug_struct(operation)
-            .field(field, name)
-            .finish_non_exhaustive()
-    }
-}
-
 /// Add, remove, rename, and cast top-level columns with a fixed output schema.
 ///
-/// Changes run in vector order. Callbacks see preceding additions, removals,
+/// Changes run in vector order. Expressions see preceding additions, removals,
 /// renames, and casts, even when omitted by the final projection.
 /// Existing columns retain their order; additions append to the current schema.
 #[derive(Clone, Debug, Default)]
 pub struct SchemaEvolutionLayer {
     changes: Arc<[ColumnEvolution]>,
+    source_schema: Option<SchemaRef>,
 }
 
 impl SchemaEvolutionLayer {
@@ -119,7 +100,15 @@ impl SchemaEvolutionLayer {
         validation::validate_evolution_specs(&changes)?;
         Ok(Self {
             changes: changes.into(),
+            source_schema: None,
         })
+    }
+
+    /// Supply the complete source schema to push dependencies down without
+    /// opening another reader for schema discovery.
+    pub fn with_source_schema(mut self, schema: SchemaRef) -> Self {
+        self.source_schema = Some(schema);
+        self
     }
 }
 
@@ -128,6 +117,7 @@ impl SchemaEvolutionLayer {
 pub struct SchemaEvolutionAccessor<A> {
     inner: A,
     changes: Arc<[ColumnEvolution]>,
+    source_schema: Option<SchemaRef>,
 }
 
 impl<A> Layer<A> for SchemaEvolutionLayer
@@ -140,6 +130,7 @@ where
         SchemaEvolutionAccessor {
             inner,
             changes: Arc::clone(&self.changes),
+            source_schema: self.source_schema.clone(),
         }
     }
 }
@@ -162,9 +153,15 @@ where
             return self.inner.open(request).await;
         }
         let output_options = request.read_options().clone();
-        // Arbitrary functors need every source column. Schema changes also need
-        // the complete namespace to detect collisions with unchanged fields.
-        if self.changes.iter().any(|change| match change {
+        let mut planned = self
+            .source_schema
+            .as_ref()
+            .map(|source| plan_evolution(&self.changes, source, &output_options))
+            .transpose()?;
+        // A supplied schema separates namespace checks from source data reads.
+        if let Some(plan) = &mut planned {
+            request.read_options_mut().projection = Some(plan.project_source()?);
+        } else if self.changes.iter().any(|change| match change {
             ColumnEvolution::ChangeDataType { .. } => false,
             ColumnEvolution::RenameColumn {
                 source_name,
@@ -184,13 +181,19 @@ where
         }
         let inner = self.inner.open(request).await?;
         let source = &inner.metadata().schema;
-        let plan = plan_evolution(&self.changes, source, &output_options)?;
+        let plan = if let Some(mut plan) = planned {
+            validation::validate_evolution_input_schema(source, &plan.source)?;
+            plan.source = source.clone();
+            plan
+        } else {
+            plan_evolution(&self.changes, source, &output_options)?
+        };
         if plan.steps.is_empty()
             && plan.schema == *source
             && plan
                 .output_indices
                 .iter()
-                .copied()
+                .map(|index| plan.input_indices.get(index).copied().unwrap_or(*index))
                 .eq(0..source.fields().len())
         {
             return Ok(inner);
@@ -217,6 +220,7 @@ struct SchemaEvolutionPlan {
     source: SchemaRef,
     schema: SchemaRef,
     affected: Vec<usize>,
+    input_indices: HashMap<usize, usize>,
     steps: Vec<EvolutionStep>,
     output_indices: Vec<usize>,
 }
@@ -225,8 +229,8 @@ enum EvolutionStep {
     Add {
         index: usize,
         field: FieldRef,
-        functor: Arc<ColumnFunctor>,
-        input: Option<(SchemaRef, Vec<usize>)>,
+        expression: Arc<dyn PhysicalExpr>,
+        input: (SchemaRef, Vec<usize>),
     },
     Cast {
         index: usize,
@@ -251,7 +255,7 @@ fn plan_evolution(
     let mut next_index = source.fields().len();
     let mut affected = HashSet::new();
     let mut steps = Vec::new();
-    let mut changed = false;
+    let mut state = None;
     for change in changes {
         let index = names.get(change.name()).copied();
         if let Some(index) = index
@@ -264,29 +268,63 @@ fn plan_evolution(
             ColumnEvolution::AddColumn {
                 name,
                 data_type,
-                functor,
+                expression,
             } => {
                 validation::validate_evolution_target(None, index)?;
-                let input = changed.then(|| resolve_schema(&fields, source));
+                let mut indices = expression
+                    .column_refs()
+                    .into_iter()
+                    .map(|column| {
+                        names
+                            .get(&column.name)
+                            .copied()
+                            .ok_or_else(|| crate::error::evolution_source(&column.name))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                indices.sort_unstable();
+                indices.dedup();
+                affected.extend(
+                    indices
+                        .iter()
+                        .copied()
+                        .filter(|&index| index < source.fields().len()),
+                );
+                let input_schema = Arc::new(Schema::new_with_metadata(
+                    indices
+                        .iter()
+                        .map(|index| fields[index].clone())
+                        .collect::<Vec<_>>(),
+                    source.metadata().clone(),
+                ));
+                let state = state.get_or_insert_with(|| SessionContext::new().state());
+                let df_schema = DFSchema::try_from(input_schema.clone())
+                    .map_err(|error| crate::error::evolution_plan_error(name, error))?;
+                let (expression, output) =
+                    crate::expression::plan_expression(state, expression.clone(), &df_schema)
+                        .map_err(|error| crate::error::evolution_plan_error(name, error))?;
+                validation::validate_evolution_expression_type(
+                    name,
+                    output.data_type(),
+                    data_type,
+                )?;
+                let input = (input_schema, indices);
                 let index = next_index;
                 next_index += 1;
                 let field = Arc::new(Field::new(name, data_type.clone(), true));
                 steps.push(EvolutionStep::Add {
                     index,
                     field: field.clone(),
-                    functor: functor.clone(),
+                    expression,
                     input,
                 });
                 names.insert(name.clone(), index);
                 fields.insert(index, field);
-                changed = true;
             }
             ColumnEvolution::RemoveColumn { name } => {
                 let index = resolve()?;
                 names.remove(name);
                 fields.remove(&index);
                 steps.push(EvolutionStep::Remove(index));
-                changed = true;
             }
             ColumnEvolution::RenameColumn {
                 source_name,
@@ -304,7 +342,6 @@ fn plan_evolution(
                         index,
                         Arc::new(fields[&index].as_ref().clone().with_name(target_name)),
                     );
-                    changed = true;
                 }
             }
             ColumnEvolution::ChangeDataType { data_type, .. } => {
@@ -315,7 +352,6 @@ fn plan_evolution(
                     let field = Arc::new(field.clone().with_data_type(data_type.clone()));
                     fields.insert(index, field.clone());
                     steps.push(EvolutionStep::Cast { index, field });
-                    changed = true;
                 }
             }
         }
@@ -332,6 +368,7 @@ fn plan_evolution(
         source: source.clone(),
         schema,
         affected: affected.into_iter().collect(),
+        input_indices: HashMap::new(),
         steps,
         output_indices,
     })
@@ -355,13 +392,16 @@ fn assemble_batch(
     indices: &[usize],
     source: &RecordBatch,
     values: &HashMap<usize, ArrayRef>,
+    input_indices: &HashMap<usize, usize>,
 ) -> Result<RecordBatch> {
     let columns = indices
         .iter()
         .map(|&index| {
             values
                 .get(&index)
-                .unwrap_or_else(|| source.column(index))
+                .unwrap_or_else(|| {
+                    source.column(input_indices.get(&index).copied().unwrap_or(index))
+                })
                 .clone()
         })
         .collect();
@@ -374,6 +414,45 @@ fn assemble_batch(
 }
 
 impl SchemaEvolutionPlan {
+    /// Bind stable source slots to the compact projection sent upstream.
+    fn project_source(&mut self) -> Result<Vec<String>> {
+        let mut required: HashSet<_> = self.output_indices.iter().copied().collect();
+        for step in &self.steps {
+            match step {
+                EvolutionStep::Add { input, .. } => required.extend(input.1.iter().copied()),
+                EvolutionStep::Cast { index, .. } => {
+                    required.insert(*index);
+                }
+                EvolutionStep::Remove(_) => {}
+            }
+        }
+        let mut indices: Vec<_> = required
+            .into_iter()
+            .filter(|&index| index < self.source.fields().len())
+            .collect();
+        indices.sort_unstable();
+        let names = indices
+            .iter()
+            .map(|&index| self.source.field(index).name().clone())
+            .collect();
+        self.input_indices = indices
+            .iter()
+            .enumerate()
+            .map(|(input, &slot)| (slot, input))
+            .collect();
+        self.affected = self
+            .affected
+            .iter()
+            .filter_map(|index| self.input_indices.get(index).copied())
+            .collect();
+        self.source = Arc::new(
+            self.source
+                .project(&indices)
+                .map_err(crate::error::evolution_batch)?,
+        );
+        Ok(names)
+    }
+
     fn convert(&self, batch: RecordBatch) -> Result<RecordBatch> {
         validation::validate_evolution_batch_schema(
             batch.schema_ref(),
@@ -390,15 +469,17 @@ impl SchemaEvolutionPlan {
                 EvolutionStep::Add {
                     index,
                     field,
-                    functor,
+                    expression,
                     input,
                 } => {
-                    let view = input
-                        .as_ref()
-                        .map(|(schema, indices)| assemble_batch(schema, indices, &batch, &values))
-                        .transpose()?;
-                    let array = functor(view.as_ref().unwrap_or(&batch))
-                        .map_err(|error| crate::error::evolution_functor(field.name(), error))?;
+                    let view =
+                        assemble_batch(&input.0, &input.1, &batch, &values, &self.input_indices)?;
+                    let array = expression
+                        .evaluate(&view)
+                        .and_then(|value| value.into_array(batch.num_rows()))
+                        .map_err(|error| {
+                            crate::error::evolution_expression_error(field.name(), error)
+                        })?;
                     validation::validate_added_column(
                         field.name(),
                         array.as_ref(),
@@ -408,7 +489,9 @@ impl SchemaEvolutionPlan {
                     values.insert(*index, array);
                 }
                 EvolutionStep::Cast { index, field } => {
-                    let column = values.get(index).unwrap_or_else(|| batch.column(*index));
+                    let column = values.get(index).unwrap_or_else(|| {
+                        batch.column(self.input_indices.get(index).copied().unwrap_or(*index))
+                    });
                     let target = field.data_type();
                     let array = cast_with_options(column.as_ref(), target, &options)
                         .or_else(|error| match target {
@@ -432,7 +515,13 @@ impl SchemaEvolutionPlan {
                 }
             }
         }
-        assemble_batch(&self.schema, &self.output_indices, &batch, &values)
+        assemble_batch(
+            &self.schema,
+            &self.output_indices,
+            &batch,
+            &values,
+            &self.input_indices,
+        )
     }
 }
 

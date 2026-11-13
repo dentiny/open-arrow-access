@@ -58,7 +58,7 @@ schema drift. Type and metadata conflicts fail without implicit casts. See the
 ## Generated columns and observation
 
 [`SchemaEvolutionLayer`](../layers/README.md) is implemented and always available.
-It adds batch functor columns, removes or renames fields, and applies explicit
+It adds DataFusion expression columns, removes or renames fields, and applies explicit
 Arrow casts through the existing layer contract.
 
 `GeneratedColumnsLayer` is implemented and always available, with

@@ -1,6 +1,7 @@
 //! Format-independent transformations following the shared `Layer` contract.
 
 mod error;
+mod expression;
 mod validation;
 
 mod generated_columns;
@@ -16,6 +17,4 @@ mod sampling;
 pub use sampling::{SamplingAccessor, SamplingLayer};
 
 mod schema_evolution;
-pub use schema_evolution::{
-    ColumnEvolution, ColumnFunctor, SchemaEvolutionAccessor, SchemaEvolutionLayer,
-};
+pub use schema_evolution::{ColumnEvolution, SchemaEvolutionAccessor, SchemaEvolutionLayer};
