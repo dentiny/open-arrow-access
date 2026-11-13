@@ -16,8 +16,8 @@ use crate::{
 
 /// Mutable namespace and execution steps for one ordered schema transformation.
 pub(super) struct EvolutionPlanner<'a> {
-    /// Complete input schema before projection; its fields occupy the initial
-    /// logical slots and its metadata is carried into the output schema.
+    /// Input schema whose fields initialize the logical slots. Dependency
+    /// pushdown may select a subset; its metadata is preserved on the output.
     source: &'a SchemaRef,
     /// Current live column name -> logical slot index in `fields`.
     /// Renames replace keys, removals delete keys, and additions allocate new slots.
