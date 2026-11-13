@@ -252,6 +252,40 @@ async fn cast_validation_rejects_unsupported_and_unsafe_types_before_reading() {
 }
 
 #[tokio::test]
+async fn added_expressions_reject_unsafe_decimal_casts_even_when_hidden() {
+    use datafusion::logical_expr::{Cast, TryCast};
+    let target = DataType::Decimal256(76, 60);
+    for expression in [
+        Expr::Cast(Cast::new(Box::new(col("value")), target.clone())),
+        Expr::TryCast(TryCast::new(Box::new(col("value")), target.clone())),
+    ] {
+        let source = MemoryAccessor::new(vec![batch(arrow_array::new_null_array(
+            &DataType::Decimal256(76, 0),
+            1,
+        ))]);
+        let reads = source.calls.clone();
+        let error = source
+            .open_evolved(
+                vec![ColumnEvolution::add_column(
+                    "scaled",
+                    target.clone(),
+                    expression,
+                )],
+                Some(vec![]),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert!(
+            error.to_string().contains("unsafe Decimal rescale"),
+            "{error}"
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
 async fn timestamp_fallback_preserves_values_nulls_and_errors() {
     use arrow_schema::TimeUnit;
     let cases = [

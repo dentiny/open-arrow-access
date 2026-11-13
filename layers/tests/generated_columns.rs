@@ -353,6 +353,49 @@ async fn casts_preserve_values_and_nulls() {
 }
 
 #[tokio::test]
+async fn unsafe_decimal_casts_fail_before_reading_or_constant_folding() {
+    let input = RecordBatch::try_from_iter([(
+        "n",
+        arrow_array::new_null_array(&DataType::Decimal256(76, 0), 1),
+    )])
+    .unwrap();
+    for expression in [
+        "arrow_cast(n, 'Decimal256(76,60)')",
+        "arrow_try_cast(n, 'Decimal256(76,60)')",
+        "cast_to_type(n, arrow_cast(NULL, 'Decimal256(76,60)'))",
+        "try_cast_to_type(n, arrow_cast(NULL, 'Decimal256(76,60)'))",
+        "arrow_cast(arrow_cast(1, 'Decimal256(76,0)'), 'Decimal256(76,60)')",
+    ] {
+        let source = MemoryAccessor::new(vec![input.clone()]);
+        let polls = source.polls.clone();
+        let error = source
+            .layer(layer(&[("x", expression)]))
+            .open(request(&[]))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.kind(),
+            ErrorKind::InvalidInput,
+            "{expression}: {error}"
+        );
+        assert!(
+            error.to_string().contains("unsafe Decimal rescale"),
+            "{error}"
+        );
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
+    }
+    let mut reader = MemoryAccessor::new(vec![input])
+        .layer(layer(&[("x", "arrow_cast(n, 'Decimal256(76,51)')")]))
+        .open(request(&["x"]))
+        .await
+        .unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(batch.column(0).data_type(), &DataType::Decimal256(76, 51));
+    assert_eq!(batch.column(0).logical_null_count(), 1);
+}
+
+#[tokio::test]
 async fn projection_pushdown_reads_real_dependencies_and_remaps_column_indices() {
     let original = input();
     let mut fields = vec![Arc::new(Field::new("unused", DataType::Utf8, false))];
