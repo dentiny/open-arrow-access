@@ -29,7 +29,9 @@ impl SchemaUnion {
 #[derive(Default)]
 struct FieldUnion {
     fields: Vec<UnionField>,
+    // Maps field names to indices in `fields`.
     positions: HashMap<String, usize>,
+    // Number of field sets merged at this level; fewer occurrences imply a nullable field.
     inputs: usize,
 }
 
