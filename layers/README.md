@@ -114,7 +114,8 @@ reconcile schemas across files.
 Opening builds a mutable name index once. Layer-owned validation checks changed
 columns only: expected O(K) for K changes, plus structural checks within changed
 nested types. Untouched fields rely on the source reader's fixed-schema contract.
-The initial index and final schema take O(F + K) for F source fields. An addition
+An ordered map retains only active slots, so snapshots skip deleted columns.
+Slot updates take O(log(F + K)) for F source fields and K changes. An addition
 after earlier changes also needs a snapshot of the current schema and a current
 batch view; these visit the fields in that view during planning and reading.
 A functor before any effective changes borrows the source batch directly.

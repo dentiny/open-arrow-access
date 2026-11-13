@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt,
     sync::Arc,
 };
@@ -245,8 +245,8 @@ fn plan_evolution(
         .map(|(index, field)| (field.name().clone(), index))
         .collect();
     validation::validate_evolution_source(names.len(), source.fields().len())?;
-    let mut fields = source.fields().to_vec();
-    let mut removed = HashSet::new();
+    let mut fields: BTreeMap<_, _> = source.fields().iter().cloned().enumerate().collect();
+    let mut next_index = source.fields().len();
     let mut affected = HashSet::new();
     let mut steps = Vec::new();
     let mut changed = false;
@@ -265,8 +265,9 @@ fn plan_evolution(
                 functor,
             } => {
                 validation::validate_evolution_target(None, index)?;
-                let input = changed.then(|| resolve_schema(&fields, &removed, source));
-                let index = fields.len();
+                let input = changed.then(|| resolve_schema(&fields, source));
+                let index = next_index;
+                next_index += 1;
                 let field = Arc::new(Field::new(name, data_type.clone(), true));
                 steps.push(EvolutionStep::Add {
                     index,
@@ -275,13 +276,13 @@ fn plan_evolution(
                     input,
                 });
                 names.insert(name.clone(), index);
-                fields.push(field);
+                fields.insert(index, field);
                 changed = true;
             }
             ColumnEvolution::RemoveColumn { name } => {
                 let index = resolve()?;
                 names.remove(name);
-                removed.insert(index);
+                fields.remove(&index);
                 steps.push(EvolutionStep::Remove(index));
                 changed = true;
             }
@@ -297,26 +298,27 @@ fn plan_evolution(
                 if source_name != target_name {
                     names.remove(source_name);
                     names.insert(target_name.clone(), index);
-                    fields[index] = Arc::new(fields[index].as_ref().clone().with_name(target_name));
+                    fields.insert(
+                        index,
+                        Arc::new(fields[&index].as_ref().clone().with_name(target_name)),
+                    );
                     changed = true;
                 }
             }
             ColumnEvolution::ChangeDataType { data_type, .. } => {
                 let index = resolve()?;
-                let field = fields[index].as_ref();
+                let field = fields[&index].as_ref();
                 if field.data_type() != data_type {
                     validation::validate_cast(field, data_type)?;
-                    fields[index] = Arc::new(field.clone().with_data_type(data_type.clone()));
-                    steps.push(EvolutionStep::Cast {
-                        index,
-                        field: fields[index].clone(),
-                    });
+                    let field = Arc::new(field.clone().with_data_type(data_type.clone()));
+                    fields.insert(index, field.clone());
+                    steps.push(EvolutionStep::Cast { index, field });
                     changed = true;
                 }
             }
         }
     }
-    let (schema, mut output_indices) = resolve_schema(&fields, &removed, source);
+    let (schema, mut output_indices) = resolve_schema(&fields, source);
     let (schema, projection) = options.resolve_projection(&schema)?;
     if let Some(projection) = projection {
         output_indices = projection
@@ -335,14 +337,11 @@ fn plan_evolution(
 
 // Slots are stable across removals and renames; only batch views need dense positions.
 fn resolve_schema(
-    fields: &[FieldRef],
-    removed: &HashSet<usize>,
+    fields: &BTreeMap<usize, FieldRef>,
     source: &SchemaRef,
 ) -> (SchemaRef, Vec<usize>) {
-    let indices: Vec<_> = (0..fields.len())
-        .filter(|index| !removed.contains(index))
-        .collect();
-    let fields: Vec<_> = indices.iter().map(|&index| fields[index].clone()).collect();
+    let indices = fields.keys().copied().collect();
+    let fields: Vec<_> = fields.values().cloned().collect();
     (
         Arc::new(Schema::new_with_metadata(fields, source.metadata().clone())),
         indices,
