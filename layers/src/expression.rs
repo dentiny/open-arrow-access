@@ -4,7 +4,8 @@ use std::{
     sync::Arc,
 };
 
-use arrow_schema::{FieldRef, Schema, SchemaRef};
+use arrow_array::{ArrayRef, RecordBatch};
+use arrow_schema::{ArrowError, FieldRef, Schema, SchemaRef};
 use datafusion::{
     common::DFSchema,
     error::DataFusionError,
@@ -17,11 +18,43 @@ use datafusion::{
         Expr as SqlExpr, FunctionArg, FunctionArgExpr, FunctionArguments, Ident, Visit, Visitor,
     },
 };
+use open_arrow_access_core::{Error, Result};
+
+pub(crate) struct DependencyView {
+    pub(crate) schema: SchemaRef,
+    pub(crate) slots: Vec<usize>,
+}
+
+pub(crate) struct BoundRowExpression {
+    physical: Arc<dyn PhysicalExpr>,
+    pub(crate) input: DependencyView,
+}
+
+impl BoundRowExpression {
+    pub(crate) fn new(physical: Arc<dyn PhysicalExpr>, input: DependencyView) -> Self {
+        Self { physical, input }
+    }
+
+    pub(crate) fn evaluate(
+        &self,
+        batch: &RecordBatch,
+        values: &HashMap<usize, ArrayRef>,
+        batch_error: impl FnOnce(ArrowError) -> Error,
+        expression_error: impl FnOnce(DataFusionError) -> Error,
+    ) -> Result<ArrayRef> {
+        let view =
+            crate::batch::assemble_batch(&self.input.schema, &self.input.slots, batch, values)
+                .map_err(batch_error)?;
+        self.physical
+            .evaluate(&view)
+            .and_then(|value| value.into_array(batch.num_rows()))
+            .map_err(expression_error)
+    }
+}
 
 pub(crate) struct PlannedExpression {
-    pub(crate) expression: Arc<dyn PhysicalExpr>,
+    pub(crate) expression: BoundRowExpression,
     pub(crate) output: FieldRef,
-    pub(crate) input: (SchemaRef, Vec<usize>),
 }
 
 /// Share one planning session across expressions in an ordered transformation.
@@ -111,9 +144,14 @@ impl ExpressionPlanner {
         let input = schema_for(&indices);
         let (physical, field) = self.plan(logical, &DFSchema::try_from(input.clone())?)?;
         Ok(PlannedExpression {
-            expression: physical,
+            expression: BoundRowExpression::new(
+                physical,
+                DependencyView {
+                    schema: input,
+                    slots: indices,
+                },
+            ),
             output: field,
-            input: (input, indices),
         })
     }
 }
@@ -218,15 +256,19 @@ mod tests {
                 Ok((original, _)),
                 Ok(PlannedExpression {
                     expression: compact,
-                    input: (schema, indices),
                     ..
                 }),
             ) = (original, compact)
             {
                 let expected = original.evaluate(&batch).unwrap().into_array(1).unwrap();
-                let view = crate::batch::assemble_batch(&schema, &indices, &batch, &HashMap::new())
+                let actual = compact
+                    .evaluate(
+                        &batch,
+                        &HashMap::new(),
+                        crate::error::generated_batch_error,
+                        |error| crate::error::generated_column_error("test", error),
+                    )
                     .unwrap();
-                let actual = compact.evaluate(&view).unwrap().into_array(1).unwrap();
                 assert_eq!(actual.to_data(), expected.to_data(), "{sql}");
             }
         }

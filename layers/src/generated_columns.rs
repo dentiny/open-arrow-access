@@ -5,7 +5,7 @@ use std::{
 
 use arrow_array::{RecordBatch, RecordBatchOptions};
 use arrow_schema::{Schema, SchemaRef};
-use datafusion::{common::DFSchema, physical_expr::PhysicalExpr};
+use datafusion::common::DFSchema;
 use futures::StreamExt;
 use open_arrow_access_core::{
     Accessor, Capability, Layer, ReadOptionsProvider, RecordCapability, RecordMetadata,
@@ -15,7 +15,7 @@ use open_arrow_access_core::{
 use crate::{
     batch::assemble_batch,
     error::{generated_batch_error, generated_column_error, generated_plan_error},
-    expression::{ExpressionPlanner, PlannedExpression},
+    expression::{BoundRowExpression, ExpressionPlanner, PlannedExpression},
     validation::{validate_generated_names, validate_generated_schema, validate_generated_specs},
 };
 
@@ -115,7 +115,7 @@ where
                 .map(|(projected, &original)| (original, projected))
                 .collect::<HashMap<_, _>>();
             for step in &mut steps {
-                remap_source_indices(&mut step.input.1, &positions);
+                remap_source_indices(&mut step.expression.input.slots, &positions);
             }
             request.read_options_mut().projection = Some(
                 indices
@@ -186,15 +186,13 @@ fn plan_steps(
     let mut dependencies = HashSet::new();
     let mut steps = Vec::with_capacity(specs.len());
     for spec in specs {
-        let PlannedExpression {
-            expression,
-            output,
-            input: (input_schema, indices),
-        } = planner
+        let PlannedExpression { expression, output } = planner
             .plan_sql(&spec.expression, &fields, &names)
             .map_err(|error| generated_plan_error(&spec.column, error))?;
         dependencies.extend(
-            indices
+            expression
+                .input
+                .slots
                 .iter()
                 .filter(|&&index| index < source.fields().len())
                 .map(|&index| fields[index].name().clone()),
@@ -217,7 +215,6 @@ fn plan_steps(
         steps.push(GeneratedStep {
             output: Arc::new(Schema::new(vec![field])),
             expression,
-            input: (input_schema, indices),
             index,
             column: spec.column.clone(),
             release: Vec::new(),
@@ -242,9 +239,8 @@ fn record_capability(inner: RecordCapability) -> RecordCapability {
 
 struct GeneratedStep {
     output: SchemaRef,
-    expression: Arc<dyn PhysicalExpr>,
+    expression: BoundRowExpression,
     column: String,
-    input: (SchemaRef, Vec<usize>),
     index: usize,
     // Generated-value slot indices whose last use is this step. Removing them
     // afterward frees hidden intermediate arrays before final batch assembly.
@@ -263,7 +259,7 @@ impl GeneratedColumnsPlan {
         let lifetimes = crate::value_lifetime::ValueLifetimePlan::new(
             steps
                 .iter()
-                .map(|step| (Some(step.index), step.input.1.as_slice())),
+                .map(|step| (Some(step.index), step.expression.input.slots.as_slice())),
             &output_indices,
         );
         for (step, release) in steps.iter_mut().zip(lifetimes.releases) {
@@ -281,13 +277,11 @@ impl GeneratedColumnsPlan {
         let options = RecordBatchOptions::new().with_row_count(Some(rows));
         let mut values = HashMap::new();
         for step in &self.steps {
-            let view = assemble_batch(&step.input.0, &step.input.1, &batch, &values)
-                .map_err(generated_batch_error)?;
-            let array = step
-                .expression
-                .evaluate(&view)
-                .and_then(|value| value.into_array(rows))
-                .map_err(|error| generated_column_error(&step.column, error))?;
+            let array =
+                step.expression
+                    .evaluate(&batch, &values, generated_batch_error, |error| {
+                        generated_column_error(&step.column, error)
+                    })?;
             // Validate hidden results too, without revisiting unrelated columns.
             let result =
                 RecordBatch::try_new_with_options(step.output.clone(), vec![array], &options)
@@ -375,7 +369,7 @@ mod tests {
         assert_eq!(
             steps
                 .iter()
-                .map(|step| step.input.0.fields().len())
+                .map(|step| step.expression.input.schema.fields().len())
                 .sum::<usize>(),
             WIDTH
         );
@@ -387,7 +381,7 @@ mod tests {
             WIDTH
         );
         for (i, step) in steps.iter().enumerate() {
-            assert_eq!(step.input.1, vec![WIDTH - 1 + i]);
+            assert_eq!(step.expression.input.slots, vec![WIDTH - 1 + i]);
             assert_eq!(step.index, WIDTH + i);
         }
         let batch = RecordBatch::try_new(

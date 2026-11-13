@@ -61,16 +61,13 @@ impl SchemaEvolutionPlan {
                     index,
                     field,
                     expression,
-                    input,
                 } => {
-                    let view = assemble_batch(&input.0, &input.1, &batch, &values)
-                        .map_err(crate::error::evolution_batch)?;
-                    let array = expression
-                        .evaluate(&view)
-                        .and_then(|value| value.into_array(batch.num_rows()))
-                        .map_err(|error| {
-                            crate::error::evolution_expression_error(field.name(), error)
-                        })?;
+                    let array = expression.evaluate(
+                        &batch,
+                        &values,
+                        crate::error::evolution_batch,
+                        |error| crate::error::evolution_expression_error(field.name(), error),
+                    )?;
                     validation::validate_added_column(
                         field.name(),
                         array.as_ref(),

@@ -4,12 +4,15 @@ use std::{
 };
 
 use arrow_schema::{Field, FieldRef, Schema, SchemaRef};
-use datafusion::{common::DFSchema, physical_expr::PhysicalExpr};
+use datafusion::common::DFSchema;
 use indexmap::IndexSet;
 use open_arrow_access_core::Result;
 
 use super::ColumnEvolution;
-use crate::{expression::ExpressionPlanner, validation};
+use crate::{
+    expression::{BoundRowExpression, DependencyView, ExpressionPlanner},
+    validation,
+};
 
 pub(super) struct SchemaEvolutionPlan {
     pub(super) source_schema: SchemaRef,
@@ -27,8 +30,7 @@ pub(super) enum EvolutionStep {
     Add {
         index: usize,
         field: FieldRef,
-        expression: Arc<dyn PhysicalExpr>,
-        input: (SchemaRef, Vec<usize>),
+        expression: BoundRowExpression,
     },
     Cast {
         index: usize,
@@ -138,8 +140,13 @@ impl SchemaEvolutionPlan {
                     steps.push(EvolutionStep::Add {
                         index,
                         field: field.clone(),
-                        expression,
-                        input: (input_schema, indices),
+                        expression: BoundRowExpression::new(
+                            expression,
+                            DependencyView {
+                                schema: input_schema,
+                                slots: indices,
+                            },
+                        ),
                     });
                     names.insert(name.as_str(), index);
                     fields.push(field);
@@ -213,7 +220,9 @@ impl SchemaEvolutionPlan {
         };
         let lifetimes = crate::value_lifetime::ValueLifetimePlan::new(
             steps.iter().map(|step| match step {
-                EvolutionStep::Add { index, input, .. } => (Some(*index), input.1.as_slice()),
+                EvolutionStep::Add {
+                    index, expression, ..
+                } => (Some(*index), expression.input.slots.as_slice()),
                 EvolutionStep::Cast { index, .. } => (Some(*index), std::slice::from_ref(index)),
                 EvolutionStep::Remove(_) => (None, &[][..]),
             }),
