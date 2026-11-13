@@ -9,6 +9,7 @@ use open_arrow_access_core::{
 use super::{
     FileSetRequest,
     accessor::FilePlanner,
+    alignment,
     error::empty_selection,
     schema,
     validation::{validate_fields, validate_file_ordering, validate_file_policy},
@@ -99,7 +100,7 @@ fn align_reader(
     let batches = into_stream(reader).map(move |batch| {
         let batch = batch?;
         super::validation::validate_schema(&batch.schema(), &source)?;
-        schema::align(batch, target.clone())
+        alignment::align(batch, target.clone())
     });
     Ok(Box::new(StreamReader::records(batches, metadata, ordering)))
 }
