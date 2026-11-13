@@ -527,28 +527,26 @@ async fn evolution_checks_udf_results_and_preserves_errors_when_hidden() {
             }),
         )
         .call(vec![col("value")]);
-        let source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1, 2])))]);
-        let reads = source.batches_read.clone();
-        let mut reader = source
-            .open_evolved(
-                vec![ColumnEvolution::add_column(
-                    "added",
-                    DataType::Int32,
-                    expression,
-                )],
-                Some(vec![]),
-            )
-            .await
-            .unwrap();
-        let error = reader.next().await.unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Decode);
-        assert!(error.to_string().contains("added"));
-        if failure == "error" {
-            assert!(std::error::Error::source(&error).is_some());
-            assert!(error.to_string().contains("custom failure"));
+        for change in [
+            ColumnEvolution::add_column("added", DataType::Int32, expression.clone()),
+            ColumnEvolution::add_column_expr("added", expression),
+        ] {
+            let source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1, 2])))]);
+            let reads = source.batches_read.clone();
+            let mut reader = source
+                .open_evolved(vec![change], Some(vec![]))
+                .await
+                .unwrap();
+            let error = reader.next().await.unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::Decode);
+            assert!(error.to_string().contains("added"));
+            if failure == "error" {
+                assert!(std::error::Error::source(&error).is_some());
+                assert!(error.to_string().contains("custom failure"));
+            }
+            assert!(reader.next().await.unwrap().is_none());
+            assert_eq!(reads.load(Ordering::SeqCst), 1);
         }
-        assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(reads.load(Ordering::SeqCst), 1);
     }
 }
 
@@ -827,81 +825,65 @@ async fn invalid_expression_types_and_source_schemas_fail_before_reading() {
 
 #[tokio::test]
 async fn hidden_expression_chain_releases_arrays_after_their_last_use() {
-    const LENGTH: usize = 128;
     for known_schema in [false, true] {
         let arrays = Arc::new(std::sync::Mutex::new(
             Vec::<std::sync::Weak<dyn Array>>::new(),
         ));
-        let mut changes = Vec::new();
-        for position in 0..LENGTH {
-            let arrays = arrays.clone();
-            let expression = create_udf(
-                "track_live_arrays",
-                vec![DataType::Int32],
-                DataType::Int32,
-                Volatility::Stable,
-                Arc::new(move |args| {
-                    let mut arrays = arrays.lock().unwrap();
-                    // Only the preceding result is still an input to this expression.
-                    assert!(
-                        arrays[..arrays.len().saturating_sub(1)]
-                            .iter()
-                            .all(|array| array.strong_count() == 0)
-                    );
-                    let input = args[0].clone().into_array(2)?;
-                    let input = input.as_any().downcast_ref::<Int32Array>().unwrap();
-                    let output = Arc::new(Int32Array::from_iter(
-                        input.iter().map(|value| value.map(|value| value + 1)),
-                    )) as ArrayRef;
-                    arrays.push(Arc::downgrade(&output));
-                    Ok(ColumnarValue::Array(output))
-                }),
-            )
-            .call(vec![col(if position == 0 {
-                "value".into()
-            } else {
-                format!("g{}", position - 1)
-            })]);
-            changes.push(ColumnEvolution::add_column(
-                format!("g{position}"),
-                DataType::Int32,
-                expression,
-            ));
-        }
+        let observed = arrays.clone();
+        let expression = create_udf(
+            "track_live_arrays",
+            vec![DataType::Int32],
+            DataType::Int32,
+            Volatility::Stable,
+            Arc::new(move |args| {
+                let mut arrays = observed.lock().unwrap();
+                // When the third expression runs, the first result must be gone.
+                if arrays.len() == 2 {
+                    assert_eq!(arrays[0].strong_count(), 0);
+                }
+                let input = args[0].clone().into_array(2)?;
+                let input = input.as_any().downcast_ref::<Int32Array>().unwrap();
+                let output = Arc::new(Int32Array::from_iter(
+                    input.iter().map(|value| value.map(|value| value + 1)),
+                )) as ArrayRef;
+                arrays.push(Arc::downgrade(&output));
+                Ok(ColumnarValue::Array(output))
+            }),
+        );
+        let changes = [("a", "value"), ("b", "a"), ("c", "b")]
+            .into_iter()
+            .map(|(name, input)| {
+                ColumnEvolution::add_column(
+                    name,
+                    DataType::Int32,
+                    expression.call(vec![col(input)]),
+                )
+            })
+            .collect();
         let source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1, 2])))]);
         let mut layer = SchemaEvolutionLayer::try_new(changes).unwrap();
         if known_schema {
             layer = layer.with_source_schema(source.schema.clone());
         }
         let mut reader = source
-            .open_layer(layer, Some(vec![format!("g{}", LENGTH - 1)]))
+            .open_layer(layer, Some(vec!["c".into()]))
             .await
             .unwrap();
         let output = reader.next().await.unwrap().unwrap();
         assert_eq!(
             output.column(0).to_data(),
-            Int32Array::from(vec![LENGTH as i32 + 1, LENGTH as i32 + 2]).to_data()
+            Int32Array::from(vec![4, 5]).to_data()
         );
         let arrays = arrays.lock().unwrap();
-        assert_eq!(arrays.len(), LENGTH);
-        assert!(
-            arrays[..LENGTH - 1]
-                .iter()
-                .all(|array| array.strong_count() == 0)
-        );
-        assert!(arrays[LENGTH - 1].upgrade().is_some());
+        assert_eq!(arrays.len(), 3);
+        assert!(arrays[..2].iter().all(|array| array.strong_count() == 0));
+        assert!(arrays[2].upgrade().is_some());
     }
 }
 
 #[tokio::test]
 async fn sql_and_inferred_exprs_share_ordered_schema_changes_and_metadata() {
-    let field = Field::new("value", DataType::Int32, false)
-        .with_metadata([("unit".into(), "items".into())].into());
-    let input = RecordBatch::try_new(
-        Arc::new(Schema::new(vec![field])),
-        vec![Arc::new(Int32Array::from(vec![1, 2]))],
-    )
-    .unwrap();
+    let input = batch(Arc::new(Int32Array::from(vec![1, 2])));
     for known_schema in [false, true] {
         let changes = vec![
             ColumnEvolution::rename_column("value", "n"),

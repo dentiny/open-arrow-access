@@ -179,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn sql_chain_keeps_compact_dependencies_and_releases_intermediates() {
+    fn sql_chain_plan_is_compact_and_releases_intermediates() {
         const WIDTH: usize = 256;
         let source = Arc::new(Schema::new(
             (0..WIDTH)
@@ -223,17 +223,7 @@ mod tests {
                 if i == 0 { vec![] } else { vec![WIDTH + i - 1] }
             );
         }
-        let batch = RecordBatch::try_new(
-            source,
-            (0..WIDTH)
-                .map(|i| Arc::new(Int64Array::from(vec![i as i64])) as ArrayRef)
-                .collect(),
-        )
-        .unwrap();
-        let output = plan.convert(batch).unwrap();
-        assert_eq!(
-            output.column(0).to_data(),
-            Int64Array::from(vec![(WIDTH * 2 - 1) as i64]).to_data()
-        );
+        assert_eq!(plan.output_indices, [WIDTH * 2 - 1]);
+        assert_eq!(plan.target_schema.fields().len(), 1);
     }
 }

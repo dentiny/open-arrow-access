@@ -46,11 +46,6 @@ impl<'a> EvolutionPlanner<'a> {
     }
 
     pub(super) fn apply(&mut self, change: &ColumnEvolution) -> Result<()> {
-        if let Some(&index) = self.names.get(change.name())
-            && index < self.source.fields().len()
-        {
-            self.affected.insert(index);
-        }
         match change {
             ColumnEvolution::AddColumn {
                 name,
@@ -66,11 +61,16 @@ impl<'a> EvolutionPlanner<'a> {
         }
     }
 
-    fn resolve(&self, name: &str) -> Result<usize> {
-        self.names
+    fn resolve(&mut self, name: &str) -> Result<usize> {
+        let index = self
+            .names
             .get(name)
             .copied()
-            .ok_or_else(|| crate::error::evolution_source(name))
+            .ok_or_else(|| crate::error::evolution_source(name))?;
+        if index < self.source.fields().len() {
+            self.affected.insert(index);
+        }
+        Ok(index)
     }
 
     fn plan_expression(
@@ -214,7 +214,7 @@ fn added_field(
     expression: &ColumnExpression,
     output: &Field,
 ) -> Result<Field> {
-    let field = if let Some(data_type) = data_type {
+    let mut field = if let Some(data_type) = data_type {
         validation::validate_evolution_expression_type(name, output.data_type(), data_type)?;
         Field::new(name, data_type.clone(), true)
     } else {
@@ -222,11 +222,10 @@ fn added_field(
             .map_err(|error| crate::error::evolution_config_error(name, error))?;
         output.clone().with_name(name)
     };
-    Ok(if let ColumnExpression::Sql(sql) = expression {
-        let mut metadata = field.metadata().clone();
-        metadata.insert("open_arrow_access:generated_expression".into(), sql.clone());
-        field.with_metadata(metadata)
-    } else {
+    if let ColumnExpression::Sql(sql) = expression {
         field
-    })
+            .metadata_mut()
+            .insert("open_arrow_access:generated_expression".into(), sql.clone());
+    }
+    Ok(field)
 }

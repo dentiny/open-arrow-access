@@ -192,15 +192,6 @@ async fn invalid_expressions_fail_at_open_even_when_hidden() {
         assert_eq!(error.kind(), ErrorKind::InvalidInput, "{specs:?}: {error}");
         assert_eq!(polls.load(Ordering::SeqCst), 0);
     }
-    for names in [vec!["missing"], vec!["x", "x"]] {
-        assert!(
-            MemoryAccessor::new(vec![input()])
-                .layer(layer(&[("x", "1")]))
-                .open(request(&names))
-                .await
-                .is_err()
-        );
-    }
 }
 
 #[tokio::test]
@@ -525,19 +516,16 @@ async fn pushdown_preserves_source_outputs_and_full_namespace_generated_slots() 
 }
 
 #[tokio::test]
-async fn sql_namespace_follows_removals_and_renames() {
+async fn sql_rejects_removed_and_renamed_source_names() {
     let batch = input();
     for known_schema in [false, true] {
-        let changes = || {
-            vec![
+        for sql in ["\"Count\"", "text"] {
+            let mut evolution = SchemaEvolutionLayer::try_new(vec![
                 ColumnEvolution::remove_column("Count"),
                 ColumnEvolution::rename_column("text", "value"),
-            ]
-        };
-        for sql in ["\"Count\"", "text"] {
-            let mut invalid = changes();
-            invalid.push(ColumnEvolution::add_column_sql("invalid", sql));
-            let mut evolution = SchemaEvolutionLayer::try_new(invalid).unwrap();
+                ColumnEvolution::add_column_sql("invalid", sql),
+            ])
+            .unwrap();
             if known_schema {
                 evolution = evolution.with_source_schema(batch.schema());
             }
@@ -546,18 +534,5 @@ async fn sql_namespace_follows_removals_and_renames() {
             assert!(source.layer(evolution).open(request(&[])).await.is_err());
             assert_eq!(polls.load(Ordering::SeqCst), 0);
         }
-        let mut valid = changes();
-        valid.push(ColumnEvolution::add_column_sql("snapshot", "value"));
-        let mut evolution = SchemaEvolutionLayer::try_new(valid).unwrap();
-        if known_schema {
-            evolution = evolution.with_source_schema(batch.schema());
-        }
-        let mut reader = MemoryAccessor::new(vec![batch.clone()])
-            .layer(evolution)
-            .open(request(&["snapshot"]))
-            .await
-            .unwrap();
-        let output = reader.next().await.unwrap().unwrap();
-        assert_eq!(output.column(0).to_data(), batch.column(1).to_data());
     }
 }

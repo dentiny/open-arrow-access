@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 /// Plans when to release computed Arrow arrays within one batch.
 /// A "value" is an array produced by a schema evolution add/cast step, stored
-/// in the executor's `values` map under a column
-/// slot ID. A cast may replace the array in an existing slot after reading it.
+/// in the executor's `values` map under a column slot ID. A cast may replace
+/// the array in an existing slot after reading it.
 /// Final output values remain available until the output batch is assembled.
 pub(crate) struct ValueLifetimePlan {
     /// `releases[step_index]` lists the slot IDs to remove from `values` after
@@ -13,6 +13,7 @@ pub(crate) struct ValueLifetimePlan {
 }
 
 impl ValueLifetimePlan {
+    /// Each step supplies its optional written slot and its read slots, read before writing.
     pub(crate) fn new<'a>(
         steps: impl IntoIterator<Item = (Option<usize>, &'a [usize])>,
         outputs: &[usize],
@@ -44,23 +45,15 @@ mod tests {
     #[test]
     fn overwrites_release_only_the_value_written_by_the_current_step() {
         // Cast slot 0 twice, copy its current value to 1, then cast 0 again.
-        let inputs = [vec![0], vec![0], vec![0], vec![0]];
-        let steps = [0, 0, 1, 0];
-        let plan = ValueLifetimePlan::new(
-            steps
-                .into_iter()
-                .zip(&inputs)
-                .map(|(output, inputs)| (Some(output), inputs.as_slice())),
-            &[1],
-        );
+        let steps = [
+            (Some(0), &[0][..]),
+            (Some(0), &[0][..]),
+            (Some(1), &[0][..]),
+            (Some(0), &[0][..]),
+        ];
+        let plan = ValueLifetimePlan::new(steps, &[1]);
         assert_eq!(plan.releases, [vec![], vec![], vec![], vec![0]]);
-        let plan = ValueLifetimePlan::new(
-            steps
-                .into_iter()
-                .zip(&inputs)
-                .map(|(output, inputs)| (Some(output), inputs.as_slice())),
-            &[0, 1],
-        );
+        let plan = ValueLifetimePlan::new(steps, &[0, 1]);
         assert!(plan.releases.iter().all(Vec::is_empty));
     }
 }
