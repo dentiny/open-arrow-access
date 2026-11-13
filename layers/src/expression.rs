@@ -36,6 +36,7 @@ impl ExpressionPlanner {
             )
             .build();
         let simplifier = ExprSimplifier::new(context);
+        // Coerce before simplifying so coalesce shortcuts preserve the common result type.
         let logical = simplifier.coerce(logical, input)?;
         let logical = simplifier.simplify(logical)?;
         let physical = self.state.create_physical_expr(logical, input)?;

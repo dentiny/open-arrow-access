@@ -928,7 +928,11 @@ async fn scalar_expressions_preserve_rows_with_no_source_columns() {
     let requested = source.requested_projection.clone();
     let layer = SchemaEvolutionLayer::try_new(vec![
         ColumnEvolution::remove_column("value"),
-        ColumnEvolution::add_column("value", DataType::Int32, lit(7i32)),
+        ColumnEvolution::add_column(
+            "value",
+            DataType::Int64,
+            datafusion::functions::core::expr_fn::coalesce(vec![lit(3i32), lit(4i64)]),
+        ),
     ])
     .unwrap()
     .with_source_schema(input.schema());
@@ -939,7 +943,7 @@ async fn scalar_expressions_preserve_rows_with_no_source_columns() {
         assert_eq!(output.num_rows(), rows);
         assert_eq!(
             output.column(0).to_data(),
-            Int32Array::from(vec![7; rows]).to_data()
+            Int64Array::from(vec![3; rows]).to_data()
         );
     }
 }
