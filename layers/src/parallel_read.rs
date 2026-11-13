@@ -72,9 +72,6 @@ impl<A: ScanPlanner> Accessor for ParallelReadAccessor<A> {
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
-        // TODO: After parallel-read implementation is complete, verify support across
-        // format, layer, directory, and service combinations, including partition
-        // independence, preserved output order, and effective storage capabilities.
         open_plan(self.plan_scan(request).await?)
     }
 }
