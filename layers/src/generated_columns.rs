@@ -140,15 +140,17 @@ where
                 (schema, steps, HashMap::new())
             }
         };
-        let (schema, projection) = output_options.resolve_projection(&schema)?;
+        let (schema, mut projection) = output_options.resolve_projection(&schema)?;
+        if let Some(indices) = &mut projection {
+            remap_source_indices(indices, &positions);
+        }
         let metadata = RecordMetadata {
             schema,
             source: inner.metadata().source.clone(),
         };
         let capability = record_capability(inner.capability());
-        let mut output_indices =
+        let output_indices =
             projection.unwrap_or_else(|| (0..metadata.schema.fields().len()).collect());
-        remap_source_indices(&mut output_indices, &positions);
         let plan = GeneratedColumnsPlan {
             steps,
             schema: metadata.schema.clone(),
