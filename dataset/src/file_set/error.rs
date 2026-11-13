@@ -56,6 +56,14 @@ pub(super) fn array_schema_mismatch() -> Error {
     union_error("array type differs from its inspected schema")
 }
 
+pub(super) fn null_array_too_large(data_type: &DataType, len: usize) -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        "union_by_name",
+        format!("cannot fill {len} null values for {data_type}: encoded length would overflow"),
+    )
+}
+
 pub(super) fn nested_file_policy() -> Error {
     Error::new(
         ErrorKind::InvalidInput,
