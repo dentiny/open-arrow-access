@@ -376,6 +376,9 @@ fn plan_evolution(
     })
 }
 
+/// `values` contains arrays from preceding add/cast steps, keyed by the same
+/// column slots as `indices`. Entries override source columns; missing entries
+/// read directly from `source`. Added-column slots must have an entry.
 fn assemble_batch(
     schema: &SchemaRef,
     indices: &[usize],
