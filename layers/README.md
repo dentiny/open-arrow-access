@@ -145,5 +145,10 @@ update metadata when changing the schema or byte representation. Forward optiona
 listing/range/planning operations, or remove the associated advertised abilities.
 Planning-aware wrappers must also wrap partition accessors.
 
+For batch transformations, adapt the input with core's `into_stream`, apply
+stream combinators, and wrap the output with `StreamReader::records`. This
+reuses terminal cleanup on EOF or error instead of implementing another reader
+state machine. Preserve the effective reader capability with `with_capability`.
+
 See [adding a layer](../docs/extending.md#add-a-layer) and the
 [`SamplingLayer` implementation](src/sampling.rs) for a compact complete example.
