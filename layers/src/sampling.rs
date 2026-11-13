@@ -1,8 +1,8 @@
 use arrow_array::BooleanArray;
 use arrow_select::filter::filter_record_batch;
+use futures::{TryStreamExt, future, stream};
 use open_arrow_access_core::{
-    Accessor, Layer, Reader, RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result,
-    async_trait,
+    Accessor, Layer, RecordCapability, RecordReader, Result, StreamReader, async_trait, into_stream,
 };
 
 /// Seeded Bernoulli sampling: independently retain each row with `probability`.
@@ -79,70 +79,30 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for SamplingAccessor<A> {
         }
         let metadata = inner.metadata().clone();
         let capability = inner.capability();
-        Ok(Box::new(SamplingReader {
-            inner: if self.settings.threshold == 0 {
-                None
-            } else {
-                Some(inner)
-            },
-            metadata,
-            capability,
-            threshold: self.settings.threshold,
-            random: SplitMix64(self.settings.seed),
-        }))
-    }
-}
-
-struct SamplingReader {
-    inner: Option<Box<dyn RecordReader>>,
-    metadata: RecordMetadata,
-    capability: RecordCapability,
-    threshold: u64,
-    random: SplitMix64,
-}
-
-#[async_trait]
-impl Reader for SamplingReader {
-    type Item = RecordBatch;
-    type Metadata = RecordMetadata;
-    type Capability = RecordCapability;
-
-    fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
-    }
-    fn capability(&self) -> RecordCapability {
-        self.capability
-    }
-
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        loop {
-            let Some(inner) = self.inner.as_mut() else {
-                return Ok(None);
-            };
-            let batch = match inner.next().await {
-                Ok(Some(batch)) => batch,
-                Ok(None) => {
-                    self.inner = None;
-                    return Ok(None);
-                }
-                Err(error) => {
-                    self.inner = None;
-                    return Err(error);
-                }
-            };
+        if self.settings.threshold == 0 {
+            // Drop the source immediately without polling any batches.
+            return Ok(Box::new(
+                StreamReader::records(stream::empty(), metadata, capability.ordering)
+                    .with_capability(capability),
+            ));
+        }
+        let threshold = self.settings.threshold;
+        let mut random = SplitMix64(self.settings.seed);
+        let batches = into_stream(inner).try_filter_map(move |batch| {
             // Exactly one draw per input row, including null and duplicate rows.
             let mask: BooleanArray = (0..batch.num_rows())
-                .map(|_| self.random.next() >> (64 - RANDOM_BITS) < self.threshold)
+                .map(|_| random.next() >> (64 - RANDOM_BITS) < threshold)
                 .collect();
-            match filter_record_batch(&batch, &mask) {
-                Ok(sampled) if sampled.num_rows() != 0 => return Ok(Some(sampled)),
-                Ok(_) => {}
-                Err(error) => {
-                    self.inner = None;
-                    return Err(crate::error::sample_error(error));
-                }
-            }
-        }
+            future::ready(
+                filter_record_batch(&batch, &mask)
+                    .map(|sampled| (sampled.num_rows() != 0).then_some(sampled))
+                    .map_err(crate::error::sample_error),
+            )
+        });
+        Ok(Box::new(
+            StreamReader::records(batches, metadata, capability.ordering)
+                .with_capability(capability),
+        ))
     }
 }
 
