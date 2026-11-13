@@ -286,6 +286,46 @@ async fn added_expressions_reject_unsafe_decimal_casts_even_when_hidden() {
 }
 
 #[tokio::test]
+async fn added_expressions_reject_run_end_casts_before_reading() {
+    use datafusion::logical_expr::{Cast, TryCast};
+    let encoded = DataType::RunEndEncoded(
+        Arc::new(Field::new("run_ends", DataType::Int16, false)),
+        item(DataType::Int64),
+    );
+    for target in [
+        encoded.clone(),
+        DataType::Struct(vec![item(encoded)].into()),
+    ] {
+        for expression in [
+            Expr::Cast(Cast::new(Box::new(col("value")), target.clone())),
+            Expr::TryCast(TryCast::new(Box::new(col("value")), target.clone())),
+        ] {
+            let source =
+                MemoryAccessor::new(vec![batch(Arc::new(arrow_array::NullArray::new(32768)))]);
+            let reads = source.calls.clone();
+            let error = source
+                .open_evolved(
+                    vec![ColumnEvolution::add_column(
+                        "encoded",
+                        target.clone(),
+                        expression,
+                    )],
+                    Some(vec![]),
+                )
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(error.kind(), ErrorKind::InvalidInput);
+            assert!(
+                error.to_string().contains("unsupported column type"),
+                "{error}"
+            );
+            assert_eq!(reads.load(Ordering::SeqCst), 0);
+        }
+    }
+}
+
+#[tokio::test]
 async fn timestamp_fallback_preserves_values_nulls_and_errors() {
     use arrow_schema::TimeUnit;
     let cases = [
@@ -568,11 +608,14 @@ async fn evolution_adds_nullable_and_nested_arrays_without_casting_them() {
         let input = RecordBatch::try_from_iter([("value", expected.clone())]).unwrap();
         let mut reader = MemoryAccessor::new(vec![input.clone()])
             .open_evolved(
-                vec![ColumnEvolution::add_column(
-                    "added",
-                    data_type.clone(),
-                    col("value"),
-                )],
+                vec![
+                    ColumnEvolution::add_column("added", data_type.clone(), col("value")),
+                    ColumnEvolution::add_column(
+                        "udf",
+                        data_type.clone(),
+                        counted_column("value", data_type.clone(), Arc::default()),
+                    ),
+                ],
                 None,
             )
             .await
@@ -582,6 +625,7 @@ async fn evolution_adds_nullable_and_nested_arrays_without_casting_them() {
         assert_eq!(output.num_rows(), 2);
         assert_eq!(output.column(1).data_type(), &data_type);
         assert!(Arc::ptr_eq(output.column(1), &expected));
+        assert!(Arc::ptr_eq(output.column(2), &expected));
         assert!(Arc::ptr_eq(output.column(0), input.column(0)));
     }
 }

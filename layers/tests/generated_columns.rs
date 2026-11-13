@@ -414,6 +414,58 @@ async fn unsafe_decimal_casts_fail_before_reading_or_constant_folding() {
 }
 
 #[tokio::test]
+async fn run_end_cast_helpers_fail_before_reading_or_constant_folding() {
+    let encoded = DataType::RunEndEncoded(
+        Arc::new(Field::new("run_ends", DataType::Int16, false)),
+        Arc::new(Field::new("values", DataType::Int64, true)),
+    );
+    let reference = arrow_array::new_null_array(&encoded, 1);
+    let input = RecordBatch::try_from_iter([
+        (
+            "n",
+            Arc::new(arrow_array::NullArray::new(1)) as arrow_array::ArrayRef,
+        ),
+        ("reference", reference.clone()),
+    ])
+    .unwrap();
+    for expression in [
+        format!("arrow_cast(n, '{encoded}')"),
+        format!("arrow_try_cast(n, '{encoded}')"),
+        "cast_to_type(n, reference)".into(),
+        "try_cast_to_type(n, reference)".into(),
+        format!("arrow_cast(NULL, '{encoded}')"),
+    ] {
+        let source = MemoryAccessor::new(vec![input.clone()]);
+        let polls = source.polls.clone();
+        let error = source
+            .layer(layer(&[("x", &expression)]))
+            .open(request(&[]))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.kind(),
+            ErrorKind::InvalidInput,
+            "{expression}: {error}"
+        );
+        assert!(
+            error.to_string().contains("unsupported column type"),
+            "{error}"
+        );
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
+    }
+    let mut reader = MemoryAccessor::new(vec![input])
+        .layer(layer(&[(
+            "x",
+            &format!("arrow_cast(reference, '{encoded}')"),
+        )]))
+        .open(request(&["x"]))
+        .await
+        .unwrap();
+    assert_eq!(reader.next().await.unwrap().unwrap().column(0), &reference);
+}
+
+#[tokio::test]
 async fn projection_pushdown_reads_real_dependencies_and_remaps_column_indices() {
     let original = input();
     let mut fields = vec![Arc::new(Field::new("unused", DataType::Utf8, false))];

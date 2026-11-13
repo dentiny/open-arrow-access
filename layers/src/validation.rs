@@ -180,7 +180,7 @@ fn validate_evolution_type(
         }
         DataType::RunEndEncoded(run_ends, values) => {
             // Arrow's null-to-run-end cast can panic beyond the key range.
-            // Expression-provided arrays do not use that cast path.
+            // Passthrough and UDF-produced arrays do not use that cast path.
             if for_cast || run_ends.is_nullable() || !run_ends.data_type().is_run_ends_type() {
                 return Err(invalid());
             }
@@ -325,6 +325,9 @@ pub(crate) fn validate_expression_casts(
             let to = expr.get_type(schema)?;
             // Check before simplification can fold constants or lower cast UDFs.
             if can_cast_types(&from, &to) {
+                if from != to {
+                    validate_evolution_type(&to, true)?;
+                }
                 validate_decimal_cast(&from, &to)?;
             }
         }
