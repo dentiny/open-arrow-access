@@ -42,6 +42,7 @@ struct MemoryAccessor {
     fail: bool,
     batches: Vec<RecordBatch>,
     calls: Arc<AtomicUsize>,
+    requested_projection: Arc<std::sync::Mutex<Option<Vec<String>>>>,
 }
 
 impl MemoryAccessor {
@@ -51,6 +52,7 @@ impl MemoryAccessor {
             fail: false,
             batches,
             calls: Arc::default(),
+            requested_projection: Arc::default(),
         }
     }
 
@@ -90,6 +92,7 @@ impl Accessor for MemoryAccessor {
     }
 
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
+        *self.requested_projection.lock().unwrap() = request.options.projection.clone();
         let (schema, projection) = request.options.resolve_projection(&self.schema)?;
         let mut batches = self.batches.clone().into_iter().map(Ok);
         let calls = self.calls.clone();
@@ -857,5 +860,45 @@ async fn evolution_preserves_runtime_order_between_casts_and_functors() {
         assert!(reader.next().await.is_err());
         assert_eq!(calls.load(Ordering::SeqCst), usize::from(!cast_first));
         assert!(reader.next().await.unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn identity_renames_preserve_projection_pushdown_and_dependencies() {
+    let input = RecordBatch::try_from_iter([
+        ("value", Arc::new(Int32Array::from(vec![1])) as ArrayRef),
+        ("keep", Arc::new(Int32Array::from(vec![2])) as ArrayRef),
+        (
+            "payload",
+            Arc::new(StringArray::from(vec!["unneeded"])) as ArrayRef,
+        ),
+    ])
+    .unwrap();
+    for (names, cast, expected) in [
+        (vec!["value"], false, vec!["value"]),
+        (vec![], false, vec!["value"]),
+        (vec!["keep"], true, vec!["keep", "value"]),
+        (vec!["value"], true, vec!["value", "keep"]),
+    ] {
+        let source = MemoryAccessor::new(vec![input.clone()]);
+        let requested = source.requested_projection.clone();
+        let mut changes = vec![ColumnEvolution::rename_column("value", "value")];
+        if cast {
+            changes.push(ColumnEvolution::change_data_type("keep", DataType::Int64));
+        }
+        let mut reader = source
+            .open_evolved(
+                changes,
+                Some(names.iter().map(|name| (*name).into()).collect()),
+            )
+            .await
+            .unwrap();
+        let expected: Vec<String> = expected.into_iter().map(String::from).collect();
+        assert_eq!(*requested.lock().unwrap(), Some(expected));
+        let output = reader.next().await.unwrap().unwrap();
+        assert_eq!(column_names(&output), names);
+        if let Some(keep) = output.column_by_name("keep") {
+            assert_eq!(keep.data_type(), &DataType::Int64);
+        }
     }
 }

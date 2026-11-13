@@ -164,19 +164,21 @@ where
         let output_options = request.read_options().clone();
         // Arbitrary functors need every source column. Schema changes also need
         // the complete namespace to detect collisions with unchanged fields.
-        if self
-            .changes
-            .iter()
-            .any(|change| !matches!(change, ColumnEvolution::ChangeDataType { .. }))
-        {
+        if self.changes.iter().any(|change| match change {
+            ColumnEvolution::ChangeDataType { .. } => false,
+            ColumnEvolution::RenameColumn {
+                source_name,
+                target_name,
+            } => source_name != target_name,
+            _ => true,
+        }) {
             request.read_options_mut().projection = None;
         } else if let Some(columns) = &mut request.read_options_mut().projection {
             let mut names: HashSet<_> = columns.iter().cloned().collect();
             for change in self.changes.iter() {
-                if let ColumnEvolution::ChangeDataType { name, .. } = change
-                    && names.insert(name.clone())
-                {
-                    columns.push(name.clone());
+                let name = change.name();
+                if names.insert(name.to_owned()) {
+                    columns.push(name.to_owned());
                 }
             }
         }
