@@ -8,9 +8,10 @@ use datafusion::{
     optimizer::simplify_expressions::{ExprSimplifier, SimplifyContext},
     physical_expr::PhysicalExpr,
 };
+use futures::StreamExt;
 use open_arrow_access_core::{
-    Accessor, Capability, Layer, ReadOptionsProvider, Reader, RecordCapability, RecordMetadata,
-    RecordReader, Result, async_trait,
+    Accessor, Capability, Layer, ReadOptionsProvider, RecordCapability, RecordMetadata,
+    RecordReader, Result, StreamReader, async_trait, into_stream,
 };
 
 use crate::{
@@ -127,13 +128,12 @@ where
             source: inner.metadata().source.clone(),
         };
         let capability = record_capability(inner.capability());
-        Ok(Box::new(GeneratedColumnsReader {
-            inner: Some(inner),
-            metadata,
-            steps,
-            projection,
-            capability,
-        }))
+        let plan = GeneratedColumnsPlan { steps, projection };
+        let batches = into_stream(inner).map(move |batch| plan.generate(batch?));
+        Ok(Box::new(
+            StreamReader::records(batches, metadata, capability.ordering)
+                .with_capability(capability),
+        ))
     }
 }
 
@@ -228,15 +228,12 @@ struct GeneratedStep {
     column: String,
 }
 
-struct GeneratedColumnsReader {
-    inner: Option<Box<dyn RecordReader>>,
-    metadata: RecordMetadata,
+struct GeneratedColumnsPlan {
     steps: Vec<GeneratedStep>,
     projection: Option<Vec<usize>>,
-    capability: RecordCapability,
 }
 
-impl GeneratedColumnsReader {
+impl GeneratedColumnsPlan {
     fn generate(&self, mut batch: RecordBatch) -> Result<RecordBatch> {
         let rows = batch.num_rows();
         let options = RecordBatchOptions::new().with_row_count(Some(rows));
@@ -255,34 +252,5 @@ impl GeneratedColumnsReader {
             Some(indices) => batch.project(indices).map_err(generated_batch_error),
             None => Ok(batch),
         }
-    }
-}
-
-#[async_trait]
-impl Reader for GeneratedColumnsReader {
-    type Item = RecordBatch;
-    type Metadata = RecordMetadata;
-    type Capability = RecordCapability;
-
-    fn capability(&self) -> RecordCapability {
-        self.capability
-    }
-
-    fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
-    }
-
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        let Some(inner) = &mut self.inner else {
-            return Ok(None);
-        };
-        let result = match inner.next().await {
-            Ok(Some(batch)) => self.generate(batch).map(Some),
-            other => other,
-        };
-        if !matches!(result, Ok(Some(_))) {
-            self.inner = None;
-        }
-        result
     }
 }
