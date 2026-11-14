@@ -3,8 +3,8 @@ use crate::inference::SchemaInference;
 use bytes::BytesMut;
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt,
-    RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader,
+    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactoryExt, RecordMetadata,
+    Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader,
 };
 use serde_json::{Deserializer, value::RawValue};
 
@@ -17,19 +17,21 @@ where
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = self.binding.factory().clone();
-        let prepared = format.prepare(&request)?;
+        let prepared = format.prepare_scan(&request)?;
         let input = self
             .binding
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
         let (format, input) = format.resolve_schema(input).await?;
-        let (schema, _) = match prepared {
+        let prepared = match prepared {
             Some(prepared) => prepared,
-            None => format.prepare(&request)?.expect("resolved JSON schema"),
+            None => format
+                .prepare_scan(&request)?
+                .expect("resolved JSON schema"),
         };
         let metadata = RecordMetadata {
-            schema,
+            schema: prepared.schema,
             source: Some(request.object.clone()),
         };
         let frames = JsonFrames {

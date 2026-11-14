@@ -179,12 +179,16 @@ async fn decoder_configuration_errors_are_classified_before_opening_bytes() {
         let (input, observed) = fixture("empty.json", 1).await;
         let schema = Arc::new(Schema::new(vec![Field::new("value", data_type, true)]));
         let accessor = JsonAccessor::new(input, schema);
-        let error = accessor.open(request(1, None)).await.err().unwrap();
-        assert_eq!(error.kind(), expected);
-        assert_eq!(error.operation(), "open_json");
-        assert!(error.source().unwrap().is::<ArrowError>());
-        assert!(observed.requests.lock().unwrap().is_empty());
-        assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
+        for error in [
+            accessor.open(request(1, None)).await.err().unwrap(),
+            accessor.plan_scan(request(1, None)).await.err().unwrap(),
+        ] {
+            assert_eq!(error.kind(), expected);
+            assert_eq!(error.operation(), "open_json");
+            assert!(error.source().unwrap().is::<ArrowError>());
+            assert!(observed.requests.lock().unwrap().is_empty());
+            assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
+        }
     }
 }
 

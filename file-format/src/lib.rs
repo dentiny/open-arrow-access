@@ -3,6 +3,8 @@
 mod accessor;
 #[cfg(any(feature = "csv", feature = "json"))]
 mod inference;
+#[cfg(any(feature = "csv", feature = "json"))]
+mod preparation;
 mod scan;
 pub use scan::DecodePartitionOptions;
 #[cfg(any(

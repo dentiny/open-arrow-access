@@ -1,4 +1,4 @@
-use crate::inference::SchemaInference;
+use crate::{inference::SchemaInference, preparation::PreparedProjection};
 
 use super::{
     CsvDialect, CsvFormat,
@@ -74,6 +74,33 @@ impl CsvFileFormat {
         self.options = CsvOptions::Dialect(dialect);
         self
     }
+
+    pub(super) fn prepare_scan(&self, request: &ReadRequest) -> Result<Option<PreparedProjection>> {
+        let Some(input_schema) = &self.schema else {
+            self.inference.validate()?;
+            validation::require_dialect(self.parallel_dialect())?;
+            return Ok(None);
+        };
+        let options = &request.options;
+        validation::validate_input_schema(input_schema)?;
+        let prepared = PreparedProjection::new(input_schema, options)?;
+        validation::validate_selected_schema(&prepared.schema)?;
+        Ok(Some(prepared))
+    }
+
+    fn decoder(&self, prepared: PreparedProjection, request: &ReadRequest) -> (SchemaRef, Decoder) {
+        let mut builder =
+            ReaderBuilder::new(self.schema.as_ref().expect("resolved CSV schema").clone())
+                .with_format(match &self.options {
+                    CsvOptions::Dialect(dialect) => dialect.format(),
+                    CsvOptions::Custom(format) => format.clone(),
+                })
+                .with_batch_size(request.options.batch_size.get());
+        if let Some(indices) = prepared.indices {
+            builder = builder.with_projection(indices);
+        }
+        (prepared.schema, builder.build_decoder())
+    }
 }
 
 #[async_trait]
@@ -114,25 +141,9 @@ impl ReaderFactory for CsvFileFormat {
     }
 
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
-        let Some(input_schema) = &self.schema else {
-            self.inference.validate()?;
-            validation::require_dialect(self.parallel_dialect())?;
-            return Ok(None);
-        };
-        let options = &request.options;
-        validation::validate_input_schema(input_schema)?;
-        let (schema, projection) = options.resolve_projection(input_schema)?;
-        validation::validate_selected_schema(&schema)?;
-        let mut builder = ReaderBuilder::new(input_schema.clone())
-            .with_format(match &self.options {
-                CsvOptions::Dialect(dialect) => dialect.format(),
-                CsvOptions::Custom(format) => format.clone(),
-            })
-            .with_batch_size(options.batch_size.get());
-        if let Some(indices) = projection {
-            builder = builder.with_projection(indices);
-        }
-        Ok(Some((schema, builder.build_decoder())))
+        Ok(self
+            .prepare_scan(request)?
+            .map(|prepared| self.decoder(prepared, request)))
     }
 
     async fn create_reader(
