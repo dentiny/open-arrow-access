@@ -41,7 +41,6 @@ oapen = ["oai"]
 openstax = []
 pmc = [
     "dep:arrow-array",
-    "dep:arrow-schema",
     "open-arrow-access-file-format/csv",
     "open-arrow-access-file-format/json",
     "dep:open-arrow-access-decompression",
@@ -57,7 +56,6 @@ format-xml = [
     "dep:quick-xml",
     "open-arrow-access-file-format/xml",
     "dep:arrow-array",
-    "dep:arrow-schema",
 ]
 oai = ["format-xml"]
 
@@ -84,7 +82,7 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["time"] }
 url.workspace = true
 
-arrow-schema = { workspace = true, optional = true }
+arrow-schema.workspace = true
 
 [dev-dependencies]
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = ["csv", "json"] }

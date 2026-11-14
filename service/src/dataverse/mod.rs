@@ -79,6 +79,7 @@ impl DataverseService {
                         name: file.name.clone(),
                         object: file.id.to_string().into(),
                         content_length: Some(file.size),
+                        size: Some(file.size),
                     })
                     .collect();
                 Ok(ResolvedFilesPlan::new(

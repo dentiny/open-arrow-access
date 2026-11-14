@@ -1,11 +1,14 @@
 //! Provider services resolve source semantics into shared object/reader contracts.
 //!
+//! Inspect file membership with [`ResolvedFileSet::manifest_records`].
 //! Decode resolved files and plan scans with [`ResolvedFileSet::records`], or bind
 //! selected JSON records with [`common::ApiDocument::records_at`]. Formats are
 //! explicit; metadata links are never followed automatically.
 
 mod error;
 mod file_manifest;
+mod manifest_records;
+pub use manifest_records::ManifestRecords;
 mod resolved_files;
 pub use resolved_files::ResolvedFileSet;
 

@@ -104,6 +104,7 @@ impl HttpFileService {
 #[cfg(test)]
 mod tests {
     use super::{FileSpec, HttpFileService, ResolvedFilesPlan};
+    use arrow_array::{Array, cast::AsArray, types::UInt64Type};
     use futures::TryStreamExt;
     use open_arrow_access_core::{Accessor, ByteAccessor, ListRequest, read_all};
     use open_arrow_access_test_support::{fixture, http::HttpFixture};
@@ -113,6 +114,7 @@ mod tests {
             name: name.into(),
             object: object.into(),
             content_length: length,
+            size: None,
         }
     }
 
@@ -163,6 +165,17 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["../opaque", "alias", "unknown length"]
         );
+        let manifest = files.manifest_records();
+        let mut reader = manifest
+            .open(open_arrow_access_core::ReadRequest::new("manifest"))
+            .await
+            .unwrap();
+        let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(batch.num_rows(), 3);
+        let sizes = batch["size"].as_primitive::<UInt64Type>();
+        assert_eq!(sizes.value(0), 4);
+        assert_eq!(sizes.value(1), 4);
+        assert!(sizes.is_null(2));
         assert_eq!(
             fixture.requests().len(),
             1,

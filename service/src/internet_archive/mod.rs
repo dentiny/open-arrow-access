@@ -58,6 +58,7 @@ impl InternetArchiveService {
                             name: file.name.clone(),
                             object: file.name.clone().into(),
                             content_length: None,
+                            size: file.size,
                         })
                         .collect(),
                     InternetArchiveMetadata {

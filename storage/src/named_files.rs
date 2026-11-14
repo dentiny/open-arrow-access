@@ -26,6 +26,11 @@ impl<A> NamedFileAccessor<A> {
             files: Arc::new(files),
         })
     }
+
+    /// Borrow logical names in manifest order without performing storage I/O.
+    pub fn names(&self) -> impl ExactSizeIterator<Item = &str> {
+        self.files.keys().map(String::as_str)
+    }
 }
 
 #[async_trait]

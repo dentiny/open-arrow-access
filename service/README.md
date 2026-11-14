@@ -82,6 +82,53 @@ the current version; select an explicit version for repeatable membership.
 Files remain lazy, may be compressed, and are not automatically parsed or
 converted to text. A byte chunk is not a logical record.
 
+## Inspect a resolved manifest as Arrow
+
+`ResolvedFileSet::manifest_records()` returns an owned `ManifestRecords` accessor.
+It enumerates the already resolved logical namespace, independently of attachment
+formats, byte storage and provider metadata types. No additional format feature is
+needed. Use this to expose a provider's file list as a table before selecting files
+for `files.records(format)`.
+
+| Column | Arrow type | Meaning |
+| --- | --- | --- |
+| `file_name` | non-null `Utf8` | Exact logical name accepted by `files.open`, in manifest order. |
+| `size` | nullable `UInt64` | Download representation size supplied by the binding; unknown is null, an empty file is zero. |
+
+```rust,no_run
+use open_arrow_access::{
+    Accessor, ReadRequest, Result,
+    service::ResolvedFileSet,
+};
+
+async fn inspect_manifest<A, M>(files: &ResolvedFileSet<A, M>) -> Result<()> {
+    let records = files.manifest_records();
+    println!("{:?}", records.schema());
+    let mut reader = records.open(ReadRequest::new("manifest")).await?;
+    while let Some(batch) = reader.next().await? {
+        println!("{:?}", batch.column_by_name("file_name"));
+    }
+    Ok(())
+}
+```
+
+The snapshot copies logical names when requested and remains readable after the
+original file set is dropped. Different names pointing to the same download remain
+distinct rows. Empty manifests retain the same two-column schema. Projection,
+batch size and zero-column row counts use `ReadRequest::options`; its object labels
+the output source rather than selecting an attachment. Native scan planning uses
+one ordered partition. Opening, reading and planning never open/stat files or send
+HEAD requests, and they do not refetch provider metadata.
+
+Sizes are forwarded from normalized binding metadata (currently Zenodo, Dataverse
+and Internet Archive), or an already supplied content length. Generic
+`Connection::files` / `ResolvedFileSet::new` bindings provide names only, so their
+sizes remain null. Raw JSON fields are not interpreted to guess missing values.
+Reported sizes are not verified or used to change the existing range-read policy;
+for example, Dataverse sizes describe original downloads, not tabular conversions.
+Provider-specific fields, MIME types and checksums remain available through
+`files.metadata()`. Download locators are not manifest table columns.
+
 ## Where storage and decoding belong
 
 ```mermaid

@@ -68,6 +68,7 @@ impl ZenodoService {
                             name: file.key.clone(),
                             object: format!("{}/content", file.key).into(),
                             content_length: None,
+                            size: Some(file.size),
                         })
                         .collect(),
                     ZenodoMetadata {

@@ -62,6 +62,7 @@ fn validation_and_construction_share_namespace_rules() {
         (vec!["same", "same"], false),
         (vec!["a", "b", "a"], false),
     ] {
+        let expected_names = names.clone();
         let validation = validate_file_names(names.iter().copied());
         let construction = NamedFileAccessor::new(
             MemoryAccessor::new(b"", 2),
@@ -72,6 +73,10 @@ fn validation_and_construction_share_namespace_rules() {
         );
         assert_eq!(validation.is_ok(), valid);
         assert_eq!(construction.is_ok(), valid);
+        if let Ok(accessor) = &construction {
+            assert_eq!(accessor.names().len(), expected_names.len());
+            assert_eq!(accessor.names().collect::<Vec<_>>(), expected_names);
+        }
         if !valid {
             let expected = validation.unwrap_err();
             let actual = construction.err().unwrap();
