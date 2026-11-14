@@ -5,7 +5,10 @@ use open_arrow_access_core::{
     Result, StreamReader, read_all, read_lines,
 };
 
-use super::{AtifFormat, error::decode_error};
+use super::{
+    AtifFormat,
+    error::{decode_error, expected_object},
+};
 
 struct AtifDecoder {
     documents: BoxStream<'static, Result<Bytes>>,
@@ -32,6 +35,9 @@ impl AtifDecoder {
             let Some(bytes) = self.documents.try_next().await? else {
                 break;
             };
+            if self.format == AtifFormat::Auto && !bytes.starts_with(b"{") {
+                return Err(expected_object(self.source.as_ref(), self.record_index));
+            }
             let document = std::str::from_utf8(&bytes)
                 .map_err(|error| decode_error(self.source.as_ref(), self.record_index, error))?;
             if self.format == AtifFormat::JsonLines && document.trim().is_empty() {
@@ -62,6 +68,7 @@ pub(super) fn create_reader(
     first_index: u64,
 ) -> impl RecordReader {
     let documents = match format {
+        AtifFormat::Auto => super::auto::documents(input),
         AtifFormat::Json => {
             stream::once(async move { read_all(input, "read_atif").await.map(Bytes::from) }).boxed()
         }

@@ -16,7 +16,7 @@ is listed in the [roadmap](roadmap.md).
 | CSV / TSV | `format-csv` | Arrow batches | Explicit or sampled Arrow schema; configurable delimiter and header; sequential bytes |
 | JSON / JSONL | `format-json` | Arrow batches | Explicit or sampled Arrow schema; whitespace-separated objects, not top-level arrays; bare NaN/Infinity/-Infinity accepted; sequential bytes |
 | XML | `format-xml` | Arrow batches | Explicit record path; bounded schema inference or explicit mappings; sequential UTF-8 bytes |
-| ATIF JSON / JSONL | `format-atif` | Arrow batches | Fixed trajectory schema; one complete trajectory per document or nonblank line; sequential bytes |
+| ATIF | `format-atif` | Arrow batches | Fixed trajectory schema; `AtifFormat::Auto` frames JSON/JSONL objects by content; explicit document/line layouts remain available |
 | WARC | `format-warc` | Native `WarcRecord` values or Arrow batches | Sequential bytes; `WarcArrowAccessor` supports projection and retains unmodified binary bodies |
 
 Projection selects top-level fields in caller order. Record readers expose a

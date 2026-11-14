@@ -85,6 +85,8 @@ converts independent groups to Arrow. Bodies remain binary and physical order
 is preserved with ordered execution. Framing/decompression remain sequential;
 the partition byte target is soft and permits an oversized complete record.
 
+Use `AtifFormat::Auto` (the default) for pretty-printed JSON or JSONL without inspecting filenames. It frames one trajectory at a time and omits inter-document whitespace from `raw_json`. Automatic framing uses a sequential whole-input scan plan; explicit `JsonLines` retains native record partitioning.
+
 ## Add a format
 
 1. Implement `ReaderFactory`: choose request, prepared state, reader type, and effective capabilities/order.
