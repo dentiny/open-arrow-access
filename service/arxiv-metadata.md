@@ -49,6 +49,9 @@ async fn harvest_one_window(from: &str, until: &str) -> Result<()> {
 
 The example prints the record count and XML byte length for every page in a
 selected window. The original XML is available for your parser; harvesting alone
-does not produce article/book content or Arrow batches.
+does not produce article/book content or Arrow batches. To read standard OAI
+header columns with a fixed schema, including empty pages, use
+`page.records(service.record_format())`; see the
+[default Arrow record format](oai-provider.md#default-arrow-records).
 
 Sources: [provider metadata documentation](https://info.arxiv.org/help/oa/index.html), [shared OAI-PMH guide](oai-protocol.md).
