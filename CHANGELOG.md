@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- Unify CSV header handling across explicit and inferred schemas with
+  `CsvHeader::{Auto, Present, Absent}`, defaulting to Auto. Resolve once per input
+  before parallel partitioning, including streaming decompression sources.
+- Preserve ambiguous all-string/single-row inference samples and numeric-looking
+  first values as data, following arrow-csv's conservative detection approach.
+
+Compatibility changes:
+- Replace `CsvDialect::has_header: bool` with `header: CsvHeader`; migrate true/false
+  to Present/Absent. Default dialects now retain Auto when setting a delimiter.
+- Move `CsvInferenceOptions::has_header` to `with_header`: None becomes Auto,
+  Some(true) becomes Present, and Some(false) becomes Absent. Sampling settings
+  no longer change header policy.
+- Explicit-schema CSV readers now inspect the first record at open by default.
+  Use Absent to retain the previous default and avoid header inspection.
+- All-string CSV inference no longer assumes a header. Select Present for files
+  with all-string headers. Opaque `CsvFormat` boolean settings remain explicit.
+
 ## 0.2.0
 
 - Add reusable file-source opening and typed record access through `BoundSource`.

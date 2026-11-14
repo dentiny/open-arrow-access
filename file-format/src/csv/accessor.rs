@@ -1,4 +1,4 @@
-use super::{CsvDialect, CsvFileFormat, CsvFormat, CsvInferenceOptions};
+use super::{CsvDialect, CsvFileFormat, CsvFormat, CsvHeader, CsvInferenceOptions};
 use crate::FileAccessor;
 use open_arrow_access_core::SchemaRef;
 
@@ -23,6 +23,11 @@ impl<B> FileAccessor<B, CsvFileFormat> {
     pub fn with_format(self, format: CsvFormat) -> Self {
         self.map_format(|factory| factory.with_format(format))
     }
+    /// Set header handling independently of schema sampling. Defaults to Auto.
+    pub fn with_header(self, header: CsvHeader) -> Self {
+        self.map_format(|format| format.with_header(header))
+    }
+
     pub fn with_dialect(self, dialect: CsvDialect) -> Self {
         self.map_format(|factory| factory.with_dialect(dialect))
     }

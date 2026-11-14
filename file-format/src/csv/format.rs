@@ -1,7 +1,7 @@
 use crate::{inference::SchemaInference, preparation::PreparedProjection};
 
 use super::{
-    CsvDialect, CsvFormat,
+    CsvDialect, CsvFormat, CsvHeader,
     inference::{self, CsvInferenceOptions},
     reader::csv_reader,
     validation,
@@ -15,13 +15,14 @@ use open_arrow_access_core::{
 use std::sync::Arc;
 
 /// Incrementally read CSV or TSV using an explicit or inferred positional schema.
-/// Defaults to comma-separated input without a header; use [`Self::with_format`]
-/// to select a tab delimiter, header handling and other Arrow CSV options.
+/// Defaults to comma-separated input with automatic header detection. Use
+/// [`Self::with_dialect`] for structural options and [`Self::with_header`] to override.
 #[derive(Clone, Debug)]
 pub struct CsvFileFormat {
     schema: Option<SchemaRef>,
     inference: CsvInferenceOptions,
     options: CsvOptions,
+    header: CsvHeader,
 }
 
 #[derive(Clone, Debug)]
@@ -37,6 +38,7 @@ impl CsvFileFormat {
             schema: None,
             inference: CsvInferenceOptions::default(),
             options: CsvOptions::Dialect(CsvDialect::default()),
+            header: CsvHeader::Auto,
         }
     }
 
@@ -50,34 +52,46 @@ impl CsvFileFormat {
             schema: Some(schema),
             inference: CsvInferenceOptions::default(),
             options: CsvOptions::Dialect(CsvDialect::default()),
+            header: CsvHeader::Auto,
         }
     }
 
     pub(super) fn parallel_dialect(&self) -> Option<CsvDialect> {
         match &self.options {
-            CsvOptions::Dialect(dialect) => Some(*dialect),
+            CsvOptions::Dialect(dialect) => Some(CsvDialect {
+                header: self.header,
+                ..*dialect
+            }),
             CsvOptions::Custom(_) => None,
         }
     }
 
     pub fn with_format(mut self, format: CsvFormat) -> Self {
+        self.header = format.has_header.into();
         self.options = CsvOptions::Custom(format);
         self
     }
     /// Configure a known CSV dialect for both sequential decoding and parallel framing.
-    /// With inference, this also explicitly sets header presence from `has_header`.
-    /// Install inference options afterwards to restore automatic detection.
+    /// The default dialect keeps automatic header detection in both schema modes.
     /// Opaque Arrow CsvFormat settings remain supported for explicit schemas through
     /// with_format, using a whole-input plan because their settings cannot be inspected.
     pub fn with_dialect(mut self, dialect: CsvDialect) -> Self {
-        if self.schema.is_none() {
-            self.inference.has_header = Some(dialect.has_header);
-        }
+        self.header = dialect.header;
         self.options = CsvOptions::Dialect(dialect);
         self
     }
 
+    /// Override the header policy. Auto requires an inspectable CsvDialect;
+    /// opaque with_format settings support only Present and Absent.
+    pub fn with_header(mut self, header: CsvHeader) -> Self {
+        self.header = header;
+        self
+    }
+
     pub(super) fn prepare_scan(&self, request: &ReadRequest) -> Result<Option<PreparedProjection>> {
+        if self.header == CsvHeader::Auto {
+            validation::require_dialect(self.parallel_dialect())?;
+        }
         let Some(input_schema) = &self.schema else {
             self.inference.validate()?;
             validation::require_dialect(self.parallel_dialect())?;
@@ -97,8 +111,14 @@ impl CsvFileFormat {
     ) -> (SchemaRef, Decoder, Option<Decoder>) {
         let schema = self.schema.as_ref().expect("resolved CSV schema");
         let format = match &self.options {
-            CsvOptions::Dialect(dialect) => dialect.format(),
-            CsvOptions::Custom(format) => format.clone(),
+            CsvOptions::Dialect(dialect) => CsvDialect {
+                header: self.header,
+                ..*dialect
+            }
+            .format(),
+            CsvOptions::Custom(format) => format
+                .clone()
+                .with_header(self.header == CsvHeader::Present),
         };
         let validate_header = format.has_header && format.validate_header;
         let header = validate_header.then(|| {
@@ -137,13 +157,14 @@ impl SchemaInference for CsvFileFormat {
         &self,
         input: Box<dyn ByteReader>,
     ) -> Result<(Self, Box<dyn ByteReader>)> {
-        if self.schema.is_some() {
+        if self.schema.is_some() && self.header != CsvHeader::Auto {
             return Ok((self.clone(), input));
         }
         let dialect = validation::require_dialect(self.parallel_dialect())?;
-        let (schema, has_header, input) = inference::infer(input, dialect, self.inference).await?;
+        let (schema, has_header, input) =
+            inference::resolve(input, dialect, self.inference, self.schema.clone()).await?;
         let format = Self::new(schema).with_dialect(CsvDialect {
-            has_header,
+            header: has_header.into(),
             validate_header: dialect.validate_header,
             allow_truncated_rows: dialect.allow_truncated_rows,
             ..CsvDialect::default()
@@ -169,9 +190,11 @@ impl ReaderFactory for CsvFileFormat {
     }
 
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
-        Ok(self
-            .prepare_scan(request)?
-            .map(|prepared| self.decoder(prepared, request)))
+        let prepared = self.prepare_scan(request)?;
+        if self.header == CsvHeader::Auto {
+            return Ok(None);
+        }
+        Ok(prepared.map(|prepared| self.decoder(prepared, request)))
     }
 
     async fn create_reader(
