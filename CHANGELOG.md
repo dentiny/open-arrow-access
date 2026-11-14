@@ -1,11 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- WARC Arrow `date` now defaults to non-null `Timestamp(Millisecond, None)`
-  through schema evolution, replacing the previous RFC 3339 `Utf8` field.
-  Sequential and parallel readers use the same conversion.
-
 ## 0.1.0
 
 Initial release of open-arrow-access, a composable Rust library for source access

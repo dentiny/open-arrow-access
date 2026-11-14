@@ -67,7 +67,7 @@ pub fn arrow_schema() -> SchemaRef {
 }
 
 fn date_type() -> DataType {
-    DataType::Timestamp(TimeUnit::Millisecond, /* timezone= */ None)
+    DataType::Timestamp(TimeUnit::Millisecond, /*timezone=*/ None)
 }
 
 pub(super) fn evolve_reader(reader: Box<dyn RecordReader>) -> Result<Box<dyn RecordReader>> {
