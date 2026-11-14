@@ -11,17 +11,22 @@ use open_arrow_access_service::{ManifestRecords, ResolvedFileSet, common::Metada
 use open_arrow_access_storage::NamedFileAccessor;
 use open_arrow_access_test_support::http::HttpFixture;
 
-async fn rows(records: &ManifestRecords) -> Vec<(String, Option<u64>)> {
+#[derive(Debug, PartialEq, Eq)]
+struct ManifestRow {
+    file_name: String,
+    /// Size in bytes; None means the provider did not supply a size.
+    size: Option<u64>,
+}
+
+async fn read_manifest_rows(records: &ManifestRecords) -> Vec<ManifestRow> {
     let mut reader = records.open(ReadRequest::new("manifest")).await.unwrap();
     let mut output = Vec::new();
     while let Some(batch) = reader.next().await.unwrap() {
         let names = batch["file_name"].as_string::<i32>();
         let sizes = batch["size"].as_primitive::<UInt64Type>();
-        output.extend((0..batch.num_rows()).map(|i| {
-            (
-                names.value(i).to_owned(),
-                (!sizes.is_null(i)).then(|| sizes.value(i)),
-            )
+        output.extend((0..batch.num_rows()).map(|i| ManifestRow {
+            file_name: names.value(i).to_owned(),
+            size: (!sizes.is_null(i)).then(|| sizes.value(i)),
         }));
     }
     assert!(reader.next().await.unwrap().is_none());
@@ -47,13 +52,25 @@ async fn generic_constructor_needs_no_backend_traits_or_cloneable_metadata() {
     let records = files.manifest_records();
     drop(files);
     let expected = vec![
-        ("../opaque".into(), None),
-        (" 雪 ".into(), None),
-        ("a\0b".into(), None),
-        ("a\nb".into(), None),
+        ManifestRow {
+            file_name: "../opaque".into(),
+            size: None,
+        },
+        ManifestRow {
+            file_name: " 雪 ".into(),
+            size: None,
+        },
+        ManifestRow {
+            file_name: "a\0b".into(),
+            size: None,
+        },
+        ManifestRow {
+            file_name: "a\nb".into(),
+            size: None,
+        },
     ];
-    assert_eq!(rows(&records).await, expected);
-    assert_eq!(rows(&records.clone()).await, expected);
+    assert_eq!(read_manifest_rows(&records).await, expected);
+    assert_eq!(read_manifest_rows(&records.clone()).await, expected);
     let capability = records.capability();
     assert!(capability.read);
     assert!(!capability.read_with_range);
@@ -81,11 +98,20 @@ async fn aliases_stay_in_manifest_order_without_any_download_or_head_requests() 
     let records = files.manifest_records();
     assert_eq!(files.metadata(), &("provider-version", 42));
     assert_eq!(
-        rows(&records).await,
+        read_manifest_rows(&records).await,
         [
-            ("z-last-name".into(), None),
-            ("a-first-name".into(), None),
-            ("alias".into(), None)
+            ManifestRow {
+                file_name: "z-last-name".into(),
+                size: None
+            },
+            ManifestRow {
+                file_name: "a-first-name".into(),
+                size: None
+            },
+            ManifestRow {
+                file_name: "alias".into(),
+                size: None
+            }
         ]
     );
     assert!(server.requests().is_empty());
@@ -178,7 +204,7 @@ async fn empty_manifests_keep_the_schema_and_validate_projections() {
     assert!(!records.schema().field(0).is_nullable());
     assert_eq!(records.schema().field(1).data_type(), &DataType::UInt64);
     assert!(records.schema().field(1).is_nullable());
-    assert!(rows(&records).await.is_empty());
+    assert!(read_manifest_rows(&records).await.is_empty());
     let mut planned = records
         .plan_scan(ReadRequest::new("empty"))
         .await
@@ -216,10 +242,16 @@ async fn zenodo_reported_sizes_include_zero_and_exact_u64_max_without_stat() {
         .unwrap();
     let manifest = files.manifest_records();
     assert_eq!(
-        rows(&manifest).await,
+        read_manifest_rows(&manifest).await,
         [
-            ("big.bin".into(), Some(u64::MAX)),
-            ("empty.bin".into(), Some(0))
+            ManifestRow {
+                file_name: "big.bin".into(),
+                size: Some(u64::MAX)
+            },
+            ManifestRow {
+                file_name: "empty.bin".into(),
+                size: Some(0)
+            }
         ]
     );
     assert_eq!(files.metadata().files[0].size, u64::MAX);
@@ -244,11 +276,20 @@ async fn internet_archive_preserves_unknown_zero_and_known_sizes() {
         .await
         .unwrap();
     assert_eq!(
-        rows(&files.manifest_records()).await,
+        read_manifest_rows(&files.manifest_records()).await,
         [
-            ("papers/paper #1%.pdf".into(), Some(8)),
-            ("notes.xml".into(), None),
-            ("empty.txt".into(), Some(0)),
+            ManifestRow {
+                file_name: "papers/paper #1%.pdf".into(),
+                size: Some(8)
+            },
+            ManifestRow {
+                file_name: "notes.xml".into(),
+                size: None
+            },
+            ManifestRow {
+                file_name: "empty.txt".into(),
+                size: Some(0)
+            },
         ]
     );
     assert_eq!(server.requests().len(), 1);
@@ -272,10 +313,16 @@ async fn dataverse_sizes_describe_original_downloads_and_logical_directory_names
         .await
         .unwrap();
     assert_eq!(
-        rows(&files.manifest_records()).await,
+        read_manifest_rows(&files.manifest_records()).await,
         [
-            ("papers/2026/paper #1%.pdf".into(), Some(8)),
-            ("table.tab".into(), Some(8)),
+            ManifestRow {
+                file_name: "papers/2026/paper #1%.pdf".into(),
+                size: Some(8)
+            },
+            ManifestRow {
+                file_name: "table.tab".into(),
+                size: Some(8)
+            },
         ]
     );
     assert_eq!(files.metadata().version, "1.0");
