@@ -10,7 +10,30 @@ use open_arrow_access_dataset::{
 use open_arrow_access_file_format::{json::JsonAccessor, parquet::ParquetAccessor};
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_storage::OpenDalAccessor;
+use open_arrow_access_test_support::MemoryAccessor;
 use parquet::arrow::AsyncArrowWriter;
+
+#[tokio::test]
+async fn union_projection_skips_invalid_unselected_json_values() {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("unused", DataType::Int64, false),
+    ]));
+    let source = JsonAccessor::new(
+        MemoryAccessor::new(b"{\"id\":1,\"unused\":\"invalid\"}\n", 3),
+        schema,
+    );
+    let files = FileSetAccessor::new(source).with_union_by_name();
+    let request = FileSetRequest::new(["a"]).with_options(ReadOptions {
+        projection: Some(vec!["id".into()]),
+        ..Default::default()
+    });
+    let mut reader = files.open(request).await.unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(batch.num_columns(), 1);
+    assert_eq!(batch.column(0).as_primitive::<Int64Type>().values(), &[1]);
+    assert!(reader.next().await.unwrap().is_none());
+}
 
 #[tokio::test]
 async fn json_directory_union_by_name_aligns_nested_struct_and_list_fields() {

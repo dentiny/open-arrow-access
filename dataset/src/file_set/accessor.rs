@@ -49,7 +49,8 @@ impl<A> FileSetAccessor<A> {
 
     /// Union compatible schemas by name, recursively aligning Struct/List fields
     /// and filling missing fields with null. Inspect all files before emitting rows;
-    /// readers are then reopened lazily, and must retain their inspected schema.
+    /// readers are then reopened lazily with only selected source columns.
+    /// Their projected schema must match the corresponding inspected fields.
     /// The default remains exact projected-schema matching.
     pub fn with_union_by_name(mut self) -> Self {
         self.union_by_name = true;

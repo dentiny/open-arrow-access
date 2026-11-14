@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition,
-    ScanPlan, map_record_reader,
+    Accessor, FieldNameIndex, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result,
+    ScanPartition, ScanPlan, map_record_reader,
 };
 
 use super::{
@@ -49,9 +49,29 @@ where
         schema: target.clone(),
         source: None,
     };
+    let selected = options
+        .projection
+        .as_ref()
+        .map(|_| FieldNameIndex::new(target.fields()));
     let files = files
         .into_iter()
-        .map(|(request, source)| {
+        .map(|(mut request, source)| {
+            // Preflight checks every field, but execution reads only selected
+            // fields present in this file. Alignment supplies missing columns
+            // and restores the requested output order.
+            let source = if let Some(selected) = &selected {
+                request.options.projection = Some(
+                    source
+                        .fields()
+                        .iter()
+                        .filter(|field| selected.get(field.name()).is_some())
+                        .map(|field| field.name().clone())
+                        .collect(),
+                );
+                request.options.resolve_projection(&source)?.0
+            } else {
+                source
+            };
             Ok((
                 request,
                 Arc::new(AlignmentPlan::new(source, target.clone())?),
