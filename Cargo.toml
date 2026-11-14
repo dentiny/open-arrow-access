@@ -149,7 +149,6 @@ arrow-schema.workspace = true
 datafusion.workspace = true
 open-arrow-access-test-support.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
-tempfile.workspace = true
 tokio.workspace = true
 
 [[test]]
