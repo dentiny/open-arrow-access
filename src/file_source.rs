@@ -1,8 +1,8 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::{
-    Accessor, AccessorExt, FactoryAccessor, ReadRequest, ReaderFactory, RecordMetadata,
-    RecordReader, Result, SchemaRef,
+    Accessor, AccessorExt, ByteAccessor, FactoryAccessor, ReadRequest, ReaderFactory,
+    RecordMetadata, RecordReader, Result, SchemaRef,
     decompression::AutoDecompressionLayer,
     storage::{OpenDalAccessor, opendal},
 };
@@ -58,15 +58,11 @@ where
     F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
 {
     let storage = OpenDalAccessor::new(operator);
-    match compression {
-        OuterCompression::None => {
-            FileSource::bind(FactoryAccessor::new(storage, format), request).await
-        }
-        OuterCompression::Auto => {
-            let storage = storage.layer(AutoDecompressionLayer::new());
-            FileSource::bind(FactoryAccessor::new(storage, format), request).await
-        }
-    }
+    let storage: Arc<dyn ByteAccessor> = match compression {
+        OuterCompression::None => Arc::new(storage),
+        OuterCompression::Auto => Arc::new(storage.layer(AutoDecompressionLayer::new())),
+    };
+    FileSource::bind(FactoryAccessor::new(storage, format), request).await
 }
 
 /// A file selection bound to its initial metadata and read options.
