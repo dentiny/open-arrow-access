@@ -4,10 +4,8 @@
 
 - Add reusable file-source opening and typed record access through `BoundSource`.
 - Add content-based ATIF JSON/JSONL framing with `AtifFormat::Auto`.
-- Add `SchemaEvolutionLayer` for column changes and improve generated-column
-  projection pushdown and memory use.
-- Push dataset union projections into file reads and reuse compiled schema
-  alignment plans.
+- Add `SchemaEvolutionLayer` for column changes and improve generated-column projection pushdown and memory use.
+- Push dataset union projections into file reads and reuse compiled schema alignment plans.
 - Provide a default record format for OAI providers.
 - Align Arrow dependencies with the Arrow 58 ecosystem.
 - Fix run-end encoded type handling and decimal cast validation.
