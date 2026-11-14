@@ -55,6 +55,17 @@ impl ScanPlan {
     /// This sequential primitive does not execute collected layer policies; open the
     /// composed accessor to validate and execute those policies.
     pub fn into_reader(self) -> impl RecordReader {
+        self.into_reader_with_schema_error(crate::error::scan_schema_mismatch)
+    }
+
+    /// Read sequentially like [`Self::into_reader`], using a caller-supplied error
+    /// for partition metadata or batch schema mismatches. This lets enclosing
+    /// datasets retain their error category and operation context while reusing
+    /// scan execution. Discovery, opening and reader errors pass through unchanged.
+    pub fn into_reader_with_schema_error(
+        self,
+        schema_error: fn() -> crate::Error,
+    ) -> impl RecordReader {
         let schema = self.metadata.schema.clone();
         let batch_schema = schema.clone();
         let batches = self
@@ -63,14 +74,22 @@ impl ScanPlan {
                 let schema = schema.clone();
                 async move {
                     let reader = partition.await?;
-                    crate::validation::validate_scan_schema(&reader.metadata().schema, &schema)?;
+                    crate::validation::validate_scan_schema(
+                        &reader.metadata().schema,
+                        &schema,
+                        schema_error,
+                    )?;
                     Ok(into_stream(reader))
                 }
             })
             .try_flatten()
             .map(move |result| {
                 let batch = result?;
-                crate::validation::validate_scan_schema(&batch.schema(), &batch_schema)?;
+                crate::validation::validate_scan_schema(
+                    &batch.schema(),
+                    &batch_schema,
+                    schema_error,
+                )?;
                 Ok(batch)
             });
         StreamReader::records(batches, self.metadata, self.ordering)

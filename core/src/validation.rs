@@ -48,9 +48,10 @@ fn validate_record_batch_type(data_type: &DataType) -> Result<()> {
 pub(crate) fn validate_scan_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,
+    schema_error: fn() -> crate::Error,
 ) -> Result<()> {
     if actual != expected {
-        return Err(crate::error::scan_schema_mismatch());
+        return Err(schema_error());
     }
     Ok(())
 }

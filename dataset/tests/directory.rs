@@ -257,6 +257,52 @@ async fn later_schema_metadata_mismatch_and_open_failure_are_terminal() {
 }
 
 #[tokio::test]
+async fn file_set_reader_errors_keep_source_context_and_stop_before_later_files() {
+    struct FailingFiles(Arc<AtomicUsize>);
+
+    #[async_trait]
+    impl Accessor for FailingFiles {
+        type Request = ReadRequest;
+        type Reader = dyn RecordReader;
+
+        fn capability(&self) -> RecordCapability {
+            RecordCapability::sequential(OrderRequirement::Reorderable)
+        }
+
+        async fn open(&self, _: ReadRequest) -> Result<Box<dyn RecordReader>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            let failure = Error::new(ErrorKind::Io, "read_fixture", "source failed")
+                .with_source(std::io::Error::other("source detail"));
+            Ok(Box::new(open_arrow_access_core::StreamReader::records(
+                stream::iter([Err(failure)]),
+                RecordMetadata {
+                    schema: schema("same"),
+                    source: None,
+                },
+                OrderRequirement::Reorderable,
+            )))
+        }
+    }
+
+    let opens = Arc::new(AtomicUsize::new(0));
+    let mut reader = FileSetAccessor::new(FailingFiles(opens.clone()))
+        .open(FileSetRequest::new(["first", "later"]))
+        .await
+        .unwrap();
+    assert_eq!(reader.capability().ordering, OrderRequirement::Reorderable);
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Io);
+    assert_eq!(error.operation(), "read_fixture");
+    assert_eq!(
+        std::error::Error::source(&error).unwrap().to_string(),
+        "source detail"
+    );
+    assert!(reader.next().await.unwrap().is_none());
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(opens.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn batch_schema_is_checked_against_the_opened_schema() {
     let declared = schema("declared");
     let other = schema("other");
@@ -634,6 +680,43 @@ impl ScanPlanner for PlannedFiles {
         Ok(ScanPlan::new(metadata, partitions)
             .with_ordering(open_arrow_access_core::OrderRequirement::Reorderable))
     }
+}
+
+#[tokio::test]
+async fn ordinary_file_set_open_ignores_native_planning_and_stays_sequential() {
+    let schema = schema("same");
+    let files = Files::new([
+        (
+            "a",
+            FileData::new(schema.clone(), vec![batch(schema.clone(), &[1])]),
+        ),
+        (
+            "b",
+            FileData::new(schema.clone(), vec![batch(schema.clone(), &[2])]),
+        ),
+    ]);
+    let plans = Arc::new(Mutex::new(Vec::new()));
+    let accessor = FileSetAccessor::new(PlannedFiles {
+        files: files.clone(),
+        plans: plans.clone(),
+    })
+    .with_file_planning();
+    let mut reader = accessor
+        .open(FileSetRequest::new(["a", "b"]))
+        .await
+        .unwrap();
+    assert!(plans.lock().unwrap().is_empty());
+    assert_eq!(files.opens.lock().unwrap().len(), 1);
+    assert_eq!(reader.metadata().schema, schema);
+    assert!(reader.metadata().source.is_none());
+    assert_eq!(reader.capability(), accessor.capability());
+    assert!(reader.next().await.unwrap().is_some());
+    assert_eq!(files.opens.lock().unwrap().len(), 1);
+    assert_eq!(values(reader).await, [2]);
+    assert!(plans.lock().unwrap().is_empty());
+    assert_eq!(files.opens.lock().unwrap().len(), 2);
+    assert_eq!(files.max_active.load(Ordering::SeqCst), 1);
+    assert_eq!(files.active.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
