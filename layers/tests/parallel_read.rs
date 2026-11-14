@@ -337,3 +337,49 @@ async fn emission_and_parallel_layers_collect_one_budget_in_either_order() {
         ErrorKind::InvalidInput
     );
 }
+
+#[tokio::test]
+async fn repeated_policies_are_idempotent_and_cannot_relax_source_ordering() {
+    let budget = ParallelReadLayer::new(NonZeroUsize::new(2).unwrap(), NonZeroUsize::MIN);
+    let source = Source(OrderRequirement::Reorderable)
+        .layer(budget)
+        .layer(UnorderedEmissionLayer)
+        .layer(budget)
+        .layer(UnorderedEmissionLayer);
+    let plan = source
+        .plan_scan(ScanPlan::new(metadata(), vec![]).with_ordering(OrderRequirement::Reorderable))
+        .await
+        .unwrap();
+    assert_eq!(
+        plan.parallel_read,
+        Some(ParallelReadOptions {
+            partitions: NonZeroUsize::new(2).unwrap(),
+            prefetch: NonZeroUsize::MIN,
+        })
+    );
+    assert_eq!(plan.emission, EmissionPolicy::Unordered);
+    assert_eq!(source.capability().ordering, OrderRequirement::Reorderable);
+    assert!(source.capability().read_parallel);
+
+    let restricted = Source(OrderRequirement::PreserveGlobal)
+        .layer(UnorderedEmissionLayer)
+        .layer(budget);
+    let plan = ScanPlan::new(metadata(), vec![]).with_ordering(OrderRequirement::Reorderable);
+    assert_eq!(
+        restricted.capability().ordering,
+        OrderRequirement::PreserveGlobal
+    );
+    assert_eq!(
+        restricted.open(plan).await.err().unwrap().kind(),
+        ErrorKind::InvalidInput
+    );
+
+    let sequential = Source(OrderRequirement::Reorderable).layer(UnorderedEmissionLayer);
+    assert!(!sequential.capability().read_parallel);
+    let plan =
+        ScanPlan::new(metadata(), vec![part(vec![7])]).with_ordering(OrderRequirement::Reorderable);
+    let mut reader = sequential.open(plan).await.unwrap();
+    assert!(!reader.capability().read_parallel);
+    assert_eq!(value(&reader.next().await.unwrap().unwrap()), 7);
+    assert!(reader.next().await.unwrap().is_none());
+}

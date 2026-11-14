@@ -3,6 +3,7 @@
 mod batch;
 mod error;
 mod expression;
+mod scan_policy;
 mod validation;
 mod value_lifetime;
 
