@@ -126,6 +126,22 @@ impl SchemaEvolutionLayer {
         })
     }
 
+    /// Apply changes to an already opened reader using its actual schema.
+    /// All input columns are available; accessor source-projection hints do not
+    /// apply at this boundary. The output schema is fixed before reading data.
+    pub fn apply_to_reader(&self, reader: Box<dyn RecordReader>) -> Result<Box<dyn RecordReader>> {
+        if self.changes.is_empty() {
+            return Ok(reader);
+        }
+        SchemaEvolutionPlan::new(
+            &self.changes,
+            &reader.metadata().schema,
+            &Default::default(),
+            false,
+        )?
+        .into_reader(reader)
+    }
+
     /// Supply the complete source schema to push dependencies down without
     /// opening another reader for schema discovery.
     pub fn with_source_schema(mut self, schema: SchemaRef) -> Self {

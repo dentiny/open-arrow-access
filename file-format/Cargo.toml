@@ -16,10 +16,11 @@ parquet-zstd = ["parquet", "parquet/zstd"]
 parquet-lz4 = ["parquet", "parquet/lz4"]
 parquet-gzip = ["parquet", "parquet/flate2-zlib-rs"]
 parquet-brotli = ["parquet", "parquet/brotli"]
-warc = ["dep:warc", "dep:arrow-schema"]
+warc = ["dep:warc", "dep:arrow-schema", "dep:open-arrow-access-layers"]
 xml = ["dep:xml-arrow"]
 
 [dependencies]
+open-arrow-access-layers = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
 csv = { workspace = true, optional = true }
