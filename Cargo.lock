@@ -357,8 +357,8 @@ checksum = "5d2050892d4691cf110586070786712b504985a4d37ed64a9cd8a402718e1706"
 
 [[package]]
 name = "atif-arrow"
-version = "0.4.6"
-source = "git+https://github.com/dentiny/atif-arrow?rev=40ed0c75244ea864b696c879563acd6b2acc6227#40ed0c75244ea864b696c879563acd6b2acc6227"
+version = "0.5.0"
+source = "git+https://github.com/dentiny/atif-arrow?rev=b5d3e82bed2ae903ff4b98e6e261e6f3955cab22#b5d3e82bed2ae903ff4b98e6e261e6f3955cab22"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -5037,8 +5037,8 @@ dependencies = [
 
 [[package]]
 name = "xml-arrow"
-version = "0.2.8"
-source = "git+https://github.com/dentiny/xml-arrow-rs?rev=ef141a949cb0a6f9b73de3533059cd33b29dd7e2#ef141a949cb0a6f9b73de3533059cd33b29dd7e2"
+version = "0.3.0"
+source = "git+https://github.com/dentiny/xml-arrow-rs?rev=93bc199b18d6e12d4c9f6983215e6d55847e03ac#93bc199b18d6e12d4c9f6983215e6d55847e03ac"
 dependencies = [
  "arrow-array",
  "arrow-schema",

@@ -58,10 +58,10 @@ arrow-json = "58"
 arrow-schema = "58"
 arrow-select = "58"
 async-trait = "0.1.91"
-atif-arrow = { git = "https://github.com/dentiny/atif-arrow", rev = "40ed0c75244ea864b696c879563acd6b2acc6227" }
+atif-arrow = { version = "0.5", git = "https://github.com/dentiny/atif-arrow", rev = "b5d3e82bed2ae903ff4b98e6e261e6f3955cab22" }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 warc = { package = "warc-rs", version = "0.3.3", default-features = false }
-xml-arrow = { git = "https://github.com/dentiny/xml-arrow-rs", rev = "ef141a949cb0a6f9b73de3533059cd33b29dd7e2" }
+xml-arrow = { version = "0.3", git = "https://github.com/dentiny/xml-arrow-rs", rev = "93bc199b18d6e12d4c9f6983215e6d55847e03ac" }
 
 # Used by schema evolution expressions.
 datafusion = { version = "54.1.0", default-features = false }

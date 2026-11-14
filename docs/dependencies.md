@@ -39,7 +39,7 @@ Core does not import DataFusion or Lance types.
 
 `format-xml` uses the immutable Arrow 58 compatibility revision from
 [xml-arrow-rs PR #39](https://github.com/dentiny/xml-arrow-rs/pull/39) while its
-compatible release is pending. The parser retains configuration
+0.3.0 release is pending. The parser retains configuration
 validation before I/O and reusable inferred mappings with bounded sample replay
 for parallel decoding. Its companion `xml-io` storage crate is not used, so storage
 remains on this workspace's OpenDAL 0.59.2 baseline.
@@ -48,9 +48,11 @@ remains on this workspace's OpenDAL 0.59.2 baseline.
 
 `format-atif` uses the immutable Arrow 58 compatibility revision from
 [atif-arrow PR #45](https://github.com/dentiny/atif-arrow/pull/45), including the
-existing projection-aware batch builders. The parser API is unchanged.
+existing projection-aware batch builders for the planned 0.5.0 release. The parser
+API is unchanged.
 
-Both parser dependencies are pinned by Git revision in `Cargo.toml` and
+The version requirements already target `xml-arrow = "0.3"` and
+`atif-arrow = "0.5"`. Both parser dependencies are pinned by Git revision in `Cargo.toml` and
 `Cargo.lock`; they do not track a moving branch. Their compatibility PRs do not
 need to be merged to build this branch. Switch back to normal registry requirements
 when Arrow 58-compatible releases are published, keeping the workspace on one
