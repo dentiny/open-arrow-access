@@ -16,7 +16,7 @@ use crate::{
 /// providers to share one source type. No runtime is created and no producer tasks
 /// are spawned. Returned readers own their state and outlive this source.
 pub struct BoundSource {
-    selection: Box<dyn Reopen>,
+    selection: Box<dyn BoundSelection>,
     metadata: RecordMetadata,
     reader: Mutex<Option<Box<dyn RecordReader>>>,
     kind: SourceKind,
@@ -28,8 +28,9 @@ pub(crate) enum SourceKind {
     File,
 }
 
+/// A saved accessor and typed request behind a common record-reader interface.
 #[async_trait]
-trait Reopen: Send + Sync {
+trait BoundSelection: Send + Sync {
     /// Open an independent reader with a clone of the stored typed request.
     /// Accessor errors propagate unchanged; the caller validates the reader's schema.
     async fn open(&self) -> Result<Box<dyn RecordReader>>;
@@ -41,7 +42,7 @@ struct Selection<A: Accessor> {
 }
 
 #[async_trait]
-impl<A> Reopen for Selection<A>
+impl<A> BoundSelection for Selection<A>
 where
     A: Accessor<Reader = dyn RecordReader>,
     A::Request: Clone + Sync,
