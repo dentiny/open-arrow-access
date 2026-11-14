@@ -91,7 +91,7 @@ Enable the upstream backend and transport features alongside your chosen format:
 
 ```toml
 [dependencies]
-open-arrow-access = { version = "0.1.0", features = ["format-parquet"] }
+open-arrow-access = { version = "0.2.0", features = ["format-parquet"] }
 opendal = { version = "0.59.2", default-features = false, features = ["services-s3", "http-transport-reqwest"] }
 ```
 
