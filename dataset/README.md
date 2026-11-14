@@ -69,10 +69,13 @@ Union mode inspects every full schema before emitting rows, then reopens files
 lazily. Missing fields receive nulls; fields follow first-seen order. Structs and
 supported lists combine recursively; other differing types or conflicting
 metadata fail. There is no implicit numeric/string cast. Projection is resolved
-after union, and conflicts in unselected fields still fail preflight.
+after union, and conflicts in unselected fields still fail preflight. Execution
+reads only selected columns present in each file, then fills missing columns and
+restores output order. An empty projection reads only row counts.
 
-Keep source files stable between inspection and reading; observed schema drift
-fails the reader. JSON inference cannot recover keys outside each file's sample.
+Keep source files stable between inspection and reading; schema drift in reopened
+selected fields fails the reader. Changes to unselected fields are not checked
+after preflight. JSON inference cannot recover keys outside each file's sample.
 Union may sample a file twice and stores selected requests/schemas, while keeping
 preflight readers/plans one at a time.
 

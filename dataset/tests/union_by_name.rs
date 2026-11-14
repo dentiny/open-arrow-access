@@ -10,7 +10,102 @@ use open_arrow_access_dataset::{
 use open_arrow_access_file_format::{json::JsonAccessor, parquet::ParquetAccessor};
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_storage::OpenDalAccessor;
+use open_arrow_access_test_support::{MemoryAccessor, MemoryRecordAccessor};
 use parquet::arrow::AsyncArrowWriter;
+
+#[tokio::test]
+async fn union_projection_skips_invalid_unselected_json_values() {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("unused", DataType::Int64, false),
+    ]));
+    for native in [false, true] {
+        let source = JsonAccessor::new(
+            MemoryAccessor::new(b"{\"id\":1,\"unused\":\"invalid\"}\n", 3),
+            schema.clone(),
+        );
+        let mut files = FileSetAccessor::new(source).with_union_by_name();
+        if native {
+            files = files.with_file_planning();
+        }
+        for parallel in [false, true] {
+            for projection in [vec!["id".to_owned()], vec![]] {
+                let request = FileSetRequest::new(["a", "a"]).with_options(ReadOptions {
+                    projection: Some(projection.clone()),
+                    ..Default::default()
+                });
+                let mut reader = if parallel {
+                    files
+                        .clone()
+                        .layer(ParallelReadLayer::new(
+                            NonZeroUsize::new(2).unwrap(),
+                            NonZeroUsize::MIN,
+                        ))
+                        .open(request)
+                        .await
+                        .unwrap()
+                } else {
+                    files.open(request).await.unwrap()
+                };
+                let mut rows = 0;
+                while let Some(batch) = reader.next().await.unwrap() {
+                    assert_eq!(batch.num_columns(), projection.len());
+                    if !projection.is_empty() {
+                        assert_eq!(batch.column(0).as_primitive::<Int64Type>().values(), &[1]);
+                    }
+                    rows += batch.num_rows();
+                }
+                assert_eq!(rows, 2);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn union_reopens_only_projected_source_columns() {
+    let batch = RecordBatch::try_from_iter([
+        (
+            "id",
+            Arc::new(Int64Array::from(vec![1])) as arrow_array::ArrayRef,
+        ),
+        (
+            "unused",
+            Arc::new(Int64Array::from(vec![2])) as arrow_array::ArrayRef,
+        ),
+        (
+            "tail",
+            Arc::new(Int64Array::from(vec![3])) as arrow_array::ArrayRef,
+        ),
+    ])
+    .unwrap();
+    let source = MemoryRecordAccessor::new(vec![batch]);
+    let projections = source.projections.clone();
+    let files = FileSetAccessor::new(source).with_union_by_name();
+    let mut reader = files
+        .open(FileSetRequest::new(["a", "a"]).with_options(ReadOptions {
+            projection: Some(vec!["tail".into(), "id".into()]),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    assert_eq!(*projections.lock().unwrap(), [None, None]);
+    let mut rows = 0;
+    while let Some(batch) = reader.next().await.unwrap() {
+        assert_eq!(batch.column(0).as_primitive::<Int64Type>().values(), &[3]);
+        assert_eq!(batch.column(1).as_primitive::<Int64Type>().values(), &[1]);
+        rows += batch.num_rows();
+    }
+    assert_eq!(rows, 2);
+    assert_eq!(
+        *projections.lock().unwrap(),
+        [
+            None,
+            None,
+            Some(vec!["id".into(), "tail".into()]),
+            Some(vec!["id".into(), "tail".into()]),
+        ]
+    );
+}
 
 #[tokio::test]
 async fn json_directory_union_by_name_aligns_nested_struct_and_list_fields() {
@@ -125,30 +220,55 @@ async fn union_by_name_projection_can_select_a_column_missing_from_the_first_fil
     .unwrap();
     let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
     let files = FileSetAccessor::new(JsonAccessor::infer(storage)).with_union_by_name();
-    for columns in [vec!["tail".to_owned(), "id".to_owned()], vec![]] {
-        let request = FileSetRequest::new(["a.jsonl", "b.jsonl"]).with_options(ReadOptions {
-            projection: Some(columns.clone()),
-            ..Default::default()
-        });
-        let mut reader = files.open(request).await.unwrap();
-        assert_eq!(
-            reader
-                .metadata()
-                .schema
-                .fields()
-                .iter()
-                .map(|field| field.name())
-                .collect::<Vec<_>>(),
-            columns.iter().collect::<Vec<_>>()
-        );
-        let mut rows = 0;
-        while let Some(batch) = reader.next().await.unwrap() {
-            if !columns.is_empty() && rows == 0 {
-                assert!(batch.column(0).is_null(0));
+    for files in [files.clone(), files.with_file_planning()] {
+        for parallel in [false, true] {
+            for columns in [
+                vec!["tail".to_owned(), "id".to_owned()],
+                vec!["tail".to_owned()],
+                vec![],
+            ] {
+                let request =
+                    FileSetRequest::new(["a.jsonl", "b.jsonl"]).with_options(ReadOptions {
+                        projection: Some(columns.clone()),
+                        ..Default::default()
+                    });
+                let mut reader = if parallel {
+                    files
+                        .clone()
+                        .layer(ParallelReadLayer::new(
+                            NonZeroUsize::new(2).unwrap(),
+                            NonZeroUsize::MIN,
+                        ))
+                        .open(request)
+                        .await
+                        .unwrap()
+                } else {
+                    files.open(request).await.unwrap()
+                };
+                assert_eq!(
+                    reader
+                        .metadata()
+                        .schema
+                        .fields()
+                        .iter()
+                        .map(|field| field.name())
+                        .collect::<Vec<_>>(),
+                    columns.iter().collect::<Vec<_>>()
+                );
+                let mut rows = 0;
+                while let Some(batch) = reader.next().await.unwrap() {
+                    if !columns.is_empty() {
+                        if rows == 0 {
+                            assert!(batch.column(0).is_null(0));
+                        } else {
+                            assert_eq!(batch.column(0).as_string::<i32>().value(0), "last");
+                        }
+                    }
+                    rows += batch.num_rows();
+                }
+                assert_eq!(rows, 2);
             }
-            rows += batch.num_rows();
         }
-        assert_eq!(rows, 2);
     }
 }
 
@@ -192,6 +312,7 @@ async fn parquet_union_by_name_only_relaxes_missing_fields() {
         .with_union_by_name()
         .with_file_planning();
     let mut reader = files
+        .clone()
         .layer(ParallelReadLayer::new(
             NonZeroUsize::new(2).unwrap(),
             NonZeroUsize::MIN,
@@ -225,4 +346,38 @@ async fn parquet_union_by_name_only_relaxes_missing_fields() {
     assert_eq!(ids, [1, 2, 3]);
     assert_eq!(left_values, [Some(10), Some(20), None]);
     assert_eq!(right_values, [None, None, Some("r".to_owned())]);
+    for columns in [
+        vec!["right".to_owned(), "id".to_owned()],
+        vec!["right".to_owned()],
+        vec![],
+    ] {
+        let mut reader = files
+            .clone()
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::MIN,
+            ))
+            .open(
+                FileSetRequest::new(["a.parquet", "b.parquet"]).with_options(ReadOptions {
+                    projection: Some(columns.clone()),
+                    ..Default::default()
+                }),
+            )
+            .await
+            .unwrap();
+        let mut rows = 0;
+        while let Some(batch) = reader.next().await.unwrap() {
+            assert_eq!(batch.num_columns(), columns.len());
+            if !columns.is_empty() {
+                let right = batch.column(0).as_string::<i32>();
+                if rows == 0 {
+                    assert_eq!(right.null_count(), 2);
+                } else {
+                    assert_eq!(right.value(0), "r");
+                }
+            }
+            rows += batch.num_rows();
+        }
+        assert_eq!(rows, 3);
+    }
 }

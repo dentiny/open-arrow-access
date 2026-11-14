@@ -16,9 +16,9 @@ use arrow_schema::{DataType, Field};
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind,
-    ListRequest, ObjectRef, ObjectStream, OrderRequirement, ReadOptionsProvider, ReadRequest,
-    Reader, RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition,
-    ScanPlan, ScanPlanner, Schema, SchemaRef, async_trait,
+    ListRequest, ObjectRef, ObjectStream, OrderRequirement, ReadOptions, ReadOptionsProvider,
+    ReadRequest, Reader, RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result,
+    ScanPartition, ScanPlan, ScanPlanner, Schema, SchemaRef, async_trait,
 };
 use open_arrow_access_layers::ParallelReadLayer;
 
@@ -761,14 +761,19 @@ async fn union_by_name_preflight_rejects_type_and_metadata_conflicts_and_drops_r
             ("b", FileData::new(right, vec![])),
         ]);
         let accessor = FileSetAccessor::new(files.clone()).with_union_by_name();
-        let error = accessor
-            .open(FileSetRequest::new(["a", "b"]))
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-        assert_eq!(files.max_active.load(Ordering::SeqCst), 1);
-        assert_eq!(files.active.load(Ordering::SeqCst), 0);
+        for projection in [None, Some(vec![])] {
+            let error = accessor
+                .open(FileSetRequest::new(["a", "b"]).with_options(ReadOptions {
+                    projection,
+                    ..Default::default()
+                }))
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(error.kind(), ErrorKind::InvalidInput);
+            assert_eq!(files.max_active.load(Ordering::SeqCst), 1);
+            assert_eq!(files.active.load(Ordering::SeqCst), 0);
+        }
     }
 }
 
@@ -815,13 +820,21 @@ async fn union_by_name_rejects_a_schema_that_changes_after_preflight() {
             )))
         }
     }
-    let accessor = FileSetAccessor::new(Changing(Arc::default())).with_union_by_name();
-    let mut reader = accessor.open(FileSetRequest::new(["a"])).await.unwrap();
-    assert_eq!(
-        reader.next().await.unwrap_err().operation(),
-        "read_file_set"
-    );
-    assert!(reader.next().await.unwrap().is_none());
+    for projection in [None, Some(vec!["id".into()])] {
+        let accessor = FileSetAccessor::new(Changing(Arc::default())).with_union_by_name();
+        let mut reader = accessor
+            .open(FileSetRequest::new(["a"]).with_options(ReadOptions {
+                projection,
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+        assert_eq!(
+            reader.next().await.unwrap_err().operation(),
+            "read_file_set"
+        );
+        assert!(reader.next().await.unwrap().is_none());
+    }
 }
 
 #[tokio::test]
