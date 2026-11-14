@@ -29,6 +29,10 @@ pub(crate) struct PlannedExpression {
 /// Rebinding changes only the slots; physical expression column indices stay compact.
 pub(crate) struct ExpressionInput {
     schema: SchemaRef,
+    /// Array slot for each field in `schema`, in the same order. Initially these
+    /// are logical column IDs; rebinding maps source columns to projected batch
+    /// indices while leaving computed-column IDs unchanged. Assembly reads a
+    /// cached computed/cast value first, otherwise the source batch column.
     slots: Vec<usize>,
 }
 
