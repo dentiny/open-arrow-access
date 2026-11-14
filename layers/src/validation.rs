@@ -352,7 +352,9 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
                 source_name
             }
             ColumnEvolution::ChangeDataType { name, data_type } => {
-                validate_evolution_type(data_type, true)
+                // Identity changes need no cast kernel. Check type validity now;
+                // the planner checks cast safety once the source type is known.
+                validate_evolution_type(data_type, false)
                     .map_err(|error| crate::error::evolution_config_error(name, error))?;
                 name
             }
