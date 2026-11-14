@@ -15,11 +15,20 @@ use open_arrow_access_core::{
 /// Projection and batch size use the ordinary record-reader options.
 #[derive(Clone, Debug)]
 pub struct ManifestRecords {
-    entries: Arc<[(String, Option<u64>)]>,
+    entries: Arc<[ManifestEntry]>,
+}
+
+/// One file in resolved manifest order; metadata is supplied at resolution.
+#[derive(Clone, Debug)]
+pub(crate) struct ManifestEntry {
+    /// The name exposed by the resolved namespace, rather than a download locator.
+    pub(crate) file_name: String,
+    /// Provider-supplied size in bytes; None means unknown and Some(0) is empty.
+    pub(crate) size: Option<u64>,
 }
 
 impl ManifestRecords {
-    pub(crate) fn new(entries: Vec<(String, Option<u64>)>) -> Self {
+    pub(crate) fn new(entries: Vec<ManifestEntry>) -> Self {
         Self {
             entries: entries.into(),
         }
@@ -66,10 +75,10 @@ impl Accessor for ManifestRecords {
                     .saturating_add(options.batch_size.get())
                     .min(entries.len());
                 let mut builder = RecordBatchBuilder::new(manifest_schema(), options.projection)?;
-                for (name, size) in &entries[start..end] {
+                for entry in &entries[start..end] {
                     builder.push(|row| {
-                        row.append("file_name", name.as_str())?;
-                        row.append("size", *size)
+                        row.append("file_name", entry.file_name.as_str())?;
+                        row.append("size", entry.size)
                     })?;
                 }
                 Ok(Some((builder.finish()?, end)))

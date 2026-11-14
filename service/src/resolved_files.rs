@@ -8,7 +8,7 @@ use open_arrow_access_dataset::file_set::FileSetAccessor;
 use open_arrow_access_file_format::FileAccessor;
 use open_arrow_access_storage::NamedFileAccessor;
 
-use crate::{ManifestRecords, file_manifest::FileSpec};
+use crate::{ManifestRecords, file_manifest::FileSpec, manifest_records::ManifestEntry};
 
 /// A fixed file namespace with provider-defined metadata and independently owned readers.
 #[derive(Clone, Debug)]
@@ -65,7 +65,10 @@ impl<A, M> ResolvedFileSet<A, M> {
             self.accessor
                 .names()
                 .enumerate()
-                .map(|(index, name)| (name.to_owned(), self.sizes.get(index).copied().flatten()))
+                .map(|(index, name)| ManifestEntry {
+                    file_name: name.to_owned(),
+                    size: self.sizes.get(index).copied().flatten(),
+                })
                 .collect(),
         )
     }
