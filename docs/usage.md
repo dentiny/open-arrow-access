@@ -170,13 +170,16 @@ Replace the format accessor for other sequential inputs:
 
 | Input | Construction | Additional feature |
 | --- | --- | --- |
-| CSV with headers | `CsvAccessor::new(decoded, schema).with_format(CsvFormat::default().with_header(true))` | `format-csv` |
-| TSV | Same CSV accessor with `.with_delimiter(b'\t')` on `CsvFormat` | `format-csv` |
+| CSV with automatic headers | `CsvAccessor::new(decoded, schema)` | `format-csv` |
+| TSV | CSV accessor with `.with_dialect(CsvDialect { delimiter: b'\t', ..Default::default() })` | `format-csv` |
 | XML | `XmlAccessor::new(decoded, "/records/record")` | `format-xml` |
 | ATIF JSON / JSONL | `AtifAccessor::new(decoded, AtifFormat::Auto)` | `format-atif` |
 
 Use `CsvAccessor::infer(decoded)` to infer CSV column types and header presence.
-Configure sampling and override ambiguous headers with `CsvInferenceOptions`.
+Configure sampling with `CsvInferenceOptions`. Both constructors default to
+`CsvHeader::Auto`; override with `.with_header(CsvHeader::Present)` or
+`.with_header(CsvHeader::Absent)`. All-string inference samples are ambiguous and
+retain their first row as data; choose Present when those files have headers.
 
 Use `JsonAccessor::infer(decoded)` to infer a JSON schema rather than supplying
 one. Configure the bounded sample with `JsonInferenceOptions`.

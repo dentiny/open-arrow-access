@@ -3,7 +3,7 @@ mod csv_format;
 mod dialect;
 mod error;
 mod planning;
-pub use dialect::CsvDialect;
+pub use dialect::{CsvDialect, CsvHeader};
 mod format;
 mod inference;
 mod reader;

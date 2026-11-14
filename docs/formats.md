@@ -40,23 +40,43 @@ EOF, terminate the reader. Batch size does not bound one record's byte size.
 
 ## CSV and TSV
 
-`CsvAccessor::new(bytes, schema)` uses an explicit Arrow schema.
-`CsvAccessor::infer(bytes)` infers types and detects headers at open. The default
-sample includes up to 1000 complete records (including the potential header) or
-64 MiB of canonical CSV bytes. Configure sampling and override header detection
-with `with_inference_options(CsvInferenceOptions { max_records, max_bytes, has_header })`.
-`has_header: None` compares the first record with types inferred from subsequent
-records: string labels above typed data indicate a header. Numeric widening
-and later nulls alone do not mark the first row as a header. Ambiguous all-string
-samples default to a header. Use `Some(false)` for
-headerless string data, which receives `column_1`, `column_2`, etc.
+`CsvAccessor::new(bytes, schema)` uses an explicit Arrow schema, while
+`CsvAccessor::infer(bytes)` infers column types. Both default to
+`CsvHeader::Auto`; override either with `.with_header(CsvHeader::Present)` to
+consume the first record, or `.with_header(CsvHeader::Absent)` to keep every
+record as data. The policy is independent of schema-sampling options.
+
+With an explicit schema, Auto consumes the first record only when every field
+exactly matches the full schema's column names in order, before projection.
+Case, whitespace, field count, and unselected columns matter. A mismatched row
+remains data, so conversion errors are reported rather than used as evidence
+for a header. All-string data is preserved unless it exactly matches the names;
+use Absent if such a matching row is actually data. Empty and matching header-only
+inputs emit no rows. Auto inspects one complete record during `open`, so source
+errors may surface there; explicit Present/Absent do not require this inspection.
+
+Without an explicit schema, Auto compares the first record with types inferred
+from subsequent records. Text labels above consistently typed data indicate a
+header. Numeric-looking text such as `+1` or integers beyond i64, numeric widening,
+and later nulls alone do not indicate a header. Ambiguous all-string and single-row
+samples are retained as data with `column_1`, `column_2`, etc. Use Present for
+all-string files that have headers. This conservative policy follows arrow-csv's
+[`infer_format` approach](https://github.com/apache/arrow-rs/blob/main/arrow-csv/src/reader/mod.rs); schema inference and decoding use the project's Arrow 58
+dependency.
+
+The default schema sample includes up to 1000 complete records (including the
+potential header) or 64 MiB of canonical CSV bytes. Configure these targets with
+`with_inference_options(CsvInferenceOptions { max_records, max_bytes })`.
 
 Inference uses the source `CsvDialect`, preserving quoted delimiters, multiline
-fields, custom quotes/escapes, comments, terminators, UTF-8 and CRLF. Calling
-`with_dialect` also explicitly sets header presence; install inference options
-with `has_header: None` afterwards to restore automatic detection for that dialect.
-Opaque `with_format` settings require an explicit schema. Record framing reuses
-the native scan parser and canonical quoting; sampled records and unread input
+fields, custom quotes/escapes, comments, terminators, UTF-8 and CRLF.
+`CsvDialect::default().header` is Auto, so changing only the delimiter preserves
+detection. Set `CsvDialect { header: CsvHeader::Present, ..Default::default() }`
+for a known header, or call `with_header` after `with_dialect` to override its policy.
+Sampling options do not change header handling. Opaque `with_format` settings
+require an explicit schema and retain their explicit boolean header setting;
+Auto requires `with_dialect` and is rejected with opaque formats before storage I/O.
+Record framing reuses the native scan parser and canonical quoting; sampled records and unread input
 continue through one source reader without reopening storage, including gzip
 streams. Byte targets are soft and checked between complete encoded records;
 one record, parser lookahead and upstream chunks can exceed them.
@@ -64,10 +84,12 @@ one record, parser lookahead and upstream chunks can exceed them.
 The schema is fixed before returning the reader. Projection is resolved after
 inference, and native parallel scans share the inferred schema across partitions.
 Schemas are inferred separately per file; no cross-file reconciliation is added.
-Later incompatible values fail decoding. Empty inputs, header-only samples,
-all-null sampled columns, and duplicate/empty headers require an explicit schema.
-For identifiers with significant leading zeros, supply an explicit string schema. Configure headers
-with `CsvFormat::default().with_header(true)` and TSV with `.with_delimiter(b'\t')`.
+Later incompatible values fail decoding. Empty inputs, samples explicitly marked
+Present that contain only a header, all-null sampled columns, and duplicate/empty
+headers require an explicit schema.
+For identifiers with significant leading zeros, supply an explicit string schema.
+Configure TSV with `with_dialect(CsvDialect { delimiter: b'\t', ..Default::default() })`.
+Header policy is resolved once before parallel partitioning and shared by all workers.
 `CsvFormat` is this crate's options wrapper around Arrow 58's CSV format, with
 the existing builder methods and `.with_header_validation(true)` preserved.
 It is no longer a type alias for `arrow_csv::reader::Format`. Header validation

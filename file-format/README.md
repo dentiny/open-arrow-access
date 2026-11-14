@@ -20,6 +20,17 @@ a top-level array/scalar is unsupported. WARC Arrow output preserves physical
 records and binary bodies; it does not extract HTML text. See [format behavior](../docs/formats.md)
 for schema inference, mappings, supported layouts, and limits.
 
+## CSV header policy
+
+Both `CsvAccessor::new(bytes, schema)` and `CsvAccessor::infer(bytes)` default to
+`CsvHeader::Auto`. With an explicit schema, the first record must exactly match
+all schema column names to be consumed as a header. Inference requires type
+evidence from later records; ambiguous all-string input retains its first row.
+Use `.with_header(CsvHeader::Present)` or `.with_header(CsvHeader::Absent)` to
+override. `CsvDialect { delimiter: b'\t', ..Default::default() }` keeps Auto for TSV;
+`CsvInferenceOptions` controls sampling only. See [CSV behavior](../docs/formats.md#csv-and-tsv)
+for streaming, parallel reads, and opaque `CsvFormat` limitations.
+
 ## Read JSONL
 
 Enable `format-json` and OpenDAL's `services-fs`. This complete function accepts
