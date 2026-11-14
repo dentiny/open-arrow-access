@@ -214,8 +214,7 @@ cargo run --example read_atif --features format-atif
 cargo run --example read_atif --features format-atif -- testdata/atif/trajectories.jsonl jsonl
 ```
 
-The adapter uses an Arrow 58-compatible `atif-arrow` revision; see
-[dependency alignment](dependencies.md#atif-parser).
+The adapter uses the published `atif-arrow` 0.5 release series with Arrow 58.
 
 
 ## WARC parser

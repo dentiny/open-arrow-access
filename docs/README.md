@@ -49,6 +49,5 @@ cargo test --workspace --all-features --locked
 
 [Test guidance](testing.md) explains suite ownership and fixture usage;
 [test helpers](../test-support/README.md) provide shared contracts.
-[Dependency alignment](dependencies.md) describes upstream version updates.
 [Roadmap](roadmap.md) and [source-attribute design](source-attributes.md) track
 future work; consult the public APIs and usage guides for available behavior.
