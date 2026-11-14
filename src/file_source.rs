@@ -1,13 +1,13 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::{
-    Accessor, AccessorExt, ByteAccessor, FactoryAccessor, ReadRequest, ReaderFactory,
+    Accessor, AccessorExt, BoundSource, ByteAccessor, FactoryAccessor, ReadRequest, ReaderFactory,
     RecordMetadata, RecordReader, Result, SchemaRef,
     decompression::AutoDecompressionLayer,
     storage::{OpenDalAccessor, opendal},
 };
 
-mod error;
+use crate::bound_source::SourceKind;
 
 /// Compression surrounding a complete file, independent of format-internal codecs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,10 +73,7 @@ where
 /// shared; readers remain usable after dropping the source. Binding fixes the
 /// schema, not the file contents, and adds no snapshot guarantee.
 pub struct FileSource {
-    accessor: Box<dyn Accessor<Request = ReadRequest, Reader = dyn RecordReader>>,
-    request: ReadRequest,
-    metadata: RecordMetadata,
-    bound_reader: Mutex<Option<Box<dyn RecordReader>>>,
+    source: BoundSource,
 }
 
 impl FileSource {
@@ -84,41 +81,24 @@ impl FileSource {
         accessor: impl Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
         request: ReadRequest,
     ) -> Result<Self> {
-        let reader = accessor.open(request.clone()).await?;
-        let metadata = reader.metadata().clone();
         Ok(Self {
-            accessor: Box::new(accessor),
-            request,
-            metadata,
-            bound_reader: Mutex::new(Some(reader)),
+            source: BoundSource::bind_with_kind(accessor, request, SourceKind::File).await?,
         })
     }
 
     /// Metadata established by the initial open, available before consuming rows.
     pub fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
+        self.source.metadata()
     }
 
     /// Share the fixed output schema without opening or polling another reader.
     pub fn schema(&self) -> SchemaRef {
-        self.metadata.schema.clone()
+        self.source.schema()
     }
 
     /// Take the bound reader once, then reopen with the original request.
     /// Schema drift returns Decode before yielding a reader; source errors pass through.
     pub async fn reader(&self) -> Result<Box<dyn RecordReader>> {
-        let bound = self
-            .bound_reader
-            .lock()
-            .map_err(|_| error::source_state_unavailable())?
-            .take();
-        let reader = match bound {
-            Some(reader) => reader,
-            None => self.accessor.open(self.request.clone()).await?,
-        };
-        if reader.metadata().schema != self.metadata.schema {
-            return Err(error::schema_changed());
-        }
-        Ok(reader)
+        self.source.reader().await
     }
 }
