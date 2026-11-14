@@ -1,8 +1,12 @@
 use super::{schema, validation};
-use arrow_array::RecordBatchOptions;
 use arrow_schema::Schema;
-use open_arrow_access_core::{Bytes, FieldNameIndex, ReadRequest, RecordBatch, Result, SchemaRef};
+use futures::stream;
+use open_arrow_access_core::{
+    Bytes, FieldNameIndex, OrderRequirement, ReadRequest, RecordBatch, RecordMetadata, Result,
+    SchemaRef, StreamReader, project_batch,
+};
 use open_arrow_access_file_format::{json::JsonFormat, read_document};
+use open_arrow_access_layers::{ColumnEvolution, SchemaEvolutionLayer};
 use std::sync::{Arc, OnceLock};
 
 /// Preserve the upstream JSON field name while exposing the URL as Arrow `text`.
@@ -27,6 +31,15 @@ fn json_schema() -> SchemaRef {
         .clone()
 }
 
+/// Reuse the record layer for the output rename while keeping source JSON names.
+fn text_column_layer() -> &'static SchemaEvolutionLayer {
+    static LAYER: OnceLock<SchemaEvolutionLayer> = OnceLock::new();
+    LAYER.get_or_init(|| {
+        SchemaEvolutionLayer::try_new(vec![ColumnEvolution::rename_column("text_url", "text")])
+            .expect("valid PMC text column rename")
+    })
+}
+
 pub(super) async fn decode_batch(
     raw: &[u8],
     path: &str,
@@ -43,23 +56,24 @@ pub(super) async fn decode_batch(
     static FIELD_INDEX: OnceLock<FieldNameIndex> = OnceLock::new();
     let field_index = FIELD_INDEX.get_or_init(|| FieldNameIndex::new(schema.fields()));
     validation::validate_metadata(&batch, path, field_index)?;
-    let columns = output_schema
+    let input = StreamReader::records(
+        stream::once(async move { Ok(batch) }),
+        RecordMetadata {
+            schema: json_schema(),
+            source: Some(path.into()),
+        },
+        OrderRequirement::Reorderable,
+    );
+    let mut reader = text_column_layer().wrap_reader(Box::new(input))?;
+    let batch = reader.next().await?.expect("one decoded PMC metadata row");
+    let projection = output_schema
         .fields()
         .iter()
         .map(|field| {
-            batch
-                .column(
-                    field_index
-                        .index_of(field.name())
-                        .expect("validated PMC projection"),
-                )
-                .clone()
+            field_index
+                .index_of(field.name())
+                .expect("validated PMC projection")
         })
         .collect::<Vec<_>>();
-    RecordBatch::try_new_with_options(
-        output_schema,
-        columns,
-        &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
-    )
-    .map_err(super::error::record_batch)
+    project_batch(batch, Some(&projection), output_schema)
 }
