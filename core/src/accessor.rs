@@ -51,11 +51,11 @@ pub type ObjectStream = BoxStream<'static, Result<ObjectRef>>;
 pub trait ByteAccessor: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> {
     /// Stream object references in accessor-defined prefix semantics and order.
     /// Apply recursion during discovery; nonrecursive requests must not descend
-    /// into child directories. Implementations must advertise [`Capability::list`].
+    /// into child directories. Implementations must advertise [`crate::Capability::list`].
     ///
     /// # Errors
     ///
-    /// Defaults to [`ErrorKind::Unsupported`]. Discovery failures may occur here
+    /// Defaults to [`crate::ErrorKind::Unsupported`]. Discovery failures may occur here
     /// or while consuming the stream.
     async fn list(&self, _request: ListRequest) -> Result<ObjectStream> {
         Err(crate::error::default_listing_unsupported())

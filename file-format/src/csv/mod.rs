@@ -1,4 +1,5 @@
 mod accessor;
+mod csv_format;
 mod dialect;
 mod error;
 mod planning;
@@ -9,6 +10,6 @@ mod reader;
 mod validation;
 
 pub use accessor::CsvAccessor;
-pub use arrow_csv::reader::Format as CsvFormat;
+pub use csv_format::CsvFormat;
 pub use format::CsvFileFormat;
 pub use inference::CsvInferenceOptions;

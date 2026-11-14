@@ -79,7 +79,7 @@ pub trait ByteReader:
     ///
     /// # Errors
     ///
-    /// The default returns [`ErrorKind::Unsupported`]. Implementations reject
+    /// The default returns [`crate::ErrorKind::Unsupported`]. Implementations reject
     /// reversed or out-of-bounds ranges and report short reads or I/O failures
     /// instead of silently returning fewer bytes than requested.
     async fn read_range(&mut self, _range: Range<u64>) -> Result<Bytes> {

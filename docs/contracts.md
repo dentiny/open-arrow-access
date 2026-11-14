@@ -339,7 +339,5 @@ Parquet errors preserve an upstream shared error's category and source chain.
 An I/O failure during decoding remains an I/O error; invalid Parquet data is
 reported as `Decode`. Identity column projections skip per-batch reordering.
 
-Arrow, Parquet, OpenDAL, and the future DataFusion layer follow one recorded
-latest upstream Lance revision. Workspace requirements record the baseline, and
-the committed lockfile preserves resolved versions, including transitive family components. See
-[dependency alignment](dependencies.md) for the baseline and update procedure.
+Workspace dependency requirements are declared in `Cargo.toml`; the committed
+`Cargo.lock` records resolved versions, including transitive dependencies.
