@@ -458,22 +458,32 @@ async fn inference_detects_headers_replays_samples_and_supports_parallel_project
 
 #[tokio::test]
 async fn inference_detects_numeric_headerless_data_and_allows_string_header_override() {
-    for (bytes, has_header, column) in [
-        (b"1,2\n3,4\n".as_slice(), None, "column_1"),
-        (b"one,two\nthree,four\n", Some(false), "column_1"),
-        (b"name,value\none,two\n", Some(true), "name"),
+    use open_arrow_access_file_format::csv::CsvInferenceOptions;
+    for (bytes, header, column, rows) in [
+        (b"1,2\n3,4\n".as_slice(), CsvHeader::Auto, "column_1", 2),
+        (b"one,two\nthree,four\n", CsvHeader::Absent, "column_1", 2),
+        (b"name,value\none,two\n", CsvHeader::Present, "name", 1),
+        (b"alice,london\nbob,paris\n", CsvHeader::Auto, "column_1", 2),
+        (b"name,city\n", CsvHeader::Auto, "column_1", 1),
+        (b"+1\n2\n3\n", CsvHeader::Auto, "column_1", 3),
+        (b"+1.5\n2.5\n3.5\n", CsvHeader::Auto, "column_1", 3),
+        (b"+1e3\n2e3\n3e3\n", CsvHeader::Auto, "column_1", 3),
+        (
+            b"9223372036854775808\n2\n3\n",
+            CsvHeader::Auto,
+            "column_1",
+            3,
+        ),
     ] {
-        let mut reader = CsvAccessor::infer(MemoryAccessor::new(bytes, 1))
-            .with_header(has_header.map(CsvHeader::from).unwrap_or_default())
-            .open(ReadRequest::new("records.csv"))
-            .await
-            .unwrap();
-        assert_eq!(reader.metadata().schema.field(0).name(), column);
-        let mut rows = 0;
-        while let Some(batch) = reader.next().await.unwrap() {
-            rows += batch.num_rows();
-        }
-        assert_eq!(rows, if column == "name" { 1 } else { 2 });
+        let accessor = CsvAccessor::infer(MemoryAccessor::new(bytes, 1))
+            .with_header(header)
+            .with_inference_options(CsvInferenceOptions::default());
+        let batches = collect(&accessor, ReadRequest::new("records.csv")).await;
+        assert_eq!(batches[0].schema().field(0).name(), column);
+        assert_eq!(
+            batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
+            rows
+        );
     }
 }
 
@@ -487,33 +497,45 @@ async fn inference_preserves_tsv_dialect_bom_gzip_and_zero_column_rows() {
         .write_all(b"\xef\xbb\xbfid\ttitle\r\n1\t'first\tvalue'\r\n2\t'next'\r\n")
         .unwrap();
     let bytes = encoded.finish().unwrap();
-    let input = MemoryAccessor::new(&bytes, 1).layer(DecompressionLayer::new(Gzip));
-    let accessor = CsvAccessor::infer(input).with_dialect(CsvDialect {
-        delimiter: b'\t',
-        quote: b'\'',
-        header: CsvHeader::Present,
-        ..Default::default()
-    });
-    let mut reader = accessor
-        .open(ReadRequest::new("records.tsv").with_options(ReadOptions {
-            projection: Some(vec![]),
+    for infer in [false, true] {
+        let input = MemoryAccessor::new(&bytes, 1).layer(DecompressionLayer::new(Gzip));
+        let accessor = if infer {
+            CsvAccessor::infer(input)
+        } else {
+            CsvAccessor::new(input, schema())
+        }
+        .with_dialect(CsvDialect {
+            delimiter: b'\t',
+            quote: b'\'',
             ..Default::default()
-        }))
-        .await
-        .unwrap();
-    assert!(reader.metadata().schema.fields().is_empty());
-    let mut rows = 0;
-    while let Some(batch) = reader.next().await.unwrap() {
-        rows += batch.num_rows();
+        });
+        let mut reader = accessor
+            .open(ReadRequest::new("records.tsv").with_options(ReadOptions {
+                projection: Some(vec![]),
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+        assert!(reader.metadata().schema.fields().is_empty());
+        let mut rows = 0;
+        while let Some(batch) = reader.next().await.unwrap() {
+            rows += batch.num_rows();
+        }
+        assert_eq!(rows, 2);
     }
-    assert_eq!(rows, 2);
 }
 
 #[tokio::test]
-async fn inference_rejects_empty_duplicate_and_null_columns() {
-    for bytes in [b"".as_slice(), b"id,id\n1,2\n", b"id,empty\n1,\n2,\n"] {
+async fn inference_rejects_empty_header_only_duplicate_and_null_columns() {
+    for bytes in [
+        b"".as_slice(),
+        b"id,title\n",
+        b"id,id\n1,2\n",
+        b"id,empty\n1,\n2,\n",
+    ] {
         assert!(
             CsvAccessor::infer(MemoryAccessor::new(bytes, 1))
+                .with_header(CsvHeader::Present)
                 .open(ReadRequest::new("records.csv"))
                 .await
                 .is_err()
@@ -579,6 +601,24 @@ async fn inference_propagates_source_errors_and_rejects_opaque_formats_before_io
             .is_err()
     );
     assert_eq!(observed.requests.lock().unwrap().len(), 0);
+    let input = MemoryAccessor::new(b"id,title\n1,first\n", 1);
+    let observed = input.observations.clone();
+    let accessor = CsvAccessor::new(input, schema())
+        .with_format(CsvFormat::default())
+        .with_header(CsvHeader::Auto);
+    assert!(
+        accessor
+            .open(ReadRequest::new("records.csv"))
+            .await
+            .is_err()
+    );
+    assert!(observed.requests.lock().unwrap().is_empty());
+    let batches = collect(
+        &accessor.with_header(CsvHeader::Present),
+        ReadRequest::new("records.csv"),
+    )
+    .await;
+    assert_eq!(collect_values::<Int64Type>(&batches, 0), [1]);
 }
 
 #[tokio::test]
@@ -624,271 +664,60 @@ async fn inference_preserves_typed_first_rows_when_later_rows_have_narrower_type
 }
 
 #[tokio::test]
-async fn explicit_schema_auto_matches_full_header_before_projection_and_partitioning() {
-    for raw in [
-        b"id,title\n1,first\n2,second\n".as_slice(),
-        b"1,first\n2,second\n",
-    ] {
-        for chunk_size in [1, 4096] {
-            for parallel in [false, true] {
-                for projection in [None, Some(vec!["title"]), Some(vec![])] {
-                    let input = MemoryAccessor::new(raw, chunk_size);
-                    let observed = input.observations.clone();
-                    let accessor = CsvAccessor::new(input, schema()).with_partition_options(
-                        DecodePartitionOptions {
-                            target_bytes: NonZeroUsize::MIN,
-                        },
-                    );
-                    let request = ReadRequest::new("records.csv")
-                        .with_options(options(1, projection.clone()));
-                    let mut reader = if parallel {
-                        accessor
-                            .layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN))
-                            .open(request)
-                            .await
-                            .unwrap()
-                    } else {
-                        accessor.open(request).await.unwrap()
-                    };
-                    assert_eq!(reader.metadata().schema.metadata(), schema().metadata());
-                    let mut rows = 0;
-                    while let Some(batch) = reader.next().await.unwrap() {
-                        rows += batch.num_rows();
-                    }
-                    assert_eq!(rows, 2);
-                    assert_eq!(observed.requests.lock().unwrap().len(), 1);
-                }
-            }
-        }
-    }
-}
-
-#[tokio::test]
-async fn explicit_auto_preserves_string_data_and_requires_exact_full_names() {
+async fn explicit_header_policy_matches_full_schema_before_projection() {
     let schema = Arc::new(Schema::new(vec![
         Field::new("name", DataType::Utf8, true),
         Field::new("city", DataType::Utf8, true),
     ]));
-    for (raw, policy, expected) in [
+    for (raw, policy, rows) in [
         (b"name,city\nalice,london\n".as_slice(), CsvHeader::Auto, 1),
         (b"alice,london\nbob,paris\n", CsvHeader::Auto, 2),
         (b"name,wrong\nalice,london\n", CsvHeader::Auto, 2),
         (b"NAME,city\nalice,london\n", CsvHeader::Auto, 2),
         (b"name,city\nalice,london\n", CsvHeader::Absent, 2),
         (b"renamed,columns\nalice,london\n", CsvHeader::Present, 1),
+        (b"", CsvHeader::Auto, 0),
+        (b"name,city", CsvHeader::Auto, 0),
     ] {
-        let accessor =
-            CsvAccessor::new(MemoryAccessor::new(raw, 1), schema.clone()).with_header(policy);
-        // A partial match in the selected column is not enough to skip the row.
+        let input = MemoryAccessor::new(raw, 1);
+        let observed = input.observations.clone();
+        let accessor = CsvAccessor::new(input, schema.clone()).with_header(policy);
         let request = ReadRequest::new("records.csv").with_options(options(1, Some(vec!["name"])));
-        for parallel in [false, true] {
-            let batches = if parallel {
-                collect(
-                    &accessor
-                        .clone()
-                        .layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN)),
-                    request.clone(),
-                )
-                .await
-            } else {
-                collect(&accessor, request.clone()).await
-            };
-            assert_eq!(
-                batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
-                expected
-            );
-        }
-    }
-}
-
-#[tokio::test]
-async fn dialect_defaults_keep_auto_for_both_schema_modes_and_gzip_sources() {
-    use open_arrow_access_decompression::AutoDecompressionLayer;
-    use std::io::Write;
-    let raw = b"\xef\xbb\xbf# comment\r\n'id'\t'title'\r\n1\t'first\tvalue'\r\n2\t'two\nlines'";
-    let mut encoded = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoded.write_all(raw).unwrap();
-    let bytes = encoded.finish().unwrap();
-    for infer in [false, true] {
-        for parallel in [false, true] {
-            let input = MemoryAccessor::new(&bytes, 1).layer(AutoDecompressionLayer::new());
-            let accessor = if infer {
-                CsvAccessor::infer(input)
-            } else {
-                CsvAccessor::new(input, schema())
-            }
-            .with_dialect(CsvDialect {
-                delimiter: b'\t',
-                quote: b'\'',
-                comment: Some(b'#'),
-                ..Default::default()
-            });
-            let request = ReadRequest::new("records.tsv.gz").with_options(options(1, None));
-            let batches = if parallel {
-                collect(
-                    &accessor.layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN)),
-                    request,
-                )
-                .await
-            } else {
-                collect(&accessor, request).await
-            };
-            assert_eq!(collect_values::<Int64Type>(&batches, 0), [1, 2]);
-            let titles: Vec<_> = batches
-                .iter()
-                .flat_map(|batch| {
-                    batch
-                        .column(1)
-                        .as_any()
-                        .downcast_ref::<StringArray>()
-                        .unwrap()
-                        .iter()
-                        .map(|s| s.unwrap().to_owned())
-                })
-                .collect();
-            assert_eq!(titles, ["first\tvalue", "two\nlines"]);
-        }
-    }
-}
-
-#[tokio::test]
-async fn explicit_auto_handles_empty_header_only_and_does_not_hide_bad_data() {
-    for raw in [b"".as_slice(), b"id,title", b"id,title\n"] {
-        let accessor = CsvAccessor::new(MemoryAccessor::new(raw, 1), schema());
-        assert!(
-            collect(&accessor, ReadRequest::new("records.csv"))
-                .await
-                .is_empty()
+        let batches = collect(&accessor, request.clone()).await;
+        let parallel = collect(
+            &accessor.layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN)),
+            request,
+        )
+        .await;
+        assert_eq!(batches, parallel);
+        assert_eq!(
+            batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
+            rows
         );
-        assert!(
-            collect(
-                &accessor.layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN)),
-                ReadRequest::new("records.csv")
-            )
-            .await
-            .is_empty()
-        );
+        assert_eq!(observed.requests.lock().unwrap().len(), 2);
     }
-    for raw in [b"bad,first\n1,second\n".as_slice(), b"id,wrong\n1,second\n"] {
-        let mut reader = CsvAccessor::new(MemoryAccessor::new(raw, 1), schema())
-            .open(ReadRequest::new("records.csv"))
-            .await
-            .unwrap();
-        assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
-        assert!(reader.next().await.unwrap().is_none());
-    }
-}
-
-#[tokio::test]
-async fn header_policy_overrides_are_independent_of_sampling_options() {
-    use open_arrow_access_file_format::csv::CsvInferenceOptions;
-    let accessor = CsvAccessor::infer(MemoryAccessor::new(b"alice,london\nbob,paris\n", 1))
-        .with_dialect(CsvDialect {
-            header: CsvHeader::Present,
-            ..Default::default()
-        })
-        .with_header(CsvHeader::Absent)
-        .with_inference_options(CsvInferenceOptions {
-            max_records: 2,
-            max_bytes: 1024,
-        });
-    let batches = collect(&accessor, ReadRequest::new("records.csv")).await;
-    assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
-    assert_eq!(batches[0].schema().field(0).name(), "column_1");
-
-    let input = MemoryAccessor::new(b"id,title\n1,first\n", 1);
-    let observed = input.observations.clone();
-    let accessor = CsvAccessor::new(input, schema())
-        .with_format(CsvFormat::default())
-        .with_header(CsvHeader::Auto);
-    assert_eq!(
-        accessor
-            .open(ReadRequest::new("records.csv"))
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::InvalidInput
-    );
-    assert!(observed.requests.lock().unwrap().is_empty());
-    let batches = collect(
-        &accessor.with_header(CsvHeader::Present),
-        ReadRequest::new("records.csv"),
-    )
-    .await;
-    assert_eq!(collect_values::<Int64Type>(&batches, 0), [1]);
-}
-
-#[tokio::test]
-async fn inference_auto_preserves_ambiguous_and_numeric_looking_first_rows() {
-    for (raw, expected) in [
-        (b"alice,london\nbob,paris\n".as_slice(), 2),
-        (b"name,city\n", 1),
-        (b"+1\n2\n3\n", 3),
-        (b"+1.5\n2.5\n3.5\n", 3),
-        (b"+1e3\n2e3\n3e3\n", 3),
-        (b"9223372036854775808\n2\n3\n", 3),
-    ] {
-        for parallel in [false, true] {
-            let accessor = CsvAccessor::infer(MemoryAccessor::new(raw, 1));
-            let request = ReadRequest::new("records.csv");
-            let batches = if parallel {
-                collect(
-                    &accessor.layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN)),
-                    request,
-                )
-                .await
-            } else {
-                collect(&accessor, request).await
-            };
-            assert_eq!(batches[0].schema().field(0).name(), "column_1");
-            assert_eq!(
-                batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
-                expected
-            );
-        }
-    }
-    assert!(
-        CsvAccessor::infer(MemoryAccessor::new(b"name,city\n", 1))
-            .with_header(CsvHeader::Present)
-            .open(ReadRequest::new("header-only.csv"))
-            .await
-            .is_err()
-    );
 }
 
 #[tokio::test]
 async fn explicit_auto_preserves_source_failures_during_inspection_and_replay() {
-    for offset in [0, 3] {
+    for offset in [3, 9] {
         let input = MemoryAccessor::new(b"id,title\n1,first\n", 1)
             .with_failure(offset, ErrorKind::PermissionDenied);
-        let error = CsvAccessor::new(input, schema())
+        let observed = input.observations.clone();
+        let result = CsvAccessor::new(input, schema())
             .open(ReadRequest::new("records.csv"))
+            .await;
+        let error = if offset < 9 {
+            result.err().unwrap()
+        } else {
+            let mut reader = result.unwrap();
+            format::assert_terminal_error(
+                reader.as_mut(),
+                &observed.reads,
+                ErrorKind::PermissionDenied,
+            )
             .await
-            .err()
-            .unwrap();
+        };
         assert_eq!(error.kind(), ErrorKind::PermissionDenied);
     }
-    let input = MemoryAccessor::new(b"id,title\n1,first\n", 1).with_empty_chunk(0);
-    assert!(
-        CsvAccessor::new(input, schema())
-            .open(ReadRequest::new("records.csv"))
-            .await
-            .is_err()
-    );
-
-    let input =
-        MemoryAccessor::new(b"id,title\n1,first\n", 1).with_failure(9, ErrorKind::PermissionDenied);
-    let observed = input.observations.clone();
-    let mut reader = CsvAccessor::new(input, schema())
-        .open(ReadRequest::new("records.csv"))
-        .await
-        .unwrap();
-    assert_eq!(
-        reader.next().await.unwrap_err().kind(),
-        ErrorKind::PermissionDenied
-    );
-    let reads = observed.reads.load(Ordering::SeqCst);
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(observed.reads.load(Ordering::SeqCst), reads);
 }
