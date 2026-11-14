@@ -921,3 +921,134 @@ async fn sql_and_inferred_exprs_share_ordered_schema_changes_and_metadata() {
         }
     }
 }
+
+#[tokio::test]
+async fn decimal_multiply_scale_boundaries_preserve_exact_values() {
+    use arrow_array::Decimal128Array;
+    for (left_scale, right_scale, accepted) in [
+        (-70, -70, false),
+        (-65, -64, false),
+        (-64, -64, true),
+        (-128, 0, true),
+        (-1, -1, true),
+    ] {
+        let input = RecordBatch::try_from_iter([
+            (
+                "a",
+                Arc::new(
+                    Decimal128Array::from(vec![1])
+                        .with_precision_and_scale(1, left_scale)
+                        .unwrap(),
+                ) as ArrayRef,
+            ),
+            (
+                "b",
+                Arc::new(
+                    Decimal128Array::from(vec![1])
+                        .with_precision_and_scale(1, right_scale)
+                        .unwrap(),
+                ) as ArrayRef,
+            ),
+        ])
+        .unwrap();
+        for known_schema in [false, true] {
+            let mut evolution =
+                SchemaEvolutionLayer::try_new(vec![ColumnEvolution::add_column_expr(
+                    "product",
+                    col("a") * col("b"),
+                )])
+                .unwrap();
+            if known_schema {
+                evolution = evolution.with_source_schema(input.schema());
+            }
+            let opened = MemoryAccessor::new(vec![input.clone()])
+                .open_layer(evolution, Some(vec!["product".into()]))
+                .await;
+            if accepted {
+                let mut reader = opened.unwrap();
+                let batch = reader.next().await.unwrap().unwrap();
+                let values = batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<Decimal128Array>()
+                    .unwrap();
+                assert_eq!(values.value(0), 1);
+                assert_eq!(values.scale(), left_scale.checked_add(right_scale).unwrap());
+            } else {
+                let error = opened.err().unwrap();
+                assert_eq!(error.kind(), ErrorKind::InvalidInput);
+                assert!(
+                    error.to_string().contains("unsafe decimal arithmetic"),
+                    "{error}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn decimal_multiply_uses_coerced_scales_for_mixed_widths() {
+    use arrow_array::{Decimal128Array, Decimal256Array};
+    use datafusion::arrow::datatypes::i256;
+    let input = RecordBatch::try_from_iter([
+        (
+            "a",
+            Arc::new(
+                Decimal128Array::from(vec![1])
+                    .with_precision_and_scale(1, -100)
+                    .unwrap(),
+            ) as ArrayRef,
+        ),
+        (
+            "b",
+            Arc::new(
+                Decimal256Array::from(vec![i256::from_i128(1)])
+                    .with_precision_and_scale(1, -30)
+                    .unwrap(),
+            ) as ArrayRef,
+        ),
+    ])
+    .unwrap();
+    let mut reader = MemoryAccessor::new(vec![input])
+        .open_evolved(
+            vec![ColumnEvolution::add_column_expr(
+                "product",
+                col("a") * col("b"),
+            )],
+            Some(vec!["product".into()]),
+        )
+        .await
+        .unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    let values = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<Decimal256Array>()
+        .unwrap();
+    assert_eq!(values.scale(), -60);
+    assert_eq!(values.value_as_string(0), format!("1{}", "0".repeat(130)));
+}
+
+#[tokio::test]
+async fn decimal_multiply_rejects_constants_before_folding() {
+    let constant = lit(datafusion::common::ScalarValue::Decimal128(Some(1), 1, -70));
+    let source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1])))]);
+    let polls = source.polls.clone();
+    let error = source
+        .open_evolved(
+            vec![ColumnEvolution::add_column_expr(
+                "product",
+                constant.clone() * constant,
+            )],
+            Some(vec![]),
+        )
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert!(
+        error.to_string().contains("unsafe decimal arithmetic"),
+        "{error}"
+    );
+    assert_eq!(polls.load(Ordering::SeqCst), 0);
+}

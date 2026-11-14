@@ -311,6 +311,86 @@ pub(crate) fn validate_expression_casts(
     Ok(())
 }
 
+/// Visit children first: obtaining an operand's type can itself evaluate a
+/// nested arithmetic expression through Arrow's empty-array numeric kernels.
+pub(crate) fn validate_decimal_arithmetic(
+    expression: &datafusion::logical_expr::Expr,
+    schema: &datafusion::common::DFSchema,
+) -> datafusion::error::Result<()> {
+    use datafusion::{
+        common::tree_node::{TreeNode, TreeNodeRecursion},
+        logical_expr::{Expr, ExprSchemable, Operator},
+    };
+    expression.apply_children(|child| {
+        validate_decimal_arithmetic(child, schema)?;
+        Ok(TreeNodeRecursion::Continue)
+    })?;
+    if let Expr::BinaryExpr(binary) = expression
+        && binary.op == Operator::Multiply
+    {
+        let left = binary.left.get_type(schema)?;
+        let right = binary.right.get_type(schema)?;
+        if !is_safe_decimal_multiply(&left, &right) {
+            return Err(crate::error::unsafe_decimal_arithmetic(
+                binary.op, &left, &right,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn decimal_value_type(data_type: &DataType) -> &DataType {
+    match data_type {
+        DataType::Dictionary(_, value) => decimal_value_type(value),
+        DataType::RunEndEncoded(_, value) => decimal_value_type(value.data_type()),
+        _ => data_type,
+    }
+}
+
+fn is_safe_decimal_multiply(left: &DataType, right: &DataType) -> bool {
+    use datafusion::logical_expr::type_coercion::binary::binary_numeric_coercion;
+
+    let left = decimal_value_type(left);
+    let right = decimal_value_type(right);
+    // DataFusion uses the non-null operand's type for both sides of arithmetic.
+    let left = if left.is_null() { right } else { left };
+    let right = if right.is_null() { left } else { right };
+    let (Some((lp, ls)), Some((rp, rs))) = (decimal_params(left), decimal_params(right)) else {
+        // Decimal/integer multiplication adds zero scale; decimal/float uses floats.
+        return true;
+    };
+    let (ls, rs) = if std::mem::discriminant(left) != std::mem::discriminant(right) {
+        // Cross-width decimals widen to one common type before multiplication.
+        // Guard DataFusion's i8 intermediates before asking it for that type.
+        let left_range = lp.checked_sub(ls);
+        let right_range = rp.checked_sub(rs);
+        let Some((left_range, right_range)) = left_range.zip(right_range) else {
+            return false;
+        };
+        if i8::try_from(left_range).is_err() || i8::try_from(right_range).is_err() {
+            return false;
+        }
+        if left_range
+            .max(right_range)
+            .checked_add(ls.max(rs))
+            .is_none_or(|precision| i8::try_from(precision).is_err())
+        {
+            return false;
+        }
+        let Some(common) = binary_numeric_coercion(left, right) else {
+            return true; // DataFusion will report incompatible types normally.
+        };
+        let (_, scale) = decimal_params(&common).expect("decimal common type");
+        (scale, scale)
+    } else {
+        (ls, rs)
+    };
+    // Arrow saturates this i8 sum without rescaling the stored integer. Reject
+    // unrepresentable scales instead of silently changing the numeric value.
+    ls.checked_add(rs)
+        .is_some_and(|scale| i8::try_from(scale).is_ok())
+}
+
 pub(crate) fn validate_partition_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,

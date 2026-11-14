@@ -536,3 +536,49 @@ async fn sql_rejects_removed_and_renamed_source_names() {
         }
     }
 }
+
+#[tokio::test]
+async fn decimal_multiply_rejects_scale_overflow_before_reading_even_when_hidden() {
+    for data_type in [
+        DataType::Decimal32(1, -70),
+        DataType::Decimal64(1, -70),
+        DataType::Decimal128(1, -70),
+        DataType::Decimal256(1, -70),
+        DataType::Dictionary(
+            Box::new(DataType::Int8),
+            Box::new(DataType::Decimal128(1, -70)),
+        ),
+        DataType::RunEndEncoded(
+            Arc::new(Field::new("run_ends", DataType::Int16, false)),
+            Arc::new(Field::new("values", DataType::Decimal128(1, -70), true)),
+        ),
+    ] {
+        let input = RecordBatch::try_from_iter([("n", arrow_array::new_null_array(&data_type, 1))])
+            .unwrap();
+        for sql in [
+            "n * n",
+            "n * NULL",
+            "(n * n) * n",
+            "CASE WHEN TRUE THEN n ELSE n * n END",
+        ] {
+            let source = MemoryAccessor::new(vec![input.clone()]);
+            let polls = source.polls.clone();
+            let error = source
+                .layer(layer(&[("x", sql)]))
+                .open(request(&[]))
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(
+                error.kind(),
+                ErrorKind::InvalidInput,
+                "{data_type} {sql}: {error}"
+            );
+            assert!(
+                error.to_string().contains("unsafe decimal arithmetic"),
+                "{error}"
+            );
+            assert_eq!(polls.load(Ordering::SeqCst), 0);
+        }
+    }
+}

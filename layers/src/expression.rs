@@ -115,6 +115,7 @@ impl ExpressionPlanner {
         input: &DFSchema,
     ) -> datafusion::error::Result<(Arc<dyn PhysicalExpr>, FieldRef)> {
         crate::validation::validate_expression(&logical)?;
+        crate::validation::validate_decimal_arithmetic(&logical, input)?;
         let context = SimplifyContext::builder()
             .with_schema(Arc::new(input.clone()))
             .with_config_options(Arc::clone(self.state.config_options()))
@@ -125,6 +126,7 @@ impl ExpressionPlanner {
         let simplifier = ExprSimplifier::new(context);
         // Coerce before simplifying so coalesce shortcuts preserve the common result type.
         let logical = simplifier.coerce(logical, input)?;
+        crate::validation::validate_decimal_arithmetic(&logical, input)?;
         crate::validation::validate_expression_casts(&logical, input)?;
         let logical = simplifier.simplify(logical)?;
         let physical = self.state.create_physical_expr(logical, input)?;

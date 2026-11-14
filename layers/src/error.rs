@@ -120,6 +120,16 @@ pub(crate) fn non_row_expression() -> datafusion::error::DataFusionError {
     datafusion::common::plan_datafusion_err!("only row-level expressions are supported")
 }
 
+pub(crate) fn unsafe_decimal_arithmetic(
+    op: datafusion::logical_expr::Operator,
+    left: &arrow_schema::DataType,
+    right: &arrow_schema::DataType,
+) -> datafusion::error::DataFusionError {
+    datafusion::common::plan_datafusion_err!(
+        "unsafe decimal arithmetic {left} {op} {right}: precision or scale would overflow"
+    )
+}
+
 pub(crate) fn invalid_evolution(message: &str) -> Error {
     Error::new(
         ErrorKind::InvalidInput,
