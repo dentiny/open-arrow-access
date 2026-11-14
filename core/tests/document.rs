@@ -1,53 +1,12 @@
 use std::{num::NonZeroUsize, sync::Arc};
 
 use arrow_array::{RecordBatchOptions, cast::AsArray};
-use arrow_schema::{DataType, Field};
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability, DocumentAccessor,
-    DocumentDecoder, Error, ErrorKind, OrderRequirement, ReadOptions, ReadRequest, RecordBatch,
-    RecordBatchBuilder, RecordCapability, Result, Schema, SchemaRef, async_trait,
+    Accessor, BinaryDecoder, ByteReadOptions, ByteReadRequest, ByteReader, Capability,
+    DocumentAccessor, DocumentDecoder, Error, ErrorKind, OrderRequirement, ReadOptions,
+    ReadRequest, RecordBatch, RecordCapability, Result, Schema, SchemaRef, async_trait,
 };
 use open_arrow_access_test_support::{MemoryAccessor, fixture};
-
-#[derive(Default)]
-struct RawDocument;
-
-#[async_trait]
-impl DocumentDecoder for RawDocument {
-    type Request = ReadRequest;
-
-    fn capability(&self, input: Capability) -> RecordCapability {
-        Capability {
-            read: input.read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::Reorderable)
-    }
-
-    fn prepare(&self, _: &ReadRequest) -> Result<SchemaRef> {
-        Ok(Arc::new(Schema::new(vec![Field::new(
-            "data",
-            DataType::LargeBinary,
-            false,
-        )])))
-    }
-
-    async fn decode(
-        &self,
-        bytes: &[u8],
-        request: ReadRequest,
-        schema: SchemaRef,
-    ) -> Result<RecordBatch> {
-        let mut builder =
-            RecordBatchBuilder::new(self.prepare(&request)?, request.options.projection)?;
-        builder.push(|row| row.append("data", bytes))?;
-        let batch = builder.finish()?;
-        assert_eq!(batch.schema(), schema);
-        Ok(batch)
-    }
-}
 
 // Neither the storage nor the decoder implements Clone. Accessor clones share
 // their ownership handles while each opened reader keeps independent state.
@@ -72,7 +31,7 @@ async fn default_decoder_constructor_clones_non_clone_inputs_and_opens_independe
     let source = MemoryAccessor::new(&fixture!("bytes", "binary.bin").await, 1);
     let observed = source.observations.clone();
     let accessor =
-        DocumentAccessor::<_, RawDocument>::with_default_decoder(NonCloneStorage(source));
+        DocumentAccessor::<_, BinaryDecoder>::with_default_decoder(NonCloneStorage(source));
     let cloned = accessor.clone();
     let options = ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
@@ -122,7 +81,7 @@ async fn default_decoder_constructor_clones_non_clone_inputs_and_opens_independe
 async fn rejects_bad_projection_and_preserves_source_errors() {
     let source = MemoryAccessor::new(&fixture!("bytes", "input.bin").await, 1);
     let observed = source.observations.clone();
-    let accessor = DocumentAccessor::new(source, RawDocument);
+    let accessor = DocumentAccessor::new(source, BinaryDecoder);
     let request = ReadRequest::new("input").with_options(ReadOptions {
         projection: Some(vec!["unknown".into()]),
         ..Default::default()
@@ -138,7 +97,7 @@ async fn rejects_bad_projection_and_preserves_source_errors() {
 
     let source = MemoryAccessor::new(&fixture!("bytes", "input.bin").await, 1)
         .with_failure(0, ErrorKind::PermissionDenied);
-    let mut reader = DocumentAccessor::new(source, RawDocument)
+    let mut reader = DocumentAccessor::new(source, BinaryDecoder)
         .open(ReadRequest::new("input"))
         .await
         .unwrap();
@@ -223,4 +182,17 @@ async fn rejects_invalid_output_and_preserves_decoder_errors() {
         }
         assert!(reader.next().await.unwrap().is_none());
     }
+}
+
+#[tokio::test]
+async fn binary_decoder_preserves_empty_objects_as_one_non_null_value() {
+    let mut reader = DocumentAccessor::new(MemoryAccessor::new(b"", 1), BinaryDecoder)
+        .open(ReadRequest::new("empty"))
+        .await
+        .unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(batch.num_rows(), 1);
+    assert_eq!(batch["data"].as_binary::<i64>().value(0), b"");
+    assert_eq!(batch["data"].null_count(), 0);
+    assert!(reader.next().await.unwrap().is_none());
 }
