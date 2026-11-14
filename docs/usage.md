@@ -25,6 +25,28 @@ cargo run --example read_parquet --features format-parquet -- testdata/parquet o
 Paths passed to generic storage are relative to the operator's configured root.
 Choose the format explicitly; extensions do not select a decoder.
 
+## Bind a record selection before consumption
+
+Use `BoundSource::bind(accessor, request).await?` when an integration needs the
+output schema before consuming records. It accepts any owned
+`Accessor<Reader = dyn RecordReader>` and its original typed request; requests
+must implement `Clone + Send + Sync + 'static`. Provider selectors and read
+options are retained together, without conversion to `ReadRequest`. An `Arc`
+of a concrete or dynamic accessor is also supported.
+
+`source.schema()` and `source.metadata()` expose the initial metadata. Binding
+opens a reader without polling its rows, and the first `source.reader().await?`
+returns that retained reader. Later calls reopen independent readers with the
+same request and reject any change to the complete Arrow schema, including
+metadata. Readers can outlive the source. Contents can change between opens:
+this helper fixes the output schema and does not create a data snapshot.
+
+All bound selections share the non-generic `BoundSource` type, allowing an FFI
+adapter to keep different provider/request types in one source state. No runtime
+or background producer is created. The helper needs no facade feature flags;
+enable the features required by the chosen accessor. `open_file_source()` uses
+the same lifecycle through its existing `FileSource` interface.
+
 ## Select columns and batch rows
 
 With `format-parquet`, use the same `testdata/parquet` root as the fixture command
