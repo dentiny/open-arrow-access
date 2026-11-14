@@ -145,17 +145,15 @@ open-arrow-access-service.workspace = true
 open-arrow-access-storage.workspace = true
 
 [dev-dependencies]
-arrow-array.workspace = true
 arrow-schema.workspace = true
 datafusion.workspace = true
 open-arrow-access-test-support.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
 tokio.workspace = true
-tempfile.workspace = true
 
 [[test]]
-name = "file_source_formats"
-required-features = ["format-csv", "format-json", "format-xml", "format-parquet", "decompression-gzip"]
+name = "file_source"
+required-features = ["format-json"]
 
 [[example]]
 name = "read_huggingface"
