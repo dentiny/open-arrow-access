@@ -153,13 +153,62 @@ async fn identity_casts_share_batches() {
 }
 
 #[tokio::test]
+async fn identity_run_end_casts_share_arrays_with_and_without_pushdown() {
+    let encoded = DataType::RunEndEncoded(
+        Arc::new(Field::new("run_ends", DataType::Int16, false)),
+        item(DataType::Int64),
+    );
+    for data_type in [
+        encoded.clone(),
+        DataType::Struct(vec![item(encoded.clone())].into()),
+        DataType::List(item(encoded)),
+    ] {
+        let input = batch(arrow_array::new_null_array(&data_type, 3));
+        for known_schema in [false, true] {
+            let source = MemoryAccessor::new(vec![input.clone()]);
+            let reads = source.batches_read.clone();
+            let mut evolution = layer("value", data_type.clone());
+            if known_schema {
+                evolution = evolution.with_source_schema(input.schema());
+            }
+            let mut reader = source.open_layer(evolution, None).await.unwrap();
+            assert_eq!(reads.load(Ordering::SeqCst), 0);
+            let output = reader.next().await.unwrap().unwrap();
+            assert_eq!(output.schema(), input.schema());
+            assert_eq!(output.num_rows(), 3);
+            assert!(Arc::ptr_eq(output.column(0), input.column(0)));
+            assert!(reader.next().await.unwrap().is_none());
+        }
+    }
+}
+
+#[tokio::test]
 async fn cast_validation_rejects_unsupported_and_unsafe_types_before_reading() {
     let decimal = |scale| DataType::Decimal256(76, scale);
+    let encoded = DataType::RunEndEncoded(
+        Arc::new(Field::new("run_ends", DataType::Int16, false)),
+        item(DataType::Int64),
+    );
     let fields = vec![
         Field::new("a", decimal(0), true),
         Field::new("b", decimal(60), true),
     ];
     for (from, to, rejected) in [
+        (DataType::Null, encoded.clone(), true),
+        (DataType::Null, DataType::List(item(encoded.clone())), true),
+        (
+            DataType::Struct(
+                vec![
+                    item(encoded.clone()),
+                    Field::new("n", DataType::Int32, true).into(),
+                ]
+                .into(),
+            ),
+            DataType::Struct(
+                vec![item(encoded), Field::new("n", DataType::Int64, true).into()].into(),
+            ),
+            true,
+        ),
         (
             DataType::Int32,
             DataType::Struct(vec![item(DataType::Int32)].into()),
@@ -484,6 +533,24 @@ fn evolution_rejects_invalid_names_and_types() {
         ColumnEvolution::change_data_type(
             "a",
             DataType::Time32(arrow_schema::TimeUnit::Nanosecond),
+        ),
+        ColumnEvolution::change_data_type(
+            "a",
+            DataType::RunEndEncoded(
+                Arc::new(Field::new("run_ends", DataType::UInt32, false)),
+                item(DataType::Int64),
+            ),
+        ),
+        ColumnEvolution::change_data_type(
+            "a",
+            DataType::RunEndEncoded(item(DataType::Int16), item(DataType::Int64)),
+        ),
+        ColumnEvolution::change_data_type(
+            "a",
+            DataType::List(item(DataType::RunEndEncoded(
+                Arc::new(Field::new("run_ends", DataType::Int16, false)),
+                item(DataType::Time32(arrow_schema::TimeUnit::Nanosecond)),
+            ))),
         ),
         ColumnEvolution::add_column(
             "bad",
