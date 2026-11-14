@@ -26,9 +26,7 @@ struct Documents {
 impl Documents {
     async fn next_document(&mut self) -> Result<Option<Bytes>> {
         let mut document = Vec::new();
-        let mut depth = 0usize;
-        let mut quoted = false;
-        let mut escaped = false;
+        let mut framer = ObjectFramer::default();
         loop {
             if self.pending.is_empty() {
                 match self.input.next().await? {
@@ -55,33 +53,52 @@ impl Documents {
                     return Ok(Some(std::mem::take(&mut self.pending)));
                 }
             }
-            for (index, byte) in self.pending.iter().copied().enumerate() {
-                if quoted {
-                    if escaped {
-                        escaped = false;
-                    } else if byte == b'\\' {
-                        escaped = true;
-                    } else if byte == b'"' {
-                        quoted = false;
-                    }
-                } else {
-                    match byte {
-                        b'"' => quoted = true,
-                        b'{' | b'[' => depth += 1,
-                        b'}' | b']' => depth -= 1,
-                        _ => {}
-                    }
+            if let Some(end) = framer.scan(&self.pending) {
+                let bytes = self.pending.split_to(end);
+                if document.is_empty() {
+                    return Ok(Some(bytes));
                 }
-                if depth == 0 && !quoted {
-                    let bytes = self.pending.split_to(index + 1);
-                    if document.is_empty() {
-                        return Ok(Some(bytes));
-                    }
-                    document.extend_from_slice(&bytes);
-                    return Ok(Some(Bytes::from(document)));
-                }
+                document.extend_from_slice(&bytes);
+                return Ok(Some(Bytes::from(document)));
             }
             document.extend_from_slice(&std::mem::take(&mut self.pending));
         }
+    }
+}
+
+/// Tracks object boundaries only; JSON and ATIF validation stay in the decoder.
+#[derive(Default)]
+struct ObjectFramer {
+    depth: usize,
+    quoted: bool,
+    escaped: bool,
+}
+
+impl ObjectFramer {
+    /// Scan only new bytes, starting with the object's opening `{` on the first call.
+    /// Returns the exclusive end offset in this chunk, or retains state for the next chunk.
+    fn scan(&mut self, chunk: &[u8]) -> Option<usize> {
+        for (index, byte) in chunk.iter().copied().enumerate() {
+            if self.quoted {
+                if self.escaped {
+                    self.escaped = false;
+                } else if byte == b'\\' {
+                    self.escaped = true;
+                } else if byte == b'"' {
+                    self.quoted = false;
+                }
+            } else {
+                match byte {
+                    b'"' => self.quoted = true,
+                    b'{' | b'[' => self.depth += 1,
+                    b'}' | b']' => self.depth -= 1,
+                    _ => {}
+                }
+            }
+            if self.depth == 0 && !self.quoted {
+                return Some(index + 1);
+            }
+        }
+        None
     }
 }
