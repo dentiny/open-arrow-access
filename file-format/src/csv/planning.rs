@@ -6,8 +6,8 @@ use futures::{
     stream,
 };
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactoryExt, RecordMetadata,
-    Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader, into_async_read,
+    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, RecordMetadata, Result, ScanPlan,
+    ScanPlanner, async_trait, into_async_read,
 };
 
 use super::{CsvAccessor, CsvDialect, error};
@@ -47,29 +47,22 @@ where
             ..CsvDialect::default()
         });
         let target_bytes = self.partition_options.target_bytes.get();
+        let rows = request.options.batch_size.get();
         // Initialization runs on first poll, keeping partition discovery lazy.
-        let partitions = stream::once(async move {
+        let chunks = stream::once(async move {
             let frames = CsvChunks::new(input, dialect).await?;
-            Ok(stream::try_unfold(frames, move |mut frames| {
-                let format = format.clone();
-                let request = request.clone();
-                async move {
-                    let Some(bytes) = frames
-                        .next_chunk(request.options.batch_size.get(), target_bytes)
-                        .await?
-                    else {
-                        return Ok(None);
-                    };
-                    let partition: ScanPartition = Box::pin(async move {
-                        let input = bytes_reader(bytes, Some(request.object.clone()));
-                        format.open_input(Box::new(input), request).await
-                    });
-                    Ok(Some((partition, frames)))
-                }
+            Ok(stream::try_unfold(frames, move |mut frames| async move {
+                Ok(frames
+                    .next_chunk(rows, target_bytes)
+                    .await?
+                    .map(|bytes| (bytes, frames)))
             }))
         })
         .try_flatten();
-        Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))
+        Ok(
+            crate::scan::bytes::into_plan(chunks, metadata, format, request)
+                .with_ordering(self.capability().ordering),
+        )
     }
 }
 

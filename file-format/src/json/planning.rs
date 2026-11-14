@@ -3,8 +3,8 @@ use crate::inference::SchemaInference;
 use bytes::BytesMut;
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactoryExt, RecordMetadata,
-    Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader,
+    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, RecordMetadata, Result, ScanPlan,
+    ScanPlanner, async_trait,
 };
 use serde_json::{Deserializer, value::RawValue};
 
@@ -40,21 +40,16 @@ where
         };
         let rows = request.options.batch_size.get();
         let target_bytes = self.partition_options.target_bytes.get();
-        let partitions = stream::try_unfold(frames, move |mut frames| {
-            let request = request.clone();
-            let format = format.clone();
-            async move {
-                let Some(bytes) = frames.next_chunk(rows, target_bytes).await? else {
-                    return Ok(None);
-                };
-                let partition: ScanPartition = Box::pin(async move {
-                    let input = bytes_reader(bytes, Some(request.object.clone()));
-                    format.open_input(Box::new(input), request).await
-                });
-                Ok(Some((partition, frames)))
-            }
+        let chunks = stream::try_unfold(frames, move |mut frames| async move {
+            Ok(frames
+                .next_chunk(rows, target_bytes)
+                .await?
+                .map(|bytes| (bytes, frames)))
         });
-        Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))
+        Ok(
+            crate::scan::bytes::into_plan(chunks, metadata, format, request)
+                .with_ordering(self.capability().ordering),
+        )
     }
 }
 

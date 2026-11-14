@@ -20,3 +20,6 @@ impl Default for DecodePartitionOptions {
 
 #[allow(dead_code)] // Some builds enable no formats that use record chunking.
 pub(crate) mod chunks;
+
+#[cfg(any(feature = "csv", feature = "json"))]
+pub(crate) mod bytes;
