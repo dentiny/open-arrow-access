@@ -26,8 +26,8 @@ license = "MIT"
 repository = "https://github.com/dentiny/open-arrow-access"
 
 [workspace.metadata.compatibility]
-arrow = "58.4.1"
-parquet = "58.4.1"
+arrow = "58"
+parquet = "58"
 datafusion = "54.1.0"
 opendal = "0.59.2"
 lance = "14.0.1"
@@ -50,18 +50,18 @@ tar = { version = "0.4.46", default-features = false }
 url = "2"
 # Keep Arrow types compatible with the released Lance and Iceberg SDKs.
 # See docs/dependencies.md when updating this baseline.
-arrow-array = "58.4.1"
-arrow-buffer = "58.4.1"
-arrow-cast = "58.4.1"
-arrow-csv = "58.4.1"
-arrow-json = "58.4.1"
-arrow-schema = "58.4.1"
-arrow-select = "58.4.1"
+arrow-array = "58"
+arrow-buffer = "58"
+arrow-cast = "58"
+arrow-csv = "58"
+arrow-json = "58"
+arrow-schema = "58"
+arrow-select = "58"
 async-trait = "0.1.91"
-atif-arrow = { git = "https://github.com/dentiny/atif-arrow", rev = "615c30eedaaaa19195ba84902e63d442c71acbb0" }
+atif-arrow = { git = "https://github.com/dentiny/atif-arrow", rev = "40ed0c75244ea864b696c879563acd6b2acc6227" }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 warc = { package = "warc-rs", version = "0.3.3", default-features = false }
-xml-arrow = { git = "https://github.com/dentiny/xml-arrow-rs", rev = "b844014691fca70e8d5c4260bf18c910ee03c266" }
+xml-arrow = { git = "https://github.com/dentiny/xml-arrow-rs", rev = "ef141a949cb0a6f9b73de3533059cd33b29dd7e2" }
 
 # Used by schema evolution expressions.
 datafusion = { version = "54.1.0", default-features = false }
@@ -81,7 +81,7 @@ open-arrow-access-layers = { path = "layers", version = "0.1.0" }
 open-arrow-access-storage = { path = "storage", version = "0.1.0", default-features = false }
 open-arrow-access-test-support = { path = "test-support" }
 opendal = { version = "0.59.2", default-features = false }
-parquet = { version = "58.4.1", default-features = false, features = ["arrow", "async", "snap"] }
+parquet = { version = "58", default-features = false, features = ["arrow", "async", "snap"] }
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

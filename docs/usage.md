@@ -110,7 +110,7 @@ see [storage requirements](support.md#storage).
 ## Read compressed JSONL
 
 Enable `format-json` and `decompression-gzip`. JSON/CSV require an explicit Arrow
-schema; add `arrow-schema = "58.4.1"` to construct its fields. This complete reader
+schema; add `arrow-schema = "58"` to construct its fields. This complete reader
 function accepts a caller-configured operator:
 
 ```rust,no_run

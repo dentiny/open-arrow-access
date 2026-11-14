@@ -5,16 +5,17 @@ applications can pass native Arrow batches between independent access and sink
 libraries without cross-version conversion. It does not follow Lance's moving
 default branch.
 
-| Family | Workspace baseline |
-| --- | --- |
-| Arrow | `58.4.1` |
-| Parquet | `58.4.1` |
-| DataFusion | `54.1.0` |
-| OpenDAL | `0.59.2` |
+| Family | Manifest requirement | Current lockfile |
+| --- | --- | --- |
+| Arrow | `58` | `58.4.1` |
+| Parquet | `58` | `58.4.1` |
+| DataFusion | `54.1.0` | `54.1.0` |
+| OpenDAL | `0.59.2` | `0.59.2` |
 
 Lance 14.0.1 requires Arrow 58; Iceberg 0.11 requires Arrow 58.4. DataFusion 54.1
 requires Arrow 58.3, which permits the shared 58.4.1 version. Direct workspace
-dependencies use normal Cargo semver requirements. The committed `Cargo.lock`
+dependencies use normal Cargo semver requirements. Arrow and Parquet specify only
+the major version (`"58"`), allowing compatible 58.x releases. The committed `Cargo.lock`
 records the exact versions; all enabled formats must resolve one Arrow family.
 CSV, JSON and Parquet use this same baseline, including their transitive Arrow
 Cast, Ord and IPC components. Existing Parquet fixtures remain valid regardless
