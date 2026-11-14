@@ -3,6 +3,7 @@
 mod accessor;
 mod async_read;
 mod async_seek;
+mod binary;
 mod capability;
 mod decode_batches;
 mod document;
@@ -28,6 +29,7 @@ mod validation;
 pub use accessor::{Accessor, ByteAccessor, ObjectStream};
 pub use async_read::into_async_read;
 pub use async_seek::{SeekableInput, into_async_seek};
+pub use binary::BinaryDecoder;
 pub use capability::{Capability, OrderRequirement, RecordCapability};
 pub use decode_batches::{BatchDecoder, decode_batches};
 pub use document::{DocumentAccessor, DocumentDecoder};
