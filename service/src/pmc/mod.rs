@@ -38,7 +38,7 @@ pub fn schema() -> SchemaRef {
                         DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
                         true,
                     ),
-                    Field::new("text_url", DataType::Utf8, true),
+                    Field::new("text", DataType::Utf8, true),
                 ],
                 HashMap::from([("pmc.row_kind".into(), "article_metadata".into())]),
             ))

@@ -25,10 +25,14 @@ The result is a `RecordReader` with exactly one row for a valid object. Full sch
 | --- | --- | --- |
 | `pmcid` | Utf8 | No |
 | `version` | UInt32, positive when supplied | Yes |
-| `pmid`, `doi`, `license_code`, `xml_url`, `pdf_url`, `text_url` | Utf8 | Yes |
+| `pmid`, `doi`, `license_code`, `xml_url`, `pdf_url`, `text` | Utf8 | Yes |
 | `title`, `citation` | LargeUtf8 | Yes |
 | `is_pmc_openaccess`, `is_manuscript`, `is_historical_ocr`, `is_retracted` | Boolean | Yes |
 | `media_urls` | List of nullable Utf8 items; JSON items must be strings | Yes |
+
+The Arrow `text` column contains the URL from the input JSON's `text_url` field,
+not inline article text. URL encoding and query parameters are preserved. The
+input JSON field remains `text_url`; use `text` in Arrow projections.
 
 Optional missing/null fields become null; unknown keys are ignored and duplicate
 keys use their final value. Known fields are validated even when projected away.
