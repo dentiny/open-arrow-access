@@ -126,7 +126,7 @@ pub(crate) fn unsafe_decimal_arithmetic(
     right: &arrow_schema::DataType,
 ) -> datafusion::error::DataFusionError {
     datafusion::common::plan_datafusion_err!(
-        "unsafe decimal arithmetic {left} {op} {right}: precision or scale would overflow"
+        "unsafe decimal arithmetic {left} {op} {right}: precision/scale arithmetic or scale alignment would overflow"
     )
 }
 

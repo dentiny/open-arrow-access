@@ -582,3 +582,90 @@ async fn decimal_multiply_rejects_scale_overflow_before_reading_even_when_hidden
         }
     }
 }
+
+#[tokio::test]
+async fn decimal_arithmetic_rejects_unsafe_type_inference_before_reading() {
+    let extreme = DataType::Decimal128(38, -100);
+    for data_type in [
+        DataType::Decimal32(9, -119),
+        DataType::Decimal64(18, -110),
+        DataType::Decimal128(38, -90),
+        extreme.clone(),
+        DataType::Decimal256(76, -52),
+        DataType::Dictionary(Box::new(DataType::Int8), Box::new(extreme.clone())),
+        DataType::RunEndEncoded(
+            Arc::new(Field::new("run_ends", DataType::Int16, false)),
+            Arc::new(Field::new("values", extreme, true)),
+        ),
+    ] {
+        let input = RecordBatch::try_from_iter([("n", arrow_array::new_null_array(&data_type, 1))])
+            .unwrap();
+        for sql in [
+            "n + n",
+            "n - n",
+            "n % n",
+            "n + NULL",
+            "NULL - n",
+            "n % NULL",
+            "(n + n) * n",
+            "CASE WHEN TRUE THEN n ELSE n + n END",
+            "coalesce(n + n, n)",
+        ] {
+            for known_schema in [false, true] {
+                let source = MemoryAccessor::new(vec![input.clone()]);
+                let polls = source.polls.clone();
+                let mut evolution = layer(&[("x", sql)]);
+                if known_schema {
+                    evolution = evolution.with_source_schema(input.schema());
+                }
+                let error = source
+                    .layer(evolution)
+                    .open(request(&[]))
+                    .await
+                    .err()
+                    .unwrap();
+                assert_eq!(
+                    error.kind(),
+                    ErrorKind::InvalidInput,
+                    "{data_type} {sql}: {error}"
+                );
+                assert!(
+                    error.to_string().contains("unsafe decimal arithmetic"),
+                    "{data_type} {sql}: {error}"
+                );
+                assert_eq!(polls.load(Ordering::SeqCst), 0);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn decimal_arithmetic_rejects_unsafe_cross_width_coercion() {
+    let input = RecordBatch::try_from_iter([
+        (
+            "a",
+            arrow_array::new_null_array(&DataType::Decimal128(38, -100), 1),
+        ),
+        (
+            "b",
+            arrow_array::new_null_array(&DataType::Decimal256(76, -100), 1),
+        ),
+    ])
+    .unwrap();
+    for sql in ["a + b", "a - b", "a % b", "a / b"] {
+        let source = MemoryAccessor::new(vec![input.clone()]);
+        let polls = source.polls.clone();
+        let error = source
+            .layer(layer(&[("x", sql)]))
+            .open(request(&[]))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert!(
+            error.to_string().contains("unsafe decimal arithmetic"),
+            "{sql}: {error}"
+        );
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
+    }
+}

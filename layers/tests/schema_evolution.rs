@@ -1052,3 +1052,162 @@ async fn decimal_multiply_rejects_constants_before_folding() {
     );
     assert_eq!(polls.load(Ordering::SeqCst), 0);
 }
+
+#[tokio::test]
+async fn decimal_arithmetic_checks_constants_and_keeps_safe_negative_scales() {
+    use arrow_array::Decimal128Array;
+    let value = lit(datafusion::common::ScalarValue::Decimal128(
+        Some(1),
+        38,
+        -100,
+    ));
+    for expression in [
+        value.clone() + value.clone(),
+        value.clone() - value.clone(),
+        value.clone() % value,
+    ] {
+        let source = MemoryAccessor::new(vec![batch(Arc::new(Int32Array::from(vec![1])))]);
+        let polls = source.polls.clone();
+        let error = source
+            .open_evolved(
+                vec![ColumnEvolution::add_column_expr("result", expression)],
+                Some(vec![]),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert!(
+            error.to_string().contains("unsafe decimal arithmetic"),
+            "{error}"
+        );
+        assert_eq!(polls.load(Ordering::SeqCst), 0);
+    }
+    // precision - scale = 127 is safe; the adjacent -90 scale would require 128.
+    let input = batch(Arc::new(
+        Decimal128Array::from(vec![1])
+            .with_precision_and_scale(38, -89)
+            .unwrap(),
+    ));
+    let mut reader = MemoryAccessor::new(vec![input])
+        .open_evolved(
+            vec![
+                ColumnEvolution::add_column_expr("sum", col("value") + col("value")),
+                ColumnEvolution::add_column_expr("difference", col("value") - col("value")),
+                ColumnEvolution::add_column_expr("remainder", col("value") % col("value")),
+            ],
+            Some(vec!["sum".into(), "difference".into(), "remainder".into()]),
+        )
+        .await
+        .unwrap();
+    let output = reader.next().await.unwrap().unwrap();
+    for (index, expected) in [2, 0, 0].into_iter().enumerate() {
+        let array = output
+            .column(index)
+            .as_any()
+            .downcast_ref::<Decimal128Array>()
+            .unwrap();
+        assert_eq!(array.scale(), -89);
+        assert_eq!(array.value(0), expected);
+    }
+}
+
+#[tokio::test]
+async fn decimal_remainder_rejects_wrapping_alignment_powers() {
+    use arrow_array::Decimal128Array;
+    for (left_scale, accepted) in [(0, true), (-1, false)] {
+        let input = RecordBatch::try_from_iter([
+            (
+                "a",
+                Arc::new(
+                    Decimal128Array::from(vec![1])
+                        .with_precision_and_scale(1, left_scale)
+                        .unwrap(),
+                ) as ArrayRef,
+            ),
+            (
+                "b",
+                Arc::new(
+                    Decimal128Array::from(vec![7])
+                        .with_precision_and_scale(38, 38)
+                        .unwrap(),
+                ) as ArrayRef,
+            ),
+        ])
+        .unwrap();
+        for (left, right, expected) in [("a", "b", 2), ("b", "a", 7)] {
+            let opened = MemoryAccessor::new(vec![input.clone()])
+                .open_evolved(
+                    vec![ColumnEvolution::add_column_expr(
+                        "result",
+                        col(left) % col(right),
+                    )],
+                    Some(vec!["result".into()]),
+                )
+                .await;
+            if accepted {
+                let output = opened.unwrap().next().await.unwrap().unwrap();
+                let array = output
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<Decimal128Array>()
+                    .unwrap();
+                assert_eq!(array.scale(), 38);
+                assert_eq!(array.value(0), expected);
+            } else {
+                let error = opened.err().unwrap();
+                assert_eq!(error.kind(), ErrorKind::InvalidInput);
+                assert!(
+                    error.to_string().contains("unsafe decimal arithmetic"),
+                    "{error}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn decimal_arithmetic_preserves_integer_and_float_coercion() {
+    use arrow_array::{Decimal128Array, Float64Array};
+    let input = batch(Arc::new(
+        Decimal128Array::from(vec![1])
+            .with_precision_and_scale(1, -1)
+            .unwrap(),
+    ));
+    let mut reader = MemoryAccessor::new(vec![input])
+        .open_evolved(
+            vec![
+                ColumnEvolution::add_column_expr("sum", col("value") + lit(1i64)),
+                ColumnEvolution::add_column_expr("difference", lit(11i64) - col("value")),
+                ColumnEvolution::add_column_expr("remainder", col("value") % lit(3i64)),
+                ColumnEvolution::add_column_expr("float", col("value") + lit(0.5f64)),
+            ],
+            Some(vec![
+                "sum".into(),
+                "difference".into(),
+                "remainder".into(),
+                "float".into(),
+            ]),
+        )
+        .await
+        .unwrap();
+    let output = reader.next().await.unwrap().unwrap();
+    for (index, expected) in [11, 1, 1].into_iter().enumerate() {
+        let array = output
+            .column(index)
+            .as_any()
+            .downcast_ref::<Decimal128Array>()
+            .unwrap();
+        assert_eq!(array.scale(), 0);
+        assert_eq!(array.value(0), expected);
+    }
+    assert_eq!(
+        output
+            .column(3)
+            .as_any()
+            .downcast_ref::<Float64Array>()
+            .unwrap()
+            .value(0),
+        10.5
+    );
+}

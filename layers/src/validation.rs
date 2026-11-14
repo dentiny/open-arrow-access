@@ -326,11 +326,18 @@ pub(crate) fn validate_decimal_arithmetic(
         Ok(TreeNodeRecursion::Continue)
     })?;
     if let Expr::BinaryExpr(binary) = expression
-        && binary.op == Operator::Multiply
+        && matches!(
+            binary.op,
+            Operator::Plus
+                | Operator::Minus
+                | Operator::Multiply
+                | Operator::Divide
+                | Operator::Modulo
+        )
     {
         let left = binary.left.get_type(schema)?;
         let right = binary.right.get_type(schema)?;
-        if !is_safe_decimal_multiply(&left, &right) {
+        if !is_safe_decimal_arithmetic(binary.op, &left, &right) {
             return Err(crate::error::unsafe_decimal_arithmetic(
                 binary.op, &left, &right,
             ));
@@ -347,7 +354,12 @@ fn decimal_value_type(data_type: &DataType) -> &DataType {
     }
 }
 
-fn is_safe_decimal_multiply(left: &DataType, right: &DataType) -> bool {
+fn is_safe_decimal_arithmetic(
+    op: datafusion::logical_expr::Operator,
+    left: &DataType,
+    right: &DataType,
+) -> bool {
+    use datafusion::logical_expr::Operator;
     use datafusion::logical_expr::type_coercion::binary::binary_numeric_coercion;
 
     let left = decimal_value_type(left);
@@ -355,12 +367,19 @@ fn is_safe_decimal_multiply(left: &DataType, right: &DataType) -> bool {
     // DataFusion uses the non-null operand's type for both sides of arithmetic.
     let left = if left.is_null() { right } else { left };
     let right = if right.is_null() { left } else { right };
-    let (Some((lp, ls)), Some((rp, rs))) = (decimal_params(left), decimal_params(right)) else {
-        // Decimal/integer multiplication adds zero scale; decimal/float uses floats.
+    if !left.is_decimal() && !right.is_decimal() {
         return true;
+    }
+    let (Some((lp, ls)), Some((rp, rs))) =
+        (decimal_numeric_params(left), decimal_numeric_params(right))
+    else {
+        return true; // Decimal/float arithmetic uses floating-point kernels.
     };
-    let (ls, rs) = if std::mem::discriminant(left) != std::mem::discriminant(right) {
-        // Cross-width decimals widen to one common type before multiplication.
+    let (lp, ls, rp, rs) = if left.is_decimal()
+        && right.is_decimal()
+        && std::mem::discriminant(left) != std::mem::discriminant(right)
+    {
+        // Cross-width decimals widen to one common type before arithmetic.
         // Guard DataFusion's i8 intermediates before asking it for that type.
         let left_range = lp.checked_sub(ls);
         let right_range = rp.checked_sub(rs);
@@ -380,15 +399,68 @@ fn is_safe_decimal_multiply(left: &DataType, right: &DataType) -> bool {
         let Some(common) = binary_numeric_coercion(left, right) else {
             return true; // DataFusion will report incompatible types normally.
         };
-        let (_, scale) = decimal_params(&common).expect("decimal common type");
-        (scale, scale)
+        let (precision, scale) = decimal_params(&common).expect("decimal common type");
+        (precision, scale, precision, scale)
     } else {
-        (ls, rs)
+        (lp, ls, rp, rs)
     };
-    // Arrow saturates this i8 sum without rescaling the stored integer. Reject
-    // unrepresentable scales instead of silently changing the numeric value.
-    ls.checked_add(rs)
-        .is_some_and(|scale| i8::try_from(scale).is_ok())
+    match op {
+        Operator::Multiply => {
+            // Saturating the scale without rescaling the integer changes its value.
+            ls.checked_add(rs)
+                .is_some_and(|scale| i8::try_from(scale).is_ok())
+        }
+        Operator::Plus | Operator::Minus | Operator::Modulo => {
+            // Arrow computes precision - scale and scale differences in i8,
+            // even for empty arrays used by DataFusion's type inference.
+            let scale = ls.max(rs);
+            let intermediates = [
+                lp.checked_sub(ls),
+                rp.checked_sub(rs),
+                scale.checked_sub(ls),
+                scale.checked_sub(rs),
+            ];
+            if !intermediates
+                .into_iter()
+                .all(|value| value.is_some_and(|value| i8::try_from(value).is_ok()))
+            {
+                return false;
+            }
+            // Remainder uses wrapping powers for scale alignment. Checked
+            // value multiplication afterwards cannot detect an already-wrapped power.
+            let max_power = decimal_max_precision(left).max(decimal_max_precision(right));
+            op != Operator::Modulo
+                || [ls, rs].into_iter().all(|input_scale| {
+                    scale
+                        .checked_sub(input_scale)
+                        .is_some_and(|delta| delta <= max_power)
+                })
+        }
+        _ => true,
+    }
+}
+
+fn decimal_numeric_params(data_type: &DataType) -> Option<(i16, i16)> {
+    decimal_params(data_type).or_else(|| {
+        let precision = match data_type {
+            DataType::Int8 | DataType::UInt8 => 3,
+            DataType::Int16 | DataType::UInt16 => 5,
+            DataType::Int32 | DataType::UInt32 => 10,
+            DataType::Int64 | DataType::UInt64 => 20,
+            _ => return None,
+        };
+        Some((precision, 0))
+    })
+}
+
+fn decimal_max_precision(data_type: &DataType) -> i16 {
+    match data_type {
+        DataType::Decimal32(_, _) => 9,
+        DataType::Decimal64(_, _) => 18,
+        DataType::Decimal128(_, _) => 38,
+        DataType::Decimal256(_, _) => 76,
+        _ => 0,
+    }
 }
 
 pub(crate) fn validate_partition_schema(

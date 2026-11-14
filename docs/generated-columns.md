@@ -33,7 +33,9 @@ Aggregates, windows, subqueries, `unnest`, and volatile functions such as
 `random()` are rejected before simplification, including inside dead branches.
 The enabled built-ins include core, string, Unicode, datetime and math functions.
 Type coercion, expression simplification, casts, and inferred types/nullability
-follow DataFusion semantics.
+follow DataFusion semantics. Decimal binary arithmetic is checked for unsafe
+precision/scale calculations and scale-alignment powers before type coercion
+or constant folding, including hidden outputs.
 Each logical open uses one query context, so stable functions such as `now()` agree across declarations and
 batches; separate opens need not produce identical values.
 
