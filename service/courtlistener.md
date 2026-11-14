@@ -58,5 +58,10 @@ async fn read_table(operator: opendal::Operator, table: &str, date: &str) -> Res
 For a table such as `courts`, the example identifies the CSV/SQL objects and
 reads decompressed CSV bytes. A chunk is not a row. Use a consumer matching the
 export's SQL/CSV semantics before turning these bytes into Arrow columns.
+For nullable string columns named by the export's header, bind
+`CsvFileFormat::from_header()` through `snapshots.records(format)`. This preserves
+all-null columns and avoids a separate header read; enable `format-csv` when
+using the facade and select files with `FileSetRequest`. Apply table-specific
+SQL casts or an explicit schema when typed columns are needed.
 
 Source: [CourtListener bulk data](https://wiki.free.law/c/courtlistener/help/api/bulk-data/bulk-legal-data).

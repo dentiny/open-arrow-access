@@ -20,6 +20,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct CsvFileFormat {
     schema: Option<SchemaRef>,
+    all_varchar: bool,
     inference: CsvInferenceOptions,
     options: CsvOptions,
 }
@@ -35,9 +36,38 @@ impl CsvFileFormat {
     pub fn infer() -> Self {
         Self {
             schema: None,
+            all_varchar: false,
             inference: CsvInferenceOptions::default(),
             options: CsvOptions::Dialect(CsvDialect::default()),
         }
+    }
+
+    /// Use the first CSV record as column names and read every column as nullable
+    /// `Utf8`. Header-only and all-null columns are supported. The input is opened
+    /// once; records following the header remain available to the reader. Empty
+    /// input still requires an explicit schema because it has no column names.
+    ///
+    /// Configure TSV and other known dialects with [`Self::with_dialect`], keeping
+    /// `has_header: true`. Header policy can also be overridden with inference options.
+    pub fn from_header() -> Self {
+        Self::infer().all_varchar().with_dialect(CsvDialect {
+            has_header: true,
+            ..Default::default()
+        })
+    }
+
+    /// Read every column as nullable `Utf8`, preserving field names and metadata.
+    ///
+    /// Inferred schemas retain the configured header detection policy. With an
+    /// explicit header policy, only the first record is needed to establish the
+    /// schema. Explicit schemas have their field types and nullability replaced.
+    /// Delimiter, quoting, null handling and row-width validation are unchanged.
+    pub fn all_varchar(mut self) -> Self {
+        self.all_varchar = true;
+        self.schema = self
+            .schema
+            .map(|schema| Arc::new(inference::varchar_schema(&schema)));
+        self
     }
 
     pub fn with_inference_options(mut self, options: CsvInferenceOptions) -> Self {
@@ -48,6 +78,7 @@ impl CsvFileFormat {
     pub fn new(schema: SchemaRef) -> Self {
         Self {
             schema: Some(schema),
+            all_varchar: false,
             inference: CsvInferenceOptions::default(),
             options: CsvOptions::Dialect(CsvDialect::default()),
         }
@@ -141,7 +172,8 @@ impl SchemaInference for CsvFileFormat {
             return Ok((self.clone(), input));
         }
         let dialect = validation::require_dialect(self.parallel_dialect())?;
-        let (schema, has_header, input) = inference::infer(input, dialect, self.inference).await?;
+        let (schema, has_header, input) =
+            inference::infer(input, dialect, self.inference, self.all_varchar).await?;
         let format = Self::new(schema).with_dialect(CsvDialect {
             has_header,
             validate_header: dialect.validate_header,

@@ -64,10 +64,60 @@ one record, parser lookahead and upstream chunks can exceed them.
 The schema is fixed before returning the reader. Projection is resolved after
 inference, and native parallel scans share the inferred schema across partitions.
 Schemas are inferred separately per file; no cross-file reconciliation is added.
-Later incompatible values fail decoding. Empty inputs, header-only samples,
-all-null sampled columns, and duplicate/empty headers require an explicit schema.
-For identifiers with significant leading zeros, supply an explicit string schema. Configure headers
-with `CsvFormat::default().with_header(true)` and TSV with `.with_delimiter(b'\t')`.
+Later incompatible values fail decoding. Default type inference rejects empty inputs,
+header-only samples and all-null sampled columns. Use an explicit schema when types
+are known, or the string-only mode below when type inference is not desired.
+Duplicate and empty header names remain invalid.
+
+### Nullable string columns
+
+`CsvFileFormat::from_header()` builds a nullable `Utf8` schema from the first CSV
+record, and `CsvAccessor::from_header(bytes)` is its accessor shorthand. This
+supports header-only files and all-null columns and retains numeric spellings
+such as `0001` and `1.2300`. A completely empty file has no names or column count
+and still needs an explicit schema. For TSV, use `with_dialect` with `delimiter: b'\t'` and `has_header: true`
+on the format or accessor.
+
+```rust,no_run
+use open_arrow_access::{
+    Accessor, ReadRequest, Result,
+    file_format::csv::{CsvAccessor, CsvDialect},
+    storage::{OpenDalAccessor, opendal},
+};
+
+async fn read_strings(operator: opendal::Operator) -> Result<()> {
+    let records = CsvAccessor::from_header(OpenDalAccessor::new(operator))
+        .with_dialect(CsvDialect {
+            delimiter: b'\t',
+            has_header: true,
+            ..Default::default()
+        });
+    let mut reader = records.open(ReadRequest::new("table.tsv")).await?;
+    while let Some(batch) = reader.next().await? {
+        println!("{} string rows", batch.num_rows());
+    }
+    Ok(())
+}
+```
+
+`CsvFileFormat::infer().all_varchar()` and `CsvAccessor::infer(bytes).all_varchar()`
+keep the existing automatic header policy while choosing nullable strings for all
+columns. For headerless data, explicitly use `has_header: Some(false)` in inference
+options, or `with_dialect(CsvDialect::default())`; generated names are `column_1`,
+`column_2`, etc. The string mode samples only the first record when header presence
+is explicit. With automatic header detection it uses the usual bounded sample.
+
+Calling `.all_varchar()` on an explicit schema replaces every field's type with
+`Utf8` and makes it nullable, retaining names, field metadata and schema metadata.
+CSV quoting, null recognition and truncated-row settings continue to apply. Empty
+fields use the existing null rules; this option does not turn nulls into empty strings.
+Projection, streaming decompression and native parallel scans use the same resolved
+schema, and storage is opened once. Inferred/string-derived schemas use an inspectable
+`CsvDialect`; opaque `with_format` options still require an explicit schema.
+
+Configure headers on explicit schemas with `CsvFormat::default().with_header(true)`
+and TSV with `.with_delimiter(b'\t')`.
+
 `CsvFormat` is this crate's options wrapper around Arrow 58's CSV format, with
 the existing builder methods and `.with_header_validation(true)` preserved.
 It is no longer a type alias for `arrow_csv::reader::Format`. Header validation

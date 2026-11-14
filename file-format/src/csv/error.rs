@@ -21,7 +21,7 @@ pub(super) fn write_error(source: csv::Error) -> Error {
     Error::new(ErrorKind::Decode, "frame_csv", source.to_string()).with_source(source)
 }
 
-pub(super) fn inference_error(source: arrow_schema::ArrowError) -> Error {
+pub(super) fn inference_error(source: impl std::error::Error + Send + Sync + 'static) -> Error {
     Error::new(ErrorKind::Decode, "infer_csv", source.to_string()).with_source(source)
 }
 
@@ -53,7 +53,7 @@ pub(super) fn null_inferred_column() -> Error {
     Error::new(
         ErrorKind::InvalidInput,
         "infer_csv",
-        "cannot infer types for header-only or all-null CSV columns; supply an explicit schema",
+        "cannot infer types for header-only or all-null CSV columns; supply an explicit schema or enable all_varchar()",
     )
 }
 

@@ -630,3 +630,352 @@ async fn inference_preserves_typed_first_rows_when_later_rows_have_narrower_type
         }
     }
 }
+
+fn assert_varchar_schema(schema: &Schema) {
+    assert!(
+        schema
+            .fields()
+            .iter()
+            .all(|field| field.data_type() == &DataType::Utf8 && field.is_nullable())
+    );
+}
+
+#[tokio::test]
+async fn from_header_preserves_text_null_columns_and_parallel_projection_with_one_open() {
+    for chunk_size in [1, 7, 4096] {
+        for parallel in [false, true] {
+            let input = MemoryAccessor::new(
+                b"id,empty,flag\n0001,,true\n0002,,false\ntext,,maybe\n",
+                chunk_size,
+            );
+            let observed = input.observations.clone();
+            let accessor = CsvAccessor::from_header(input);
+            let request = ReadRequest::new("strings.csv")
+                .with_options(options(1, Some(vec!["flag", "id", "empty"])));
+            let mut reader = if parallel {
+                accessor
+                    .layer(ParallelReadLayer::new(
+                        NonZeroUsize::new(2).unwrap(),
+                        NonZeroUsize::MIN,
+                    ))
+                    .open(request)
+                    .await
+                    .unwrap()
+            } else {
+                accessor.open(request).await.unwrap()
+            };
+            assert_varchar_schema(&reader.metadata().schema);
+            assert_eq!(reader.metadata().schema.field(0).name(), "flag");
+            let mut ids = Vec::new();
+            let mut flags = Vec::new();
+            while let Some(batch) = reader.next().await.unwrap() {
+                assert_eq!(batch.num_rows(), 1);
+                assert_eq!(batch.column(2).null_count(), 1);
+                ids.push(
+                    batch
+                        .column(1)
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap()
+                        .value(0)
+                        .to_owned(),
+                );
+                flags.push(
+                    batch
+                        .column(0)
+                        .as_any()
+                        .downcast_ref::<StringArray>()
+                        .unwrap()
+                        .value(0)
+                        .to_owned(),
+                );
+            }
+            assert_eq!(ids, ["0001", "0002", "text"]);
+            assert_eq!(flags, ["true", "false", "maybe"]);
+            assert_eq!(observed.requests.lock().unwrap().len(), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn from_header_only_inputs_have_the_same_schema_as_populated_inputs() {
+    use open_arrow_access_core::Reader;
+    use open_arrow_access_file_format::{FileAccessor, csv::CsvFileFormat};
+    let expected = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Utf8, true),
+        Field::new("empty", DataType::Utf8, true),
+    ]));
+    for bytes in [
+        b"id,empty\n".as_slice(),
+        b"id,empty",
+        b"\xef\xbb\xbfid,empty\r\n",
+        b"id,empty\n0001,\n",
+    ] {
+        let accessor =
+            FileAccessor::from_format(MemoryAccessor::new(bytes, 1), CsvFileFormat::from_header());
+        let request = ReadRequest::new("header.csv");
+        let mut reader = accessor.open(request.clone()).await.unwrap();
+        assert_eq!(reader.metadata().schema, expected);
+        let mut count = 0;
+        while let Some(batch) = reader.next().await.unwrap() {
+            count += batch.num_rows();
+        }
+        assert_eq!(count, usize::from(bytes.ends_with(b"0001,\n")));
+        let plan = accessor.plan_scan(request).await.unwrap();
+        assert_eq!(plan.metadata.schema, expected);
+        let mut planned = plan.into_reader();
+        let mut count = 0;
+        while let Some(batch) = planned.next().await.unwrap() {
+            count += batch.num_rows();
+        }
+        assert_eq!(count, usize::from(bytes.ends_with(b"0001,\n")));
+    }
+}
+
+#[tokio::test]
+async fn all_varchar_headerless_inputs_keep_first_rows_and_numeric_spellings() {
+    let accessor = CsvAccessor::infer(MemoryAccessor::new(
+        b"0001,1.2300,,true\n0002,1e9999,,false\n",
+        1,
+    ))
+    .all_varchar()
+    .with_dialect(CsvDialect::default());
+    let mut reader = accessor
+        .open(ReadRequest::new("no-header.csv"))
+        .await
+        .unwrap();
+    assert_varchar_schema(&reader.metadata().schema);
+    assert_eq!(reader.metadata().schema.field(0).name(), "column_1");
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(batch.num_rows(), 2);
+    let values = |column| {
+        batch
+            .column(column)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+    };
+    assert_eq!(
+        values(0).iter().collect::<Vec<_>>(),
+        [Some("0001"), Some("0002")]
+    );
+    assert_eq!(
+        values(1).iter().collect::<Vec<_>>(),
+        [Some("1.2300"), Some("1e9999")]
+    );
+    assert_eq!(values(2).null_count(), 2);
+    assert_eq!(values(3).value(0), "true");
+}
+
+#[tokio::test]
+async fn all_varchar_keeps_automatic_and_explicit_header_policies() {
+    use open_arrow_access_file_format::csv::CsvInferenceOptions;
+    for (bytes, has_header, column, rows) in [
+        (b"0001,2\n0003,4\n".as_slice(), None, "column_1", 2),
+        (b"name,empty\nalpha,\nbeta,\n", None, "name", 2),
+        (b"one,two\nthree,four\n", Some(false), "column_1", 2),
+        (b"001,002\n", Some(true), "001", 0),
+    ] {
+        let mut reader = CsvAccessor::infer(MemoryAccessor::new(bytes, 1))
+            .all_varchar()
+            .with_inference_options(CsvInferenceOptions {
+                has_header,
+                ..Default::default()
+            })
+            .open(ReadRequest::new("auto.csv"))
+            .await
+            .unwrap();
+        assert_varchar_schema(&reader.metadata().schema);
+        assert_eq!(reader.metadata().schema.field(0).name(), column);
+        let mut count = 0;
+        while let Some(batch) = reader.next().await.unwrap() {
+            count += batch.num_rows();
+        }
+        assert_eq!(count, rows);
+    }
+}
+
+#[tokio::test]
+async fn from_header_supports_quoted_multiline_names_and_gzipped_tsv_dialects() {
+    use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
+    use std::io::Write;
+    let mut reader = CsvAccessor::from_header(MemoryAccessor::new(
+        b"\"id\",\"multi\nname\"\n0001,value\n",
+        1,
+    ))
+    .open(ReadRequest::new("multiline.csv"))
+    .await
+    .unwrap();
+    assert_eq!(reader.metadata().schema.field(1).name(), "multi\nname");
+    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
+    let mut encoded = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoded.write_all(b"\xef\xbb\xbf# ignored\r\n'id'\t'label\tname'\r\n'0001'\t'first\tvalue'\r\n'0002'\t'next'\r\n").unwrap();
+    let encoded = encoded.finish().unwrap();
+    for parallel in [false, true] {
+        let input = MemoryAccessor::new(&encoded, 1).layer(DecompressionLayer::new(Gzip));
+        let accessor = CsvAccessor::from_header(input).with_dialect(CsvDialect {
+            delimiter: b'\t',
+            quote: b'\'',
+            comment: Some(b'#'),
+            has_header: true,
+            validate_header: true,
+            ..Default::default()
+        });
+        let request = ReadRequest::new("records.tsv.gz").with_options(options(1, None));
+        let mut reader = if parallel {
+            accessor
+                .layer(ParallelReadLayer::new(
+                    NonZeroUsize::new(2).unwrap(),
+                    NonZeroUsize::MIN,
+                ))
+                .open(request)
+                .await
+                .unwrap()
+        } else {
+            accessor.open(request).await.unwrap()
+        };
+        assert_eq!(reader.metadata().schema.field(1).name(), "label\tname");
+        let mut rows = Vec::new();
+        while let Some(batch) = reader.next().await.unwrap() {
+            let strings = |column| {
+                batch
+                    .column(column)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap()
+            };
+            rows.push((
+                strings(0).value(0).to_owned(),
+                strings(1).value(0).to_owned(),
+            ));
+        }
+        assert_eq!(
+            rows,
+            [
+                ("0001".into(), "first\tvalue".into()),
+                ("0002".into(), "next".into())
+            ]
+        );
+    }
+}
+
+#[tokio::test]
+async fn all_varchar_explicit_schemas_keep_metadata_dialect_and_null_rules() {
+    let original = Arc::new(Schema::new_with_metadata(
+        vec![
+            Field::new("id", DataType::Int64, false)
+                .with_metadata([("label".into(), "identifier".into())].into()),
+            Field::new("missing", DataType::Binary, false),
+        ],
+        [("source".into(), "explicit".into())].into(),
+    ));
+    let mut reader = CsvAccessor::new(MemoryAccessor::new(b"0001;NA\n", 1), original.clone())
+        .with_format(
+            CsvFormat::default()
+                .with_delimiter(b';')
+                .with_null_regex(regex::Regex::new("^NA$").unwrap()),
+        )
+        .all_varchar()
+        .open(ReadRequest::new("explicit.csv"))
+        .await
+        .unwrap();
+    let schema = reader.metadata().schema.clone();
+    assert_varchar_schema(&schema);
+    assert_eq!(schema.metadata(), original.metadata());
+    assert_eq!(schema.field(0).metadata(), original.field(0).metadata());
+    assert_eq!(original.field(0).data_type(), &DataType::Int64);
+    assert!(!original.field(0).is_nullable());
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(
+        batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+            .value(0),
+        "0001"
+    );
+    assert!(batch.column(1).is_null(0));
+}
+
+#[tokio::test]
+async fn from_header_validates_empty_and_ambiguous_names_and_configuration() {
+    use open_arrow_access_file_format::csv::CsvInferenceOptions;
+    for bytes in [b"".as_slice(), b"\n\r\n", b"id,id\n", b",id\n"] {
+        let error = CsvAccessor::from_header(MemoryAccessor::new(bytes, 1))
+            .open(ReadRequest::new("bad.csv"))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+    let input = MemoryAccessor::new(b"id\n1\n", 1);
+    let observed = input.observations.clone();
+    let error = CsvAccessor::from_header(input)
+        .with_inference_options(CsvInferenceOptions {
+            max_records: 0,
+            ..Default::default()
+        })
+        .open(ReadRequest::new("limits.csv"))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert!(observed.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn from_header_streams_late_decode_and_source_errors_as_terminal_failures() {
+    for bytes in [b"id,value\n1\n".as_slice(), b"id\n1,2\n", b"id\n\xff\n"] {
+        let mut reader = CsvAccessor::from_header(MemoryAccessor::new(bytes, 1))
+            .open(ReadRequest::new("bad-data.csv"))
+            .await
+            .unwrap();
+        assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
+        assert!(reader.next().await.unwrap().is_none());
+    }
+    let input = MemoryAccessor::new(b"id\n0001\n", 1).with_failure(3, ErrorKind::PermissionDenied);
+    let mut reader = CsvAccessor::from_header(input)
+        .open(ReadRequest::new("source-error.csv"))
+        .await
+        .unwrap();
+    assert_eq!(
+        reader.next().await.unwrap_err().kind(),
+        ErrorKind::PermissionDenied
+    );
+    assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn from_header_preserves_truncated_row_policy_and_zero_column_counts() {
+    let accessor = CsvAccessor::from_header(MemoryAccessor::new(b"id,missing\n0001\n", 1))
+        .with_dialect(CsvDialect {
+            has_header: true,
+            allow_truncated_rows: true,
+            ..Default::default()
+        });
+    let mut reader = accessor
+        .open(ReadRequest::new("truncated.csv"))
+        .await
+        .unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(batch.num_rows(), 1);
+    assert!(batch.column(1).is_null(0));
+    let accessor = CsvAccessor::from_header(MemoryAccessor::new(b"id\n0001\n0002\n", 1));
+    let request = ReadRequest::new("count.csv").with_options(options(1, Some(vec![])));
+    let mut reader = accessor
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::MIN,
+        ))
+        .open(request)
+        .await
+        .unwrap();
+    assert!(reader.metadata().schema.fields().is_empty());
+    let mut count = 0;
+    while let Some(batch) = reader.next().await.unwrap() {
+        assert_eq!(batch.num_columns(), 0);
+        count += batch.num_rows();
+    }
+    assert_eq!(count, 2);
+}

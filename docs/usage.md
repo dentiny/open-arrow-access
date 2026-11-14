@@ -155,6 +155,10 @@ Replace the format accessor for other sequential inputs:
 
 Use `CsvAccessor::infer(decoded)` to infer CSV column types and header presence.
 Configure sampling and override ambiguous headers with `CsvInferenceOptions`.
+Use `CsvAccessor::from_header(decoded)` for nullable string columns named by a
+header, including header-only inputs and all-null columns. `.all_varchar()` on
+an inferred accessor retains the configured header policy while choosing string
+columns. See [CSV string mode](formats.md#nullable-string-columns).
 
 Use `JsonAccessor::infer(decoded)` to infer a JSON schema rather than supplying
 one. Configure the bounded sample with `JsonInferenceOptions`.

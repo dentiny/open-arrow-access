@@ -11,6 +11,17 @@ impl<B> FileAccessor<B, CsvFileFormat> {
         Self::from_format(inner, CsvFileFormat::infer())
     }
 
+    /// Read nullable string columns named by the first CSV record. See
+    /// [`CsvFileFormat::from_header`] for dialect and empty-input behavior.
+    pub fn from_header(inner: B) -> Self {
+        Self::from_format(inner, CsvFileFormat::from_header())
+    }
+
+    /// Read all columns as nullable strings, retaining header/dialect settings.
+    pub fn all_varchar(self) -> Self {
+        self.map_format(CsvFileFormat::all_varchar)
+    }
+
     pub fn with_inference_options(self, options: CsvInferenceOptions) -> Self {
         self.map_format(|format| format.with_inference_options(options))
     }

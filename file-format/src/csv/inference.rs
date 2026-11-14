@@ -1,6 +1,6 @@
 use std::{io::Cursor, sync::Arc};
 
-use arrow_schema::{DataType, Schema};
+use arrow_schema::{DataType, Field, Schema};
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{ByteReader, Result, SchemaRef, StreamReader};
 
@@ -61,6 +61,7 @@ pub(super) async fn infer(
     input: Box<dyn ByteReader>,
     dialect: CsvDialect,
     options: CsvInferenceOptions,
+    all_varchar: bool,
 ) -> Result<(SchemaRef, bool, Box<dyn ByteReader>)> {
     let mut metadata = input.metadata().clone();
     // Frame every row, including the potential header, with the source dialect.
@@ -74,7 +75,14 @@ pub(super) async fn infer(
     .await?;
     let mut sample = Vec::new();
     let mut first_end = 0;
-    for index in 0..options.max_records {
+    // With a known header policy, string columns only need names/width from the
+    // first record. Keep subsequent records in the same streaming framer.
+    let max_records = if all_varchar && options.has_header.is_some() {
+        options.max_records.min(1)
+    } else {
+        options.max_records
+    };
+    for index in 0..max_records {
         let Some(record) = records.next_chunk(1, options.max_bytes).await? else {
             break;
         };
@@ -95,7 +103,11 @@ pub(super) async fn infer(
             dialect.allow_truncated_rows,
         )?,
     };
-    let schema = infer_sample(&sample, has_header, dialect.allow_truncated_rows)?;
+    let schema = if all_varchar {
+        infer_strings(&sample, has_header)?
+    } else {
+        infer_sample(&sample, has_header, dialect.allow_truncated_rows)?
+    };
     super::validation::validate_inferred_schema(&schema)?;
     // Canonicalization preserves field contents, but changes the byte representation.
     metadata.content_length = None;
@@ -110,5 +122,51 @@ pub(super) async fn infer(
         Arc::new(schema),
         has_header,
         Box::new(StreamReader::new(replay, metadata)),
+    ))
+}
+
+/// Preserve the column namespace while replacing data types and nullability.
+pub(super) fn varchar_schema(schema: &Schema) -> Schema {
+    Schema::new_with_metadata(
+        schema
+            .fields()
+            .iter()
+            .map(|field| {
+                field
+                    .as_ref()
+                    .clone()
+                    .with_data_type(DataType::Utf8)
+                    .with_nullable(true)
+            })
+            .collect::<Vec<_>>(),
+        schema.metadata().clone(),
+    )
+}
+
+fn infer_strings(sample: &[u8], has_header: bool) -> Result<Schema> {
+    // CsvChunks already normalized the source dialect. Read only the first
+    // canonical record to obtain its names or width, without inferring values.
+    let mut records = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .from_reader(sample);
+    let record = records
+        .records()
+        .next()
+        .transpose()
+        .map_err(inference_error)?
+        .ok_or_else(super::error::empty_inference_sample)?;
+    Ok(Schema::new(
+        record
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let name = if has_header {
+                    value.to_owned()
+                } else {
+                    format!("column_{}", index + 1)
+                };
+                Field::new(name, DataType::Utf8, true)
+            })
+            .collect::<Vec<_>>(),
     ))
 }

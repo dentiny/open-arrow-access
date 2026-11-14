@@ -1,12 +1,11 @@
-use std::{num::NonZeroUsize, sync::Arc};
+use std::num::NonZeroUsize;
 
 use arrow_array::cast::AsArray;
-use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteReadOptions, ByteReadRequest, ErrorKind, Result, ScanPlanner,
 };
 use open_arrow_access_dataset::file_set::FileSetRequest;
-use open_arrow_access_file_format::csv::{CsvFileFormat, CsvFormat};
+use open_arrow_access_file_format::csv::CsvFileFormat;
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::courtlistener::{CourtListenerBulkAccessor, CourtListenerSnapshot};
 use open_arrow_access_storage::OpenDalAccessor;
@@ -128,24 +127,12 @@ async fn invalid_selections_fail_before_storage_io() {
 
 #[tokio::test]
 async fn snapshot_record_plans_preserve_validation_order_and_quoted_csv() {
-    let raw = fixture!("courtlistener", "courts-2026-09-30.csv").await;
-    let fields = std::str::from_utf8(&raw)
-        .unwrap()
-        .lines()
-        .next()
-        .unwrap()
-        .split(',')
-        .map(|name| Field::new(name, DataType::Utf8, true))
-        .collect::<Vec<_>>();
     let bytes = MemoryAccessor::new(
         &fixture!("courtlistener", "courts-2026-09-30.csv.bz2").await,
         1,
     );
     let observed = bytes.observations.clone();
-    let records = CourtListenerBulkAccessor::new(bytes).records(
-        CsvFileFormat::new(Arc::new(Schema::new(fields)))
-            .with_format(CsvFormat::default().with_header(true)),
-    );
+    let records = CourtListenerBulkAccessor::new(bytes).records(CsvFileFormat::from_header());
     let bad = FileSetRequest::new(["bulk-data/../courts-2026-09-30.csv.bz2"]);
     assert_eq!(
         records.plan_scan(bad).await.err().unwrap().kind(),
