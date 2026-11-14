@@ -261,11 +261,17 @@ The fixed schema has eight top-level fields:
 | `record_id` | Utf8 | No |
 | `record_type` | Utf8 | No |
 | `warc_version` | Utf8 | No |
-| `date` | Utf8 (RFC 3339) | No |
+| `date` | Timestamp(Millisecond, None) | No |
 | `source_uri` | LargeUtf8 (input locator) | No |
 | `target_uri` | LargeUtf8 | Yes |
 | `content_type` | Utf8 | Yes |
 | `body` | LargeBinary | No |
+
+The default Arrow reader applies `SchemaEvolutionLayer` to convert parsed RFC 3339
+dates to UTC epoch milliseconds, stored without timezone metadata. Sequential and
+parallel scans expose the same timestamp schema, including projected reads.
+Sub-millisecond precision is not retained. Native WARC records
+retain the parser's date representation.
 
 Each physical WARC record produces one row, including warcinfo and continuation
 records. Bodies retain their original bytes; embedded HTTP messages are not

@@ -1,6 +1,6 @@
 use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
-use arrow_array::cast::AsArray;
+use arrow_array::{cast::AsArray, types::TimestampMillisecondType};
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteReadOptions, ByteReadRequest, Error, ErrorKind, ReadOptions,
@@ -256,7 +256,7 @@ async fn parallel_record_partitions_are_lazy_and_preserve_binary_projection_and_
     });
     let request = ReadRequest::new("physical.warc").with_options(ReadOptions {
         batch_size: NonZeroUsize::new(2).unwrap(),
-        projection: Some(vec!["body".into(), "record_id".into()]),
+        projection: Some(vec!["body".into(), "record_id".into(), "date".into()]),
     });
     let mut plan = accessor.plan_scan(request.clone()).await.unwrap();
     assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
@@ -283,6 +283,12 @@ async fn parallel_record_partitions_are_lazy_and_preserve_binary_projection_and_
     while let Some(batch) = reader.next().await.unwrap() {
         // Every record exceeds the soft byte target and must still be accepted.
         assert_eq!(batch.num_rows(), 1);
+        assert_eq!(
+            batch["date"]
+                .as_primitive::<TimestampMillisecondType>()
+                .value(0),
+            1_594_176_775_000,
+        );
         assert_eq!(batch.schema().field(0).name(), "body");
         ids.push(batch["record_id"].as_string::<i32>().value(0).to_owned());
         bodies.push(batch["body"].as_binary::<i64>().value(0).to_vec());
@@ -337,6 +343,13 @@ async fn five_metadata_columns_preserve_order_and_optional_header_nulls_without_
         .unwrap();
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch.num_rows(), 3);
+    assert_eq!(
+        batch["date"]
+            .as_primitive::<TimestampMillisecondType>()
+            .values()
+            .as_ref(),
+        &[1_594_176_775_000; 3],
+    );
     assert_eq!(
         batch
             .schema()

@@ -1,13 +1,12 @@
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, OrderRequirement, ReadRequest, ReaderFactory,
-    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait,
-    into_async_read,
+    RecordMetadata, Result, ScanPlan, ScanPlanner, StreamReader, async_trait, into_async_read,
 };
 
 use super::{
     WarcArrowAccessor,
-    arrow::{append_record, new_batch},
+    arrow::{append_record, evolve_reader, new_batch, raw_projection},
     decode_error,
 };
 
@@ -57,11 +56,15 @@ where
                         append_record(&mut batch, &record, source)?;
                     }
                     let batch = batch.finish()?;
-                    Ok(Box::new(StreamReader::records(
+                    let metadata = RecordMetadata {
+                        schema: raw_projection(&metadata.schema)?,
+                        ..metadata
+                    };
+                    evolve_reader(Box::new(StreamReader::records(
                         stream::iter([Ok(batch)]),
                         metadata,
                         OrderRequirement::Reorderable,
-                    )) as Box<dyn RecordReader>)
+                    )))
                 })
             },
         );
