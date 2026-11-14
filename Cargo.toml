@@ -173,10 +173,6 @@ required-features = ["service-pmc"]
 name = "read_parquet"
 required-features = ["format-parquet"]
 
-[[example]]
-name = "read_file_source"
-required-features = ["format-json"]
-
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

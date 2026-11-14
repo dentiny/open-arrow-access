@@ -87,12 +87,6 @@ the required `decompression-*` features too. Format-specific options stay on the
 typed format; projection, batch size and byte I/O options stay on `ReadRequest`.
 URI interpretation and credential selection remain application responsibilities.
 
-Run a complete JSON example from the repository checkout:
-
-```sh
-cargo run --locked --example read_file_source --features format-json -- testdata/json good.json
-```
-
 ## How the pieces compose
 
 ```mermaid
