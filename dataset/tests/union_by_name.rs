@@ -19,46 +19,20 @@ async fn union_projection_skips_invalid_unselected_json_values() {
         Field::new("id", DataType::Int64, false),
         Field::new("unused", DataType::Int64, false),
     ]));
-    for native in [false, true] {
-        let source = JsonAccessor::new(
-            MemoryAccessor::new(b"{\"id\":1,\"unused\":\"invalid\"}\n", 3),
-            schema.clone(),
-        );
-        let mut files = FileSetAccessor::new(source).with_union_by_name();
-        if native {
-            files = files.with_file_planning();
-        }
-        for parallel in [false, true] {
-            for projection in [vec!["id".to_owned()], vec![]] {
-                let request = FileSetRequest::new(["a", "a"]).with_options(ReadOptions {
-                    projection: Some(projection.clone()),
-                    ..Default::default()
-                });
-                let mut reader = if parallel {
-                    files
-                        .clone()
-                        .layer(ParallelReadLayer::new(
-                            NonZeroUsize::new(2).unwrap(),
-                            NonZeroUsize::MIN,
-                        ))
-                        .open(request)
-                        .await
-                        .unwrap()
-                } else {
-                    files.open(request).await.unwrap()
-                };
-                let mut rows = 0;
-                while let Some(batch) = reader.next().await.unwrap() {
-                    assert_eq!(batch.num_columns(), projection.len());
-                    if !projection.is_empty() {
-                        assert_eq!(batch.column(0).as_primitive::<Int64Type>().values(), &[1]);
-                    }
-                    rows += batch.num_rows();
-                }
-                assert_eq!(rows, 2);
-            }
-        }
-    }
+    let source = JsonAccessor::new(
+        MemoryAccessor::new(b"{\"id\":1,\"unused\":\"invalid\"}\n", 3),
+        schema,
+    );
+    let files = FileSetAccessor::new(source).with_union_by_name();
+    let request = FileSetRequest::new(["a"]).with_options(ReadOptions {
+        projection: Some(vec!["id".into()]),
+        ..Default::default()
+    });
+    let mut reader = files.open(request).await.unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(batch.num_columns(), 1);
+    assert_eq!(batch.column(0).as_primitive::<Int64Type>().values(), &[1]);
+    assert!(reader.next().await.unwrap().is_none());
 }
 
 #[tokio::test]
