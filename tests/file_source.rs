@@ -2,6 +2,7 @@ use open_arrow_access::{
     OuterCompression, ReadRequest, file_format::json::JsonFormat, open_file_source,
 };
 use open_arrow_access_test_support::{fixture_path, fs_operator};
+use tempfile::tempdir;
 
 #[tokio::test]
 async fn opens_a_file_source_and_reads_it_again() {
@@ -28,21 +29,8 @@ async fn opens_a_file_source_and_reads_it_again() {
 
 #[tokio::test]
 async fn schema_drift_preserves_file_source_error_context() {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    struct TempDir(std::path::PathBuf);
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-    let root = TempDir(std::env::temp_dir().join(format!(
-        "open-arrow-access-file-source-{}-{}",
-        std::process::id(),
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos(),
-    )));
-    std::fs::create_dir_all(&root.0).unwrap();
-    let operator = fs_operator(&root.0);
+    let root = tempdir().unwrap();
+    let operator = fs_operator(root.path());
     operator.write("data.json", "{\"id\":1}\n").await.unwrap();
     let source = open_file_source(
         operator.clone(),
