@@ -1,6 +1,6 @@
 //! Bind a provider's validated manifest to lazy HTTP file access.
 
-use open_arrow_access_core::{Error, Result};
+use open_arrow_access_core::{Error, ErrorKind, Result};
 use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 use serde::de::DeserializeOwned;
 use url::Url;
@@ -41,15 +41,25 @@ impl<M> ResolvedFilesPlan<M> {
     }
 }
 
-/// Connection and error context shared by public JSON-manifest providers.
-#[derive(Clone, Debug)]
+/// Connection and error context shared by JSON-manifest providers.
+#[derive(Clone)]
 pub(crate) struct HttpFileService {
     endpoint: Url,
     client: HttpClient,
+    token: Option<String>,
     /// Provider operation for metadata HTTP/JSON errors.
     operation: &'static str,
     /// Wrap namespace errors with provider context.
     map_file_namespace_error: fn(Error) -> Error,
+}
+
+impl std::fmt::Debug for HttpFileService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpFileService")
+            .field("endpoint", &self.endpoint)
+            .field("operation", &self.operation)
+            .finish_non_exhaustive()
+    }
 }
 
 impl HttpFileService {
@@ -62,6 +72,7 @@ impl HttpFileService {
         Ok(Self {
             endpoint: resolve_origin(endpoint, configure)?,
             client: HttpClient::new()?,
+            token: None,
             operation,
             map_file_namespace_error,
         })
@@ -70,6 +81,19 @@ impl HttpFileService {
     pub(crate) fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
         config.validate()?;
         self.client.config = config;
+        Ok(self)
+    }
+
+    pub(crate) fn with_token(mut self, token: &str) -> Result<Self> {
+        if token.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                self.operation,
+                "bearer token must not be empty",
+            ));
+        }
+        super::validation::bearer_header(token, self.operation)?;
+        self.token = Some(token.to_owned());
         Ok(self)
     }
 
@@ -85,7 +109,7 @@ impl HttpFileService {
     ) -> Result<ResolvedFileSet<OpenDalAccessor, M>> {
         let response = self
             .client
-            .json(metadata_url.as_str(), /*token=*/ None, self.operation)
+            .json(metadata_url.as_str(), self.token.as_deref(), self.operation)
             .await?;
         let plan = resolve(response)?;
         let lengths = plan.files.iter().filter_map(|file| {
@@ -94,7 +118,12 @@ impl HttpFileService {
         });
         let storage = self
             .client
-            .accessor(&self.endpoint, &plan.root, plan.query)?
+            .accessor(
+                &self.endpoint,
+                &plan.root,
+                plan.query,
+                self.token.as_deref(),
+            )?
             .with_content_lengths(lengths);
         ResolvedFileSet::from_files(storage, plan.files, plan.metadata)
             .map_err(self.map_file_namespace_error)
