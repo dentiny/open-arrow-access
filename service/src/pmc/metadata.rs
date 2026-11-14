@@ -10,7 +10,7 @@ use open_arrow_access_layers::{ColumnEvolution, SchemaEvolutionLayer};
 use std::sync::{Arc, OnceLock};
 
 /// Preserve the upstream JSON field name while exposing the URL as Arrow `text`.
-fn json_schema() -> SchemaRef {
+fn source_metadata_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
@@ -49,7 +49,7 @@ pub(super) async fn decode_batch(
     let schema = schema();
     let batch = read_document(
         Bytes::copy_from_slice(raw),
-        JsonFormat::new(json_schema()),
+        JsonFormat::new(source_metadata_schema()),
         ReadRequest::new(path),
     )
     .await?;
@@ -59,7 +59,7 @@ pub(super) async fn decode_batch(
     let input = StreamReader::records(
         stream::once(async move { Ok(batch) }),
         RecordMetadata {
-            schema: json_schema(),
+            schema: source_metadata_schema(),
             source: Some(path.into()),
         },
         OrderRequirement::Reorderable,
