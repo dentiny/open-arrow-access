@@ -68,6 +68,8 @@ async fn read_initial_page() -> Result<()> {
 The example obtains exactly one DOAB XML page. Enable the service crate's
 `oai` feature directly when using it without a facade provider feature; facade
 features such as `service-doab` already expose this module. Follow the returned
-token for additional pages.
+token for additional pages. Configured providers also offer a
+[default Arrow record format](oai-provider.md#default-arrow-records) for standard
+header columns, preserving a stable schema for empty pages.
 
 Source: [OAI-PMH specification](https://www.openarchives.org/OAI/openarchivesprotocol.html).
