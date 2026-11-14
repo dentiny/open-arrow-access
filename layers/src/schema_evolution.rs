@@ -126,10 +126,10 @@ impl SchemaEvolutionLayer {
         })
     }
 
-    /// Apply changes to an already opened reader using its actual schema.
-    /// All input columns are available; accessor source-projection hints do not
-    /// apply at this boundary. The output schema is fixed before reading data.
-    pub fn apply_to_reader(&self, reader: Box<dyn RecordReader>) -> Result<Box<dyn RecordReader>> {
+    /// Wrap an opened reader with schema evolution based on its actual schema.
+    /// All input columns are available; source-projection hints are ignored.
+    /// The output schema is fixed before reading data.
+    pub fn wrap_reader(&self, reader: Box<dyn RecordReader>) -> Result<Box<dyn RecordReader>> {
         if self.changes.is_empty() {
             return Ok(reader);
         }

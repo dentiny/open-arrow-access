@@ -75,7 +75,7 @@ pub(super) fn evolve_reader(reader: Box<dyn RecordReader>) -> Result<Box<dyn Rec
         return Ok(reader);
     }
     SchemaEvolutionLayer::try_new(vec![ColumnEvolution::change_data_type("date", date_type())])?
-        .apply_to_reader(reader)
+        .wrap_reader(reader)
 }
 
 pub(super) fn raw_projection(output: &SchemaRef) -> Result<SchemaRef> {
