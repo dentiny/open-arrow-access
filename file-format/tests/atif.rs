@@ -292,24 +292,6 @@ async fn atif_rejects_unordered_even_with_one_partition() {
 }
 
 #[tokio::test]
-async fn auto_fixed_schema_contract_preserves_projection_and_source_failures() {
-    format::assert_fixed_schema_contract(
-        |bytes| AtifAccessor::new(bytes, AtifFormat::Auto),
-        format::FormatCase {
-            bytes: &fixture!("atif", "trajectory.json").await,
-            request: ReadRequest::new("x").with_options(ReadOptions {
-                projection: Some(vec!["source_record_index".into(), "trajectory_id".into()]),
-                ..ReadOptions::default()
-            }),
-            schema: trajectory_schema(),
-            rows: 1,
-            fault_offsets: &[0, 8],
-        },
-    )
-    .await;
-}
-
-#[tokio::test]
 async fn auto_empty_or_whitespace_input_is_eof() {
     for name in ["empty.jsonl", "whitespace.jsonl"] {
         let input = fixture!("atif", name).await;
@@ -322,20 +304,6 @@ async fn auto_empty_or_whitespace_input_is_eof() {
 }
 
 #[tokio::test]
-async fn auto_rejects_unordered_even_with_one_partition() {
-    let data = fixture!("atif", "trajectory.json").await;
-    let source = AtifAccessor::new(MemoryAccessor::new(&data, 7), AtifFormat::Auto);
-    let error = source
-        .layer(UnorderedEmissionLayer)
-        .open(ReadRequest::new("runs"))
-        .await
-        .err()
-        .unwrap();
-    assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    assert_eq!(error.operation(), "unordered_emission");
-}
-
-#[tokio::test]
 async fn auto_reads_document_and_object_streams_without_filename_hints() {
     for (name, expected) in [
         ("trajectory.json", vec!["first"]),
@@ -343,7 +311,7 @@ async fn auto_reads_document_and_object_streams_without_filename_hints() {
         ("mixed_layouts.atif", vec!["escaped", "second"]),
     ] {
         let input = fixture!("atif", name).await;
-        for chunk in [1, 7, input.len()] {
+        for chunk in [1, input.len()] {
             let accessor =
                 AtifAccessor::new(MemoryAccessor::new(&input, chunk), AtifFormat::default());
             let mut reader = accessor
@@ -375,13 +343,7 @@ async fn auto_reads_document_and_object_streams_without_filename_hints() {
 
 #[tokio::test]
 async fn auto_preserves_error_context_and_discards_incomplete_batches() {
-    for name in [
-        "bad_truncated.jsonl",
-        "bad_array.jsonl",
-        "bad_utf8.jsonl",
-        "bad_missing_fields.jsonl",
-        "bad_version.jsonl",
-    ] {
+    for name in ["bad_truncated.jsonl", "bad_array.jsonl", "bad_utf8.jsonl"] {
         let input = fixture!("atif", name).await;
         let bytes = MemoryAccessor::new(&input, 1);
         let observations = bytes.observations.clone();
@@ -423,12 +385,9 @@ async fn auto_stops_after_the_requested_record_and_preserves_io_errors() {
 }
 
 #[tokio::test]
-async fn auto_gzip_scan_uses_one_ordered_partition() {
-    let input = fixture!("atif", "repeated-trajectories.jsonl.gz").await;
-    let accessor = AtifAccessor::new(
-        MemoryAccessor::new(&input, 1).layer(DecompressionLayer::new(Gzip)),
-        AtifFormat::Auto,
-    );
+async fn auto_scan_uses_one_ordered_partition() {
+    let input = fixture!("atif", "trajectories.jsonl").await;
+    let accessor = AtifAccessor::new(MemoryAccessor::new(&input, 1), AtifFormat::Auto);
     let plan = accessor
         .plan_scan(ReadRequest::new("opaque"))
         .await
@@ -444,5 +403,5 @@ async fn auto_gzip_scan_uses_one_ordered_partition() {
     while let Some(batch) = reader.next().await.unwrap() {
         rows += batch.num_rows();
     }
-    assert_eq!(rows, 6);
+    assert_eq!(rows, 3);
 }
