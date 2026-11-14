@@ -10,7 +10,6 @@ use open_arrow_access_core::{
 use super::{
     FileSetRequest,
     error::empty_selection,
-    reader::create_reader,
     validation::{validate_file_ordering, validate_file_policy},
 };
 
@@ -101,11 +100,20 @@ where
             schema: reader.metadata().schema.clone(),
             source: None,
         };
-        Ok(Box::new(create_reader(
-            self.inner.clone(),
-            reader,
-            requests,
+        let inner = self.inner.clone();
+        let first: ScanPartition = Box::pin(async move { Ok(reader) });
+        let later = requests.map(move |request| {
+            let inner = inner.clone();
+            let partition: ScanPartition = Box::pin(async move { inner.open(request).await });
+            Ok(partition)
+        });
+        let plan = ScanPlan::from_stream(
             metadata,
+            stream::once(async { Ok(first) }).chain(stream::iter(later)),
+        )
+        .with_ordering(self.capability().ordering);
+        Ok(Box::new(plan.into_reader_with_schema_error(
+            super::error::schema_mismatch,
         )))
     }
 }
