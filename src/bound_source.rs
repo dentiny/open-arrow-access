@@ -30,6 +30,8 @@ pub(crate) enum SourceKind {
 
 #[async_trait]
 trait Reopen: Send + Sync {
+    /// Open an independent reader with a clone of the stored typed request.
+    /// Accessor errors propagate unchanged; the caller validates the reader's schema.
     async fn open(&self) -> Result<Box<dyn RecordReader>>;
 }
 
