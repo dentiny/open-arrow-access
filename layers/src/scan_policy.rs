@@ -7,7 +7,15 @@ use crate::parallel_read::open_plan;
 
 /// Changes scan settings without executing partitions or relaxing source ordering.
 pub(crate) trait ScanPolicy: Send + Sync {
+    /// Report whether the wrapped accessor supports parallel execution, using
+    /// the inner capability without I/O. This describes support, not the number
+    /// of partitions a particular request runs, and must imply `inner.read`.
     fn read_parallel(&self, inner: RecordCapability) -> bool;
+
+    /// Collect this policy's settings into a plan whose ordering already includes
+    /// the inner accessor's requirement. Preserve its metadata, partitions and
+    /// ordering; return an error for conflicting settings. The shared executor
+    /// validates emission permission at open and starts partition work on consumption.
     fn apply(&self, plan: &mut ScanPlan) -> Result<()>;
 }
 
