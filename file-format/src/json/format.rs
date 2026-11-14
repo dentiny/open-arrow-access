@@ -1,4 +1,4 @@
-use crate::inference::SchemaInference;
+use crate::{inference::SchemaInference, preparation::PreparedProjection};
 
 use super::{
     inference::{self, JsonInferenceOptions},
@@ -41,6 +41,40 @@ impl JsonFormat {
             inference: JsonInferenceOptions::default(),
         }
     }
+
+    fn prepare_projection(&self, request: &ReadRequest) -> Result<Option<PreparedProjection>> {
+        let Some(input_schema) = &self.schema else {
+            self.inference.validate()?;
+            return Ok(None);
+        };
+        PreparedProjection::new(input_schema, &request.options).map(Some)
+    }
+
+    pub(super) fn prepare_scan(&self, request: &ReadRequest) -> Result<Option<PreparedProjection>> {
+        let prepared = self.prepare_projection(request)?;
+        if let Some(prepared) = &prepared {
+            // Arrow exposes schema validation only through decoder construction.
+            // Keep nested type/timezone errors before storage I/O and empty scans.
+            self.build_decoder(prepared.schema.clone(), request)?;
+        }
+        Ok(prepared)
+    }
+
+    fn build_decoder(&self, schema: SchemaRef, request: &ReadRequest) -> Result<Decoder> {
+        ReaderBuilder::new(schema)
+            .with_batch_size(request.options.batch_size.get())
+            .build_decoder()
+            .map_err(super::error::open_error)
+    }
+
+    fn decoder(
+        &self,
+        prepared: PreparedProjection,
+        request: &ReadRequest,
+    ) -> Result<(SchemaRef, Decoder)> {
+        let decoder = self.build_decoder(prepared.schema.clone(), request)?;
+        Ok((prepared.schema, decoder))
+    }
 }
 
 #[async_trait]
@@ -74,17 +108,9 @@ impl ReaderFactory for JsonFormat {
     }
 
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
-        let Some(input_schema) = &self.schema else {
-            self.inference.validate()?;
-            return Ok(None);
-        };
-        let options = &request.options;
-        let (schema, _) = options.resolve_projection(input_schema)?;
-        let decoder = ReaderBuilder::new(schema.clone())
-            .with_batch_size(options.batch_size.get())
-            .build_decoder()
-            .map_err(super::error::open_error)?;
-        Ok(Some((schema, decoder)))
+        self.prepare_projection(request)?
+            .map(|prepared| self.decoder(prepared, request))
+            .transpose()
     }
 
     async fn create_reader(

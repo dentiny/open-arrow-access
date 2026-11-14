@@ -6,9 +6,8 @@ use futures::{
     stream,
 };
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactory, ReaderFactoryExt,
-    RecordMetadata, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader,
-    into_async_read,
+    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactoryExt, RecordMetadata,
+    Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader, into_async_read,
 };
 
 use super::{CsvAccessor, CsvDialect, error};
@@ -24,20 +23,20 @@ where
             return Ok(ScanPlan::whole_input(self.open(request).await?)
                 .with_ordering(self.capability().ordering));
         };
-        let prepared = format.prepare(&request)?;
+        let prepared = format.prepare_scan(&request)?;
         let input = self
             .binding
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
         let (format, input) = format.resolve_schema(input).await?;
-        let (schema, _) = match prepared {
+        let prepared = match prepared {
             Some(prepared) => prepared,
-            None => format.prepare(&request)?.expect("resolved CSV schema"),
+            None => format.prepare_scan(&request)?.expect("resolved CSV schema"),
         };
         let dialect = format.parallel_dialect().unwrap_or(dialect);
         let metadata = RecordMetadata {
-            schema,
+            schema: prepared.schema,
             source: Some(request.object.clone()),
         };
         // Workers read canonical CSV, regardless of the source dialect.
