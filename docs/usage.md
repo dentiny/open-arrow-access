@@ -173,7 +173,7 @@ Replace the format accessor for other sequential inputs:
 | CSV with headers | `CsvAccessor::new(decoded, schema).with_format(CsvFormat::default().with_header(true))` | `format-csv` |
 | TSV | Same CSV accessor with `.with_delimiter(b'\t')` on `CsvFormat` | `format-csv` |
 | XML | `XmlAccessor::new(decoded, "/records/record")` | `format-xml` |
-| ATIF JSONL | `AtifAccessor::new(decoded, AtifFormat::JsonLines)` | `format-atif` |
+| ATIF JSON / JSONL | `AtifAccessor::new(decoded, AtifFormat::Auto)` | `format-atif` |
 
 Use `CsvAccessor::infer(decoded)` to infer CSV column types and header presence.
 Configure sampling and override ambiguous headers with `CsvInferenceOptions`.

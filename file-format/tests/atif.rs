@@ -290,3 +290,118 @@ async fn atif_rejects_unordered_even_with_one_partition() {
         assert_eq!(error.operation(), "unordered_emission");
     }
 }
+
+#[tokio::test]
+async fn auto_empty_or_whitespace_input_is_eof() {
+    for name in ["empty.jsonl", "whitespace.jsonl"] {
+        let input = fixture!("atif", name).await;
+        let mut reader = AtifAccessor::new(MemoryAccessor::new(&input, 1), AtifFormat::Auto)
+            .open(ReadRequest::new("empty"))
+            .await
+            .unwrap();
+        assert!(reader.next().await.unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn auto_reads_document_and_object_streams_without_filename_hints() {
+    for (name, expected) in [
+        ("trajectory.json", vec!["first"]),
+        ("trajectories.jsonl", vec!["first", "second", "third"]),
+        ("mixed_layouts.atif", vec!["escaped", "second"]),
+    ] {
+        let input = fixture!("atif", name).await;
+        for chunk in [1, input.len()] {
+            let accessor =
+                AtifAccessor::new(MemoryAccessor::new(&input, chunk), AtifFormat::default());
+            let mut reader = accessor
+                .open(ReadRequest::new("opaque-key").with_options(ReadOptions {
+                    batch_size: NonZeroUsize::new(2).unwrap(),
+                    ..Default::default()
+                }))
+                .await
+                .unwrap();
+            assert_eq!(reader.metadata().schema, trajectory_schema());
+            let mut ids = Vec::new();
+            while let Some(batch) = reader.next().await.unwrap() {
+                assert!(batch.num_rows() <= 2);
+                for row in 0..batch.num_rows() {
+                    ids.push(text(&batch, "trajectory_id", row).to_owned());
+                    assert_eq!(text(&batch, "source_uri", row), "opaque-key");
+                    if name == "trajectory.json" {
+                        assert_eq!(
+                            text(&batch, "raw_json", row),
+                            std::str::from_utf8(&input).unwrap().trim()
+                        );
+                    }
+                }
+            }
+            assert_eq!(ids, expected);
+        }
+    }
+}
+
+#[tokio::test]
+async fn auto_preserves_error_context_and_discards_incomplete_batches() {
+    for name in ["bad_truncated.jsonl", "bad_array.jsonl", "bad_utf8.jsonl"] {
+        let input = fixture!("atif", name).await;
+        let bytes = MemoryAccessor::new(&input, 1);
+        let observations = bytes.observations.clone();
+        let mut reader = AtifAccessor::new(bytes, AtifFormat::Auto)
+            .open(ReadRequest::new("broken").with_options(ReadOptions {
+                batch_size: NonZeroUsize::new(2).unwrap(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+        let error =
+            format::assert_terminal_error(reader.as_mut(), &observations.reads, ErrorKind::Decode)
+                .await;
+        assert!(error.to_string().contains("broken: record 2:"), "{error}");
+        assert!(error.source().is_some());
+    }
+}
+
+#[tokio::test]
+async fn auto_stops_after_the_requested_record_and_preserves_io_errors() {
+    let input = fixture!("atif", "trajectories.jsonl").await;
+    // The fixture starts with one blank line before its first trajectory.
+    let end = input.windows(2).position(|pair| pair == b"}\r").unwrap() + 1;
+    let bytes = MemoryAccessor::new(&input, 1).with_failure(end, ErrorKind::Io);
+    let observations = bytes.observations.clone();
+    let mut reader = AtifAccessor::new(bytes, AtifFormat::Auto)
+        .open(ReadRequest::new("opaque").with_options(ReadOptions {
+            batch_size: NonZeroUsize::MIN,
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    assert_eq!(
+        text(&reader.next().await.unwrap().unwrap(), "trajectory_id", 0),
+        "first"
+    );
+    assert_eq!(observations.reads.load(Ordering::SeqCst), end);
+    format::assert_terminal_error(reader.as_mut(), &observations.reads, ErrorKind::Io).await;
+}
+
+#[tokio::test]
+async fn auto_scan_uses_one_ordered_partition() {
+    let input = fixture!("atif", "trajectories.jsonl").await;
+    let accessor = AtifAccessor::new(MemoryAccessor::new(&input, 1), AtifFormat::Auto);
+    let plan = accessor
+        .plan_scan(ReadRequest::new("opaque"))
+        .await
+        .unwrap();
+    assert_eq!(
+        plan.ordering,
+        open_arrow_access_core::OrderRequirement::PreserveGlobal
+    );
+    let mut partitions = plan.partitions.try_collect::<Vec<_>>().await.unwrap();
+    assert_eq!(partitions.len(), 1);
+    let mut reader = partitions.pop().unwrap().await.unwrap();
+    let mut rows = 0;
+    while let Some(batch) = reader.next().await.unwrap() {
+        rows += batch.num_rows();
+    }
+    assert_eq!(rows, 3);
+}
