@@ -3,13 +3,13 @@ use std::sync::Arc;
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ReadRequest, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan,
-    SchemaRef, StreamReader, into_stream,
+    StreamReader, into_stream,
 };
 
 use super::{
     FileSetRequest,
     accessor::FilePlanner,
-    alignment,
+    alignment::AlignmentPlan,
     error::empty_selection,
     schema,
     validation::{validate_fields, validate_file_ordering, validate_file_policy},
@@ -49,21 +49,28 @@ where
         schema: target.clone(),
         source: None,
     };
+    let files = files
+        .into_iter()
+        .map(|(request, source)| {
+            Ok((
+                request,
+                Arc::new(AlignmentPlan::new(source, target.clone())?),
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let partitions = stream::iter(files)
-        .then(move |(request, source)| {
+        .then(move |(request, alignment)| {
             let inner = inner.clone();
-            let target = target.clone();
             async move {
                 let plan = open_plan(inner, file_planner, request).await?;
                 validate_file_policy(&plan)?;
                 validate_file_ordering(ordering, plan.ordering)?;
-                super::validation::validate_schema(&plan.metadata.schema, &source)?;
+                super::validation::validate_schema(&plan.metadata.schema, &alignment.source)?;
                 Ok(plan.partitions.map(move |partition| {
                     let partition = partition?;
-                    let source = source.clone();
-                    let target = target.clone();
+                    let alignment = alignment.clone();
                     let aligned: ScanPartition =
-                        Box::pin(async move { align_reader(partition.await?, source, target) });
+                        Box::pin(async move { align_reader(partition.await?, alignment) });
                     Ok(aligned)
                 }))
             }
@@ -88,19 +95,14 @@ where
 
 fn align_reader(
     reader: Box<dyn RecordReader>,
-    source: SchemaRef,
-    target: SchemaRef,
+    alignment: Arc<AlignmentPlan>,
 ) -> Result<Box<dyn RecordReader>> {
-    super::validation::validate_schema(&reader.metadata().schema, &source)?;
+    super::validation::validate_schema(&reader.metadata().schema, &alignment.source)?;
     let ordering = reader.capability().ordering;
     let metadata = RecordMetadata {
-        schema: target.clone(),
+        schema: alignment.target.clone(),
         source: reader.metadata().source.clone(),
     };
-    let batches = into_stream(reader).map(move |batch| {
-        let batch = batch?;
-        super::validation::validate_schema(&batch.schema(), &source)?;
-        alignment::align(batch, target.clone())
-    });
+    let batches = into_stream(reader).map(move |batch| alignment.apply(batch?));
     Ok(Box::new(StreamReader::records(batches, metadata, ordering)))
 }
