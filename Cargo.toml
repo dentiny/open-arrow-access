@@ -48,7 +48,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 tar = { version = "0.4.46", default-features = false }
 url = "2"
-# Keep Arrow types compatible with the released Lance and Iceberg SDKs.
 arrow-array = "58"
 arrow-buffer = "58"
 arrow-cast = "58"
