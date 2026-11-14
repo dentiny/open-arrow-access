@@ -76,8 +76,8 @@ let mut reader = source.reader().await?;
 while let Some(batch) = reader.next().await? { /* consume batch */ }
 ```
 
-The source retains its first reader, so reading after schema inspection does not
-repeat the initial open or inference. Later `reader()` calls open independent
+The source retains the reader opened during binding. Reading after schema
+inspection does not repeat the initial open or inference. Later `reader()` calls open independent
 cursors with the same request and reject a changed schema. Binding fixes the
 schema rather than the file contents. The application supplies the runtime.
 

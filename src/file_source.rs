@@ -67,8 +67,8 @@ where
 
 /// A file selection bound to its initial metadata and read options.
 ///
-/// The first reader is retained after schema inspection, avoiding another open
-/// or inference pass on first consumption. Later calls reopen independently and
+/// The reader opened during binding is retained after schema inspection, avoiding
+/// another open or inference pass on first consumption. Later calls reopen independently and
 /// require the same output schema, including metadata. Reader cursors are never
 /// shared; readers remain usable after dropping the source. Binding fixes the
 /// schema, not the file contents, and adds no snapshot guarantee.
@@ -76,7 +76,7 @@ pub struct FileSource {
     accessor: Box<dyn Accessor<Request = ReadRequest, Reader = dyn RecordReader>>,
     request: ReadRequest,
     metadata: RecordMetadata,
-    first_reader: Mutex<Option<Box<dyn RecordReader>>>,
+    bound_reader: Mutex<Option<Box<dyn RecordReader>>>,
 }
 
 impl FileSource {
@@ -90,7 +90,7 @@ impl FileSource {
             accessor: Box::new(accessor),
             request,
             metadata,
-            first_reader: Mutex::new(Some(reader)),
+            bound_reader: Mutex::new(Some(reader)),
         })
     }
 
@@ -104,15 +104,15 @@ impl FileSource {
         self.metadata.schema.clone()
     }
 
-    /// Take the initial reader once, then reopen with the original request.
+    /// Take the bound reader once, then reopen with the original request.
     /// Schema drift returns Decode before yielding a reader; source errors pass through.
     pub async fn reader(&self) -> Result<Box<dyn RecordReader>> {
-        let first = self
-            .first_reader
+        let bound = self
+            .bound_reader
             .lock()
             .map_err(|_| error::source_state_unavailable())?
             .take();
-        let reader = match first {
+        let reader = match bound {
             Some(reader) => reader,
             None => self.accessor.open(self.request.clone()).await?,
         };
