@@ -2,7 +2,7 @@ use crate::{RecordBatch, Result, SchemaRef};
 
 /// Project or reorder columns and attach the supplied output schema.
 /// `None` retains all columns; an empty projection preserves the row count.
-/// Arrays are shared without copying. Failures return [`ErrorKind::Decode`].
+/// Arrays are shared without copying. Failures return [`crate::ErrorKind::Decode`].
 pub fn project_batch(
     batch: RecordBatch,
     projection: Option<&[usize]>,

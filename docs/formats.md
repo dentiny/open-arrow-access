@@ -68,7 +68,12 @@ Later incompatible values fail decoding. Empty inputs, header-only samples,
 all-null sampled columns, and duplicate/empty headers require an explicit schema.
 For identifiers with significant leading zeros, supply an explicit string schema. Configure headers
 with `CsvFormat::default().with_header(true)` and TSV with `.with_delimiter(b'\t')`.
-The reader uses Arrow CSV's incremental decoder over sequential bytes.
+`CsvFormat` is this crate's options wrapper around Arrow 58's CSV format, with
+the existing builder methods and `.with_header_validation(true)` preserved.
+It is no longer a type alias for `arrow_csv::reader::Format`. Header validation
+checks the complete source schema before projection, using the same incremental
+CSV parser and dialect. Data still uses Arrow CSV's incremental decoder over
+sequential bytes.
 
 ## XML
 
@@ -209,7 +214,7 @@ cargo run --example read_atif --features format-atif
 cargo run --example read_atif --features format-atif -- testdata/atif/trajectories.jsonl jsonl
 ```
 
-The adapter uses published `atif-arrow 0.4.0` with Arrow 59; see
+The adapter uses an Arrow 58-compatible `atif-arrow` revision; see
 [dependency alignment](dependencies.md#atif-parser).
 
 

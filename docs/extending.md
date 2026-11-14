@@ -43,7 +43,7 @@ sequenceDiagram
 For a small complete example, this format treats each UTF-8 physical line as one
 `text` row. It emits one row per batch, preserves line endings, limits each line
 to 1 MiB, and supports ordinary projection including zero columns. Add
-`arrow-array = "59.3.0"`, `arrow-schema = "59.3.0"`, and `futures = "0.3"`.
+`arrow-array = "58.4.1"`, `arrow-schema = "58.4.1"`, and `futures = "0.3"`.
 No built-in format feature is required when using core's `FactoryAccessor`.
 
 ```rust,no_run

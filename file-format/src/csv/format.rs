@@ -7,10 +7,12 @@ use super::{
     validation,
 };
 use arrow_csv::{ReaderBuilder, reader::Decoder};
+use arrow_schema::{DataType, Schema};
 use open_arrow_access_core::{
     ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
     RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
 };
+use std::sync::Arc;
 
 /// Incrementally read CSV or TSV using an explicit or inferred positional schema.
 /// Defaults to comma-separated input without a header; use [`Self::with_format`]
@@ -88,18 +90,44 @@ impl CsvFileFormat {
         Ok(Some(prepared))
     }
 
-    fn decoder(&self, prepared: PreparedProjection, request: &ReadRequest) -> (SchemaRef, Decoder) {
-        let mut builder =
-            ReaderBuilder::new(self.schema.as_ref().expect("resolved CSV schema").clone())
-                .with_format(match &self.options {
-                    CsvOptions::Dialect(dialect) => dialect.format(),
-                    CsvOptions::Custom(format) => format.clone(),
+    fn decoder(
+        &self,
+        prepared: PreparedProjection,
+        request: &ReadRequest,
+    ) -> (SchemaRef, Decoder, Option<Decoder>) {
+        let schema = self.schema.as_ref().expect("resolved CSV schema");
+        let format = match &self.options {
+            CsvOptions::Dialect(dialect) => dialect.format(),
+            CsvOptions::Custom(format) => format.clone(),
+        };
+        let validate_header = format.has_header && format.validate_header;
+        let header = validate_header.then(|| {
+            let fields = schema
+                .fields()
+                .iter()
+                .map(|field| {
+                    field
+                        .as_ref()
+                        .clone()
+                        .with_data_type(DataType::Utf8)
+                        .with_nullable(true)
                 })
-                .with_batch_size(request.options.batch_size.get());
+                .collect::<Vec<_>>();
+            ReaderBuilder::new(Arc::new(Schema::new(fields)))
+                .with_format(format.inner.clone().with_header(false).with_null_regex(
+                    regex::Regex::new(r"\b\B").expect("valid never-matching regex"),
+                ))
+                .with_batch_size(1)
+                .build_decoder()
+        });
+        let format = format.inner;
+        let mut builder = ReaderBuilder::new(schema.clone())
+            .with_format(format)
+            .with_batch_size(request.options.batch_size.get());
         if let Some(indices) = prepared.indices {
             builder = builder.with_projection(indices);
         }
-        (prepared.schema, builder.build_decoder())
+        (prepared.schema, builder.build_decoder(), header)
     }
 }
 
@@ -128,7 +156,7 @@ impl SchemaInference for CsvFileFormat {
 impl ReaderFactory for CsvFileFormat {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
-    type Prepared = Option<(SchemaRef, Decoder)>;
+    type Prepared = Option<(SchemaRef, Decoder, Option<Decoder>)>;
 
     fn capability(&self, input: Capability) -> RecordCapability {
         Capability {
@@ -153,17 +181,19 @@ impl ReaderFactory for CsvFileFormat {
         request: ReadRequest,
         prepared: Self::Prepared,
     ) -> Result<Box<dyn RecordReader>> {
-        let (input, schema, decoder) = match prepared {
-            Some((schema, decoder)) => (input, schema, decoder),
+        let (input, schema, decoder, header) = match prepared {
+            Some((schema, decoder, header)) => (input, schema, decoder, header),
             None => {
                 let (format, input) = self.resolve_schema(input).await?;
-                let (schema, decoder) = format.prepare(&request)?.expect("resolved CSV schema");
-                (input, schema, decoder)
+                let (schema, decoder, header) =
+                    format.prepare(&request)?.expect("resolved CSV schema");
+                (input, schema, decoder, header)
             }
         };
         Ok(Box::new(csv_reader(
             input,
             decoder,
+            header,
             RecordMetadata {
                 schema,
                 source: Some(request.object),

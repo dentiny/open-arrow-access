@@ -25,16 +25,13 @@ edition = "2024"
 license = "MIT"
 repository = "https://github.com/dentiny/open-arrow-access"
 
-[workspace.metadata.lance]
-repository = "https://github.com/lance-format/lance"
-revision = "343aa21c460c5e17c67185c4b57bd3365a1735a1"
-checked-at = "2026-11-04"
-
-[workspace.metadata.lance.versions]
-arrow = "59.3.0"
-parquet = "59.3.0"
-datafusion = "55.2.0"
+[workspace.metadata.compatibility]
+arrow = "58.4.1"
+parquet = "58.4.1"
+datafusion = "54.1.0"
 opendal = "0.59.2"
+lance = "14.0.1"
+iceberg = "0.11.0"
 
 [workspace.dependencies]
 async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
@@ -46,27 +43,28 @@ opendal-service-http = "=0.59.2"
 percent-encoding = "2"
 quick-xml = { version = "0.41", features = ["serialize"] }
 reqwest = { version = "0.13.5", default-features = false }
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 tar = { version = "0.4.46", default-features = false }
 url = "2"
-# Match the resolved Cargo.lock versions at the Lance revision above.
+# Keep Arrow types compatible with the released Lance and Iceberg SDKs.
 # See docs/dependencies.md when updating this baseline.
-arrow-array = "59.3.0"
-arrow-buffer = "59.3.0"
-arrow-cast = "59.3.0"
-arrow-csv = "59.3.0"
-arrow-json = "59.3.0"
-arrow-schema = "59.3.0"
-arrow-select = "59.3.0"
+arrow-array = "58.4.1"
+arrow-buffer = "58.4.1"
+arrow-cast = "58.4.1"
+arrow-csv = "58.4.1"
+arrow-json = "58.4.1"
+arrow-schema = "58.4.1"
+arrow-select = "58.4.1"
 async-trait = "0.1.91"
-atif-arrow = "0.4.6"
+atif-arrow = { git = "https://github.com/dentiny/atif-arrow", rev = "615c30eedaaaa19195ba84902e63d442c71acbb0" }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 warc = { package = "warc-rs", version = "0.3.3", default-features = false }
-xml-arrow = "0.2.8"
+xml-arrow = { git = "https://github.com/dentiny/xml-arrow-rs", rev = "b844014691fca70e8d5c4260bf18c910ee03c266" }
 
 # Used by schema evolution expressions.
-datafusion = { version = "55.2.0", default-features = false }
+datafusion = { version = "54.1.0", default-features = false }
 
 bytes = "1"
 csv = "1.4"
@@ -83,7 +81,7 @@ open-arrow-access-layers = { path = "layers", version = "0.1.0" }
 open-arrow-access-storage = { path = "storage", version = "0.1.0", default-features = false }
 open-arrow-access-test-support = { path = "test-support" }
 opendal = { version = "0.59.2", default-features = false }
-parquet = { version = "59.3.0", default-features = false, features = ["arrow", "async", "snap"] }
+parquet = { version = "58.4.1", default-features = false, features = ["arrow", "async", "snap"] }
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

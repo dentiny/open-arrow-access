@@ -1,76 +1,69 @@
-# Lance dependency alignment
+# Dependency compatibility
 
-DataFusion, Arrow, Parquet, and OpenDAL versions follow the latest
-`lance-format/lance` default-branch commit checked when this baseline is updated.
-Record one immutable commit so builds remain reproducible as upstream advances.
+The Arrow baseline follows the released Lance 14.0.1 and Iceberg 0.11 SDKs so
+applications can pass native Arrow batches between independent access and sink
+libraries without cross-version conversion. It does not follow Lance's moving
+default branch.
 
-Baseline checked on 2026-11-04:
-[`343aa21c460c5e17c67185c4b57bd3365a1735a1`](https://github.com/lance-format/lance/commit/343aa21c460c5e17c67185c4b57bd3365a1735a1).
-Both its [manifest](https://github.com/lance-format/lance/blob/343aa21c460c5e17c67185c4b57bd3365a1735a1/Cargo.toml)
-and [lockfile](https://github.com/lance-format/lance/blob/343aa21c460c5e17c67185c4b57bd3365a1735a1/Cargo.lock)
-were inspected.
+| Family | Workspace baseline |
+| --- | --- |
+| Arrow | `58.4.1` |
+| Parquet | `58.4.1` |
+| DataFusion | `54.1.0` |
+| OpenDAL | `0.59.2` |
 
-| Family | Upstream manifest requirement | Upstream resolved version / our baseline |
-| --- | --- | --- |
-| Arrow | `59.2.0` | `59.3.0` |
-| Parquet | `59.2.0` | `59.3.0` |
-| DataFusion | `55.0.0` | `55.2.0` |
-| OpenDAL | `0.59.2` | `0.59.2` |
+Lance 14.0.1 requires Arrow 58; Iceberg 0.11 requires Arrow 58.4. DataFusion 54.1
+requires Arrow 58.3, which permits the shared 58.4.1 version. Direct workspace
+dependencies use normal Cargo semver requirements. The committed `Cargo.lock`
+records the exact versions; all enabled formats must resolve one Arrow family.
+CSV, JSON and Parquet use this same baseline, including their transitive Arrow
+Cast, Ord and IPC components. Existing Parquet fixtures remain valid regardless
+of which Arrow release originally wrote them.
 
-Use upstream's **resolved lockfile versions**, including patch versions, as the
-workspace baseline. Direct workspace dependencies use normal Cargo semver
-requirements without an `=` prefix. The committed `Cargo.lock` records the
-resolved versions and aligns transitive Arrow and OpenDAL components. For
-additional OpenDAL services and HTTP transports, use the same OpenDAL release
-(`0.59.2`). Feature selection remains specific to this project's scope.
-The CSV feature uses the same Arrow baseline (`59.3.0`) for `arrow-csv`, including
-the transitive Arrow Cast and Arrow Ord components in the committed lockfile.
-
-DataFusion is a required dependency of the layers crate for generated columns
-and inherits its version through `workspace = true`. Only the `sql` feature is
-explicitly enabled, with DataFusion's default features disabled. DataFusion 55.2.0
-still enables scalar-function defaults (including string, Unicode, datetime, and
-math) through its dependencies. Optional Parquet, compression, and recursive
-protection features are not enabled here. Core does not import DataFusion or Lance types.
+OpenDAL remains on 0.59.2, including its service and HTTP transport crates. This
+change does not require a storage API downgrade. DataFusion remains a required
+layers dependency with default features disabled and `sql` explicitly enabled.
+Core does not import DataFusion or Lance types.
 
 ## Updating the baseline
 
-1. Resolve the latest default-branch SHA of `lance-format/lance` and inspect
-   `Cargo.toml` and `Cargo.lock` at that exact SHA, including any source patches.
-2. Update the workspace requirements, baseline metadata, this document, and lockfile
-   together. New backend/format/layer crates inherit workspace dependencies.
-   Add new family components to the same version baseline.
-3. Compare resolved dependency-family versions with the upstream lockfile, then
-   run feature builds, tests, Clippy and Rustdoc.
-
-The recorded SHA is a version reference, not a Git dependency on Lance. Builds
-do not query upstream or automatically change dependency versions.
+1. Check the Arrow requirements of the released SDKs that exchange batches with
+   this workspace, including parsers and DataFusion.
+2. Update workspace requirements, compatibility metadata, this document, examples
+   and lockfile together. Preserve one Arrow major across all enabled formats.
+3. Run all-feature workspace tests, Clippy and Rustdoc, and verify the resolved
+   Arrow dependency family before updating the compatibility baseline.
 
 ## XML parser
 
-`format-xml` uses the published [`xml-arrow 0.2.8`](https://crates.io/crates/xml-arrow/0.2.8)
-parser for Arrow 59 compatibility, configuration validation before I/O, and reusable
-inferred mappings with bounded sample replay for parallel decoding.
-Its companion `xml-io` storage crate is not used, so storage remains on this
-workspace's OpenDAL 0.59.2 baseline. Arrow family versions remain 59.3.0 in the
-lockfile. The parser uses a normal registry dependency, with the resolved version
-and checksum recorded in Cargo.lock.
+`format-xml` uses the immutable Arrow 58 compatibility revision from
+[xml-arrow-rs PR #39](https://github.com/dentiny/xml-arrow-rs/pull/39) while its
+compatible release is pending. The parser retains configuration
+validation before I/O and reusable inferred mappings with bounded sample replay
+for parallel decoding. Its companion `xml-io` storage crate is not used, so storage
+remains on this workspace's OpenDAL 0.59.2 baseline.
 
 ## ATIF parser
 
-`format-atif` uses the published
-[`atif-arrow 0.4.6`](https://crates.io/crates/atif-arrow/0.4.6) converter, including
-projection-aware batch builders. The resolved registry version and checksum are
-recorded in Cargo.lock.
+`format-atif` uses the immutable Arrow 58 compatibility revision from
+[atif-arrow PR #45](https://github.com/dentiny/atif-arrow/pull/45), including the
+existing projection-aware batch builders. The parser API is unchanged.
+
+Both parser dependencies are pinned by Git revision in `Cargo.toml` and
+`Cargo.lock`; they do not track a moving branch. Their compatibility PRs do not
+need to be merged to build this branch. Switch back to normal registry requirements
+when Arrow 58-compatible releases are published, keeping the workspace on one
+Arrow major.
 
 Only the pure parser/schema/converter crate is used. The companion `atif-io`
 and Harbor Hub backend are not dependencies, so ATIF does not bring its own
 storage, transport, runtime or decompression policy. JSON/JSONL framing is handled
-over the shared `ByteReader` contract. Arrow remains 59.3.0 and OpenDAL remains
+over the shared `ByteReader` contract. Arrow remains 58.4.1 and OpenDAL remains
 0.59.2 in this workspace's lockfile.
 
 `format-warc` uses published `warc-rs 0.3.3` with default features disabled,
-reusing its async parser without its optional storage dependencies.
+reusing its async parser without its optional storage dependencies. WARC itself
+does not depend on Arrow and needs no version change for this baseline.
 
 Common Crawl HTTP configuration pins `opendal-service-http` to `0.59.2`, matching
 the recorded OpenDAL baseline. The optional HTTP transport uses the SDK

@@ -73,8 +73,8 @@ All configured computations run before final projection.
 
 ## Evolve a schema
 
-Add matching `datafusion = { version = "55.2.0", default-features = false }`
-and `arrow-schema = "59.3.0"` dependencies. For a record accessor `source` and
+Add matching `datafusion = { version = "54.1.0", default-features = false }`
+and `arrow-schema = "58.4.1"` dependencies. For a record accessor `source` and
 its complete `source_schema` containing `count` and `obsolete` columns:
 
 ```rust,ignore

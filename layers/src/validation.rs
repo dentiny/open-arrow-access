@@ -87,7 +87,7 @@ fn is_safe_decimal_cast(from: &DataType, to: &DataType) -> bool {
     if let (Some((precision, from_scale)), Some((_, to_scale))) =
         (decimal_params(from), decimal_params(to))
     {
-        // Arrow 59.3 computes both expressions in i8, which can panic or select wrapping multiplication.
+        // Arrow decimal kernels compute both expressions in i8, which can panic or select wrapping multiplication.
         let delta = to_scale - from_scale;
         return delta.abs() <= i16::from(i8::MAX)
             && (delta < 0 || precision + delta <= i16::from(i8::MAX));
