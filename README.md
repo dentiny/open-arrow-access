@@ -14,7 +14,7 @@ the default feature set is empty. Add the published crate to your application:
 
 ```toml
 [dependencies]
-open-arrow-access = { version = "0.2.1", default-features = false, features = ["format-parquet"] }
+open-arrow-access = { version = "0.2.2", default-features = false, features = ["format-parquet"] }
 opendal = { version = "=0.59.2", default-features = false, features = ["services-fs"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
@@ -122,7 +122,7 @@ storage operator separately.
 Set features on the dependency used by your application:
 
 ```toml
-open-arrow-access = { version = "0.2.1", default-features = false, features = [
+open-arrow-access = { version = "0.2.2", default-features = false, features = [
     "format-json",
     "decompression-gzip",
     "dataset-directory",

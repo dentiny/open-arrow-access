@@ -20,7 +20,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/dentiny/open-arrow-access"
@@ -72,11 +72,11 @@ futures = { version = "0.3", default-features = false, features = ["std", "async
 glob = "0.3.4"
 memchr = "2"
 more-asserts = "0.3.1"
-open-arrow-access-core = { path = "core", version = "0.2.1" }
-open-arrow-access-decompression = { path = "decompression", version = "0.2.1", default-features = false }
-open-arrow-access-file-format = { path = "file-format", version = "0.2.1", default-features = false }
-open-arrow-access-layers = { path = "layers", version = "0.2.1" }
-open-arrow-access-storage = { path = "storage", version = "0.2.1", default-features = false }
+open-arrow-access-core = { path = "core", version = "0.2.2" }
+open-arrow-access-decompression = { path = "decompression", version = "0.2.2", default-features = false }
+open-arrow-access-file-format = { path = "file-format", version = "0.2.2", default-features = false }
+open-arrow-access-layers = { path = "layers", version = "0.2.2" }
+open-arrow-access-storage = { path = "storage", version = "0.2.2", default-features = false }
 open-arrow-access-test-support = { path = "test-support" }
 opendal = { version = "0.59.2", default-features = false }
 parquet = { version = "58", default-features = false, features = ["arrow", "async", "snap"] }
@@ -84,9 +84,9 @@ tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
-open-arrow-access-dataset = { path = "dataset", version = "0.2.1", default-features = false }
+open-arrow-access-dataset = { path = "dataset", version = "0.2.2", default-features = false }
 
-open-arrow-access-service = { path = "service", version = "0.2.1", default-features = false }
+open-arrow-access-service = { path = "service", version = "0.2.2", default-features = false }
 
 [features]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
