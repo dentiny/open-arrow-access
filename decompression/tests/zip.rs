@@ -13,6 +13,31 @@ fn memory(data: &[u8]) -> MemoryAccessor {
 }
 
 #[tokio::test]
+async fn zip64_rejects_impossible_directory_counts_before_allocation() {
+    for name in ["bad_zip64_entry_count.zip", "bad_zip64_directory_count.zip"] {
+        let data = fixture!("zip", name).await;
+        let zip = ZipAccessor::new(memory(&data), 0);
+        let error = zip
+            .entries(ByteReadRequest::new("archive"))
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Decode);
+        assert!(matches!(
+            std::error::Error::source(&error)
+                .unwrap()
+                .downcast_ref::<async_zip::error::ZipError>(),
+            Some(async_zip::error::ZipError::NumFilesAboveMax(_))
+        ));
+        let error = zip
+            .open(ByteReadRequest::new("archive"))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::Decode);
+    }
+}
+
+#[tokio::test]
 async fn archive_session_reuses_storage_and_interleaves_independent_entries() {
     let data = fixture!("zip", "mixed.zip").await;
     let source = memory(&data);

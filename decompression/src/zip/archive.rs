@@ -25,9 +25,14 @@ impl ZipArchive {
     /// Inspect the central directory once over a ranged, known-length source.
     pub async fn open(input: Box<dyn ByteReader>, limits: ZipLimits) -> Result<Self> {
         let source = ArchiveSource::new(input, "open_zip")?;
+        let archive_len = source.input.content_length();
+        let max_entries = super::validation::directory_entry_limit(archive_len);
         let options = ZipOptions {
             max_uncompressed_size_per_file: limits.max_entry_bytes,
             max_compressed_size_per_file: limits.max_entry_bytes,
+            max_cd_num_files: max_entries,
+            max_cd_num_files_load: max_entries,
+            max_cd_size_in_bytes: archive_len,
             ..ZipOptions::default()
         };
         let parser = ZipArchiveReader::open_with_options(source.input.clone(), options)

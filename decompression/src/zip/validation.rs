@@ -5,6 +5,15 @@ use async_zip::spec::{
 };
 use open_arrow_access_core::Result;
 
+/// Every central-directory entry needs at least a 46-byte fixed header. Bound
+/// declarations before async_zip preallocates both its CDR and offset vectors;
+/// each vector's byte capacity must also fit Rust's isize allocation limit.
+pub(super) fn directory_entry_limit(archive_len: u64) -> u64 {
+    let entry_size = std::mem::size_of::<CDR>().max(std::mem::size_of::<u64>());
+    let addressable_entries = (isize::MAX as usize / entry_size) as u64;
+    (archive_len / 46).min(addressable_entries)
+}
+
 /// async_zip 0.0.19 unwraps this optional ZIP64 field in lfh_offset().
 /// Validate it before any entry can reach that upstream accessor.
 pub(super) fn validate_offset(entry: &CDR) -> Result<()> {
