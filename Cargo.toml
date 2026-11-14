@@ -90,12 +90,12 @@ open-arrow-access-service = { path = "service", version = "0.1.0", default-featu
 
 [features]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
-decompression-bz2 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
-decompression-gzip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip"]
-decompression-lz4 = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/lz4"]
-decompression-tar = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/tar"]
-decompression-zip = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zip"]
-decompression-zstd = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/zstd"]
+decompression-bz2 = ["open-arrow-access-decompression/bz2"]
+decompression-gzip = ["open-arrow-access-decompression/gzip"]
+decompression-lz4 = ["open-arrow-access-decompression/lz4"]
+decompression-tar = ["open-arrow-access-decompression/tar"]
+decompression-zip = ["open-arrow-access-decompression/zip"]
+decompression-zstd = ["open-arrow-access-decompression/zstd"]
 default = []
 format-atif = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/atif"]
 format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
@@ -138,7 +138,7 @@ service-zenodo = ["open-arrow-access-service/zenodo"]
 [dependencies]
 open-arrow-access-core.workspace = true
 open-arrow-access-dataset = { workspace = true, optional = true }
-open-arrow-access-decompression = { workspace = true, optional = true }
+open-arrow-access-decompression.workspace = true
 open-arrow-access-file-format = { workspace = true, optional = true }
 open-arrow-access-layers.workspace = true
 open-arrow-access-service.workspace = true
@@ -147,8 +147,13 @@ open-arrow-access-storage.workspace = true
 [dev-dependencies]
 arrow-schema.workspace = true
 datafusion.workspace = true
+open-arrow-access-test-support.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
 tokio.workspace = true
+
+[[test]]
+name = "file_source"
+required-features = ["format-json"]
 
 [[example]]
 name = "read_huggingface"

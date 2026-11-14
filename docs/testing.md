@@ -2,12 +2,13 @@
 
 This is the starting point for finding and adding tests across the workspace.
 Each crate owns its tests under `<crate>/tests/`. Composition tests live in the
-crate whose behavior they exercise. The workspace root has no test directory.
+crate whose behavior they exercise; the facade file-source smoke test lives in root `tests/`.
 
 ## Find a test
 
 | Area | Test location |
 | --- | --- |
+| High-level file-source smoke test | [`tests/file_source.rs`](../tests/file_source.rs) |
 | CSV and TSV | [`file-format/tests/csv.rs`](../file-format/tests/csv.rs) |
 | JSON and JSONL | [`file-format/tests/json.rs`](../file-format/tests/json.rs) |
 | XML | [`file-format/tests/xml.rs`](../file-format/tests/xml.rs) |

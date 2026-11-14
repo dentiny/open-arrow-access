@@ -2762,6 +2762,7 @@ dependencies = [
  "open-arrow-access-layers",
  "open-arrow-access-service",
  "open-arrow-access-storage",
+ "open-arrow-access-test-support",
  "opendal",
  "tokio",
 ]

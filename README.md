@@ -55,6 +55,38 @@ cargo run --locked --example read_parquet --features format-parquet -- testdata/
 Readers own their resources. Drop a reader to stop consuming it; after cancelling
 a pending read, drop that reader too.
 
+## Reusable file sources
+
+`open_file_source` is always available in the facade. Enable the desired format
+and pass a configured OpenDAL operator, the complete read request, a typed format
+and an explicit outer-compression policy:
+
+```rust,ignore
+use open_arrow_access::{open_file_source, OuterCompression, ReadRequest};
+use open_arrow_access::file_format::parquet::ParquetFormat;
+
+let source = open_file_source(
+    operator,
+    ReadRequest::new("part-00000.parquet"),
+    ParquetFormat,
+    OuterCompression::None,
+).await?;
+println!("schema: {:?}", source.schema());
+let mut reader = source.reader().await?;
+while let Some(batch) = reader.next().await? { /* consume batch */ }
+```
+
+The source retains the reader opened during binding. Reading after schema
+inspection does not repeat the initial open or inference. Later `reader()` calls open independent
+cursors with the same request and reject a changed schema. Binding fixes the
+schema rather than the file contents. The application supplies the runtime.
+
+Use `OuterCompression::None` for Parquet's original bytes and range access. For
+CSV, JSON and XML, `Auto` selects an enabled decoder by object-key suffix; enable
+the required `decompression-*` features too. Format-specific options stay on the
+typed format; projection, batch size and byte I/O options stay on `ReadRequest`.
+URI interpretation and credential selection remain application responsibilities.
+
 ## How the pieces compose
 
 ```mermaid
