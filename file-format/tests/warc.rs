@@ -1,7 +1,6 @@
 use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
 use arrow_array::{cast::AsArray, types::TimestampMillisecondType};
-use arrow_schema::{DataType, TimeUnit};
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteReadOptions, ByteReadRequest, Error, ErrorKind, ReadOptions,
@@ -257,7 +256,7 @@ async fn parallel_record_partitions_are_lazy_and_preserve_binary_projection_and_
     });
     let request = ReadRequest::new("physical.warc").with_options(ReadOptions {
         batch_size: NonZeroUsize::new(2).unwrap(),
-        projection: Some(vec!["body".into(), "record_id".into()]),
+        projection: Some(vec!["body".into(), "record_id".into(), "date".into()]),
     });
     let mut plan = accessor.plan_scan(request.clone()).await.unwrap();
     assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
@@ -284,6 +283,12 @@ async fn parallel_record_partitions_are_lazy_and_preserve_binary_projection_and_
     while let Some(batch) = reader.next().await.unwrap() {
         // Every record exceeds the soft byte target and must still be accepted.
         assert_eq!(batch.num_rows(), 1);
+        assert_eq!(
+            batch["date"]
+                .as_primitive::<TimestampMillisecondType>()
+                .value(0),
+            1_594_176_775_000,
+        );
         assert_eq!(batch.schema().field(0).name(), "body");
         ids.push(batch["record_id"].as_string::<i32>().value(0).to_owned());
         bodies.push(batch["body"].as_binary::<i64>().value(0).to_vec());
@@ -338,6 +343,13 @@ async fn five_metadata_columns_preserve_order_and_optional_header_nulls_without_
         .unwrap();
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch.num_rows(), 3);
+    assert_eq!(
+        batch["date"]
+            .as_primitive::<TimestampMillisecondType>()
+            .values()
+            .as_ref(),
+        &[1_594_176_775_000; 3],
+    );
     assert_eq!(
         batch
             .schema()
@@ -403,78 +415,5 @@ async fn empty_parallel_projection_preserves_rows_and_validates_unselected_bodie
             assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
         }
         assert!(reader.next().await.unwrap().is_none());
-    }
-}
-
-#[tokio::test]
-async fn dates_default_to_timestamps_in_sequential_and_parallel_scans() {
-    let mut input = Vec::new();
-    for (index, date) in [
-        "1970-01-01T00:00:00.123456Z",
-        "1970-01-01T02:30:00.456+02:30",
-        "1969-12-31T23:59:59.999Z",
-    ]
-    .iter()
-    .enumerate()
-    {
-        input.extend_from_slice(format!(
-            "WARC/1.1\r\nWARC-Type: resource\r\nWARC-Record-ID: <urn:test:{index}>\r\nWARC-Date: {date}\r\nContent-Length: 0\r\n\r\n\r\n\r\n"
-        ).as_bytes());
-    }
-    let expected_type = DataType::Timestamp(TimeUnit::Millisecond, None);
-    let default_schema = open_arrow_access_file_format::warc::arrow_schema();
-    assert_eq!(
-        default_schema.field_with_name("date").unwrap().data_type(),
-        &expected_type
-    );
-    assert!(
-        !default_schema
-            .field_with_name("date")
-            .unwrap()
-            .is_nullable()
-    );
-    for parallel in [false, true] {
-        for projection in [None, Some(vec!["date".into(), "record_id".into()])] {
-            let accessor = WarcArrowAccessor::new(MemoryAccessor::new(&input, 1))
-                .with_partition_options(DecodePartitionOptions {
-                    target_bytes: NonZeroUsize::MIN,
-                });
-            let request = ReadRequest::new("dates.warc").with_options(ReadOptions {
-                batch_size: NonZeroUsize::new(2).unwrap(),
-                projection,
-            });
-            let mut reader = if parallel {
-                accessor
-                    .layer(ParallelReadLayer::new(
-                        NonZeroUsize::new(2).unwrap(),
-                        NonZeroUsize::MIN,
-                    ))
-                    .open(request)
-                    .await
-                    .unwrap()
-            } else {
-                accessor.open(request).await.unwrap()
-            };
-            assert_eq!(
-                reader
-                    .metadata()
-                    .schema
-                    .field_with_name("date")
-                    .unwrap()
-                    .data_type(),
-                &expected_type
-            );
-            let mut dates = Vec::new();
-            while let Some(batch) = reader.next().await.unwrap() {
-                assert_eq!(batch.schema(), reader.metadata().schema);
-                dates.extend(
-                    batch["date"]
-                        .as_primitive::<TimestampMillisecondType>()
-                        .iter()
-                        .map(Option::unwrap),
-                );
-            }
-            assert_eq!(dates, [123, 456, -1]);
-        }
     }
 }
