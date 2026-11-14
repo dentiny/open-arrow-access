@@ -14,7 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let operator = opendal::Operator::new(opendal::services::Fs::default().root(&root))?;
     let service = ArxivService::new(OpenDalAccessor::new(operator));
     let archives = service
-        .manifest(ArxivKind::Pdf, Some(month), ByteReadOptions::default())
+        .manifest(ArxivKind::Auto, Some(month), ByteReadOptions::default())
         .await?;
     for (index, archive) in archives.iter().enumerate() {
         println!("{index}\t{}\t{} bytes", archive.filename, archive.size);

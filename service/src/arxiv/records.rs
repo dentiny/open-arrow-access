@@ -19,6 +19,7 @@ const DEFAULT_BATCH_TARGET_BYTES: usize = 4 * 1024 * 1024;
 /// Selection of independent TAR shards; entries inside each shard remain sequential.
 #[derive(Clone, Debug)]
 pub struct ArxivReadRequest {
+    /// Distribution selection; defaults to automatic discovery of both manifests.
     pub kind: ArxivKind,
     pub month: Option<u16>,
     pub options: ReadOptions,
@@ -26,6 +27,12 @@ pub struct ArxivReadRequest {
     /// Soft serialized payload target per Arrow batch. A complete entry can
     /// exceed this target; batch_size still limits the number of rows.
     pub target_bytes: NonZeroUsize,
+}
+
+impl Default for ArxivReadRequest {
+    fn default() -> Self {
+        Self::new(ArxivKind::Auto)
+    }
 }
 
 impl ArxivReadRequest {
