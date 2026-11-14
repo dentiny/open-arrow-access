@@ -45,6 +45,16 @@ async fn maps_metadata_without_fetching_content() {
         .await
         .unwrap();
     assert!(batch["pdf_url"].is_null(0));
+    assert!(batch["text"].is_null(0));
+    let batch = read(
+        br#"{"pmcid":"PMC1","text_url":"s3://pmc-oa-opendata/PMC1.1/article%20name.txt?md5=opaque","text":"ignored"}"#,
+        Some(vec!["text".into()]),
+    ).await.unwrap();
+    assert_eq!(batch.schema().field(0).name(), "text");
+    assert_eq!(
+        batch["text"].as_string::<i32>().value(0),
+        "s3://pmc-oa-opendata/PMC1.1/article%20name.txt?md5=opaque"
+    );
 }
 
 #[tokio::test]
