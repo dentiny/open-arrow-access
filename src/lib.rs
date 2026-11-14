@@ -1,23 +1,18 @@
 //! Composable, asynchronous read access to Arrow record batches.
 //!
 //! The shared extension contracts, OpenDAL storage adapter, service HTTP utilities,
-//! and record layers (including [`layers::SchemaEvolutionLayer`]) are always
-//! available. Concrete providers remain opt-in.
+//! file-opening utilities, and record layers (including [`layers::SchemaEvolutionLayer`])
+//! are always available. Concrete providers remain opt-in.
 //! Enable a `format-parquet`, `format-json`, `format-csv`, `format-xml`, or
 //! `format-atif` reader to decode records.
 
 pub use open_arrow_access_core::*;
 
+mod file_source;
+pub use file_source::{FileSource, OuterCompression, open_file_source};
+
 pub use open_arrow_access_service as service;
 
-#[cfg(any(
-    feature = "decompression-gzip",
-    feature = "decompression-bz2",
-    feature = "decompression-lz4",
-    feature = "decompression-zstd",
-    feature = "decompression-zip",
-    feature = "decompression-tar",
-))]
 pub use open_arrow_access_decompression as decompression;
 
 #[cfg(any(
