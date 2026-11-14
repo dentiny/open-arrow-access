@@ -15,6 +15,7 @@ use tokio::{sync::mpsc, task::JoinSet};
 
 use crate::{
     error::partition_task_error,
+    scan_policy::{ScanPolicy, ScanPolicyAccessor},
     validation::{validate_emission_policy, validate_parallel_read_settings},
 };
 
@@ -40,8 +41,7 @@ impl ParallelReadLayer {
 }
 
 pub struct ParallelReadAccessor<A> {
-    inner: A,
-    settings: ParallelReadLayer,
+    policy: ScanPolicyAccessor<A, ParallelReadLayer>,
 }
 
 impl<A: ScanPlanner> Layer<A> for ParallelReadLayer {
@@ -49,8 +49,7 @@ impl<A: ScanPlanner> Layer<A> for ParallelReadLayer {
 
     fn layer(&self, inner: A) -> Self::Layered {
         ParallelReadAccessor {
-            inner,
-            settings: *self,
+            policy: ScanPolicyAccessor::new(inner, *self),
         }
     }
 }
@@ -61,36 +60,34 @@ impl<A: ScanPlanner> Accessor for ParallelReadAccessor<A> {
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> RecordCapability {
-        let read = self.inner.capability().read;
-        Capability {
-            read,
-            read_parallel: read,
-            read_with_range: false,
-            list: false,
-        }
-        .with_ordering(self.inner.capability().ordering)
+        self.policy.capability()
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
-        open_plan(self.plan_scan(request).await?)
+        self.policy.open(request).await
     }
 }
 
 #[async_trait]
 impl<A: ScanPlanner> ScanPlanner for ParallelReadAccessor<A> {
     async fn plan_scan(&self, request: Self::Request) -> Result<ScanPlan> {
-        let mut plan = self
-            .inner
-            .plan_scan(request)
-            .await?
-            .require_ordering(self.inner.capability().ordering);
+        self.policy.plan_scan(request).await
+    }
+}
+
+impl ScanPolicy for ParallelReadLayer {
+    fn read_parallel(&self, inner: RecordCapability) -> bool {
+        inner.read
+    }
+
+    fn apply(&self, plan: &mut ScanPlan) -> Result<()> {
         let settings = ParallelReadOptions {
-            partitions: self.settings.partitions,
-            prefetch: self.settings.prefetch,
+            partitions: self.partitions,
+            prefetch: self.prefetch,
         };
         validate_parallel_read_settings(plan.parallel_read, settings)?;
         plan.parallel_read = Some(settings);
-        Ok(plan)
+        Ok(())
     }
 }
 
