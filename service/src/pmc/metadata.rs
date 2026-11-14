@@ -36,7 +36,7 @@ fn text_column_layer() -> &'static SchemaEvolutionLayer {
     static LAYER: OnceLock<SchemaEvolutionLayer> = OnceLock::new();
     LAYER.get_or_init(|| {
         SchemaEvolutionLayer::try_new(vec![ColumnEvolution::rename_column("text_url", "text")])
-            .expect("valid PMC text column rename")
+            .unwrap()
     })
 }
 
