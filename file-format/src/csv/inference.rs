@@ -108,12 +108,9 @@ pub(super) async fn resolve(
         // Deliberately keep mismatches as data: a conversion failure is not proof
         // of a header, and all-string data must not lose its first row.
         let first = first_record(&sample)?;
-        let has_header = !first.is_empty()
-            && first.len() == schema.fields().len()
-            && first
-                .iter()
-                .zip(schema.fields())
-                .all(|(value, field)| value == field.name().as_bytes());
+        let has_header = first
+            .iter()
+            .eq(schema.fields().iter().map(|field| field.name().as_bytes()));
         (schema, has_header)
     } else {
         super::validation::validate_sample(&sample)?;

@@ -50,9 +50,7 @@ impl CsvFileFormat {
     pub fn new(schema: SchemaRef) -> Self {
         Self {
             schema: Some(schema),
-            inference: CsvInferenceOptions::default(),
-            options: CsvOptions::Dialect(CsvDialect::default()),
-            header: CsvHeader::Auto,
+            ..Self::infer()
         }
     }
 
@@ -89,12 +87,11 @@ impl CsvFileFormat {
     }
 
     pub(super) fn prepare_scan(&self, request: &ReadRequest) -> Result<Option<PreparedProjection>> {
-        if self.header == CsvHeader::Auto {
+        if self.schema.is_none() || self.header == CsvHeader::Auto {
             validation::require_dialect(self.parallel_dialect())?;
         }
         let Some(input_schema) = &self.schema else {
             self.inference.validate()?;
-            validation::require_dialect(self.parallel_dialect())?;
             return Ok(None);
         };
         let options = &request.options;
@@ -111,15 +108,10 @@ impl CsvFileFormat {
     ) -> (SchemaRef, Decoder, Option<Decoder>) {
         let schema = self.schema.as_ref().expect("resolved CSV schema");
         let format = match &self.options {
-            CsvOptions::Dialect(dialect) => CsvDialect {
-                header: self.header,
-                ..*dialect
-            }
-            .format(),
-            CsvOptions::Custom(format) => format
-                .clone()
-                .with_header(self.header == CsvHeader::Present),
-        };
+            CsvOptions::Dialect(dialect) => dialect.format(),
+            CsvOptions::Custom(format) => format.clone(),
+        }
+        .with_header(self.header == CsvHeader::Present);
         let validate_header = format.has_header && format.validate_header;
         let header = validate_header.then(|| {
             let fields = schema
