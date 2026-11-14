@@ -3,8 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use arrow_array::{Array, ArrayRef, LargeStringArray, RecordBatch, cast::AsArray};
 use arrow_cast::{CastOptions, cast_with_options};
 use arrow_schema::{ArrowError, DataType};
-use futures::stream;
-use open_arrow_access_core::{RecordMetadata, RecordReader, Result, StreamReader};
+use open_arrow_access_core::{RecordReader, Result, map_record_reader};
 
 use super::plan::{EvolutionStep, SchemaEvolutionPlan};
 use crate::{batch::assemble_batch, validation};
@@ -27,21 +26,14 @@ impl SchemaEvolutionPlan {
         {
             return Ok(inner);
         }
-        let metadata = RecordMetadata {
-            schema: Arc::clone(&self.target_schema),
-            source: inner.metadata().source.clone(),
-        };
         let capability = inner.capability();
-        let batches = stream::try_unfold((inner, self), |(mut inner, plan)| async move {
-            let Some(batch) = inner.next().await? else {
-                return Ok(None);
-            };
-            Ok(Some((plan.convert(batch)?, (inner, plan))))
-        });
-        Ok(Box::new(
-            StreamReader::records(batches, metadata, capability.ordering)
-                .with_capability(capability),
-        ))
+        let schema = Arc::clone(&self.target_schema);
+        Ok(Box::new(map_record_reader(
+            inner,
+            schema,
+            capability,
+            move |batch| self.convert(batch),
+        )))
     }
 
     fn convert(&self, batch: RecordBatch) -> Result<RecordBatch> {

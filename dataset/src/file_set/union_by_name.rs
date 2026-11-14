@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, ReadRequest, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan,
-    StreamReader, into_stream,
+    Accessor, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition,
+    ScanPlan, map_record_reader,
 };
 
 use super::{
@@ -98,11 +98,12 @@ fn align_reader(
     alignment: Arc<AlignmentPlan>,
 ) -> Result<Box<dyn RecordReader>> {
     super::validation::validate_schema(&reader.metadata().schema, &alignment.source)?;
-    let ordering = reader.capability().ordering;
-    let metadata = RecordMetadata {
-        schema: alignment.target.clone(),
-        source: reader.metadata().source.clone(),
-    };
-    let batches = into_stream(reader).map(move |batch| alignment.apply(batch?));
-    Ok(Box::new(StreamReader::records(batches, metadata, ordering)))
+    let capability = RecordCapability::sequential(reader.capability().ordering);
+    let schema = alignment.target.clone();
+    Ok(Box::new(map_record_reader(
+        reader,
+        schema,
+        capability,
+        move |batch| alignment.apply(batch),
+    )))
 }

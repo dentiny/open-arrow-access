@@ -47,7 +47,7 @@ pub use reader::{
 };
 pub use reader_factory::{FactoryToken, ReaderFactory, ReaderFactoryExt};
 pub use record_batch_builder::{FieldValue, RecordBatchBuilder, RecordBatchRow};
-pub use record_stream::record_stream_reader;
+pub use record_stream::{map_record_reader, record_stream_reader};
 pub use request::{
     ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ListRequest, ObjectRef, ReadOptions,
     ReadOptionsProvider, ReadRequest,
