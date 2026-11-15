@@ -41,7 +41,7 @@ pub(super) fn validate_dataset(
     response: &Response,
     persistent_id: &str,
     expected: (u64, u64),
-    authenticated: bool,
+    has_credentials: bool,
 ) -> Result<()> {
     let data = &response.data;
     let same_id = if persistent_id.starts_with("doi:") {
@@ -63,7 +63,7 @@ pub(super) fn validate_dataset(
         return Err(decode("dataset version is not published"));
     }
     for file in &data.files {
-        if file.restricted && !authenticated {
+        if file.restricted && !has_credentials {
             return Err(unsupported(
                 "restricted Dataverse files require authentication",
             ));

@@ -131,6 +131,10 @@ impl HttpFileService {
         client
     }
 
+    pub(crate) fn has_credentials(&self) -> bool {
+        self.token.is_some() || !self.headers.is_empty()
+    }
+
     pub(crate) fn endpoint(&self) -> &Url {
         &self.endpoint
     }

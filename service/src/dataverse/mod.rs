@@ -15,7 +15,6 @@ use validation::{validate_dataset, validate_request};
 #[derive(Clone, Debug)]
 pub struct DataverseService {
     http: HttpFileService,
-    authenticated: bool,
 }
 
 impl DataverseService {
@@ -32,7 +31,6 @@ impl DataverseService {
             http::header::HeaderName::from_static("x-dataverse-key"),
             value,
         )?;
-        self.authenticated = true;
         Ok(self)
     }
 
@@ -46,7 +44,6 @@ impl DataverseService {
             .map_err(|_| error::invalid("invalid bearer token header"))?;
         value.set_sensitive(true);
         self.http = self.http.with_header(http::header::AUTHORIZATION, value)?;
-        self.authenticated = true;
         Ok(self)
     }
 
@@ -66,7 +63,6 @@ impl DataverseService {
     /// Configure a Dataverse installation origin without performing network I/O.
     pub fn new(endpoint: &str) -> Result<Self> {
         Ok(Self {
-            authenticated: false,
             http: HttpFileService::new(
                 endpoint,
                 "configure_dataverse",
@@ -91,7 +87,12 @@ impl DataverseService {
             .append_pair("excludeMetadataBlocks", "true");
         self.http
             .resolve_files(&url, |response: Response| {
-                validate_dataset(&response, persistent_id, expected, self.authenticated)?;
+                validate_dataset(
+                    &response,
+                    persistent_id,
+                    expected,
+                    self.http.has_credentials(),
+                )?;
                 let files: Vec<_> = response
                     .data
                     .files
