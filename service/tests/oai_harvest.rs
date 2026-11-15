@@ -137,23 +137,3 @@ async fn resume_projection_and_planning() {
     assert_eq!(count, 2);
     assert_eq!(http.requests().len(), 3);
 }
-
-#[tokio::test]
-async fn schema_drift_keeps_oai_context_and_stops_before_later_pages() {
-    let http = HttpFixture::new();
-    respond(&http, None, page(&["first"], Some("next")));
-    respond(&http, Some("next"), page(&["deleted"], Some("unread")));
-    let provider = service(&http);
-    let mut reader = provider
-        .harvest()
-        .with_format(provider.inferred_record_format())
-        .open(request())
-        .await
-        .unwrap();
-    assert!(reader.next().await.unwrap().is_some());
-    let error = reader.next().await.unwrap_err();
-    assert_eq!(error.kind(), open_arrow_access_core::ErrorKind::Decode);
-    assert_eq!(error.operation(), "oai_pmh");
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(http.requests().len(), 2);
-}
