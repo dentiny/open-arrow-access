@@ -9,6 +9,7 @@ crate whose behavior they exercise; the facade file-source smoke test lives in r
 | Area | Test location |
 | --- | --- |
 | High-level file-source smoke test | [`tests/file_source.rs`](../tests/file_source.rs) |
+| Facade file scan planning, projection, and compression | [`tests/file_scan.rs`](../tests/file_scan.rs) |
 | Selected-attachment decoding and feature availability | [`tests/attachment.rs`](../tests/attachment.rs) |
 | CSV and TSV | [`file-format/tests/csv.rs`](../file-format/tests/csv.rs) |
 | JSON and JSONL | [`file-format/tests/json.rs`](../file-format/tests/json.rs) |
