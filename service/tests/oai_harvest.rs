@@ -1,4 +1,4 @@
-use std::{collections::HashMap, num::NonZeroUsize};
+use std::num::NonZeroUsize;
 
 use arrow_array::cast::AsArray;
 use http::StatusCode;
@@ -7,7 +7,7 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::oai::{OaiHarvestRequest, OaiProvider, OaiProviderService};
-use open_arrow_access_test_support::http::{HttpFixture, response};
+use open_arrow_access_test_support::http::HttpFixture;
 
 mod providers;
 
@@ -53,36 +53,29 @@ fn request() -> OaiHarvestRequest {
     }))
 }
 
+// All routes use the same verb; None denotes the initial request.
+fn respond(http: &HttpFixture, token: Option<&str>, xml: String) {
+    let query = match token {
+        Some(token) => format!("resumptionToken={token}"),
+        None => "metadataPrefix=xoai".into(),
+    };
+    http.respond(
+        &format!("/harvest?verb=ListRecords&{query}"),
+        StatusCode::OK,
+        xml,
+    );
+}
+
 #[tokio::test]
-async fn follows_opaque_tokens_lazily_across_empty_pages_and_preserves_deleted_rows() {
+async fn follows_tokens_lazily_across_empty_pages() {
     let http = HttpFixture::new();
-    http.handle(|request| {
-        assert_eq!(request.headers()["x-api-key"], "secret");
-        let query = url::form_urlencoded::parse(request.uri().query().unwrap().as_bytes())
-            .into_owned()
-            .collect::<HashMap<_, _>>();
-        assert_eq!(query["verb"], "ListRecords");
-        let xml = match query.get("resumptionToken").map(String::as_str) {
-            None => {
-                assert_eq!(query.len(), 5);
-                assert_eq!(query["metadataPrefix"], "xoai");
-                assert_eq!(query["from"], "2026-01-01");
-                assert_eq!(query["until"], "2026-02-01");
-                assert_eq!(query["set"], "books");
-                page(&["first", "deleted"], Some(" next+token&x "))
-            }
-            Some(" next+token&x ") => {
-                assert_eq!(query.len(), 2);
-                page(&[], Some("last"))
-            }
-            Some("last") => {
-                assert_eq!(query.len(), 2);
-                page(&["third"], Some(""))
-            }
-            _ => panic!("unexpected token"),
-        };
-        Ok(response(StatusCode::OK, xml))
-    });
+    http.respond(
+        "/harvest?verb=ListRecords&metadataPrefix=xoai&from=2026-01-01&until=2026-02-01&set=books",
+        StatusCode::OK,
+        page(&["first", "deleted"], Some(" next+token&x ")),
+    );
+    respond(&http, Some("+next%2Btoken%26x+"), page(&[], Some("last")));
+    respond(&http, Some("last"), page(&["third"], Some("")));
     let provider = OaiProviderService::<TestProvider>::with_connection(
         providers::connection(&http)
             .with_header("x-api-key", "secret")
@@ -97,88 +90,73 @@ async fn follows_opaque_tokens_lazily_across_empty_pages_and_preserves_deleted_r
     req.set = Some("books".into());
     let mut reader = harvest.open(req.clone()).await.unwrap();
     assert_eq!(http.requests().len(), 1);
-    assert_eq!(
-        reader.next().await.unwrap().unwrap()["identifier"]
-            .as_string::<i32>()
-            .value(0),
-        "first"
-    );
-    let deleted = reader.next().await.unwrap().unwrap();
-    assert_eq!(deleted["status"].as_string::<i32>().value(0), "deleted");
-    assert_eq!(http.requests().len(), 1);
-    assert_eq!(
-        reader.next().await.unwrap().unwrap()["identifier"]
-            .as_string::<i32>()
-            .value(0),
-        "third"
-    );
-    assert_eq!(http.requests().len(), 3);
+    for (column, value, requests) in [
+        ("identifier", "first", 1),
+        ("status", "deleted", 1),
+        ("identifier", "third", 3),
+    ] {
+        let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(batch[column].as_string::<i32>().value(0), value);
+        assert_eq!(http.requests().len(), requests);
+    }
     assert!(reader.next().await.unwrap().is_none());
     assert!(reader.next().await.unwrap().is_none());
-    let independent = harvest.open(req).await.unwrap();
-    drop(independent);
+    drop(harvest.open(req).await.unwrap());
     assert_eq!(http.requests().len(), 4);
+    assert!(
+        http.requests()
+            .iter()
+            .all(|r| r.headers["x-api-key"] == "secret")
+    );
 }
 
 #[tokio::test]
-async fn cycles_limits_and_http_errors_are_terminal_after_delivered_rows() {
-    for case in ["cycle", "limit", "http", "protocol"] {
+async fn continuation_failures_are_terminal() {
+    use ErrorKind::{Decode, PermissionDenied, ResourceExhausted};
+    for (case, kind, rows, requests) in [
+        ("cycle", Decode, 2, 2),
+        ("limit", ResourceExhausted, 1, 1),
+        ("http", PermissionDenied, 1, 2),
+        ("protocol", Decode, 1, 2),
+    ] {
         let http = HttpFixture::new();
-        http.respond(
-            "/harvest?verb=ListRecords&metadataPrefix=xoai",
-            StatusCode::OK,
-            page(&["first"], Some("a")),
-        );
-        http.respond(
-            "/harvest?verb=ListRecords&resumptionToken=a",
-            if case == "http" {
-                StatusCode::FORBIDDEN
-            } else {
-                StatusCode::OK
-            },
-            if case == "protocol" {
-                "<OAI-PMH xmlns=\"http://www.openarchives.org/OAI/2.0/\"><error code=\"badResumptionToken\"/></OAI-PMH>".into()
-            } else { page(&["second"], Some("a")) },
-        );
+        respond(&http, None, page(&["first"], Some("a")));
+        let xml = if case == "protocol" {
+            "<OAI-PMH><error code=\"badResumptionToken\"/></OAI-PMH>".into()
+        } else {
+            page(&["second"], Some("a"))
+        };
+        respond(&http, Some("a"), xml);
+        if case == "http" {
+            http.respond(
+                "/harvest?verb=ListRecords&resumptionToken=a",
+                StatusCode::FORBIDDEN,
+                "",
+            );
+        }
         let mut req = request();
         if case == "limit" {
             req.max_pages = NonZeroUsize::new(1);
         }
         let mut reader = service(&http).harvest().open(req).await.unwrap();
-        assert!(reader.next().await.unwrap().is_some());
-        if case == "cycle" {
-            assert!(reader.next().await.unwrap().is_some());
+        for _ in 0..rows {
+            assert!(reader.next().await.unwrap().is_some(), "{case}");
         }
         let error = reader.next().await.unwrap_err();
-        assert_eq!(
-            error.kind(),
-            match case {
-                "http" => ErrorKind::PermissionDenied,
-                "limit" => ErrorKind::ResourceExhausted,
-                _ => ErrorKind::Decode,
-            }
-        );
+        assert_eq!(error.kind(), kind, "{case}");
         if case == "http" {
             assert_eq!(error.http_status(), Some(403));
         }
         assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(http.requests().len(), if case == "limit" { 1 } else { 2 });
+        assert_eq!(http.requests().len(), requests, "{case}");
     }
 }
 
 #[tokio::test]
-async fn initial_resume_projection_and_single_partition_planning_share_the_same_reader() {
+async fn resume_projection_and_planning() {
     let http = HttpFixture::new();
-    http.respond(
-        "/harvest?verb=ListRecords&resumptionToken=start",
-        StatusCode::OK,
-        page(&["one"], Some("finish")),
-    );
-    http.respond(
-        "/harvest?verb=ListRecords&resumptionToken=finish",
-        StatusCode::OK,
-        page(&["two"], None),
-    );
+    respond(&http, Some("start"), page(&["one"], Some("finish")));
+    respond(&http, Some("finish"), page(&["two"], None));
     let harvest = service(&http).harvest();
     let mut req = request();
     req.resumption_token = Some("start".into());
@@ -205,25 +183,26 @@ async fn initial_resume_projection_and_single_partition_planning_share_the_same_
 }
 
 #[tokio::test]
-async fn validates_initial_configuration_before_network_and_keeps_empty_schema() {
+async fn validates_before_network_and_keeps_empty_schema() {
     let http = HttpFixture::new();
     let harvest = service(&http).harvest();
-    let mut invalid = request();
-    invalid.resumption_token = Some("start".into());
-    invalid.set = Some("books".into());
-    assert_eq!(
-        harvest.open(invalid).await.err().unwrap().kind(),
-        ErrorKind::InvalidInput
-    );
-    let mut invalid = request();
-    invalid.read.options.projection = Some(vec!["missing".into()]);
-    assert_eq!(
-        harvest.open(invalid).await.err().unwrap().kind(),
-        ErrorKind::InvalidInput
-    );
+    let mut mixed = request();
+    mixed.resumption_token = Some("start".into());
+    mixed.set = Some("books".into());
+    let mut missing_column = request();
+    missing_column.read.options.projection = Some(vec!["missing".into()]);
+    for invalid in [mixed, missing_column] {
+        assert_eq!(
+            harvest.open(invalid).await.err().unwrap().kind(),
+            ErrorKind::InvalidInput
+        );
+    }
     assert!(http.requests().is_empty());
-    http.respond("/harvest?verb=ListRecords&metadataPrefix=xoai", StatusCode::OK,
-        "<OAI-PMH xmlns=\"http://www.openarchives.org/OAI/2.0/\"><error code=\"noRecordsMatch\"/></OAI-PMH>");
+    respond(
+        &http,
+        None,
+        "<OAI-PMH><error code=\"noRecordsMatch\"/></OAI-PMH>".into(),
+    );
     let mut reader = harvest.open(request()).await.unwrap();
     assert_eq!(reader.metadata().schema.fields().len(), 4);
     assert!(reader.next().await.unwrap().is_none());
@@ -231,22 +210,14 @@ async fn validates_initial_configuration_before_network_and_keeps_empty_schema()
 }
 
 #[tokio::test]
-async fn inferred_page_schema_changes_fail_before_emitting_incompatible_rows() {
+async fn rejects_schema_drift_before_emitting_rows() {
     let http = HttpFixture::new();
-    http.respond(
-        "/harvest?verb=ListRecords&metadataPrefix=xoai",
-        StatusCode::OK,
-        page(&["first"], Some("next")),
-    );
+    respond(&http, None, page(&["first"], Some("next")));
     let next = page(&["second"], None).replace(
         "</record>",
         "<metadata><new_field>value</new_field></metadata></record>",
     );
-    http.respond(
-        "/harvest?verb=ListRecords&resumptionToken=next",
-        StatusCode::OK,
-        next,
-    );
+    respond(&http, Some("next"), next);
     let provider = service(&http);
     let mut reader = provider
         .harvest()
