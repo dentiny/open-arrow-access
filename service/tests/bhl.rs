@@ -19,9 +19,12 @@ async fn api_v3_keeps_rights_and_exposes_lazy_content() {
         Bytes::from_static(b"original OCR"),
     );
     let s = BhlService::with_services(
-        providers::connection(&f).with_query("apikey", "test"),
+        providers::connection(&f).with_query("apikey", "old-key"),
         FigshareService::with_connection(providers::connection(&f)),
-    );
+    )
+    .with_key("test")
+    .unwrap();
+    assert!(!format!("{s:?}").contains("old-key"));
     let files = s
         .item(std::num::NonZeroU64::new(125582).unwrap())
         .await
@@ -45,7 +48,7 @@ async fn bulk_export_uses_shared_figshare_and_api_denials_are_not_empty_data() {
         raw.into_bytes(),
     );
     f.respond(
-        "/api3?op=GetStats&format=json",
+        "/api3?op=GetStats&format=json&apikey=test",
         StatusCode::OK,
         Bytes::from_static(
             b"{\"Status\":\"unauthorized\",\"ErrorMessage\":\"key rejected\",\"Result\":[]}",
@@ -54,7 +57,9 @@ async fn bulk_export_uses_shared_figshare_and_api_denials_are_not_empty_data() {
     let s = BhlService::with_services(
         providers::connection(&f),
         FigshareService::with_connection(providers::connection(&f)),
-    );
+    )
+    .with_key("test")
+    .unwrap();
     assert_eq!(
         s.bulk_export(std::num::NonZeroU32::new(4))
             .await
@@ -72,4 +77,17 @@ async fn bulk_export_uses_shared_figshare_and_api_denials_are_not_empty_data() {
             .await
             .is_err()
     );
+}
+
+#[test]
+fn custom_connections_reject_empty_keys_before_io() {
+    let f = HttpFixture::new();
+    let error = BhlService::with_services(
+        providers::connection(&f),
+        FigshareService::with_connection(providers::connection(&f)),
+    )
+    .with_key("")
+    .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert!(f.requests().is_empty());
 }

@@ -24,6 +24,21 @@ fn authenticated_connection(fixture: &HttpFixture) -> Connection {
 }
 
 #[tokio::test]
+async fn replacing_query_credentials_preserves_other_parameters() {
+    let fixture = HttpFixture::new();
+    fixture.respond("/page?tenant=retained&apikey=new-key", StatusCode::OK, "{}");
+    connection(&fixture)
+        .with_query("apikey", "old-key")
+        .with_query("tenant", "retained")
+        .with_query("apikey", "new-key")
+        .json("page", &[])
+        .await
+        .unwrap();
+    assert_eq!(fixture.requests().len(), 1);
+    assert!(!fixture.requests()[0].path.contains("old-key"));
+}
+
+#[tokio::test]
 async fn reads_one_page_and_strips_credentials_across_redirects() {
     let provider = HttpFixture::new();
     let dest = HttpFixture::new();
