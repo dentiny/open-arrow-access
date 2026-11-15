@@ -33,22 +33,26 @@ pub(super) async fn decode_batch(
     output_schema: SchemaRef,
 ) -> Result<RecordBatch> {
     // Read and validate the complete metadata before applying output projection.
-    let schema = schema();
+    let source_schema = source_metadata_schema();
     let batch = read_document(
         Bytes::copy_from_slice(raw),
-        JsonFormat::new(source_metadata_schema()),
+        JsonFormat::new(source_schema.clone()),
         ReadRequest::new(path),
     )
     .await?;
     static FIELD_INDEX: OnceLock<FieldNameIndex> = OnceLock::new();
-    let field_index = FIELD_INDEX.get_or_init(|| FieldNameIndex::new(schema.fields()));
+    let field_index = FIELD_INDEX.get_or_init(|| FieldNameIndex::new(source_schema.fields()));
     validation::validate_metadata(&batch, path, field_index)?;
     let columns = output_schema
         .fields()
         .iter()
         .map(|field| {
+            let source_name = match field.name().as_str() {
+                "text" => "text_url",
+                name => name,
+            };
             let index = field_index
-                .index_of(field.name())
+                .index_of(source_name)
                 .expect("validated PMC projection");
             batch.column(index).clone()
         })
