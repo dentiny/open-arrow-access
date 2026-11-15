@@ -151,14 +151,6 @@ open-arrow-access-test-support.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
 tokio.workspace = true
 
-[[test]]
-name = "file_source"
-required-features = ["format-json"]
-
-[[test]]
-name = "resolved_files"
-required-features = ["format-json"]
-
 [[example]]
 name = "read_huggingface"
 required-features = ["service-huggingface"]
