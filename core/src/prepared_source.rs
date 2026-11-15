@@ -21,10 +21,16 @@ pub struct PreparedSource {
     batch_size: NonZeroUsize,
 }
 
+/// Erased access to a saved selection and its optional partition planner.
 #[async_trait]
 trait PreparedSelection: Send + Sync {
+    /// Open the saved selection with the supplied common read options.
+    /// The caller validates the returned reader against the bound schema.
     async fn open(&self, options: ReadOptions) -> Result<Box<dyn RecordReader>>;
 
+    /// Plan the saved selection with the supplied common read options.
+    /// Sources may perform planning I/O; returned partition openers remain lazy.
+    /// The default rejects planning when its interface was not retained.
     async fn plan_scan(&self, _options: ReadOptions) -> Result<ScanPlan> {
         Err(Error::new(
             ErrorKind::Unsupported,
@@ -45,6 +51,7 @@ where
     A: Accessor<Reader = dyn RecordReader>,
     A::Request: Clone + Sync + ReadOptionsProvider,
 {
+    /// Clone the saved request and replace only its common read options.
     async fn open(&self, options: ReadOptions) -> Result<Box<dyn RecordReader>> {
         let mut request = self.request.clone();
         *request.read_options_mut() = options;
@@ -60,10 +67,12 @@ where
     A: ScanPlanner,
     A::Request: Clone + Sync + ReadOptionsProvider,
 {
+    /// Use the accessor's ordinary open path for a normal scan.
     async fn open(&self, options: ReadOptions) -> Result<Box<dyn RecordReader>> {
         self.0.open(options).await
     }
 
+    /// Forward planning while retaining the accessor's ordering requirement.
     async fn plan_scan(&self, options: ReadOptions) -> Result<ScanPlan> {
         let mut request = self.0.request.clone();
         *request.read_options_mut() = options;
