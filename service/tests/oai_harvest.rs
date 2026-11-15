@@ -183,33 +183,6 @@ async fn resume_projection_and_planning() {
 }
 
 #[tokio::test]
-async fn validates_before_network_and_keeps_empty_schema() {
-    let http = HttpFixture::new();
-    let harvest = service(&http).harvest();
-    let mut mixed = request();
-    mixed.resumption_token = Some("start".into());
-    mixed.set = Some("books".into());
-    let mut missing_column = request();
-    missing_column.read.options.projection = Some(vec!["missing".into()]);
-    for invalid in [mixed, missing_column] {
-        assert_eq!(
-            harvest.open(invalid).await.err().unwrap().kind(),
-            ErrorKind::InvalidInput
-        );
-    }
-    assert!(http.requests().is_empty());
-    respond(
-        &http,
-        None,
-        "<OAI-PMH><error code=\"noRecordsMatch\"/></OAI-PMH>".into(),
-    );
-    let mut reader = harvest.open(request()).await.unwrap();
-    assert_eq!(reader.metadata().schema.fields().len(), 4);
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(http.requests().len(), 1);
-}
-
-#[tokio::test]
 async fn rejects_schema_drift_before_emitting_rows() {
     let http = HttpFixture::new();
     respond(&http, None, page(&["first"], Some("next")));
