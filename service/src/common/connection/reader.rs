@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{num::NonZeroUsize, ops::Range};
 
 use futures::{TryStreamExt, stream};
 use http::{HeaderValue, Request, StatusCode, header};
@@ -74,6 +74,7 @@ pub(super) async fn open(
         client: connection.client,
         request,
         range_length,
+        io_concurrency: options.io_concurrency,
     }))
 }
 
@@ -82,6 +83,7 @@ struct HttpReader<R> {
     client: HttpClient,
     request: Request<Buffer>,
     range_length: Option<u64>,
+    io_concurrency: NonZeroUsize,
 }
 
 #[async_trait]
@@ -107,45 +109,75 @@ impl<R: ByteReader> Reader for HttpReader<R> {
 #[async_trait]
 impl<R: ByteReader> ByteReader for HttpReader<R> {
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
-        let Some(length) = self.range_length else {
+        read_http_range(&self.client, &self.request, self.range_length, range).await
+    }
+
+    async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+        let client = &self.client;
+        let request = &self.request;
+        let length = self.range_length;
+        let reads = ranges
+            .into_iter()
+            .enumerate()
+            .map(|(index, range)| async move {
+                let bytes = read_http_range(client, request, length, range).await?;
+                Ok::<_, Error>((index, bytes))
+            });
+        // Observe errors before earlier ranges complete; restore request order
+        // on success. Dropping this stream cancels its in-flight reads.
+        let mut output: Vec<_> =
+            futures::StreamExt::buffer_unordered(stream::iter(reads), self.io_concurrency.get())
+                .try_collect()
+                .await?;
+        output.sort_unstable_by_key(|(index, _)| *index);
+        Ok(output.into_iter().map(|(_, bytes)| bytes).collect())
+    }
+}
+
+async fn read_http_range(
+    client: &HttpClient,
+    template: &Request<Buffer>,
+    length: Option<u64>,
+    range: Range<u64>,
+) -> Result<Bytes> {
+    let Some(length) = length else {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            error::OP,
+            "HTTP input does not advertise byte ranges with a known identity length",
+        ));
+    };
+    validate_byte_range(&range, length, error::OP)?;
+    if range.is_empty() {
+        return Ok(Bytes::new());
+    }
+    let mut request = template.clone();
+    request.headers_mut().insert(
+        header::RANGE,
+        HeaderValue::from_str(&BytesRange::from(range.clone()).to_header())
+            .expect("valid range header"),
+    );
+    let response = client.fetch(request, error::OP).await?;
+    match response.status() {
+        StatusCode::PARTIAL_CONTENT => {}
+        StatusCode::OK => {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 error::OP,
-                "HTTP input does not advertise byte ranges with a known identity length",
+                "HTTP server ignored the byte range request",
             ));
-        };
-        validate_byte_range(&range, length, error::OP)?;
-        if range.is_empty() {
-            return Ok(Bytes::new());
         }
-        let mut request = self.request.clone();
-        request.headers_mut().insert(
-            header::RANGE,
-            HeaderValue::from_str(&BytesRange::from(range.clone()).to_header())
-                .expect("valid range header"),
-        );
-        let response = self.client.fetch(request, error::OP).await?;
-        match response.status() {
-            StatusCode::PARTIAL_CONTENT => {}
-            StatusCode::OK => {
-                return Err(Error::new(
-                    ErrorKind::Unsupported,
-                    error::OP,
-                    "HTTP server ignored the byte range request",
-                ));
-            }
-            status => {
-                return Err(crate::http_client::http_status_error(
-                    error::OP,
-                    status,
-                    response.headers(),
-                ));
-            }
+        status => {
+            return Err(crate::http_client::http_status_error(
+                error::OP,
+                status,
+                response.headers(),
+            ));
         }
-        let etag = self.request.headers().get(header::IF_MATCH);
-        validation::validate_response(response.headers(), &range, length, etag)?;
-        let body =
-            BodyReader::new(response, error::OP)?.with_expected_length(range.end - range.start)?;
-        crate::http_body::collect(body).await
     }
+    let etag = template.headers().get(header::IF_MATCH);
+    validation::validate_response(response.headers(), &range, length, etag)?;
+    let body =
+        BodyReader::new(response, error::OP)?.with_expected_length(range.end - range.start)?;
+    crate::http_body::collect(body).await
 }
