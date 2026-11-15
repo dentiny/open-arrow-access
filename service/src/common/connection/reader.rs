@@ -84,10 +84,10 @@ fn sequential_chunks(
     body: BodyReader,
     client: &HttpClient,
     request: &Request<Buffer>,
-    bounded_length: Option<u64>,
+    chunked_range_length: Option<u64>,
     chunk_size: usize,
 ) -> futures::stream::BoxStream<'static, Result<Buffer>> {
-    if let Some(length) = bounded_length {
+    if let Some(length) = chunked_range_length {
         // Do not reserve the shared budget while the reader is idle: each
         // bounded range finishes its response before handing bytes to the caller.
         drop(body);
