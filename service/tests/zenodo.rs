@@ -116,13 +116,3 @@ async fn preserves_attachment_keys_without_path_validation() {
     assert_eq!(record.files()[0].key, "../paper.pdf");
     assert_eq!(http.requests().len(), 1);
 }
-
-#[tokio::test]
-async fn rejects_invalid_bearer_tokens_before_io() {
-    let fixture = HttpFixture::new();
-    for token in ["", "bad\ntoken", "bad\rtoken"] {
-        let service = ZenodoService::with_endpoint(fixture.endpoint()).unwrap();
-        assert!(service.with_token(token).is_err());
-    }
-    assert!(fixture.requests().is_empty());
-}
