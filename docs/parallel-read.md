@@ -73,6 +73,78 @@ when cancellation is next scheduled. Cancelled `next` calls must be followed by
 dropping the reader, as required by the shared reader contract. Already delivered
 batches are never replayed. No source snapshot guarantee is added.
 
+## Optional cancellation and deadlines
+
+`ScanContext` is a runtime-independent, cloneable cancellation scope. Keep a clone
+at the application boundary (for example, a query interrupt handler), and call
+`cancel()` to stop all operations sharing it. `context.open(&accessor, request)`
+covers both opening and subsequent reads. To use another preparation API, call
+`context.run(preparation_future).await?`, then `context.wrap_reader(reader)` on
+each resulting reader. For example, existing bound sources compose as follows:
+
+```rust,ignore
+let bound = context.run(BoundSource::bind(accessor, request)).await?;
+let reader = context.run(bound.reader()).await?;
+let mut reader = context.wrap_reader(reader);
+```
+
+Prepared-source APIs use the same pattern: wrap preparation and each scan-opening
+future with `run`, then wrap each returned reader. Wrapping only preparation does
+not cancel later reads.
+
+```rust,ignore
+use open_arrow_access::ScanContext;
+
+let context = ScanContext::new()
+    .with_deadline(tokio::time::sleep(std::time::Duration::from_secs(30)));
+let interrupt = context.clone(); // Retain this in the query interrupt handler.
+let mut reader = context.open(&source, request).await?;
+while let Some(batch) = reader.next().await? {
+    // Consume the batch. The handler may call interrupt.cancel() concurrently.
+}
+```
+
+The deadline future is supplied and timed by the caller; core creates no runtime
+or timer. Attach it before cloning the context. One deadline is shared across
+preparation and all reads, rather than restarting on every batch. Explicit
+cancellation returns `Cancelled`; deadline expiry returns `Timeout`. Already
+cancelled operations are not polled. On cancellation, timeout, EOF or read error,
+the wrapper drops its inner reader and subsequent reads return EOF. Dropping a
+parallel reader aborts its workers; their state is destroyed when Tokio next
+schedules cancellation. Work that never yields cannot be preempted.
+
+## Optional queued-byte budget
+
+Call `ParallelReadLayer::with_max_queued_bytes_per_partition(bytes)` to obtain a
+`BudgetedParallelReadLayer`. Apply this terminal executor **outside** planning
+and ordering layers:
+
+```rust,ignore
+let source = files.with_file_planning()
+    .layer(UnorderedEmissionLayer::new()) // Only if the source allows reordering.
+    .layer(ParallelReadLayer::new(partitions, prefetch)
+        .with_max_queued_bytes_per_partition(bytes));
+let mut reader = context.open(&source, request).await?;
+```
+
+This accessor implements `Accessor`, not `ScanPlanner`: existing public plans do
+not carry the extra budget, so exposing planning would silently discard it when
+another executor consumes the plan. Ordinary `ParallelReadLayer` planning and
+policy composition are unchanged.
+
+Each partition accounts for queued batches using
+`RecordBatch::get_array_memory_size()`. With P resident partitions and B bytes
+per partition, summed queued estimates never exceed P * B. Independent budgets
+prevent later ordered partitions from consuming all capacity needed by the first
+partition. The batch-count prefetch limit still applies. A batch whose estimate
+exceeds B terminates the scan with `ResourceExhausted`, rather than waiting for
+capacity that can never become available.
+
+This is **not a process or total scan memory limit**. Shared Arrow buffers may
+be counted repeatedly, and estimates exclude decoder state, input buffers,
+object overhead, delivered batches, and one decoded batch per worker waiting for
+queue admission. Byte permits are released on delivery or queue destruction.
+
 ## Source ordering contract
 
 `ScanPlan::ordering` describes permission for the entire selected input; it does

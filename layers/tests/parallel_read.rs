@@ -337,3 +337,153 @@ async fn emission_and_parallel_layers_collect_one_budget_in_either_order() {
         ErrorKind::InvalidInput
     );
 }
+
+#[tokio::test]
+async fn byte_budget_oversize_is_terminal() {
+    let size = batch(1).get_array_memory_size();
+    let accessor = Source(OrderRequirement::Reorderable).layer(
+        ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN)
+            .with_max_queued_bytes_per_partition(NonZeroUsize::new(size - 1).unwrap()),
+    );
+    let mut reader = accessor
+        .open(ScanPlan::new(metadata(), vec![part(vec![1])]))
+        .await
+        .unwrap();
+    assert_eq!(
+        reader.next().await.unwrap_err().kind(),
+        ErrorKind::ResourceExhausted
+    );
+    assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn later_ordered_partition_cannot_exhaust_first_partitions_budget() {
+    let (release, gate) = oneshot::channel();
+    let first: ScanPartition = Box::pin(async move {
+        Ok(Box::new(StreamReader::records(
+            stream::once(async move {
+                gate.await.unwrap();
+                Ok(batch(1))
+            }),
+            metadata(),
+            OrderRequirement::PreserveGlobal,
+        )) as Box<dyn RecordReader>)
+    });
+    let (staging, staged) = oneshot::channel();
+    let second: ScanPartition = Box::pin(async move {
+        let batches = stream::iter([Ok(batch(2))]).chain(stream::once(async move {
+            staging.send(()).unwrap();
+            Ok(batch(3))
+        }));
+        Ok(Box::new(StreamReader::records(
+            batches,
+            metadata(),
+            OrderRequirement::PreserveGlobal,
+        )) as Box<dyn RecordReader>)
+    });
+    let accessor = Source(OrderRequirement::PreserveGlobal).layer(
+        ParallelReadLayer::new(NonZeroUsize::new(2).unwrap(), NonZeroUsize::new(3).unwrap())
+            .with_max_queued_bytes_per_partition(
+                NonZeroUsize::new(batch(1).get_array_memory_size()).unwrap(),
+            ),
+    );
+    let mut reader = accessor
+        .open(ScanPlan::new(metadata(), vec![first, second]))
+        .await
+        .unwrap();
+    let read = async move {
+        let mut values = Vec::new();
+        while let Some(batch) = reader.next().await.unwrap() {
+            values.push(value(&batch));
+        }
+        values
+    };
+    let release_first = async move {
+        // The later partition already queues its entire budget before the first
+        // produces anything; it is also holding one decoded batch for admission.
+        staged.await.unwrap();
+        release.send(()).unwrap();
+    };
+    let (values, ()) = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        tokio::join!(read, release_first)
+    })
+    .await
+    .unwrap();
+    assert_eq!(values, vec![1, 2, 3]);
+}
+
+#[tokio::test]
+async fn scan_context_cancels_pending_parallel_work_and_releases_workers() {
+    let (first, first_started, first_dropped) = blocked_partition();
+    let (second, second_started, second_dropped) = blocked_partition();
+    let accessor = Source(OrderRequirement::PreserveGlobal).layer(
+        ParallelReadLayer::new(NonZeroUsize::new(2).unwrap(), NonZeroUsize::MIN)
+            .with_max_queued_bytes_per_partition(NonZeroUsize::new(1024).unwrap()),
+    );
+    let context = ScanContext::new();
+    let mut reader = context
+        .open(&accessor, ScanPlan::new(metadata(), vec![first, second]))
+        .await
+        .unwrap();
+    let cancel = async {
+        first_started.await.unwrap();
+        second_started.await.unwrap();
+        context.cancel();
+    };
+    let (result, ()) = tokio::join!(reader.next(), cancel);
+    assert_eq!(result.unwrap_err().kind(), ErrorKind::Cancelled);
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        assert!(first_dropped.await.is_err());
+        assert!(second_dropped.await.is_err());
+    })
+    .await
+    .unwrap();
+    assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn cancellation_drops_a_worker_waiting_for_byte_admission() {
+    let (first, first_started, first_dropped) = blocked_partition();
+    let (staging, staged) = oneshot::channel();
+    let (lifetime, dropped) = oneshot::channel::<()>();
+    let second: ScanPartition = Box::pin(async move {
+        let batches = stream::unfold(
+            (0, Some(staging), lifetime),
+            |(n, mut staging, lifetime)| async move {
+                if n == 1 {
+                    staging.take().unwrap().send(()).unwrap();
+                }
+                Some((Ok(batch(n)), (n + 1, staging, lifetime)))
+            },
+        );
+        Ok(Box::new(StreamReader::records(
+            batches,
+            metadata(),
+            OrderRequirement::PreserveGlobal,
+        )) as Box<dyn RecordReader>)
+    });
+    let accessor = Source(OrderRequirement::PreserveGlobal).layer(
+        ParallelReadLayer::new(NonZeroUsize::new(2).unwrap(), NonZeroUsize::new(3).unwrap())
+            .with_max_queued_bytes_per_partition(
+                NonZeroUsize::new(batch(1).get_array_memory_size()).unwrap(),
+            ),
+    );
+    let context = ScanContext::new();
+    let mut reader = context
+        .open(&accessor, ScanPlan::new(metadata(), vec![first, second]))
+        .await
+        .unwrap();
+    let cancel = async {
+        first_started.await.unwrap();
+        staged.await.unwrap();
+        context.cancel();
+    };
+    let (result, ()) = tokio::join!(reader.next(), cancel);
+    assert_eq!(result.unwrap_err().kind(), ErrorKind::Cancelled);
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        assert!(first_dropped.await.is_err());
+        assert!(dropped.await.is_err());
+    })
+    .await
+    .unwrap();
+}

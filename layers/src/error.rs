@@ -188,3 +188,13 @@ pub(crate) fn evolution_expression_type(
 pub(crate) fn evolution_batch(source: ArrowError) -> Error {
     Error::new(ErrorKind::Decode, "evolve_schema", source.to_string()).with_source(source)
 }
+
+pub(crate) fn queued_batch_too_large(bytes: usize, limit: usize) -> Error {
+    Error::new(
+        ErrorKind::ResourceExhausted,
+        "parallel_read",
+        format!(
+            "batch estimated array size {bytes} exceeds per-partition queued-byte limit {limit}"
+        ),
+    )
+}

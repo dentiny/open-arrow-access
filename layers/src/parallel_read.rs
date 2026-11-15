@@ -1,4 +1,12 @@
-use std::{collections::VecDeque, num::NonZeroUsize, task::Poll};
+use std::{
+    collections::VecDeque,
+    num::NonZeroUsize,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    task::Poll,
+};
 
 use futures::{
     StreamExt,
@@ -11,7 +19,10 @@ use open_arrow_access_core::{
     RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan,
     ScanPlanner, async_trait,
 };
-use tokio::{sync::mpsc, task::JoinSet};
+use tokio::{
+    sync::{Notify, mpsc},
+    task::JoinSet,
+};
 
 use crate::{
     error::partition_task_error,
@@ -37,6 +48,66 @@ impl ParallelReadLayer {
             partitions,
             prefetch,
         }
+    }
+
+    /// Limit estimated Arrow array bytes queued in each resident partition.
+    ///
+    /// Total queued estimates are bounded by `partitions * bytes`; a shared global
+    /// budget would allow later ordered partitions to starve the first partition.
+    /// Uses `RecordBatch::get_array_memory_size` (shared buffers may count more
+    /// than once). Excludes decoder state, object overhead, delivered batches and
+    /// one decoded batch per worker awaiting admission. This is not a total scan
+    /// memory limit. Batches exceeding the limit return `ResourceExhausted`.
+    /// The returned layer is a terminal executor: place it outside planning and
+    /// ordering layers. It deliberately does not expose `ScanPlanner`, whose
+    /// existing public plan cannot carry this additional budget.
+    pub fn with_max_queued_bytes_per_partition(
+        self,
+        bytes: NonZeroUsize,
+    ) -> BudgetedParallelReadLayer {
+        BudgetedParallelReadLayer {
+            parallel: self,
+            bytes,
+        }
+    }
+}
+
+/// Terminal parallel executor with independent per-partition queued-byte limits.
+/// Construct with [`ParallelReadLayer::with_max_queued_bytes_per_partition`].
+#[derive(Clone, Copy, Debug)]
+pub struct BudgetedParallelReadLayer {
+    parallel: ParallelReadLayer,
+    bytes: NonZeroUsize,
+}
+
+/// A budgeted executor. Compose planning layers before applying this layer.
+pub struct BudgetedParallelReadAccessor<A> {
+    policy: ScanPolicyAccessor<A, ParallelReadLayer>,
+    bytes: NonZeroUsize,
+}
+
+impl<A: ScanPlanner> Layer<A> for BudgetedParallelReadLayer {
+    type Layered = BudgetedParallelReadAccessor<A>;
+
+    fn layer(&self, inner: A) -> Self::Layered {
+        BudgetedParallelReadAccessor {
+            policy: ScanPolicyAccessor::new(inner, self.parallel),
+            bytes: self.bytes,
+        }
+    }
+}
+
+#[async_trait]
+impl<A: ScanPlanner> Accessor for BudgetedParallelReadAccessor<A> {
+    type Request = A::Request;
+    type Reader = dyn RecordReader;
+
+    fn capability(&self) -> RecordCapability {
+        self.policy.capability()
+    }
+
+    async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
+        open_plan_with_budget(self.policy.plan_scan(request).await?, Some(self.bytes))
     }
 }
 
@@ -92,25 +163,109 @@ impl ScanPolicy for ParallelReadLayer {
 }
 
 pub(crate) fn open_plan(plan: ScanPlan) -> Result<Box<dyn RecordReader>> {
+    open_plan_with_budget(plan, None)
+}
+
+fn open_plan_with_budget(
+    plan: ScanPlan,
+    budget: Option<NonZeroUsize>,
+) -> Result<Box<dyn RecordReader>> {
     validate_emission_policy(plan.emission, plan.ordering)?;
     match plan.parallel_read {
-        Some(settings) => Ok(Box::new(ParallelReader::new(plan, settings))),
+        Some(settings) => Ok(Box::new(ParallelReader::new_with_budget(
+            plan, settings, budget,
+        ))),
         None => Ok(Box::new(plan.into_reader())),
     }
+}
+
+// Each partition has one producer. A waiting decoded batch is deliberately outside
+// this queued-byte estimate, but cannot exceed the configured per-partition limit.
+struct ByteBudget {
+    limit: usize,
+    available: AtomicUsize,
+    changed: Notify,
+}
+
+impl ByteBudget {
+    fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            available: AtomicUsize::new(limit),
+            changed: Notify::new(),
+        }
+    }
+
+    async fn acquire(self: &Arc<Self>, bytes: usize) -> Result<BytePermit> {
+        if bytes > self.limit {
+            return Err(crate::error::queued_batch_too_large(bytes, self.limit));
+        }
+        loop {
+            let changed = self.changed.notified();
+            let available = self.available.load(Ordering::Acquire);
+            if available >= bytes
+                && self
+                    .available
+                    .compare_exchange(
+                        available,
+                        available - bytes,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    )
+                    .is_ok()
+            {
+                return Ok(BytePermit {
+                    budget: self.clone(),
+                    bytes,
+                });
+            }
+            // notify_one retains a permit if release happens before this await.
+            changed.await;
+        }
+    }
+}
+
+struct BytePermit {
+    budget: Arc<ByteBudget>,
+    bytes: usize,
+}
+
+impl Drop for BytePermit {
+    fn drop(&mut self) {
+        self.budget
+            .available
+            .fetch_add(self.bytes, Ordering::Release);
+        self.budget.changed.notify_one();
+    }
+}
+
+struct QueuedBatch {
+    batch: RecordBatch,
+    _bytes: Option<BytePermit>,
 }
 
 struct ParallelReader {
     ordering: OrderRequirement,
     metadata: RecordMetadata,
     remaining: Fuse<BoxStream<'static, Result<ScanPartition>>>,
-    partition_receivers: VecDeque<mpsc::Receiver<RecordBatch>>,
+    partition_receivers: VecDeque<mpsc::Receiver<QueuedBatch>>,
     tasks: JoinSet<Result<()>>,
     settings: ParallelReadOptions,
     emission: EmissionPolicy,
+    max_queued_bytes_per_partition: Option<NonZeroUsize>,
 }
 
 impl ParallelReader {
+    #[cfg(test)]
     fn new(plan: ScanPlan, settings: ParallelReadOptions) -> Self {
+        Self::new_with_budget(plan, settings, None)
+    }
+
+    fn new_with_budget(
+        plan: ScanPlan,
+        settings: ParallelReadOptions,
+        budget: Option<NonZeroUsize>,
+    ) -> Self {
         Self {
             ordering: plan.ordering,
             metadata: plan.metadata,
@@ -119,12 +274,16 @@ impl ParallelReader {
             tasks: JoinSet::new(),
             settings,
             emission: plan.emission,
+            max_queued_bytes_per_partition: budget,
         }
     }
 
     fn spawn_partition(&mut self, open: ScanPartition) {
         let (sender, receiver) = mpsc::channel(self.settings.prefetch.get());
         let schema = self.metadata.schema.clone();
+        let budget = self
+            .max_queued_bytes_per_partition
+            .map(|bytes| Arc::new(ByteBudget::new(bytes.get())));
         self.tasks.spawn(async move {
             let mut reader = open.await?;
             crate::validation::validate_partition_schema(&reader.metadata().schema, &schema)?;
@@ -137,7 +296,14 @@ impl ParallelReader {
                     return Ok(());
                 };
                 crate::validation::validate_partition_schema(&batch.schema(), &schema)?;
-                permit.send(batch);
+                let bytes = match &budget {
+                    Some(budget) => Some(budget.acquire(batch.get_array_memory_size()).await?),
+                    None => None,
+                };
+                permit.send(QueuedBatch {
+                    batch,
+                    _bytes: bytes,
+                });
             }
         });
         self.partition_receivers.push_back(receiver);
@@ -185,7 +351,7 @@ impl ParallelReader {
                         if emission == EmissionPolicy::Unordered {
                             self.partition_receivers.rotate_left(index + 1);
                         }
-                        return Ok(batch);
+                        return Ok(batch.map(|queued| queued.batch));
                     }
                     // EOF only frees a resident slot after that receiver is drained.
                     self.partition_receivers.remove(index);

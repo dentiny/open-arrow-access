@@ -64,5 +64,8 @@ pub use arrow_schema::{Schema, SchemaRef};
 pub use async_trait::async_trait;
 pub use bytes::Bytes;
 
+mod scan_context;
+pub use scan_context::ScanContext;
+
 mod scan;
 pub use scan::{EmissionPolicy, ParallelReadOptions, ScanPartition, ScanPlan, ScanPlanner};

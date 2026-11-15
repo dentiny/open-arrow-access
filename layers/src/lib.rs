@@ -8,7 +8,10 @@ mod validation;
 mod value_lifetime;
 
 mod parallel_read;
-pub use parallel_read::{ParallelReadAccessor, ParallelReadLayer};
+pub use parallel_read::{
+    BudgetedParallelReadAccessor, BudgetedParallelReadLayer, ParallelReadAccessor,
+    ParallelReadLayer,
+};
 
 mod unordered_emission;
 pub use unordered_emission::{UnorderedEmissionAccessor, UnorderedEmissionLayer};

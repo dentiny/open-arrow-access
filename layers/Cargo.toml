@@ -20,6 +20,7 @@ tokio = { workspace = true, features = ["sync"] }
 [dev-dependencies]
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = ["csv"] }
 open-arrow-access-test-support.workspace = true
+tokio = { workspace = true, features = ["time"] }
 
 [lints]
 workspace = true

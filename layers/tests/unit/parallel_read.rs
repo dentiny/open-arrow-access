@@ -29,7 +29,14 @@ async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
         },
     );
     let (sender, ready) = mpsc::channel(1);
-    sender.try_send(batch.clone()).unwrap();
+    assert!(
+        sender
+            .try_send(QueuedBatch {
+                batch: batch.clone(),
+                _bytes: None
+            })
+            .is_ok()
+    );
     drop(sender);
     let (sender, closed) = mpsc::channel(1);
     drop(sender);
@@ -41,4 +48,22 @@ async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
     assert_eq!(reader.partition_receivers.len(), 2);
     assert!(reader.next().await.unwrap().is_none());
     assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn byte_budget_waits_until_delivery_or_drop_releases_bytes() {
+    use futures::FutureExt;
+    let budget = Arc::new(ByteBudget::new(100));
+    let first = budget.acquire(70).await.unwrap();
+    assert_eq!(budget.available.load(Ordering::Acquire), 30);
+    assert!(budget.acquire(40).now_or_never().is_none());
+    drop(first);
+    let second = budget.acquire(100).await.unwrap();
+    assert_eq!(budget.available.load(Ordering::Acquire), 0);
+    drop(second);
+    assert_eq!(budget.available.load(Ordering::Acquire), 100);
+    assert_eq!(
+        budget.acquire(101).await.err().unwrap().kind(),
+        open_arrow_access_core::ErrorKind::ResourceExhausted
+    );
 }

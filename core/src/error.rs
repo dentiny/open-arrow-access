@@ -7,6 +7,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ErrorKind {
+    /// The caller explicitly cancelled the operation.
+    Cancelled,
     InvalidInput,
     Unsupported,
     NotFound,
