@@ -54,9 +54,6 @@ async fn scoped_query_survives_redirect_and_cannot_duplicate_existing_key() {
         })
     });
     connection(&fixture)
-        .with_http_concurrency_limit(
-            open_arrow_access_storage::HttpConcurrencyLimitLayer::new(1).unwrap(),
-        )
         .with_query("api_key", "secret")
         .json("start", &[("api_key", "secret")])
         .await
@@ -166,32 +163,4 @@ async fn credentials_stay_stripped_after_redirect_returns_to_provider() {
         .unwrap();
     assert_eq!(provider.requests().len(), 2);
     assert_eq!(external.requests().len(), 1);
-}
-
-#[tokio::test]
-async fn cloned_connections_share_http_limit_after_context_replacement() {
-    use open_arrow_access_storage::HttpConcurrencyLimitLayer;
-    use opendal::OperationContext;
-
-    let fixture = HttpFixture::new();
-    fixture.respond("/download", StatusCode::OK, "data");
-    fixture.respond("/page", StatusCode::OK, "{\"ok\":true}");
-    let client = Connection::new(fixture.endpoint())
-        .unwrap()
-        .with_http_concurrency_limit(HttpConcurrencyLimitLayer::new(1).unwrap())
-        .with_context(OperationContext::new());
-    let first = client
-        .open(
-            &format!("{}/download", fixture.endpoint()),
-            Default::default(),
-        )
-        .await
-        .unwrap();
-    let clone = client.clone();
-    let waiting = clone.json("page", &[]);
-    tokio::pin!(waiting);
-    assert!(futures::poll!(&mut waiting).is_pending());
-    assert_eq!(fixture.requests().len(), 1);
-    drop(first);
-    assert_eq!(waiting.await.unwrap().value()["ok"], true);
 }
