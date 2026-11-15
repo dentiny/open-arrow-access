@@ -12,7 +12,7 @@ Enable facade feature `service-doab`. See [example setup](README.md#example-setu
 
 Implement `OaiProvider` with `ORIGIN`, `PATH` and `METADATA_PREFIX` constants on
 a Clone + Debug + Send + Sync marker. The wrapper exposes `new`,
-`with_connection`, `connection`, `record_format()`, `records(from, until, set)` and
+`with_connection`, `connection`, `record_format()`, `inferred_record_format()`, `records(from, until, set)` and
 `resume(token)`.
 Responses are the same `OaiPage` XML/continuation/count values documented in the
 [OAI-PMH guide](oai-protocol.md). Built-in aliases are documented in their own guides.
@@ -88,10 +88,34 @@ async fn read_headers() -> Result<()> {
 
 This default selects protocol headers, not provider-specific metadata. The full
 XML, including `metadata` and `about`, remains in `page.bytes`. To extract those
-fields, continue passing your own `XmlFormat` to `page.records(format)`, or override
-`OaiProvider::record_format()` on a custom marker. For example, start with the
+fields, use `inferred_record_format()` as described below, pass your own
+`XmlFormat` to `page.records(format)`, or override `OaiProvider::record_format()`
+on a custom marker. For example, start with the
 built-in record path and replace its schema using
 `Doab::record_format().with_schema(custom_xml_schema)` (import `OaiProvider`).
 Explicit schemas supply their own namespace bindings. XML limits, projection,
 batch sizes and scan planning use the existing XML format APIs; no automatic
 pagination or extra network reads are introduced.
+
+## Inferred Arrow records
+
+Use `page.records(service.inferred_record_format())` to infer the fields beneath
+each standard OAI record, including nested `header`, `metadata` and `about`
+elements present in the sample. This shares the standard record path and OAI
+namespace binding, so DOAB/OAPEN callers do not need to repeat either setting.
+Default namespaces and different source prefixes are matched by namespace URI.
+Deleted/header-only records remain rows; metadata may be null on those rows.
+
+```rust
+let page = service.records(None, None, None).await?;
+let records = page.records(service.inferred_record_format());
+let mut reader = records.open(ReadRequest::new("oai-page")).await?;
+```
+
+The returned `XmlFormat` supports the usual XML limits and inference options.
+This is the same mapping as manually constructing `XmlFormat::new` with the
+standard record path and `oai` namespace; it does not normalize provider fields.
+The inferred schema depends on the sampled page contents, unlike the fixed
+header schema from `record_format()`. Use an explicit XML schema when stable
+columns across pages, including empty pages, are required. The standard record
+envelope is used even if a custom marker overrides `OaiProvider::record_format`.

@@ -49,6 +49,18 @@ impl<P: OaiProvider> OaiProviderService<P> {
         P::record_format()
     }
 
+    /// Infer all fields beneath each standard OAI-PMH record, including provider
+    /// metadata, using the shared record path and namespace binding.
+    ///
+    /// Unlike [`Self::record_format`], this does not fix the output to protocol
+    /// header columns. The schema depends on the sampled page contents; use an
+    /// explicit XML schema when a stable mapping across pages is required.
+    /// This always selects the standard OAI record envelope, independently of a
+    /// custom [`OaiProvider::record_format`] override.
+    pub fn inferred_record_format(&self) -> XmlFormat {
+        super::record_format::inferred_record_format()
+    }
+
     pub async fn records(
         &self,
         from: Option<&str>,
