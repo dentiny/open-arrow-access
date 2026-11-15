@@ -57,6 +57,10 @@ a pending read, drop that reader too.
 
 ## Reusable file sources
 
+For an explicitly selected provider attachment, use the typed
+[`open_attachment_source` entry point](docs/attachments.md) to choose binary,
+CSV/TSV, JSON(L), Parquet or XML decoding and outer compression.
+
 `open_file_source` is always available in the facade. Enable the desired format
 and pass a configured OpenDAL operator, the complete read request, a typed format
 and an explicit outer-compression policy:
