@@ -91,7 +91,7 @@ fn file_storage(
 /// # async fn example(operator: open_arrow_access::storage::opendal::Operator)
 /// # -> open_arrow_access::Result<()> {
 /// use open_arrow_access::{
-///     OuterCompression, PreparedSource, ReadOptions, ReadRequest, file_scan_accessor,
+///     OuterCompression, PreparedSource, ReadOptions, ReadRequest, Reader, file_scan_accessor,
 /// };
 /// use open_arrow_access::file_format::json::JsonFormat;
 ///
