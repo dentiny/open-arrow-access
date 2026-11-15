@@ -5,6 +5,21 @@ use super::{
     error::{decode, invalid, not_found, unavailable},
 };
 
+pub(super) fn validate_credentials(access_key: &str, secret_key: &str) -> Result<()> {
+    for key in [access_key, secret_key] {
+        if key.is_empty()
+            || key
+                .bytes()
+                .any(|b| b.is_ascii_whitespace() || b.is_ascii_control() || b == b':')
+        {
+            return Err(invalid(
+                "expected nonempty Internet Archive access and secret keys without whitespace or colons",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn validate_identifier(identifier: &str) -> Result<()> {
     if identifier.len() > 100
         || !identifier
@@ -25,12 +40,13 @@ pub(super) fn validate_identifier(identifier: &str) -> Result<()> {
 pub(super) fn extract_items_and_validate(
     response: ItemResponse,
     identifier: &str,
+    authenticated: bool,
 ) -> Result<Vec<InternetArchiveFile>> {
     let item = match response {
         ItemResponse::Missing([]) => return Err(not_found()),
         ItemResponse::Item(item) => item,
     };
-    if item.is_unavailable {
+    if item.is_unavailable && !authenticated {
         return Err(unavailable());
     }
     if item.error.is_some() {
