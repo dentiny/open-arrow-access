@@ -18,7 +18,7 @@ where
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = *self.binding.factory();
-        if format == AtifFormat::Json {
+        if format != AtifFormat::JsonLines {
             return Ok(ScanPlan::whole_input(self.open(request).await?));
         }
         let (schema, projection) = format.prepare(&request)?;

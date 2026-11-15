@@ -15,7 +15,10 @@ pub(super) async fn parse_manifest(
     kind: ArxivKind,
     month: Option<u16>,
 ) -> Result<Vec<ArxivArchive>> {
-    let document = XmlDocument::new(bytes, kind.root())?;
+    let root = kind
+        .root()
+        .ok_or_else(|| decode("manifest kind must be Pdf or Source"))?;
+    let document = XmlDocument::new(bytes, root)?;
     let fields = ["filename", "yymm", "seq_num", "size", "num_items", "md5sum"]
         .map(|name| XmlField::new(name, document.element(name), Utf8, false));
     let batch = document

@@ -67,3 +67,10 @@ name, then reads its first original chunk. Apply gzip/JSON decoding according to
 the selected dataset's own schema; no fixed Arrow columns are added here.
 
 Source: [Semantic Scholar Datasets API](https://api.semanticscholar.org/api-docs/datasets).
+
+## Custom connections
+
+Use `SemanticScholarService::with_connection(connection).with_key(key)?` when
+configuring a custom endpoint, transport or HTTP policy. This reuses the same
+key validation and authentication header as `new(key)`, preserves other
+connection settings, and replaces any previously configured API key.

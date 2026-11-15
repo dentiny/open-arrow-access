@@ -253,3 +253,78 @@ async fn native_parallel_shards_preserve_order_and_payloads_with_a_soft_byte_tar
     assert!(actual.next().await.unwrap().is_none());
     assert!(expected.next().await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn auto_discovers_both_distributions_and_default_scan() {
+    let service = service();
+    let archives = service
+        .manifest(ArxivKind::Auto, Some(2410), ByteReadOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        archives
+            .iter()
+            .map(|a| (a.kind, a.sequence))
+            .collect::<Vec<_>>(),
+        vec![
+            (ArxivKind::Pdf, 3),
+            (ArxivKind::Pdf, 1),
+            (ArxivKind::Source, 1)
+        ]
+    );
+    let plan = service
+        .records()
+        .plan_scan(ArxivReadRequest::default().with_month(2410))
+        .await
+        .unwrap();
+    assert_eq!(plan.partitions.size_hint().0, 3);
+}
+
+#[tokio::test]
+async fn auto_skips_missing_distributions_but_requires_one_manifest() {
+    for available in [ArxivKind::Pdf, ArxivKind::Source] {
+        let dir = tempfile::tempdir().unwrap();
+        let key = available.manifest_key().unwrap();
+        let destination = dir.path().join(key);
+        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        std::fs::copy(fixture_path!("arxiv", key), &destination).unwrap();
+        let service = ArxivService::new(OpenDalAccessor::new(fs_operator(dir.path())));
+        let archives = service
+            .manifest(ArxivKind::Auto, None, ByteReadOptions::default())
+            .await
+            .unwrap();
+        assert!(!archives.is_empty());
+        assert!(archives.iter().all(|archive| archive.kind == available));
+        std::fs::remove_file(destination).unwrap();
+        assert_eq!(
+            service
+                .manifest(ArxivKind::Auto, None, ByteReadOptions::default())
+                .await
+                .unwrap_err()
+                .kind(),
+            ErrorKind::NotFound
+        );
+    }
+}
+
+#[tokio::test]
+async fn auto_propagates_storage_and_manifest_errors() {
+    let pdf = fixture!("arxiv", "pdf/arXiv_pdf_manifest.xml").await;
+    for (storage, expected) in [
+        (
+            MemoryAccessor::new(b"", 3).with_open_failure(ErrorKind::PermissionDenied),
+            ErrorKind::PermissionDenied,
+        ),
+        // PDF succeeds, but returning the same XML for source has the wrong root.
+        (MemoryAccessor::new(&pdf, 3), ErrorKind::Decode),
+    ] {
+        assert_eq!(
+            ArxivService::new(storage)
+                .manifest(ArxivKind::Auto, None, ByteReadOptions::default())
+                .await
+                .unwrap_err()
+                .kind(),
+            expected
+        );
+    }
+}

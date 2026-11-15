@@ -63,3 +63,45 @@ impl HttpTransport for RedirectTransport {
         Err(error::transport(error::decode("too many redirects")))
     }
 }
+
+pub(crate) struct HeaderTransport {
+    inner: HttpTransporter,
+    scope: AuthScope,
+}
+
+impl HeaderTransport {
+    /// Attach origin-scoped headers before following redirects on a single-hop transport.
+    pub(crate) fn wrap(
+        context: OperationContext,
+        origin: Url,
+        headers: HeaderMap,
+    ) -> OperationContext {
+        let context = follow_redirects(context);
+        let inner = context.http_transport().clone();
+        context.with_http_transport(HttpTransporter::new(Self {
+            inner,
+            scope: AuthScope {
+                origin,
+                headers,
+                query: vec![],
+            },
+        }))
+    }
+}
+
+impl std::fmt::Debug for HeaderTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HeaderTransport")
+            .field("token", &"<token>")
+            .finish_non_exhaustive()
+    }
+}
+impl HttpTransport for HeaderTransport {
+    async fn fetch(
+        &self,
+        mut request: Request<Buffer>,
+    ) -> opendal::Result<http::Response<HttpBody>> {
+        request.extensions_mut().insert(self.scope.clone());
+        self.inner.fetch(request).await
+    }
+}

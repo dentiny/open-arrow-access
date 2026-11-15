@@ -25,6 +25,29 @@ cargo run --example read_parquet --features format-parquet -- testdata/parquet o
 Paths passed to generic storage are relative to the operator's configured root.
 Choose the format explicitly; extensions do not select a decoder.
 
+## Bind a record selection before consumption
+
+Use `BoundSource::bind(accessor, request).await?` when an integration needs the
+output schema before consuming records. It accepts any owned
+`Accessor<Reader = dyn RecordReader>` and its original typed request; requests
+must implement `Clone + Send + Sync + 'static`. Provider selectors and read
+options are retained together, without conversion to `ReadRequest`. An `Arc`
+of a concrete or dynamic accessor is also supported.
+
+`source.schema()` and `source.metadata()` expose the initial metadata. Binding
+opens a reader without polling its rows, and the first `source.reader().await?`
+returns that retained reader. Later calls reopen independent readers with the
+same request and reject any change to the complete Arrow schema, including
+metadata. Readers can outlive the source. Contents can change between opens:
+this helper fixes the output schema and does not create a data snapshot.
+
+All bound selections share the non-generic `BoundSource` type, allowing an FFI
+adapter to keep different provider/request types in one source state. No runtime
+or background producer is created. The helper is defined in
+`open-arrow-access-core` and re-exported by the facade. It needs no facade feature
+flags; enable the features required by the chosen accessor. `open_file_source()` uses
+the same lifecycle through its existing `FileSource` interface.
+
 ## Select columns and batch rows
 
 With `format-parquet`, use the same `testdata/parquet` root as the fixture command
@@ -69,7 +92,7 @@ Enable the upstream backend and transport features alongside your chosen format:
 
 ```toml
 [dependencies]
-open-arrow-access = { version = "0.1.0", features = ["format-parquet"] }
+open-arrow-access = { version = "0.2.2", features = ["format-parquet"] }
 opendal = { version = "0.59.2", default-features = false, features = ["services-s3", "http-transport-reqwest"] }
 ```
 
@@ -148,17 +171,20 @@ Replace the format accessor for other sequential inputs:
 
 | Input | Construction | Additional feature |
 | --- | --- | --- |
-| CSV with headers | `CsvAccessor::new(decoded, schema).with_format(CsvFormat::default().with_header(true))` | `format-csv` |
-| TSV | Same CSV accessor with `.with_delimiter(b'\t')` on `CsvFormat` | `format-csv` |
+| CSV with automatic headers | `CsvAccessor::new(decoded, schema)` | `format-csv` |
+| TSV | CSV accessor with `.with_dialect(CsvDialect { delimiter: b'\t', ..Default::default() })` | `format-csv` |
 | XML | `XmlAccessor::new(decoded, "/records/record")` | `format-xml` |
-| ATIF JSONL | `AtifAccessor::new(decoded, AtifFormat::JsonLines)` | `format-atif` |
+| ATIF JSON / JSONL | `AtifAccessor::new(decoded, AtifFormat::Auto)` | `format-atif` |
 
 Use `CsvAccessor::infer(decoded)` to infer CSV column types and header presence.
-Configure sampling and override ambiguous headers with `CsvInferenceOptions`.
-Use `CsvAccessor::from_header(decoded)` for nullable string columns named by a
-header, including header-only inputs and all-null columns. `.all_varchar()` on
-an inferred accessor retains the configured header policy while choosing string
-columns. See [CSV string mode](formats.md#nullable-string-columns).
+Configure sampling with `CsvInferenceOptions`. Both constructors default to
+`CsvHeader::Auto`; override with `.with_header(CsvHeader::Present)` or
+`.with_header(CsvHeader::Absent)`. All-string inference samples are ambiguous and
+retain their first row as data; choose Present when those files have headers.
+
+Use `CsvAccessor::from_header(decoded)` for header-named nullable string columns,
+including header-only files and all-null columns. `.all_varchar()` preserves an
+existing format's header policy; see [CSV string mode](formats.md#nullable-string-columns).
 
 Use `JsonAccessor::infer(decoded)` to infer a JSON schema rather than supplying
 one. Configure the bounded sample with `JsonInferenceOptions`.

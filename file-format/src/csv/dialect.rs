@@ -1,10 +1,33 @@
 use super::CsvFormat;
 
+/// Header policy shared by explicit-schema and schema-inference readers.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CsvHeader {
+    /// Match the full explicit schema's names, or detect from a sample when inferring.
+    /// Ambiguous inference samples are treated as data to preserve the first row.
+    #[default]
+    Auto,
+    /// Consume the first record as a header.
+    Present,
+    /// Decode every record as data.
+    Absent,
+}
+
+impl From<bool> for CsvHeader {
+    fn from(has_header: bool) -> Self {
+        if has_header {
+            Self::Present
+        } else {
+            Self::Absent
+        }
+    }
+}
+
 /// Explicit structural CSV options shared by the framer and Arrow decoder.
 #[derive(Clone, Copy, Debug)]
 pub struct CsvDialect {
-    /// Consume and optionally validate the first record as a header.
-    pub has_header: bool,
+    /// Detect, consume, or retain the first record. Defaults to Auto.
+    pub header: CsvHeader,
     pub validate_header: bool,
     pub delimiter: u8,
     pub quote: u8,
@@ -18,7 +41,7 @@ pub struct CsvDialect {
 impl Default for CsvDialect {
     fn default() -> Self {
         Self {
-            has_header: false,
+            header: CsvHeader::Auto,
             validate_header: false,
             delimiter: b',',
             quote: b'"',
@@ -33,7 +56,7 @@ impl Default for CsvDialect {
 impl CsvDialect {
     pub(super) fn format(self) -> CsvFormat {
         let mut format = CsvFormat::default()
-            .with_header(self.has_header)
+            .with_header(self.header == CsvHeader::Present)
             .with_header_validation(self.validate_header)
             .with_delimiter(self.delimiter)
             .with_quote(self.quote)

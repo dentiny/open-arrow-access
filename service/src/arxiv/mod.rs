@@ -7,39 +7,46 @@ pub use records::{ArxivReadRequest, ArxivRecords, record_schema};
 mod validation;
 
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Result, read_object,
+    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, ErrorKind, Result, read_object,
 };
 use open_arrow_access_decompression::tar::{TarArchive, TarLimits, TarStream};
 
 use manifest::parse_manifest;
 use validation::{validate_archive, validate_archive_length, validate_month};
 
-/// The two separately published arXiv bulk distributions.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Select an arXiv bulk distribution or discover all available distributions.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ArxivKind {
+    /// Probe both manifests, skipping only missing distributions.
+    #[default]
+    Auto,
     Pdf,
     Source,
 }
 
 impl ArxivKind {
-    fn prefix(self) -> &'static str {
+    fn prefix(self) -> Option<&'static str> {
         match self {
-            Self::Pdf => "pdf",
-            Self::Source => "src",
+            Self::Auto => None,
+            Self::Pdf => Some("pdf"),
+            Self::Source => Some("src"),
         }
     }
 
-    fn root(self) -> &'static str {
+    fn root(self) -> Option<&'static str> {
         match self {
-            Self::Pdf => "arXivPDF",
-            Self::Source => "arXivSRC",
+            Self::Auto => None,
+            Self::Pdf => Some("arXivPDF"),
+            Self::Source => Some("arXivSRC"),
         }
     }
 
-    pub fn manifest_key(self) -> &'static str {
+    /// The manifest key for a concrete distribution; `Auto` has no single key.
+    pub fn manifest_key(self) -> Option<&'static str> {
         match self {
-            Self::Pdf => "pdf/arXiv_pdf_manifest.xml",
-            Self::Source => "src/arXiv_src_manifest.xml",
+            Self::Auto => None,
+            Self::Pdf => Some("pdf/arXiv_pdf_manifest.xml"),
+            Self::Source => Some("src/arXiv_src_manifest.xml"),
         }
     }
 }
@@ -47,6 +54,7 @@ impl ArxivKind {
 /// One TAR shard in the manifest. MD5 metadata is exposed, not verified.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArxivArchive {
+    /// Resolved distribution (`Pdf` or `Source`); `Auto` is invalid for a shard.
     pub kind: ArxivKind,
     pub filename: String,
     /// Year and month encoded as YYMM, e.g. 2410 for October 2024.
@@ -84,6 +92,8 @@ impl<A> ArxivService<A> {
 impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivService<A> {
     /// Resolve shards in manifest order, optionally filtering one YYMM month.
     /// Unmatched months return no shards; all manifest rows are validated.
+    /// `Auto` probes PDF then source, retaining each manifest's order. Only a
+    /// missing manifest is skipped; if both are missing, returns `NotFound`.
     pub async fn manifest(
         &self,
         kind: ArxivKind,
@@ -93,13 +103,36 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivServi
         if let Some(month) = month {
             validate_month(month)?;
         }
-        let bytes = read_object(
-            &self.storage,
-            ByteReadRequest::new(kind.manifest_key()).with_options(options),
-            "read_arxiv_manifest",
-        )
-        .await?;
-        parse_manifest(&bytes, kind, month).await
+        let kinds: &[ArxivKind] = match kind {
+            ArxivKind::Auto => &[ArxivKind::Pdf, ArxivKind::Source],
+            ArxivKind::Pdf => &[ArxivKind::Pdf],
+            ArxivKind::Source => &[ArxivKind::Source],
+        };
+        let mut archives = Vec::new();
+        let mut found = false;
+        let mut missing = None;
+        for &resolved in kinds {
+            let bytes = match read_object(
+                &self.storage,
+                ByteReadRequest::new(resolved.manifest_key().unwrap()).with_options(options),
+                "read_arxiv_manifest",
+            )
+            .await
+            {
+                Ok(bytes) => bytes,
+                Err(error) if kind == ArxivKind::Auto && error.kind() == ErrorKind::NotFound => {
+                    missing = Some(error);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            archives.extend(parse_manifest(&bytes, resolved, month).await?);
+            found = true;
+        }
+        if !found && let Some(error) = missing {
+            return Err(error);
+        }
+        Ok(archives)
     }
 
     /// Stream a shard sequentially, yielding the first entry after its header

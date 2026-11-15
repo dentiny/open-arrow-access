@@ -8,6 +8,9 @@
 
 pub use open_arrow_access_core::*;
 
+mod attachment;
+pub use attachment::{AttachmentFormat, AttachmentOptions, open_attachment_source};
+
 mod file_source;
 pub use file_source::{FileSource, OuterCompression, open_file_source};
 

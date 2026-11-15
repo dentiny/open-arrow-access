@@ -10,7 +10,7 @@ use open_arrow_access_core::{
     Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader, into_async_read,
 };
 
-use super::{CsvAccessor, CsvDialect, error};
+use super::{CsvAccessor, CsvDialect, CsvHeader, error};
 
 #[async_trait]
 impl<B> ScanPlanner for CsvAccessor<B>
@@ -41,7 +41,7 @@ where
         };
         // Workers read canonical CSV, regardless of the source dialect.
         let format = format.with_dialect(CsvDialect {
-            has_header: dialect.has_header,
+            header: dialect.header,
             validate_header: dialect.validate_header,
             allow_truncated_rows: dialect.allow_truncated_rows,
             ..CsvDialect::default()
@@ -103,7 +103,7 @@ impl CsvChunks {
             .reader_builder()
             .create_reader(Box::new(Cursor::new(prefix).chain(input))
                 as Box<dyn futures::io::AsyncRead + Unpin + Send>);
-        let header = if dialect.has_header {
+        let header = if dialect.header == CsvHeader::Present {
             let mut header = csv_async::ByteRecord::new();
             records
                 .read_byte_record(&mut header)

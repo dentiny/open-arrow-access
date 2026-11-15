@@ -41,6 +41,7 @@ impl HttpClient {
         endpoint: &Url,
         root: &str,
         query: Vec<(String, String)>,
+        token: Option<&str>,
     ) -> Result<OpenDalAccessor> {
         let mut context = policy::apply(&self.config, self.context.clone())?;
         if !query.is_empty() {
@@ -49,13 +50,15 @@ impl HttpClient {
                 query,
             }));
         }
-        let operator = opendal::Operator::new(
-            opendal_service_http::Http::default()
-                .endpoint(endpoint.as_str().trim_end_matches('/'))
-                .root(root),
-        )
-        .map_err(|error| transport_error("configure_http", error))?
-        .with_context(context);
+        let mut builder = opendal_service_http::Http::default()
+            .endpoint(endpoint.as_str().trim_end_matches('/'))
+            .root(root);
+        if let Some(token) = token {
+            builder = builder.token(token);
+        }
+        let operator = opendal::Operator::new(builder)
+            .map_err(|error| transport_error("configure_http", error))?
+            .with_context(context);
         Ok(OpenDalAccessor::new(operator))
     }
 

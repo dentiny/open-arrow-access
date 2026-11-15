@@ -204,6 +204,9 @@ supplied projected schema. Bind it with `DocumentAccessor::new(storage, decoder)
 If the decoder implements `Default`, callers can use
 `DocumentAccessor::<_, MyDecoder>::with_default_decoder(storage)`. See
 [PMC](../service/src/pmc/) and [Gutenberg](../service/src/gutenberg/) for examples.
+Use the built-in `BinaryDecoder` to preserve an object as one non-null
+`data: LargeBinary` value: `DocumentAccessor::new(storage, BinaryDecoder)`.
+It buffers the complete object and preserves empty inputs and arbitrary bytes.
 
 ## Add a layer
 

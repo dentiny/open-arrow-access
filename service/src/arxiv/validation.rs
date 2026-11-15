@@ -17,12 +17,13 @@ pub(super) fn validate_month(month: u16) -> Result<()> {
 
 pub(super) fn validate_archive(archive: &ArxivArchive) -> Result<()> {
     validate_month(archive.month).map_err(|_| decode("invalid archive month"))?;
+    let prefix = archive
+        .kind
+        .prefix()
+        .ok_or_else(|| decode("archive kind must be Pdf or Source"))?;
     let expected = format!(
         "{}/arXiv_{}_{:04}_{:03}.tar",
-        archive.kind.prefix(),
-        archive.kind.prefix(),
-        archive.month,
-        archive.sequence
+        prefix, prefix, archive.month, archive.sequence
     );
     if archive.sequence == 0 || archive.filename != expected {
         return Err(decode(

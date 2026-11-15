@@ -49,7 +49,7 @@ The following example discovers files and reads bytes.
 
 ```toml
 [dependencies]
-open-arrow-access = { version = "0.1.0", default-features = false, features = ["service-figshare"] }
+open-arrow-access = { version = "0.2.2", default-features = false, features = ["service-figshare"] }
 futures = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
@@ -125,7 +125,10 @@ timeout, and authentication settings.
 | Archive session | Inspect entries, open selected member | Member metadata and bytes |
 
 Bind an explicit format through `ResolvedFileSet::records(format)` and select
-names with `FileSetRequest` to decode resolved files. For API metadata use
+names with `service::FileSetRequest` to decode resolved files. The service module
+also exports `FileSetAccessor`; facade consumers do not need `dataset-directory`
+for provider attachments. See [multi-attachment record scans](remote-files.md#multi-attachment-record-scans).
+For API metadata use
 `ApiDocument::records_at(pointer, format)`; OAI pages expose `records(format)`.
 These bindings do not follow PDF/HTML URLs, infer content mappings, or discover
 additional pages. See [response shapes](response-schemas.md).

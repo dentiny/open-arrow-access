@@ -1,4 +1,5 @@
 mod accessor;
+mod auto;
 mod error;
 mod format;
 mod planning;

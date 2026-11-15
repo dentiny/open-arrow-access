@@ -40,6 +40,7 @@ meca = [
 oapen = ["oai"]
 openstax = []
 pmc = [
+    "dep:open-arrow-access-layers",
     "dep:arrow-array",
     "dep:arrow-schema",
     "open-arrow-access-file-format/csv",
@@ -72,6 +73,7 @@ open-arrow-access-core.workspace = true
 open-arrow-access-dataset = { workspace = true, features = ["directory"] }
 open-arrow-access-decompression = { workspace = true, optional = true }
 open-arrow-access-file-format.workspace = true
+open-arrow-access-layers = { workspace = true, optional = true }
 open-arrow-access-storage.workspace = true
 opendal = { workspace = true, features = ["services-http", "http-transport-reqwest"] }
 opendal-http-transport-reqwest.workspace = true

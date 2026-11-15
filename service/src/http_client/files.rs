@@ -41,15 +41,28 @@ impl<M> ResolvedFilesPlan<M> {
     }
 }
 
-/// Connection and error context shared by public JSON-manifest providers.
-#[derive(Clone, Debug)]
+/// Connection and error context shared by JSON-manifest providers.
+#[derive(Clone)]
 pub(crate) struct HttpFileService {
     endpoint: Url,
     client: HttpClient,
+    token: Option<String>,
+    headers: http::HeaderMap,
+    context: Option<opendal::OperationContext>,
     /// Provider operation for metadata HTTP/JSON errors.
     operation: &'static str,
     /// Wrap namespace errors with provider context.
     map_file_namespace_error: fn(Error) -> Error,
+}
+
+impl std::fmt::Debug for HttpFileService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpFileService")
+            .field("endpoint", &self.endpoint)
+            .field("token", &self.token.as_ref().map(|_| "<token>"))
+            .field("operation", &self.operation)
+            .finish_non_exhaustive()
+    }
 }
 
 impl HttpFileService {
@@ -62,6 +75,9 @@ impl HttpFileService {
         Ok(Self {
             endpoint: resolve_origin(endpoint, configure)?,
             client: HttpClient::new()?,
+            token: None,
+            headers: http::HeaderMap::new(),
+            context: None,
             operation,
             map_file_namespace_error,
         })
@@ -71,6 +87,54 @@ impl HttpFileService {
         config.validate()?;
         self.client.config = config;
         Ok(self)
+    }
+
+    pub(crate) fn with_token(mut self, token: &str) -> Result<Self> {
+        super::validation::validate_empty_token(token, self.operation)?;
+        super::validation::bearer_header(token, self.operation)?;
+        self.token = Some(token.to_owned());
+        Ok(self)
+    }
+
+    /// Use provider-specific credentials on both metadata and lazy file requests.
+    pub(crate) fn with_header(
+        mut self,
+        name: http::header::HeaderName,
+        value: http::HeaderValue,
+    ) -> Result<Self> {
+        if self.context.is_none() {
+            self.context = Some(opendal::OperationContext::new().with_http_transport(
+                opendal::HttpTransporter::new(super::new_single_hop_transport()?),
+            ));
+        }
+        // A provider selects one authentication scheme at a time.
+        self.headers.clear();
+        self.headers.insert(name, value);
+        Ok(self)
+    }
+
+    pub(crate) fn with_context(mut self, context: opendal::OperationContext) -> Self {
+        self.context = Some(context);
+        self
+    }
+
+    fn client(&self) -> HttpClient {
+        let mut client = self.client.clone();
+        if let Some(context) = &self.context {
+            client.context = context.clone();
+        }
+        if !self.headers.is_empty() {
+            client.context = crate::common::transport::HeaderTransport::wrap(
+                client.context,
+                self.endpoint.clone(),
+                self.headers.clone(),
+            );
+        }
+        client
+    }
+
+    pub(crate) fn has_credentials(&self) -> bool {
+        self.token.is_some() || !self.headers.is_empty()
     }
 
     pub(crate) fn endpoint(&self) -> &Url {
@@ -83,18 +147,22 @@ impl HttpFileService {
         metadata_url: &Url,
         resolve: impl FnOnce(T) -> Result<ResolvedFilesPlan<M>>,
     ) -> Result<ResolvedFileSet<OpenDalAccessor, M>> {
-        let response = self
-            .client
-            .json(metadata_url.as_str(), /*token=*/ None, self.operation)
+        let client = self.client();
+        let response = client
+            .json(metadata_url.as_str(), self.token.as_deref(), self.operation)
             .await?;
         let plan = resolve(response)?;
         let lengths = plan.files.iter().filter_map(|file| {
             file.content_length
                 .map(|length| (file.object.locator().to_owned(), length))
         });
-        let storage = self
-            .client
-            .accessor(&self.endpoint, &plan.root, plan.query)?
+        let storage = client
+            .accessor(
+                &self.endpoint,
+                &plan.root,
+                plan.query,
+                self.token.as_deref(),
+            )?
             .with_content_lengths(lengths);
         ResolvedFileSet::from_files(storage, plan.files, plan.metadata)
             .map_err(self.map_file_namespace_error)

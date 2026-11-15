@@ -61,7 +61,7 @@ pub(super) fn uninspectable_dialect() -> Error {
     Error::new(
         ErrorKind::InvalidInput,
         "infer_csv",
-        "schema inference requires an inspectable CsvDialect; use with_dialect instead of with_format",
+        "schema inference and automatic header detection require an inspectable CsvDialect; use with_dialect instead of with_format",
     )
 }
 

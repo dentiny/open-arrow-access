@@ -14,7 +14,7 @@ the default feature set is empty. Add the published crate to your application:
 
 ```toml
 [dependencies]
-open-arrow-access = { version = "0.1.0", default-features = false, features = ["format-parquet"] }
+open-arrow-access = { version = "0.2.2", default-features = false, features = ["format-parquet"] }
 opendal = { version = "=0.59.2", default-features = false, features = ["services-fs"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
@@ -56,6 +56,10 @@ Readers own their resources. Drop a reader to stop consuming it; after cancellin
 a pending read, drop that reader too.
 
 ## Reusable file sources
+
+For an explicitly selected provider attachment, use the typed
+[`open_attachment_source` entry point](docs/attachments.md) to choose binary,
+CSV/TSV, JSON(L), Parquet or XML decoding and outer compression.
 
 `open_file_source` is always available in the facade. Enable the desired format
 and pass a configured OpenDAL operator, the complete read request, a typed format
@@ -122,7 +126,7 @@ storage operator separately.
 Set features on the dependency used by your application:
 
 ```toml
-open-arrow-access = { version = "0.1.0", default-features = false, features = [
+open-arrow-access = { version = "0.2.2", default-features = false, features = [
     "format-json",
     "decompression-gzip",
     "dataset-directory",

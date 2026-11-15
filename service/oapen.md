@@ -63,6 +63,12 @@ async fn read_hosted_book(url: &str) -> Result<()> {
 
 The example prints the record count and XML byte length for every page in a
 selected window. The original XML is available for your parser; harvesting alone
-does not produce article/book content or Arrow batches.
+does not produce article/book content or Arrow batches. To read standard OAI
+header columns with a fixed schema, including empty pages, use
+`page.records(service.record_format())`; see the
+[default Arrow record format](oai-provider.md#default-arrow-records).
+To retain inferred nested provider metadata instead, use
+`page.records(service.inferred_record_format())`; see
+[inferred Arrow records](oai-provider.md#inferred-arrow-records).
 
 Sources: [provider metadata documentation](https://oapen.org/article/metadata), [shared OAI-PMH guide](oai-protocol.md).
