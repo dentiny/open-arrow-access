@@ -233,3 +233,10 @@ guide](docs/extending.md) for contracts, diagrams, and reference implementations
 
 See the [documentation index](docs/README.md) for detailed contracts, format limits,
 and development instructions. The library is MIT licensed.
+
+### Read metrics
+
+Use `layers::MetricsLayer` for instance-scoped byte/row counters and call timings.
+The default exporter only accumulates in memory. Share it with
+`storage::opendal_metrics_layer` to observe OpenDAL I/O separately from delivered
+output. See [metrics](docs/metrics.md) and [the example](examples/read_metrics.rs).

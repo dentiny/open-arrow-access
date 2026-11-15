@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add byte and record `MetricsLayer` with a default in-memory exporter, snapshots,
+  cancellation accounting, and shared OpenDAL operation/HTTP instrumentation.
+
 ## 0.3.0
 
 - Add `PreparedSource` for reusable schema binding with execution-time read options

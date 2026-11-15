@@ -36,3 +36,6 @@ pub use named_files::NamedFileAccessor;
 pub use validation::validate_file_names;
 
 pub use error::opendal_error_kind;
+
+mod metrics;
+pub use metrics::opendal_metrics_layer;

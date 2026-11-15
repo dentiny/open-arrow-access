@@ -15,6 +15,7 @@ http.workspace = true
 indexmap.workspace = true
 open-arrow-access-core.workspace = true
 opendal = { workspace = true, features = ["executors-tokio", "layers-retry", "layers-timeout"] }
+opendal-layer-observe-metrics-common = "=0.59.2"
 tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]

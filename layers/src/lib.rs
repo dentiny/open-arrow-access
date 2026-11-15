@@ -20,3 +20,6 @@ mod schema_evolution;
 pub use schema_evolution::{
     ColumnEvolution, ColumnExpression, SchemaEvolutionAccessor, SchemaEvolutionLayer,
 };
+
+/// Read observability for byte and record accessors.
+pub use open_arrow_access_core::metrics::{MetricsAccessor, MetricsLayer};

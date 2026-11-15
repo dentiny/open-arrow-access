@@ -2917,6 +2917,7 @@ dependencies = [
  "open-arrow-access-core",
  "open-arrow-access-test-support",
  "opendal",
+ "opendal-layer-observe-metrics-common",
  "opendal-service-http",
  "rstest",
  "tempfile",
@@ -2988,6 +2989,17 @@ dependencies = [
  "http-body",
  "opendal-core",
  "reqwest",
+]
+
+[[package]]
+name = "opendal-layer-observe-metrics-common"
+version = "0.59.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fbe664be117c293cfa3980a0d2fc238bbb38eae5f6c191f376e88ccb830d26b"
+dependencies = [
+ "futures",
+ "http",
+ "opendal-core",
 ]
 
 [[package]]
