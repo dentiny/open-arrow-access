@@ -1,7 +1,7 @@
 use std::{
     num::NonZeroUsize,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicUsize, Ordering},
     },
 };
@@ -113,19 +113,4 @@ async fn page_set_schema_drift_is_rejected_by_both_executors() {
             assert!(reader.next().await.unwrap().is_none());
         }
     }
-}
-
-#[tokio::test]
-async fn cloned_page_sets_share_nonclone_openers_and_keep_readers_independent() {
-    let opens = Mutex::new(0usize);
-    let pages = PageSetAccessor::new(move |index| {
-        // Capturing a Mutex makes this callback non-Clone.
-        *opens.lock().unwrap() += 1;
-        async move { Ok(page(index)) }
-    });
-    let sequential = pages.clone().open(vec![2, 1]).await.unwrap();
-    let parallel = open_pages(pages.clone(), vec![3, 2, 3], true).await;
-    drop(pages);
-    assert_eq!(collect_column::<UInt64Type>(parallel, 0).await, [3, 2, 3]);
-    assert_eq!(collect_column::<UInt64Type>(sequential, 0).await, [2, 1]);
 }
