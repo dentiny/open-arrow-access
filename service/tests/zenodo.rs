@@ -31,8 +31,13 @@ async fn fixture_service(name: &str) -> (HttpFixture, ZenodoService) {
 #[tokio::test]
 async fn record_membership_and_lazy_independent_file_reads() {
     let (fixture, service) = fixture_service("record").await;
+    assert!(format!("{service:?}").contains("token: None"));
+    let service = service.with_token("fixture-bearer-token").unwrap();
+    assert!(format!("{service:?}").contains("token: Some(\"<token>\")"));
+    assert!(!format!("{service:?}").contains("fixture-bearer-token"));
     let accessor = service.record(ID).await.unwrap();
     assert_eq!(fixture.requests().len(), 1);
+    assert!(!format!("{accessor:?}").contains("fixture-bearer-token"));
     assert_eq!(accessor.id(), ID);
     assert_eq!(accessor.files()[0].size, 8);
     assert_eq!(accessor.files()[0].checksum, "md5:fixture");
@@ -57,6 +62,13 @@ async fn record_membership_and_lazy_independent_file_reads() {
     )
     .await
     .unwrap();
+    for request in fixture.requests() {
+        assert_eq!(
+            request.headers["authorization"],
+            "Bearer fixture-bearer-token"
+        );
+        assert!(!request.path.contains("fixture-bearer-token"));
+    }
 }
 
 #[tokio::test]

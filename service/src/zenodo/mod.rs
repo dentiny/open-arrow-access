@@ -30,6 +30,13 @@ impl ZenodoService {
         Ok(self)
     }
 
+    /// Use a bearer token for record metadata and lazy attachment reads.
+    /// Tokens are validated before I/O and omitted from Debug output.
+    pub fn with_token(mut self, token: &str) -> Result<Self> {
+        self.http = self.http.with_token(token)?;
+        Ok(self)
+    }
+
     pub fn new() -> Result<Self> {
         Self::with_endpoint("https://zenodo.org")
     }
