@@ -3,20 +3,19 @@ use super::{
     transport::{self, AuthScope},
     url_util, validation,
 };
-use crate::{ResolvedFileSet, http_body::BodyReader, http_client::HttpClient};
-use futures::stream;
+use crate::{ResolvedFileSet, http_client::HttpClient};
+
+mod reader;
 use http::{HeaderMap, HeaderValue, Request, header::HeaderName};
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteMetadata, ByteReadOptions, ByteReadRequest, ByteReader, Bytes,
-    Capability, Result, StreamReader, async_trait,
+    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability,
+    Result, async_trait,
 };
 use open_arrow_access_storage::StorageConfig;
-use opendal::{Buffer, HttpBody, HttpTransporter, OperationContext};
+use opendal::{Buffer, HttpTransporter, OperationContext};
 use url::Url;
 
 use crate::file_manifest::FileSpec;
-
-const DEFAULT_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 
 /// HTTP settings. Debug output never includes keys or signed URLs.
 #[derive(Clone)]
@@ -93,15 +92,6 @@ impl Connection {
         Ok(request)
     }
 
-    pub(super) async fn response(
-        &self,
-        url: Url,
-        accept: &str,
-    ) -> Result<http::Response<HttpBody>> {
-        let url = resolve_download_url(url.as_str())?;
-        let request = self.request(&url, accept)?;
-        self.client.response(request, error::OP).await
-    }
     /// Fetch one API page as parsed JSON metadata.
     pub async fn json(&self, path: &str, query: &[(&str, &str)]) -> Result<ApiDocument> {
         self.json_url(self.url(path, query)?).await
@@ -120,44 +110,11 @@ impl Connection {
             .await
     }
     /// Open an absolute URL, preserving encoded paths and signatures byte-for-byte.
+    /// The sequential response is retained lazily. Readers additionally support exact
+    /// ranges when it declares `Accept-Ranges: bytes`, an identity representation and
+    /// a known length. Strong ETags pin subsequent range requests to that version.
     pub async fn open(&self, url: &str, options: ByteReadOptions) -> Result<Box<dyn ByteReader>> {
-        let response = self.response(resolve_download_url(url)?, "*/*").await?;
-        let version = response
-            .headers()
-            .get("etag")
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned);
-        let chunk_size = options
-            .io_chunk_size
-            .map_or(DEFAULT_CHUNK_SIZE, |s| s.get());
-        let body = BodyReader::new(response, error::OP)?;
-        let content_length = body.content_length();
-        let state = (body, Buffer::new(), Bytes::new());
-        let chunks = stream::try_unfold(
-            state,
-            move |(mut body, mut parts, mut pending)| async move {
-                while pending.is_empty() {
-                    if let Some(part) = parts.next() {
-                        pending = part;
-                        continue;
-                    }
-                    let Some(buffer) = body.next().await? else {
-                        return Ok(None);
-                    };
-                    parts = buffer;
-                }
-                let chunk = pending.split_to(pending.len().min(chunk_size));
-                Ok(Some((chunk, (body, parts, pending))))
-            },
-        );
-        Ok(Box::new(StreamReader::new(
-            chunks,
-            ByteMetadata {
-                source: None,
-                content_length,
-                version,
-            },
-        )))
+        reader::open(self.clone(), resolve_download_url(url)?, options).await
     }
     /// Resolve file links into lazy downloads, retaining the full JSON as metadata.
     /// The resolver owns provider identity/availability checks.
@@ -184,7 +141,7 @@ impl Connection {
     }
 }
 
-/// A manifest's provider metadata alongside a fixed namespace of sequential files.
+/// A manifest's provider metadata alongside a fixed namespace of HTTP files.
 pub type RemoteFiles<M = ApiDocument> = ResolvedFileSet<Connection, M>;
 
 #[async_trait]
@@ -194,7 +151,7 @@ impl Accessor for Connection {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            read_with_range: false,
+            read_with_range: true,
             read_parallel: false,
             list: false,
         }
