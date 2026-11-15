@@ -1,8 +1,8 @@
-use std::sync::Mutex;
+use std::{num::NonZeroUsize, sync::Arc};
 
 use crate::{
-    Accessor, Error, ErrorKind, ReadOptions, ReadOptionsProvider, RecordMetadata, RecordReader,
-    Result, SchemaRef, async_trait, map_record_reader,
+    Accessor, BoundSource, Error, ErrorKind, ReadOptions, ReadOptionsProvider, RecordMetadata,
+    RecordReader, Result, SchemaRef, async_trait, map_record_reader,
 };
 
 /// A typed selection with a complete bound schema and execution-time read options.
@@ -14,8 +14,8 @@ use crate::{
 /// No runtime or producer tasks are created.
 pub struct PreparedSource {
     selection: Box<dyn PreparedSelection>,
-    metadata: RecordMetadata,
-    cached_reader: Mutex<Option<CachedReader>>,
+    bound: BoundSource,
+    batch_size: NonZeroUsize,
 }
 
 #[async_trait]
@@ -41,11 +41,6 @@ where
     }
 }
 
-struct CachedReader {
-    options: ReadOptions,
-    reader: Box<dyn RecordReader>,
-}
-
 impl PreparedSource {
     /// Inspect the complete schema of a typed selection, retaining its first reader.
     ///
@@ -56,15 +51,13 @@ impl PreparedSource {
     ///
     /// ```no_run
     /// use open_arrow_access_core::{
-    ///     Accessor, PreparedSource, ReadOptions, ReadOptionsProvider, RecordReader, Result,
+    ///     Accessor, PreparedSource, ReadOptions, ReadRequest, RecordReader, Result,
     /// };
     ///
-    /// async fn query<A>(accessor: A, request: A::Request) -> Result<()>
-    /// where
-    ///     A: Accessor<Reader = dyn RecordReader> + 'static,
-    ///     A::Request: Clone + Sync + ReadOptionsProvider + 'static,
-    /// {
-    ///     let prepared = PreparedSource::prepare(accessor, request).await?;
+    /// async fn query(
+    ///     accessor: impl Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
+    /// ) -> Result<()> {
+    ///     let prepared = PreparedSource::prepare(accessor, ReadRequest::new("data")).await?;
     ///     let mut options = ReadOptions::default();
     ///     options.projection = Some(vec![prepared.schema().field(0).name().clone()]);
     ///     let mut reader = prepared.scan(options).await?;
@@ -78,24 +71,24 @@ impl PreparedSource {
         A::Request: Clone + Sync + ReadOptionsProvider + 'static,
     {
         request.read_options_mut().projection = None;
-        let options = request.read_options().clone();
-        let reader = accessor.open(request.clone()).await?;
-        let metadata = reader.metadata().clone();
+        let batch_size = request.read_options().batch_size;
+        let accessor = Arc::new(accessor);
+        let bound = BoundSource::bind(accessor.clone(), request.clone()).await?;
         Ok(Self {
             selection: Box::new(Selection { accessor, request }),
-            metadata,
-            cached_reader: Mutex::new(Some(CachedReader { options, reader })),
+            bound,
+            batch_size,
         })
     }
 
     /// Complete metadata established by preparation, without polling rows.
     pub fn metadata(&self) -> &RecordMetadata {
-        &self.metadata
+        self.bound.metadata()
     }
 
     /// Complete unprojected schema against which every scan is validated.
     pub fn schema(&self) -> SchemaRef {
-        self.metadata.schema.clone()
+        self.bound.schema()
     }
 
     /// Open an independent scan with execution-time batch size and projection.
@@ -107,29 +100,11 @@ impl PreparedSource {
     /// source. Both opened metadata and emitted batches must match the projected
     /// bound schema, including schema metadata; drift returns `Decode`.
     pub async fn scan(&self, options: ReadOptions) -> Result<Box<dyn RecordReader>> {
-        let (schema, _) = options.resolve_projection(&self.metadata.schema)?;
-        let cached_reader = {
-            let mut cached_reader = self.cached_reader.lock().map_err(|_| {
-                Error::new(
-                    ErrorKind::Io,
-                    "prepared_source_scan",
-                    "prepared source state is poisoned",
-                )
-            })?;
-            if cached_reader.as_ref().is_some_and(|cached_reader| {
-                cached_reader.options.batch_size == options.batch_size
-                    && cached_reader.options.projection == options.projection
-            }) {
-                cached_reader
-                    .take()
-                    .map(|cached_reader| cached_reader.reader)
-            } else {
-                None
-            }
-        };
-        let reader = match cached_reader {
-            Some(reader) => reader,
-            None => self.selection.open(options).await?,
+        let (schema, _) = options.resolve_projection(&self.schema())?;
+        let reader = if options.projection.is_none() && options.batch_size == self.batch_size {
+            self.bound.reader().await?
+        } else {
+            self.selection.open(options).await?
         };
         validate_schema(&reader.metadata().schema, &schema)?;
         let capability = reader.capability();

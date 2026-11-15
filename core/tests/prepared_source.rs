@@ -3,8 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use arrow_array::{Int32Array, StringArray};
-use arrow_schema::{DataType, Field, Schema};
+use arrow_array::record_batch;
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ErrorKind, OrderRequirement, PreparedSource, ReadOptions, ReadRequest, RecordBatch,
@@ -20,18 +19,7 @@ struct Dataset {
 
 impl Dataset {
     fn new() -> Self {
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int32, false),
-            Field::new("label", DataType::Utf8, false),
-        ]));
-        let batch = RecordBatch::try_new(
-            schema,
-            vec![
-                Arc::new(Int32Array::from(vec![1, 2])),
-                Arc::new(StringArray::from(vec!["a", "b"])),
-            ],
-        )
-        .unwrap();
+        let batch = record_batch!(("id", Int32, [1, 2]), ("label", Utf8, ["a", "b"])).unwrap();
         Self {
             batch: Arc::new(Mutex::new(batch)),
             requests: Arc::default(),
