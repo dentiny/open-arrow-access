@@ -28,7 +28,7 @@ pub enum OuterCompression {
 /// keys are supplied separately in read requests. This helper does not resolve URIs.
 /// Enable the chosen format and decompression codecs through their existing features.
 /// This generic accessor does not add format-specific partition planning; use
-/// `file_scan_accessor` with an enabled file format when that capability is needed.
+/// [`file_scan_accessor`] when that capability is needed.
 ///
 /// ```no_run
 /// # #[cfg(feature = "format-json")]
@@ -81,9 +81,10 @@ fn file_storage(
 /// record layers such as [`crate::layers::ParallelReadLayer`]. Planning may
 /// inspect input; partition readers remain independently owned and lazy.
 ///
-/// Available when a `format-*` feature is enabled. The format must support scan
-/// planning over the composed byte accessor. Use [`OuterCompression::None`] for
-/// Parquet range reads; text inputs can use [`OuterCompression::Auto`] with the
+/// This utility is always available; enable the chosen format through its existing
+/// feature. The format must support scan planning over the composed byte accessor.
+/// Use [`OuterCompression::None`] for Parquet range reads; text inputs can use
+/// [`OuterCompression::Auto`] with the
 /// required decompression features. This helper does not schedule partitions.
 ///
 /// ```no_run
@@ -107,14 +108,6 @@ fn file_storage(
 /// # Ok(())
 /// # }
 /// ```
-#[cfg(any(
-    feature = "format-warc",
-    feature = "format-parquet",
-    feature = "format-json",
-    feature = "format-atif",
-    feature = "format-xml",
-    feature = "format-csv",
-))]
 pub fn file_scan_accessor<F>(
     operator: opendal::Operator,
     format: F,

@@ -91,9 +91,11 @@ the required `decompression-*` features too. Format-specific options stay on the
 typed format; projection, batch size and byte I/O options stay on `ReadRequest`.
 URI interpretation and credential selection remain application responsibilities.
 
-For native file partitions, use `file_scan_accessor(operator, format, compression)`
-with an enabled `format-*` feature. It returns a `FileAccessor` retaining the
-format's `ScanPlanner` implementation and `with_partition_options` configuration.
+For native file partitions, use `file_scan_accessor(operator, format, compression)`.
+The helper and `file_format` module are always available; concrete decoders remain
+opt-in through their `format-*` features. The helper returns a `FileAccessor`
+retaining the format's `ScanPlanner` implementation and `with_partition_options`
+configuration.
 Pass it to `PreparedSource::prepare_plannable` to bind a complete schema and plan
 later scans with execution-time projection and batch size, or compose it with
 `ParallelReadLayer`. The helper performs no I/O and creates no executor;
