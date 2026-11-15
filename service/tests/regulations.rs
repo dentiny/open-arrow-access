@@ -19,9 +19,14 @@ async fn record_retains_upstream_fields_and_attachment_representations() {
     downloads.file("/attachment.pdf", Bytes::from_static(b"%PDFsource"));
     let s = RegulationsService::with_connection(
         providers::connection(&api)
-            .with_header("X-Api-Key", "test")
+            .with_header("x-client", "retained")
             .unwrap(),
-    );
+    )
+    .with_key("old-key")
+    .unwrap()
+    .with_key("test")
+    .unwrap();
+    assert!(!format!("{s:?}").contains("old-key"));
     let files = s
         .record(RegulationsResource::Documents, "DOC-1")
         .await
@@ -30,6 +35,11 @@ async fn record_retains_upstream_fields_and_attachment_representations() {
         files.metadata().value()["data"]["attributes"]["withdrawn"],
         true
     );
+    for request in api.requests() {
+        assert_eq!(request.headers["x-api-key"], "test");
+        assert_eq!(request.headers["x-client"], "retained");
+        assert!(request.headers["x-api-key"].is_sensitive());
+    }
     assert!(downloads.requests().is_empty());
     byte_accessor::assert_read_contract(files, "attachment-000/file-000".into(), b"%PDFsource")
         .await
@@ -74,4 +84,16 @@ async fn record_rejects_mismatched_identity() {
             .kind(),
         ErrorKind::Decode
     );
+}
+
+#[test]
+fn validates_keys_on_custom_connections_before_io() {
+    let f = HttpFixture::new();
+    for key in ["", "invalid\r\nInjected: value"] {
+        let error = RegulationsService::with_connection(providers::connection(&f))
+            .with_key(key)
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+    assert!(f.requests().is_empty());
 }

@@ -82,3 +82,10 @@ available representation. Withdrawal/restriction metadata remains available for
 caller policy; no joins or full-text extraction are performed.
 
 Source: [Regulations.gov API](https://open.gsa.gov/api/regulationsgov/).
+
+## Custom connections
+
+Use `RegulationsService::with_connection(connection).with_key(key)?` when
+configuring a custom endpoint, transport or HTTP policy. This reuses the same
+key validation and authentication header as `new(key)`, preserves other
+connection settings, and replaces any previously configured API key.
