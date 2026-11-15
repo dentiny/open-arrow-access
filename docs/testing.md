@@ -34,7 +34,6 @@ crate whose behavior they exercise; the facade file-source smoke test lives in r
 | Compression codecs | [`decompression/tests/`](../decompression/tests/) |
 | ZIP entry decompression | [`decompression/tests/zip.rs`](../decompression/tests/zip.rs) |
 | Streaming and indexed TAR entries | [`decompression/tests/tar.rs`](../decompression/tests/tar.rs) |
-| Bound selections, typed requests and reader reuse | [`core/tests/bound_source.rs`](../core/tests/bound_source.rs) |
 | Document accessor | [`core/tests/document.rs`](../core/tests/document.rs) |
 | Field-name index and wide projections | [`core/tests/field_index.rs`](../core/tests/field_index.rs) |
 | Shared HTTP status classification | [`core/tests/error.rs`](../core/tests/error.rs) |
