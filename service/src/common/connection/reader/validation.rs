@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use http::{HeaderMap, HeaderValue, header};
 use open_arrow_access_core::Result;
+use opendal::raw::BytesContentRange;
 
 use super::error;
 
@@ -11,7 +12,7 @@ fn single<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     values.next().is_none().then_some(value)
 }
 
-fn identity(headers: &HeaderMap) -> bool {
+fn uses_identity_encoding(headers: &HeaderMap) -> bool {
     !headers.contains_key(header::CONTENT_ENCODING)
         || single(headers, "content-encoding")
             .is_some_and(|value| value.eq_ignore_ascii_case("identity"))
@@ -30,7 +31,7 @@ pub(super) fn strong_etag(headers: &HeaderMap) -> Option<HeaderValue> {
 }
 
 pub(super) fn supports_ranges(headers: &HeaderMap) -> bool {
-    identity(headers)
+    uses_identity_encoding(headers)
         && single(headers, "accept-ranges").is_some_and(|value| value.eq_ignore_ascii_case("bytes"))
 }
 
@@ -40,7 +41,7 @@ pub(super) fn validate_response(
     length: u64,
     etag: Option<&HeaderValue>,
 ) -> Result<()> {
-    if !identity(headers) {
+    if !uses_identity_encoding(headers) {
         return Err(error::decode(
             "HTTP range response changed content encoding",
         ));
@@ -52,18 +53,11 @@ pub(super) fn validate_response(
             "HTTP object version changed during range reads",
         ));
     }
-    let parsed = single(headers, "content-range")
-        .and_then(|value| value.strip_prefix("bytes "))
-        .and_then(|value| value.split_once('/'))
-        .and_then(|(bounds, total)| {
-            let (start, end) = bounds.split_once('-')?;
-            Some((
-                start.parse::<u64>().ok()?,
-                end.parse::<u64>().ok()?,
-                total.parse::<u64>().ok()?,
-            ))
-        });
-    if parsed != Some((range.start, range.end - 1, length)) {
+    let expected = BytesContentRange::default()
+        .with_range(range.start, range.end - 1)
+        .with_size(length);
+    let parsed = single(headers, "content-range").and_then(|value| value.parse().ok());
+    if parsed != Some(expected) {
         return Err(error::decode(
             "HTTP Content-Range does not match the requested range and object length",
         ));

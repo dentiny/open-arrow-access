@@ -13,32 +13,7 @@ pub(crate) async fn collect(
     response: Response<HttpBody>,
     operation: &'static str,
 ) -> Result<Bytes> {
-    let mut body = BodyReader::new(response, operation)?;
-    let Some(first) = body.next().await? else {
-        return Ok(Bytes::new());
-    };
-    // Validate EOF before returning a single buffer, preserving framing errors.
-    let Some(second) = body.next().await? else {
-        return Ok(first.to_bytes());
-    };
-    // Content-Length is an allocation hint, never an unbounded reservation.
-    // Wait for actual data before reserving for a possibly stale large header.
-    let capacity = body
-        .content_length()
-        .unwrap_or(0)
-        .min(MAX_INITIAL_BODY_CAPACITY) as usize;
-    let mut bytes = Vec::with_capacity(capacity);
-    for buffer in [first, second] {
-        for part in buffer {
-            bytes.extend_from_slice(&part);
-        }
-    }
-    while let Some(buffer) = body.next().await? {
-        for part in buffer {
-            bytes.extend_from_slice(&part);
-        }
-    }
-    Ok(bytes.into())
+    BodyReader::new(response, operation)?.collect().await
 }
 
 /// Read and validate response framing for both buffered and streaming consumers.
@@ -54,6 +29,50 @@ impl BodyReader {
             body: response.into_body(),
             length,
         })
+    }
+
+    /// Require exact framing even when the server omits Content-Length.
+    pub(crate) fn with_expected_length(mut self, expected: u64) -> Result<Self> {
+        if self
+            .length
+            .expected
+            .is_some_and(|length| length != expected)
+        {
+            return Err(error::body_error(
+                self.length.operation,
+                "unexpected Content-Length",
+            ));
+        }
+        self.length.expected = Some(expected);
+        Ok(self)
+    }
+
+    pub(crate) async fn collect(mut self) -> Result<Bytes> {
+        let Some(first) = self.next().await? else {
+            return Ok(Bytes::new());
+        };
+        // Validate EOF before returning a single buffer, preserving framing errors.
+        let Some(second) = self.next().await? else {
+            return Ok(first.to_bytes());
+        };
+        // Content-Length is an allocation hint, never an unbounded reservation.
+        // Wait for actual data before reserving for a possibly stale large header.
+        let capacity = self
+            .content_length()
+            .unwrap_or(0)
+            .min(MAX_INITIAL_BODY_CAPACITY) as usize;
+        let mut bytes = Vec::with_capacity(capacity);
+        for buffer in [first, second] {
+            for part in buffer {
+                bytes.extend_from_slice(&part);
+            }
+        }
+        while let Some(buffer) = self.next().await? {
+            for part in buffer {
+                bytes.extend_from_slice(&part);
+            }
+        }
+        Ok(bytes.into())
     }
 
     pub(crate) fn content_length(&self) -> Option<u64> {

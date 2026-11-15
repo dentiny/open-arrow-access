@@ -1,12 +1,12 @@
 use std::ops::Range;
 
-use futures::stream;
+use futures::{TryStreamExt, stream};
 use http::{HeaderValue, Request, StatusCode, header};
 use open_arrow_access_core::{
     ByteMetadata, ByteReadOptions, ByteReader, Bytes, Capability, Error, ErrorKind, Reader, Result,
     StreamReader, async_trait, validate_byte_range,
 };
-use opendal::Buffer;
+use opendal::{Buffer, BytesRange};
 use url::Url;
 
 use super::{Connection, error, transport::AuthScope};
@@ -65,24 +65,17 @@ pub(super) async fn open(
         version,
     };
     let ranges = ranges && metadata.content_length.is_some();
-    let state = (body, Buffer::new(), Bytes::new());
-    let chunks = stream::try_unfold(
-        state,
-        move |(mut body, mut parts, mut pending)| async move {
-            while pending.is_empty() {
-                if let Some(part) = parts.next() {
-                    pending = part;
-                    continue;
-                }
-                let Some(buffer) = body.next().await? else {
-                    return Ok(None);
-                };
-                parts = buffer;
-            }
-            let chunk = pending.split_to(pending.len().min(chunk_size));
-            Ok(Some((chunk, (body, parts, pending))))
-        },
-    );
+    let chunks = stream::try_unfold(body, |mut body| async move {
+        Ok::<_, Error>(body.next().await?.map(|buffer| (buffer, body)))
+    })
+    .map_ok(move |buffer| {
+        stream::iter(buffer.flat_map(move |part| {
+            Buffer::from(part)
+                .chunks(chunk_size)
+                .map(|chunk| Ok(chunk.to_bytes()))
+        }))
+    })
+    .try_flatten();
     Ok(Box::new(HttpReader {
         sequential: Box::new(StreamReader::new(chunks, metadata)),
         connection,
@@ -138,7 +131,7 @@ impl ByteReader for HttpReader {
         let mut request = request(&self.connection, &self.url)?;
         request.headers_mut().insert(
             header::RANGE,
-            HeaderValue::from_str(&format!("bytes={}-{}", range.start, range.end - 1))
+            HeaderValue::from_str(&BytesRange::from(range.clone()).to_header())
                 .expect("valid range header"),
         );
         if let Some(etag) = &self.etag {
@@ -163,30 +156,9 @@ impl ByteReader for HttpReader {
             }
         }
         validation::validate_response(response.headers(), &range, length, self.etag.as_ref())?;
-        let expected = range.end - range.start;
-        let mut body = BodyReader::new(response, error::OP)?;
-        if body
-            .content_length()
-            .is_some_and(|length| length != expected)
-        {
-            return Err(error::decode(
-                "HTTP range Content-Length does not match the requested range",
-            ));
-        }
-        let mut bytes = Vec::new();
-        while let Some(buffer) = body.next().await? {
-            if buffer.len() as u64 > expected - bytes.len() as u64 {
-                return Err(error::decode("HTTP range body exceeds the requested range"));
-            }
-            for part in buffer {
-                bytes.extend_from_slice(&part);
-            }
-        }
-        if bytes.len() as u64 != expected {
-            return Err(error::decode(
-                "HTTP range body length does not match the requested range",
-            ));
-        }
-        Ok(bytes.into())
+        BodyReader::new(response, error::OP)?
+            .with_expected_length(range.end - range.start)?
+            .collect()
+            .await
     }
 }

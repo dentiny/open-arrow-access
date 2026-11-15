@@ -98,6 +98,39 @@ async fn exact_ranges_preserve_cursor_aliases_signed_urls_and_io_options() {
 }
 
 #[tokio::test]
+async fn sequential_chunks_split_fragmented_buffers_without_empty_items() {
+    let f = HttpFixture::new();
+    f.handle(|_| {
+        let mut output = response(StatusCode::OK, Bytes::from_static(b"abcdefgh"));
+        *output.body_mut() = HttpBody::new(
+            stream::iter([Ok(Buffer::from(vec![
+                Bytes::new(),
+                Bytes::from_static(b"abcd"),
+                Bytes::new(),
+                Bytes::from_static(b"efgh"),
+            ]))]),
+            None,
+        );
+        Ok(output)
+    });
+    let mut reader = providers::connection(&f)
+        .open(
+            &format!("{}/file", f.endpoint()),
+            ByteReadOptions {
+                io_chunk_size: NonZeroUsize::new(2),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    for expected in [b"ab", b"cd", b"ef", b"gh"] {
+        assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), expected);
+    }
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(f.requests().len(), 1);
+}
+
+#[tokio::test]
 async fn unsupported_or_unknown_representations_remain_sequential() {
     for case in ["absent", "none", "unknown-length", "encoded"] {
         let f = HttpFixture::new();
@@ -145,6 +178,9 @@ async fn malformed_or_changed_partial_responses_are_rejected() {
         "bounds",
         "total",
         "wildcard",
+        "malformed",
+        "overflow",
+        "reversed",
         "duplicate",
         "short",
         "long",
@@ -178,6 +214,16 @@ async fn malformed_or_changed_partial_responses_are_rejected() {
                         output
                             .headers_mut()
                             .insert("content-range", "bytes 2-3/*".parse().unwrap());
+                    }
+                    "malformed" | "overflow" | "reversed" => {
+                        let value = match case {
+                            "malformed" => "bytes invalid/8",
+                            "overflow" => "bytes 2-18446744073709551615/8",
+                            _ => "bytes 3-2/8",
+                        };
+                        output
+                            .headers_mut()
+                            .insert("content-range", value.parse().unwrap());
                     }
                     "duplicate" => {
                         output
