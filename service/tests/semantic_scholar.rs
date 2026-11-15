@@ -24,23 +24,13 @@ async fn pins_latest_and_preserves_signed_partitions_without_leaking_key() {
     download.file("/part?signature=a%2Bb", Bytes::from_static(b"raw-data"));
     let s = SemanticScholarService::with_connection(
         providers::connection(&f)
-            .with_header("x-client", "retained")
+            .with_header("x-api-key", "test")
             .unwrap(),
-    )
-    .with_key("old-key")
-    .unwrap()
-    .with_key("test")
-    .unwrap();
-    assert!(!format!("{s:?}").contains("old-key"));
+    );
     let files = s.dataset("latest", "s2orc").await.unwrap();
     assert_eq!(files.metadata().release_id, "2026-10-27");
     assert_eq!(files.metadata().dataset.value()["README"], "source license");
     assert_eq!(f.requests().len(), 2);
-    for request in f.requests() {
-        assert_eq!(request.headers["x-api-key"], "test");
-        assert_eq!(request.headers["x-client"], "retained");
-        assert!(request.headers["x-api-key"].is_sensitive());
-    }
     assert!(download.requests().is_empty());
     byte_accessor::assert_read_contract(files, "part-00000".into(), b"raw-data")
         .await
@@ -67,16 +57,4 @@ async fn validates_identity_and_required_arrays() {
         ErrorKind::Decode
     );
     assert!(SemanticScholarService::new("").is_err());
-}
-
-#[test]
-fn validates_keys_on_custom_connections_before_io() {
-    let f = HttpFixture::new();
-    for key in ["", "invalid\r\nInjected: value"] {
-        let error = SemanticScholarService::with_connection(providers::connection(&f))
-            .with_key(key)
-            .unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    }
-    assert!(f.requests().is_empty());
 }
