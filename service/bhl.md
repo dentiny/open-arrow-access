@@ -18,6 +18,10 @@ Enable facade feature `service-bhl`. See [example setup](README.md#example-setup
 
 `BhlOperation` covers title/item/page/part metadata, collections and statistics.
 Use `new(Some(key))` for API v3 calls or `new(None)` for the public bulk export.
+For custom endpoints or transports, use
+`BhlService::with_services(connection, figshare).with_key(key)?` to reuse API key
+validation and query authentication. This replaces any earlier `apikey` value
+while retaining both configured connections, including the public Figshare export.
 Item files are named `text`, `pdf`, `images` when their URLs are available.
 Bulk-export files retain Figshare filenames. Both paths expose sequential original
 bytes and complete parsed metadata; they do not produce Arrow rows.
