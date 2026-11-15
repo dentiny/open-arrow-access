@@ -1,6 +1,6 @@
 //! Bind a provider's validated manifest to lazy HTTP file access.
 
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::{Error, Result};
 use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 use serde::de::DeserializeOwned;
 use url::Url;
@@ -86,13 +86,7 @@ impl HttpFileService {
     }
 
     pub(crate) fn with_token(mut self, token: &str) -> Result<Self> {
-        if token.is_empty() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                self.operation,
-                "bearer token must not be empty",
-            ));
-        }
+        super::validation::validate_empty_token(token, self.operation)?;
         super::validation::bearer_header(token, self.operation)?;
         self.token = Some(token.to_owned());
         Ok(self)

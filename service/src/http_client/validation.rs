@@ -1,4 +1,4 @@
-use open_arrow_access_core::Result;
+use open_arrow_access_core::{Error, ErrorKind, Result};
 use std::time::{Duration, SystemTime};
 
 use super::error::invalid_origin;
@@ -42,6 +42,17 @@ pub(super) fn retry_after(headers: &http::HeaderMap, now: SystemTime) -> Option<
             .duration_since(now)
             .unwrap_or_default(),
     )
+}
+
+pub(super) fn validate_empty_token(token: &str, operation: &'static str) -> Result<()> {
+    if token.is_empty() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            operation,
+            "bearer token must not be empty",
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn bearer_header(token: &str, operation: &'static str) -> Result<http::HeaderValue> {
