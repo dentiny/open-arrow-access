@@ -139,3 +139,109 @@ async fn preserves_logical_names_without_path_validation() {
         assert_eq!(http.requests().len(), 1);
     }
 }
+
+#[derive(Default)]
+struct DataverseFixture {
+    http: HttpFixture,
+}
+
+impl DataverseFixture {
+    fn service(&self) -> DataverseService {
+        DataverseService::new(self.http.endpoint())
+            .unwrap()
+            .with_context(opendal::OperationContext::new())
+    }
+}
+
+#[tokio::test]
+async fn authenticates_metadata_and_restricted_original_reads() {
+    for (authenticate, header, value) in [
+        (
+            DataverseService::with_token as fn(DataverseService, &str) -> _,
+            "x-dataverse-key",
+            "test-secret",
+        ),
+        (
+            DataverseService::with_bearer_token,
+            "authorization",
+            "Bearer test-secret",
+        ),
+    ] {
+        let fixture = DataverseFixture::default();
+        let http = &fixture.http;
+        http.respond(
+            METADATA,
+            StatusCode::OK,
+            fixture!("dataverse", "restricted.json").await,
+        );
+        http.file(
+            "/api/access/datafile/102?format=original",
+            b"ORIGINAL".to_vec(),
+        );
+        let service = authenticate(fixture.service(), "test-secret").unwrap();
+        assert!(!format!("{service:?}").contains("test-secret"));
+        let dataset = service.dataset(PID, "1.0").await.unwrap();
+        let mut reader = dataset.open("table.tab".into()).await.unwrap();
+        assert_eq!(reader.read_range(1..4).await.unwrap().as_ref(), b"RIG");
+        assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"ORIGINAL");
+        for request in http.requests() {
+            assert_eq!(request.headers[header], value);
+            assert!(!request.path.contains("test-secret"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn credentials_follow_same_origin_redirects_but_never_return_after_leaving() {
+    use open_arrow_access_test_support::http::{file_response, response};
+    let fixture = DataverseFixture::default();
+    let http = &fixture.http;
+    let other = HttpFixture::new();
+    let destination = other.endpoint().to_owned();
+    http.respond(
+        METADATA,
+        StatusCode::OK,
+        fixture!("dataverse", "restricted.json").await,
+    );
+    http.handle(move |request| {
+        if request.uri().path() == "/returned" {
+            return Ok(file_response(&request, b"ORIGINAL".to_vec()));
+        }
+        let location = if request.uri().path() == "/api/access/datafile/102" {
+            "/same-origin".to_owned()
+        } else {
+            format!("{destination}/signed?signature=a%2Bb")
+        };
+        let mut redirect = response(StatusCode::TEMPORARY_REDIRECT, Vec::new());
+        redirect
+            .headers_mut()
+            .insert("location", location.parse().unwrap());
+        Ok(redirect)
+    });
+    let origin = http.endpoint().to_owned();
+    other.handle(move |_| {
+        let mut redirect = response(StatusCode::FOUND, Vec::new());
+        redirect
+            .headers_mut()
+            .insert("location", format!("{origin}/returned").parse().unwrap());
+        Ok(redirect)
+    });
+    let dataset = fixture
+        .service()
+        .with_token("test-secret")
+        .unwrap()
+        .dataset(PID, "1.0")
+        .await
+        .unwrap();
+    let mut reader = dataset.open("table.tab".into()).await.unwrap();
+    assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"ORIGINAL");
+    let requests = http.requests();
+    let same_origin = requests.iter().find(|r| r.path == "/same-origin").unwrap();
+    assert_eq!(same_origin.headers["x-dataverse-key"], "test-secret");
+    let returned = requests.iter().find(|r| r.path == "/returned").unwrap();
+    assert!(!returned.headers.contains_key("x-dataverse-key"));
+    let external = other.requests();
+    assert_eq!(external.len(), 1);
+    assert_eq!(external[0].path, "/signed?signature=a%2Bb");
+    assert!(!external[0].headers.contains_key("x-dataverse-key"));
+}
