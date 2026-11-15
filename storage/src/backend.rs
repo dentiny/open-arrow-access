@@ -26,6 +26,7 @@ const MAX_FETCH_RANGES: usize = 512;
 #[derive(Clone, Debug)]
 pub struct OpenDalAccessor {
     operator: Operator,
+    http_concurrency_limit: crate::HttpConcurrencyLimitLayer,
     chunk_size: NonZeroUsize,
     content_lengths: Option<Arc<HashMap<String, u64>>>,
 }
@@ -36,20 +37,29 @@ impl OpenDalAccessor {
         Ok(Self::new(config.apply(operator)?))
     }
 
+    /// Limit this accessor and its clones to 32 ongoing HTTP requests by default.
+    /// Independently constructed accessors have separate budgets.
     pub fn new(operator: Operator) -> Self {
         Self {
             operator,
+            http_concurrency_limit: crate::HttpConcurrencyLimitLayer::default(),
             chunk_size: DEFAULT_OUTPUT_CHUNK_SIZE,
             content_lengths: None,
         }
     }
 
-    /// Share one HTTP request budget across this accessor's readers and clones.
+    /// Replace the default HTTP request budget for this accessor's readers and clones.
     /// Pass clones of the same limiter to other accessors or provider connections
     /// to include their requests in that budget. Per-reader I/O settings remain separate.
     pub fn with_http_concurrency_limit(mut self, limit: crate::HttpConcurrencyLimitLayer) -> Self {
-        self.operator = self.operator.layer(limit);
+        self.http_concurrency_limit = limit;
         self
+    }
+
+    fn operator(&self) -> Operator {
+        self.operator
+            .clone()
+            .layer(self.http_concurrency_limit.clone())
     }
 
     pub fn with_content_lengths(
@@ -75,7 +85,7 @@ impl OpenDalAccessor {
             return Ok(*len);
         }
         let metadata = self
-            .operator
+            .operator()
             .stat(path)
             .await
             .map_err(|e| map_error("stat", path, e))?;
@@ -110,7 +120,7 @@ impl Accessor for OpenDalAccessor {
         let len = self.content_length(path).await?;
         // Share a budget across OpenDAL's stream/fetch queues so interleaved
         // range reads cannot multiply sequential prefetch concurrency.
-        let mut operator = self.operator.clone();
+        let mut operator = self.operator();
         if options.io_concurrency.get() > 1 {
             operator = operator.layer(ReaderBudget(options.io_concurrency.get()));
         }
@@ -154,7 +164,7 @@ impl ByteAccessor for OpenDalAccessor {
             format!("{}/", path.trim_end_matches('/'))
         };
         let lister = self
-            .operator
+            .operator()
             .lister_with(&path)
             .recursive(request.recursive)
             .await
