@@ -11,7 +11,7 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability,
     Result, async_trait,
 };
-use open_arrow_access_storage::StorageConfig;
+use open_arrow_access_storage::{HttpConcurrencyLimitLayer, StorageConfig};
 use opendal::{Buffer, HttpTransporter, OperationContext};
 use url::Url;
 
@@ -24,6 +24,7 @@ pub struct Connection {
     pub(super) headers: HeaderMap,
     pub(super) query: Vec<(String, String)>,
     client: HttpClient,
+    http_concurrency_limit: Option<HttpConcurrencyLimitLayer>,
 }
 impl std::fmt::Debug for Connection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -35,8 +36,8 @@ impl std::fmt::Debug for Connection {
 impl Connection {
     pub fn new(origin: &str) -> Result<Self> {
         let origin = crate::http_client::resolve_origin(origin, error::OP)?;
-        let context = transport::follow_redirects(OperationContext::new().with_http_transport(
-            HttpTransporter::new(crate::http_client::new_single_hop_transport()?),
+        let context = OperationContext::new().with_http_transport(HttpTransporter::new(
+            crate::http_client::new_single_hop_transport()?,
         ));
         Ok(Self {
             origin,
@@ -46,14 +47,32 @@ impl Connection {
                 context,
                 config: Default::default(),
             },
+            http_concurrency_limit: None,
         })
     }
     /// Override transport, for custom TLS/proxy configuration or deterministic tests.
     /// The inner transport must return single-hop responses; redirects are followed by the provider transport.
     pub fn with_context(mut self, context: OperationContext) -> Self {
-        self.client.context = transport::follow_redirects(context);
+        self.client.context = context;
         self
     }
+    /// Share a total HTTP request budget with other connections or OpenDAL operators.
+    /// Clones, file downloads and context replacements retain the same budget.
+    pub fn with_http_concurrency_limit(mut self, limit: HttpConcurrencyLimitLayer) -> Self {
+        self.http_concurrency_limit = Some(limit);
+        self
+    }
+
+    fn http_client(&self) -> HttpClient {
+        let mut client = self.client.clone();
+        if let Some(limit) = &self.http_concurrency_limit {
+            let transport = limit.wrap(client.context.http_transport().clone());
+            client.context = client.context.with_http_transport(transport);
+        }
+        client.context = transport::follow_redirects(client.context);
+        client
+    }
+
     /// Configure retries and per-attempt/stream-read timeouts for this connection.
     /// Preserved when replacing the transport with `with_context`.
     pub fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
@@ -105,14 +124,15 @@ impl Connection {
     /// Read small XML/catalogue metadata; large file content should use `open`.
     pub async fn bytes(&self, url: Url, accept: &str) -> Result<Bytes> {
         let url = resolve_download_url(url.as_str())?;
-        self.client
+        self.http_client()
             .bytes(self.request(&url, accept)?, error::OP)
             .await
     }
     /// Open an absolute URL, preserving encoded paths and signatures byte-for-byte.
-    /// The sequential response is retained lazily. Readers additionally support exact
-    /// ranges when it declares `Accept-Ranges: bytes`, an identity representation and
-    /// a known length. Strong ETags pin subsequent range requests to that version.
+    /// Readers support exact ranges for a known identity length with
+    /// `Accept-Ranges: bytes`. Strong ETags pin requests to that version.
+    /// With `with_http_concurrency_limit`, range-capable inputs also use bounded
+    /// range reads for sequential output, avoiding an idle response holding the only permit.
     pub async fn open(&self, url: &str, options: ByteReadOptions) -> Result<Box<dyn ByteReader>> {
         reader::open(self.clone(), resolve_download_url(url)?, options).await
     }

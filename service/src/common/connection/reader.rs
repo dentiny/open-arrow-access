@@ -35,10 +35,8 @@ pub(super) async fn open(
         header::ACCEPT_ENCODING,
         HeaderValue::from_static("identity"),
     );
-    let response = connection
-        .client
-        .response(request.clone(), error::OP)
-        .await?;
+    let client = connection.http_client();
+    let response = client.response(request.clone(), error::OP).await?;
     let headers = response.headers();
     let version = headers
         .get(header::ETAG)
@@ -58,24 +56,61 @@ pub(super) async fn open(
         version,
     };
     let range_length = metadata.content_length.filter(|_| ranges);
-    let chunks = stream::try_unfold(body, |mut body| async move {
-        Ok::<_, Error>(body.next().await?.map(|buffer| (buffer, body)))
-    })
-    .map_ok(move |buffer| {
-        stream::iter(buffer.flat_map(move |part| {
-            Buffer::from(part)
-                .chunks(chunk_size)
-                .map(|chunk| Ok(chunk.to_bytes()))
-        }))
-    })
-    .try_flatten();
+    let chunks = sequential_chunks(
+        body,
+        &client,
+        &request,
+        range_length.filter(|_| connection.http_concurrency_limit.is_some()),
+        chunk_size,
+    );
+    let chunks = chunks
+        .map_ok(move |buffer| {
+            stream::iter(buffer.flat_map(move |part| {
+                Buffer::from(part)
+                    .chunks(chunk_size)
+                    .map(|chunk| Ok(chunk.to_bytes()))
+            }))
+        })
+        .try_flatten();
     Ok(Box::new(HttpReader {
         sequential: StreamReader::new(chunks, metadata),
-        client: connection.client,
+        client,
         request,
         range_length,
         io_concurrency: options.io_concurrency,
     }))
+}
+
+fn sequential_chunks(
+    body: BodyReader,
+    client: &HttpClient,
+    request: &Request<Buffer>,
+    chunked_range_length: Option<u64>,
+    chunk_size: usize,
+) -> futures::stream::BoxStream<'static, Result<Buffer>> {
+    if let Some(length) = chunked_range_length {
+        // Do not reserve the shared budget while the reader is idle: each
+        // bounded range finishes its response before handing bytes to the caller.
+        drop(body);
+        let client = client.clone();
+        let request = request.clone();
+        Box::pin(stream::try_unfold(0, move |offset| {
+            let client = client.clone();
+            let request = request.clone();
+            async move {
+                if offset == length {
+                    return Ok(None);
+                }
+                let end = offset + (length - offset).min(chunk_size as u64);
+                let bytes = read_http_range(&client, &request, Some(length), offset..end).await?;
+                Ok(Some((Buffer::from(bytes), end)))
+            }
+        }))
+    } else {
+        Box::pin(stream::try_unfold(body, |mut body| async move {
+            Ok::<_, Error>(body.next().await?.map(|buffer| (buffer, body)))
+        }))
+    }
 }
 
 struct HttpReader<R> {

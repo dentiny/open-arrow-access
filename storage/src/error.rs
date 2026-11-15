@@ -26,6 +26,10 @@ pub(crate) fn invalid_timeouts() -> Error {
     invalid_config("storage timeouts must be positive")
 }
 
+pub(crate) fn invalid_http_concurrency() -> Error {
+    invalid_config("HTTP concurrency must be positive and not exceed Semaphore::MAX_PERMITS")
+}
+
 fn invalid_config(message: &'static str) -> Error {
     Error::new(ErrorKind::InvalidInput, "configure_storage", message)
 }

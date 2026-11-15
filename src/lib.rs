@@ -17,20 +17,14 @@ mod attachment;
 pub use attachment::{AttachmentFormat, AttachmentOptions, open_attachment_source};
 
 mod file_source;
-pub use file_source::{FileSource, OuterCompression, open_file_source};
+pub use file_source::{
+    FileSource, OuterCompression, file_accessor, file_scan_accessor, open_file_source,
+};
 
 pub use open_arrow_access_service as service;
 
 pub use open_arrow_access_decompression as decompression;
 
-#[cfg(any(
-    feature = "format-warc",
-    feature = "format-parquet",
-    feature = "format-json",
-    feature = "format-atif",
-    feature = "format-xml",
-    feature = "format-csv",
-))]
 pub use open_arrow_access_file_format as file_format;
 
 #[cfg(feature = "dataset-directory")]

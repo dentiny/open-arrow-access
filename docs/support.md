@@ -143,6 +143,7 @@ one metadata page at a time; callers own continuation, pacing, and retry policy.
 | `Layer<A>` / `AccessorExt::layer` | Implemented | Type-preserving accessor wrappers with explicit capabilities |
 | `DecompressionLayer<C>` | Implemented | Streaming byte transformation; range capability removed |
 | Per-reader byte I/O concurrency | Implemented | `ByteReadOptions`; ordered output, default concurrency one |
+| Shared HTTP request concurrency | Implemented | Clone one `HttpConcurrencyLimitLayer` across operators/transports; permits cover response bodies |
 | Generated columns | Implemented | `SchemaEvolutionLayer` SQL/Expr additions and final projection; [source projection pushdown with a supplied schema](generated-columns.md) |
 | Metrics, timeout, read budgets | Planned | Observation and resource policies |
 | Partition planning / parallel scans | Planned | Source-aware work units and bounded execution |

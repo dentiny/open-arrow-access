@@ -98,17 +98,16 @@ decompression-tar = ["open-arrow-access-decompression/tar"]
 decompression-zip = ["open-arrow-access-decompression/zip"]
 decompression-zstd = ["open-arrow-access-decompression/zstd"]
 default = []
-format-atif = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/atif"]
-format-csv = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/csv"]
-format-json = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/json"]
-format-parquet = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/parquet"]
+format-atif = ["open-arrow-access-file-format/atif"]
+format-csv = ["open-arrow-access-file-format/csv"]
+format-json = ["open-arrow-access-file-format/json"]
+format-parquet = ["open-arrow-access-file-format/parquet"]
 format-parquet-zstd = ["format-parquet", "open-arrow-access-file-format/parquet-zstd"]
 format-parquet-lz4 = ["format-parquet", "open-arrow-access-file-format/parquet-lz4"]
 format-parquet-gzip = ["format-parquet", "open-arrow-access-file-format/parquet-gzip"]
 format-parquet-brotli = ["format-parquet", "open-arrow-access-file-format/parquet-brotli"]
-format-warc = ["dep:open-arrow-access-file-format", "open-arrow-access-file-format/warc"]
+format-warc = ["open-arrow-access-file-format/warc"]
 format-xml = [
-    "dep:open-arrow-access-file-format",
     "open-arrow-access-file-format/xml",
     "open-arrow-access-service/format-xml",
 ]
@@ -143,7 +142,7 @@ tokio = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-decompression.workspace = true
-open-arrow-access-file-format = { workspace = true, optional = true }
+open-arrow-access-file-format.workspace = true
 open-arrow-access-layers.workspace = true
 open-arrow-access-service.workspace = true
 open-arrow-access-storage.workspace = true

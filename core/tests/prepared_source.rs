@@ -6,9 +6,9 @@ use std::{
 use arrow_array::record_batch;
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ErrorKind, OrderRequirement, PreparedSource, ReadOptions, ReadRequest, RecordBatch,
-    RecordCapability, RecordMetadata, RecordReader, Result, StreamReader, async_trait,
-    project_batch,
+    Accessor, ErrorKind, OrderRequirement, PreparedSource, ReadOptions, ReadRequest, Reader,
+    RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan,
+    ScanPlanner, StreamReader, async_trait, project_batch,
 };
 
 #[derive(Clone)]
@@ -32,10 +32,12 @@ impl Accessor for Dataset {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
 
+    /// Advertise the dataset's fixed global-order contract.
     fn capability(&self) -> RecordCapability {
         RecordCapability::sequential(OrderRequirement::PreserveGlobal)
     }
 
+    /// Log this open and project the current batch into an independent reader.
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         self.requests.lock().unwrap().push(request.clone());
         let batch = self.batch.lock().unwrap().clone();
@@ -49,6 +51,30 @@ impl Accessor for Dataset {
             },
             OrderRequirement::PreserveGlobal,
         )))
+    }
+}
+
+#[async_trait]
+impl ScanPlanner for Dataset {
+    /// Expose two independent partitions without opening their readers.
+    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
+        let (schema, _) = request
+            .options
+            .resolve_projection(&self.batch.lock().unwrap().schema())?;
+        let partitions = (0..2)
+            .map(|_| {
+                let dataset = self.clone();
+                let request = request.clone();
+                Box::pin(async move { dataset.open(request).await }) as ScanPartition
+            })
+            .collect();
+        Ok(ScanPlan::new(
+            RecordMetadata {
+                schema,
+                source: Some(request.object),
+            },
+            partitions,
+        ))
     }
 }
 
@@ -132,4 +158,28 @@ async fn scan_rejects_schema_changes_after_preparation() {
         .err()
         .unwrap();
     assert_eq!(error.kind(), ErrorKind::Decode);
+}
+
+#[tokio::test]
+async fn prepared_source_retains_lazy_projected_partitions() {
+    let dataset = Dataset::new();
+    let prepared = PreparedSource::prepare_plannable(dataset.clone(), ReadRequest::new("dataset"))
+        .await
+        .unwrap();
+    let plan = prepared
+        .plan_scan(ReadOptions {
+            projection: Some(vec!["label".into()]),
+            ..ReadOptions::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(dataset.requests.lock().unwrap().len(), 1);
+    let mut reader = plan.into_reader();
+    for _ in 0..2 {
+        let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(batch.schema().field(0).name(), "label");
+        assert_eq!(batch.num_columns(), 1);
+    }
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(dataset.requests.lock().unwrap().len(), 3);
 }

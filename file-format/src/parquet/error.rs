@@ -1,5 +1,21 @@
 use open_arrow_access_core::{Error, ErrorKind};
 
+pub(super) fn parquet_statistics_input_error() -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        "inspect_parquet_statistics",
+        "Parquet statistics require range reads and a known byte length",
+    )
+}
+
+pub(super) fn parquet_statistics_row_count_error() -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "inspect_parquet_statistics",
+        "Parquet footer contains a negative row count",
+    )
+}
+
 pub(super) fn parquet_partition_input_error() -> Error {
     Error::new(
         ErrorKind::Unsupported,

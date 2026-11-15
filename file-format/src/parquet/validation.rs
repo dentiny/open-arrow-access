@@ -1,6 +1,12 @@
 use open_arrow_access_core::{ByteMetadata, ByteReader, Error, Result};
 
-use super::error::{parquet_partition_changed, parquet_partition_input_error};
+use super::error::{
+    parquet_partition_changed, parquet_partition_input_error, parquet_statistics_row_count_error,
+};
+
+pub(super) fn validate_statistics_row_count(rows: i64) -> Result<u64> {
+    u64::try_from(rows).map_err(|_| parquet_statistics_row_count_error())
+}
 
 pub(super) fn validate_input(
     input: &dyn ByteReader,
