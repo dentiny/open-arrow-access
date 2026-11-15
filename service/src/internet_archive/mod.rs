@@ -10,7 +10,7 @@ use serde::{Deserialize, Deserializer, de::Error as _};
 use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
 use crate::{ResolvedFileSet, file_manifest::FileSpec};
 use error::map_file_namespace_error;
-use validation::{extract_items_and_validate, validate_identifier};
+use validation::{extract_items_and_validate, validate_credentials, validate_identifier};
 
 const CONFIGURE: &str = "configure_internet_archive";
 const RESOLVE: &str = "resolve_internet_archive";
@@ -33,17 +33,7 @@ impl InternetArchiveService {
     /// Keys are validated before I/O and omitted from Debug output and URLs.
     /// This does not grant access to items the account cannot read or borrow books.
     pub fn with_credentials(mut self, access_key: &str, secret_key: &str) -> Result<Self> {
-        for key in [access_key, secret_key] {
-            if key.is_empty()
-                || key
-                    .bytes()
-                    .any(|b| b.is_ascii_whitespace() || b.is_ascii_control() || b == b':')
-            {
-                return Err(error::invalid(
-                    "expected nonempty Internet Archive access and secret keys without whitespace or colons",
-                ));
-            }
-        }
+        validate_credentials(access_key, secret_key)?;
         self.http = self
             .http
             .with_authorization(&format!("LOW {access_key}:{secret_key}"))?;
