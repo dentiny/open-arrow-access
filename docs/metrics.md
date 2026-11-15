@@ -103,9 +103,13 @@ as if they represented the same quantity.
 
 ## Custom exporters
 
-Implement `metrics::MetricsExporter` and pass it to `MetricsLayer::new(exporter)`
+Exporter implementations live in the dedicated `metrics::exporter` module.
+Implement `metrics::exporter::MetricsExporter` and pass it to `MetricsLayer::new(exporter)`
 and `opendal_metrics_layer(exporter.clone())`. Its `record(MetricEvent)` receives
 counter increments, gauge deltas and observations. Clones must share the intended
 recording scope. Exporters execute synchronously on the read path and must be
 fast, nonblocking and non-panicking; network exporters should aggregate locally
 and arrange delivery outside read calls. The library does not own exporter tasks.
+
+The existing `metrics::{InMemoryExporter, MetricsExporter, MetricsSnapshot, ...}`
+re-exports remain available for convenience.
