@@ -68,3 +68,10 @@ The example prints one product file-page response, an available filename and
 its first original chunk. It does not expand ZIP files or convert patent XML.
 
 Source: [USPTO ODP API access](https://data.uspto.gov/apis/getting-started).
+
+## Custom connections
+
+Use `UsptoService::with_connection(connection).with_key(key)?` when
+configuring a custom endpoint, transport or HTTP policy. This reuses the same
+key validation and authentication header as `new(key)`, preserves other
+connection settings, and replaces any previously configured API key.

@@ -10,10 +10,15 @@ pub struct UsptoService {
 }
 impl UsptoService {
     pub fn new(key: &str) -> Result<Self> {
+        Self::with_connection(Connection::new("https://api.uspto.gov")?).with_key(key)
+    }
+
+    /// Set or replace the API key while preserving the configured connection.
+    /// The key is validated locally and sent as `X-API-KEY` only within its origin.
+    pub fn with_key(mut self, key: &str) -> Result<Self> {
         validation::validate_key(key)?;
-        Ok(Self::with_connection(
-            Connection::new("https://api.uspto.gov")?.with_header("X-API-KEY", key)?,
-        ))
+        self.connection = self.connection.with_header("X-API-KEY", key)?;
+        Ok(self)
     }
 
     pub fn with_connection(connection: Connection) -> Self {
