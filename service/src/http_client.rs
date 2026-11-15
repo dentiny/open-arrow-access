@@ -124,6 +124,8 @@ impl HttpClient {
         request: Request<Buffer>,
         operation: &'static str,
     ) -> Result<open_arrow_access_core::Bytes> {
-        crate::http_body::collect(self.response(request, operation).await?, operation).await
+        let body =
+            crate::http_body::BodyReader::new(self.response(request, operation).await?, operation)?;
+        crate::http_body::collect(body).await
     }
 }

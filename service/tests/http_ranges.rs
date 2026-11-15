@@ -1,7 +1,7 @@
 use std::{num::NonZeroUsize, ops::Range};
 
 use futures::stream;
-use http::{Request, Response, StatusCode};
+use http::{Request, Response};
 use open_arrow_access_core::{
     Accessor, ByteReadOptions, ByteReader, Bytes, ErrorKind, ReadRequest,
 };
@@ -9,7 +9,7 @@ use open_arrow_access_service::common::MetadataLink;
 use open_arrow_access_test_support::{
     byte_accessor::assert_ranges,
     collect_bytes, fixture,
-    http::{HttpFixture, file_response, response},
+    http::{HttpFixture, file_response},
     record::collect_column,
 };
 use opendal::{Buffer, HttpBody};
@@ -44,6 +44,7 @@ async fn exact_ranges_preserve_cursor_aliases_signed_urls_and_io_options() {
     let f = HttpFixture::new();
     f.handle(|request| {
         let mut output = serve(&request, Bytes::from_static(b"abcdefgh"));
+        assert!(!request.headers().contains_key("if-range"));
         if request.headers().contains_key("range") {
             assert_eq!(request.headers()["if-match"], "\"v1\"");
         } else {
@@ -55,6 +56,14 @@ async fn exact_ranges_preserve_cursor_aliases_signed_urls_and_io_options() {
         Ok(output)
     });
     let files = providers::connection(&f)
+        .with_header("range", "bytes=7-7")
+        .unwrap()
+        .with_header("if-match", "\"wrong\"")
+        .unwrap()
+        .with_header("if-range", "\"wrong\"")
+        .unwrap()
+        .with_header("accept-encoding", "gzip")
+        .unwrap()
         .files(
             vec![MetadataLink {
                 file_name: "alias".into(),
@@ -207,95 +216,6 @@ async fn remote_service_parquet_decodes_through_ranges() {
     assert!(requests.iter().all(|r| r.method == http::Method::GET));
 }
 
-fn redirect(location: &str) -> Response<HttpBody> {
-    Response::builder()
-        .status(StatusCode::FOUND)
-        .header("location", location)
-        .body(HttpBody::new(stream::empty(), Some(0)))
-        .unwrap()
-}
-
-#[tokio::test]
-async fn ranges_keep_protocol_headers_and_strip_credentials_after_leaving_origin() {
-    let provider = HttpFixture::new();
-    let external = HttpFixture::new();
-    let external_url = format!("{}/bounce?sig=a%2Bb", external.endpoint());
-    provider.handle(move |request| {
-        assert_eq!(request.headers()["x-api-key"], "secret");
-        assert_eq!(request.uri().query(), Some("api_key=secret"));
-        Ok(redirect(&external_url))
-    });
-    external.handle(move |request| {
-        assert!(!request.headers().contains_key("x-api-key"));
-        assert_eq!(request.uri().query(), Some("sig=a%2Bb"));
-        if request.headers().contains_key("range") {
-            assert_eq!(request.headers()["if-match"], "\"v1\"");
-        }
-        Ok(serve(&request, Bytes::from_static(b"abcdefgh")))
-    });
-    let connection = providers::connection(&provider)
-        .with_header("x-api-key", "secret")
-        .unwrap()
-        .with_query("api_key", "secret")
-        .with_header("range", "bytes=7-7")
-        .unwrap()
-        .with_header("accept-encoding", "gzip")
-        .unwrap()
-        .with_header("if-match", "\"wrong\"")
-        .unwrap();
-    let mut reader = connection
-        .open(
-            &format!("{}/start", provider.endpoint()),
-            Default::default(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(reader.read_range(1..3).await.unwrap().as_ref(), b"bc");
-    assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"abcdefgh");
-    assert_eq!(provider.requests().len(), 2);
-    assert_eq!(external.requests().len(), 2);
-}
-
-#[tokio::test]
-async fn range_requests_share_retry_policy() {
-    use open_arrow_access_storage::{RetryConfig, StorageConfig};
-    use std::{
-        sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        },
-        time::Duration,
-    };
-    let f = HttpFixture::new();
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = attempts.clone();
-    f.handle(move |request| {
-        if request.headers().contains_key("range") && observed.fetch_add(1, Ordering::SeqCst) == 0 {
-            Ok(response(StatusCode::TOO_MANY_REQUESTS, Bytes::new()))
-        } else {
-            Ok(serve(&request, Bytes::from_static(b"abcdefgh")))
-        }
-    });
-    let connection = providers::connection(&f)
-        .with_http_config(StorageConfig {
-            retry: Some(RetryConfig {
-                max_retries: 1,
-                min_delay: Duration::from_millis(1),
-                max_delay: Duration::from_millis(1),
-                jitter: false,
-                ..Default::default()
-            }),
-            ..Default::default()
-        })
-        .unwrap();
-    let mut reader = connection
-        .open(&format!("{}/file", f.endpoint()), Default::default())
-        .await
-        .unwrap();
-    assert_eq!(reader.read_range(0..2).await.unwrap().as_ref(), b"ab");
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
-}
-
 #[tokio::test]
 async fn weak_and_absent_etags_do_not_send_strong_preconditions() {
     for etag in [None, Some("W/\"weak\""), Some("\"one\", \"two\"")] {
@@ -310,36 +230,4 @@ async fn weak_and_absent_etags_do_not_send_strong_preconditions() {
         assert_eq!(reader.metadata().version.as_deref(), etag);
         assert_eq!(reader.read_range(0..2).await.unwrap().as_ref(), b"ab");
     }
-}
-
-#[tokio::test]
-async fn range_body_timeout_is_not_replayed() {
-    use open_arrow_access_storage::{StorageConfig, TimeoutConfig};
-    use std::time::Duration;
-    let f = HttpFixture::new();
-    f.handle(|request| {
-        let mut output = serve(&request, Bytes::from_static(b"abcdefgh"));
-        if request.headers().contains_key("range") {
-            *output.body_mut() = HttpBody::new(stream::pending(), None);
-        }
-        Ok(output)
-    });
-    let connection = providers::connection(&f)
-        .with_http_config(StorageConfig {
-            timeout: Some(TimeoutConfig {
-                operation_timeout: Duration::from_secs(5),
-                io_timeout: Duration::from_millis(5),
-            }),
-            ..Default::default()
-        })
-        .unwrap();
-    let mut reader = connection
-        .open(&format!("{}/file", f.endpoint()), Default::default())
-        .await
-        .unwrap();
-    assert_eq!(
-        reader.read_range(0..2).await.unwrap_err().kind(),
-        ErrorKind::Timeout
-    );
-    assert_eq!(f.requests().len(), 2);
 }

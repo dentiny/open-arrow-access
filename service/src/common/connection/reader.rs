@@ -144,9 +144,8 @@ impl ByteReader for HttpReader {
         }
         let etag = self.request.headers().get(header::IF_MATCH);
         validation::validate_response(response.headers(), &range, length, etag)?;
-        BodyReader::new(response, error::OP)?
-            .with_expected_length(range.end - range.start)?
-            .collect()
-            .await
+        let body =
+            BodyReader::new(response, error::OP)?.with_expected_length(range.end - range.start)?;
+        crate::http_body::collect(body).await
     }
 }

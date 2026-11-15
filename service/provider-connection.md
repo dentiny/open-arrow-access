@@ -26,33 +26,24 @@ listing. A Connection implements `ByteAccessor` for direct byte-layer compositio
 
 ## Attachment range reads
 
-`open` retains the initial GET body for lazy sequential consumption; it does not
-issue a HEAD request or buffer the object. The accessor advertises potential
-range support. Each opened reader advertises `read_with_range` only when the
-response supplies `Accept-Ranges: bytes`, a known Content-Length and no
-non-identity Content-Encoding. Missing/`none` range advertisements and unknown
-lengths remain sequential. File requests use `Accept-Encoding: identity`.
+`open` keeps its initial GET body for lazy sequential reads, without a HEAD
+request or whole-object buffering. The reader supports `read_range` when the
+response advertises `Accept-Ranges: bytes`, a known Content-Length and identity
+encoding. Otherwise it remains sequential.
 
-`read_range(start..end)` uses a separate GET and leaves the sequential cursor
-unchanged, including after EOF. Empty valid ranges perform no I/O; invalid ranges
-fail locally. `read_ranges` retains request order and duplicates through the
-standard sequential fallback. A partial response must have status 206, an exact
-Content-Range (including the original total length), identity encoding and the
-exact requested body length. A server ignoring Range with HTTP 200 returns
-Unsupported; other HTTP failures preserve status and Retry-After metadata.
+Range GETs leave the sequential cursor unchanged, including after EOF. Responses
+must have status 206, matching Content-Range bounds/total, identity encoding and
+the exact requested body length. Ignored ranges (HTTP 200) return Unsupported;
+other HTTP failures retain status and Retry-After metadata. Empty valid ranges
+perform no I/O, and invalid ranges fail locally.
 
-The initial ETag is retained in `ByteMetadata::version`. A strong ETag becomes
-an `If-Match` precondition on every range request; changed/missing response validators are
-rejected. Weak or absent ETags provide no snapshot guarantee, even though range
-bounds and total length are still checked. Reopening a source is independent.
-Download-owned Range, If-Match, If-Range and Accept-Encoding settings take
-precedence over connection headers; provider authentication keeps its existing
-origin scope across redirects. Retry and timeout policies apply to range GETs
-and their bodies as well as the initial response.
+A strong initial ETag pins range requests with If-Match; changed or missing ETags
+are rejected. Weak/absent ETags provide no snapshot guarantee. Download-owned
+Range, If-Match, If-Range and Accept-Encoding headers override connection defaults;
+authentication, redirects, retries and timeouts use the existing connection policy.
 
-These readers allow native Parquet decoding directly through `RemoteFiles` on
-range-capable servers. Outer compression still removes native random access;
-there is no implicit whole-object materialization or seek emulation.
+This enables native Parquet decoding through `RemoteFiles` on range-capable
+servers. Outer compression still removes native random access.
 
 ## Usage and results
 
