@@ -91,7 +91,9 @@ impl HeaderTransport {
 
 impl std::fmt::Debug for HeaderTransport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HeaderTransport").finish_non_exhaustive()
+        f.debug_struct("HeaderTransport")
+            .field("token", &"<token>")
+            .finish_non_exhaustive()
     }
 }
 impl HttpTransport for HeaderTransport {
