@@ -735,6 +735,12 @@ async fn native_file_plans_share_one_budget_and_preserve_lazy_ordered_selection(
         plans.lock().unwrap().last().unwrap().object.locator(),
         "mismatch"
     );
+    let planned = plans.lock().unwrap().len();
+    assert_eq!(
+        values(accessor.open(FileSetRequest::new(["a"])).await.unwrap()).await,
+        [1, 2, 3]
+    );
+    assert_eq!(plans.lock().unwrap().len(), planned);
 }
 
 #[tokio::test]

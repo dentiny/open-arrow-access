@@ -88,31 +88,7 @@ where
     }
 
     async fn open(&self, request: FileSetRequest) -> Result<Box<dyn RecordReader>> {
-        if self.union_by_name {
-            let plan = super::union_by_name::plan(self.inner.clone(), None, request).await?;
-            return Ok(Box::new(plan.into_reader()));
-        }
-        let mut requests = request.into_requests();
-        let first = requests
-            .next()
-            .ok_or_else(|| empty_selection("open_file_set"))?;
-        let reader = self.inner.open(first).await?;
-        let metadata = RecordMetadata {
-            schema: reader.metadata().schema.clone(),
-            source: None,
-        };
-        let inner = self.inner.clone();
-        let first: ScanPartition = Box::pin(async move { Ok(reader) });
-        let later = requests.map(move |request| {
-            let inner = inner.clone();
-            let partition: ScanPartition = Box::pin(async move { inner.open(request).await });
-            Ok(partition)
-        });
-        let plan = ScanPlan::from_stream(
-            metadata,
-            stream::once(async { Ok(first) }).chain(stream::iter(later)),
-        )
-        .with_ordering(self.capability().ordering);
+        let plan = self.plan_files(request, None, "open_file_set").await?;
         Ok(Box::new(plan.into_reader_with_schema_error(
             super::error::schema_mismatch,
         )))
@@ -125,15 +101,27 @@ where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
 {
     async fn plan_scan(&self, request: FileSetRequest) -> Result<ScanPlan> {
+        self.plan_files(request, self.file_planner, "plan_file_set")
+            .await
+    }
+}
+
+impl<A> FileSetAccessor<A>
+where
+    A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
+{
+    async fn plan_files(
+        &self,
+        request: FileSetRequest,
+        file_planner: Option<FilePlanner<A>>,
+        operation: &'static str,
+    ) -> Result<ScanPlan> {
         if self.union_by_name {
-            return super::union_by_name::plan(self.inner.clone(), self.file_planner, request)
-                .await;
+            return super::union_by_name::plan(self.inner.clone(), file_planner, request).await;
         }
         let mut requests = request.into_requests();
-        let first = requests
-            .next()
-            .ok_or_else(|| empty_selection("plan_file_set"))?;
-        let first = match self.file_planner {
+        let first = requests.next().ok_or_else(|| empty_selection(operation))?;
+        let first = match file_planner {
             Some(plan_file) => plan_file(self.inner.clone(), first).await?,
             None => ScanPlan::whole_input(self.inner.open(first).await?),
         };
@@ -144,7 +132,7 @@ where
             source: None,
         };
         let inner = self.inner.clone();
-        if let Some(plan_file) = self.file_planner {
+        if let Some(plan_file) = file_planner {
             let schema = metadata.schema.clone();
             let later = stream::iter(requests).then(move |request| {
                 let inner = inner.clone();
