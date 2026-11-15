@@ -324,6 +324,29 @@ rows, or decoded bytes. Start with the [provider matrix](support.md#dataset-prov
 then follow its guide. Discovery does not imply that a provider downloads article
 content or supplies a text-extraction pipeline.
 
+## Cancel an open, plan or pending read
+
+`ReadCancellation` is a cloneable signal that can be triggered from a query
+interrupt handler. Wrap opening or planning futures with `run`, then wrap each
+returned record reader:
+
+```rust,ignore
+let cancellation = ReadCancellation::new();
+let interrupt = cancellation.clone();
+let prepared = cancellation.run(PreparedSource::prepare(accessor, request)).await?;
+let reader = cancellation.run(prepared.scan(options)).await?;
+let mut reader = cancellation.wrap_reader(reader);
+// The interrupt handler calls interrupt.cancel(), including during a pending next().
+```
+
+Cancellation returns `ErrorKind::Cancelled` and drops the pending future and
+reader. Subsequent reads return EOF; metadata stays available. Source errors pass
+through unchanged. Clones wake all pending consumers. There is no implicit
+runtime, background task or deadline. Cancellation is cooperative and cannot
+preempt CPU work that does not yield. Dropping a parallel reader aborts its
+workers; their state is released when the runtime next schedules cancellation.
+Wrapping only preparation does not cancel later consumption: wrap each reader too.
+
 ## Handle lifecycle and source identity
 
 - Obtain the schema from `reader.metadata().schema` after open and before reading.

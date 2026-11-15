@@ -7,6 +7,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ErrorKind {
+    /// The caller explicitly cancelled the operation.
+    Cancelled,
     InvalidInput,
     Unsupported,
     NotFound,
@@ -349,4 +351,8 @@ pub(crate) fn default_range_unsupported() -> Error {
 
 pub(crate) fn record_batch_error(source: arrow_schema::ArrowError) -> Error {
     record_batch_decode(source.to_string()).with_source(source)
+}
+
+pub(crate) fn read_cancelled() -> Error {
+    Error::new(ErrorKind::Cancelled, "read_cancelled", "read cancelled")
 }
