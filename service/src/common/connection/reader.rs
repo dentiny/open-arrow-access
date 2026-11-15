@@ -9,52 +9,45 @@ use open_arrow_access_core::{
 use opendal::{Buffer, BytesRange};
 use url::Url;
 
-use super::{Connection, error, transport::AuthScope};
-use crate::http_body::BodyReader;
+use super::{Connection, error};
+use crate::{http_body::BodyReader, http_client::HttpClient};
 
 mod validation;
 
 const DEFAULT_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 
-// Per-download protocol headers take precedence over scoped connection settings.
-// Authentication remains attached by the existing redirect transport on every request.
-fn request(connection: &Connection, url: &Url) -> Result<Request<Buffer>> {
-    let mut request = connection.request(url, "*/*")?;
-    let scope = request
-        .extensions_mut()
-        .get_mut::<AuthScope>()
-        .expect("auth scope");
+pub(super) async fn open(
+    mut connection: Connection,
+    url: Url,
+    options: ByteReadOptions,
+) -> Result<Box<dyn ByteReader>> {
+    // Prepare once; cloned range requests retain redirect-safe authentication.
     for name in [
         header::RANGE,
         header::IF_MATCH,
         header::IF_RANGE,
         header::ACCEPT_ENCODING,
     ] {
-        scope.headers.remove(name);
+        connection.headers.remove(name);
     }
+    let mut request = connection.request(&url, "*/*")?;
     request.headers_mut().insert(
         header::ACCEPT_ENCODING,
         HeaderValue::from_static("identity"),
     );
-    Ok(request)
-}
-
-pub(super) async fn open(
-    connection: Connection,
-    url: Url,
-    options: ByteReadOptions,
-) -> Result<Box<dyn ByteReader>> {
     let response = connection
         .client
-        .response(request(&connection, &url)?, error::OP)
+        .response(request.clone(), error::OP)
         .await?;
     let headers = response.headers();
-    let etag = validation::strong_etag(headers);
     let version = headers
         .get(header::ETAG)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
     let ranges = validation::supports_ranges(headers);
+    if let Some(etag) = validation::strong_etag(headers) {
+        request.headers_mut().insert(header::IF_MATCH, etag);
+    }
     let chunk_size = options
         .io_chunk_size
         .map_or(DEFAULT_CHUNK_SIZE, |s| s.get());
@@ -64,7 +57,7 @@ pub(super) async fn open(
         content_length: body.content_length(),
         version,
     };
-    let ranges = ranges && metadata.content_length.is_some();
+    let range_length = metadata.content_length.filter(|_| ranges);
     let chunks = stream::try_unfold(body, |mut body| async move {
         Ok::<_, Error>(body.next().await?.map(|buffer| (buffer, body)))
     })
@@ -78,19 +71,17 @@ pub(super) async fn open(
     .try_flatten();
     Ok(Box::new(HttpReader {
         sequential: Box::new(StreamReader::new(chunks, metadata)),
-        connection,
-        url,
-        etag,
-        ranges,
+        client: connection.client,
+        request,
+        range_length,
     }))
 }
 
 struct HttpReader {
     sequential: Box<dyn ByteReader>,
-    connection: Connection,
-    url: Url,
-    etag: Option<HeaderValue>,
-    ranges: bool,
+    client: HttpClient,
+    request: Request<Buffer>,
+    range_length: Option<u64>,
 }
 
 #[async_trait]
@@ -101,7 +92,7 @@ impl Reader for HttpReader {
 
     fn capability(&self) -> Capability {
         Capability {
-            read_with_range: self.ranges,
+            read_with_range: self.range_length.is_some(),
             ..self.sequential.capability()
         }
     }
@@ -116,28 +107,24 @@ impl Reader for HttpReader {
 #[async_trait]
 impl ByteReader for HttpReader {
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
-        if !self.ranges {
+        let Some(length) = self.range_length else {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 error::OP,
                 "HTTP input does not advertise byte ranges with a known identity length",
             ));
-        }
-        let length = self.metadata().content_length.expect("ranged input length");
+        };
         validate_byte_range(&range, length, error::OP)?;
         if range.is_empty() {
             return Ok(Bytes::new());
         }
-        let mut request = request(&self.connection, &self.url)?;
+        let mut request = self.request.clone();
         request.headers_mut().insert(
             header::RANGE,
             HeaderValue::from_str(&BytesRange::from(range.clone()).to_header())
                 .expect("valid range header"),
         );
-        if let Some(etag) = &self.etag {
-            request.headers_mut().insert(header::IF_MATCH, etag.clone());
-        }
-        let response = self.connection.client.fetch(request, error::OP).await?;
+        let response = self.client.fetch(request, error::OP).await?;
         match response.status() {
             StatusCode::PARTIAL_CONTENT => {}
             StatusCode::OK => {
@@ -155,7 +142,8 @@ impl ByteReader for HttpReader {
                 ));
             }
         }
-        validation::validate_response(response.headers(), &range, length, self.etag.as_ref())?;
+        let etag = self.request.headers().get(header::IF_MATCH);
+        validation::validate_response(response.headers(), &range, length, etag)?;
         BodyReader::new(response, error::OP)?
             .with_expected_length(range.end - range.start)?
             .collect()

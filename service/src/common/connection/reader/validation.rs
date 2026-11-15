@@ -19,15 +19,13 @@ fn uses_identity_encoding(headers: &HeaderMap) -> bool {
 }
 
 pub(super) fn strong_etag(headers: &HeaderMap) -> Option<HeaderValue> {
-    let value = single(headers, "etag")?;
     // Weak validators cannot pin exact byte coordinates with If-Match.
-    (value.starts_with('"')
-        && value.ends_with('"')
-        && value.len() >= 2
-        && value.as_bytes()[1..value.len() - 1]
-            .iter()
-            .all(|byte| *byte >= 0x21 && *byte != b'"' && *byte != 0x7f))
-    .then(|| headers[header::ETAG].clone())
+    let tag = single(headers, "etag")?
+        .strip_prefix('"')?
+        .strip_suffix('"')?;
+    tag.bytes()
+        .all(|byte| byte >= 0x21 && byte != b'"' && byte != 0x7f)
+        .then(|| headers[header::ETAG].clone())
 }
 
 pub(super) fn supports_ranges(headers: &HeaderMap) -> bool {

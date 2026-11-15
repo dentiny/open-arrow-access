@@ -2,12 +2,29 @@ use std::{num::NonZeroUsize, ops::Range};
 
 use futures::stream;
 use http::{Request, Response, StatusCode};
-use open_arrow_access_core::{Accessor, ByteReadOptions, Bytes, ErrorKind, ReadRequest};
+use open_arrow_access_core::{
+    Accessor, ByteReadOptions, ByteReader, Bytes, ErrorKind, ReadRequest,
+};
 use open_arrow_access_service::common::MetadataLink;
 use open_arrow_access_test_support::{collect_bytes, http::HttpFixture};
 use opendal::{Buffer, HttpBody};
 
 mod providers;
+
+async fn open(f: &HttpFixture) -> Box<dyn ByteReader> {
+    providers::connection(f)
+        .open(&format!("{}/file", f.endpoint()), Default::default())
+        .await
+        .unwrap()
+}
+
+fn set_header(output: &mut Response<HttpBody>, name: &'static str, value: Option<&str>) {
+    if let Some(value) = value {
+        output.headers_mut().insert(name, value.parse().unwrap());
+    } else {
+        output.headers_mut().remove(name);
+    }
+}
 
 fn response(status: StatusCode, bytes: Bytes) -> Response<HttpBody> {
     Response::builder()
@@ -132,35 +149,20 @@ async fn sequential_chunks_split_fragmented_buffers_without_empty_items() {
 
 #[tokio::test]
 async fn unsupported_or_unknown_representations_remain_sequential() {
-    for case in ["absent", "none", "unknown-length", "encoded"] {
+    for (name, value) in [
+        ("accept-ranges", None),
+        ("accept-ranges", Some("none")),
+        ("content-length", None),
+        ("content-encoding", Some("gzip")),
+    ] {
         let f = HttpFixture::new();
         f.handle(move |_| {
             let mut output = response(StatusCode::OK, Bytes::from_static(b"abc"));
-            match case {
-                "absent" => {
-                    output.headers_mut().remove("accept-ranges");
-                }
-                "none" => {
-                    output
-                        .headers_mut()
-                        .insert("accept-ranges", "none".parse().unwrap());
-                }
-                "unknown-length" => {
-                    output.headers_mut().remove("content-length");
-                }
-                _ => {
-                    output
-                        .headers_mut()
-                        .insert("content-encoding", "gzip".parse().unwrap());
-                }
-            }
+            set_header(&mut output, name, value);
             Ok(output)
         });
-        let mut reader = providers::connection(&f)
-            .open(&format!("{}/file", f.endpoint()), Default::default())
-            .await
-            .unwrap();
-        assert!(!reader.capability().read_with_range, "{case}");
+        let mut reader = open(&f).await;
+        assert!(!reader.capability().read_with_range, "{name}: {value:?}");
         assert_eq!(
             reader.read_range(0..1).await.unwrap_err().kind(),
             ErrorKind::Unsupported
@@ -172,109 +174,56 @@ async fn unsupported_or_unknown_representations_remain_sequential() {
 
 #[tokio::test]
 async fn malformed_or_changed_partial_responses_are_rejected() {
-    for case in [
-        "ignored",
-        "missing",
-        "bounds",
-        "total",
-        "wildcard",
-        "malformed",
-        "overflow",
-        "reversed",
-        "duplicate",
-        "short",
-        "long",
-        "length",
-        "encoding",
-        "etag",
-        "missing-etag",
-        "precondition",
-        "unsatisfiable",
+    for (field, value) in [
+        ("status", Some("200")),
+        ("content-range", None),
+        ("content-range", Some("bytes 0-1/8")),
+        ("content-range", Some("bytes 2-3/9")),
+        ("content-range", Some("bytes 2-3/*")),
+        ("content-range", Some("bytes invalid/8")),
+        ("content-range", Some("bytes 2-18446744073709551615/8")),
+        ("content-range", Some("bytes 3-2/8")),
+        ("duplicate-content-range", Some("bytes 2-3/8")),
+        ("body", Some("c")),
+        ("body", Some("cde")),
+        ("content-length", Some("3")),
+        ("content-encoding", Some("gzip")),
+        ("etag", Some("\"v2\"")),
+        ("etag", None),
+        ("status", Some("412")),
+        ("status", Some("416")),
     ] {
         let f = HttpFixture::new();
         f.handle(move |request| {
             let mut output = serve(&request, Bytes::from_static(b"abcdefgh"));
             if request.headers().contains_key("range") {
-                match case {
-                    "ignored" => *output.status_mut() = StatusCode::OK,
-                    "missing" => {
-                        output.headers_mut().remove("content-range");
-                    }
-                    "bounds" => {
-                        output
-                            .headers_mut()
-                            .insert("content-range", "bytes 0-1/8".parse().unwrap());
-                    }
-                    "total" => {
-                        output
-                            .headers_mut()
-                            .insert("content-range", "bytes 2-3/9".parse().unwrap());
-                    }
-                    "wildcard" => {
-                        output
-                            .headers_mut()
-                            .insert("content-range", "bytes 2-3/*".parse().unwrap());
-                    }
-                    "malformed" | "overflow" | "reversed" => {
-                        let value = match case {
-                            "malformed" => "bytes invalid/8",
-                            "overflow" => "bytes 2-18446744073709551615/8",
-                            _ => "bytes 3-2/8",
-                        };
-                        output
-                            .headers_mut()
-                            .insert("content-range", value.parse().unwrap());
-                    }
-                    "duplicate" => {
-                        output
-                            .headers_mut()
-                            .append("content-range", "bytes 2-3/8".parse().unwrap());
-                    }
-                    "short" | "long" => {
+                match field {
+                    "status" => *output.status_mut() = value.unwrap().parse().unwrap(),
+                    "body" => {
                         output.headers_mut().remove("content-length");
-                        *output.body_mut() = HttpBody::new(
-                            stream::iter([Ok(Buffer::from(if case == "short" {
-                                "c"
-                            } else {
-                                "cde"
-                            }))]),
-                            None,
-                        );
+                        *output.body_mut() =
+                            HttpBody::new(stream::iter([Ok(Buffer::from(value.unwrap()))]), None);
                     }
-                    "length" => {
+                    "duplicate-content-range" => {
                         output
                             .headers_mut()
-                            .insert("content-length", "3".parse().unwrap());
+                            .append("content-range", value.unwrap().parse().unwrap());
                     }
-                    "encoding" => {
-                        output
-                            .headers_mut()
-                            .insert("content-encoding", "gzip".parse().unwrap());
-                    }
-                    "etag" => {
-                        output
-                            .headers_mut()
-                            .insert("etag", "\"v2\"".parse().unwrap());
-                    }
-                    "missing-etag" => {
-                        output.headers_mut().remove("etag");
-                    }
-                    "precondition" => *output.status_mut() = StatusCode::PRECONDITION_FAILED,
-                    _ => *output.status_mut() = StatusCode::RANGE_NOT_SATISFIABLE,
+                    name => set_header(&mut output, name, value),
                 }
             }
             Ok(output)
         });
-        let mut reader = providers::connection(&f)
-            .open(&format!("{}/file", f.endpoint()), Default::default())
-            .await
-            .unwrap();
+        let mut reader = open(&f).await;
         let error = reader.read_range(2..4).await.unwrap_err();
-        match case {
-            "ignored" => assert_eq!(error.kind(), ErrorKind::Unsupported),
-            "precondition" => assert_eq!(error.http_status(), Some(412)),
-            "unsatisfiable" => assert_eq!(error.http_status(), Some(416)),
-            _ => assert_eq!(error.kind(), ErrorKind::Decode, "{case}: {error}"),
+        match (field, value) {
+            ("status", Some("200")) => assert_eq!(error.kind(), ErrorKind::Unsupported),
+            ("status", Some(code)) => assert_eq!(error.http_status(), Some(code.parse().unwrap())),
+            _ => assert_eq!(
+                error.kind(),
+                ErrorKind::Decode,
+                "{field}: {value:?}: {error}"
+            ),
         }
         assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"abcdefgh");
     }
@@ -450,10 +399,7 @@ async fn weak_and_absent_etags_do_not_send_strong_preconditions() {
             }
             Ok(output)
         });
-        let mut reader = providers::connection(&f)
-            .open(&format!("{}/file", f.endpoint()), Default::default())
-            .await
-            .unwrap();
+        let mut reader = open(&f).await;
         assert_eq!(reader.metadata().version.as_deref(), etag);
         assert_eq!(reader.read_range(0..2).await.unwrap().as_ref(), b"ab");
     }
