@@ -1,10 +1,10 @@
 //! Demand-driven OAI continuation scanning over the existing single-page protocol.
 use std::{collections::HashSet, num::NonZeroUsize};
 
-use futures::{StreamExt, TryStreamExt, stream};
+use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, OrderRequirement, ReadRequest, ReaderFactory, RecordCapability, RecordReader, Result,
-    ScanPlan, ScanPlanner, StreamReader, async_trait, into_stream,
+    ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 use open_arrow_access_file_format::xml::XmlFormat;
 
@@ -94,14 +94,12 @@ impl Accessor for OaiHarvester {
             .open(request.read.clone())
             .await?;
         let metadata = current.metadata().clone();
-        let schema = metadata.schema.clone();
         let harvester = self.clone();
         let continuations = stream::try_unfold(
             (page.resumption_token, seen, 1usize),
             move |(next, mut seen, pages)| {
                 let harvester = harvester.clone();
                 let request = request.clone();
-                let schema = schema.clone();
                 async move {
                     let Some(token) = next else {
                         return Ok(None);
@@ -115,25 +113,18 @@ impl Accessor for OaiHarvester {
                     let pages = pages.checked_add(1).ok_or_else(error::harvest_page_limit)?;
                     let page = harvester.service.resume(&token).await?;
                     let reader = page.records(harvester.format).open(request.read).await?;
-                    if reader.metadata().schema != schema {
-                        return Err(error::harvest_schema_changed());
-                    }
-                    Ok(Some((
-                        into_stream(reader),
-                        (page.resumption_token, seen, pages),
-                    )))
+                    let partition: ScanPartition = Box::pin(async move { Ok(reader) });
+                    Ok(Some((partition, (page.resumption_token, seen, pages))))
                 }
             },
         );
-        // Flatten drains each page before polling the next continuation.
-        let batches = stream::once(async move { Ok(into_stream(current)) })
-            .chain(continuations)
-            .try_flatten();
-        Ok(Box::new(StreamReader::records(
-            batches,
-            metadata,
-            OrderRequirement::PreserveGlobal,
-        )))
+        let first: ScanPartition = Box::pin(async move { Ok(current) });
+        // Sequential execution drains each page before discovering its continuation.
+        let partitions = stream::iter([Ok(first)]).chain(continuations);
+        Ok(Box::new(
+            ScanPlan::from_stream(metadata, partitions)
+                .into_reader_with_schema_error(error::harvest_schema_changed),
+        ))
     }
 }
 
