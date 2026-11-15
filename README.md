@@ -91,6 +91,14 @@ the required `decompression-*` features too. Format-specific options stay on the
 typed format; projection, batch size and byte I/O options stay on `ReadRequest`.
 URI interpretation and credential selection remain application responsibilities.
 
+For a synchronous Arrow consumer, enable the optional `blocking` feature and wrap
+an opened `Box<dyn RecordReader>` in `BlockingRecordBatchReader::new(reader,
+runtime)`, passing an `Arc<tokio::runtime::Runtime>` configured for the source's
+I/O. It implements Arrow's `RecordBatchReader`, pulls one batch at a time, and
+keeps the runtime alive. Consume and drop it on a synchronous thread outside a
+Tokio runtime context; an async caller can use a separate synchronous thread.
+The core reader contracts remain runtime-independent.
+
 ## How the pieces compose
 
 ```mermaid
