@@ -5,6 +5,13 @@ use super::{
     error::{decode, invalid, unsupported},
 };
 
+pub(super) fn validate_token(token: &str, kind: &str) -> Result<()> {
+    if token.trim().is_empty() {
+        return Err(invalid(&format!("{kind} token must not be empty")));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_request(persistent_id: &str, version: &str) -> Result<(u64, u64)> {
     let identifier = persistent_id
         .strip_prefix("doi:")
@@ -41,6 +48,7 @@ pub(super) fn validate_dataset(
     response: &Response,
     persistent_id: &str,
     expected: (u64, u64),
+    has_credentials: bool,
 ) -> Result<()> {
     let data = &response.data;
     let same_id = if persistent_id.starts_with("doi:") {
@@ -62,8 +70,10 @@ pub(super) fn validate_dataset(
         return Err(decode("dataset version is not published"));
     }
     for file in &data.files {
-        if file.restricted {
-            return Err(unsupported("restricted Dataverse files are not supported"));
+        if file.restricted && !has_credentials {
+            return Err(unsupported(
+                "restricted Dataverse files require authentication",
+            ));
         }
         if file.data_file.tabular_data && file.data_file.original_file_size.is_none() {
             return Err(unsupported(

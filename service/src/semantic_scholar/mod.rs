@@ -18,11 +18,15 @@ pub struct DatasetMetadata {
 }
 impl SemanticScholarService {
     pub fn new(api_key: &str) -> Result<Self> {
-        validation::validate_key(api_key)?;
-        Ok(Self::with_connection(
-            Connection::new("https://api.semanticscholar.org")?
-                .with_header("x-api-key", api_key)?,
-        ))
+        Self::with_connection(Connection::new("https://api.semanticscholar.org")?).with_key(api_key)
+    }
+
+    /// Set or replace the API key while preserving the configured connection.
+    /// The key is validated locally and sent as `x-api-key` only within its origin.
+    pub fn with_key(mut self, key: &str) -> Result<Self> {
+        validation::validate_key(key)?;
+        self.connection = self.connection.with_header("x-api-key", key)?;
+        Ok(self)
     }
 
     pub fn with_connection(connection: Connection) -> Self {

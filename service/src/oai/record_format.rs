@@ -9,6 +9,10 @@ const OAI_NAMESPACE: NamespaceBinding<'static> = NamespaceBinding {
     uri: "http://www.openarchives.org/OAI/2.0/",
 };
 
+pub(super) fn inferred_record_format() -> XmlFormat {
+    XmlFormat::new(RECORD_PATH).with_namespaces(&[OAI_NAMESPACE])
+}
+
 pub(super) fn default_record_format() -> XmlFormat {
     static SCHEMA: OnceLock<XmlSchema> = OnceLock::new();
     let schema = SCHEMA.get_or_init(|| {

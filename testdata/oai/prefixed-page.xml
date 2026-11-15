@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<source:OAI-PMH xmlns:source="http://www.openarchives.org/OAI/2.0/">
+  <source:ListRecords>
+    <source:record>
+      <source:header status="deleted"><source:identifier>id1</source:identifier></source:header>
+    </source:record>
+    <source:record>
+      <source:header><source:identifier>id2</source:identifier></source:header>
+      <source:metadata><source:raw><source:license>all rights</source:license></source:raw></source:metadata>
+    </source:record>
+    <source:resumptionToken>next+token&amp;x</source:resumptionToken>
+  </source:ListRecords>
+</source:OAI-PMH>

@@ -73,7 +73,9 @@ impl Connection {
         Ok(self)
     }
     /// Scoped query authentication, e.g. GovInfo's `api_key`.
+    /// Replaces any previously configured value for the same parameter.
     pub fn with_query(mut self, name: &str, value: &str) -> Self {
+        self.query.retain(|(key, _)| key != name);
         self.query.push((name.into(), value.into()));
         self
     }

@@ -38,13 +38,20 @@ impl BhlService {
     /// The bulk export needs no key. API v3 calls require a configured BHL key.
     pub fn new(key: Option<&str>) -> Result<Self> {
         let connection = Connection::new("https://www.biodiversitylibrary.org")?;
-        let connection = if let Some(key) = key {
-            validation::validate_key(key)?;
-            connection.with_query("apikey", key)
+        let service = Self::with_services(connection, FigshareService::new()?);
+        if let Some(key) = key {
+            service.with_key(key)
         } else {
-            connection
-        };
-        Ok(Self::with_services(connection, FigshareService::new()?))
+            Ok(service)
+        }
+    }
+
+    /// Set or replace the API v3 key without changing the configured API or
+    /// Figshare connections. Query credentials stay scoped to the API origin.
+    pub fn with_key(mut self, key: &str) -> Result<Self> {
+        validation::validate_key(key)?;
+        self.connection = self.connection.with_query("apikey", key);
+        Ok(self)
     }
 
     pub fn with_services(connection: Connection, figshare: FigshareService) -> Self {

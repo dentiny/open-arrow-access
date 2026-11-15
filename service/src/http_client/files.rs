@@ -1,9 +1,7 @@
 //! Bind a provider's validated manifest to lazy HTTP file access.
 
-use http::{HeaderMap, header::AUTHORIZATION};
 use open_arrow_access_core::{Error, Result};
 use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
-use opendal::{HttpTransporter, OperationContext};
 use serde::de::DeserializeOwned;
 use url::Url;
 
@@ -49,8 +47,8 @@ pub(crate) struct HttpFileService {
     endpoint: Url,
     client: HttpClient,
     token: Option<String>,
-    headers: HeaderMap,
-    single_hop_context: Option<OperationContext>,
+    headers: http::HeaderMap,
+    context: Option<opendal::OperationContext>,
     /// Provider operation for metadata HTTP/JSON errors.
     operation: &'static str,
     /// Wrap namespace errors with provider context.
@@ -78,8 +76,8 @@ impl HttpFileService {
             endpoint: resolve_origin(endpoint, configure)?,
             client: HttpClient::new()?,
             token: None,
-            headers: HeaderMap::new(),
-            single_hop_context: None,
+            headers: http::HeaderMap::new(),
+            context: None,
             operation,
             map_file_namespace_error,
         })
@@ -98,30 +96,45 @@ impl HttpFileService {
         Ok(self)
     }
 
-    /// Add provider-specific credentials to metadata and all lazy byte reads.
-    /// The provider validates credential syntax before constructing this value.
-    pub(crate) fn with_authorization(mut self, token: &str) -> Result<Self> {
-        let mut value = http::HeaderValue::from_str(token)
-            .map_err(|source| super::error::invalid_token(self.operation, source))?;
-        value.set_sensitive(true);
-        self.headers.insert(AUTHORIZATION, value);
-        if self.single_hop_context.is_none() {
-            self.single_hop_context = Some(
-                OperationContext::new()
-                    .with_http_transport(HttpTransporter::new(super::new_single_hop_transport()?)),
-            );
+    /// Use provider-specific credentials on both metadata and lazy file requests.
+    pub(crate) fn with_header(
+        mut self,
+        name: http::header::HeaderName,
+        value: http::HeaderValue,
+    ) -> Result<Self> {
+        if self.context.is_none() {
+            self.context = Some(opendal::OperationContext::new().with_http_transport(
+                opendal::HttpTransporter::new(super::new_single_hop_transport()?),
+            ));
         }
+        // A provider selects one authentication scheme at a time.
+        self.headers.clear();
+        self.headers.insert(name, value);
         Ok(self)
     }
 
-    /// Custom transports must return single-hop responses.
-    pub(crate) fn with_context(mut self, context: OperationContext) -> Self {
-        self.single_hop_context = Some(context);
+    pub(crate) fn with_context(mut self, context: opendal::OperationContext) -> Self {
+        self.context = Some(context);
         self
     }
 
-    pub(crate) fn has_auth_headers(&self) -> bool {
-        !self.headers.is_empty()
+    fn client(&self) -> HttpClient {
+        let mut client = self.client.clone();
+        if let Some(context) = &self.context {
+            client.context = context.clone();
+        }
+        if !self.headers.is_empty() {
+            client.context = crate::common::transport::HeaderTransport::wrap(
+                client.context,
+                self.endpoint.clone(),
+                self.headers.clone(),
+            );
+        }
+        client
+    }
+
+    pub(crate) fn has_credentials(&self) -> bool {
+        self.token.is_some() || !self.headers.is_empty()
     }
 
     pub(crate) fn endpoint(&self) -> &Url {
@@ -134,16 +147,7 @@ impl HttpFileService {
         metadata_url: &Url,
         resolve: impl FnOnce(T) -> Result<ResolvedFilesPlan<M>>,
     ) -> Result<ResolvedFileSet<OpenDalAccessor, M>> {
-        let mut client = self.client.clone();
-        if let Some(context) = self.single_hop_context.clone() {
-            let context = crate::common::transport::follow_redirects(context);
-            let inner = context.http_transport().clone();
-            client.context = context.with_http_transport(HttpTransporter::new(HeaderTransport {
-                inner,
-                origin: self.endpoint.clone(),
-                headers: self.headers.clone(),
-            }));
-        }
+        let client = self.client();
         let response = client
             .json(metadata_url.as_str(), self.token.as_deref(), self.operation)
             .await?;
@@ -162,31 +166,6 @@ impl HttpFileService {
             .with_content_lengths(lengths);
         ResolvedFileSet::from_files(storage, plan.files, plan.metadata)
             .map_err(self.map_file_namespace_error)
-    }
-}
-
-/// Attach credentials through the existing origin-scoped redirect transport.
-/// OpenDAL's HEAD and Range requests use this same transport.
-#[derive(Debug)]
-struct HeaderTransport {
-    inner: HttpTransporter,
-    origin: Url,
-    headers: HeaderMap,
-}
-
-impl opendal::HttpTransport for HeaderTransport {
-    async fn fetch(
-        &self,
-        mut request: http::Request<opendal::Buffer>,
-    ) -> opendal::Result<http::Response<opendal::HttpBody>> {
-        request
-            .extensions_mut()
-            .insert(crate::common::transport::AuthScope {
-                origin: self.origin.clone(),
-                headers: self.headers.clone(),
-                query: Vec::new(),
-            });
-        self.inner.fetch(request).await
     }
 }
 

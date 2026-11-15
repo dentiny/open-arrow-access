@@ -34,9 +34,10 @@ impl InternetArchiveService {
     /// This does not grant access to items the account cannot read or borrow books.
     pub fn with_credentials(mut self, access_key: &str, secret_key: &str) -> Result<Self> {
         validate_credentials(access_key, secret_key)?;
-        self.http = self
-            .http
-            .with_authorization(&format!("LOW {access_key}:{secret_key}"))?;
+        let mut value = http::HeaderValue::from_str(&format!("LOW {access_key}:{secret_key}"))
+            .map_err(|_| error::invalid("invalid Internet Archive authorization header"))?;
+        value.set_sensitive(true);
+        self.http = self.http.with_header(http::header::AUTHORIZATION, value)?;
         Ok(self)
     }
 
@@ -69,7 +70,7 @@ impl InternetArchiveService {
         self.http
             .resolve_files(&url, |response| {
                 let files =
-                    extract_items_and_validate(response, identifier, self.http.has_auth_headers())?;
+                    extract_items_and_validate(response, identifier, self.http.has_credentials())?;
                 ResolvedFilesPlan::new(
                     format!("download/{identifier}/"),
                     files
