@@ -94,8 +94,6 @@ HF dataset scans explicitly retain global order because a Parquet export does no
 establish the dataset's semantic ordering contract. Application-defined page sets
 also explicitly preserve global order because their callback does not declare a
 selection-wide reorderability guarantee.
-For a runnable HTTP/JSON example with a reusable opener, see
-[independent API page scans](../service/api-pages.md).
 
 FileSet and Directory always forward the supplied record accessor's ordering,
 including whole-file planning without `with_file_planning()`. Native planning

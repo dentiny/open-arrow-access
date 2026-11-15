@@ -160,10 +160,6 @@ name = "read_huggingface"
 required-features = ["service-huggingface"]
 
 [[example]]
-name = "read_api_pages"
-required-features = ["format-json"]
-
-[[example]]
 name = "read_gutenberg"
 required-features = ["service-gutenberg"]
 
