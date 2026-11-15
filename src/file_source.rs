@@ -27,8 +27,8 @@ pub enum OuterCompression {
 /// Configure backend credentials and policies on the supplied operator; object
 /// keys are supplied separately in read requests. This helper does not resolve URIs.
 /// Enable the chosen format and decompression codecs through their existing features.
-/// This generic accessor does not add format-specific partition planning; compose
-/// `file_format::FileAccessor` directly when that capability is needed.
+/// This generic accessor does not add format-specific partition planning; use
+/// [`file_scan_accessor`] when that capability is needed.
 ///
 /// ```no_run
 /// # #[cfg(feature = "format-json")]
@@ -58,12 +58,66 @@ pub fn file_accessor<F>(
 where
     F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader>,
 {
+    FactoryAccessor::new(file_storage(operator, compression), format)
+}
+
+fn file_storage(
+    operator: opendal::Operator,
+    compression: OuterCompression,
+) -> Arc<dyn ByteAccessor> {
     let storage = OpenDalAccessor::new(operator);
-    let storage: Arc<dyn ByteAccessor> = match compression {
+    match compression {
         OuterCompression::None => Arc::new(storage),
         OuterCompression::Auto => Arc::new(storage.layer(AutoDecompressionLayer::new())),
-    };
-    FactoryAccessor::new(storage, format)
+    }
+}
+
+/// Compose file storage and a typed format while retaining native scan planning.
+///
+/// Like [`file_accessor`], construction performs no I/O, URI resolution, or schema
+/// inspection. The returned [`crate::file_format::FileAccessor`] retains the
+/// format's [`crate::ScanPlanner`] implementation and partition options. It can
+/// be passed to [`crate::PreparedSource::prepare_plannable`] or composed with
+/// record layers such as [`crate::layers::ParallelReadLayer`]. Planning may
+/// inspect input; partition readers remain independently owned and lazy.
+///
+/// This utility is always available; enable the chosen format through its existing
+/// feature. The format must support scan planning over the composed byte accessor.
+/// Use [`OuterCompression::None`] for Parquet range reads; text inputs can use
+/// [`OuterCompression::Auto`] with the
+/// required decompression features. This helper does not schedule partitions.
+///
+/// ```no_run
+/// # #[cfg(feature = "format-json")]
+/// # async fn example(operator: open_arrow_access::storage::opendal::Operator)
+/// # -> open_arrow_access::Result<()> {
+/// use open_arrow_access::{
+///     OuterCompression, PreparedSource, ReadOptions, ReadRequest, Reader, file_scan_accessor,
+/// };
+/// use open_arrow_access::file_format::json::JsonFormat;
+///
+/// let accessor = file_scan_accessor(operator, JsonFormat::infer(), OuterCompression::Auto);
+/// let source = PreparedSource::prepare_plannable(accessor, ReadRequest::new("events.jsonl")).await?;
+/// let plan = source.plan_scan(ReadOptions {
+///     projection: Some(vec!["id".into()]),
+///     ..Default::default()
+/// }).await?;
+/// // Read partitions sequentially, or hand them to an executor honoring plan policies.
+/// let mut reader = plan.into_reader();
+/// while let Some(batch) = reader.next().await? { /* consume projected rows */ }
+/// # Ok(())
+/// # }
+/// ```
+pub fn file_scan_accessor<F>(
+    operator: opendal::Operator,
+    format: F,
+    compression: OuterCompression,
+) -> crate::file_format::FileAccessor<Arc<dyn ByteAccessor>, F>
+where
+    F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader>,
+    crate::file_format::FileAccessor<Arc<dyn ByteAccessor>, F>: crate::ScanPlanner,
+{
+    crate::file_format::FileAccessor::from_format(file_storage(operator, compression), format)
 }
 
 /// Open a typed file source with metadata available and independently owned readers.
