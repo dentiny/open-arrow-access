@@ -19,8 +19,14 @@ fn batch() -> RecordBatch {
     .unwrap()
 }
 
+#[rstest::rstest]
+#[case::full(None)]
+#[case::reordered(Some(vec![1, 0]))]
+#[case::empty(Some(vec![]))]
 #[tokio::test]
-async fn restores_schema_and_field_metadata_for_full_reordered_and_empty_projections() {
+async fn restores_schema_and_field_metadata_for_full_reordered_and_empty_projections(
+    #[case] projection: Option<Vec<usize>>,
+) {
     let batch = batch();
     let full = Schema::new_with_metadata(
         batch
@@ -36,35 +42,33 @@ async fn restores_schema_and_field_metadata_for_full_reordered_and_empty_project
             .collect::<Vec<_>>(),
         HashMap::from([("version".into(), "fixture".into())]),
     );
-    for projection in [None, Some(vec![1, 0]), Some(vec![])] {
-        let schema = Arc::new(match &projection {
-            Some(indices) => full.project(indices).unwrap(),
-            None => full.clone(),
-        });
-        let mut reader = record_stream_reader(
-            stream::iter([Ok(batch.clone())]).then(|item| async move { item }),
-            RecordMetadata {
-                schema: schema.clone(),
-                source: Some("native.xml".into()),
-            },
-            projection.clone(),
-            OrderRequirement::PreserveGlobal,
-        );
-        assert_eq!(reader.metadata().schema, schema);
-        assert_eq!(
-            reader.metadata().source.as_ref().unwrap().locator(),
-            "native.xml"
-        );
-        let output = reader.next().await.unwrap().unwrap();
-        assert_eq!(output.schema(), schema);
-        assert_eq!(output.num_rows(), 2);
-        let indices = projection.unwrap_or_else(|| vec![0, 1]);
-        for (output_index, input_index) in indices.into_iter().enumerate() {
-            assert!(Arc::ptr_eq(
-                output.column(output_index),
-                batch.column(input_index)
-            ));
-        }
-        assert!(reader.next().await.unwrap().is_none());
+    let schema = Arc::new(match &projection {
+        Some(indices) => full.project(indices).unwrap(),
+        None => full.clone(),
+    });
+    let mut reader = record_stream_reader(
+        stream::iter([Ok(batch.clone())]).then(|item| async move { item }),
+        RecordMetadata {
+            schema: schema.clone(),
+            source: Some("native.xml".into()),
+        },
+        projection.clone(),
+        OrderRequirement::PreserveGlobal,
+    );
+    assert_eq!(reader.metadata().schema, schema);
+    assert_eq!(
+        reader.metadata().source.as_ref().unwrap().locator(),
+        "native.xml"
+    );
+    let output = reader.next().await.unwrap().unwrap();
+    assert_eq!(output.schema(), schema);
+    assert_eq!(output.num_rows(), 2);
+    let indices = projection.unwrap_or_else(|| vec![0, 1]);
+    for (output_index, input_index) in indices.into_iter().enumerate() {
+        assert!(Arc::ptr_eq(
+            output.column(output_index),
+            batch.column(input_index)
+        ));
     }
+    assert!(reader.next().await.unwrap().is_none());
 }

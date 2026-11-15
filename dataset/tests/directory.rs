@@ -14,6 +14,7 @@ use std::{
 use arrow_array::{ArrayRef, Int64Array, types::Int64Type};
 use arrow_schema::{DataType, Field};
 use futures::stream;
+use more_asserts::assert_le;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteReadRequest, ByteReader, Capability, Error, ErrorKind,
     ListRequest, ObjectRef, ObjectStream, OrderRequirement, ReadOptionsProvider, ReadRequest,
@@ -691,7 +692,7 @@ async fn native_file_plans_share_one_budget_and_preserve_lazy_ordered_selection(
         [4, 5, 1, 2, 3, 4, 5]
     );
     assert_eq!(files.active.load(Ordering::SeqCst), 0);
-    assert!(files.max_active.load(Ordering::SeqCst) <= 2);
+    assert_le!(files.max_active.load(Ordering::SeqCst), 2);
     assert!(files.opens.lock().unwrap().is_empty());
     {
         let observed = plans.lock().unwrap();

@@ -1,4 +1,5 @@
 use futures::TryStreamExt;
+use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_layers::{ParallelReadLayer, UnorderedEmissionLayer};
 use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
@@ -266,7 +267,7 @@ async fn parallel_byte_targets_keep_lookahead_indices_and_oversized_trajectories
                 .value(0),
             index
         );
-        assert!(text(&batch, "raw_json", 0).len() > 1);
+        assert_gt!(text(&batch, "raw_json", 0).len(), 1);
         assert!(reader.next().await.unwrap().is_none());
     }
     assert!(partitions.try_next().await.unwrap().is_none());
@@ -324,7 +325,7 @@ async fn auto_reads_document_and_object_streams_without_filename_hints() {
             assert_eq!(reader.metadata().schema, trajectory_schema());
             let mut ids = Vec::new();
             while let Some(batch) = reader.next().await.unwrap() {
-                assert!(batch.num_rows() <= 2);
+                assert_le!(batch.num_rows(), 2);
                 for row in 0..batch.num_rows() {
                     ids.push(text(&batch, "trajectory_id", row).to_owned());
                     assert_eq!(text(&batch, "source_uri", row), "opaque-key");

@@ -3,6 +3,7 @@ use std::num::NonZeroUsize;
 use arrow_array::{cast::AsArray, types::Int64Type};
 use futures::TryStreamExt;
 use http::StatusCode;
+use more_asserts::assert_le;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteReadOptions, Bytes, ErrorKind, ReadOptions, ScanPlanner,
 };
@@ -60,7 +61,9 @@ async fn dataset_pins_export_sorts_paginated_shards_and_reads_lazily_with_option
             .any(|uri| uri.contains("/resolve/")
                 && (uri.contains("README") || uri.contains("/test/")))
     );
-    assert!(hub.ranges().iter().all(|range| range.len() <= 64));
+    for range in hub.ranges() {
+        assert_le!(range.len(), 64, "{range:?}");
+    }
 }
 
 #[tokio::test]

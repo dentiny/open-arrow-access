@@ -4,6 +4,7 @@ mod commoncrawl_support;
 use arrow_array::cast::AsArray;
 use commoncrawl_support::{Records, entry, manifest};
 use futures::TryStreamExt;
+use more_asserts::assert_gt;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteReadOptions, ErrorKind, ReadOptions, ReadOptionsProvider,
     ScanPlanner, into_stream,
@@ -175,7 +176,7 @@ async fn parallel_manifest_plan_preserves_membership_order_and_options() {
     let accessor = CommonCrawlWarcAccessor::new(manifest("good.paths", 1), Records::default());
     let selection = request();
     let plan = accessor.plan_scan(selection.clone()).await.unwrap();
-    assert!(plan.partitions.size_hint().0 > 0);
+    assert_gt!(plan.partitions.size_hint().0, 0);
     drop(plan);
     let expected =
         commoncrawl_support::paths(accessor.open(selection.clone()).await.unwrap()).await;

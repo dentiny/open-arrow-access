@@ -7,6 +7,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{
     Accessor, Error, ErrorKind, ObjectRef, ReadRequest, RecordBatch, RecordMetadata, RecordReader,
     SchemaRef,
@@ -103,8 +104,8 @@ async fn collect_reader(
     assert!(!capability.read_with_range && !capability.list);
     let mut batches = Vec::new();
     while let Some(batch) = reader.next().await.unwrap() {
-        assert!(batch.num_rows() > 0);
-        assert!(batch.num_rows() <= request.options.batch_size.get());
+        assert_gt!(batch.num_rows(), 0);
+        assert_le!(batch.num_rows(), request.options.batch_size.get());
         assert_eq!(batch.schema(), schema);
         assert_eq!(reader.metadata().schema, schema);
         assert_eq!(reader.metadata().source.as_ref(), Some(&request.object));
