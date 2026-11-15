@@ -12,9 +12,22 @@ use super::error::empty_page_selection;
 /// The opener owns provider validation, authentication and record decoding.
 /// Cursor-dependent continuations must be discovered before constructing a selection.
 /// Install ParallelReadLayer to overlap page fetching and decoding within its budget.
+/// Clone the accessor to share the opener across independently configured scans;
+/// each open owns its request selection and reader cursors.
 pub struct PageSetAccessor<F, R, Fut> {
     open: Arc<F>,
     request: PhantomData<fn(R) -> Fut>,
+}
+
+/// Clones share the opener, not request selections or reader cursors.
+/// The callback, request and future types do not need to implement `Clone`.
+impl<F, R, Fut> Clone for PageSetAccessor<F, R, Fut> {
+    fn clone(&self) -> Self {
+        Self {
+            open: self.open.clone(),
+            request: PhantomData,
+        }
+    }
 }
 
 impl<F, R, Fut> PageSetAccessor<F, R, Fut>

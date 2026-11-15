@@ -133,7 +133,9 @@ additional pages. See [response shapes](response-schemas.md).
 Independent API requests can be wrapped in `common::PageSetAccessor`, then
 executed through `ParallelReadLayer`. Supply independently addressable requests
 and one schema. Cursor/resumption-token chains must still be discovered in
-protocol order. [Parallel reading](../docs/parallel-read.md) covers planning.
+protocol order. [Independent API page scans](api-pages.md) includes a runnable
+example and describes opener reuse. [Parallel reading](../docs/parallel-read.md)
+covers planning.
 
 ## Add a service
 
