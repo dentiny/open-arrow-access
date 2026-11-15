@@ -9,7 +9,7 @@ use super::{HttpClient, resolve_origin};
 use crate::{ResolvedFileSet, file_manifest::FileSpec};
 
 /// Canonical download root, ordered logical-name mappings and provider metadata.
-/// Providers validate identity, availability and names before returning this plan.
+/// Providers validate identity and availability; binding validates the file namespace.
 pub(crate) struct ResolvedFilesPlan<M> {
     /// Download path prefix relative to the service's HTTP origin.
     root: String,
@@ -21,15 +21,13 @@ pub(crate) struct ResolvedFilesPlan<M> {
 }
 
 impl<M> ResolvedFilesPlan<M> {
-    pub(crate) fn new(root: impl Into<String>, files: Vec<FileSpec>, metadata: M) -> Result<Self> {
-        open_arrow_access_storage::validate_file_names(files.iter().map(|file| file.name.as_str()))
-            .map_err(super::error::file_namespace)?;
-        Ok(Self {
+    pub(crate) fn new(root: impl Into<String>, files: Vec<FileSpec>, metadata: M) -> Self {
+        Self {
             root: root.into(),
             files,
             metadata,
             query: Vec::new(),
-        })
+        }
     }
 
     pub(crate) fn with_query(mut self, query: &[(&str, &str)]) -> Self {
@@ -165,6 +163,7 @@ impl HttpFileService {
             )?
             .with_content_lengths(lengths);
         ResolvedFileSet::from_files(storage, plan.files, plan.metadata)
+            .map_err(super::error::file_namespace)
             .map_err(self.map_file_namespace_error)
     }
 }
@@ -204,7 +203,7 @@ mod tests {
         let url = service.endpoint().join("manifest").unwrap();
         let files = service
             .resolve_files(&url, |metadata: serde_json::Value| {
-                ResolvedFilesPlan::new(
+                Ok(ResolvedFilesPlan::new(
                     "files/",
                     vec![
                         file("../opaque", "shared", Some(4)),
@@ -212,7 +211,7 @@ mod tests {
                         file("unknown length", "unknown", None),
                     ],
                     metadata,
-                )
+                ))
             })
             .await
             .unwrap();
