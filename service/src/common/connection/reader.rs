@@ -21,7 +21,7 @@ pub(super) async fn open(
     url: Url,
     options: ByteReadOptions,
 ) -> Result<Box<dyn ByteReader>> {
-    // Prepare once; cloned range requests retain redirect-safe authentication.
+    // Download headers take precedence over connection defaults.
     for name in [
         header::RANGE,
         header::IF_MATCH,
