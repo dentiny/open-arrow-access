@@ -82,30 +82,31 @@ output order and do not enable multi-file parallel scans. Multiple independently
 opened readers have separate budgets. `OpenDalAccessor::with_chunk_size` controls
 emitted byte chunks, independently of both settings above.
 
-For one total budget across readers and operators, reuse a single OpenDAL
-`ConcurrentLimitLayer`. The storage adapter enables this upstream layer:
+For one total HTTP request budget across readers and operators, clone a single
+`HttpConcurrencyLimitLayer`. It wraps the transport rather than counting
+OpenDAL operations or reader tasks:
 
 ```rust,no_run
-use open_arrow_access::storage::{OpenDalAccessor, opendal};
+use open_arrow_access::storage::{HttpConcurrencyLimitLayer, OpenDalAccessor, opendal};
 
 fn shared_limit(a: opendal::Operator, b: opendal::Operator)
-    -> (OpenDalAccessor, OpenDalAccessor)
+    -> open_arrow_access::Result<(OpenDalAccessor, OpenDalAccessor)>
 {
-    let limit = opendal::layers::ConcurrentLimitLayer::new(32)
-        .with_http_concurrent_limit(8);
-    (
+    let limit = HttpConcurrencyLimitLayer::new(8)?;
+    Ok((
         OpenDalAccessor::new(a.layer(limit.clone())),
         OpenDalAccessor::new(b.layer(limit)),
-    )
+    ))
 }
 ```
 
-These operators share limits of 32 OpenDAL operations and 8 HTTP requests.
-The HTTP permit is held until the response body is dropped. Cloning the layer
-shares its budgets; constructing another layer creates separate budgets. Keep
-both limits positive. Per-reader `io_concurrency` still controls how much work
-each reader offers to this shared budget. Direct provider HTTP requests need a
-separately configured transport; an operator layer does not cover those requests.
+These operators share at most 8 ongoing HTTP requests. A permit is acquired
+before fetch and released on fetch failure, body EOF/error or body drop.
+Clones share one budget; separate layer instances do not. Per-reader
+`io_concurrency` controls how much work each reader offers to this total budget.
+Direct provider HTTP paths can share it with `limit.wrap(transport)`; use the
+wrapped transport in their operation context. Place retry policies outside the
+limiter. Merely configuring an operator does not limit unrelated transports.
 
 To use a standard futures stream, pass an owned record reader to
 `open_arrow_access::into_stream(reader)`. It yields `Result<RecordBatch>` and

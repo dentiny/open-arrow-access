@@ -2931,7 +2931,6 @@ checksum = "9fe43e16d96bed57937eb7c4a28559bf4c5fc4a3951656505d1fdd4f856349b4"
 dependencies = [
  "opendal-core",
  "opendal-http-transport-reqwest",
- "opendal-layer-concurrent-limit",
  "opendal-layer-retry",
  "opendal-layer-timeout",
  "opendal-service-fs",
@@ -2976,18 +2975,6 @@ dependencies = [
  "http-body",
  "opendal-core",
  "reqwest",
-]
-
-[[package]]
-name = "opendal-layer-concurrent-limit"
-version = "0.59.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3734c648617e5ad724d49175dde8323550624f9614f50e9e81b7aafae30b1734"
-dependencies = [
- "asyncband",
- "futures",
- "http",
- "opendal-core",
 ]
 
 [[package]]

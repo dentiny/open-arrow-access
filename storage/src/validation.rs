@@ -3,6 +3,13 @@ use indexmap::{IndexMap, map::Entry};
 use crate::error;
 use open_arrow_access_core::Result;
 
+pub(crate) fn validate_http_concurrency(limit: usize) -> Result<()> {
+    if limit == 0 || limit > tokio::sync::Semaphore::MAX_PERMITS {
+        return Err(error::invalid_http_concurrency());
+    }
+    Ok(())
+}
+
 /// Reject empty or duplicate opaque names without interpreting them as paths.
 pub fn validate_file_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Result<()> {
     index_files(names.into_iter().map(|name| (name, ()))).map(|_| ())
