@@ -39,7 +39,7 @@ pub enum OuterCompression {
 ///     ReadRequest::new("events.jsonl"),
 ///     JsonFormat::infer(),
 ///     OuterCompression::Auto,
-/// ).await?;
+/// ).await?.into_bound_source();
 /// println!("{:?}", source.schema());
 /// let mut reader = source.reader().await?;
 /// while let Some(batch) = reader.next().await? { /* consume batch */ }
@@ -75,6 +75,15 @@ pub struct FileSource {
 }
 
 impl FileSource {
+    /// Consume this file source as a provider-independent bound source.
+    ///
+    /// Transfers the bound metadata, retained first reader and original selection
+    /// without opening the file again or polling any rows. Subsequent readers
+    /// keep the same reopening and schema-validation behavior.
+    pub fn into_bound_source(self) -> BoundSource {
+        self.source
+    }
+
     async fn bind(
         accessor: impl Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
         request: ReadRequest,
