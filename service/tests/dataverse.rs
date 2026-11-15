@@ -146,23 +146,26 @@ struct DataverseFixture {
 }
 
 impl DataverseFixture {
-    fn authenticated(&self, bearer: bool) -> DataverseService {
-        let service = DataverseService::new(self.http.endpoint())
+    fn service(&self) -> DataverseService {
+        DataverseService::new(self.http.endpoint())
             .unwrap()
-            .with_context(opendal::OperationContext::new());
-        if bearer {
-            service.with_bearer_token("test-secret").unwrap()
-        } else {
-            service.with_token("test-secret").unwrap()
-        }
+            .with_context(opendal::OperationContext::new())
     }
 }
 
 #[tokio::test]
 async fn authenticates_metadata_and_restricted_original_reads() {
-    for (bearer, header, value) in [
-        (false, "x-dataverse-key", "test-secret"),
-        (true, "authorization", "Bearer test-secret"),
+    for (authenticate, header, value) in [
+        (
+            DataverseService::with_token as fn(DataverseService, &str) -> _,
+            "x-dataverse-key",
+            "test-secret",
+        ),
+        (
+            DataverseService::with_bearer_token,
+            "authorization",
+            "Bearer test-secret",
+        ),
     ] {
         let fixture = DataverseFixture::default();
         let http = &fixture.http;
@@ -175,7 +178,7 @@ async fn authenticates_metadata_and_restricted_original_reads() {
             "/api/access/datafile/102?format=original",
             b"ORIGINAL".to_vec(),
         );
-        let service = fixture.authenticated(bearer);
+        let service = authenticate(fixture.service(), "test-secret").unwrap();
         assert!(!format!("{service:?}").contains("test-secret"));
         let dataset = service.dataset(PID, "1.0").await.unwrap();
         let mut reader = dataset.open("table.tab".into()).await.unwrap();
@@ -224,7 +227,9 @@ async fn credentials_follow_same_origin_redirects_but_never_return_after_leaving
         Ok(redirect)
     });
     let dataset = fixture
-        .authenticated(false)
+        .service()
+        .with_token("test-secret")
+        .unwrap()
         .dataset(PID, "1.0")
         .await
         .unwrap();

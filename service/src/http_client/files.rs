@@ -48,7 +48,7 @@ pub(crate) struct HttpFileService {
     client: HttpClient,
     token: Option<String>,
     headers: http::HeaderMap,
-    custom_context: bool,
+    context: Option<opendal::OperationContext>,
     /// Provider operation for metadata HTTP/JSON errors.
     operation: &'static str,
     /// Wrap namespace errors with provider context.
@@ -77,7 +77,7 @@ impl HttpFileService {
             client: HttpClient::new()?,
             token: None,
             headers: http::HeaderMap::new(),
-            custom_context: false,
+            context: None,
             operation,
             map_file_namespace_error,
         })
@@ -102,10 +102,10 @@ impl HttpFileService {
         name: http::header::HeaderName,
         value: http::HeaderValue,
     ) -> Result<Self> {
-        if self.headers.is_empty() && !self.custom_context {
-            self.client.context = opendal::OperationContext::new().with_http_transport(
+        if self.context.is_none() {
+            self.context = Some(opendal::OperationContext::new().with_http_transport(
                 opendal::HttpTransporter::new(super::new_single_hop_transport()?),
-            );
+            ));
         }
         // A provider selects one authentication scheme at a time.
         self.headers.clear();
@@ -114,13 +114,15 @@ impl HttpFileService {
     }
 
     pub(crate) fn with_context(mut self, context: opendal::OperationContext) -> Self {
-        self.client.context = context;
-        self.custom_context = true;
+        self.context = Some(context);
         self
     }
 
     fn client(&self) -> HttpClient {
         let mut client = self.client.clone();
+        if let Some(context) = &self.context {
+            client.context = context.clone();
+        }
         if !self.headers.is_empty() {
             client.context = crate::common::transport::HeaderTransport::wrap(
                 client.context,
