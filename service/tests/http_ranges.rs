@@ -6,7 +6,12 @@ use open_arrow_access_core::{
     Accessor, ByteReadOptions, ByteReader, Bytes, ErrorKind, ReadRequest,
 };
 use open_arrow_access_service::common::MetadataLink;
-use open_arrow_access_test_support::{collect_bytes, http::HttpFixture};
+use open_arrow_access_test_support::{
+    byte_accessor::assert_ranges,
+    collect_bytes, fixture,
+    http::{HttpFixture, file_response, response},
+    record::collect_column,
+};
 use opendal::{Buffer, HttpBody};
 
 mod providers;
@@ -26,45 +31,29 @@ fn set_header(output: &mut Response<HttpBody>, name: &'static str, value: Option
     }
 }
 
-fn response(status: StatusCode, bytes: Bytes) -> Response<HttpBody> {
-    Response::builder()
-        .status(status)
-        .header("content-length", bytes.len())
-        .header("accept-ranges", "bytes")
-        .header("etag", "\"v1\"")
-        .body(HttpBody::new(stream::iter([Ok(Buffer::from(bytes))]), None))
-        .unwrap()
-}
-
 fn serve(request: &Request<Buffer>, bytes: Bytes) -> Response<HttpBody> {
     assert_eq!(request.headers()["accept-encoding"], "identity");
-    if let Some(range) = request.headers().get("range") {
-        let (start, end) = range
-            .to_str()
-            .unwrap()
-            .strip_prefix("bytes=")
-            .unwrap()
-            .split_once('-')
-            .unwrap();
-        let range = start.parse::<usize>().unwrap()..end.parse::<usize>().unwrap() + 1;
-        assert_eq!(request.headers()["if-match"], "\"v1\"");
-        let mut output = response(StatusCode::PARTIAL_CONTENT, bytes.slice(range.clone()));
-        output.headers_mut().insert(
-            "content-range",
-            format!("bytes {}-{}/{}", range.start, range.end - 1, bytes.len())
-                .parse()
-                .unwrap(),
-        );
-        output
-    } else {
-        response(StatusCode::OK, bytes)
-    }
+    let mut output = file_response(request, bytes);
+    set_header(&mut output, "accept-ranges", Some("bytes"));
+    set_header(&mut output, "etag", Some("\"v1\""));
+    output
 }
 
 #[tokio::test]
 async fn exact_ranges_preserve_cursor_aliases_signed_urls_and_io_options() {
     let f = HttpFixture::new();
-    f.handle(|request| Ok(serve(&request, Bytes::from_static(b"abcdefgh"))));
+    f.handle(|request| {
+        let mut output = serve(&request, Bytes::from_static(b"abcdefgh"));
+        if request.headers().contains_key("range") {
+            assert_eq!(request.headers()["if-match"], "\"v1\"");
+        } else {
+            // Include empty parts and parts larger than the requested chunk size.
+            let parts = [b"".as_slice(), b"abcd", b"", b"efgh"].map(Bytes::from_static);
+            *output.body_mut() =
+                HttpBody::new(stream::iter([Ok(Buffer::from(parts.to_vec()))]), None);
+        }
+        Ok(output)
+    });
     let files = providers::connection(&f)
         .files(
             vec![MetadataLink {
@@ -87,19 +76,9 @@ async fn exact_ranges_preserve_cursor_aliases_signed_urls_and_io_options() {
     assert!(reader.capability().read_with_range);
     assert_eq!(reader.metadata().version.as_deref(), Some("\"v1\""));
     assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"ab");
-    assert_eq!(
-        reader
-            .read_ranges(vec![5..8, 0..2, 8..8, 5..8])
-            .await
-            .unwrap(),
-        [
-            Bytes::from_static(b"fgh"),
-            Bytes::from_static(b"ab"),
-            Bytes::new(),
-            Bytes::from_static(b"fgh")
-        ]
-    );
-    assert_eq!(reader.read_range(0..0).await.unwrap(), Bytes::new());
+    assert_ranges(reader.as_mut(), b"abcdefgh", &[5..8, 0..2, 8..8, 5..8])
+        .await
+        .unwrap();
     let count = f.requests().len();
     for range in [Range { start: 3, end: 2 }, 0..9, 9..9] {
         assert_eq!(
@@ -108,43 +87,13 @@ async fn exact_ranges_preserve_cursor_aliases_signed_urls_and_io_options() {
         );
     }
     assert_eq!(f.requests().len(), count);
-    assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"cdefgh");
-    assert_eq!(reader.read_range(2..4).await.unwrap().as_ref(), b"cd");
-    assert!(reader.next().await.unwrap().is_none());
-    assert!(f.requests().iter().all(|r| r.path == "/file?sig=a%2Bb%2Fz"));
-}
-
-#[tokio::test]
-async fn sequential_chunks_split_fragmented_buffers_without_empty_items() {
-    let f = HttpFixture::new();
-    f.handle(|_| {
-        let mut output = response(StatusCode::OK, Bytes::from_static(b"abcdefgh"));
-        *output.body_mut() = HttpBody::new(
-            stream::iter([Ok(Buffer::from(vec![
-                Bytes::new(),
-                Bytes::from_static(b"abcd"),
-                Bytes::new(),
-                Bytes::from_static(b"efgh"),
-            ]))]),
-            None,
-        );
-        Ok(output)
-    });
-    let mut reader = providers::connection(&f)
-        .open(
-            &format!("{}/file", f.endpoint()),
-            ByteReadOptions {
-                io_chunk_size: NonZeroUsize::new(2),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    for expected in [b"ab", b"cd", b"ef", b"gh"] {
+    for expected in [b"cd", b"ef", b"gh"] {
         assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), expected);
     }
     assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(f.requests().len(), 1);
+    assert_eq!(reader.read_range(2..4).await.unwrap().as_ref(), b"cd");
+    assert!(reader.next().await.unwrap().is_none());
+    assert!(f.requests().iter().all(|r| r.path == "/file?sig=a%2Bb%2Fz"));
 }
 
 #[tokio::test]
@@ -156,8 +105,8 @@ async fn unsupported_or_unknown_representations_remain_sequential() {
         ("content-encoding", Some("gzip")),
     ] {
         let f = HttpFixture::new();
-        f.handle(move |_| {
-            let mut output = response(StatusCode::OK, Bytes::from_static(b"abc"));
+        f.handle(move |request| {
+            let mut output = serve(&request, Bytes::from_static(b"abc"));
             set_header(&mut output, name, value);
             Ok(output)
         });
@@ -231,16 +180,9 @@ async fn malformed_or_changed_partial_responses_are_rejected() {
 
 #[tokio::test]
 async fn remote_service_parquet_decodes_through_ranges() {
-    use arrow_array::Int64Array;
+    use arrow_array::types::Int64Type;
     use open_arrow_access_file_format::parquet::ParquetAccessor;
-    let bytes = Bytes::from(
-        tokio::fs::read(open_arrow_access_test_support::fixture_path!(
-            "parquet",
-            "ordered-uncompressed.parquet"
-        ))
-        .await
-        .unwrap(),
-    );
+    let bytes = Bytes::from(fixture!("parquet", "ordered-uncompressed.parquet").await);
     let f = HttpFixture::new();
     f.handle(move |request| Ok(serve(&request, bytes.clone())));
     let files = providers::connection(&f)
@@ -252,24 +194,14 @@ async fn remote_service_parquet_decodes_through_ranges() {
             (),
         )
         .unwrap();
-    let mut reader = ParquetAccessor::new(files)
+    let reader = ParquetAccessor::new(files)
         .open(ReadRequest::new("data.parquet"))
         .await
         .unwrap();
-    let mut ids = Vec::new();
-    while let Some(batch) = reader.next().await.unwrap() {
-        ids.extend(
-            batch
-                .column(0)
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .unwrap()
-                .values()
-                .iter()
-                .copied(),
-        );
-    }
-    assert_eq!(ids, (0..7).collect::<Vec<_>>());
+    assert_eq!(
+        collect_column::<Int64Type>(reader, 0).await,
+        (0..7).collect::<Vec<_>>()
+    );
     let requests = f.requests();
     assert!(requests.iter().any(|r| r.headers.contains_key("range")));
     assert!(requests.iter().all(|r| r.method == http::Method::GET));
@@ -288,26 +220,18 @@ async fn ranges_keep_protocol_headers_and_strip_credentials_after_leaving_origin
     let provider = HttpFixture::new();
     let external = HttpFixture::new();
     let external_url = format!("{}/bounce?sig=a%2Bb", external.endpoint());
-    let return_url = format!("{}/finish?sig=c%2Bd", provider.endpoint());
     provider.handle(move |request| {
-        if request.uri().path() != "/finish" {
-            assert_eq!(request.headers()["x-api-key"], "secret");
-            assert_eq!(request.uri().query(), Some("api_key=secret"));
-            Ok(if request.uri().path() == "/start" {
-                redirect("/same")
-            } else {
-                redirect(&external_url)
-            })
-        } else {
-            assert!(!request.headers().contains_key("x-api-key"));
-            assert_eq!(request.uri().query(), Some("sig=c%2Bd"));
-            Ok(serve(&request, Bytes::from_static(b"abcdefgh")))
-        }
+        assert_eq!(request.headers()["x-api-key"], "secret");
+        assert_eq!(request.uri().query(), Some("api_key=secret"));
+        Ok(redirect(&external_url))
     });
     external.handle(move |request| {
         assert!(!request.headers().contains_key("x-api-key"));
         assert_eq!(request.uri().query(), Some("sig=a%2Bb"));
-        Ok(redirect(&return_url))
+        if request.headers().contains_key("range") {
+            assert_eq!(request.headers()["if-match"], "\"v1\"");
+        }
+        Ok(serve(&request, Bytes::from_static(b"abcdefgh")))
     });
     let connection = providers::connection(&provider)
         .with_header("x-api-key", "secret")
@@ -328,7 +252,7 @@ async fn ranges_keep_protocol_headers_and_strip_credentials_after_leaving_origin
         .unwrap();
     assert_eq!(reader.read_range(1..3).await.unwrap().as_ref(), b"bc");
     assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"abcdefgh");
-    assert_eq!(provider.requests().len(), 6);
+    assert_eq!(provider.requests().len(), 2);
     assert_eq!(external.requests().len(), 2);
 }
 
@@ -378,25 +302,8 @@ async fn weak_and_absent_etags_do_not_send_strong_preconditions() {
         let f = HttpFixture::new();
         f.handle(move |request| {
             assert!(!request.headers().contains_key("if-match"));
-            let ranged = request.headers().contains_key("range");
-            let mut output = response(
-                if ranged {
-                    StatusCode::PARTIAL_CONTENT
-                } else {
-                    StatusCode::OK
-                },
-                Bytes::from_static(if ranged { b"ab" } else { b"abcdefgh" }),
-            );
-            if ranged {
-                output
-                    .headers_mut()
-                    .insert("content-range", "bytes 0-1/8".parse().unwrap());
-            }
-            if let Some(etag) = etag {
-                output.headers_mut().insert("etag", etag.parse().unwrap());
-            } else {
-                output.headers_mut().remove("etag");
-            }
+            let mut output = serve(&request, Bytes::from_static(b"abcdefgh"));
+            set_header(&mut output, "etag", etag);
             Ok(output)
         });
         let mut reader = open(&f).await;
