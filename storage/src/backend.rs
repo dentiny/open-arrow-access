@@ -37,7 +37,7 @@ impl OpenDalAccessor {
         Ok(Self::new(config.apply(operator)?))
     }
 
-    /// Limit this accessor and its clones to 32 ongoing HTTP requests by default.
+    /// Limit this accessor and its clones to 64 ongoing HTTP requests by default.
     /// Independently constructed accessors have separate budgets.
     pub fn new(operator: Operator) -> Self {
         Self {

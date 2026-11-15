@@ -1,5 +1,5 @@
 //! Storage adapters use OpenDAL and expose only the shared read contracts.
-//! Accessors default to 32 ongoing HTTP requests, shared by their clones rather
+//! Accessors default to 64 ongoing HTTP requests, shared by their clones rather
 //! than by the entire process. An explicit limiter replaces this default.
 //!
 //! Clone one HTTP limiter across operators to share a total request budget:

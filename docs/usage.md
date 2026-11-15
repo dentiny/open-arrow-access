@@ -82,7 +82,7 @@ output order and do not enable multi-file parallel scans. Multiple independently
 opened readers have separate budgets. `OpenDalAccessor::with_chunk_size` controls
 emitted byte chunks, independently of both settings above.
 
-`OpenDalAccessor::new` and `try_new` enable a budget of 32 ongoing HTTP requests
+`OpenDalAccessor::new` and `try_new` enable a budget of 64 ongoing HTTP requests
 by default, shared by all readers and clones of that accessor. Independently
 constructed accessors have independent budgets; this is not a process-global
 limit. `with_http_concurrency_limit` replaces that default without stacking it.

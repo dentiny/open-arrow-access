@@ -12,7 +12,7 @@ use opendal::{
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-const DEFAULT_HTTP_CONCURRENCY: usize = 32;
+const DEFAULT_HTTP_CONCURRENCY: usize = 64;
 
 /// One HTTP request budget shared across cloned layers and wrapped transports.
 ///
@@ -26,7 +26,7 @@ pub struct HttpConcurrencyLimitLayer {
 }
 
 impl Default for HttpConcurrencyLimitLayer {
-    /// Create an independent budget of 32 ongoing HTTP requests.
+    /// Create an independent budget of 64 ongoing HTTP requests.
     fn default() -> Self {
         Self::new(DEFAULT_HTTP_CONCURRENCY).expect("default HTTP limit is valid")
     }
