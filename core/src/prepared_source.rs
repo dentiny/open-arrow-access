@@ -15,7 +15,7 @@ use crate::{
 pub struct PreparedSource {
     selection: Box<dyn PreparedSelection>,
     metadata: RecordMetadata,
-    initial: Mutex<Option<InitialReader>>,
+    cached_reader: Mutex<Option<CachedReader>>,
 }
 
 #[async_trait]
@@ -41,7 +41,7 @@ where
     }
 }
 
-struct InitialReader {
+struct CachedReader {
     options: ReadOptions,
     reader: Box<dyn RecordReader>,
 }
@@ -84,7 +84,7 @@ impl PreparedSource {
         Ok(Self {
             selection: Box::new(Selection { accessor, request }),
             metadata,
-            initial: Mutex::new(Some(InitialReader { options, reader })),
+            cached_reader: Mutex::new(Some(CachedReader { options, reader })),
         })
     }
 
@@ -108,24 +108,26 @@ impl PreparedSource {
     /// bound schema, including schema metadata; drift returns `Decode`.
     pub async fn scan(&self, options: ReadOptions) -> Result<Box<dyn RecordReader>> {
         let (schema, _) = options.resolve_projection(&self.metadata.schema)?;
-        let initial = {
-            let mut initial = self.initial.lock().map_err(|_| {
+        let cached_reader = {
+            let mut cached_reader = self.cached_reader.lock().map_err(|_| {
                 Error::new(
                     ErrorKind::Io,
                     "prepared_source_scan",
                     "prepared source state is poisoned",
                 )
             })?;
-            if initial.as_ref().is_some_and(|initial| {
-                initial.options.batch_size == options.batch_size
-                    && initial.options.projection == options.projection
+            if cached_reader.as_ref().is_some_and(|cached_reader| {
+                cached_reader.options.batch_size == options.batch_size
+                    && cached_reader.options.projection == options.projection
             }) {
-                initial.take().map(|initial| initial.reader)
+                cached_reader
+                    .take()
+                    .map(|cached_reader| cached_reader.reader)
             } else {
                 None
             }
         };
-        let reader = match initial {
+        let reader = match cached_reader {
             Some(reader) => reader,
             None => self.selection.open(options).await?,
         };
