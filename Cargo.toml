@@ -152,14 +152,9 @@ open-arrow-access-storage.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
 datafusion.workspace = true
-futures.workspace = true
 open-arrow-access-test-support.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
 tokio.workspace = true
-
-[[test]]
-name = "file_scan"
-required-features = ["format-json"]
 
 [[example]]
 name = "read_huggingface"
