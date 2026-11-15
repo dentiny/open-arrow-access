@@ -46,8 +46,6 @@ async fn check_compression(compression: Compression) {
     writer.write(&expected).unwrap();
     writer.close().unwrap();
     let accessor = ParquetAccessor::new(MemoryAccessor::new(&bytes, 17).with_ranges());
-    // Projection modes are covered by the main Parquet suite. Each codec only
-    // needs actual page decoding through sequential and partitioned readers.
     let request = ReadRequest::new("data.parquet").with_options(ReadOptions {
         batch_size: NonZeroUsize::new(2).unwrap(),
         ..Default::default()
