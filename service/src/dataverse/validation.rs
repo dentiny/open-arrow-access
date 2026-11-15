@@ -5,6 +5,13 @@ use super::{
     error::{decode, invalid, unsupported},
 };
 
+pub(super) fn validate_token(token: &str, kind: &str) -> Result<()> {
+    if token.trim().is_empty() {
+        return Err(invalid(&format!("{kind} token must not be empty")));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_request(persistent_id: &str, version: &str) -> Result<(u64, u64)> {
     let identifier = persistent_id
         .strip_prefix("doi:")

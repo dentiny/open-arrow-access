@@ -10,7 +10,7 @@ use serde::Deserialize;
 use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
 use crate::{ResolvedFileSet, file_manifest::FileSpec};
 use error::map_file_namespace_error;
-use validation::{validate_dataset, validate_request};
+use validation::{validate_dataset, validate_request, validate_token};
 
 #[derive(Clone, Debug)]
 pub struct DataverseService {
@@ -21,9 +21,7 @@ impl DataverseService {
     /// Authenticate using the installation's API token (`X-Dataverse-key`).
     /// Replaces any previously configured bearer token.
     pub fn with_token(mut self, token: &str) -> Result<Self> {
-        if token.trim().is_empty() {
-            return Err(error::invalid("API token must not be empty"));
-        }
+        validate_token(token, "API")?;
         let mut value = http::HeaderValue::from_str(token)
             .map_err(|_| error::invalid("invalid API token header"))?;
         value.set_sensitive(true);
@@ -37,9 +35,7 @@ impl DataverseService {
     /// Authenticate using an OIDC bearer token on installations that support it.
     /// Replaces any previously configured API token.
     pub fn with_bearer_token(mut self, token: &str) -> Result<Self> {
-        if token.trim().is_empty() {
-            return Err(error::invalid("bearer token must not be empty"));
-        }
+        validate_token(token, "bearer")?;
         let mut value = http::HeaderValue::from_str(&format!("Bearer {token}"))
             .map_err(|_| error::invalid("invalid bearer token header"))?;
         value.set_sensitive(true);
