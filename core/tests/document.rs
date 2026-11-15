@@ -196,3 +196,15 @@ async fn binary_decoder_preserves_empty_objects_as_one_non_null_value() {
     assert_eq!(batch["data"].null_count(), 0);
     assert!(reader.next().await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn binary_document_rejects_input_larger_than_its_limit() {
+    let source =
+        DocumentAccessor::new(MemoryAccessor::new(b"abcd", 2), BinaryDecoder).with_max_bytes(3);
+    let mut reader = source.open(ReadRequest::new("document")).await.unwrap();
+    assert_eq!(
+        reader.next().await.unwrap_err().kind(),
+        ErrorKind::ResourceExhausted
+    );
+    assert!(reader.next().await.unwrap().is_none());
+}

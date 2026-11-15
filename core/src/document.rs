@@ -5,7 +5,7 @@ use futures::stream;
 use crate::{
     Accessor, ByteReadRequest, ByteReader, Capability, ReadOptionsProvider, RecordBatch,
     RecordCapability, RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, SchemaRef,
-    StreamReader, async_trait, read_object,
+    StreamReader, async_trait, read_object, read_object_limited,
 };
 
 /// Decode one whole object into one Arrow row.
@@ -34,6 +34,7 @@ pub trait DocumentDecoder: Send + Sync {
 pub struct DocumentAccessor<B, D> {
     storage: Arc<B>,
     decoder: Arc<D>,
+    max_bytes: Option<usize>,
 }
 
 impl<B, D: Default> DocumentAccessor<B, D> {
@@ -48,6 +49,7 @@ impl<B, D> Clone for DocumentAccessor<B, D> {
         Self {
             storage: self.storage.clone(),
             decoder: self.decoder.clone(),
+            max_bytes: self.max_bytes,
         }
     }
 }
@@ -57,7 +59,16 @@ impl<B, D> DocumentAccessor<B, D> {
         Self {
             storage: Arc::new(storage),
             decoder: Arc::new(decoder),
+            max_bytes: None,
         }
+    }
+
+    /// Limit bytes collected for each document before decoding. Defaults to unlimited.
+    /// Exceeding the limit returns `ResourceExhausted` on the first read and drops
+    /// the input; upstream chunk allocations and decoded Arrow output are separate.
+    pub fn with_max_bytes(mut self, max_bytes: usize) -> Self {
+        self.max_bytes = Some(max_bytes);
+        self
     }
 }
 
@@ -86,8 +97,15 @@ where
         };
         let storage = self.storage.clone();
         let decoder = self.decoder.clone();
+        let max_bytes = self.max_bytes;
         let stream = stream::once(async move {
-            let bytes = read_object(storage.as_ref(), byte_request, "read_document").await?;
+            let bytes = match max_bytes {
+                Some(limit) => {
+                    read_object_limited(storage.as_ref(), byte_request, "read_document", limit)
+                        .await?
+                }
+                None => read_object(storage.as_ref(), byte_request, "read_document").await?,
+            };
             let batch = decoder.decode(&bytes, request, schema.clone()).await?;
             crate::validation::validate_document_batch(&batch, &schema)?;
             batch

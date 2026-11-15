@@ -350,3 +350,14 @@ pub(crate) fn default_range_unsupported() -> Error {
 pub(crate) fn record_batch_error(source: arrow_schema::ArrowError) -> Error {
     record_batch_decode(source.to_string()).with_source(source)
 }
+
+pub(crate) fn read_limit_exceeded(operation: &'static str, limit: Option<usize>) -> Error {
+    Error::new(
+        ErrorKind::ResourceExhausted,
+        operation,
+        match limit {
+            Some(limit) => format!("object exceeds {limit} byte limit"),
+            None => "collected byte length overflow".into(),
+        },
+    )
+}

@@ -87,6 +87,11 @@ impl HttpFileService {
         Ok(self)
     }
 
+    pub(crate) fn with_metadata_max_bytes(mut self, max_bytes: usize) -> Self {
+        self.client.metadata_max_bytes = Some(max_bytes);
+        self
+    }
+
     pub(crate) fn with_token(mut self, token: &str) -> Result<Self> {
         super::validation::validate_empty_token(token, self.operation)?;
         super::validation::bearer_header(token, self.operation)?;

@@ -324,6 +324,27 @@ rows, or decoded bytes. Start with the [provider matrix](support.md#dataset-prov
 then follow its guide. Discovery does not imply that a provider downloads article
 content or supplies a text-extraction pipeline.
 
+## Bound buffered object and metadata reads
+
+Use `read_all_limited(reader, operation, max_bytes)` or
+`read_object_limited(&accessor, request, operation, max_bytes)` when collecting an
+entire object. `DocumentAccessor::with_max_bytes(max_bytes)` applies the same
+limit before decoding, including `DocumentAccessor::new(storage, BinaryDecoder)`.
+The existing unlimited functions and default document behavior are unchanged.
+
+For provider API metadata, configure
+`Connection::new(origin)?.with_metadata_max_bytes(max_bytes)` before passing the
+connection to a service. Zenodo, Dataverse, Internet Archive and Hugging Face
+services also expose `with_metadata_max_bytes(max_bytes)` directly. The limit
+applies per buffered JSON/XML/catalogue response, including paginated responses;
+streaming downloads and HTTP range reads remain unaffected.
+
+Both collectors check accumulated actual bytes before copying each chunk, even
+without Content-Length. Exceeding the limit returns `ResourceExhausted` and drops
+the input without reading further chunks. Allocation hints are capped by the
+limit. This bounds collected payload bytes, not transport chunk allocations,
+allocator overhead or decoded Arrow output. A zero limit accepts only empty input.
+
 ## Handle lifecycle and source identity
 
 - Obtain the schema from `reader.metadata().schema` after open and before reading.

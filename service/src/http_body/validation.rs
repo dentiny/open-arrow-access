@@ -22,3 +22,18 @@ pub(super) fn validate_complete(
     }
     Ok(())
 }
+
+pub(super) fn validate_collected_bytes(
+    current: usize,
+    additional: usize,
+    limit: Option<usize>,
+    operation: &'static str,
+) -> Result<()> {
+    if current
+        .checked_add(additional)
+        .is_none_or(|total| limit.is_some_and(|limit| total > limit))
+    {
+        return Err(super::error::body_limit_exceeded(operation, limit));
+    }
+    Ok(())
+}

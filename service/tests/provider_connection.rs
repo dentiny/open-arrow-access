@@ -1,4 +1,4 @@
-use futures::stream;
+use futures::{StreamExt, stream};
 use http::{Response, StatusCode};
 use open_arrow_access_core::{ErrorKind, read_all};
 use open_arrow_access_service::common::Connection;
@@ -163,4 +163,28 @@ async fn credentials_stay_stripped_after_redirect_returns_to_provider() {
         .unwrap();
     assert_eq!(provider.requests().len(), 2);
     assert_eq!(external.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn metadata_limit_stops_chunked_collection_without_content_length() {
+    let fixture = HttpFixture::new();
+    fixture.handle(|_| {
+        let chunks = stream::iter([
+            Ok(opendal::Buffer::from("{\"")),
+            Ok(opendal::Buffer::from("a\":1}")),
+        ])
+        .chain(stream::once(async {
+            panic!("metadata body read past the limit")
+        }));
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .body(HttpBody::new(Box::pin(chunks), None))
+            .unwrap())
+    });
+    let error = connection(&fixture)
+        .with_metadata_max_bytes(3)
+        .json("metadata", &[])
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::ResourceExhausted);
 }

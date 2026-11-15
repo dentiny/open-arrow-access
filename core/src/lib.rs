@@ -43,10 +43,10 @@ pub use layer::{AccessorExt, Layer};
 pub use list_files::list_files;
 pub use prepared_source::PreparedSource;
 pub use project_batch::project_batch;
-pub use read_all::read_all;
+pub use read_all::{read_all, read_all_limited};
 pub use read_chunks::read_chunks;
 pub use read_lines::read_lines;
-pub use read_object::read_object;
+pub use read_object::{read_object, read_object_limited};
 pub use read_state::ReadState;
 pub use reader::{
     ByteMetadata, ByteReader, Reader, RecordMetadata, RecordReader, RecordStream, into_stream,

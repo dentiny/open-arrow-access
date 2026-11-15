@@ -18,6 +18,12 @@ pub struct DataverseService {
 }
 
 impl DataverseService {
+    /// Limit each buffered metadata response; lazy attachment reads remain unlimited.
+    pub fn with_metadata_max_bytes(mut self, max_bytes: usize) -> Self {
+        self.http = self.http.with_metadata_max_bytes(max_bytes);
+        self
+    }
+
     /// Authenticate using the installation's API token (`X-Dataverse-key`).
     /// Replaces any previously configured bearer token.
     pub fn with_token(mut self, token: &str) -> Result<Self> {

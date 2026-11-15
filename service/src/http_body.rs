@@ -9,27 +9,35 @@ use opendal::{Buffer, HttpBody, raw::oio::ReadStream};
 
 const MAX_INITIAL_BODY_CAPACITY: u64 = 64 * 1024 * 1024;
 
-pub(crate) async fn collect(mut body: BodyReader) -> Result<Bytes> {
+pub(crate) async fn collect(body: BodyReader) -> Result<Bytes> {
+    collect_limited(body, None).await
+}
+
+pub(crate) async fn collect_limited(mut body: BodyReader, limit: Option<usize>) -> Result<Bytes> {
     let Some(first) = body.next().await? else {
         return Ok(Bytes::new());
     };
+    let operation = body.length.operation;
+    validation::validate_collected_bytes(0, first.len(), limit, operation)?;
     // Validate EOF before returning a single buffer, preserving framing errors.
     let Some(second) = body.next().await? else {
         return Ok(first.to_bytes());
     };
+    validation::validate_collected_bytes(first.len(), second.len(), limit, operation)?;
     // Content-Length is an allocation hint, never an unbounded reservation.
     // Wait for actual data before reserving for a possibly stale large header.
     let capacity = body
         .content_length()
         .unwrap_or(0)
         .min(MAX_INITIAL_BODY_CAPACITY) as usize;
-    let mut bytes = Vec::with_capacity(capacity);
+    let mut bytes = Vec::with_capacity(capacity.min(limit.unwrap_or(usize::MAX)));
     for buffer in [first, second] {
         for part in buffer {
             bytes.extend_from_slice(&part);
         }
     }
     while let Some(buffer) = body.next().await? {
+        validation::validate_collected_bytes(bytes.len(), buffer.len(), limit, operation)?;
         for part in buffer {
             bytes.extend_from_slice(&part);
         }

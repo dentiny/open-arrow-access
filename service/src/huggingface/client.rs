@@ -12,6 +12,12 @@ pub struct HuggingFaceService {
 }
 
 impl HuggingFaceService {
+    /// Limit each buffered Hub metadata response; repository file reads are unaffected.
+    pub fn with_metadata_max_bytes(mut self, max_bytes: usize) -> Self {
+        self.client.metadata_max_bytes = Some(max_bytes);
+        self
+    }
+
     /// Resolve connection settings and load cached credentials asynchronously.
     /// Does not contact the Hub until discovery or file reading is requested.
     pub async fn new(mut options: HuggingFaceOptions) -> Result<Self> {

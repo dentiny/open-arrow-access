@@ -45,6 +45,7 @@ impl Connection {
             client: HttpClient {
                 context,
                 config: Default::default(),
+                metadata_max_bytes: None,
             },
         })
     }
@@ -60,6 +61,13 @@ impl Connection {
         config.validate()?;
         self.client.config = config;
         Ok(self)
+    }
+    /// Bound each buffered JSON/XML/catalogue response. Defaults to unlimited.
+    /// Actual chunks are checked before collection; streaming downloads and
+    /// range reads are unaffected. This does not bound transport chunk allocations.
+    pub fn with_metadata_max_bytes(mut self, max_bytes: usize) -> Self {
+        self.client.metadata_max_bytes = Some(max_bytes);
+        self
     }
     pub fn origin(&self) -> &Url {
         &self.origin

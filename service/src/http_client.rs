@@ -24,6 +24,7 @@ use url::Url;
 pub(crate) struct HttpClient {
     pub(crate) context: OperationContext,
     pub(crate) config: StorageConfig,
+    pub(crate) metadata_max_bytes: Option<usize>,
 }
 
 impl HttpClient {
@@ -33,6 +34,7 @@ impl HttpClient {
         Ok(Self {
             context: OperationContext::new(),
             config: Default::default(),
+            metadata_max_bytes: None,
         })
     }
 
@@ -126,6 +128,6 @@ impl HttpClient {
     ) -> Result<open_arrow_access_core::Bytes> {
         let body =
             crate::http_body::BodyReader::new(self.response(request, operation).await?, operation)?;
-        crate::http_body::collect(body).await
+        crate::http_body::collect_limited(body, self.metadata_max_bytes).await
     }
 }

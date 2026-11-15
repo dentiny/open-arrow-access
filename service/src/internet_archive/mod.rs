@@ -22,6 +22,12 @@ pub struct InternetArchiveService {
 }
 
 impl InternetArchiveService {
+    /// Limit each buffered metadata response; lazy attachment reads remain unlimited.
+    pub fn with_metadata_max_bytes(mut self, max_bytes: usize) -> Self {
+        self.http = self.http.with_metadata_max_bytes(max_bytes);
+        self
+    }
+
     /// Apply the same HTTP policy to metadata and lazy file requests.
     pub fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
         self.http = self.http.with_http_config(config)?;
