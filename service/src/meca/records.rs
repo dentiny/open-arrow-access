@@ -11,7 +11,9 @@ use open_arrow_access_core::{
     Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, read_all,
 };
 
-use super::MecaArchive;
+use open_arrow_access_decompression::zip::ZipArchive;
+
+use super::{MecaArchive, MecaFile};
 
 const DEFAULT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
 
@@ -57,13 +59,15 @@ impl ReadOptionsProvider for MecaReadRequest {
 /// Entry readers share the ZIP source without implying concurrent range I/O.
 /// ZipLimits bound entry decoding.
 pub struct MecaRecords {
-    archive: Arc<Mutex<MecaArchive>>,
+    archive: Mutex<ZipArchive>,
+    files: Arc<[MecaFile]>,
 }
 
 impl MecaArchive {
     pub fn records(self) -> MecaRecords {
         MecaRecords {
-            archive: Arc::new(Mutex::new(self)),
+            archive: Mutex::new(self.archive),
+            files: self.files.into(),
         }
     }
 }
@@ -111,11 +115,10 @@ impl ScanPlanner for MecaRecords {
             schema: schema.clone(),
             source: None,
         };
-        let session = self.archive.lock().await;
-        let files = session.files.clone();
-        let archive = session.archive.clone();
-        drop(session);
-        let partitions = files.into_iter().map(move |file| {
+        let archive = self.archive.lock().await.clone();
+        let files = self.files.clone();
+        let partitions = (0..files.len()).map(move |index| {
+            let file = files[index].clone();
             let archive = archive.clone();
             let request = request.clone();
             let schema = schema.clone();
