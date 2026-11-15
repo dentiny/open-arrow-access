@@ -2,7 +2,7 @@ use std::{collections::HashSet, ops::Range};
 
 use arrow_schema::{DataType, Fields};
 
-use crate::{Result, SchemaRef};
+use crate::{Error, ErrorKind, Result, SchemaRef};
 
 /// Validate a half-open byte range against the current representation's length.
 /// Empty ranges at or before EOF are valid. This performs no I/O and leaves
@@ -100,6 +100,17 @@ pub(crate) fn validate_range_length(
 ) -> Result<()> {
     if actual != expected {
         return Err(crate::error::incorrect_range_length(operation));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_prepared_schema(actual: &SchemaRef, expected: &SchemaRef) -> Result<()> {
+    if actual != expected {
+        return Err(Error::new(
+            ErrorKind::Decode,
+            "prepared_source_scan",
+            "scan schema differs from the projected schema fixed at preparation",
+        ));
     }
     Ok(())
 }

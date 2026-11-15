@@ -1,8 +1,8 @@
 use std::{num::NonZeroUsize, sync::Arc};
 
 use crate::{
-    Accessor, BoundSource, Error, ErrorKind, ReadOptions, ReadOptionsProvider, RecordMetadata,
-    RecordReader, Result, SchemaRef, async_trait, map_record_reader,
+    Accessor, BoundSource, ReadOptions, ReadOptionsProvider, RecordMetadata, RecordReader, Result,
+    SchemaRef, async_trait, map_record_reader, validation::validate_prepared_schema,
 };
 
 /// A typed selection with a complete bound schema and execution-time read options.
@@ -106,27 +106,16 @@ impl PreparedSource {
         } else {
             self.selection.open(options).await?
         };
-        validate_schema(&reader.metadata().schema, &schema)?;
+        validate_prepared_schema(&reader.metadata().schema, &schema)?;
         let capability = reader.capability();
         Ok(Box::new(map_record_reader(
             reader,
             schema.clone(),
             capability,
             move |batch| {
-                validate_schema(&batch.schema(), &schema)?;
+                validate_prepared_schema(&batch.schema(), &schema)?;
                 Ok(batch)
             },
         )))
     }
-}
-
-fn validate_schema(actual: &SchemaRef, expected: &SchemaRef) -> Result<()> {
-    if actual != expected {
-        return Err(Error::new(
-            ErrorKind::Decode,
-            "prepared_source_scan",
-            "scan schema differs from the projected schema fixed at preparation",
-        ));
-    }
-    Ok(())
 }
