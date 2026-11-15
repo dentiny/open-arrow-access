@@ -3,7 +3,8 @@ use crate::common::Connection;
 use open_arrow_access_core::Result;
 use url::Url;
 
-/// Protocol shared by arXiv, DOAB and OAPEN. One method call fetches one page.
+/// Protocol shared by arXiv, DOAB and OAPEN. `records` and `resume` each fetch
+/// one page; `harvest` binds an automatic continuation scanner.
 #[derive(Clone, Debug)]
 pub struct OaiService {
     connection: Connection,
@@ -11,6 +12,14 @@ pub struct OaiService {
     metadata_prefix: String,
 }
 impl OaiService {
+    /// Bind automatic, sequential token following to an Arrow record format.
+    pub fn harvest(
+        &self,
+        format: open_arrow_access_file_format::xml::XmlFormat,
+    ) -> super::OaiHarvester {
+        super::OaiHarvester::new(self.clone(), format)
+    }
+
     pub fn connection(&self) -> &Connection {
         &self.connection
     }

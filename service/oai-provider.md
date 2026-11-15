@@ -94,8 +94,8 @@ on a custom marker. For example, start with the
 built-in record path and replace its schema using
 `Doab::record_format().with_schema(custom_xml_schema)` (import `OaiProvider`).
 Explicit schemas supply their own namespace bindings. XML limits, projection,
-batch sizes and scan planning use the existing XML format APIs; no automatic
-pagination or extra network reads are introduced.
+batch sizes and scan planning use the existing XML format APIs. These single-page
+methods fetch only the requested page; use the continuation scanner below for a harvest.
 
 ## Inferred Arrow records
 
@@ -119,3 +119,55 @@ The inferred schema depends on the sampled page contents, unlike the fixed
 header schema from `record_format()`. Use an explicit XML schema when stable
 columns across pages, including empty pages, are required. The standard record
 envelope is used even if a custom marker overrides `OaiProvider::record_format`.
+
+## Automatic continuation scans
+
+`service.harvest()` returns an `OaiHarvester` using the provider's default record
+mapping. It works for DOAB, OAPEN and other `OaiProviderService` aliases. For a
+custom `OaiService`, call `protocol.harvest(format)`.
+
+```rust,no_run
+use std::num::NonZeroUsize;
+use open_arrow_access::{
+    Accessor, ReadRequest, Result,
+    service::{doab::DoabService, oai::OaiHarvestRequest},
+};
+
+async fn harvest_books() -> Result<()> {
+    let service = DoabService::new()?;
+    let mut request = OaiHarvestRequest::new(ReadRequest::new("doab-harvest"));
+    request.from = Some("2026-01-01".into());
+    request.max_pages = NonZeroUsize::new(1000);
+    let mut reader = service.harvest().open(request).await?;
+    while let Some(batch) = reader.next().await? {
+        println!("{} records", batch.num_rows());
+    }
+    Ok(())
+}
+```
+
+Construction does no I/O. Opening fetches and binds the first page; pulling after
+its EOF follows its opaque token through `resume()`. Continuations send only verb
+and token, retaining the configured connection's authentication and HTTP policy.
+An absent/empty token or `noRecordsMatch` ends the scan. Empty pages with a token
+continue; deleted headers remain rows. Each open has independent cursor state.
+Dropping the reader stops work, and any error terminates it without replay.
+
+Set `resumption_token` to start from a caller-held continuation instead of initial
+selectors; combining it with from/until/set is rejected before I/O. `max_pages`
+counts every fetched page, including empty and resumed pages. It defaults to no
+limit; exhausting an explicit limit with a continuation returns ResourceExhausted
+rather than a successful truncated scan. Repeated tokens, including longer cycles,
+return a decode error before refetching the repeated continuation. Token history
+is retained for cycle detection; page XML uses the existing buffered page API.
+
+The first reader fixes the output schema, including projection and batch size
+from `request.read`. Later page schemas must match. The default fixed header
+mapping handles empty pages. Use `harvest.with_format(explicit_xml_format)` for
+stable provider metadata columns; per-page inference can fail on empty pages or
+schema drift and is not automatically reconciled. Use the single-page methods
+when retaining raw envelopes or managing application checkpoints.
+
+A native harvest plan contains one ordered whole-input partition. Installing
+`ParallelReadLayer` does not turn dependent token requests into parallel fetches.
+EOF, protocol/HTTP errors, schema checks and page limits retain the same behavior.

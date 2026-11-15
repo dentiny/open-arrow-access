@@ -61,6 +61,12 @@ impl<P: OaiProvider> OaiProviderService<P> {
         super::record_format::inferred_record_format()
     }
 
+    /// Scan all continuation pages using the provider's default record mapping.
+    /// Use `with_format` on the harvester for explicit metadata field mappings.
+    pub fn harvest(&self) -> super::OaiHarvester {
+        self.protocol.harvest(self.record_format())
+    }
+
     pub async fn records(
         &self,
         from: Option<&str>,
