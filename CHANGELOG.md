@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 — 2026-11-15
+## 0.3.0
 
 - Add `PreparedSource` for reusable schema binding with execution-time read options
   and native partition planning, plus `file_accessor` and `file_scan_accessor`.
