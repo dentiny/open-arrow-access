@@ -127,7 +127,6 @@ impl DataverseService {
                         files,
                     },
                 )
-                .map_err(map_file_namespace_error)?
                 .with_query(&[("format", "original")]))
             })
             .await

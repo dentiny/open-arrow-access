@@ -71,7 +71,7 @@ impl InternetArchiveService {
             .resolve_files(&url, |response| {
                 let files =
                     extract_items_and_validate(response, identifier, self.http.has_credentials())?;
-                ResolvedFilesPlan::new(
+                Ok(ResolvedFilesPlan::new(
                     format!("download/{identifier}/"),
                     files
                         .iter()
@@ -85,8 +85,7 @@ impl InternetArchiveService {
                         identifier: identifier.into(),
                         files,
                     },
-                )
-                .map_err(map_file_namespace_error)
+                ))
             })
             .await
     }
