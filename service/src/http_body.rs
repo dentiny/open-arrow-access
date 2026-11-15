@@ -9,11 +9,7 @@ use opendal::{Buffer, HttpBody, raw::oio::ReadStream};
 
 const MAX_INITIAL_BODY_CAPACITY: u64 = 64 * 1024 * 1024;
 
-pub(crate) async fn collect(
-    response: Response<HttpBody>,
-    operation: &'static str,
-) -> Result<Bytes> {
-    let mut body = BodyReader::new(response, operation)?;
+pub(crate) async fn collect(mut body: BodyReader) -> Result<Bytes> {
     let Some(first) = body.next().await? else {
         return Ok(Bytes::new());
     };
@@ -54,6 +50,17 @@ impl BodyReader {
             body: response.into_body(),
             length,
         })
+    }
+
+    /// Require exact framing even when the server omits Content-Length.
+    pub(crate) fn with_expected_length(mut self, expected: u64) -> Result<Self> {
+        if *self.length.expected.get_or_insert(expected) != expected {
+            return Err(error::body_error(
+                self.length.operation,
+                "unexpected Content-Length",
+            ));
+        }
+        Ok(self)
     }
 
     pub(crate) fn content_length(&self) -> Option<u64> {

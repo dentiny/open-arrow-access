@@ -12,7 +12,7 @@ mod transport;
 pub(crate) use transport::{MAX_REDIRECTS, new_single_hop_transport, new_transport};
 pub(crate) mod validation;
 
-pub(crate) use error::{json_error, request_error, transport_error};
+pub(crate) use error::{http_status_error, json_error, request_error, transport_error};
 use http::Request;
 use open_arrow_access_core::Result;
 use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
@@ -94,12 +94,7 @@ impl HttpClient {
         request: Request<Buffer>,
         operation: &'static str,
     ) -> Result<http::Response<HttpBody>> {
-        let context = policy::apply(&self.config, self.context.clone())?;
-        let response = context
-            .http_transport()
-            .fetch(request)
-            .await
-            .map_err(|error| transport_error(operation, error))?;
+        let response = self.fetch(request, operation).await?;
         if response.status() != http::StatusCode::OK {
             return Err(error::http_status_error(
                 operation,
@@ -110,11 +105,27 @@ impl HttpClient {
         Ok(response)
     }
 
+    /// Fetch with shared retry/timeout policy, leaving status validation to the caller.
+    pub(crate) async fn fetch(
+        &self,
+        request: Request<Buffer>,
+        operation: &'static str,
+    ) -> Result<http::Response<HttpBody>> {
+        let context = policy::apply(&self.config, self.context.clone())?;
+        context
+            .http_transport()
+            .fetch(request)
+            .await
+            .map_err(|error| transport_error(operation, error))
+    }
+
     pub(crate) async fn bytes(
         &self,
         request: Request<Buffer>,
         operation: &'static str,
     ) -> Result<open_arrow_access_core::Bytes> {
-        crate::http_body::collect(self.response(request, operation).await?, operation).await
+        let body =
+            crate::http_body::BodyReader::new(self.response(request, operation).await?, operation)?;
+        crate::http_body::collect(body).await
     }
 }
