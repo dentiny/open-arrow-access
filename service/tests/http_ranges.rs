@@ -1,4 +1,4 @@
-use std::num::NonZeroUsize;
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 
 use futures::stream;
 use http::{Request, Response};
@@ -12,6 +12,7 @@ use open_arrow_access_test_support::{
     record::collect_column,
 };
 use opendal::{Buffer, HttpBody};
+use tokio::sync::Notify;
 
 mod providers;
 
@@ -101,6 +102,51 @@ async fn malformed_or_changed_partial_responses_are_rejected() {
         }
         assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"abcdefgh");
     }
+}
+
+#[tokio::test]
+async fn concurrent_ranges_return_in_request_order() {
+    let f = HttpFixture::new();
+    let second_done = Arc::new(Notify::new());
+    f.handle(move |request| {
+        let mut output = serve(&request, Bytes::from_static(b"abcdefgh"));
+        if let Some(range) = request.headers().get("range") {
+            let first = range == "bytes=0-1";
+            let second_done = second_done.clone();
+            *output.body_mut() = HttpBody::new(
+                stream::once(Box::pin(async move {
+                    let bytes = if first {
+                        second_done.notified().await;
+                        "ab"
+                    } else {
+                        second_done.notify_one();
+                        "cd"
+                    };
+                    Ok(Buffer::from(bytes))
+                })),
+                Some(2),
+            );
+        }
+        Ok(output)
+    });
+    let mut reader = providers::connection(&f)
+        .open(
+            &format!("{}/file", f.endpoint()),
+            ByteReadOptions {
+                io_concurrency: NonZeroUsize::new(2).unwrap(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(5), reader.read_ranges(vec![0..2, 2..4]))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        result,
+        vec![Bytes::from_static(b"ab"), Bytes::from_static(b"cd")]
+    );
 }
 
 #[tokio::test]

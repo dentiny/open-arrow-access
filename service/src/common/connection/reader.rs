@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{num::NonZeroUsize, ops::Range};
 
 use futures::{TryStreamExt, stream};
 use http::{HeaderValue, Request, StatusCode, header};
@@ -77,6 +77,7 @@ pub(super) async fn open(
         client,
         request,
         range_length,
+        io_concurrency: options.io_concurrency,
     }))
 }
 
@@ -117,6 +118,7 @@ struct HttpReader<R> {
     client: HttpClient,
     request: Request<Buffer>,
     range_length: Option<u64>,
+    io_concurrency: NonZeroUsize,
 }
 
 #[async_trait]
@@ -143,6 +145,21 @@ impl<R: ByteReader> Reader for HttpReader<R> {
 impl<R: ByteReader> ByteReader for HttpReader<R> {
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         read_http_range(&self.client, &self.request, self.range_length, range).await
+    }
+
+    async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+        let client = &self.client;
+        let request = &self.request;
+        let length = self.range_length;
+        let mut output = vec![Bytes::new(); ranges.len()];
+        let reads = ranges.into_iter().zip(&mut output).map(Ok::<_, Error>);
+        stream::iter(reads)
+            .try_for_each_concurrent(self.io_concurrency.get(), |(range, slot)| async move {
+                *slot = read_http_range(client, request, length, range).await?;
+                Ok(())
+            })
+            .await?;
+        Ok(output)
     }
 }
 
