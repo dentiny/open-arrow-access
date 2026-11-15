@@ -104,6 +104,33 @@ async fn malformed_or_changed_partial_responses_are_rejected() {
 }
 
 #[tokio::test]
+async fn one_http_permit_supports_ranges_and_sequential_reads() {
+    use open_arrow_access_storage::HttpConcurrencyLimitLayer;
+
+    let f = HttpFixture::new();
+    f.handle(|request| Ok(serve(&request, Bytes::from_static(b"abcdefgh"))));
+    let mut reader = providers::connection(&f)
+        .with_http_concurrency_limit(HttpConcurrencyLimitLayer::new(1).unwrap())
+        .open(
+            &format!("{}/file", f.endpoint()),
+            ByteReadOptions {
+                io_chunk_size: NonZeroUsize::new(2),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        assert_eq!(reader.read_range(4..6).await.unwrap().as_ref(), b"ef");
+        assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"ab");
+        assert_eq!(reader.read_range(6..8).await.unwrap().as_ref(), b"gh");
+        assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"cdefgh");
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn remote_service_parquet_decodes_through_ranges() {
     use arrow_array::types::Int64Type;
     use open_arrow_access_file_format::parquet::ParquetAccessor;

@@ -35,10 +35,8 @@ pub(super) async fn open(
         header::ACCEPT_ENCODING,
         HeaderValue::from_static("identity"),
     );
-    let response = connection
-        .client
-        .response(request.clone(), error::OP)
-        .await?;
+    let client = connection.http_client();
+    let response = client.response(request.clone(), error::OP).await?;
     let headers = response.headers();
     let version = headers
         .get(header::ETAG)
@@ -58,20 +56,45 @@ pub(super) async fn open(
         version,
     };
     let range_length = metadata.content_length.filter(|_| ranges);
-    let chunks = stream::try_unfold(body, |mut body| async move {
-        Ok::<_, Error>(body.next().await?.map(|buffer| (buffer, body)))
-    })
-    .map_ok(move |buffer| {
-        stream::iter(buffer.flat_map(move |part| {
-            Buffer::from(part)
-                .chunks(chunk_size)
-                .map(|chunk| Ok(chunk.to_bytes()))
+    let chunks: futures::stream::BoxStream<'static, Result<Buffer>> = if connection
+        .http_concurrency_limit
+        .is_some()
+        && let Some(length) = range_length
+    {
+        // Do not reserve the shared budget while the reader is idle: each
+        // bounded range finishes its response before handing bytes to the caller.
+        drop(body);
+        let client = client.clone();
+        let request = request.clone();
+        Box::pin(stream::try_unfold(0, move |offset| {
+            let client = client.clone();
+            let request = request.clone();
+            async move {
+                if offset == length {
+                    return Ok(None);
+                }
+                let end = offset + (length - offset).min(chunk_size as u64);
+                let bytes = read_http_range(&client, &request, Some(length), offset..end).await?;
+                Ok(Some((Buffer::from(bytes), end)))
+            }
         }))
-    })
-    .try_flatten();
+    } else {
+        Box::pin(stream::try_unfold(body, |mut body| async move {
+            Ok::<_, Error>(body.next().await?.map(|buffer| (buffer, body)))
+        }))
+    };
+    let chunks = chunks
+        .map_ok(move |buffer| {
+            stream::iter(buffer.flat_map(move |part| {
+                Buffer::from(part)
+                    .chunks(chunk_size)
+                    .map(|chunk| Ok(chunk.to_bytes()))
+            }))
+        })
+        .try_flatten();
     Ok(Box::new(HttpReader {
         sequential: StreamReader::new(chunks, metadata),
-        client: connection.client,
+        client,
         request,
         range_length,
     }))
@@ -107,45 +130,54 @@ impl<R: ByteReader> Reader for HttpReader<R> {
 #[async_trait]
 impl<R: ByteReader> ByteReader for HttpReader<R> {
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
-        let Some(length) = self.range_length else {
+        read_http_range(&self.client, &self.request, self.range_length, range).await
+    }
+}
+
+async fn read_http_range(
+    client: &HttpClient,
+    template: &Request<Buffer>,
+    length: Option<u64>,
+    range: Range<u64>,
+) -> Result<Bytes> {
+    let Some(length) = length else {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            error::OP,
+            "HTTP input does not advertise byte ranges with a known identity length",
+        ));
+    };
+    validate_byte_range(&range, length, error::OP)?;
+    if range.is_empty() {
+        return Ok(Bytes::new());
+    }
+    let mut request = template.clone();
+    request.headers_mut().insert(
+        header::RANGE,
+        HeaderValue::from_str(&BytesRange::from(range.clone()).to_header())
+            .expect("valid range header"),
+    );
+    let response = client.fetch(request, error::OP).await?;
+    match response.status() {
+        StatusCode::PARTIAL_CONTENT => {}
+        StatusCode::OK => {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 error::OP,
-                "HTTP input does not advertise byte ranges with a known identity length",
+                "HTTP server ignored the byte range request",
             ));
-        };
-        validate_byte_range(&range, length, error::OP)?;
-        if range.is_empty() {
-            return Ok(Bytes::new());
         }
-        let mut request = self.request.clone();
-        request.headers_mut().insert(
-            header::RANGE,
-            HeaderValue::from_str(&BytesRange::from(range.clone()).to_header())
-                .expect("valid range header"),
-        );
-        let response = self.client.fetch(request, error::OP).await?;
-        match response.status() {
-            StatusCode::PARTIAL_CONTENT => {}
-            StatusCode::OK => {
-                return Err(Error::new(
-                    ErrorKind::Unsupported,
-                    error::OP,
-                    "HTTP server ignored the byte range request",
-                ));
-            }
-            status => {
-                return Err(crate::http_client::http_status_error(
-                    error::OP,
-                    status,
-                    response.headers(),
-                ));
-            }
+        status => {
+            return Err(crate::http_client::http_status_error(
+                error::OP,
+                status,
+                response.headers(),
+            ));
         }
-        let etag = self.request.headers().get(header::IF_MATCH);
-        validation::validate_response(response.headers(), &range, length, etag)?;
-        let body =
-            BodyReader::new(response, error::OP)?.with_expected_length(range.end - range.start)?;
-        crate::http_body::collect(body).await
     }
+    let etag = template.headers().get(header::IF_MATCH);
+    validation::validate_response(response.headers(), &range, length, etag)?;
+    let body =
+        BodyReader::new(response, error::OP)?.with_expected_length(range.end - range.start)?;
+    crate::http_body::collect(body).await
 }
