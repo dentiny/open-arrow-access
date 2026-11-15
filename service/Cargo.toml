@@ -214,3 +214,7 @@ required-features = ["bhl"]
 [[test]]
 name = "regulations"
 required-features = ["regulations"]
+
+[[test]]
+name = "oai_harvest"
+required-features = ["oai"]

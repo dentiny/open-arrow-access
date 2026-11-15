@@ -19,7 +19,9 @@ Both return `OaiPage { bytes, resumption_token, record_count }`. `bytes` preserv
 the original XML envelope, header/metadata elements and deleted records;
 `reader()` returns those bytes as a sequential reader. Empty tokens end paging.
 The caller controls date windows, sets and pacing. Choose the provider alias
-when its standard endpoint/prefix is sufficient.
+when its standard endpoint/prefix is sufficient. For automatic token following,
+bind `OaiService::harvest(format)` with an `OaiHarvestRequest`; see
+[automatic continuation scans](oai-provider.md#automatic-continuation-scans).
 
 An illustrative XML page (the contents of `metadata` are provider-specific):
 

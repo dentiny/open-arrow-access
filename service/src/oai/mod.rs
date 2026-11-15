@@ -5,6 +5,7 @@
 //! DOAB and OAPEN reuse this path. Configured providers expose `record_format()`
 //! for stable standard header columns, including empty pages, or
 //! `inferred_record_format()` to infer header and provider metadata fields.
+//! Use `service.harvest()` with an `OaiHarvestRequest` to scan continuation pages.
 //! Resumption-token acquisition stays sequential and is not treated as
 //! independently fetchable parallel work.
 mod error;
@@ -18,3 +19,6 @@ pub use protocol::OaiService;
 
 mod provider;
 pub use provider::{OaiProvider, OaiProviderService};
+
+mod harvest;
+pub use harvest::{OaiHarvestRequest, OaiHarvester};

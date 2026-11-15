@@ -31,3 +31,24 @@ impl std::fmt::Display for ProtocolError {
     }
 }
 impl std::error::Error for ProtocolError {}
+
+pub(super) fn invalid_harvest_selectors() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        OP,
+        "resumption tokens cannot be combined with OAI selectors",
+    )
+}
+pub(super) fn repeated_harvest_token() -> Error {
+    decode("repeated OAI resumption token")
+}
+pub(super) fn harvest_page_limit() -> Error {
+    Error::new(
+        ErrorKind::ResourceExhausted,
+        OP,
+        "OAI harvest page limit reached with a continuation",
+    )
+}
+pub(super) fn harvest_schema_changed() -> Error {
+    decode("OAI page schema changed; supply a stable explicit XML mapping")
+}
