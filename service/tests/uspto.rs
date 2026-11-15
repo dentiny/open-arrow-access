@@ -19,15 +19,25 @@ async fn product_file_page_keeps_release_metadata_and_scopes_authentication() {
     download.file("/grant.zip?sig=a%2Bb", Bytes::from_static(b"original zip"));
     let s = UsptoService::with_connection(
         providers::connection(&f)
-            .with_header("X-API-KEY", "test")
+            .with_header("x-client", "retained")
             .unwrap(),
-    );
+    )
+    .with_key("old-key")
+    .unwrap()
+    .with_key("test")
+    .unwrap();
+    assert!(!format!("{s:?}").contains("old-key"));
     let files = s.product("PTGRXML", 0, 100).await.unwrap();
     assert_eq!(
         files.metadata().value()["bulkDataProductBag"][0]["productFileTotalQuantity"],
         1
     );
     assert_eq!(f.requests()[0].headers["x-api-key"], "test");
+    for request in f.requests() {
+        assert_eq!(request.headers["x-api-key"], "test");
+        assert_eq!(request.headers["x-client"], "retained");
+        assert!(request.headers["x-api-key"].is_sensitive());
+    }
     assert!(download.requests().is_empty());
     byte_accessor::assert_read_contract(files, "grant.zip".into(), b"original zip")
         .await
@@ -56,4 +66,16 @@ async fn rejects_wrong_product_and_missing_file_membership() {
     }
     assert!(UsptoService::new("").is_err());
     assert!(s.product("PTGRXML", 0, 0).await.is_err());
+}
+
+#[test]
+fn validates_keys_on_custom_connections_before_io() {
+    let f = HttpFixture::new();
+    for key in ["", "invalid\r\nInjected: value"] {
+        let error = UsptoService::with_connection(providers::connection(&f))
+            .with_key(key)
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+    assert!(f.requests().is_empty());
 }
