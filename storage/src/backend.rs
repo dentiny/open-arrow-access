@@ -44,6 +44,14 @@ impl OpenDalAccessor {
         }
     }
 
+    /// Share one HTTP request budget across this accessor's readers and clones.
+    /// Pass clones of the same limiter to other accessors or provider connections
+    /// to include their requests in that budget. Per-reader I/O settings remain separate.
+    pub fn with_http_concurrency_limit(mut self, limit: crate::HttpConcurrencyLimitLayer) -> Self {
+        self.operator = self.operator.layer(limit);
+        self
+    }
+
     pub fn with_content_lengths(
         mut self,
         lengths: impl IntoIterator<Item = (String, u64)>,

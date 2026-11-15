@@ -94,8 +94,8 @@ fn shared_limit(a: opendal::Operator, b: opendal::Operator)
 {
     let limit = HttpConcurrencyLimitLayer::new(8)?;
     Ok((
-        OpenDalAccessor::new(a.layer(limit.clone())),
-        OpenDalAccessor::new(b.layer(limit)),
+        OpenDalAccessor::new(a).with_http_concurrency_limit(limit.clone()),
+        OpenDalAccessor::new(b).with_http_concurrency_limit(limit),
     ))
 }
 ```

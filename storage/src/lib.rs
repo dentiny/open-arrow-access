@@ -7,7 +7,7 @@
 //! fn limited(operator: opendal::Operator, limit: HttpConcurrencyLimitLayer)
 //!     -> OpenDalAccessor
 //! {
-//!     OpenDalAccessor::new(operator.layer(limit))
+//!     OpenDalAccessor::new(operator).with_http_concurrency_limit(limit)
 //! }
 //! # fn main() -> open_arrow_access_core::Result<()> {
 //! let limit = HttpConcurrencyLimitLayer::new(8)?;
