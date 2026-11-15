@@ -4,7 +4,7 @@
 
 Internet Archive items group digital materials such as books, audio, video,
 software and associated metadata/derivative files. This provider resolves one
-public item's file membership and opens exact filenames.
+item's file membership and opens exact filenames.
 
 Enable facade feature `service-internet-archive`. See [example setup](README.md#example-setup) for dependencies and the async runtime.
 
@@ -41,6 +41,25 @@ additional fields may be present):
   ]
 }
 ```
+
+## Authentication
+
+Use `InternetArchiveService::new()?.with_credentials(access_key, secret_key)?`
+with your [Internet Archive keys](https://archive.org/account/s3.php). Metadata,
+HEAD, sequential downloads and range reads send
+`Authorization: LOW <access_key>:<secret_key>`, matching the official
+[Python client](https://github.com/jjjake/internetarchive/blob/master/internetarchive/auth.py)
+and [Archive authentication scheme](https://archive.org/developers/ias3.html#skip-request-signing).
+Keys are validated before I/O and omitted from Debug output and URLs. Use HTTPS.
+
+Same-origin redirects retain credentials; cross-origin redirects strip them,
+including redirects to Archive data nodes. Such redirects must resolve to a public
+or signed download. Keys are never forwarded automatically to another host.
+`with_context` accepts a custom single-hop transport for TLS/proxies or tests;
+the provider handles redirects itself. Without credentials, the existing public
+item behavior remains. With credentials, hidden item manifests may be resolved
+when the server returns valid metadata, and downloads still require server
+permission. This does not implement borrowing, lending sessions or cookie login.
 
 ## Usage and results
 

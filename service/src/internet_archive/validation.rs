@@ -25,12 +25,13 @@ pub(super) fn validate_identifier(identifier: &str) -> Result<()> {
 pub(super) fn extract_items_and_validate(
     response: ItemResponse,
     identifier: &str,
+    authenticated: bool,
 ) -> Result<Vec<InternetArchiveFile>> {
     let item = match response {
         ItemResponse::Missing([]) => return Err(not_found()),
         ItemResponse::Item(item) => item,
     };
-    if item.is_unavailable {
+    if item.is_unavailable && !authenticated {
         return Err(unavailable());
     }
     if item.error.is_some() {

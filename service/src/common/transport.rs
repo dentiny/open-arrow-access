@@ -5,14 +5,14 @@ use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext
 use url::Url;
 
 #[derive(Clone)]
-pub(super) struct AuthScope {
-    pub(super) origin: Url,
-    pub(super) headers: HeaderMap,
-    pub(super) query: Vec<(String, String)>,
+pub(crate) struct AuthScope {
+    pub(crate) origin: Url,
+    pub(crate) headers: HeaderMap,
+    pub(crate) query: Vec<(String, String)>,
 }
 
 /// The inner transport sends one hop; this layer follows redirects by default.
-pub(super) fn follow_redirects(context: OperationContext) -> OperationContext {
+pub(crate) fn follow_redirects(context: OperationContext) -> OperationContext {
     let inner = context.http_transport().clone();
     context.with_http_transport(HttpTransporter::new(RedirectTransport { inner }))
 }

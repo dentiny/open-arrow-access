@@ -1,7 +1,9 @@
 //! Bind a provider's validated manifest to lazy HTTP file access.
 
+use http::{HeaderMap, header::HeaderName};
 use open_arrow_access_core::{Error, Result};
 use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
+use opendal::{HttpTransporter, OperationContext};
 use serde::de::DeserializeOwned;
 use url::Url;
 
@@ -47,6 +49,8 @@ pub(crate) struct HttpFileService {
     endpoint: Url,
     client: HttpClient,
     token: Option<String>,
+    headers: HeaderMap,
+    single_hop_context: Option<OperationContext>,
     /// Provider operation for metadata HTTP/JSON errors.
     operation: &'static str,
     /// Wrap namespace errors with provider context.
@@ -74,6 +78,8 @@ impl HttpFileService {
             endpoint: resolve_origin(endpoint, configure)?,
             client: HttpClient::new()?,
             token: None,
+            headers: HeaderMap::new(),
+            single_hop_context: None,
             operation,
             map_file_namespace_error,
         })
@@ -92,6 +98,38 @@ impl HttpFileService {
         Ok(self)
     }
 
+    /// Add provider-specific credentials to metadata and all lazy byte reads.
+    pub(crate) fn with_auth_header(mut self, name: HeaderName, token: &str) -> Result<Self> {
+        if token.trim().is_empty() {
+            return Err(open_arrow_access_core::Error::new(
+                open_arrow_access_core::ErrorKind::InvalidInput,
+                self.operation,
+                "authentication token must not be empty",
+            ));
+        }
+        let mut value = http::HeaderValue::from_str(token)
+            .map_err(|source| super::error::invalid_token(self.operation, source))?;
+        value.set_sensitive(true);
+        self.headers.insert(name, value);
+        if self.single_hop_context.is_none() {
+            self.single_hop_context = Some(
+                OperationContext::new()
+                    .with_http_transport(HttpTransporter::new(super::new_single_hop_transport()?)),
+            );
+        }
+        Ok(self)
+    }
+
+    /// Custom transports must return single-hop responses.
+    pub(crate) fn with_context(mut self, context: OperationContext) -> Self {
+        self.single_hop_context = Some(context);
+        self
+    }
+
+    pub(crate) fn has_auth_headers(&self) -> bool {
+        !self.headers.is_empty()
+    }
+
     pub(crate) fn endpoint(&self) -> &Url {
         &self.endpoint
     }
@@ -102,8 +140,19 @@ impl HttpFileService {
         metadata_url: &Url,
         resolve: impl FnOnce(T) -> Result<ResolvedFilesPlan<M>>,
     ) -> Result<ResolvedFileSet<OpenDalAccessor, M>> {
-        let response = self
-            .client
+        let mut client = self.client.clone();
+        if let Some(context) = self.single_hop_context.clone() {
+            let inner = crate::common::transport::follow_redirects(context);
+            client.context =
+                inner
+                    .clone()
+                    .with_http_transport(HttpTransporter::new(HeaderTransport {
+                        inner: inner.http_transport().clone(),
+                        origin: self.endpoint.clone(),
+                        headers: self.headers.clone(),
+                    }));
+        }
+        let response = client
             .json(metadata_url.as_str(), self.token.as_deref(), self.operation)
             .await?;
         let plan = resolve(response)?;
@@ -111,8 +160,7 @@ impl HttpFileService {
             file.content_length
                 .map(|length| (file.object.locator().to_owned(), length))
         });
-        let storage = self
-            .client
+        let storage = client
             .accessor(
                 &self.endpoint,
                 &plan.root,
@@ -122,6 +170,31 @@ impl HttpFileService {
             .with_content_lengths(lengths);
         ResolvedFileSet::from_files(storage, plan.files, plan.metadata)
             .map_err(self.map_file_namespace_error)
+    }
+}
+
+/// Attach credentials through the existing origin-scoped redirect transport.
+/// OpenDAL's HEAD and Range requests use this same transport.
+#[derive(Debug)]
+struct HeaderTransport {
+    inner: HttpTransporter,
+    origin: Url,
+    headers: HeaderMap,
+}
+
+impl opendal::HttpTransport for HeaderTransport {
+    async fn fetch(
+        &self,
+        mut request: http::Request<opendal::Buffer>,
+    ) -> opendal::Result<http::Response<opendal::HttpBody>> {
+        request
+            .extensions_mut()
+            .insert(crate::common::transport::AuthScope {
+                origin: self.origin.clone(),
+                headers: self.headers.clone(),
+                query: Vec::new(),
+            });
+        self.inner.fetch(request).await
     }
 }
 

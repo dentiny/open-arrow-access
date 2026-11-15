@@ -11,7 +11,7 @@ mod document;
 pub use document::ApiDocument;
 
 mod connection;
-mod transport;
+pub(crate) mod transport;
 pub use connection::{Connection, RemoteFiles};
 
 pub use json_util::{LinkField, MetadataLink, resolve_named_links, resolve_optional_links};

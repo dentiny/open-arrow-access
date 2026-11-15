@@ -1,7 +1,7 @@
 use futures::TryStreamExt;
 use http::StatusCode;
 use open_arrow_access_core::{
-    ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, ErrorKind, ListRequest,
+    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Bytes, ErrorKind, ListRequest,
 };
 use open_arrow_access_service::internet_archive::InternetArchiveService;
 use open_arrow_access_test_support::{
@@ -157,4 +157,154 @@ async fn preserves_file_names_without_path_validation() {
         .unwrap();
     assert_eq!(item.files()[0].name, "papers/../secret");
     assert_eq!(http.requests().len(), 1);
+}
+
+fn authenticated_service(http: &HttpFixture) -> InternetArchiveService {
+    InternetArchiveService::with_endpoint(http.endpoint())
+        .unwrap()
+        .with_credentials("fixture-access", "fixture-secret")
+        .unwrap()
+        .with_context(opendal::OperationContext::new())
+}
+
+#[tokio::test]
+async fn authenticates_metadata_and_lazy_head_range_and_sequential_reads() {
+    let fixture = HttpFixture::new();
+    fixture.respond(
+        METADATA,
+        StatusCode::OK,
+        fixture!("internet_archive", "item.json").await,
+    );
+    fixture.file(DOWNLOAD, b"%PDFdata".as_slice());
+    let service = authenticated_service(&fixture);
+    assert!(!format!("{service:?}").contains("fixture-secret"));
+    let item = service.item(ITEM).await.unwrap();
+    assert_eq!(fixture.requests().len(), 1, "downloads remain lazy");
+    assert!(!format!("{item:?}").contains("fixture-secret"));
+    byte_accessor::assert_ranged_read_contract(
+        item,
+        ByteReadRequest::new(NAME),
+        b"%PDFdata",
+        &[1..4, 0..0, 1..4],
+    )
+    .await
+    .unwrap();
+    let requests = fixture.requests();
+    assert!(requests.iter().any(|r| r.method == http::Method::HEAD));
+    assert!(requests.iter().any(|r| r.headers.contains_key("range")));
+    for request in requests {
+        assert_eq!(
+            request.headers["authorization"],
+            "LOW fixture-access:fixture-secret"
+        );
+        assert!(!request.path.contains("fixture-secret"));
+        assert!(!request.path.contains("fixture-access"));
+    }
+}
+
+#[test]
+fn rejects_invalid_credentials_before_io_without_exposing_them() {
+    for (access, secret) in [
+        ("", "secret"),
+        ("access", ""),
+        (" ", "secret"),
+        ("access", "secret\r\nInjected: yes"),
+        ("access:other", "secret"),
+        ("access", "secret\0"),
+    ] {
+        let error = InternetArchiveService::new()
+            .unwrap()
+            .with_credentials(access, secret)
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert!(!format!("{error:?}").contains("Injected"));
+    }
+}
+
+#[tokio::test]
+async fn authenticated_hidden_items_still_require_server_permission() {
+    let fixture = HttpFixture::new();
+    let mut metadata: serde_json::Value =
+        serde_json::from_slice(&fixture!("internet_archive", "item.json").await).unwrap();
+    metadata["is_dark"] = true.into();
+    fixture.respond(
+        METADATA,
+        StatusCode::OK,
+        serde_json::to_vec(&metadata).unwrap(),
+    );
+    fixture.file(DOWNLOAD, b"%PDFdata".as_slice());
+    let item = authenticated_service(&fixture).item(ITEM).await.unwrap();
+    byte_accessor::assert_ranged_read_contract(
+        item,
+        ByteReadRequest::new(NAME),
+        b"%PDFdata",
+        &[1..4, 0..0],
+    )
+    .await
+    .unwrap();
+    fixture.respond_for(
+        http::Method::HEAD,
+        DOWNLOAD,
+        StatusCode::FORBIDDEN,
+        Vec::new(),
+    );
+    let item = authenticated_service(&fixture).item(ITEM).await.unwrap();
+    let error = item.open(NAME.into()).await.err().unwrap();
+    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+    fixture.respond(METADATA, StatusCode::UNAUTHORIZED, Vec::new());
+    let error = authenticated_service(&fixture)
+        .item(ITEM)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Unauthenticated);
+}
+
+#[tokio::test]
+async fn retains_credentials_on_same_origin_and_strips_them_on_cross_origin_redirects() {
+    let fixture = HttpFixture::new();
+    let external = HttpFixture::new();
+    fixture.respond(
+        METADATA,
+        StatusCode::OK,
+        fixture!("internet_archive", "item.json").await,
+    );
+    let origin = fixture.endpoint().to_owned();
+    let destination = external.endpoint().to_owned();
+    fixture.handle(move |request| {
+        let location = if request.uri().path() == "/local" {
+            format!("{destination}/file")
+        } else {
+            format!("{origin}/local")
+        };
+        Ok(http::Response::builder()
+            .status(StatusCode::TEMPORARY_REDIRECT)
+            .header("location", location)
+            .body(opendal::HttpBody::new(futures::stream::empty(), Some(0)))
+            .unwrap())
+    });
+    external.file("/file", b"%PDFdata".as_slice());
+    let item = authenticated_service(&fixture).item(ITEM).await.unwrap();
+    byte_accessor::assert_ranged_read_contract(
+        item,
+        ByteReadRequest::new(NAME),
+        b"%PDFdata",
+        &[1..4, 0..0],
+    )
+    .await
+    .unwrap();
+    assert!(fixture.requests().iter().any(|r| r.path == "/local"));
+    assert!(
+        fixture
+            .requests()
+            .iter()
+            .all(|r| r.headers["authorization"] == "LOW fixture-access:fixture-secret")
+    );
+    assert!(!external.requests().is_empty());
+    assert!(
+        external
+            .requests()
+            .iter()
+            .all(|r| !r.headers.contains_key("authorization"))
+    );
 }
