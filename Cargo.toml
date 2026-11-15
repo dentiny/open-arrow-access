@@ -154,7 +154,7 @@ arrow-schema.workspace = true
 datafusion.workspace = true
 open-arrow-access-test-support.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
-tokio = { workspace = true, features = ["time"] }
+tokio.workspace = true
 
 [[example]]
 name = "read_huggingface"
