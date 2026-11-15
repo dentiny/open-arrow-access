@@ -51,34 +51,34 @@ async fn maps_names_and_lists_without_storage_io() {
     assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"data");
 }
 
-#[test]
-fn validation_and_construction_share_namespace_rules() {
-    for (names, valid) in [
-        (vec![], true),
-        (vec!["../opaque", " padded ", "雪"], true),
-        (vec!["/", ".", "..", "a\\b", "a\nb", "a\0b"], true),
-        (vec!["name", " name", "name ", "./name"], true),
-        (vec![""], false),
-        (vec!["same", "same"], false),
-        (vec!["a", "b", "a"], false),
-    ] {
-        let validation = validate_file_names(names.iter().copied());
-        let construction = NamedFileAccessor::new(
-            MemoryAccessor::new(b"", 2),
-            names
-                .into_iter()
-                .map(|name| (name.to_owned(), "key".into()))
-                .collect(),
-        );
-        assert_eq!(validation.is_ok(), valid);
-        assert_eq!(construction.is_ok(), valid);
-        if !valid {
-            let expected = validation.unwrap_err();
-            let actual = construction.err().unwrap();
-            assert_eq!(expected.kind(), ErrorKind::InvalidInput);
-            assert_eq!(expected.operation(), "configure_named_files");
-            assert_eq!(actual.kind(), expected.kind());
-            assert_eq!(actual.operation(), expected.operation());
-        }
+#[rstest::rstest]
+#[case::empty(vec![], true)]
+#[case::opaque(vec!["../opaque", " padded ", "雪"], true)]
+#[case::special(vec!["/", ".", "..", "a\\b", "a\nb", "a\0b"], true)]
+#[case::distinct(vec!["name", " name", "name ", "./name"], true)]
+#[case::empty_name(vec![""], false)]
+#[case::duplicate(vec!["same", "same"], false)]
+#[case::non_adjacent_duplicate(vec!["a", "b", "a"], false)]
+fn validation_and_construction_share_namespace_rules(
+    #[case] names: Vec<&str>,
+    #[case] valid: bool,
+) {
+    let validation = validate_file_names(names.iter().copied());
+    let construction = NamedFileAccessor::new(
+        MemoryAccessor::new(b"", 2),
+        names
+            .into_iter()
+            .map(|name| (name.to_owned(), "key".into()))
+            .collect(),
+    );
+    assert_eq!(validation.is_ok(), valid);
+    assert_eq!(construction.is_ok(), valid);
+    if !valid {
+        let expected = validation.unwrap_err();
+        let actual = construction.err().unwrap();
+        assert_eq!(expected.kind(), ErrorKind::InvalidInput);
+        assert_eq!(expected.operation(), "configure_named_files");
+        assert_eq!(actual.kind(), expected.kind());
+        assert_eq!(actual.operation(), expected.operation());
     }
 }

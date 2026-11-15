@@ -81,24 +81,22 @@ async fn layer_preserves_metadata_options_and_listing_but_removes_ranges() -> Re
     Ok(())
 }
 
+#[rstest::rstest]
+#[case::empty("bad_empty.gz")]
+#[case::magic("bad_magic.gz")]
+#[case::header("bad_header.gz")]
+#[case::truncated("bad_truncated.gz")]
+#[case::checksum("bad_checksum.gz")]
+#[case::trailing("bad_trailing.gz")]
+#[case::truncated_member("bad_truncated_member.gz")]
 #[tokio::test]
-async fn invalid_gzip_is_terminal() -> Result<()> {
-    for name in [
-        "bad_empty.gz",
-        "bad_magic.gz",
-        "bad_header.gz",
-        "bad_truncated.gz",
-        "bad_checksum.gz",
-        "bad_trailing.gz",
-        "bad_truncated_member.gz",
-    ] {
-        byte_layer::assert_decode_error(
-            |input| input.layer(DecompressionLayer::new(Gzip)),
-            &fixture!("gzip", name).await,
-            "decompress",
-        )
-        .await?;
-    }
+async fn invalid_gzip_is_terminal(#[case] name: &str) -> Result<()> {
+    byte_layer::assert_decode_error(
+        |input| input.layer(DecompressionLayer::new(Gzip)),
+        &fixture!("gzip", name).await,
+        "decompress",
+    )
+    .await?;
     Ok(())
 }
 

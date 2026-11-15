@@ -90,6 +90,7 @@ async fn disabled_codec_is_rejected_before_storage_opens() {
 #[cfg(feature = "gzip")]
 #[tokio::test]
 async fn routes_gzip_with_chunk_limit_metadata_and_terminal_errors() {
+    use more_asserts::assert_le;
     use open_arrow_access_test_support::fixture;
     use std::num::NonZeroUsize;
 
@@ -106,7 +107,7 @@ async fn routes_gzip_with_chunk_limit_metadata_and_terminal_errors() {
     );
     let mut output = Vec::new();
     while let Some(chunk) = reader.next().await.unwrap() {
-        assert!(chunk.len() <= 3);
+        assert_le!(chunk.len(), 3);
         output.extend_from_slice(&chunk);
     }
     assert_eq!(output, b"payload");

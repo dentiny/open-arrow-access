@@ -6,6 +6,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+use more_asserts::assert_le;
 use open_arrow_access_core::{Accessor, ByteReadRequest, Error, ErrorKind, Reader};
 
 use crate::{MemoryAccessor, Observations, memory_error};
@@ -125,7 +126,7 @@ pub async fn assert_error_contract<A, M>(
         assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
     }
     for &offset in offsets {
-        assert!(offset <= bytes.len());
+        assert_le!(offset, bytes.len());
         let input = MemoryAccessor::new(bytes, 1).with_failure(offset, kind);
         let observed = input.observations.clone();
         let error = read_error(make_accessor(input), &request, &observed, &snapshot).await;

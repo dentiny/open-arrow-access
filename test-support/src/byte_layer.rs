@@ -1,6 +1,7 @@
 //! Reusable error contract for sequential byte layers.
 
 use crate::{MemoryAccessor, collect_bytes, reader};
+use more_asserts::assert_le;
 use open_arrow_access_core::{Accessor, ByteReadRequest, ByteReader, Error, ErrorKind, Result};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -13,7 +14,7 @@ pub async fn assert_output(
     let mut output = Vec::new();
     while let Some(chunk) = reader.next().await? {
         assert!(!chunk.is_empty());
-        assert!(chunk.len() <= max_chunk_size);
+        assert_le!(chunk.len(), max_chunk_size);
         output.extend_from_slice(&chunk);
     }
     assert_eq!(output, expected);

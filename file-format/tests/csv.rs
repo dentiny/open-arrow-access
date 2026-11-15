@@ -394,66 +394,66 @@ async fn parallel_csv_custom_dialect_is_lazy_and_opaque_formats_remain_unsplit()
     assert_eq!(plan.partitions.size_hint().0, 1);
 }
 
+#[rstest::rstest]
 #[tokio::test]
-async fn inference_detects_headers_replays_samples_and_supports_parallel_projection() {
+async fn inference_detects_headers_replays_samples_and_supports_parallel_projection(
+    #[values(1, 7, 4096)] chunk_size: usize,
+    #[values(false, true)] parallel: bool,
+) {
     use open_arrow_access_file_format::csv::CsvInferenceOptions;
     use open_arrow_access_layers::ParallelReadLayer;
-    for chunk_size in [1, 7, 4096] {
-        for parallel in [false, true] {
-            let bytes = fixture!("csv", "inference.csv").await;
-            let input = MemoryAccessor::new(&bytes, chunk_size);
-            let observed = input.observations.clone();
-            let accessor = CsvAccessor::infer(input).with_inference_options(CsvInferenceOptions {
-                max_records: 3,
-                max_bytes: 1024,
-            });
-            let request = ReadRequest::new("records.csv").with_options(ReadOptions {
-                batch_size: NonZeroUsize::new(1).unwrap(),
-                projection: Some(vec![
-                    "score".to_owned(),
-                    "id".to_owned(),
-                    "title".to_owned(),
-                ]),
-            });
-            let mut reader = if parallel {
-                accessor
-                    .layer(ParallelReadLayer::new(
-                        NonZeroUsize::new(2).unwrap(),
-                        NonZeroUsize::new(1).unwrap(),
-                    ))
-                    .open(request)
-                    .await
-                    .unwrap()
-            } else {
-                accessor.open(request).await.unwrap()
-            };
-            let schema = reader.metadata().schema.clone();
-            assert_eq!(schema.field(0).data_type(), &DataType::Float64);
-            assert_eq!(schema.field(1).data_type(), &DataType::Int64);
-            let mut ids = Vec::new();
-            let mut titles = Vec::new();
-            while let Some(batch) = reader.next().await.unwrap() {
-                assert_eq!(batch.schema(), schema);
-                ids.extend_from_slice(
-                    batch
-                        .column(1)
-                        .as_any()
-                        .downcast_ref::<Int64Array>()
-                        .unwrap()
-                        .values(),
-                );
-                let values = batch
-                    .column(2)
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .unwrap();
-                titles.extend(values.iter().map(|value| value.unwrap().to_owned()));
-            }
-            assert_eq!(ids, [1, 2, 3]);
-            assert_eq!(titles, ["first\nline", "second", "third"]);
-            assert_eq!(observed.requests.lock().unwrap().len(), 1);
-        }
+    let bytes = fixture!("csv", "inference.csv").await;
+    let input = MemoryAccessor::new(&bytes, chunk_size);
+    let observed = input.observations.clone();
+    let accessor = CsvAccessor::infer(input).with_inference_options(CsvInferenceOptions {
+        max_records: 3,
+        max_bytes: 1024,
+    });
+    let request = ReadRequest::new("records.csv").with_options(ReadOptions {
+        batch_size: NonZeroUsize::new(1).unwrap(),
+        projection: Some(vec![
+            "score".to_owned(),
+            "id".to_owned(),
+            "title".to_owned(),
+        ]),
+    });
+    let mut reader = if parallel {
+        accessor
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::new(1).unwrap(),
+            ))
+            .open(request)
+            .await
+            .unwrap()
+    } else {
+        accessor.open(request).await.unwrap()
+    };
+    let schema = reader.metadata().schema.clone();
+    assert_eq!(schema.field(0).data_type(), &DataType::Float64);
+    assert_eq!(schema.field(1).data_type(), &DataType::Int64);
+    let mut ids = Vec::new();
+    let mut titles = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        assert_eq!(batch.schema(), schema);
+        ids.extend_from_slice(
+            batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap()
+                .values(),
+        );
+        let values = batch
+            .column(2)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        titles.extend(values.iter().map(|value| value.unwrap().to_owned()));
     }
+    assert_eq!(ids, [1, 2, 3]);
+    assert_eq!(titles, ["first\nline", "second", "third"]);
+    assert_eq!(observed.requests.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]

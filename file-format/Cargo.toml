@@ -46,6 +46,7 @@ arrow-schema.workspace = true
 more-asserts.workspace = true
 open-arrow-access-storage.workspace = true
 open-arrow-access-test-support.workspace = true
+rstest.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 

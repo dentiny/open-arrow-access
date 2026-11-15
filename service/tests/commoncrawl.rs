@@ -11,14 +11,6 @@ fn crawl_identity_and_mirror_urls_are_canonical() {
         CommonCrawl::new("CC-MAIN-2022-40").unwrap().origin(),
         "https://data.commoncrawl.org"
     );
-    for origin in ["https://mirror.example", "http://mirror.example:8080/"] {
-        let source = CommonCrawl::new("CC-MAIN-2022-40")
-            .unwrap()
-            .with_origin(origin)
-            .unwrap();
-        assert_eq!(source.origin(), origin.trim_end_matches('/'));
-        open_arrow_access_service::commoncrawl::create_http_accessor(origin).unwrap();
-    }
     let origin = "https://mirror.example/nested/";
     for (error, operation) in [
         (
@@ -36,36 +28,50 @@ fn crawl_identity_and_mirror_urls_are_canonical() {
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
         assert_eq!(error.operation(), operation);
     }
-    for crawl in [
-        "../CC-MAIN-2022-40",
-        "CC-MAIN-22-40",
-        "CC-MAIN-2022-400",
-        "",
-        "cc-main-2022-40",
-        "CC-MAIN-202-40",
-        "CC-MAIN-2022-4",
-        "CC-MAIN-202x-40",
-        "CC-MAIN-2022-4x",
-        "CC-MAIN-2022-40-extra",
-        "CC-MAIN-2022-40 ",
-    ] {
-        let error = CommonCrawl::new(crawl).unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput, "{crawl:?}");
-        assert_eq!(error.operation(), "configure_commoncrawl");
-    }
-    for value in [
-        "https://host/crawl-data/CC-MAIN-2022-40/?x=1",
-        "https://user:pass@host/crawl-data/CC-MAIN-2022-40/",
-        "https://host/x/../crawl-data/CC-MAIN-2022-40/",
-        "https://host/crawl-data/%43C-MAIN-2022-40/",
-        "https://host/crawl-data//CC-MAIN-2022-40/",
-        "https://host/crawl-data/CC-MAIN-2022-40//",
-        "file:///crawl-data/CC-MAIN-2022-40/",
-    ] {
-        assert_eq!(
-            CommonCrawl::from_url(value).unwrap_err().kind(),
-            ErrorKind::InvalidInput,
-            "{value}"
-        );
-    }
+}
+
+#[rstest::rstest]
+#[case::https("https://mirror.example")]
+#[case::http_with_port("http://mirror.example:8080/")]
+fn mirror_origins_are_canonical(#[case] origin: &str) {
+    let source = CommonCrawl::new("CC-MAIN-2022-40")
+        .unwrap()
+        .with_origin(origin)
+        .unwrap();
+    assert_eq!(source.origin(), origin.trim_end_matches('/'));
+    open_arrow_access_service::commoncrawl::create_http_accessor(origin).unwrap();
+}
+
+#[rstest::rstest]
+#[case("../CC-MAIN-2022-40")]
+#[case("CC-MAIN-22-40")]
+#[case("CC-MAIN-2022-400")]
+#[case("")]
+#[case("cc-main-2022-40")]
+#[case("CC-MAIN-202-40")]
+#[case("CC-MAIN-2022-4")]
+#[case("CC-MAIN-202x-40")]
+#[case("CC-MAIN-2022-4x")]
+#[case("CC-MAIN-2022-40-extra")]
+#[case("CC-MAIN-2022-40 ")]
+fn rejects_invalid_crawl_identities(#[case] crawl: &str) {
+    let error = CommonCrawl::new(crawl).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput, "{crawl:?}");
+    assert_eq!(error.operation(), "configure_commoncrawl");
+}
+
+#[rstest::rstest]
+#[case("https://host/crawl-data/CC-MAIN-2022-40/?x=1")]
+#[case("https://user:pass@host/crawl-data/CC-MAIN-2022-40/")]
+#[case("https://host/x/../crawl-data/CC-MAIN-2022-40/")]
+#[case("https://host/crawl-data/%43C-MAIN-2022-40/")]
+#[case("https://host/crawl-data//CC-MAIN-2022-40/")]
+#[case("https://host/crawl-data/CC-MAIN-2022-40//")]
+#[case("file:///crawl-data/CC-MAIN-2022-40/")]
+fn rejects_noncanonical_crawl_urls(#[case] value: &str) {
+    assert_eq!(
+        CommonCrawl::from_url(value).unwrap_err().kind(),
+        ErrorKind::InvalidInput,
+        "{value}"
+    );
 }

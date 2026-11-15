@@ -5,6 +5,7 @@ use arrow_array::{
 };
 use arrow_schema::DataType::{Float64, Int64, Utf8};
 use futures::TryStreamExt;
+use more_asserts::assert_lt;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, Reader, ScanPlanner,
 };
@@ -123,7 +124,7 @@ async fn path_only_infers_nested_lists_and_replays_bounded_sample() {
         .open(request("inventory.xml", 1, None))
         .await
         .unwrap();
-    assert!(observations.reads.load(Ordering::Relaxed) < input.len());
+    assert_lt!(observations.reads.load(Ordering::Relaxed), input.len());
     let schema = reader.metadata().schema.clone();
     for (id, location) in ["north", "south"].into_iter().enumerate() {
         let batch = reader.next().await.unwrap().unwrap();
@@ -439,7 +440,7 @@ async fn parallel_inferred_xml_replays_bounded_sample_and_keeps_nested_mappings(
         });
     let request = request("inventory.xml", 1, Some(&["rack", "@id"]));
     let plan = accessor.plan_scan(request.clone()).await.unwrap();
-    assert!(observed.reads.load(Ordering::Relaxed) < input.len());
+    assert_lt!(observed.reads.load(Ordering::Relaxed), input.len());
     assert_eq!(
         plan.partitions.try_collect::<Vec<_>>().await.unwrap().len(),
         2

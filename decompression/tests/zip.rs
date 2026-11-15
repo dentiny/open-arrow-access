@@ -1,5 +1,6 @@
 use std::{num::NonZeroUsize, sync::atomic::Ordering};
 
+use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest, ErrorKind};
 use open_arrow_access_decompression::zip::{ZipAccessor, ZipLimits};
 use open_arrow_access_test_support::{
@@ -83,9 +84,11 @@ async fn enumerate_then_read_selected_members_with_bounded_io() {
     let reads = source.observations.ranges.lock().unwrap().len();
     assert!(reader.next().await.unwrap().is_none());
     assert_eq!(reads, source.observations.ranges.lock().unwrap().len());
-    assert!(source.observations.range_reads.load(Ordering::SeqCst) > 0);
+    assert_gt!(source.observations.range_reads.load(Ordering::SeqCst), 0);
     let ranges = source.observations.ranges.lock().unwrap();
-    assert!(ranges.iter().all(|range| range.end - range.start <= 65_536));
+    for range in ranges.iter() {
+        assert_le!(range.end - range.start, 65_536, "{range:?}");
+    }
     assert!(
         ranges
             .iter()

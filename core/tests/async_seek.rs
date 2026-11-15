@@ -1,6 +1,7 @@
 use std::{io::SeekFrom, num::NonZeroUsize};
 
 use futures::io::{AsyncReadExt, AsyncSeekExt};
+use more_asserts::assert_le;
 use open_arrow_access_core::{Accessor, ErrorKind, into_async_seek};
 use open_arrow_access_test_support::{MemoryAccessor, fixture};
 
@@ -43,14 +44,9 @@ async fn seeks_clones_and_direct_ranges_preserve_independent_cursors() {
     assert_eq!(&head, b"bc");
     assert!(input.seek(SeekFrom::Current(-3)).await.is_ok());
     assert!(input.seek(SeekFrom::Current(-1)).await.is_err());
-    assert!(
-        observed
-            .ranges
-            .lock()
-            .unwrap()
-            .iter()
-            .all(|range| range.end - range.start <= 3)
-    );
+    for range in observed.ranges.lock().unwrap().iter() {
+        assert_le!(range.end - range.start, 3, "{range:?}");
+    }
 }
 
 #[tokio::test]

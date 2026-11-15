@@ -10,6 +10,7 @@ use std::{num::NonZeroUsize, sync::Arc};
 use arrow_array::{Int64Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use futures::TryStreamExt;
+use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{Accessor, AccessorExt, ReadOptions, ReadRequest, into_stream};
 use open_arrow_access_file_format::parquet::ParquetAccessor;
 use open_arrow_access_layers::ParallelReadLayer;
@@ -57,7 +58,9 @@ async fn check_compression(name: &str) {
     for batches in [sequential, partitioned] {
         let mut offset = 0;
         for batch in batches {
-            assert!(batch.num_rows() > 0 && batch.num_rows() <= 2);
+            let rows = batch.num_rows();
+            assert_gt!(rows, 0);
+            assert_le!(rows, 2);
             assert_eq!(batch, expected.slice(offset, batch.num_rows()));
             offset += batch.num_rows();
         }

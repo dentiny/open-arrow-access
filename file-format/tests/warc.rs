@@ -2,6 +2,7 @@ use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
 use arrow_array::{cast::AsArray, types::TimestampMillisecondType};
 use futures::TryStreamExt;
+use more_asserts::assert_lt;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteReadOptions, ByteReadRequest, Error, ErrorKind, ReadOptions,
     ReadRequest, ScanPlanner,
@@ -261,7 +262,7 @@ async fn parallel_record_partitions_are_lazy_and_preserve_binary_projection_and_
     let mut plan = accessor.plan_scan(request.clone()).await.unwrap();
     assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
     let partition = plan.partitions.try_next().await.unwrap().unwrap();
-    assert!(observed.reads.load(Ordering::SeqCst) < bytes.len());
+    assert_lt!(observed.reads.load(Ordering::SeqCst), bytes.len());
     let reads = observed.reads.load(Ordering::SeqCst);
     let mut first = partition.await.unwrap();
     assert_eq!(first.metadata().schema, plan.metadata.schema);

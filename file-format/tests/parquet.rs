@@ -660,7 +660,7 @@ async fn row_group_plan_reuses_metadata_and_preserves_projection_and_rows() {
         .plan_scan(ReadRequest::new("data.parquet"))
         .await
         .unwrap();
-    assert!(plan.partitions.size_hint().0 > 1);
+    assert_gt!(plan.partitions.size_hint().0, 1);
     // A plan retains one storage handle, rather than one opener per row group.
     assert_eq!(Arc::strong_count(&bytes), owners + 1);
     assert_eq!(observations.byte_options.lock().unwrap().len(), 1);

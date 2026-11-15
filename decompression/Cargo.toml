@@ -25,6 +25,7 @@ tar = { workspace = true, optional = true }
 [dev-dependencies]
 more-asserts.workspace = true
 open-arrow-access-test-support.workspace = true
+rstest.workspace = true
 tokio.workspace = true
 
 [[test]]
