@@ -9,7 +9,6 @@ use super::error::decode_error;
 struct JsonDecoder {
     decoder: Decoder,
     batch_size: usize,
-    eof_flushed: bool,
 }
 
 impl BatchDecoder for JsonDecoder {
@@ -29,10 +28,6 @@ impl BatchDecoder for JsonDecoder {
     }
 
     fn finish(&mut self) -> Result<Option<RecordBatch>> {
-        if self.eof_flushed {
-            return Ok(None);
-        }
-        self.eof_flushed = true;
         self.flush()
     }
 }
@@ -48,7 +43,6 @@ pub(super) fn json_reader(
         JsonDecoder {
             decoder,
             batch_size,
-            eof_flushed: false,
         },
         metadata,
         OrderRequirement::Reorderable,
