@@ -25,6 +25,7 @@ mod reader_factory;
 mod record_batch_builder;
 mod record_stream;
 mod request;
+mod statistics;
 mod stream_reader;
 mod validation;
 
@@ -58,6 +59,7 @@ pub use request::{
     ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ListRequest, ObjectRef, ReadOptions,
     ReadOptionsProvider, ReadRequest,
 };
+pub use statistics::{ScanStatistics, Statistic, StatisticsProvider};
 pub use stream_reader::{StreamReader, bytes_reader};
 pub use validation::validate_byte_range;
 
