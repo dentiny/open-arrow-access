@@ -64,6 +64,30 @@ The example returns a parsed JSON page. It does not use a Figshare-specific
 feature or resolve attachment membership. For provider identity/file validation,
 prefer the corresponding typed provider service.
 
+### Shared HTTP request budget
+
+`with_http_concurrency_limit(HttpConcurrencyLimitLayer)` applies the same shared
+budget to metadata, redirects and file downloads. Pass clones of one limiter to
+connections and OpenDAL operators to include them in one total limit. The limit
+survives `with_context` replacements and connection clones; it is opt-in and
+independent of retry/timeout configuration.
+
+```rust
+use open_arrow_access::{Result, service::common::Connection, storage::HttpConcurrencyLimitLayer};
+
+fn limited() -> Result<Connection> {
+    let limit = HttpConcurrencyLimitLayer::new(8)?;
+    Ok(Connection::new("https://api.figshare.com")?.with_http_concurrency_limit(limit))
+}
+```
+
+For range-capable files with a known length, limited readers release the initial
+probe body and use bounded range requests for sequential output as well. Each
+chunk finishes its HTTP response before yielding, so an idle reader cannot hold
+its own only permit while another range waits. `io_chunk_size` sets the chunk
+size (2 MiB by default). Without a limiter, sequential streaming is unchanged;
+servers without range support retain a sequential response until EOF or drop.
+
 ### Retry and timeout policy
 
 `with_http_config(StorageConfig)` configures metadata and sequential downloads
