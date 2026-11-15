@@ -8,9 +8,6 @@
 
 pub use open_arrow_access_core::*;
 
-mod bound_source;
-pub use bound_source::BoundSource;
-
 mod attachment;
 pub use attachment::{AttachmentFormat, AttachmentOptions, open_attachment_source};
 

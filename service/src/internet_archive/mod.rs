@@ -1,4 +1,4 @@
-//! Public Internet Archive item metadata and attached file bytes.
+//! Internet Archive item metadata and attached file bytes.
 
 mod error;
 mod validation;
@@ -10,12 +10,12 @@ use serde::{Deserialize, Deserializer, de::Error as _};
 use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
 use crate::{ResolvedFileSet, file_manifest::FileSpec};
 use error::map_file_namespace_error;
-use validation::{extract_items_and_validate, validate_identifier};
+use validation::{extract_items_and_validate, validate_credentials, validate_identifier};
 
 const CONFIGURE: &str = "configure_internet_archive";
 const RESOLVE: &str = "resolve_internet_archive";
 
-/// Resolve one public item at an Internet Archive origin. Construction performs no I/O.
+/// Resolve one item at an Internet Archive origin. Construction performs no I/O.
 #[derive(Clone, Debug)]
 pub struct InternetArchiveService {
     http: HttpFileService,
@@ -26,6 +26,26 @@ impl InternetArchiveService {
     pub fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
         self.http = self.http.with_http_config(config)?;
         Ok(self)
+    }
+
+    /// Use Internet Archive S3-style keys for metadata and lazy file reads.
+    /// Sends `Authorization: LOW <access_key>:<secret_key>` only to this origin.
+    /// Keys are validated before I/O and omitted from Debug output and URLs.
+    /// This does not grant access to items the account cannot read or borrow books.
+    pub fn with_credentials(mut self, access_key: &str, secret_key: &str) -> Result<Self> {
+        validate_credentials(access_key, secret_key)?;
+        let mut value = http::HeaderValue::from_str(&format!("LOW {access_key}:{secret_key}"))
+            .map_err(|_| error::invalid("invalid Internet Archive authorization header"))?;
+        value.set_sensitive(true);
+        self.http = self.http.with_header(http::header::AUTHORIZATION, value)?;
+        Ok(self)
+    }
+
+    /// Override transport for custom TLS/proxies or deterministic tests.
+    /// The transport must return single-hop responses; the provider follows redirects.
+    pub fn with_context(mut self, context: opendal::OperationContext) -> Self {
+        self.http = self.http.with_context(context);
+        self
     }
 
     pub fn new() -> Result<Self> {
@@ -49,7 +69,8 @@ impl InternetArchiveService {
             .unwrap();
         self.http
             .resolve_files(&url, |response| {
-                let files = extract_items_and_validate(response, identifier)?;
+                let files =
+                    extract_items_and_validate(response, identifier, self.http.has_credentials())?;
                 ResolvedFilesPlan::new(
                     format!("download/{identifier}/"),
                     files

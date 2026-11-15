@@ -7,8 +7,6 @@ use crate::{
     storage::{OpenDalAccessor, opendal},
 };
 
-use crate::bound_source::SourceKind;
-
 /// Compression surrounding a complete file, independent of format-internal codecs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OuterCompression {
@@ -82,7 +80,7 @@ impl FileSource {
         request: ReadRequest,
     ) -> Result<Self> {
         Ok(Self {
-            source: BoundSource::bind_with_kind(accessor, request, SourceKind::File).await?,
+            source: BoundSource::bind(accessor, request).await?,
         })
     }
 
