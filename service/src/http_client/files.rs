@@ -1,6 +1,6 @@
 //! Bind a provider's validated manifest to lazy HTTP file access.
 
-use http::{HeaderMap, header::HeaderName};
+use http::{HeaderMap, header::AUTHORIZATION};
 use open_arrow_access_core::{Error, Result};
 use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 use opendal::{HttpTransporter, OperationContext};
@@ -99,18 +99,12 @@ impl HttpFileService {
     }
 
     /// Add provider-specific credentials to metadata and all lazy byte reads.
-    pub(crate) fn with_auth_header(mut self, name: HeaderName, token: &str) -> Result<Self> {
-        if token.trim().is_empty() {
-            return Err(open_arrow_access_core::Error::new(
-                open_arrow_access_core::ErrorKind::InvalidInput,
-                self.operation,
-                "authentication token must not be empty",
-            ));
-        }
+    /// The provider validates credential syntax before constructing this value.
+    pub(crate) fn with_authorization(mut self, token: &str) -> Result<Self> {
         let mut value = http::HeaderValue::from_str(token)
             .map_err(|source| super::error::invalid_token(self.operation, source))?;
         value.set_sensitive(true);
-        self.headers.insert(name, value);
+        self.headers.insert(AUTHORIZATION, value);
         if self.single_hop_context.is_none() {
             self.single_hop_context = Some(
                 OperationContext::new()
@@ -142,15 +136,13 @@ impl HttpFileService {
     ) -> Result<ResolvedFileSet<OpenDalAccessor, M>> {
         let mut client = self.client.clone();
         if let Some(context) = self.single_hop_context.clone() {
-            let inner = crate::common::transport::follow_redirects(context);
-            client.context =
-                inner
-                    .clone()
-                    .with_http_transport(HttpTransporter::new(HeaderTransport {
-                        inner: inner.http_transport().clone(),
-                        origin: self.endpoint.clone(),
-                        headers: self.headers.clone(),
-                    }));
+            let context = crate::common::transport::follow_redirects(context);
+            let inner = context.http_transport().clone();
+            client.context = context.with_http_transport(HttpTransporter::new(HeaderTransport {
+                inner,
+                origin: self.endpoint.clone(),
+                headers: self.headers.clone(),
+            }));
         }
         let response = client
             .json(metadata_url.as_str(), self.token.as_deref(), self.operation)

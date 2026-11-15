@@ -44,10 +44,9 @@ impl InternetArchiveService {
                 ));
             }
         }
-        self.http = self.http.with_auth_header(
-            http::header::AUTHORIZATION,
-            &format!("LOW {access_key}:{secret_key}"),
-        )?;
+        self.http = self
+            .http
+            .with_authorization(&format!("LOW {access_key}:{secret_key}"))?;
         Ok(self)
     }
 
