@@ -7,6 +7,7 @@
 mod error;
 mod file_manifest;
 mod resolved_files;
+pub use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
 pub use resolved_files::ResolvedFileSet;
 
 #[cfg(feature = "courtlistener")]

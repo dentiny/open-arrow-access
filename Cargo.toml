@@ -155,6 +155,10 @@ tokio.workspace = true
 name = "file_source"
 required-features = ["format-json"]
 
+[[test]]
+name = "resolved_files"
+required-features = ["format-json"]
+
 [[example]]
 name = "read_huggingface"
 required-features = ["service-huggingface"]

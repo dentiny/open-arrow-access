@@ -79,6 +79,9 @@ where
     /// each selected file opens an independent byte reader on demand.
     /// Call `with_file_planning()` on the result when the format supports native
     /// partitions, to combine file-internal and cross-file parallelism.
+    /// Build selections with [`crate::FileSetRequest`]. Both file-set types are
+    /// exported by the service crate, so facade users do not need the
+    /// `dataset-directory` feature to scan provider attachments.
     pub fn records<F>(self, format: F) -> FileSetAccessor<FileAccessor<Self, F>>
     where
         F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
