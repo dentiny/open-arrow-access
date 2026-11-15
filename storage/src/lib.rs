@@ -1,4 +1,6 @@
 //! Storage adapters use OpenDAL and expose only the shared read contracts.
+//! Accessors default to 64 ongoing HTTP requests, shared by their clones rather
+//! than by the entire process. An explicit limiter replaces this default.
 //!
 //! Clone one HTTP limiter across operators to share a total request budget:
 //! ```no_run
@@ -7,7 +9,7 @@
 //! fn limited(operator: opendal::Operator, limit: HttpConcurrencyLimitLayer)
 //!     -> OpenDalAccessor
 //! {
-//!     OpenDalAccessor::new(operator.layer(limit))
+//!     OpenDalAccessor::new(operator).with_http_concurrency_limit(limit)
 //! }
 //! # fn main() -> open_arrow_access_core::Result<()> {
 //! let limit = HttpConcurrencyLimitLayer::new(8)?;

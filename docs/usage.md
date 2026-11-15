@@ -82,6 +82,11 @@ output order and do not enable multi-file parallel scans. Multiple independently
 opened readers have separate budgets. `OpenDalAccessor::with_chunk_size` controls
 emitted byte chunks, independently of both settings above.
 
+`OpenDalAccessor::new` and `try_new` enable a budget of 64 ongoing HTTP requests
+by default, shared by all readers and clones of that accessor. Independently
+constructed accessors have independent budgets; this is not a process-global
+limit. `with_http_concurrency_limit` replaces that default without stacking it.
+
 For one total HTTP request budget across readers and operators, clone a single
 `HttpConcurrencyLimitLayer`. It wraps the transport rather than counting
 OpenDAL operations or reader tasks:
@@ -94,8 +99,8 @@ fn shared_limit(a: opendal::Operator, b: opendal::Operator)
 {
     let limit = HttpConcurrencyLimitLayer::new(8)?;
     Ok((
-        OpenDalAccessor::new(a.layer(limit.clone())),
-        OpenDalAccessor::new(b.layer(limit)),
+        OpenDalAccessor::new(a).with_http_concurrency_limit(limit.clone()),
+        OpenDalAccessor::new(b).with_http_concurrency_limit(limit),
     ))
 }
 ```
