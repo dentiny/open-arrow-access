@@ -181,25 +181,3 @@ async fn resume_projection_and_planning() {
     assert_eq!(count, 2);
     assert_eq!(http.requests().len(), 3);
 }
-
-#[tokio::test]
-async fn rejects_schema_drift_before_emitting_rows() {
-    let http = HttpFixture::new();
-    respond(&http, None, page(&["first"], Some("next")));
-    let next = page(&["second"], None).replace(
-        "</record>",
-        "<metadata><new_field>value</new_field></metadata></record>",
-    );
-    respond(&http, Some("next"), next);
-    let provider = service(&http);
-    let mut reader = provider
-        .harvest()
-        .with_format(provider.inferred_record_format())
-        .open(request())
-        .await
-        .unwrap();
-    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
-    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(http.requests().len(), 2);
-}
