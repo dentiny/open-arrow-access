@@ -70,22 +70,22 @@ pub(super) async fn open(
     })
     .try_flatten();
     Ok(Box::new(HttpReader {
-        sequential: Box::new(StreamReader::new(chunks, metadata)),
+        sequential: StreamReader::new(chunks, metadata),
         client: connection.client,
         request,
         range_length,
     }))
 }
 
-struct HttpReader {
-    sequential: Box<dyn ByteReader>,
+struct HttpReader<R> {
+    sequential: R,
     client: HttpClient,
     request: Request<Buffer>,
     range_length: Option<u64>,
 }
 
 #[async_trait]
-impl Reader for HttpReader {
+impl<R: ByteReader> Reader for HttpReader<R> {
     type Item = Bytes;
     type Metadata = ByteMetadata;
     type Capability = Capability;
@@ -105,7 +105,7 @@ impl Reader for HttpReader {
 }
 
 #[async_trait]
-impl ByteReader for HttpReader {
+impl<R: ByteReader> ByteReader for HttpReader<R> {
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         let Some(length) = self.range_length else {
             return Err(Error::new(
