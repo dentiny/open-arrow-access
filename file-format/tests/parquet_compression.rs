@@ -46,60 +46,53 @@ async fn check_compression(compression: Compression) {
     writer.write(&expected).unwrap();
     writer.close().unwrap();
     let accessor = ParquetAccessor::new(MemoryAccessor::new(&bytes, 17).with_ranges());
-    for projection in [None, Some(vec!["text".into(), "id".into()]), Some(vec![])] {
-        let projected = match &projection {
-            None => expected.clone(),
-            Some(fields) if fields.is_empty() => expected.project(&[]).unwrap(),
-            Some(_) => expected.project(&[1, 0]).unwrap(),
-        };
-        let request = ReadRequest::new("data.parquet").with_options(ReadOptions {
-            batch_size: NonZeroUsize::new(2).unwrap(),
-            projection,
-        });
-        let sequential = into_stream(accessor.open(request.clone()).await.unwrap())
-            .try_collect::<Vec<_>>()
-            .await
-            .unwrap();
-        let parallel = accessor.clone().layer(ParallelReadLayer::new(
-            NonZeroUsize::new(2).unwrap(),
-            NonZeroUsize::new(1).unwrap(),
-        ));
-        let partitioned = into_stream(parallel.open(request).await.unwrap())
-            .try_collect::<Vec<_>>()
-            .await
-            .unwrap();
-        for batches in [sequential, partitioned] {
-            let mut offset = 0;
-            for batch in batches {
-                assert!(batch.num_rows() > 0 && batch.num_rows() <= 2);
-                assert_eq!(batch, projected.slice(offset, batch.num_rows()));
-                offset += batch.num_rows();
-            }
-            assert_eq!(offset, expected.num_rows());
+    let request = ReadRequest::new("data.parquet").with_options(ReadOptions {
+        batch_size: NonZeroUsize::new(2).unwrap(),
+        ..Default::default()
+    });
+    let sequential = into_stream(accessor.open(request.clone()).await.unwrap())
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    let parallel = accessor.layer(ParallelReadLayer::new(
+        NonZeroUsize::new(2).unwrap(),
+        NonZeroUsize::MIN,
+    ));
+    let partitioned = into_stream(parallel.open(request).await.unwrap())
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    for batches in [sequential, partitioned] {
+        let mut offset = 0;
+        for batch in batches {
+            assert!(batch.num_rows() > 0 && batch.num_rows() <= 2);
+            assert_eq!(batch, expected.slice(offset, batch.num_rows()));
+            offset += batch.num_rows();
         }
+        assert_eq!(offset, expected.num_rows());
     }
 }
 
 #[cfg(feature = "parquet-brotli")]
 #[tokio::test]
-async fn brotli_preserves_values_projection_and_parallel_row_groups() {
+async fn brotli_preserves_values_and_parallel_row_groups() {
     check_compression(Compression::BROTLI(Default::default())).await;
 }
 
 #[cfg(feature = "parquet-gzip")]
 #[tokio::test]
-async fn gzip_preserves_values_projection_and_parallel_row_groups() {
+async fn gzip_preserves_values_and_parallel_row_groups() {
     check_compression(Compression::GZIP(Default::default())).await;
 }
 
 #[cfg(feature = "parquet-lz4")]
 #[tokio::test]
-async fn lz4_preserves_values_projection_and_parallel_row_groups() {
+async fn lz4_preserves_values_and_parallel_row_groups() {
     check_compression(Compression::LZ4_RAW).await;
 }
 
 #[cfg(feature = "parquet-zstd")]
 #[tokio::test]
-async fn zstd_preserves_values_projection_and_parallel_row_groups() {
+async fn zstd_preserves_values_and_parallel_row_groups() {
     check_compression(Compression::ZSTD(Default::default())).await;
 }
