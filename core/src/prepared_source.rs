@@ -1,8 +1,11 @@
 use std::{num::NonZeroUsize, sync::Arc};
 
+use futures::StreamExt;
+
 use crate::{
-    Accessor, BoundSource, ReadOptions, ReadOptionsProvider, RecordMetadata, RecordReader, Result,
-    SchemaRef, async_trait, map_record_reader, validation::validate_prepared_schema,
+    Accessor, BoundSource, Error, ErrorKind, ReadOptions, ReadOptionsProvider, RecordMetadata,
+    RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader,
+    async_trait, into_stream, map_record_reader, validation::validate_prepared_schema,
 };
 
 /// A typed selection with a complete bound schema and execution-time read options.
@@ -18,9 +21,23 @@ pub struct PreparedSource {
     batch_size: NonZeroUsize,
 }
 
+/// Erased access to a saved selection and its optional partition planner.
 #[async_trait]
 trait PreparedSelection: Send + Sync {
+    /// Open the saved selection with the supplied common read options.
+    /// The caller validates the returned reader against the bound schema.
     async fn open(&self, options: ReadOptions) -> Result<Box<dyn RecordReader>>;
+
+    /// Plan the saved selection with the supplied common read options.
+    /// Sources may perform planning I/O; returned partition openers remain lazy.
+    /// The default rejects planning when its interface was not retained.
+    async fn plan_scan(&self, _options: ReadOptions) -> Result<ScanPlan> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "prepared_source_plan",
+            "prepare_plannable is required to retain partition planning",
+        ))
+    }
 }
 
 struct Selection<A: Accessor> {
@@ -34,10 +51,37 @@ where
     A: Accessor<Reader = dyn RecordReader>,
     A::Request: Clone + Sync + ReadOptionsProvider,
 {
+    /// Clone the saved request and replace only its common read options.
     async fn open(&self, options: ReadOptions) -> Result<Box<dyn RecordReader>> {
         let mut request = self.request.clone();
         *request.read_options_mut() = options;
         self.accessor.open(request).await
+    }
+}
+
+struct PlannableSelection<A: Accessor>(Selection<A>);
+
+#[async_trait]
+impl<A> PreparedSelection for PlannableSelection<A>
+where
+    A: ScanPlanner,
+    A::Request: Clone + Sync + ReadOptionsProvider,
+{
+    /// Use the accessor's ordinary open path for a normal scan.
+    async fn open(&self, options: ReadOptions) -> Result<Box<dyn RecordReader>> {
+        self.0.open(options).await
+    }
+
+    /// Forward planning while retaining the accessor's ordering requirement.
+    async fn plan_scan(&self, options: ReadOptions) -> Result<ScanPlan> {
+        let mut request = self.0.request.clone();
+        *request.read_options_mut() = options;
+        Ok(self
+            .0
+            .accessor
+            .plan_scan(request)
+            .await?
+            .require_ordering(self.0.accessor.capability().ordering))
     }
 }
 
@@ -65,7 +109,38 @@ impl PreparedSource {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn prepare<A>(accessor: A, mut request: A::Request) -> Result<Self>
+    pub async fn prepare<A>(accessor: A, request: A::Request) -> Result<Self>
+    where
+        A: Accessor<Reader = dyn RecordReader> + 'static,
+        A::Request: Clone + Sync + ReadOptionsProvider + 'static,
+    {
+        Self::prepare_with(accessor, request, |accessor, request| {
+            Box::new(Selection { accessor, request })
+        })
+        .await
+    }
+
+    /// Prepare a source while retaining its optional [`ScanPlanner`] interface.
+    ///
+    /// Like [`Self::prepare`], this retains the first unprojected reader through
+    /// [`BoundSource`]. [`Self::scan`] still executes the accessor's `open` path;
+    /// [`Self::plan_scan`] explicitly exposes its independent partitions.
+    pub async fn prepare_plannable<A>(accessor: A, request: A::Request) -> Result<Self>
+    where
+        A: ScanPlanner + 'static,
+        A::Request: Clone + Sync + ReadOptionsProvider + 'static,
+    {
+        Self::prepare_with(accessor, request, |accessor, request| {
+            Box::new(PlannableSelection(Selection { accessor, request }))
+        })
+        .await
+    }
+
+    async fn prepare_with<A>(
+        accessor: A,
+        mut request: A::Request,
+        selection: impl FnOnce(Arc<A>, A::Request) -> Box<dyn PreparedSelection>,
+    ) -> Result<Self>
     where
         A: Accessor<Reader = dyn RecordReader> + 'static,
         A::Request: Clone + Sync + ReadOptionsProvider + 'static,
@@ -75,7 +150,7 @@ impl PreparedSource {
         let accessor = Arc::new(accessor);
         let bound = BoundSource::bind(accessor.clone(), request.clone()).await?;
         Ok(Self {
-            selection: Box::new(Selection { accessor, request }),
+            selection: selection(accessor, request),
             bound,
             batch_size,
         })
@@ -106,16 +181,53 @@ impl PreparedSource {
         } else {
             self.selection.open(options).await?
         };
-        validate_prepared_schema(&reader.metadata().schema, &schema)?;
-        let capability = reader.capability();
-        Ok(Box::new(map_record_reader(
-            reader,
-            schema.clone(),
-            capability,
-            move |batch| {
-                validate_prepared_schema(&batch.schema(), &schema)?;
-                Ok(batch)
-            },
-        )))
+        checked_reader(reader, schema)
     }
+
+    /// Plan independent partitions with execution-time projection and batch size.
+    ///
+    /// Returns `Unsupported` unless prepared with [`Self::prepare_plannable`].
+    /// Plan, partition-reader, and batch schemas must match the projected bound
+    /// schema. Discovery and opening stay lazy, and the initial reader is retained
+    /// for a compatible [`Self::scan`]. Plans/readers outlive this source.
+    ///
+    /// Source ordering and the partition/prefetch counts and emission policy
+    /// represented by [`ScanPlan`] are preserved. The consumer must honor those
+    /// policies; [`ScanPlan::into_reader`] is only a sequential primitive. Use
+    /// [`Self::scan`] to execute the composed accessor's policies. Accessors
+    /// without [`ScanPlanner`] cannot use this planning path.
+    pub async fn plan_scan(&self, options: ReadOptions) -> Result<ScanPlan> {
+        let (schema, _) = options.resolve_projection(&self.schema())?;
+        let mut plan = self.selection.plan_scan(options).await?;
+        validate_prepared_schema(&plan.metadata.schema, &schema)?;
+        // Reuse terminal stream cleanup without polling discovery or openers.
+        let partitions = into_stream(Box::new(StreamReader::new(plan.partitions, ())));
+        plan.partitions = partitions
+            .map(move |partition| {
+                let schema = schema.clone();
+                partition.map(|partition| {
+                    Box::pin(async move { checked_reader(partition.await?, schema) })
+                        as ScanPartition
+                })
+            })
+            .boxed();
+        Ok(plan)
+    }
+}
+
+fn checked_reader(
+    reader: Box<dyn RecordReader>,
+    schema: SchemaRef,
+) -> Result<Box<dyn RecordReader>> {
+    validate_prepared_schema(&reader.metadata().schema, &schema)?;
+    let capability = reader.capability();
+    Ok(Box::new(map_record_reader(
+        reader,
+        schema.clone(),
+        capability,
+        move |batch| {
+            validate_prepared_schema(&batch.schema(), &schema)?;
+            Ok(batch)
+        },
+    )))
 }
