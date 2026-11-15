@@ -82,6 +82,31 @@ output order and do not enable multi-file parallel scans. Multiple independently
 opened readers have separate budgets. `OpenDalAccessor::with_chunk_size` controls
 emitted byte chunks, independently of both settings above.
 
+For one total budget across readers and operators, reuse a single OpenDAL
+`ConcurrentLimitLayer`. The storage adapter enables this upstream layer:
+
+```rust,no_run
+use open_arrow_access::storage::{OpenDalAccessor, opendal};
+
+fn shared_limit(a: opendal::Operator, b: opendal::Operator)
+    -> (OpenDalAccessor, OpenDalAccessor)
+{
+    let limit = opendal::layers::ConcurrentLimitLayer::new(32)
+        .with_http_concurrent_limit(8);
+    (
+        OpenDalAccessor::new(a.layer(limit.clone())),
+        OpenDalAccessor::new(b.layer(limit)),
+    )
+}
+```
+
+These operators share limits of 32 OpenDAL operations and 8 HTTP requests.
+The HTTP permit is held until the response body is dropped. Cloning the layer
+shares its budgets; constructing another layer creates separate budgets. Keep
+both limits positive. Per-reader `io_concurrency` still controls how much work
+each reader offers to this shared budget. Direct provider HTTP requests need a
+separately configured transport; an operator layer does not cover those requests.
+
 To use a standard futures stream, pass an owned record reader to
 `open_arrow_access::into_stream(reader)`. It yields `Result<RecordBatch>` and
 terminates after EOF or the first error.

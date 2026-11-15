@@ -1,4 +1,18 @@
 //! Storage adapters use OpenDAL and expose only the shared read contracts.
+//!
+//! Reuse OpenDAL's concurrent-limit layer for a shared budget across operators:
+//! ```no_run
+//! use open_arrow_access_storage::{OpenDalAccessor, opendal};
+//!
+//! fn limited(operator: opendal::Operator, limit: opendal::layers::ConcurrentLimitLayer)
+//!     -> OpenDalAccessor
+//! {
+//!     OpenDalAccessor::new(operator.layer(limit))
+//! }
+//! let limit = opendal::layers::ConcurrentLimitLayer::new(32)
+//!     .with_http_concurrent_limit(8);
+//! // Pass limit.clone() to each operator that should share these budgets.
+//! ```
 
 mod backend;
 mod config;
