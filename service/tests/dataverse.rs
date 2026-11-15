@@ -140,14 +140,21 @@ async fn preserves_logical_names_without_path_validation() {
     }
 }
 
-fn authenticated(http: &HttpFixture, bearer: bool) -> DataverseService {
-    let service = DataverseService::new(http.endpoint())
-        .unwrap()
-        .with_context(opendal::OperationContext::new());
-    if bearer {
-        service.with_bearer_token("test-secret").unwrap()
-    } else {
-        service.with_token("test-secret").unwrap()
+#[derive(Default)]
+struct DataverseFixture {
+    http: HttpFixture,
+}
+
+impl DataverseFixture {
+    fn authenticated(&self, bearer: bool) -> DataverseService {
+        let service = DataverseService::new(self.http.endpoint())
+            .unwrap()
+            .with_context(opendal::OperationContext::new());
+        if bearer {
+            service.with_bearer_token("test-secret").unwrap()
+        } else {
+            service.with_token("test-secret").unwrap()
+        }
     }
 }
 
@@ -157,7 +164,8 @@ async fn authenticates_metadata_and_restricted_original_reads() {
         (false, "x-dataverse-key", "test-secret"),
         (true, "authorization", "Bearer test-secret"),
     ] {
-        let http = HttpFixture::new();
+        let fixture = DataverseFixture::default();
+        let http = &fixture.http;
         http.respond(
             METADATA,
             StatusCode::OK,
@@ -167,7 +175,7 @@ async fn authenticates_metadata_and_restricted_original_reads() {
             "/api/access/datafile/102?format=original",
             b"ORIGINAL".to_vec(),
         );
-        let service = authenticated(&http, bearer);
+        let service = fixture.authenticated(bearer);
         assert!(!format!("{service:?}").contains("test-secret"));
         let dataset = service.dataset(PID, "1.0").await.unwrap();
         let mut reader = dataset.open("table.tab".into()).await.unwrap();
@@ -183,7 +191,8 @@ async fn authenticates_metadata_and_restricted_original_reads() {
 #[tokio::test]
 async fn credentials_follow_same_origin_redirects_but_never_return_after_leaving() {
     use open_arrow_access_test_support::http::{file_response, response};
-    let http = HttpFixture::new();
+    let fixture = DataverseFixture::default();
+    let http = &fixture.http;
     let other = HttpFixture::new();
     let destination = other.endpoint().to_owned();
     http.respond(
@@ -214,7 +223,8 @@ async fn credentials_follow_same_origin_redirects_but_never_return_after_leaving
             .insert("location", format!("{origin}/returned").parse().unwrap());
         Ok(redirect)
     });
-    let dataset = authenticated(&http, false)
+    let dataset = fixture
+        .authenticated(false)
         .dataset(PID, "1.0")
         .await
         .unwrap();
