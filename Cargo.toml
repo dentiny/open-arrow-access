@@ -89,6 +89,7 @@ open-arrow-access-dataset = { path = "dataset", version = "0.2.2", default-featu
 open-arrow-access-service = { path = "service", version = "0.2.2", default-features = false }
 
 [features]
+blocking = ["dep:arrow-array", "dep:arrow-schema", "dep:tokio"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 decompression-bz2 = ["open-arrow-access-decompression/bz2"]
 decompression-gzip = ["open-arrow-access-decompression/gzip"]
@@ -136,6 +137,9 @@ service-warc = ["open-arrow-access-service/warc"]
 service-zenodo = ["open-arrow-access-service/zenodo"]
 
 [dependencies]
+arrow-array = { workspace = true, optional = true }
+arrow-schema = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 open-arrow-access-dataset = { workspace = true, optional = true }
 open-arrow-access-decompression.workspace = true

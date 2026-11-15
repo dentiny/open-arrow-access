@@ -8,6 +8,11 @@
 
 pub use open_arrow_access_core::*;
 
+#[cfg(feature = "blocking")]
+mod blocking;
+#[cfg(feature = "blocking")]
+pub use blocking::BlockingRecordBatchReader;
+
 mod attachment;
 pub use attachment::{AttachmentFormat, AttachmentOptions, open_attachment_source};
 
