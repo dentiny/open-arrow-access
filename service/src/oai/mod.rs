@@ -5,9 +5,8 @@
 //! DOAB and OAPEN reuse this path. Configured providers expose `record_format()`
 //! for stable standard header columns, including empty pages, or
 //! `inferred_record_format()` to infer header and provider metadata fields.
-//! Resumption-token
-//! acquisition stays sequential and is not treated as independently fetchable
-//! parallel work.
+//! Resumption-token acquisition stays sequential and is not treated as
+//! independently fetchable parallel work.
 mod error;
 mod page;
 mod parser;
