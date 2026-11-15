@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, AccessorExt, ByteAccessor, FieldNameIndex, ObjectRef, OrderRequirement, ReadRequest,
-    RecordMetadata, RecordReader, SchemaRef, into_stream, record_stream_reader,
+    Accessor, AccessorExt, ByteAccessor, ObjectRef, OrderRequirement, ReadRequest, RecordMetadata,
+    RecordReader, SchemaRef, into_stream, record_stream_reader,
 };
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::csv::CsvAccessor;
@@ -13,6 +13,7 @@ use super::validation;
 #[derive(Clone)]
 pub(super) struct InventoryTransform {
     pub(super) csv_schema: SchemaRef,
+    pub(super) validation_columns: [usize; 2],
     pub(super) output_projection: Option<Vec<usize>>,
     pub(super) output_schema: SchemaRef,
 }
@@ -33,11 +34,6 @@ impl InventoryTransform {
             source.layer(DecompressionLayer::new(Gzip)),
             self.csv_schema.clone(),
         ));
-        let (csv_schema, _) = request
-            .options
-            .resolve_projection(&self.csv_schema)
-            .expect("validated inventory projection");
-        let fields = FieldNameIndex::new(csv_schema.fields());
         let options = request.options;
         let readers = stream::iter(files).then(move |file| {
             let csv = csv.clone();
@@ -48,7 +44,7 @@ impl InventoryTransform {
         });
         let batches = readers.try_flatten().map(move |batch| {
             let batch = batch?;
-            validation::validate_batch(&batch, &fields)?;
+            validation::validate_batch(&batch, self.validation_columns)?;
             Ok(batch)
         });
         record_stream_reader(

@@ -6,10 +6,7 @@ use open_arrow_access_core::{
     RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner,
     async_trait,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 /// Read the gzip CSV shards listed in an inventory manifest.
 pub struct PmcInventoryAccessor<A> {
@@ -82,16 +79,22 @@ impl<A: ByteAccessor + 'static> PmcInventoryAccessor<A> {
         let output_projection = request.options.projection.as_mut().map(|csv_columns| {
             let output_indices = (0..csv_columns.len()).collect();
             // Output columns come first; validation-only columns are appended.
-            let mut names: HashSet<_> = csv_columns.iter().cloned().collect();
             for name in ["Bucket", "Key"] {
-                if names.insert(name.to_owned()) {
+                if !csv_columns.iter().any(|column| column == name) {
                     csv_columns.push(name.into());
                 }
             }
             output_indices
         });
+        let (csv_output_schema, _) = request.options.resolve_projection(&csv_schema)?;
+        let validation_columns = ["Bucket", "Key"].map(|name| {
+            csv_output_schema
+                .index_of(name)
+                .expect("validated inventory columns")
+        });
         let transform = InventoryTransform {
             csv_schema,
+            validation_columns,
             output_projection,
             output_schema,
         };
