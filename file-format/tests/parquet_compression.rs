@@ -13,10 +13,9 @@ use futures::TryStreamExt;
 use open_arrow_access_core::{Accessor, AccessorExt, ReadOptions, ReadRequest, into_stream};
 use open_arrow_access_file_format::parquet::ParquetAccessor;
 use open_arrow_access_layers::ParallelReadLayer;
-use open_arrow_access_test_support::MemoryAccessor;
-use parquet::{arrow::ArrowWriter, basic::Compression, file::properties::WriterProperties};
+use open_arrow_access_test_support::{MemoryAccessor, fixture};
 
-async fn check_compression(compression: Compression) {
+async fn check_compression(name: &str) {
     let schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int64, false),
         Field::new("text", DataType::Utf8, true),
@@ -37,14 +36,7 @@ async fn check_compression(compression: Compression) {
         ],
     )
     .unwrap();
-    let properties = WriterProperties::builder()
-        .set_compression(compression)
-        .set_max_row_group_row_count(Some(3))
-        .build();
-    let mut bytes = Vec::new();
-    let mut writer = ArrowWriter::try_new(&mut bytes, expected.schema(), Some(properties)).unwrap();
-    writer.write(&expected).unwrap();
-    writer.close().unwrap();
+    let bytes = fixture!("parquet", name).await;
     let accessor = ParquetAccessor::new(MemoryAccessor::new(&bytes, 17).with_ranges());
     let request = ReadRequest::new("data.parquet").with_options(ReadOptions {
         batch_size: NonZeroUsize::new(2).unwrap(),
@@ -76,23 +68,23 @@ async fn check_compression(compression: Compression) {
 #[cfg(feature = "parquet-brotli")]
 #[tokio::test]
 async fn brotli_preserves_values_and_parallel_row_groups() {
-    check_compression(Compression::BROTLI(Default::default())).await;
+    check_compression("codec-brotli.parquet").await;
 }
 
 #[cfg(feature = "parquet-gzip")]
 #[tokio::test]
 async fn gzip_preserves_values_and_parallel_row_groups() {
-    check_compression(Compression::GZIP(Default::default())).await;
+    check_compression("codec-gzip.parquet").await;
 }
 
 #[cfg(feature = "parquet-lz4")]
 #[tokio::test]
 async fn lz4_preserves_values_and_parallel_row_groups() {
-    check_compression(Compression::LZ4_RAW).await;
+    check_compression("codec-lz4.parquet").await;
 }
 
 #[cfg(feature = "parquet-zstd")]
 #[tokio::test]
 async fn zstd_preserves_values_and_parallel_row_groups() {
-    check_compression(Compression::ZSTD(Default::default())).await;
+    check_compression("codec-zstd.parquet").await;
 }
