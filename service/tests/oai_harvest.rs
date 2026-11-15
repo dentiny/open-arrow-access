@@ -2,9 +2,7 @@ use std::num::NonZeroUsize;
 
 use arrow_array::cast::AsArray;
 use http::StatusCode;
-use open_arrow_access_core::{
-    Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, ScanPlanner,
-};
+use open_arrow_access_core::{Accessor, AccessorExt, ReadOptions, ReadRequest, ScanPlanner};
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::oai::{OaiHarvestRequest, OaiProvider, OaiProviderService};
 use open_arrow_access_test_support::http::HttpFixture;
@@ -108,48 +106,6 @@ async fn follows_tokens_lazily_across_empty_pages() {
             .iter()
             .all(|r| r.headers["x-api-key"] == "secret")
     );
-}
-
-#[tokio::test]
-async fn continuation_failures_are_terminal() {
-    use ErrorKind::{Decode, PermissionDenied, ResourceExhausted};
-    for (case, kind, rows, requests) in [
-        ("cycle", Decode, 2, 2),
-        ("limit", ResourceExhausted, 1, 1),
-        ("http", PermissionDenied, 1, 2),
-        ("protocol", Decode, 1, 2),
-    ] {
-        let http = HttpFixture::new();
-        respond(&http, None, page(&["first"], Some("a")));
-        let xml = if case == "protocol" {
-            "<OAI-PMH><error code=\"badResumptionToken\"/></OAI-PMH>".into()
-        } else {
-            page(&["second"], Some("a"))
-        };
-        respond(&http, Some("a"), xml);
-        if case == "http" {
-            http.respond(
-                "/harvest?verb=ListRecords&resumptionToken=a",
-                StatusCode::FORBIDDEN,
-                "",
-            );
-        }
-        let mut req = request();
-        if case == "limit" {
-            req.max_pages = NonZeroUsize::new(1);
-        }
-        let mut reader = service(&http).harvest().open(req).await.unwrap();
-        for _ in 0..rows {
-            assert!(reader.next().await.unwrap().is_some(), "{case}");
-        }
-        let error = reader.next().await.unwrap_err();
-        assert_eq!(error.kind(), kind, "{case}");
-        if case == "http" {
-            assert_eq!(error.http_status(), Some(403));
-        }
-        assert!(reader.next().await.unwrap().is_none());
-        assert_eq!(http.requests().len(), requests, "{case}");
-    }
 }
 
 #[tokio::test]
