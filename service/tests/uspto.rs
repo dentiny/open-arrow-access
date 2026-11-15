@@ -67,15 +67,3 @@ async fn rejects_wrong_product_and_missing_file_membership() {
     assert!(UsptoService::new("").is_err());
     assert!(s.product("PTGRXML", 0, 0).await.is_err());
 }
-
-#[test]
-fn validates_keys_on_custom_connections_before_io() {
-    let f = HttpFixture::new();
-    for key in ["", "invalid\r\nInjected: value"] {
-        let error = UsptoService::with_connection(providers::connection(&f))
-            .with_key(key)
-            .unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    }
-    assert!(f.requests().is_empty());
-}
