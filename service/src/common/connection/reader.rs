@@ -116,21 +116,15 @@ impl<R: ByteReader> ByteReader for HttpReader<R> {
         let client = &self.client;
         let request = &self.request;
         let length = self.range_length;
-        let reads = ranges
-            .into_iter()
-            .enumerate()
-            .map(|(index, range)| async move {
-                let bytes = read_http_range(client, request, length, range).await?;
-                Ok::<_, Error>((index, bytes))
-            });
-        // Observe errors before earlier ranges complete; restore request order
-        // on success. Dropping this stream cancels its in-flight reads.
-        let mut output: Vec<_> =
-            futures::StreamExt::buffer_unordered(stream::iter(reads), self.io_concurrency.get())
-                .try_collect()
-                .await?;
-        output.sort_unstable_by_key(|(index, _)| *index);
-        Ok(output.into_iter().map(|(_, bytes)| bytes).collect())
+        let mut output = vec![Bytes::new(); ranges.len()];
+        let reads = ranges.into_iter().zip(&mut output).map(Ok::<_, Error>);
+        stream::iter(reads)
+            .try_for_each_concurrent(self.io_concurrency.get(), |(range, slot)| async move {
+                *slot = read_http_range(client, request, length, range).await?;
+                Ok(())
+            })
+            .await?;
+        Ok(output)
     }
 }
 
