@@ -64,28 +64,31 @@ impl HttpTransport for RedirectTransport {
     }
 }
 
-/// Attach origin-scoped headers before following redirects on a single-hop transport.
-pub(crate) fn with_headers(
-    context: OperationContext,
-    origin: Url,
-    headers: HeaderMap,
-) -> OperationContext {
-    let context = follow_redirects(context);
-    let inner = context.http_transport().clone();
-    context.with_http_transport(HttpTransporter::new(HeaderTransport {
-        inner,
-        scope: AuthScope {
-            origin,
-            headers,
-            query: vec![],
-        },
-    }))
-}
-
-struct HeaderTransport {
+pub(crate) struct HeaderTransport {
     inner: HttpTransporter,
     scope: AuthScope,
 }
+
+impl HeaderTransport {
+    /// Attach origin-scoped headers before following redirects on a single-hop transport.
+    pub(crate) fn wrap(
+        context: OperationContext,
+        origin: Url,
+        headers: HeaderMap,
+    ) -> OperationContext {
+        let context = follow_redirects(context);
+        let inner = context.http_transport().clone();
+        context.with_http_transport(HttpTransporter::new(Self {
+            inner,
+            scope: AuthScope {
+                origin,
+                headers,
+                query: vec![],
+            },
+        }))
+    }
+}
+
 impl std::fmt::Debug for HeaderTransport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HeaderTransport").finish_non_exhaustive()

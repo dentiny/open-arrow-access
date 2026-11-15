@@ -122,7 +122,7 @@ impl HttpFileService {
     fn client(&self) -> HttpClient {
         let mut client = self.client.clone();
         if !self.headers.is_empty() {
-            client.context = crate::common::transport::with_headers(
+            client.context = crate::common::transport::HeaderTransport::wrap(
                 client.context,
                 self.endpoint.clone(),
                 self.headers.clone(),
