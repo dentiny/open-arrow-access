@@ -43,8 +43,9 @@ this helper fixes the output schema and does not create a data snapshot.
 
 All bound selections share the non-generic `BoundSource` type, allowing an FFI
 adapter to keep different provider/request types in one source state. No runtime
-or background producer is created. The helper needs no facade feature flags;
-enable the features required by the chosen accessor. `open_file_source()` uses
+or background producer is created. The helper is defined in
+`open-arrow-access-core` and re-exported by the facade. It needs no facade feature
+flags; enable the features required by the chosen accessor. `open_file_source()` uses
 the same lifecycle through its existing `FileSource` interface.
 
 ## Select columns and batch rows

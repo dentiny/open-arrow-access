@@ -19,13 +19,6 @@ pub struct BoundSource {
     selection: Box<dyn BoundSelection>,
     metadata: RecordMetadata,
     reader: Mutex<Option<Box<dyn RecordReader>>>,
-    kind: SourceKind,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum SourceKind {
-    Bound,
-    File,
 }
 
 /// A saved accessor and typed request behind a common record-reader interface.
@@ -61,7 +54,7 @@ impl BoundSource {
     /// can also be passed. Open errors propagate unchanged.
     ///
     /// ```no_run
-    /// use open_arrow_access::{Accessor, BoundSource, RecordReader, Result};
+    /// use open_arrow_access_core::{Accessor, BoundSource, RecordReader, Result};
     ///
     /// async fn consume<A>(accessor: A, request: A::Request) -> Result<()>
     /// where
@@ -82,25 +75,12 @@ impl BoundSource {
         A: Accessor<Reader = dyn RecordReader> + 'static,
         A::Request: Clone + Sync + 'static,
     {
-        Self::bind_with_kind(accessor, request, SourceKind::Bound).await
-    }
-
-    pub(crate) async fn bind_with_kind<A>(
-        accessor: A,
-        request: A::Request,
-        kind: SourceKind,
-    ) -> Result<Self>
-    where
-        A: Accessor<Reader = dyn RecordReader> + 'static,
-        A::Request: Clone + Sync + 'static,
-    {
         let reader = accessor.open(request.clone()).await?;
         let metadata = reader.metadata().clone();
         Ok(Self {
             selection: Box::new(Selection { accessor, request }),
             metadata,
             reader: Mutex::new(Some(reader)),
-            kind,
         })
     }
 
@@ -123,39 +103,25 @@ impl BoundSource {
         let initial = self
             .reader
             .lock()
-            .map_err(|_| self.kind.state_unavailable())?
+            .map_err(|_| {
+                Error::new(
+                    ErrorKind::Io,
+                    "bound_source_reader",
+                    "bound source state is poisoned",
+                )
+            })?
             .take();
         let reader = match initial {
             Some(reader) => reader,
             None => self.selection.open().await?,
         };
         if reader.metadata().schema != self.metadata.schema {
-            return Err(self.kind.schema_changed());
-        }
-        Ok(reader)
-    }
-}
-
-impl SourceKind {
-    fn state_unavailable(self) -> Error {
-        let (operation, message) = match self {
-            Self::Bound => ("bound_source_reader", "bound source state is poisoned"),
-            Self::File => ("file_source_reader", "file source state is poisoned"),
-        };
-        Error::new(ErrorKind::Io, operation, message)
-    }
-
-    fn schema_changed(self) -> Error {
-        let (operation, message) = match self {
-            Self::Bound => (
+            return Err(Error::new(
+                ErrorKind::Decode,
                 "bound_source_reader",
                 "source schema differs from the schema fixed at bind",
-            ),
-            Self::File => (
-                "file_source_reader",
-                "file schema differs from the schema fixed at open",
-            ),
-        };
-        Error::new(ErrorKind::Decode, operation, message)
+            ));
+        }
+        Ok(reader)
     }
 }
