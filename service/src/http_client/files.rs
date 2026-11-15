@@ -47,6 +47,8 @@ pub(crate) struct HttpFileService {
     endpoint: Url,
     client: HttpClient,
     token: Option<String>,
+    headers: http::HeaderMap,
+    custom_context: bool,
     /// Provider operation for metadata HTTP/JSON errors.
     operation: &'static str,
     /// Wrap namespace errors with provider context.
@@ -74,6 +76,8 @@ impl HttpFileService {
             endpoint: resolve_origin(endpoint, configure)?,
             client: HttpClient::new()?,
             token: None,
+            headers: http::HeaderMap::new(),
+            custom_context: false,
             operation,
             map_file_namespace_error,
         })
@@ -92,6 +96,41 @@ impl HttpFileService {
         Ok(self)
     }
 
+    /// Use provider-specific credentials on both metadata and lazy file requests.
+    pub(crate) fn with_header(
+        mut self,
+        name: http::header::HeaderName,
+        value: http::HeaderValue,
+    ) -> Result<Self> {
+        if self.headers.is_empty() && !self.custom_context {
+            self.client.context = opendal::OperationContext::new().with_http_transport(
+                opendal::HttpTransporter::new(super::new_single_hop_transport()?),
+            );
+        }
+        // A provider selects one authentication scheme at a time.
+        self.headers.clear();
+        self.headers.insert(name, value);
+        Ok(self)
+    }
+
+    pub(crate) fn with_context(mut self, context: opendal::OperationContext) -> Self {
+        self.client.context = context;
+        self.custom_context = true;
+        self
+    }
+
+    fn client(&self) -> HttpClient {
+        let mut client = self.client.clone();
+        if !self.headers.is_empty() {
+            client.context = crate::common::transport::with_headers(
+                client.context,
+                self.endpoint.clone(),
+                self.headers.clone(),
+            );
+        }
+        client
+    }
+
     pub(crate) fn endpoint(&self) -> &Url {
         &self.endpoint
     }
@@ -102,8 +141,8 @@ impl HttpFileService {
         metadata_url: &Url,
         resolve: impl FnOnce(T) -> Result<ResolvedFilesPlan<M>>,
     ) -> Result<ResolvedFileSet<OpenDalAccessor, M>> {
-        let response = self
-            .client
+        let client = self.client();
+        let response = client
             .json(metadata_url.as_str(), self.token.as_deref(), self.operation)
             .await?;
         let plan = resolve(response)?;
@@ -111,8 +150,7 @@ impl HttpFileService {
             file.content_length
                 .map(|length| (file.object.locator().to_owned(), length))
         });
-        let storage = self
-            .client
+        let storage = client
             .accessor(
                 &self.endpoint,
                 &plan.root,

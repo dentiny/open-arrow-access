@@ -139,3 +139,219 @@ async fn preserves_logical_names_without_path_validation() {
         assert_eq!(http.requests().len(), 1);
     }
 }
+
+fn authenticated(http: &HttpFixture, bearer: bool) -> DataverseService {
+    let service = DataverseService::new(http.endpoint()).unwrap();
+    let service = if bearer {
+        service.with_bearer_token("test-secret").unwrap()
+    } else {
+        service.with_token("test-secret").unwrap()
+    };
+    service.with_context(opendal::OperationContext::new())
+}
+
+#[tokio::test]
+async fn authenticates_metadata_and_restricted_original_reads() {
+    for bearer in [false, true] {
+        let http = HttpFixture::new();
+        http.respond(
+            METADATA,
+            StatusCode::OK,
+            fixture!("dataverse", "restricted.json").await,
+        );
+        http.file(
+            "/api/access/datafile/102?format=original",
+            b"ORIGINAL".to_vec(),
+        );
+        let service = authenticated(&http, bearer);
+        assert!(!format!("{service:?}").contains("test-secret"));
+        let dataset = service.dataset(PID, "1.0").await.unwrap();
+        byte_accessor::assert_ranged_read_contract(
+            dataset,
+            ByteReadRequest::new("table.tab"),
+            b"ORIGINAL",
+            &[1..4, 0..0, 1..4],
+        )
+        .await
+        .unwrap();
+        let (header, value, absent) = if bearer {
+            ("authorization", "Bearer test-secret", "x-dataverse-key")
+        } else {
+            ("x-dataverse-key", "test-secret", "authorization")
+        };
+        let requests = http.requests();
+        assert!(requests.len() > 1);
+        for request in requests {
+            assert_eq!(request.headers.get(header).unwrap(), value);
+            assert!(request.headers.get(header).unwrap().is_sensitive());
+            assert!(!request.headers.contains_key(absent));
+            assert!(!request.path.contains("test-secret"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn credentials_follow_same_origin_redirects_but_never_return_after_leaving() {
+    use open_arrow_access_test_support::http::{file_response, response};
+    for bearer in [false, true] {
+        let http = HttpFixture::new();
+        let other = HttpFixture::new();
+        let destination = other.endpoint().to_owned();
+        http.respond(
+            METADATA,
+            StatusCode::OK,
+            fixture!("dataverse", "restricted.json").await,
+        );
+        http.handle(move |request| {
+            if request.uri().path() == "/returned" {
+                return Ok(file_response(&request, b"%PDFdata".to_vec()));
+            }
+            let location = if request.uri().path() == "/api/access/datafile/101" {
+                "/same-origin".to_owned()
+            } else {
+                format!("{destination}/signed?signature=a%2Bb")
+            };
+            let mut redirect = response(StatusCode::TEMPORARY_REDIRECT, Vec::new());
+            redirect
+                .headers_mut()
+                .insert("location", location.parse().unwrap());
+            Ok(redirect)
+        });
+        let origin = http.endpoint().to_owned();
+        other.handle(move |_| {
+            let mut redirect = response(StatusCode::FOUND, Vec::new());
+            redirect
+                .headers_mut()
+                .insert("location", format!("{origin}/returned").parse().unwrap());
+            Ok(redirect)
+        });
+        let dataset = authenticated(&http, bearer)
+            .dataset(PID, "1.0")
+            .await
+            .unwrap();
+        let mut reader = dataset
+            .open("papers/2026/paper #1%.pdf".into())
+            .await
+            .unwrap();
+        assert_eq!(reader.read_range(1..4).await.unwrap().as_ref(), b"PDF");
+        assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"%PDFdata");
+        for request in other.requests().into_iter().chain(
+            http.requests()
+                .into_iter()
+                .filter(|r| r.path == "/returned"),
+        ) {
+            assert!(!request.headers.contains_key("x-dataverse-key"));
+            assert!(!request.headers.contains_key("authorization"));
+        }
+        let header = if bearer {
+            "authorization"
+        } else {
+            "x-dataverse-key"
+        };
+        assert!(
+            http.requests()
+                .iter()
+                .filter(|r| r.path == "/same-origin")
+                .all(|r| r.headers.contains_key(header))
+        );
+        assert!(
+            other
+                .requests()
+                .iter()
+                .all(|r| r.path == "/signed?signature=a%2Bb")
+        );
+    }
+}
+
+#[tokio::test]
+async fn rejects_invalid_tokens_and_preserves_permission_errors() {
+    let http = HttpFixture::new();
+    for token in ["", " ", "secret\r\ninjected: true"] {
+        assert_eq!(
+            DataverseService::new(http.endpoint())
+                .unwrap()
+                .with_token(token)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidInput
+        );
+        assert_eq!(
+            DataverseService::new(http.endpoint())
+                .unwrap()
+                .with_bearer_token(token)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidInput
+        );
+    }
+    assert!(http.requests().is_empty());
+    for status in [StatusCode::UNAUTHORIZED, StatusCode::FORBIDDEN] {
+        http.respond(METADATA, status, Vec::new());
+        let error = authenticated(&http, false)
+            .dataset(PID, "1.0")
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::from_http_status(status.as_u16()));
+        assert!(!error.to_string().contains("test-secret"));
+    }
+}
+
+#[tokio::test]
+async fn last_authentication_scheme_wins_and_custom_context_survives_setters() {
+    for bearer in [false, true] {
+        let http = HttpFixture::new();
+        http.respond(
+            METADATA,
+            StatusCode::OK,
+            fixture!("dataverse", "empty.json").await,
+        );
+        let service = DataverseService::new(http.endpoint())
+            .unwrap()
+            .with_context(opendal::OperationContext::new());
+        let service = if bearer {
+            service
+                .with_token("old-secret")
+                .unwrap()
+                .with_bearer_token("new-secret")
+                .unwrap()
+        } else {
+            service
+                .with_bearer_token("old-secret")
+                .unwrap()
+                .with_token("new-secret")
+                .unwrap()
+        };
+        service.dataset(PID, "1.0").await.unwrap();
+        let requests = http.requests();
+        let headers = &requests[0].headers;
+        if bearer {
+            assert_eq!(headers["authorization"], "Bearer new-secret");
+            assert!(!headers.contains_key("x-dataverse-key"));
+        } else {
+            assert_eq!(headers["x-dataverse-key"], "new-secret");
+            assert!(!headers.contains_key("authorization"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn token_does_not_bypass_server_file_permissions() {
+    let http = HttpFixture::new();
+    http.respond(
+        METADATA,
+        StatusCode::OK,
+        fixture!("dataverse", "restricted.json").await,
+    );
+    http.respond(
+        "/api/access/datafile/102?format=original",
+        StatusCode::FORBIDDEN,
+        Vec::new(),
+    );
+    let dataset = authenticated(&http, false)
+        .dataset(PID, "1.0")
+        .await
+        .unwrap();
+    let mut reader = dataset.open("table.tab".into()).await.unwrap();
+    let error = collect_bytes(reader.as_mut()).await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+}

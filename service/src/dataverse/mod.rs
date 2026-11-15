@@ -15,9 +15,48 @@ use validation::{validate_dataset, validate_request};
 #[derive(Clone, Debug)]
 pub struct DataverseService {
     http: HttpFileService,
+    authenticated: bool,
 }
 
 impl DataverseService {
+    /// Authenticate using the installation's API token (`X-Dataverse-key`).
+    /// Replaces any previously configured bearer token.
+    pub fn with_token(mut self, token: &str) -> Result<Self> {
+        if token.trim().is_empty() {
+            return Err(error::invalid("API token must not be empty"));
+        }
+        let mut value = http::HeaderValue::from_str(token)
+            .map_err(|_| error::invalid("invalid API token header"))?;
+        value.set_sensitive(true);
+        self.http = self.http.with_header(
+            http::header::HeaderName::from_static("x-dataverse-key"),
+            value,
+        )?;
+        self.authenticated = true;
+        Ok(self)
+    }
+
+    /// Authenticate using an OIDC bearer token on installations that support it.
+    /// Replaces any previously configured API token.
+    pub fn with_bearer_token(mut self, token: &str) -> Result<Self> {
+        if token.trim().is_empty() {
+            return Err(error::invalid("bearer token must not be empty"));
+        }
+        let mut value = http::HeaderValue::from_str(&format!("Bearer {token}"))
+            .map_err(|_| error::invalid("invalid bearer token header"))?;
+        value.set_sensitive(true);
+        self.http = self.http.with_header(http::header::AUTHORIZATION, value)?;
+        self.authenticated = true;
+        Ok(self)
+    }
+
+    /// Override the HTTP transport, preserving credentials and HTTP policy.
+    /// For authenticated access, the transport must return single-hop responses.
+    pub fn with_context(mut self, context: opendal::OperationContext) -> Self {
+        self.http = self.http.with_context(context);
+        self
+    }
+
     /// Apply the same HTTP policy to metadata and lazy file requests.
     pub fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
         self.http = self.http.with_http_config(config)?;
@@ -27,6 +66,7 @@ impl DataverseService {
     /// Configure a Dataverse installation origin without performing network I/O.
     pub fn new(endpoint: &str) -> Result<Self> {
         Ok(Self {
+            authenticated: false,
             http: HttpFileService::new(
                 endpoint,
                 "configure_dataverse",
@@ -51,7 +91,7 @@ impl DataverseService {
             .append_pair("excludeMetadataBlocks", "true");
         self.http
             .resolve_files(&url, |response: Response| {
-                validate_dataset(&response, persistent_id, expected)?;
+                validate_dataset(&response, persistent_id, expected, self.authenticated)?;
                 let files: Vec<_> = response
                     .data
                     .files
