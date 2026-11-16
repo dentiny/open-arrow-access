@@ -70,12 +70,14 @@ lazily. Missing fields receive nulls; fields follow first-seen order. Structs an
 supported lists combine recursively; other differing types or conflicting
 metadata fail. There is no implicit numeric/string cast. Projection is resolved
 after union, and conflicts in unselected fields still fail preflight. Execution
-reads only selected columns present in each file, then fills missing columns and
-restores output order. An empty projection reads only row counts.
+requests only selected columns present in each file, then fills missing columns
+and restores output order. JSON readers still validate and decode the full input
+schema before projection, including when the output has zero columns.
 
 Keep source files stable between inspection and reading; schema drift in reopened
-selected fields fails the reader. Changes to unselected fields are not checked
-after preflight. JSON inference cannot recover keys outside each file's sample.
+selected fields fails the reader. JSON also checks unselected fields and rejects
+unknown keys, including keys outside each file's inference sample. Other formats
+may skip changes to unselected fields after preflight.
 Union may sample a file twice and stores selected requests/schemas, while keeping
 preflight readers/plans one at a time.
 

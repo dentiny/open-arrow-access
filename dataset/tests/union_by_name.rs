@@ -80,25 +80,32 @@ async fn inferred_union_skips_empty_inputs() {
 }
 
 #[tokio::test]
-async fn union_projection_skips_invalid_unselected_json_values() {
+async fn union_projection_validates_the_full_json_schema() {
     let schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int64, false),
         Field::new("unused", DataType::Int64, false),
     ]));
-    let source = JsonAccessor::new(
-        MemoryAccessor::new(b"{\"id\":1,\"unused\":\"invalid\"}\n", 3),
-        schema,
-    );
-    let files = FileSetAccessor::new(source).with_union_by_name();
-    let request = FileSetRequest::new(["a"]).with_options(ReadOptions {
-        projection: Some(vec!["id".into()]),
-        ..Default::default()
-    });
-    let mut reader = files.open(request).await.unwrap();
-    let batch = reader.next().await.unwrap().unwrap();
-    assert_eq!(batch.num_columns(), 1);
-    assert_eq!(batch.column(0).as_primitive::<Int64Type>().values(), &[1]);
-    assert!(reader.next().await.unwrap().is_none());
+    for raw in [
+        br#"{"id":1,"unused":"invalid"}"#.as_slice(),
+        br#"{"id":1,"unused":1,"unknown":2}"#,
+    ] {
+        for planned in [false, true] {
+            let source = JsonAccessor::new(MemoryAccessor::new(raw, 3), schema.clone());
+            let files = FileSetAccessor::new(source).with_union_by_name();
+            let request = FileSetRequest::new(["a"]).with_options(ReadOptions {
+                projection: Some(vec!["id".into()]),
+                ..Default::default()
+            });
+            let mut reader: Box<dyn RecordReader> = if planned {
+                Box::new(files.plan_scan(request).await.unwrap().into_reader())
+            } else {
+                files.open(request).await.unwrap()
+            };
+            let error = reader.next().await.unwrap_err();
+            assert_eq!(error.kind(), open_arrow_access_core::ErrorKind::Decode);
+            assert!(reader.next().await.unwrap().is_none());
+        }
+    }
 }
 
 #[tokio::test]

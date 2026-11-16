@@ -44,6 +44,7 @@ async fn rejects_invalid_documents() {
         "{}",
         r#"{"value":1} {"value":2}"#,
         r#"{"value":1} trailing"#,
+        r#"{"value":1,"unknown":2}"#,
     ] {
         let error = read(raw.as_bytes(), JsonFormat::new(schema()))
             .await

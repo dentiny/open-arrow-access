@@ -11,8 +11,10 @@ use open_arrow_access_core::{
 };
 
 /// Read whitespace-separated JSON objects, including JSONL, with an explicit or inferred fixed schema.
-/// Missing nullable fields become null; unknown fields are ignored by default.
-/// Use [`Self::with_strict_mode`] to reject unknown fields. Top-level
+/// Missing nullable fields become null; unknown fields, including nested struct
+/// fields and keys first seen after inference, are rejected. Validation and
+/// decoding use the full input schema before projection, including an empty
+/// projection. Unselected columns also undergo type and nullability checks. Top-level
 /// arrays and scalar records are rejected. Bare `NaN`, `Infinity`, and `-Infinity`
 /// values are accepted and decoded by Arrow as floating-point values.
 /// String fields also accept numbers and booleans; numeric text is preserved.
@@ -20,7 +22,6 @@ use open_arrow_access_core::{
 pub struct JsonFormat {
     schema: Option<SchemaRef>,
     inference: JsonInferenceOptions,
-    strict_mode: bool,
 }
 
 impl JsonFormat {
@@ -30,7 +31,6 @@ impl JsonFormat {
         Self {
             schema: None,
             inference: JsonInferenceOptions::default(),
-            strict_mode: false,
         }
     }
 
@@ -43,19 +43,7 @@ impl JsonFormat {
         Self {
             schema: Some(schema),
             inference: JsonInferenceOptions::default(),
-            strict_mode: false,
         }
-    }
-
-    /// Reject fields outside the full input schema, including nested struct fields.
-    ///
-    /// Defaults to `false`. Validation happens before projection, including for
-    /// an empty projection. Strict mode decodes all input columns, so type and
-    /// nullability checks also apply to columns omitted from the output.
-    /// With inference, keys first seen after the sample are rejected.
-    pub fn with_strict_mode(mut self, strict_mode: bool) -> Self {
-        self.strict_mode = strict_mode;
-        self
     }
 
     fn prepare_projection(&self, request: &ReadRequest) -> Result<Option<PreparedProjection>> {
@@ -78,13 +66,9 @@ impl JsonFormat {
 
     fn build_decoder(&self, schema: SchemaRef, request: &ReadRequest) -> Result<Decoder> {
         // Strict validation must see the full source schema, not just output columns.
-        let schema = if self.strict_mode {
-            self.schema.clone().unwrap_or(schema)
-        } else {
-            schema
-        };
+        let schema = self.schema.clone().unwrap_or(schema);
         ReaderBuilder::new(schema)
-            .with_strict_mode(self.strict_mode)
+            .with_strict_mode(true)
             .with_coerce_primitive(true)
             .with_batch_size(request.options.batch_size.get())
             .build_decoder()
@@ -97,8 +81,7 @@ impl JsonFormat {
         request: &ReadRequest,
     ) -> Result<(SchemaRef, Decoder, Option<Vec<usize>>)> {
         let decoder = self.build_decoder(prepared.schema.clone(), request)?;
-        let projection = self.strict_mode.then_some(prepared.indices).flatten();
-        Ok((prepared.schema, decoder, projection))
+        Ok((prepared.schema, decoder, prepared.indices))
     }
 }
 

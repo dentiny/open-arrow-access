@@ -54,17 +54,36 @@ fn ids(batch: &RecordBatch) -> &[i64] {
 
 #[tokio::test]
 async fn fragmented_json_objects_preserve_values_schema_and_batch_order() {
+    let source_schema = Arc::new(Schema::new_with_metadata(
+        vec![
+            schema().field(0).clone(),
+            schema().field(1).clone(),
+            Field::new(
+                "ignored",
+                DataType::Struct(
+                    vec![Field::new(
+                        "x",
+                        DataType::List(Arc::new(Field::new("item", DataType::Int64, true))),
+                        true,
+                    )]
+                    .into(),
+                ),
+                true,
+            ),
+        ],
+        schema().metadata().clone(),
+    ));
     for chunk_size in [1, 7, 4096] {
         let (input, _) = fixture("good.json", chunk_size).await;
-        let accessor = JsonAccessor::new(input, schema());
+        let accessor = JsonAccessor::new(input, source_schema.clone());
         let mut reader = accessor.open(request(2, None)).await.unwrap();
-        assert_eq!(reader.metadata().schema, schema());
+        assert_eq!(reader.metadata().schema, source_schema);
         assert_eq!(
             reader.metadata().source.as_ref().unwrap().locator(),
             "records.json"
         );
         let first = reader.next().await.unwrap().unwrap();
-        assert_eq!(first.schema(), schema());
+        assert_eq!(first.schema(), source_schema);
         assert_eq!(ids(&first), [0, 1]);
         let titles = first
             .column(1)
@@ -267,11 +286,27 @@ async fn parallel_json_framing_handles_nested_values_and_rejects_invalid_syntax(
         "  {{\"id\":1,\"title\":\"{}é\",\"extra\":[{{\"x\":\"}}\\\"\"}},null]}}\n\t",
         "x".repeat(16 * 1024)
     );
+    let source_schema = Arc::new(Schema::new(vec![
+        schema().field(0).clone(),
+        schema().field(1).clone(),
+        Field::new(
+            "extra",
+            DataType::List(Arc::new(Field::new(
+                "item",
+                DataType::Struct(vec![Field::new("x", DataType::Utf8, true)].into()),
+                true,
+            ))),
+            true,
+        ),
+    ]));
     for chunk_size in [7, 4096] {
-        let accessor = JsonAccessor::new(MemoryAccessor::new(raw.as_bytes(), chunk_size), schema())
-            .with_partition_options(DecodePartitionOptions {
-                target_bytes: NonZeroUsize::new(32).unwrap(),
-            });
+        let accessor = JsonAccessor::new(
+            MemoryAccessor::new(raw.as_bytes(), chunk_size),
+            source_schema.clone(),
+        )
+        .with_partition_options(DecodePartitionOptions {
+            target_bytes: NonZeroUsize::new(32).unwrap(),
+        });
         let mut expected = accessor.open(request(1, None)).await.unwrap();
         let mut actual = accessor
             .layer(ParallelReadLayer::new(
@@ -421,6 +456,7 @@ async fn nonfinite_values_survive_fragmentation_and_parallel_decoding() {
             true,
         ),
         Field::new("NaN", DataType::Utf8, true),
+        Field::new("extra", DataType::Utf8, true),
     ]));
     let raw = br#"{"value":NaN,"nested":{"values":[Infinity,-Infinity,null]},"NaN":"NaN Infinity -Infinity \""}
     {"value":Infinity} {"value":-Infinity} {"value":1.5} {"value":null} {"value":-1.5,"extra":"\\NaN"}"#;
@@ -631,7 +667,6 @@ async fn strict_mode_rejects_unknown_fields_before_projection() {
                 for parallel in [false, true] {
                     let accessor =
                         JsonAccessor::new(MemoryAccessor::new(raw, chunk_size), strict_schema())
-                            .with_strict_mode(true)
                             .with_partition_options(DecodePartitionOptions {
                                 target_bytes: NonZeroUsize::MIN,
                             });
@@ -681,7 +716,7 @@ async fn strict_mode_accepts_known_fields_and_preserves_output_projection() {
         for planned in [false, true] {
             let accessor = JsonAccessor::from_format(
                 MemoryAccessor::new(raw, 1),
-                JsonFormat::new(strict_schema()).with_strict_mode(true),
+                JsonFormat::new(strict_schema()),
             );
             let selection = request(2, projection.clone());
             let (expected, _) = selection
@@ -705,50 +740,31 @@ async fn strict_mode_accepts_known_fields_and_preserves_output_projection() {
 }
 
 #[tokio::test]
-async fn strict_inference_rejects_late_keys_and_can_be_disabled() {
+async fn inference_rejects_late_keys() {
     use open_arrow_access_file_format::json::JsonInferenceOptions;
 
     for raw in [
         br#"{"id":1,"nested":{"known":1}} {"id":2,"unknown":1}"#.as_slice(),
         br#"{"id":1,"nested":{"known":1}} {"id":2,"nested":{"unknown":1}}"#,
     ] {
-        for strict in [false, true] {
-            for planned in [false, true] {
-                let accessor = JsonAccessor::infer(MemoryAccessor::new(raw, 1))
-                    .with_strict_mode(true)
-                    .with_strict_mode(strict)
-                    .with_inference_options(JsonInferenceOptions {
-                        max_records: 1,
-                        max_bytes: 1024,
-                    });
-                let selection = request(1, Some(vec!["id"]));
-                let mut reader: Box<dyn RecordReader> = if planned {
-                    Box::new(accessor.plan_scan(selection).await.unwrap().into_reader())
-                } else {
-                    accessor.open(selection).await.unwrap()
-                };
-                assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
-                if strict {
-                    let error = reader.next().await.expect_err("accepted a late key");
-                    assert_eq!(error.kind(), ErrorKind::Decode);
-                    assert!(error.to_string().contains("unknown"), "{error}");
-                } else {
-                    assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [2]);
-                }
-                assert!(reader.next().await.unwrap().is_none());
-            }
+        for planned in [false, true] {
+            let accessor = JsonAccessor::infer(MemoryAccessor::new(raw, 1)).with_inference_options(
+                JsonInferenceOptions {
+                    max_records: 1,
+                    max_bytes: 1024,
+                },
+            );
+            let selection = request(1, Some(vec!["id"]));
+            let mut reader: Box<dyn RecordReader> = if planned {
+                Box::new(accessor.plan_scan(selection).await.unwrap().into_reader())
+            } else {
+                accessor.open(selection).await.unwrap()
+            };
+            assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
+            let error = reader.next().await.expect_err("accepted a late key");
+            assert_eq!(error.kind(), ErrorKind::Decode);
+            assert!(error.to_string().contains("unknown"), "{error}");
+            assert!(reader.next().await.unwrap().is_none());
         }
     }
-}
-
-#[tokio::test]
-async fn default_mode_ignores_unknown_fields_with_explicit_schema() {
-    let raw = br#"{"id":1,"unknown":1,"nested":{"unknown":2},"items":[{"unknown":3}]}
-        {"id":2,"late":4}"#;
-    let mut reader = JsonAccessor::new(MemoryAccessor::new(raw, 1), strict_schema())
-        .open(request(2, None))
-        .await
-        .unwrap();
-    assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1, 2]);
-    assert!(reader.next().await.unwrap().is_none());
 }

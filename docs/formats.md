@@ -32,13 +32,12 @@ across every decode partition. It accepts
 whitespace-separated objects, including JSONL and pretty-printed object streams.
 Top-level arrays are not flattened; arrays, scalars and null records are rejected.
 Empty or whitespace-only input emits no rows. Missing nullable fields become
-null and unknown fields are ignored by default. Set `.with_strict_mode(true)` on
-`JsonAccessor` or `JsonFormat` to reject unknown top-level and nested struct
-fields, including structs inside lists. With inference, new keys after the
-sample are rejected against the fixed inferred schema. Strict mode decodes the
+null. Unknown top-level and nested struct fields, including structs inside
+lists, are always rejected. With inference, new keys after the sample are
+rejected against the fixed inferred schema. JSON readers decode the
 full input schema before projection (even an empty projection), so unselected
-columns also undergo type and nullability checks. It uses Arrow JSON's strict
-field handling; it does not require nullable fields to be present.
+columns also undergo type and nullability checks. This uses Arrow JSON's strict
+field handling; nullable fields may be absent.
 
 Rows are decoded incrementally. Decoder errors, including incomplete records at
 EOF, terminate the reader. Batch size does not bound one record's byte size.
