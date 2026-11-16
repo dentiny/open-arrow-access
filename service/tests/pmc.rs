@@ -142,3 +142,82 @@ async fn duplicate_fields_use_the_final_value_and_preserve_empty_strings() {
     assert_eq!(batch["pmid"].as_string::<i32>().value(0), "00001");
     assert_eq!(batch["doi"].as_string::<i32>().value(0), "");
 }
+
+#[tokio::test]
+async fn sanitizes_content_urls_in_full_and_projected_batches() {
+    let url = "s3://pmc-oa-opendata/PMC10009416.1/article%20%2B%2520.pdf";
+    let checked = format!("{url}?md5=0123456789abcdef0123456789ABCDEF");
+    let raw = serde_json::json!({
+        "pmcid": "PMC10009416", "pdf_url": checked, "xml_url": checked,
+        "text_url": checked, "media_urls": [checked, url], "title": checked,
+    })
+    .to_string();
+    for projection in [
+        None,
+        Some(vec![
+            "media_urls".into(),
+            "text".into(),
+            "pdf_url".into(),
+            "xml_url".into(),
+        ]),
+    ] {
+        let batch = read(raw.as_bytes(), projection.clone()).await.unwrap();
+        assert_eq!(batch.num_rows(), 1);
+        for name in ["pdf_url", "xml_url", "text"] {
+            assert_eq!(batch[name].as_string::<i32>().value(0), url);
+        }
+        let media = batch["media_urls"].as_list::<i32>().value(0);
+        assert_eq!(
+            media.as_string::<i32>().iter().collect::<Vec<_>>(),
+            vec![Some(url), Some(url)]
+        );
+        if let Some(projection) = projection {
+            assert_eq!(
+                batch
+                    .schema()
+                    .fields()
+                    .iter()
+                    .map(|field| field.name().clone())
+                    .collect::<Vec<_>>(),
+                projection
+            );
+        } else {
+            assert_eq!(batch.schema(), schema());
+            assert_eq!(batch["title"].as_string::<i64>().value(0), checked);
+        }
+    }
+}
+
+#[tokio::test]
+async fn url_sanitization_preserves_other_queries_and_nullable_shapes() {
+    for url in [
+        "s3://pmc-oa-opendata/a.pdf",
+        "s3://pmc-oa-opendata/a.pdf?md5=opaque",
+        "s3://pmc-oa-opendata/a.pdf?md5=0123456789abcdef0123456789abcdeg",
+        "s3://pmc-oa-opendata/a.pdf?md5=0123456789abcdef0123456789abcdef&versionId=other",
+        "s3://pmc-oa-opendata/a.pdf?md5=0123456789abcdef0123456789abcdef&md5=0123456789abcdef0123456789abcdef",
+        "s3://pmc-oa-opendata/a.pdf?md5=0123456789abcdef0123456789abcdef#fragment",
+        "s3://pmc-oa-opendata/a.pdf#fragment?md5=0123456789abcdef0123456789abcdef",
+        "https://example.org/a.pdf?md5=0123456789abcdef0123456789abcdef",
+        "",
+    ] {
+        let raw =
+            serde_json::json!({"pmcid": "PMC1", "pdf_url": url, "media_urls": [url]}).to_string();
+        let batch = read(raw.as_bytes(), None).await.unwrap();
+        assert_eq!(batch["pdf_url"].as_string::<i32>().value(0), url);
+        let media = batch["media_urls"].as_list::<i32>().value(0);
+        assert_eq!(media.as_string::<i32>().value(0), url);
+        assert!(batch["xml_url"].is_null(0));
+        assert!(batch["text"].is_null(0));
+    }
+    for media in [serde_json::Value::Null, serde_json::json!([])] {
+        let raw = serde_json::json!({"pmcid": "PMC1", "media_urls": media}).to_string();
+        let batch = read(raw.as_bytes(), None).await.unwrap();
+        assert!(batch["pdf_url"].is_null(0));
+        let urls = batch["media_urls"].as_list::<i32>();
+        assert_eq!(urls.is_null(0), media.is_null());
+        if !media.is_null() {
+            assert_eq!(urls.value_length(0), 0);
+        }
+    }
+}

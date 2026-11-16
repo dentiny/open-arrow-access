@@ -54,7 +54,7 @@ pub(super) async fn decode_batch(
             let index = field_index
                 .index_of(source_name)
                 .expect("validated PMC projection");
-            batch.column(index).clone()
+            super::urls::sanitize_column(batch.column(index), source_name)
         })
         .collect();
     RecordBatch::try_new_with_options(

@@ -3,6 +3,7 @@
 mod accessor;
 mod error;
 mod metadata;
+mod urls;
 mod validation;
 
 pub use accessor::{PmcAccessor, PmcDecoder};

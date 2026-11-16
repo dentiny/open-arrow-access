@@ -31,8 +31,20 @@ The result is a `RecordReader` with exactly one row for a valid object. Full sch
 | `media_urls` | List of nullable Utf8 items; JSON items must be strings | Yes |
 
 The Arrow `text` column contains the URL from the input JSON's `text_url` field,
-not inline article text. URL encoding and query parameters are preserved. The
-input JSON field remains `text_url`; use `text` in Arrow projections.
+not inline article text. The input JSON field remains `text_url`; use `text` in
+Arrow projections.
+
+After JSON decoding, the PMC service sanitizes `pdf_url`, `xml_url`, `text`, and
+each `media_urls` item before returning the RecordBatch. For S3 content links,
+a single `md5=<32 hexadecimal digits>` query is stripped so the value identifies
+the downloadable object. This checks the checksum's format, not the downloaded
+content. Other queries, HTTP(S) URLs, and malformed MD5 metadata are preserved.
+Path encoding, nulls, empty strings/lists, schema, and projection order are
+preserved. No content is downloaded and no checksum column is added.
+
+For downstream PDF downloads, register a separate anonymous S3 source operator
+for `pmc-oa-opendata` in `us-east-1`; destination credentials need not apply to
+this public bucket.
 
 Optional missing/null fields become null; unknown keys are ignored and duplicate
 keys use their final value. Known fields are validated even when projected away.
