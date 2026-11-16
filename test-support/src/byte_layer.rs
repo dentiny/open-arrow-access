@@ -56,13 +56,15 @@ where
     let input = MemoryAccessor::new(bytes, 1);
     let observed = input.observations.clone();
     let mut reader = make_layer(input).open("invalid".into()).await?;
-    assert_terminal_error(
+    let error = assert_terminal_error(
         reader.as_mut(),
         &observed.reads,
         ErrorKind::Decode,
         operation,
     )
     .await;
+    assert_eq!(error.object().unwrap().locator(), "invalid");
+    assert!(error.to_string().contains("invalid"));
     Ok(())
 }
 

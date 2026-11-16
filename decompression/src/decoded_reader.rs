@@ -20,5 +20,10 @@ where
 {
     let stream = read_chunks(decoder, chunk_size)
         .map_err(move |error| crate::error::decoder_error(error, operation, codec_name));
-    Box::new(StreamReader::new(stream, metadata))
+    let object = metadata.source.clone();
+    let reader = StreamReader::new(stream, metadata);
+    Box::new(match object {
+        Some(object) => reader.with_object(object),
+        None => reader,
+    })
 }

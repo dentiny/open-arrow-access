@@ -16,47 +16,53 @@ where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        let format = self.binding.factory().clone();
-        let prepared = format.prepare_scan(&request)?;
-        let input = self
-            .binding
-            .storage()
-            .open(ByteReadRequest::from(&request))
-            .await?;
-        let Some((format, input)) = format.resolve_schema(input).await? else {
-            return Ok(crate::inference::empty_plan(request));
-        };
-        let prepared = match prepared {
-            Some(prepared) => prepared,
-            None => format
-                .prepare_scan(&request)?
-                .expect("resolved JSON schema"),
-        };
-        let metadata = RecordMetadata {
-            schema: prepared.schema,
-            source: Some(request.object.clone()),
-        };
-        let frames = JsonFrames {
-            input: super::nonfinite::normalize_input(input),
-            pending_input: BytesMut::new(),
-        };
-        let rows = request.options.batch_size.get();
-        let target_bytes = self.partition_options.target_bytes.get();
-        let partitions = stream::try_unfold(frames, move |mut frames| {
-            let request = request.clone();
-            let format = format.clone();
-            async move {
-                let Some(bytes) = frames.next_chunk(rows, target_bytes).await? else {
-                    return Ok(None);
-                };
-                let partition: ScanPartition = Box::pin(async move {
-                    let input = bytes_reader(bytes, Some(request.object.clone()));
-                    format.open_input(Box::new(input), request).await
-                });
-                Ok(Some((partition, frames)))
-            }
-        });
-        Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))
+        let object = request.object.clone();
+        let result = async {
+            let format = self.binding.factory().clone();
+            let prepared = format.prepare_scan(&request)?;
+            let input = self
+                .binding
+                .storage()
+                .open(ByteReadRequest::from(&request))
+                .await?;
+            let Some((format, input)) = format.resolve_schema(input).await? else {
+                return Ok(crate::inference::empty_plan(request));
+            };
+            let prepared = match prepared {
+                Some(prepared) => prepared,
+                None => format
+                    .prepare_scan(&request)?
+                    .expect("resolved JSON schema"),
+            };
+            let metadata = RecordMetadata {
+                schema: prepared.schema,
+                source: Some(request.object.clone()),
+            };
+            let frames = JsonFrames {
+                input: super::nonfinite::normalize_input(input),
+                pending_input: BytesMut::new(),
+            };
+            let rows = request.options.batch_size.get();
+            let target_bytes = self.partition_options.target_bytes.get();
+            let partitions = stream::try_unfold(frames, move |mut frames| {
+                let request = request.clone();
+                let format = format.clone();
+                async move {
+                    let Some(bytes) = frames.next_chunk(rows, target_bytes).await? else {
+                        return Ok(None);
+                    };
+                    let partition: ScanPartition = Box::pin(async move {
+                        let input = bytes_reader(bytes, Some(request.object.clone()));
+                        format.open_input(Box::new(input), request).await
+                    });
+                    Ok(Some((partition, frames)))
+                }
+            });
+            Ok(ScanPlan::from_stream(metadata, partitions)
+                .with_ordering(self.capability().ordering))
+        }
+        .await;
+        result.map_err(|error: open_arrow_access_core::Error| error.with_object(&object))
     }
 }
 

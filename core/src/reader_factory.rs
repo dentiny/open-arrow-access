@@ -64,9 +64,17 @@ impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
         input: Box<dyn ByteReader>,
         request: Self::Request,
     ) -> Result<Box<Self::Reader>> {
-        let prepared = self.prepare(&request)?;
-        self.create_reader(&FactoryToken { _private: () }, input, request, prepared)
-            .await
+        let object = input.metadata().source.clone();
+        let result = async {
+            let prepared = self.prepare(&request)?;
+            self.create_reader(&FactoryToken { _private: () }, input, request, prepared)
+                .await
+        }
+        .await;
+        result.map_err(|error| match &object {
+            Some(object) => error.with_object(object),
+            None => error,
+        })
     }
 
     async fn open_reader(
@@ -77,10 +85,15 @@ impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
     where
         for<'a> ByteReadRequest: From<&'a Self::Request>,
     {
-        let prepared = self.prepare(&request)?;
         let byte_request = ByteReadRequest::from(&request);
-        let input = storage.open(byte_request).await?;
-        let token = FactoryToken { _private: () };
-        self.create_reader(&token, input, request, prepared).await
+        let object = byte_request.object.clone();
+        let result = async {
+            let prepared = self.prepare(&request)?;
+            let input = storage.open(byte_request).await?;
+            let token = FactoryToken { _private: () };
+            self.create_reader(&token, input, request, prepared).await
+        }
+        .await;
+        result.map_err(|error| error.with_object(&object))
     }
 }

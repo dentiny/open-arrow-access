@@ -110,3 +110,45 @@ async fn parallel_atif_composes_with_independent_gzip_readers() {
         }
     }
 }
+
+#[tokio::test]
+async fn file_set_decode_failure_identifies_the_second_object() {
+    let root = tempfile::tempdir().unwrap();
+    tokio::fs::copy(
+        open_arrow_access_test_support::fixture_path!("atif", "trajectories.jsonl"),
+        root.path().join("a.jsonl"),
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(root.path().join("b.jsonl"), b"{\"bad\":true}\n")
+        .await
+        .unwrap();
+    let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(root.path()));
+    for planned in [false, true] {
+        let files = FileSetAccessor::new(AtifAccessor::new(bytes.clone(), AtifFormat::JsonLines));
+        let request = FileSetRequest::new(["a.jsonl", "b.jsonl"]);
+        let mut reader = if planned {
+            files
+                .with_file_planning()
+                .layer(ParallelReadLayer::new(
+                    NonZeroUsize::new(2).unwrap(),
+                    NonZeroUsize::MIN,
+                ))
+                .open(request)
+                .await
+                .unwrap()
+        } else {
+            files.open(request).await.unwrap()
+        };
+        let error = loop {
+            match reader.next().await {
+                Err(error) => break error,
+                Ok(Some(_)) => (),
+                Ok(None) => panic!("expected second file to fail"),
+            }
+        };
+        assert_eq!(error.object().unwrap().locator(), "b.jsonl");
+        assert!(error.to_string().contains("b.jsonl"));
+        assert!(reader.next().await.unwrap().is_none());
+    }
+}

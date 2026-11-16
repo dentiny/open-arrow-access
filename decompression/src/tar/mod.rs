@@ -54,35 +54,43 @@ pub struct TarArchive {
 
 impl TarArchive {
     pub async fn open(input: Box<dyn ByteReader>, limits: TarLimits) -> Result<Self> {
-        let source = ArchiveSource::new(input, "open_tar")?;
-        let input = &source.input;
-        let mut offset = 0;
-        let mut entries = Vec::new();
-        loop {
-            if input.content_length().saturating_sub(offset) < BLOCK_SIZE {
-                return Err(decode("TAR archive has no complete end marker"));
-            }
-            let bytes = input.read_range(offset..offset + BLOCK_SIZE).await?;
-            if bytes.iter().all(|byte| *byte == 0) {
-                if input.content_length().saturating_sub(offset) < 2 * BLOCK_SIZE
-                    || !input
-                        .read_range(offset + BLOCK_SIZE..offset + 2 * BLOCK_SIZE)
-                        .await?
-                        .iter()
-                        .all(|byte| *byte == 0)
-                {
-                    return Err(decode("TAR archive requires two zero end blocks"));
+        let object = input.metadata().source.clone();
+        let result = async {
+            let source = ArchiveSource::new(input, "open_tar")?;
+            let input = &source.input;
+            let mut offset = 0;
+            let mut entries = Vec::new();
+            loop {
+                if input.content_length().saturating_sub(offset) < BLOCK_SIZE {
+                    return Err(decode("TAR archive has no complete end marker"));
                 }
-                break;
+                let bytes = input.read_range(offset..offset + BLOCK_SIZE).await?;
+                if bytes.iter().all(|byte| *byte == 0) {
+                    if input.content_length().saturating_sub(offset) < 2 * BLOCK_SIZE
+                        || !input
+                            .read_range(offset + BLOCK_SIZE..offset + 2 * BLOCK_SIZE)
+                            .await?
+                            .iter()
+                            .all(|byte| *byte == 0)
+                    {
+                        return Err(decode("TAR archive requires two zero end blocks"));
+                    }
+                    break;
+                }
+                let entry = parse_entry(&bytes, entries.len(), &limits)?;
+                let start = offset + BLOCK_SIZE;
+                offset = entry_end(start, entry.size, input.content_length())?;
+                entries.push((entry, start));
             }
-            let entry = parse_entry(&bytes, entries.len(), &limits)?;
-            let start = offset + BLOCK_SIZE;
-            offset = entry_end(start, entry.size, input.content_length())?;
-            entries.push((entry, start));
+            Ok(Self {
+                source,
+                entries: entries.into(),
+            })
         }
-        Ok(Self {
-            source,
-            entries: entries.into(),
+        .await;
+        result.map_err(|error: open_arrow_access_core::Error| match &object {
+            Some(object) => error.with_object(object),
+            None => error,
         })
     }
 
@@ -113,6 +121,11 @@ impl TarArchive {
             let bytes = input.read_range(position..next).await?;
             Ok(Some((bytes, (input, next))))
         });
-        Ok(Box::new(StreamReader::new(stream, metadata)))
+        let object = metadata.source.clone();
+        let reader = StreamReader::new(stream, metadata);
+        Ok(Box::new(match object {
+            Some(object) => reader.with_object(object),
+            None => reader,
+        }))
     }
 }

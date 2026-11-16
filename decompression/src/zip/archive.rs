@@ -24,33 +24,41 @@ pub struct ZipArchive {
 impl ZipArchive {
     /// Inspect the central directory once over a ranged, known-length source.
     pub async fn open(input: Box<dyn ByteReader>, limits: ZipLimits) -> Result<Self> {
-        let source = ArchiveSource::new(input, "open_zip")?;
-        let options = ZipOptions {
-            max_uncompressed_size_per_file: limits.max_entry_bytes,
-            max_compressed_size_per_file: limits.max_entry_bytes,
-            ..ZipOptions::default()
-        };
-        let parser = ZipArchiveReader::open_with_options(source.input.clone(), options)
-            .await
-            .map_err(zip_error)?;
-        let entries = parser
-            .cdrs()
-            .iter()
-            .enumerate()
-            .map(|(index, entry)| {
-                super::validation::validate_offset(entry)?;
-                Ok(ZipEntry {
-                    index,
-                    name: entry.insecure_file_name.as_bytes().to_vec(),
-                    compressed_size: entry.compressed_size().map_err(zip_error)?,
-                    uncompressed_size: entry.uncompressed_size().map_err(zip_error)?,
+        let object = input.metadata().source.clone();
+        let result = async {
+            let source = ArchiveSource::new(input, "open_zip")?;
+            let options = ZipOptions {
+                max_uncompressed_size_per_file: limits.max_entry_bytes,
+                max_compressed_size_per_file: limits.max_entry_bytes,
+                ..ZipOptions::default()
+            };
+            let parser = ZipArchiveReader::open_with_options(source.input.clone(), options)
+                .await
+                .map_err(zip_error)?;
+            let entries = parser
+                .cdrs()
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| {
+                    super::validation::validate_offset(entry)?;
+                    Ok(ZipEntry {
+                        index,
+                        name: entry.insecure_file_name.as_bytes().to_vec(),
+                        compressed_size: entry.compressed_size().map_err(zip_error)?,
+                        uncompressed_size: entry.uncompressed_size().map_err(zip_error)?,
+                    })
                 })
+                .collect::<Result<Vec<_>>>()?;
+            Ok(Self {
+                directory: parser.inner().clone(),
+                source,
+                entries: entries.into(),
             })
-            .collect::<Result<Vec<_>>>()?;
-        Ok(Self {
-            directory: parser.inner().clone(),
-            source,
-            entries: entries.into(),
+        }
+        .await;
+        result.map_err(|error: open_arrow_access_core::Error| match &object {
+            Some(object) => error.with_object(object),
+            None => error,
         })
     }
 
@@ -67,7 +75,16 @@ impl ZipArchive {
     ) -> impl std::future::Future<Output = Result<Box<dyn ByteReader>>> + Send + 'static + use<>
     {
         let archive = self.clone();
-        async move { archive.read_entry(entry_index, chunk_size).await }
+        async move {
+            let object = archive.source.metadata.source.clone();
+            archive
+                .read_entry(entry_index, chunk_size)
+                .await
+                .map_err(|error| match &object {
+                    Some(object) => error.with_object(object),
+                    None => error,
+                })
+        }
     }
 
     async fn read_entry(
