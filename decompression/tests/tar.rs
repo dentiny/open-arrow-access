@@ -102,18 +102,15 @@ async fn rejects_malformed_and_unsupported_archives() {
         ("gnu-longname.tar", ErrorKind::Unsupported),
     ] {
         let source = source(name).await;
-        assert_eq!(
-            TarArchive::open(
-                source.open("archive".into()).await.unwrap(),
-                TarLimits::default()
-            )
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-            kind,
-            "{name}"
-        );
+        let error = TarArchive::open(
+            source.open("archive".into()).await.unwrap(),
+            TarLimits::default(),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert_eq!(error.kind(), kind, "{name}");
+        assert!(error.to_string().contains("archive"));
     }
 }
 

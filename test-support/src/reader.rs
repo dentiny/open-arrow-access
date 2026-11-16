@@ -147,7 +147,8 @@ pub(crate) fn assert_memory_read_error(error: &Error, kind: ErrorKind) {
 pub(crate) fn assert_memory_error(error: &Error, kind: ErrorKind, operation: &str, message: &str) {
     let original = memory_error(error, operation);
     assert_eq!(original.kind(), kind);
-    assert_eq!(original.to_string(), format!("{operation}: {message}"));
+    assert_eq!(original.operation(), operation);
+    assert!(original.to_string().ends_with(&format!(": {message}")));
     let cause = original
         .source()
         .unwrap()

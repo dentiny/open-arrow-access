@@ -47,7 +47,7 @@ flowchart LR
 
 The explicit layer uses the selected codec regardless of filename. For mixed
 plain/compressed objects, use `AutoDecompressionLayer::new()` instead. It routes
-by the final, case-insensitive suffix: `.gz` / `.tgz`, `.bz2`, `.lz4`, `.zst` /
+by the final, ASCII case-insensitive suffix: `.gz` / `.tgz`, `.bz2`, `.lz4`, `.zst` /
 `.zstd`. Enable each corresponding codec feature; a recognized but disabled codec
 fails before opening storage. Other suffixes pass through. This removes one
 compression layer, without sniffing bytes, stripping URL query strings, guessing

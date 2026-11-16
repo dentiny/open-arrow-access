@@ -1,7 +1,9 @@
 use std::num::NonZeroUsize;
 
+use futures::TryStreamExt;
+
 use arrow_array::cast::AsArray;
-use open_arrow_access_core::{Accessor, AccessorExt, ReadOptions, ReadRequest};
+use open_arrow_access_core::{Accessor, AccessorExt, ReadOptions, ReadRequest, into_stream};
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::atif::{AtifAccessor, AtifFormat};
@@ -108,5 +110,43 @@ async fn parallel_atif_composes_with_independent_gzip_readers() {
         if expected.is_none() {
             break;
         }
+    }
+}
+
+#[tokio::test]
+async fn file_set_decode_failure_identifies_the_second_object() {
+    let root = tempfile::tempdir().unwrap();
+    tokio::fs::copy(
+        open_arrow_access_test_support::fixture_path!("atif", "trajectories.jsonl"),
+        root.path().join("a.jsonl"),
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(root.path().join("b.jsonl"), b"{\"bad\":true}\n")
+        .await
+        .unwrap();
+    let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(root.path()));
+    for planned in [false, true] {
+        let files = FileSetAccessor::new(AtifAccessor::new(bytes.clone(), AtifFormat::JsonLines));
+        let request = FileSetRequest::new(["a.jsonl", "b.jsonl"]);
+        let reader = if planned {
+            files
+                .with_file_planning()
+                .layer(ParallelReadLayer::new(
+                    NonZeroUsize::new(2).unwrap(),
+                    NonZeroUsize::MIN,
+                ))
+                .open(request)
+                .await
+                .unwrap()
+        } else {
+            files.open(request).await.unwrap()
+        };
+        let error = into_stream(reader)
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap_err();
+        assert!(!error.to_string().contains("a.jsonl"));
+        assert!(error.to_string().contains("b.jsonl"));
     }
 }

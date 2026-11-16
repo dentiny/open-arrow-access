@@ -24,7 +24,13 @@ pub struct ZipArchive {
 impl ZipArchive {
     /// Inspect the central directory once over a ranged, known-length source.
     pub async fn open(input: Box<dyn ByteReader>, limits: ZipLimits) -> Result<Self> {
-        let source = ArchiveSource::new(input, "open_zip")?;
+        let object = input.metadata().source.clone();
+        let context = |error: open_arrow_access_core::Error| error.with_object(object.as_ref());
+        let source = ArchiveSource::new(input, "open_zip").map_err(context)?;
+        Self::inspect(source, limits).await.map_err(context)
+    }
+
+    async fn inspect(source: ArchiveSource, limits: ZipLimits) -> Result<Self> {
         let options = ZipOptions {
             max_uncompressed_size_per_file: limits.max_entry_bytes,
             max_compressed_size_per_file: limits.max_entry_bytes,
@@ -67,7 +73,13 @@ impl ZipArchive {
     ) -> impl std::future::Future<Output = Result<Box<dyn ByteReader>>> + Send + 'static + use<>
     {
         let archive = self.clone();
-        async move { archive.read_entry(entry_index, chunk_size).await }
+        async move {
+            let object = archive.source.metadata.source.clone();
+            archive
+                .read_entry(entry_index, chunk_size)
+                .await
+                .map_err(|error| error.with_object(object.as_ref()))
+        }
     }
 
     async fn read_entry(

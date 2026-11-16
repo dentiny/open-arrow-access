@@ -4,18 +4,18 @@ use bytes::BytesMut;
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactoryExt, RecordMetadata,
-    Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader,
+    Result, ScanPartition, ScanPlan, async_trait, bytes_reader,
 };
 use serde_json::{Deserializer, value::RawValue};
 
 use super::{JsonAccessor, error};
 
 #[async_trait]
-impl<B> ScanPlanner for JsonAccessor<B>
+impl<B> crate::scan::FileScanPlanner for JsonAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
-    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
+    async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = self.binding.factory().clone();
         let prepared = format.prepare_scan(&request)?;
         let input = self

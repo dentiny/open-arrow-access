@@ -52,11 +52,12 @@ impl<C: Codec> ReaderFactory for DecompressionFactory<C> {
         &self,
         _token: &FactoryToken,
         input: Box<dyn ByteReader>,
-        _request: ByteReadRequest,
+        request: ByteReadRequest,
         (): (),
     ) -> Result<Box<dyn ByteReader>> {
         let mut metadata = input.metadata().clone();
         metadata.content_length = None;
+        metadata.source = Some(request.object);
         let input = into_async_read(input, "decompress_input");
         let decoder = self.codec.decoder(Box::pin(input));
         Ok(decoded_reader(

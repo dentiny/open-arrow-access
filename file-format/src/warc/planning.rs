@@ -1,7 +1,7 @@
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, OrderRequirement, ReadRequest, ReaderFactory,
-    RecordMetadata, Result, ScanPlan, ScanPlanner, StreamReader, async_trait, into_async_read,
+    RecordMetadata, Result, ScanPlan, StreamReader, async_trait, into_async_read,
 };
 
 use super::{
@@ -15,11 +15,11 @@ use crate::scan::chunks::RecordChunks;
 type RawRecord = (warc::RawRecordHeader, Vec<u8>);
 
 #[async_trait]
-impl<B> ScanPlanner for WarcArrowAccessor<B>
+impl<B> crate::scan::FileScanPlanner for WarcArrowAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
-    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
+    async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let schema = self.binding.factory().prepare(&request)?;
         let metadata = RecordMetadata {
             schema,
