@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use super::MetricEvent;
+use super::{MetricEvent, MetricValue};
 
 mod in_memory;
 pub use in_memory::InMemoryExporter;
@@ -10,6 +10,15 @@ pub use in_memory::InMemoryExporter;
 /// Destination for observations. Clones must retain the same recording scope.
 pub trait MetricsExporter: Clone + Send + Sync + 'static {
     fn record(&self, event: MetricEvent);
+
+    /// Increment a counter in this exporter's recording scope.
+    fn record_counter(&self, name: &'static str, operation: &'static str, n: u64) {
+        self.record(MetricEvent {
+            name,
+            operation,
+            value: MetricValue::Counter(n),
+        });
+    }
 }
 
 /// Constant-space summary; individual samples are never retained.

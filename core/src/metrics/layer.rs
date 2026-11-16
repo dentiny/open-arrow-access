@@ -9,14 +9,6 @@ use crate::{
     async_trait,
 };
 
-fn counter<E: MetricsExporter>(exporter: &E, name: &'static str, operation: &'static str, n: u64) {
-    exporter.record(MetricEvent {
-        name,
-        operation,
-        value: MetricValue::Counter(n),
-    });
-}
-
 /// Observe accessors and byte/record readers without changing their representation.
 ///
 /// `oaa_bytes_delivered_total` counts successful byte results at this boundary,
@@ -98,8 +90,7 @@ impl<A: ByteAccessor, E: MetricsExporter> ByteAccessor for MetricsAccessor<A, E>
         let entries = Call::observe(&self.exporter, "list", self.inner.list(request)).await?;
         let exporter = self.exporter.clone();
         Ok(Box::pin(entries.inspect(move |item| {
-            counter(
-                &exporter,
+            exporter.record_counter(
                 if item.is_ok() {
                     "oaa_list_entries_total"
                 } else {
@@ -153,7 +144,7 @@ impl<'a, E: MetricsExporter> Call<'a, E> {
         operation: &'static str,
         future: impl Future<Output = Result<T>>,
     ) -> Result<T> {
-        counter(exporter, "oaa_calls_total", operation, 1);
+        exporter.record_counter("oaa_calls_total", operation, 1);
         exporter.record(MetricEvent {
             name: "oaa_executing",
             operation,
@@ -168,7 +159,7 @@ impl<'a, E: MetricsExporter> Call<'a, E> {
         let result = future.await;
         call.finished = true;
         if result.is_err() {
-            counter(exporter, "oaa_errors_total", operation, 1);
+            exporter.record_counter("oaa_errors_total", operation, 1);
         }
         result
     }
@@ -177,7 +168,8 @@ impl<'a, E: MetricsExporter> Call<'a, E> {
 impl<E: MetricsExporter> Drop for Call<'_, E> {
     fn drop(&mut self) {
         if !self.finished {
-            counter(self.exporter, "oaa_cancelled_total", self.operation, 1);
+            self.exporter
+                .record_counter("oaa_cancelled_total", self.operation, 1);
         }
         self.exporter.record(MetricEvent {
             name: "oaa_call_duration_seconds",
@@ -200,7 +192,7 @@ struct Measured<R: Reader + ?Sized, E: MetricsExporter> {
 
 impl<R: Reader + ?Sized, E: MetricsExporter> Measured<R, E> {
     fn new(inner: Box<R>, exporter: E) -> Self {
-        counter(&exporter, "oaa_readers_opened_total", "reader", 1);
+        exporter.record_counter("oaa_readers_opened_total", "reader", 1);
         Self {
             inner,
             exporter,
@@ -212,12 +204,8 @@ impl<R: Reader + ?Sized, E: MetricsExporter> Measured<R, E> {
 impl<R: Reader + ?Sized, E: MetricsExporter> Drop for Measured<R, E> {
     fn drop(&mut self) {
         if !self.terminal {
-            counter(
-                &self.exporter,
-                "oaa_readers_dropped_early_total",
-                "reader",
-                1,
-            );
+            self.exporter
+                .record_counter("oaa_readers_dropped_early_total", "reader", 1);
         }
     }
 }
@@ -227,19 +215,14 @@ trait OutputMetrics {
 }
 impl OutputMetrics for Bytes {
     fn record<E: MetricsExporter>(&self, exporter: &E) {
-        counter(
-            exporter,
-            "oaa_bytes_delivered_total",
-            "next",
-            self.len() as u64,
-        );
-        counter(exporter, "oaa_chunks_total", "next", 1);
+        exporter.record_counter("oaa_bytes_delivered_total", "next", self.len() as u64);
+        exporter.record_counter("oaa_chunks_total", "next", 1);
     }
 }
 impl OutputMetrics for RecordBatch {
     fn record<E: MetricsExporter>(&self, exporter: &E) {
-        counter(exporter, "oaa_batches_total", "next", 1);
-        counter(exporter, "oaa_rows_total", "next", self.num_rows() as u64);
+        exporter.record_counter("oaa_batches_total", "next", 1);
+        exporter.record_counter("oaa_rows_total", "next", self.num_rows() as u64);
     }
 }
 
@@ -268,11 +251,13 @@ where
             Ok(Some(item)) => item.record(&self.exporter),
             Ok(None) => {
                 self.terminal = true;
-                counter(&self.exporter, "oaa_readers_completed_total", "reader", 1);
+                self.exporter
+                    .record_counter("oaa_readers_completed_total", "reader", 1);
             }
             Err(_) => {
                 self.terminal = true;
-                counter(&self.exporter, "oaa_readers_failed_total", "reader", 1);
+                self.exporter
+                    .record_counter("oaa_readers_failed_total", "reader", 1);
             }
         }
         result
@@ -285,8 +270,7 @@ impl<E: MetricsExporter> ByteReader for Measured<dyn ByteReader, E> {
         let result =
             Call::observe(&self.exporter, "read_range", self.inner.read_range(range)).await;
         if let Ok(bytes) = &result {
-            counter(
-                &self.exporter,
+            self.exporter.record_counter(
                 "oaa_bytes_delivered_total",
                 "read_range",
                 bytes.len() as u64,
@@ -302,8 +286,7 @@ impl<E: MetricsExporter> ByteReader for Measured<dyn ByteReader, E> {
         )
         .await;
         if let Ok(bytes) = &result {
-            counter(
-                &self.exporter,
+            self.exporter.record_counter(
                 "oaa_bytes_delivered_total",
                 "read_ranges",
                 bytes.iter().map(|b| b.len() as u64).sum(),
