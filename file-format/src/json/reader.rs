@@ -1,7 +1,7 @@
 use arrow_json::reader::Decoder;
 use open_arrow_access_core::{
     BatchDecoder, ByteReader, OrderRequirement, RecordBatch, RecordMetadata, RecordReader, Result,
-    SchemaRef, decode_batches, project_batch,
+    decode_batches,
 };
 
 use super::error::decode_error;
@@ -9,8 +9,6 @@ use super::error::decode_error;
 struct JsonDecoder {
     decoder: Decoder,
     batch_size: usize,
-    projection: Option<Vec<usize>>,
-    schema: SchemaRef,
 }
 
 impl BatchDecoder for JsonDecoder {
@@ -26,11 +24,7 @@ impl BatchDecoder for JsonDecoder {
     }
 
     fn flush(&mut self) -> Result<Option<RecordBatch>> {
-        self.decoder
-            .flush()
-            .map_err(decode_error)?
-            .map(|batch| project_batch(batch, self.projection.as_deref(), self.schema.clone()))
-            .transpose()
+        self.decoder.flush().map_err(decode_error)
     }
 
     fn finish(&mut self) -> Result<Option<RecordBatch>> {
@@ -41,7 +35,6 @@ impl BatchDecoder for JsonDecoder {
 pub(super) fn json_reader(
     input: Box<dyn ByteReader>,
     decoder: Decoder,
-    projection: Option<Vec<usize>>,
     metadata: RecordMetadata,
     batch_size: usize,
 ) -> impl RecordReader {
@@ -50,8 +43,6 @@ pub(super) fn json_reader(
         JsonDecoder {
             decoder,
             batch_size,
-            projection,
-            schema: metadata.schema.clone(),
         },
         metadata,
         OrderRequirement::Reorderable,
