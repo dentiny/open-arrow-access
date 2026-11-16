@@ -315,3 +315,62 @@ async fn parquet_union_by_name_only_relaxes_missing_fields() {
     assert_eq!(left_values, [Some(10), Some(20), None]);
     assert_eq!(right_values, [None, None, Some("r".to_owned())]);
 }
+
+#[tokio::test]
+async fn mixed_csv_tsv_file_set_selects_each_delimiter_before_union_and_planning() {
+    use open_arrow_access_file_format::csv::{CsvDialect, CsvHeader};
+    let dir = tempfile::tempdir().unwrap();
+    tokio::fs::write(dir.path().join("a.csv"), b"id,title\n1,first\n")
+        .await
+        .unwrap();
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(b"title\tid\n\"second\tvalue\"\t2\n")
+        .unwrap();
+    tokio::fs::write(dir.path().join("b.tsv.gz"), encoder.finish().unwrap())
+        .await
+        .unwrap();
+    let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()))
+        .layer(AutoDecompressionLayer::new());
+    let files = FileSetAccessor::new(
+        CsvAccessor::infer(storage)
+            .with_dialect(CsvDialect {
+                header: CsvHeader::Present,
+                ..Default::default()
+            })
+            .with_delimiter_by_extension(),
+    )
+    .with_union_by_name()
+    .with_file_planning();
+    for planned in [false, true] {
+        let request = FileSetRequest::new(["a.csv", "b.tsv.gz"]).with_options(ReadOptions {
+            batch_size: NonZeroUsize::MIN,
+            projection: Some(vec!["title".into(), "id".into()]),
+        });
+        let mut reader = if planned {
+            files
+                .clone()
+                .layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN))
+                .open(request)
+                .await
+                .unwrap()
+        } else {
+            files.open(request).await.unwrap()
+        };
+        let mut ids = Vec::new();
+        let mut titles = Vec::new();
+        while let Some(batch) = reader.next().await.unwrap() {
+            assert_eq!(batch.schema().field(0).name(), "title");
+            ids.extend(batch.column(1).as_primitive::<Int64Type>().iter());
+            titles.extend(
+                batch
+                    .column(0)
+                    .as_string::<i32>()
+                    .iter()
+                    .map(|value| value.unwrap().to_owned()),
+            );
+        }
+        assert_eq!(ids, [Some(1), Some(2)]);
+        assert_eq!(titles, ["first", "second\tvalue"]);
+    }
+}

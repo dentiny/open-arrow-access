@@ -89,6 +89,19 @@ Present that contain only a header, all-null sampled columns, and duplicate/empt
 headers require an explicit schema.
 For identifiers with significant leading zeros, supply an explicit string schema.
 Configure TSV with `with_dialect(CsvDialect { delimiter: b'\t', ..Default::default() })`.
+To read CSV and TSV in the same file set or directory, enable
+`CsvAccessor::infer(bytes).with_delimiter_by_extension()` (also available on
+`CsvFileFormat` and explicit-schema accessors). Each input uses comma for `.csv`
+or tab for `.tsv`, case-insensitively, including one optional `.gz`, `.bz2`,
+`.lz4`, `.zst`, or `.zstd` suffix. Other extensions use the configured delimiter.
+This opt-in policy overrides only the delimiter, including one set by
+`with_dialect` or `with_format`; quote, escape, header, and validation settings
+are preserved. Without it, every input uses the configured delimiter.
+Locators remain opaque, so query and fragment characters are not stripped.
+Attach decompression separately; suffix selection does not decompress bytes.
+The selected delimiter is shared by inference, sequential decoding, and native
+parallel framing, including file-set union by name.
+
 Header policy is resolved once before parallel partitioning and shared by all workers.
 `CsvFormat` is this crate's options wrapper around Arrow 58's CSV format, with
 the existing builder methods and `.with_header_validation(true)` preserved.

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add opt-in per-file CSV/TSV delimiter selection to CSV accessors and formats,
+  including compressed suffixes, schema inference, and native parallel scans.
+
 ## 0.3.1
 
 - Align OpenDAL and its HTTP/metrics components on 0.59.5, allowing compatible patch updates.
