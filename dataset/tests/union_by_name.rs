@@ -364,39 +364,26 @@ async fn mixed_csv_and_compressed_tsv_file_set() {
         .unwrap();
     let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()))
         .layer(AutoDecompressionLayer::new().with_factory(factory.clone()));
-    for infer in [false, true] {
-        let source = if infer {
-            CsvAccessor::infer(storage.clone())
+    let source = CsvAccessor::infer(storage).with_compression_factory(factory);
+    let files = FileSetAccessor::new(source)
+        .with_union_by_name()
+        .with_file_planning();
+    for planned in [false, true] {
+        let request = FileSetRequest::new(["a.csv", "b.tsv.gz", "c.tsv.xor"]);
+        let mut reader = if planned {
+            files
+                .clone()
+                .layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN))
+                .open(request)
+                .await
+                .unwrap()
         } else {
-            CsvAccessor::new(
-                storage.clone(),
-                Arc::new(Schema::new(vec![
-                    Field::new("id", DataType::Int64, true),
-                    Field::new("title", DataType::Utf8, true),
-                ])),
-            )
-            .with_header(open_arrow_access_file_format::csv::CsvHeader::Present)
+            files.open(request).await.unwrap()
         };
-        let files = FileSetAccessor::new(source.with_compression_factory(factory.clone()))
-            .with_union_by_name()
-            .with_file_planning();
-        for planned in [false, true] {
-            let request = FileSetRequest::new(["a.csv", "b.tsv.gz", "c.tsv.xor"]);
-            let mut reader = if planned {
-                files
-                    .clone()
-                    .layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN))
-                    .open(request)
-                    .await
-                    .unwrap()
-            } else {
-                files.open(request).await.unwrap()
-            };
-            let mut ids = Vec::new();
-            while let Some(batch) = reader.next().await.unwrap() {
-                ids.extend(batch.column(0).as_primitive::<Int64Type>().iter());
-            }
-            assert_eq!(ids, [Some(1), Some(2), Some(3)]);
+        let mut ids = Vec::new();
+        while let Some(batch) = reader.next().await.unwrap() {
+            ids.extend(batch.column(0).as_primitive::<Int64Type>().iter());
         }
+        assert_eq!(ids, [Some(1), Some(2), Some(3)]);
     }
 }
