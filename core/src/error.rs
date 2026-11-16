@@ -1,4 +1,6 @@
-use std::{error::Error as StdError, io, sync::Arc};
+use std::{error::Error as StdError, fmt, io, sync::Arc};
+
+use crate::ObjectRef;
 
 /// The result type shared by all components.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -85,10 +87,9 @@ impl ErrorKind {
 
 /// An error with operation context and an optional original error.
 #[derive(Debug, thiserror::Error)]
-#[error("{operation}: {message}")]
 pub struct Error {
     kind: ErrorKind,
-    has_object_context: bool,
+    object: Option<ObjectRef>,
     operation: &'static str,
     message: String,
     #[source]
@@ -101,7 +102,7 @@ impl Error {
     pub fn new(kind: ErrorKind, operation: &'static str, message: impl Into<String>) -> Self {
         Self {
             kind,
-            has_object_context: false,
+            object: None,
             operation,
             message: message.into(),
             source: None,
@@ -112,12 +113,9 @@ impl Error {
 
     /// Add the exact object locator without changing classification or the source chain.
     /// The first object wins, so outer dataset readers retain the failing child object.
-    pub fn with_object(mut self, object: Option<&crate::ObjectRef>) -> Self {
-        if !self.has_object_context
-            && let Some(object) = object
-        {
-            self.message = format!("object {:?}: {}", object.locator(), self.message);
-            self.has_object_context = true;
+    pub fn with_object(mut self, object: Option<&ObjectRef>) -> Self {
+        if self.object.is_none() {
+            self.object = object.cloned();
         }
         self
     }
@@ -155,6 +153,16 @@ impl Error {
 
     pub fn operation(&self) -> &'static str {
         self.operation
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.operation)?;
+        if let Some(object) = &self.object {
+            write!(f, "object {:?}: ", object.locator())?;
+        }
+        f.write_str(&self.message)
     }
 }
 
