@@ -19,65 +19,67 @@ where
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let object = request.object.clone();
-        let result = async {
-            let format = self.binding.factory().clone();
-            let Some(dialect) = format.parallel_dialect() else {
-                return Ok(ScanPlan::whole_input(self.open(request).await?)
-                    .with_ordering(self.capability().ordering));
-            };
-            let prepared = format.prepare_scan(&request)?;
-            let input = self
-                .binding
-                .storage()
-                .open(ByteReadRequest::from(&request))
-                .await?;
-            let Some((format, input)) = format.resolve_schema(input).await? else {
-                return Ok(crate::inference::empty_plan(request));
-            };
-            let prepared = match prepared {
-                Some(prepared) => prepared,
-                None => format.prepare_scan(&request)?.expect("resolved CSV schema"),
-            };
-            let dialect = format.parallel_dialect().unwrap_or(dialect);
-            let metadata = RecordMetadata {
-                schema: prepared.schema,
-                source: Some(request.object.clone()),
-            };
-            // Workers read canonical CSV, regardless of the source dialect.
-            let format = format.with_dialect(CsvDialect {
-                header: dialect.header,
-                validate_header: dialect.validate_header,
-                allow_truncated_rows: dialect.allow_truncated_rows,
-                ..CsvDialect::default()
-            });
-            let target_bytes = self.partition_options.target_bytes.get();
-            // Initialization runs on first poll, keeping partition discovery lazy.
-            let partitions = stream::once(async move {
-                let frames = CsvChunks::new(input, dialect).await?;
-                Ok(stream::try_unfold(frames, move |mut frames| {
-                    let format = format.clone();
-                    let request = request.clone();
-                    async move {
-                        let Some(bytes) = frames
-                            .next_chunk(request.options.batch_size.get(), target_bytes)
-                            .await?
-                        else {
-                            return Ok(None);
-                        };
-                        let partition: ScanPartition = Box::pin(async move {
-                            let input = bytes_reader(bytes, Some(request.object.clone()));
-                            format.open_input(Box::new(input), request).await
-                        });
-                        Ok(Some((partition, frames)))
-                    }
-                }))
-            })
-            .try_flatten();
-            Ok(ScanPlan::from_stream(metadata, partitions)
-                .with_ordering(self.capability().ordering))
-        }
-        .await;
-        result.map_err(|error: open_arrow_access_core::Error| error.with_object(&object))
+        let context = |error: open_arrow_access_core::Error| error.with_object(&object);
+        let format = self.binding.factory().clone();
+        let Some(dialect) = format.parallel_dialect() else {
+            return Ok(
+                ScanPlan::whole_input(self.open(request).await.map_err(context)?)
+                    .with_ordering(self.capability().ordering),
+            );
+        };
+        let prepared = format.prepare_scan(&request).map_err(context)?;
+        let input = self
+            .binding
+            .storage()
+            .open(ByteReadRequest::from(&request))
+            .await
+            .map_err(context)?;
+        let Some((format, input)) = format.resolve_schema(input).await.map_err(context)? else {
+            return Ok(crate::inference::empty_plan(request));
+        };
+        let prepared = match prepared {
+            Some(prepared) => prepared,
+            None => format
+                .prepare_scan(&request)
+                .map_err(context)?
+                .expect("resolved CSV schema"),
+        };
+        let dialect = format.parallel_dialect().unwrap_or(dialect);
+        let metadata = RecordMetadata {
+            schema: prepared.schema,
+            source: Some(request.object.clone()),
+        };
+        // Workers read canonical CSV, regardless of the source dialect.
+        let format = format.with_dialect(CsvDialect {
+            header: dialect.header,
+            validate_header: dialect.validate_header,
+            allow_truncated_rows: dialect.allow_truncated_rows,
+            ..CsvDialect::default()
+        });
+        let target_bytes = self.partition_options.target_bytes.get();
+        // Initialization runs on first poll, keeping partition discovery lazy.
+        let partitions = stream::once(async move {
+            let frames = CsvChunks::new(input, dialect).await?;
+            Ok(stream::try_unfold(frames, move |mut frames| {
+                let format = format.clone();
+                let request = request.clone();
+                async move {
+                    let Some(bytes) = frames
+                        .next_chunk(request.options.batch_size.get(), target_bytes)
+                        .await?
+                    else {
+                        return Ok(None);
+                    };
+                    let partition: ScanPartition = Box::pin(async move {
+                        let input = bytes_reader(bytes, Some(request.object.clone()));
+                        format.open_input(Box::new(input), request).await
+                    });
+                    Ok(Some((partition, frames)))
+                }
+            }))
+        })
+        .try_flatten();
+        Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))
     }
 }
 

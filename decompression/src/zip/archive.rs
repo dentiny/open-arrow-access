@@ -25,40 +25,42 @@ impl ZipArchive {
     /// Inspect the central directory once over a ranged, known-length source.
     pub async fn open(input: Box<dyn ByteReader>, limits: ZipLimits) -> Result<Self> {
         let object = input.metadata().source.clone();
-        let result = async {
-            let source = ArchiveSource::new(input, "open_zip")?;
-            let options = ZipOptions {
-                max_uncompressed_size_per_file: limits.max_entry_bytes,
-                max_compressed_size_per_file: limits.max_entry_bytes,
-                ..ZipOptions::default()
-            };
-            let parser = ZipArchiveReader::open_with_options(source.input.clone(), options)
-                .await
-                .map_err(zip_error)?;
-            let entries = parser
-                .cdrs()
-                .iter()
-                .enumerate()
-                .map(|(index, entry)| {
-                    super::validation::validate_offset(entry)?;
-                    Ok(ZipEntry {
-                        index,
-                        name: entry.insecure_file_name.as_bytes().to_vec(),
-                        compressed_size: entry.compressed_size().map_err(zip_error)?,
-                        uncompressed_size: entry.uncompressed_size().map_err(zip_error)?,
-                    })
+        let context = |error: open_arrow_access_core::Error| error.with_object(object.as_ref());
+        let source = ArchiveSource::new(input, "open_zip").map_err(context)?;
+        let options = ZipOptions {
+            max_uncompressed_size_per_file: limits.max_entry_bytes,
+            max_compressed_size_per_file: limits.max_entry_bytes,
+            ..ZipOptions::default()
+        };
+        let parser = ZipArchiveReader::open_with_options(source.input.clone(), options)
+            .await
+            .map_err(zip_error)
+            .map_err(context)?;
+        let entries = parser
+            .cdrs()
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                super::validation::validate_offset(entry).map_err(context)?;
+                Ok(ZipEntry {
+                    index,
+                    name: entry.insecure_file_name.as_bytes().to_vec(),
+                    compressed_size: entry
+                        .compressed_size()
+                        .map_err(zip_error)
+                        .map_err(context)?,
+                    uncompressed_size: entry
+                        .uncompressed_size()
+                        .map_err(zip_error)
+                        .map_err(context)?,
                 })
-                .collect::<Result<Vec<_>>>()?;
-            Ok(Self {
-                directory: parser.inner().clone(),
-                source,
-                entries: entries.into(),
             })
-        }
-        .await;
-        result.map_err(|error: open_arrow_access_core::Error| match &object {
-            Some(object) => error.with_object(object),
-            None => error,
+            .collect::<Result<Vec<_>>>()
+            .map_err(context)?;
+        Ok(Self {
+            directory: parser.inner().clone(),
+            source,
+            entries: entries.into(),
         })
     }
 
@@ -80,10 +82,7 @@ impl ZipArchive {
             archive
                 .read_entry(entry_index, chunk_size)
                 .await
-                .map_err(|error| match &object {
-                    Some(object) => error.with_object(object),
-                    None => error,
-                })
+                .map_err(|error| error.with_object(object.as_ref()))
         }
     }
 

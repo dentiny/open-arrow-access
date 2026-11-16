@@ -110,16 +110,12 @@ impl ScanPlan {
         let partitions = partitions.map(move |result| {
             let object = object.clone();
             result
-                .map_err(|error| match &object {
-                    Some(object) => error.with_object(object),
-                    None => error,
-                })
+                .map_err(|error| error.with_object(object.as_ref()))
                 .map(|partition| {
                     Box::pin(async move {
-                        partition.await.map_err(|error| match &object {
-                            Some(object) => error.with_object(object),
-                            None => error,
-                        })
+                        partition
+                            .await
+                            .map_err(|error| error.with_object(object.as_ref()))
                     }) as ScanPartition
                 })
         });

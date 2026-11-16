@@ -54,8 +54,8 @@ impl<S, M> StreamReader<S, M> {
 
 impl<S, M, C> StreamReader<S, M, C> {
     /// Attach object context to lazy errors without changing their source chain.
-    pub fn with_object(mut self, object: ObjectRef) -> Self {
-        self.object = Some(object);
+    pub fn with_object(mut self, object: impl Into<Option<ObjectRef>>) -> Self {
+        self.object = object.into();
         self
     }
 
@@ -74,10 +74,9 @@ impl<S> StreamReader<S, RecordMetadata, RecordCapability> {
     /// Construct a record stream with an explicit source ordering contract.
     pub fn records(stream: S, metadata: RecordMetadata, ordering: OrderRequirement) -> Self {
         let object = metadata.source.clone();
-        let mut reader = StreamReader::new(stream, metadata)
-            .with_capability(RecordCapability::sequential(ordering));
-        reader.object = object;
-        reader
+        StreamReader::new(stream, metadata)
+            .with_capability(RecordCapability::sequential(ordering))
+            .with_object(object)
     }
 }
 
@@ -109,10 +108,7 @@ where
         if !matches!(result, Ok(Some(_))) {
             self.stream = None;
         }
-        result.map_err(|error| match &self.object {
-            Some(object) => error.with_object(object),
-            None => error,
-        })
+        result.map_err(|error| error.with_object(self.object.as_ref()))
     }
 }
 

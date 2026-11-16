@@ -21,60 +21,57 @@ where
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let object = request.object.clone();
-        let result = async {
-            let schema = self.binding.factory().prepare(&request)?;
-            let metadata = RecordMetadata {
-                schema,
-                source: Some(request.object.clone()),
-            };
-            let input = self
-                .binding
-                .storage()
-                .open(ByteReadRequest::from(&request))
-                .await?;
-            let records =
-                warc::WarcReader::new(into_async_read(input, "read_warc")).iter_raw_records();
-            let records = stream::try_unfold(records, |mut records| async move {
-                Ok(records
-                    .next()
-                    .await
-                    .transpose()
-                    .map_err(decode_error)?
-                    .map(|record| (record, records)))
-            })
-            .boxed();
-            let plan = RecordChunks::new(records).into_plan(
-                metadata,
-                request.options.batch_size.get(),
-                self.partition_options.target_bytes.get(),
-                record_size,
-                move |records, metadata| {
-                    Box::pin(async move {
-                        let mut batch = new_batch(&metadata.schema)?;
-                        let source = metadata.source.as_ref().unwrap().locator();
-                        for (headers, body) in records {
-                            let record = warc::Record::<warc::EmptyBody>::try_from(headers)
-                                .map_err(decode_error)?
-                                .add_body(body);
-                            append_record(&mut batch, &record, source)?;
-                        }
-                        let batch = batch.finish()?;
-                        let metadata = RecordMetadata {
-                            schema: raw_projection(&metadata.schema)?,
-                            ..metadata
-                        };
-                        evolve_reader(Box::new(StreamReader::records(
-                            stream::iter([Ok(batch)]),
-                            metadata,
-                            OrderRequirement::Reorderable,
-                        )))
-                    })
-                },
-            );
-            Ok(plan.with_ordering(self.capability().ordering))
-        }
-        .await;
-        result.map_err(|error: open_arrow_access_core::Error| error.with_object(&object))
+        let context = |error: open_arrow_access_core::Error| error.with_object(&object);
+        let schema = self.binding.factory().prepare(&request).map_err(context)?;
+        let metadata = RecordMetadata {
+            schema,
+            source: Some(request.object.clone()),
+        };
+        let input = self
+            .binding
+            .storage()
+            .open(ByteReadRequest::from(&request))
+            .await
+            .map_err(context)?;
+        let records = warc::WarcReader::new(into_async_read(input, "read_warc")).iter_raw_records();
+        let records = stream::try_unfold(records, |mut records| async move {
+            Ok(records
+                .next()
+                .await
+                .transpose()
+                .map_err(decode_error)?
+                .map(|record| (record, records)))
+        })
+        .boxed();
+        let plan = RecordChunks::new(records).into_plan(
+            metadata,
+            request.options.batch_size.get(),
+            self.partition_options.target_bytes.get(),
+            record_size,
+            move |records, metadata| {
+                Box::pin(async move {
+                    let mut batch = new_batch(&metadata.schema)?;
+                    let source = metadata.source.as_ref().unwrap().locator();
+                    for (headers, body) in records {
+                        let record = warc::Record::<warc::EmptyBody>::try_from(headers)
+                            .map_err(decode_error)?
+                            .add_body(body);
+                        append_record(&mut batch, &record, source)?;
+                    }
+                    let batch = batch.finish()?;
+                    let metadata = RecordMetadata {
+                        schema: raw_projection(&metadata.schema)?,
+                        ..metadata
+                    };
+                    evolve_reader(Box::new(StreamReader::records(
+                        stream::iter([Ok(batch)]),
+                        metadata,
+                        OrderRequirement::Reorderable,
+                    )))
+                })
+            },
+        );
+        Ok(plan.with_ordering(self.capability().ordering))
     }
 }
 

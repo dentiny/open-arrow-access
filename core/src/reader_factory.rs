@@ -65,16 +65,11 @@ impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
         request: Self::Request,
     ) -> Result<Box<Self::Reader>> {
         let object = input.metadata().source.clone();
-        let result = async {
-            let prepared = self.prepare(&request)?;
-            self.create_reader(&FactoryToken { _private: () }, input, request, prepared)
-                .await
-        }
-        .await;
-        result.map_err(|error| match &object {
-            Some(object) => error.with_object(object),
-            None => error,
-        })
+        let context = |error: crate::Error| error.with_object(object.as_ref());
+        let prepared = self.prepare(&request).map_err(context)?;
+        self.create_reader(&FactoryToken { _private: () }, input, request, prepared)
+            .await
+            .map_err(context)
     }
 
     async fn open_reader(
@@ -87,13 +82,12 @@ impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
     {
         let byte_request = ByteReadRequest::from(&request);
         let object = byte_request.object.clone();
-        let result = async {
-            let prepared = self.prepare(&request)?;
-            let input = storage.open(byte_request).await?;
-            let token = FactoryToken { _private: () };
-            self.create_reader(&token, input, request, prepared).await
-        }
-        .await;
-        result.map_err(|error| error.with_object(&object))
+        let context = |error: crate::Error| error.with_object(&object);
+        let prepared = self.prepare(&request).map_err(context)?;
+        let input = storage.open(byte_request).await.map_err(context)?;
+        let token = FactoryToken { _private: () };
+        self.create_reader(&token, input, request, prepared)
+            .await
+            .map_err(context)
     }
 }

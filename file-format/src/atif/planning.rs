@@ -18,64 +18,64 @@ where
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let object = request.object.clone();
-        let result = async {
-            let format = *self.binding.factory();
-            if format != AtifFormat::JsonLines {
-                return Ok(ScanPlan::whole_input(self.open(request).await?));
-            }
-            let (schema, projection) = format.prepare(&request)?;
-            let metadata = RecordMetadata {
-                schema,
-                source: Some(request.object.clone()),
-            };
-            let input = self
-                .binding
-                .storage()
-                .open(ByteReadRequest::from(&request))
-                .await?;
-            let frames = AtifFrames {
-                lines: read_lines(input, None, "frame_atif").boxed(),
-                next_index: 1,
-                source: request.object.clone(),
-            };
-            let records = stream::try_unfold(frames, |mut frames| async move {
-                Ok(frames.next_record().await?.map(|record| (record, frames)))
-            })
-            .boxed();
-            Ok(RecordChunks::new(records)
-                .into_plan(
-                    metadata,
-                    request.options.batch_size.get(),
-                    self.partition_options.target_bytes.get(),
-                    |(line, _)| line.len(),
-                    move |records, metadata| {
-                        let request = request.clone();
-                        let projection = projection.clone();
-                        let first_index = records[0].1;
-                        // Keep original line endings/whitespace for raw_json fidelity.
-                        let capacity = records.iter().map(|(line, _)| line.len()).sum();
-                        let mut bytes = Vec::with_capacity(capacity);
-                        for (line, _) in records {
-                            bytes.extend_from_slice(&line);
-                        }
-                        Box::pin(async move {
-                            let input =
-                                Box::new(bytes_reader(bytes.into(), Some(request.object.clone())));
-                            Ok(Box::new(create_reader(
-                                input,
-                                format,
-                                request.options.batch_size.get(),
-                                projection,
-                                metadata,
-                                first_index,
-                            )) as Box<dyn RecordReader>)
-                        })
-                    },
-                )
-                .with_ordering(self.capability().ordering))
+        let context = |error: open_arrow_access_core::Error| error.with_object(&object);
+        let format = *self.binding.factory();
+        if format != AtifFormat::JsonLines {
+            return Ok(ScanPlan::whole_input(
+                self.open(request).await.map_err(context)?,
+            ));
         }
-        .await;
-        result.map_err(|error: open_arrow_access_core::Error| error.with_object(&object))
+        let (schema, projection) = format.prepare(&request).map_err(context)?;
+        let metadata = RecordMetadata {
+            schema,
+            source: Some(request.object.clone()),
+        };
+        let input = self
+            .binding
+            .storage()
+            .open(ByteReadRequest::from(&request))
+            .await
+            .map_err(context)?;
+        let frames = AtifFrames {
+            lines: read_lines(input, None, "frame_atif").boxed(),
+            next_index: 1,
+            source: request.object.clone(),
+        };
+        let records = stream::try_unfold(frames, |mut frames| async move {
+            Ok(frames.next_record().await?.map(|record| (record, frames)))
+        })
+        .boxed();
+        Ok(RecordChunks::new(records)
+            .into_plan(
+                metadata,
+                request.options.batch_size.get(),
+                self.partition_options.target_bytes.get(),
+                |(line, _)| line.len(),
+                move |records, metadata| {
+                    let request = request.clone();
+                    let projection = projection.clone();
+                    let first_index = records[0].1;
+                    // Keep original line endings/whitespace for raw_json fidelity.
+                    let capacity = records.iter().map(|(line, _)| line.len()).sum();
+                    let mut bytes = Vec::with_capacity(capacity);
+                    for (line, _) in records {
+                        bytes.extend_from_slice(&line);
+                    }
+                    Box::pin(async move {
+                        let input =
+                            Box::new(bytes_reader(bytes.into(), Some(request.object.clone())));
+                        Ok(Box::new(create_reader(
+                            input,
+                            format,
+                            request.options.batch_size.get(),
+                            projection,
+                            metadata,
+                            first_index,
+                        )) as Box<dyn RecordReader>)
+                    })
+                },
+            )
+            .with_ordering(self.capability().ordering))
     }
 }
 

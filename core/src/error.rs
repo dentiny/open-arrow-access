@@ -112,8 +112,10 @@ impl Error {
 
     /// Add the exact object locator without changing classification or the source chain.
     /// The first object wins, so outer dataset readers retain the failing child object.
-    pub fn with_object(mut self, object: &crate::ObjectRef) -> Self {
-        if self.object.is_none() {
+    pub fn with_object<'a>(mut self, object: impl Into<Option<&'a crate::ObjectRef>>) -> Self {
+        if self.object.is_none()
+            && let Some(object) = object.into()
+        {
             self.message = format!("object {:?}: {}", object.locator(), self.message);
             self.object = Some(object.clone());
         }
