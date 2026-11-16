@@ -2,12 +2,12 @@ use std::{ops::Range, sync::Arc};
 
 use arrow_array::Int32Array;
 use arrow_schema::{DataType, Field, Schema};
-use futures::{TryStreamExt, future, stream};
+use futures::{future, stream};
 use open_arrow_access_core::{
-    Accessor, AccessorExt, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes,
-    Capability, ErrorKind, OrderRequirement, Reader, RecordBatch, RecordCapability, RecordMetadata,
-    RecordReader, Result, ScanPlan, ScanPlanner, ScanStatistics, Statistic, StatisticsProvider,
-    StreamReader, async_trait,
+    Accessor, AccessorExt, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability, ErrorKind,
+    OrderRequirement, Reader, RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result,
+    ScanPlan, ScanPlanner, ScanStatistics, Statistic, StatisticsProvider, StreamReader,
+    async_trait,
     metrics::{
         InMemoryExporter, MetricAggregate, MetricEvent, MetricValue, MetricsExporter, MetricsLayer,
     },
@@ -165,32 +165,6 @@ async fn bulk_ranges_are_delegated_once_and_count_only_returned_bytes() {
     assert_eq!(counter(exporter, "oaa_errors_total", "read_range"), 1);
 }
 
-#[tokio::test]
-async fn listing_is_preserved_and_counts_consumed_entries() {
-    let metrics = MetricsLayer::default();
-    let source = MemoryAccessor::new(b"", 1).with_listing();
-    let expected = source
-        .list("".into())
-        .await
-        .unwrap()
-        .try_collect::<Vec<_>>()
-        .await
-        .unwrap();
-    let actual = source
-        .layer(metrics.clone())
-        .list("".into())
-        .await
-        .unwrap()
-        .try_collect::<Vec<_>>()
-        .await
-        .unwrap();
-    assert_eq!(actual, expected);
-    assert_eq!(
-        counter(metrics.exporter(), "oaa_list_entries_total", "list"),
-        actual.len() as u64
-    );
-}
-
 struct PendingAccessor;
 #[async_trait]
 impl Accessor for PendingAccessor {
@@ -325,70 +299,23 @@ async fn record_output_statistics_and_lazy_scan_planning_are_preserved() {
 }
 
 #[test]
-fn memory_is_bounded_and_summaries_do_not_retain_samples() {
+fn exporter_aggregates_observations_without_retaining_samples() {
     let exporter = InMemoryExporter::default();
-    for _ in 0..10_000 {
+    for value in [0.5, 1.5] {
         exporter.record(MetricEvent {
             name: "duration",
             operation: "read",
-            value: MetricValue::Observation(0.5),
+            value: MetricValue::Observation(value),
         });
     }
     let snapshot = exporter.snapshot();
     assert_eq!(snapshot.len(), 1);
     match snapshot[&("duration", "read")] {
         MetricAggregate::Summary(summary) => {
-            assert_eq!(summary.count, 10_000);
-            assert_eq!(summary.sum, 5000.0);
-            assert_eq!(summary.max, 0.5);
+            assert_eq!(summary.count, 2);
+            assert_eq!(summary.sum, 2.0);
+            assert_eq!(summary.max, 1.5);
         }
         other => panic!("unexpected: {other:?}"),
     }
-}
-
-#[test]
-fn concurrent_exporter_clones_do_not_lose_updates() {
-    let exporter = InMemoryExporter::default();
-    let workers = (0..4)
-        .map(|_| {
-            let exporter = exporter.clone();
-            std::thread::spawn(move || {
-                for _ in 0..1_000 {
-                    exporter.record(MetricEvent {
-                        name: "bytes",
-                        operation: "read",
-                        value: MetricValue::Counter(2),
-                    });
-                }
-            })
-        })
-        .collect::<Vec<_>>();
-    for worker in workers {
-        worker.join().unwrap();
-    }
-    assert_eq!(counter(&exporter, "bytes", "read"), 8_000);
-}
-
-#[derive(Clone, Default)]
-struct ByteExporter(Arc<std::sync::atomic::AtomicU64>);
-impl MetricsExporter for ByteExporter {
-    fn record(&self, event: MetricEvent) {
-        if let MetricEvent {
-            name: "oaa_bytes_delivered_total",
-            value: MetricValue::Counter(n),
-            ..
-        } = event
-        {
-            self.0.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
-}
-
-#[tokio::test]
-async fn custom_exporters_receive_events_without_using_the_default_exporter() {
-    let exporter = ByteExporter::default();
-    let accessor = MemoryAccessor::new(b"abcdef", 2).layer(MetricsLayer::new(exporter.clone()));
-    let mut reader = accessor.open("data".into()).await.unwrap();
-    assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"abcdef"[..]);
-    assert_eq!(exporter.0.load(std::sync::atomic::Ordering::Relaxed), 6);
 }

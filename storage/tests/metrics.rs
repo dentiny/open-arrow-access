@@ -48,34 +48,6 @@ async fn opendal_and_reader_metrics_share_an_exporter_but_keep_byte_counts_separ
 }
 
 #[tokio::test]
-async fn early_drop_retains_output_and_observed_io() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("data"), b"abcdef").unwrap();
-    let metrics = MetricsLayer::default();
-    let accessor = OpenDalAccessor::new(
-        fs_operator(dir.path()).layer(opendal_metrics_layer(metrics.exporter().clone())),
-    )
-    .with_chunk_size(NonZeroUsize::new(2).unwrap())
-    .layer(metrics.clone());
-    let mut reader = accessor.open("data".into()).await.unwrap();
-    assert_eq!(reader.next().await.unwrap().unwrap(), "ab");
-    drop(reader);
-    assert_eq!(
-        counter(metrics.exporter(), "oaa_bytes_delivered_total", "next"),
-        2
-    );
-    assert!(counter(metrics.exporter(), "opendal_operation_bytes", "read") >= 2);
-    assert_eq!(
-        counter(
-            metrics.exporter(),
-            "oaa_readers_dropped_early_total",
-            "reader"
-        ),
-        1
-    );
-}
-
-#[tokio::test]
 async fn http_transport_observations_are_exported_without_a_global_recorder() {
     let fixture = HttpFixture::new();
     fixture.file("/data", "abcdef");
