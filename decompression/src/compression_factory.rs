@@ -55,6 +55,7 @@ impl Registration {
 /// Share a configured clone with format readers that inspect compression suffixes.
 #[derive(Clone)]
 pub struct CompressionFactory {
+    // Maps lowercase extensions without a leading dot to codec registrations.
     registrations: Arc<BTreeMap<String, Registration>>,
     chunk_size: NonZeroUsize,
 }
