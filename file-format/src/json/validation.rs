@@ -16,10 +16,3 @@ pub(super) fn validate_record(value: &serde_json::Value) -> Result<()> {
     }
     Ok(())
 }
-
-pub(super) fn validate_sample(records: &[serde_json::Value]) -> Result<()> {
-    if records.is_empty() {
-        return Err(super::error::empty_inference_sample());
-    }
-    Ok(())
-}

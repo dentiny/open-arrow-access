@@ -79,3 +79,11 @@ pub(super) fn file_ordering_mismatch() -> Error {
         "file plan violates the accessor-wide reorderable contract",
     )
 }
+
+pub(super) fn no_inferred_schema(operation: &'static str) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        operation,
+        "cannot infer a schema from empty inputs; supply an explicit schema",
+    )
+}

@@ -341,3 +341,9 @@ reported as `Decode`. Identity column projections skip per-batch reordering.
 
 Workspace dependency requirements are declared in `Cargo.toml`; the committed
 `Cargo.lock` records resolved versions, including transitive dependencies.
+
+CSV and JSON inputs with no records to infer from open as zero-column, zero-row
+readers/plans, including after decompression. Union-by-name skips those inputs
+and fails only if no selected input provides a schema or any rows. Zero-field
+JSON objects retain their rows. Known-schema empty inputs retain their schema;
+malformed content, storage failures, and invalid options remain errors.

@@ -73,7 +73,7 @@ pub(super) async fn resolve(
     dialect: CsvDialect,
     options: CsvInferenceOptions,
     explicit_schema: Option<SchemaRef>,
-) -> Result<(SchemaRef, bool, Box<dyn ByteReader>)> {
+) -> Result<Option<(SchemaRef, bool, Box<dyn ByteReader>)>> {
     let mut metadata = input.metadata().clone();
     // Frame every row, including the potential header, with the source dialect.
     let mut records = CsvChunks::new(
@@ -113,7 +113,9 @@ pub(super) async fn resolve(
             .eq(schema.fields().iter().map(|field| field.name().as_bytes()));
         (schema, has_header)
     } else {
-        super::validation::validate_sample(&sample)?;
+        if sample.is_empty() {
+            return Ok(None);
+        }
         let has_header = match dialect.header {
             CsvHeader::Present => true,
             CsvHeader::Absent => false,
@@ -136,9 +138,9 @@ pub(super) async fn resolve(
             .map(|bytes| (bytes, records)))
     });
     let replay = stream::iter((!sample.is_empty()).then(|| Ok(sample.into()))).chain(remaining);
-    Ok((
+    Ok(Some((
         schema,
         has_header,
         Box::new(StreamReader::new(replay, metadata)),
-    ))
+    )))
 }

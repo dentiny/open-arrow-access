@@ -526,10 +526,9 @@ async fn inference_preserves_tsv_dialect_bom_gzip_and_zero_column_rows() {
 }
 
 #[tokio::test]
-async fn inference_rejects_empty_header_only_duplicate_and_null_columns() {
+async fn inference_rejects_header_only_duplicate_and_null_columns() {
     for bytes in [
-        b"".as_slice(),
-        b"id,title\n",
+        b"id,title\n".as_slice(),
         b"id,id\n1,2\n",
         b"id,empty\n1,\n2,\n",
     ] {

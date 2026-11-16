@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, FieldNameIndex, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result,
-    ScanPartition, ScanPlan, map_record_reader,
+    Accessor, FieldNameIndex, ReadRequest, Reader, RecordCapability, RecordMetadata, RecordReader,
+    Result, ScanPartition, ScanPlan, map_record_reader,
 };
 
 use super::{
@@ -27,21 +27,33 @@ where
     // A requested column may be absent in one file and present in another.
     request.options.projection = None;
     let mut files = Vec::new();
+    let mut selected = false;
     let mut union_schema = schema::SchemaUnion::default();
     let mut ordering = inner.capability().ordering;
     // Drop each inspected reader/plan before opening the next file, so JSON
     // samples and native partitions are not retained across the entire dataset.
     for request in request.into_requests() {
+        selected = true;
         let inspected = open_plan(inner.clone(), file_planner, request.clone()).await?;
         validate_file_policy(&inspected)?;
-        ordering = ordering.combine(inspected.ordering);
-        let source = inspected.metadata.schema;
+        let file_ordering = inspected.ordering;
+        let source = inspected.metadata.schema.clone();
+        // A zero-field JSON object still has a row; only skip zero-column inputs
+        // after confirming they have no rows. Inspected readers are not reused.
+        if source.fields().is_empty() && !has_rows(inspected).await? {
+            continue;
+        }
+        ordering = ordering.combine(file_ordering);
         validate_fields(source.fields())?;
         union_schema.merge(source.as_ref())?;
         files.push((request, source));
     }
     if files.is_empty() {
-        return Err(empty_selection("union_by_name"));
+        return Err(if selected {
+            super::error::no_inferred_schema("union_by_name")
+        } else {
+            empty_selection("union_by_name")
+        });
     }
     let union_schema = Arc::new(union_schema.finish());
     let (target, _) = options.resolve_projection(&union_schema)?;
@@ -111,6 +123,16 @@ where
         Some(plan) => plan(inner, request).await,
         None => Ok(ScanPlan::whole_input(inner.open(request).await?)),
     }
+}
+
+async fn has_rows(plan: ScanPlan) -> Result<bool> {
+    let mut reader = plan.into_reader();
+    while let Some(batch) = reader.next().await? {
+        if batch.num_rows() > 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn align_reader(

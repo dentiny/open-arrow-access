@@ -82,12 +82,14 @@ impl SchemaInference for JsonFormat {
     async fn resolve_schema(
         &self,
         input: Box<dyn ByteReader>,
-    ) -> Result<(Self, Box<dyn ByteReader>)> {
+    ) -> Result<Option<(Self, Box<dyn ByteReader>)>> {
         if self.schema.is_some() {
-            return Ok((self.clone(), input));
+            return Ok(Some((self.clone(), input)));
         }
-        let (schema, input) = inference::infer(input, self.inference).await?;
-        Ok((Self::new(schema), input))
+        let Some((schema, input)) = inference::infer(input, self.inference).await? else {
+            return Ok(None);
+        };
+        Ok(Some((Self::new(schema), input)))
     }
 }
 
@@ -123,7 +125,11 @@ impl ReaderFactory for JsonFormat {
         let (input, schema, decoder) = match prepared {
             Some((schema, decoder)) => (input, schema, decoder),
             None => {
-                let (format, input) = self.resolve_schema(input).await?;
+                let Some((format, input)) = self.resolve_schema(input).await? else {
+                    return Ok(Box::new(
+                        crate::inference::empty_plan(request).into_reader(),
+                    ));
+                };
                 let (schema, decoder) = format.prepare(&request)?.expect("resolved JSON schema");
                 (input, schema, decoder)
             }

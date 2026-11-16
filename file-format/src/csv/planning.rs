@@ -29,7 +29,9 @@ where
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
-        let (format, input) = format.resolve_schema(input).await?;
+        let Some((format, input)) = format.resolve_schema(input).await? else {
+            return Ok(crate::inference::empty_plan(request));
+        };
         let prepared = match prepared {
             Some(prepared) => prepared,
             None => format.prepare_scan(&request)?.expect("resolved CSV schema"),

@@ -1,17 +1,83 @@
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{io::Write, num::NonZeroUsize, sync::Arc};
 
 use arrow_array::{Array, Int64Array, RecordBatch, StringArray, cast::AsArray, types::Int64Type};
 use arrow_schema::{DataType, Field, Schema};
-use open_arrow_access_core::{Accessor, AccessorExt, ReadOptions};
+use open_arrow_access_core::{
+    Accessor, AccessorExt, ReadOptions, ReadRequest, RecordReader, ScanPlanner,
+};
 use open_arrow_access_dataset::{
     directory::{DirectoryAccessor, DirectoryRequest},
     file_set::{FileSetAccessor, FileSetRequest},
 };
-use open_arrow_access_file_format::{json::JsonAccessor, parquet::ParquetAccessor};
+use open_arrow_access_decompression::AutoDecompressionLayer;
+use open_arrow_access_file_format::{
+    csv::CsvAccessor, json::JsonAccessor, parquet::ParquetAccessor,
+};
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::MemoryAccessor;
 use parquet::arrow::AsyncArrowWriter;
+
+#[tokio::test]
+async fn inferred_union_skips_empty_inputs() {
+    for (json, data, extra) in [
+        (false, b"id\n1\n".as_slice(), b"\n".as_slice()),
+        (true, b"{\"id\":1}".as_slice(), b"{}".as_slice()),
+    ] {
+        for compressed in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = |name: &str| format!("{name}{}", if compressed { ".gz" } else { "" });
+            for (name, bytes) in [("empty", b"".as_slice()), ("extra", extra), ("data", data)] {
+                let bytes = if compressed {
+                    let mut encoder =
+                        flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+                    encoder.write_all(bytes).unwrap();
+                    encoder.finish().unwrap()
+                } else {
+                    bytes.to_vec()
+                };
+                tokio::fs::write(dir.path().join(path(name)), bytes)
+                    .await
+                    .unwrap();
+            }
+            let storage =
+                OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()))
+                    .layer(AutoDecompressionLayer::new());
+            let source: Arc<dyn ScanPlanner<Request = ReadRequest>> = if json {
+                Arc::new(JsonAccessor::infer(storage))
+            } else {
+                Arc::new(CsvAccessor::infer(storage))
+            };
+            let files = FileSetAccessor::new(source)
+                .with_union_by_name()
+                .with_file_planning();
+            for planned in [false, true] {
+                let request =
+                    FileSetRequest::new(["empty", "extra", "empty", "data", "empty"].map(path));
+                let mut reader: Box<dyn RecordReader> = if planned {
+                    Box::new(files.plan_scan(request).await.unwrap().into_reader())
+                } else {
+                    files.open(request).await.unwrap()
+                };
+                let mut ids = Vec::new();
+                while let Some(batch) = reader.next().await.unwrap() {
+                    ids.extend(batch.column(0).as_primitive::<Int64Type>().iter());
+                }
+                assert_eq!(
+                    ids,
+                    if json {
+                        vec![None, Some(1)]
+                    } else {
+                        vec![Some(1)]
+                    }
+                );
+            }
+            let all_empty = FileSetRequest::new([path("empty")]);
+            assert!(files.open(all_empty.clone()).await.is_err());
+            assert!(files.plan_scan(all_empty).await.is_err());
+        }
+    }
+}
 
 #[tokio::test]
 async fn union_projection_skips_invalid_unselected_json_values() {
