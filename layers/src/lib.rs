@@ -13,6 +13,9 @@ pub use parallel_read::{ParallelReadAccessor, ParallelReadLayer};
 mod unordered_emission;
 pub use unordered_emission::{UnorderedEmissionAccessor, UnorderedEmissionLayer};
 
+mod limit;
+pub use limit::{LimitAccessor, LimitLayer};
+
 mod sampling;
 pub use sampling::{SamplingAccessor, SamplingLayer};
 
