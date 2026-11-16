@@ -332,14 +332,10 @@ async fn mixed_csv_tsv_file_set_selects_each_delimiter_before_union_and_planning
         .unwrap();
     let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()))
         .layer(AutoDecompressionLayer::new());
-    let files = FileSetAccessor::new(
-        CsvAccessor::infer(storage)
-            .with_dialect(CsvDialect {
-                header: CsvHeader::Present,
-                ..Default::default()
-            })
-            .with_delimiter_by_extension(),
-    )
+    let files = FileSetAccessor::new(CsvAccessor::infer(storage).with_dialect(CsvDialect {
+        header: CsvHeader::Present,
+        ..Default::default()
+    }))
     .with_union_by_name()
     .with_file_planning();
     for planned in [false, true] {

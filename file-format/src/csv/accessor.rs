@@ -28,12 +28,6 @@ impl<B> FileAccessor<B, CsvFileFormat> {
         self.map_format(|format| format.with_header(header))
     }
 
-    /// Select the delimiter per input's CSV/TSV extension. See
-    /// [`CsvFileFormat::with_delimiter_by_extension`] for suffix and fallback rules.
-    pub fn with_delimiter_by_extension(self) -> Self {
-        self.map_format(|format| format.with_delimiter_by_extension())
-    }
-
     pub fn with_dialect(self, dialect: CsvDialect) -> Self {
         self.map_format(|factory| factory.with_dialect(dialect))
     }

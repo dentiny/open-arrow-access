@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add opt-in per-file CSV/TSV delimiter selection to CSV accessors and formats,
+- Select CSV/TSV delimiters automatically per file extension in CSV accessors and formats,
   including compressed suffixes, schema inference, and native parallel scans.
 
 ## 0.3.1

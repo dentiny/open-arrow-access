@@ -15,15 +15,20 @@ use open_arrow_access_core::{
 use std::sync::Arc;
 
 /// Incrementally read CSV or TSV using an explicit or inferred positional schema.
-/// Defaults to comma-separated input with automatic header detection. Use
+/// Selects comma for `.csv` and tab for `.tsv` per input, with automatic header
+/// detection. Other extensions use the configured delimiter (comma by default). Use
 /// [`Self::with_dialect`] for structural options and [`Self::with_header`] to override.
+/// Extension matching is case-insensitive and ignores one optional `.gz`, `.bz2`,
+/// `.lz4`, `.zst`, or `.zstd` suffix; configure decompression separately.
+/// Recognized extensions override the configured delimiter, preserving all other
+/// dialect options. Locators are opaque: query/fragment characters are not stripped.
 #[derive(Clone, Debug)]
 pub struct CsvFileFormat {
     schema: Option<SchemaRef>,
     inference: CsvInferenceOptions,
     options: CsvOptions,
     header: CsvHeader,
-    delimiter_by_extension: bool,
+    delimiter_resolved: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -40,28 +45,16 @@ impl CsvFileFormat {
             inference: CsvInferenceOptions::default(),
             options: CsvOptions::Dialect(CsvDialect::default()),
             header: CsvHeader::Auto,
-            delimiter_by_extension: false,
+            delimiter_resolved: false,
         }
-    }
-
-    /// Select comma for `.csv` and tab for `.tsv` independently for each input.
-    /// Matching is case-insensitive and ignores one optional compression suffix
-    /// (`.gz`, `.bz2`, `.lz4`, `.zst`, or `.zstd`). Other extensions retain the
-    /// configured delimiter. Locators remain opaque: queries are not stripped.
-    /// Only the delimiter changes; all other dialect and header settings remain.
-    /// This opt-in policy takes precedence over with_dialect/with_format delimiters.
-    /// Decompression must still be configured on the byte accessor separately.
-    pub fn with_delimiter_by_extension(mut self) -> Self {
-        self.delimiter_by_extension = true;
-        self
     }
 
     pub(super) fn for_request(&self, request: &ReadRequest) -> Self {
         let mut format = self.clone();
         // Resolve once, before inference or framing. Workers consume canonical
         // comma-separated bytes even when the original locator ends in `.tsv`.
-        format.delimiter_by_extension = false;
-        if self.delimiter_by_extension
+        format.delimiter_resolved = true;
+        if !self.delimiter_resolved
             && let Some(delimiter) = super::dialect::delimiter_from_path(request.object.locator())
         {
             match &mut format.options {
@@ -190,12 +183,14 @@ impl SchemaInference for CsvFileFormat {
         else {
             return Ok(None);
         };
-        let format = Self::new(schema).with_dialect(CsvDialect {
+        let mut format = Self::new(schema).with_dialect(CsvDialect {
             header: has_header.into(),
             validate_header: dialect.validate_header,
             allow_truncated_rows: dialect.allow_truncated_rows,
             ..CsvDialect::default()
         });
+        // Inference replays canonical CSV, regardless of the source extension.
+        format.delimiter_resolved = true;
         Ok(Some((format, input)))
     }
 }

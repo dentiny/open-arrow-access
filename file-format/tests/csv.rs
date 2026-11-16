@@ -357,7 +357,7 @@ async fn parallel_csv_custom_dialect_is_lazy_and_opaque_formats_remain_unsplit()
         .with_partition_options(DecodePartitionOptions {
             target_bytes: NonZeroUsize::new(4).unwrap(),
         });
-    let request = ReadRequest::new("custom.csv").with_options(options(10, None));
+    let request = ReadRequest::new("custom.data").with_options(options(10, None));
     let mut reader = accessor
         .clone()
         .layer(ParallelReadLayer::new(
@@ -752,8 +752,6 @@ async fn extension_delimiters_match_sequential_and_parallel_decoding() {
                 } else {
                     CsvAccessor::new(MemoryAccessor::new(text.as_bytes(), 1), schema())
                 }
-                .with_delimiter_by_extension()
-                // The extension policy must survive subsequent dialect settings.
                 .with_dialect(CsvDialect {
                     delimiter: b';',
                     quote: b'\'',
@@ -799,35 +797,22 @@ async fn extension_delimiters_match_sequential_and_parallel_decoding() {
 }
 
 #[tokio::test]
-async fn extension_policy_supports_opaque_formats_and_remains_opt_in() {
+async fn extension_policy_supports_opaque_formats_and_unknown_extension_fallback() {
     let text = b"id\ttitle\n1\tfirst\n";
     let accessor = CsvAccessor::new(MemoryAccessor::new(text, 1), schema()).with_format(
         CsvFormat::default()
             .with_header(true)
             .with_header_validation(true),
     );
-    assert!(
-        accessor
-            .open(ReadRequest::new("records.tsv"))
-            .await
-            .unwrap()
-            .next()
-            .await
-            .is_err()
-    );
-    let batches = collect(
-        &accessor.with_delimiter_by_extension(),
-        ReadRequest::new("records.tsv"),
-    )
-    .await;
+    let batches = collect(&accessor, ReadRequest::new("records.tsv")).await;
     assert_eq!(collect_values::<Int64Type>(&batches, 0), [1]);
-    // A fixed tab dialect still applies to a .csv locator without the opt-in.
+    // Unknown extensions keep the configured delimiter.
     let batches = collect(
         &CsvAccessor::new(MemoryAccessor::new(text, 1), schema()).with_dialect(CsvDialect {
             delimiter: b'\t',
             ..Default::default()
         }),
-        ReadRequest::new("records.csv"),
+        ReadRequest::new("records.data"),
     )
     .await;
     assert_eq!(collect_values::<Int64Type>(&batches, 0), [1]);
