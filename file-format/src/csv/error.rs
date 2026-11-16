@@ -35,7 +35,7 @@ pub(super) fn invalid_inference_limits() -> Error {
 
 pub(super) fn empty_inference_sample() -> Error {
     Error::new(
-        ErrorKind::InvalidInput,
+        ErrorKind::EmptyInput,
         "infer_csv",
         "cannot infer a schema from empty CSV input; supply an explicit schema",
     )

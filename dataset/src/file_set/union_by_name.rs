@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, FieldNameIndex, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result,
-    ScanPartition, ScanPlan, map_record_reader,
+    Accessor, ErrorKind, FieldNameIndex, ReadRequest, RecordCapability, RecordMetadata,
+    RecordReader, Result, ScanPartition, ScanPlan, map_record_reader,
 };
 
 use super::{
@@ -27,12 +27,22 @@ where
     // A requested column may be absent in one file and present in another.
     request.options.projection = None;
     let mut files = Vec::new();
+    let mut empty_input = None;
     let mut union_schema = schema::SchemaUnion::default();
     let mut ordering = inner.capability().ordering;
     // Drop each inspected reader/plan before opening the next file, so JSON
     // samples and native partitions are not retained across the entire dataset.
     for request in request.into_requests() {
-        let inspected = open_plan(inner.clone(), file_planner, request.clone()).await?;
+        let inspected = match open_plan(inner.clone(), file_planner, request.clone()).await {
+            Ok(plan) => plan,
+            Err(error) if error.kind() == ErrorKind::EmptyInput => {
+                // No records means no contribution to either schema or rows.
+                // Retain the first error in case no file has an inferable schema.
+                empty_input.get_or_insert(error);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         validate_file_policy(&inspected)?;
         ordering = ordering.combine(inspected.ordering);
         let source = inspected.metadata.schema;
@@ -41,7 +51,7 @@ where
         files.push((request, source));
     }
     if files.is_empty() {
-        return Err(empty_selection("union_by_name"));
+        return Err(empty_input.unwrap_or_else(|| empty_selection("union_by_name")));
     }
     let union_schema = Arc::new(union_schema.finish());
     let (target, _) = options.resolve_projection(&union_schema)?;

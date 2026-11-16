@@ -1,17 +1,162 @@
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{io::Write, num::NonZeroUsize, sync::Arc};
 
 use arrow_array::{Array, Int64Array, RecordBatch, StringArray, cast::AsArray, types::Int64Type};
 use arrow_schema::{DataType, Field, Schema};
-use open_arrow_access_core::{Accessor, AccessorExt, ReadOptions};
+use open_arrow_access_core::{
+    Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, RecordReader, ScanPlanner,
+};
 use open_arrow_access_dataset::{
     directory::{DirectoryAccessor, DirectoryRequest},
     file_set::{FileSetAccessor, FileSetRequest},
 };
-use open_arrow_access_file_format::{json::JsonAccessor, parquet::ParquetAccessor};
+use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
+use open_arrow_access_file_format::{
+    csv::CsvAccessor, json::JsonAccessor, parquet::ParquetAccessor,
+};
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::MemoryAccessor;
 use parquet::arrow::AsyncArrowWriter;
+
+// Exercise both ordinary open and native file planning, including lazy execution.
+async fn check_empty_inference<A>(source: A, compressed: bool)
+where
+    A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + ScanPlanner + Clone + 'static,
+{
+    let error = source.open(ReadRequest::new("empty")).await.err().unwrap();
+    assert_eq!(error.kind(), ErrorKind::EmptyInput);
+    assert!(
+        FileSetAccessor::new(source.clone())
+            .open(FileSetRequest::new(["empty", "data"]))
+            .await
+            .is_err()
+    );
+    for native_planning in [false, true] {
+        let files = FileSetAccessor::new(source.clone()).with_union_by_name();
+        let files = if native_planning {
+            files.with_file_planning()
+        } else {
+            files
+        };
+        // Empty files before, between, and after data must contribute no rows.
+        for projection in [None, Some(vec!["id".into()]), Some(vec![])] {
+            let request = FileSetRequest::new(["empty", "data", "whitespace", "data", "empty"])
+                .with_options(ReadOptions {
+                    projection: projection.clone(),
+                    ..Default::default()
+                });
+            let mut reader = files.open(request).await.unwrap();
+            assert_eq!(
+                reader.metadata().schema.fields().len(),
+                projection.as_ref().map_or(1, Vec::len)
+            );
+            let mut rows = 0;
+            while let Some(batch) = reader.next().await.unwrap() {
+                assert_eq!(batch.schema(), reader.metadata().schema);
+                if batch.num_columns() > 0 {
+                    assert_eq!(batch.column(0).as_primitive::<Int64Type>().values(), &[1]);
+                }
+                rows += batch.num_rows();
+            }
+            assert_eq!(rows, 2);
+        }
+        let error = files
+            .open(FileSetRequest::new(["empty", "whitespace"]))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::EmptyInput);
+        for invalid in ["invalid", "missing"]
+            .into_iter()
+            .chain(compressed.then_some("corrupt"))
+        {
+            let error = files
+                .open(FileSetRequest::new(["empty", "data", invalid]))
+                .await
+                .err()
+                .unwrap();
+            assert_ne!(error.kind(), ErrorKind::EmptyInput);
+        }
+        let error = files
+            .open(FileSetRequest::new(Vec::<String>::new()))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+}
+
+#[tokio::test]
+async fn inferred_union_skips_empty_csv_and_json_including_gzip() {
+    for json in [false, true] {
+        for compressed in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let (data, invalid) = if json {
+                (b"{\"id\":1}\n".as_slice(), b"{".as_slice())
+            } else {
+                (b"id\n1\n".as_slice(), b"id,id\n1,2\n".as_slice())
+            };
+            for (name, bytes) in [
+                ("empty", b"".as_slice()),
+                ("whitespace", b"\n\r\n".as_slice()),
+                ("data", data),
+                ("invalid", invalid),
+            ] {
+                let bytes = if compressed {
+                    let mut encoder =
+                        flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+                    encoder.write_all(bytes).unwrap();
+                    encoder.finish().unwrap()
+                } else {
+                    bytes.to_vec()
+                };
+                tokio::fs::write(dir.path().join(name), bytes)
+                    .await
+                    .unwrap();
+            }
+            let storage =
+                OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
+            if compressed {
+                // A corrupt compressed stream is not an empty input.
+                tokio::fs::write(dir.path().join("corrupt"), b"bad gzip")
+                    .await
+                    .unwrap();
+                let storage = storage.layer(DecompressionLayer::new(Gzip));
+                if json {
+                    check_empty_inference(JsonAccessor::infer(storage), compressed).await;
+                } else {
+                    check_empty_inference(CsvAccessor::infer(storage), compressed).await;
+                }
+            } else if json {
+                check_empty_inference(JsonAccessor::infer(storage), compressed).await;
+            } else {
+                check_empty_inference(CsvAccessor::infer(storage), compressed).await;
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn zero_column_json_records_are_not_skipped_as_empty_inputs() {
+    let dir = tempfile::tempdir().unwrap();
+    tokio::fs::write(dir.path().join("no-fields"), b"{}\n{}")
+        .await
+        .unwrap();
+    tokio::fs::write(dir.path().join("data"), b"{\"id\":1}")
+        .await
+        .unwrap();
+    let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
+    let files = FileSetAccessor::new(JsonAccessor::infer(storage)).with_union_by_name();
+    let mut reader = files
+        .open(FileSetRequest::new(["no-fields", "data"]))
+        .await
+        .unwrap();
+    let mut ids = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        ids.extend(batch.column(0).as_primitive::<Int64Type>().iter());
+    }
+    assert_eq!(ids, [None, None, Some(1)]);
+}
 
 #[tokio::test]
 async fn union_projection_skips_invalid_unselected_json_values() {
@@ -38,6 +183,9 @@ async fn union_projection_skips_invalid_unselected_json_values() {
 #[tokio::test]
 async fn json_directory_union_by_name_aligns_nested_struct_and_list_fields() {
     let dir = tempfile::tempdir().unwrap();
+    for name in ["0-empty.jsonl", "z-empty.jsonl"] {
+        tokio::fs::write(dir.path().join(name), b"").await.unwrap();
+    }
     tokio::fs::write(dir.path().join("a.jsonl"), b"{\"id\":1,\"all_null\":null,\"meta\":{\"left\":\"a\"},\"items\":[{\"x\":1}]}\n{\"id\":2,\"meta\":null,\"items\":[]}\n").await.unwrap();
     tokio::fs::write(
         dir.path().join("b.jsonl"),

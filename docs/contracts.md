@@ -341,3 +341,11 @@ reported as `Decode`. Identity column projections skip per-batch reordering.
 
 Workspace dependency requirements are declared in `Cargo.toml`; the committed
 `Cargo.lock` records resolved versions, including transitive dependencies.
+
+CSV and JSON schema inference report `ErrorKind::EmptyInput` when EOF is
+reached without records (including after decompression). Standalone inference
+still fails. Union-by-name file sets and directories skip these inputs during
+preflight; if every selected input reports `EmptyInput`, the first such error
+is returned. Empty selections remain `InvalidInput`. Malformed data, storage
+failures, and invalid inference options are not skipped. A zero-field JSON
+object is a record and retains its row during alignment.
