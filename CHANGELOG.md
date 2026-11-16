@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Align OpenDAL and its HTTP/metrics components on 0.59.5, allowing compatible patch updates.
+- Require atif-arrow 0.5.1, warc-rs 0.3.4, and xml-arrow 0.3.1 from the coordinated dependency release.
+- Update the workspace and its internal dependency requirements together.
+
 ## 0.3.0
 
 - Add `PreparedSource` for reusable schema binding with execution-time read options
