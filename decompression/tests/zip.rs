@@ -179,15 +179,13 @@ async fn malformed_missing_unsupported_and_sequential_inputs() {
     let data = fixture!("zip", "mixed.zip").await;
     for name in ["bad_magic.zip", "bad_truncated.zip"] {
         let bytes = fixture!("zip", name).await;
-        assert_eq!(
-            ZipAccessor::new(memory(&bytes), 0)
-                .open(ByteReadRequest::new("bad"))
-                .await
-                .err()
-                .unwrap()
-                .kind(),
-            ErrorKind::Decode
-        );
+        let error = ZipAccessor::new(memory(&bytes), 0)
+            .open(ByteReadRequest::new("bad"))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::Decode);
+        assert!(error.to_string().contains("object \"bad\""));
     }
     let sequential = ZipAccessor::new(MemoryAccessor::new(&data, 1), 0);
     assert!(!sequential.capability().read);

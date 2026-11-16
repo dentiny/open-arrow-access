@@ -7,17 +7,17 @@ use futures::{
 };
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactoryExt, RecordMetadata,
-    Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader, into_async_read,
+    Result, ScanPartition, ScanPlan, async_trait, bytes_reader, into_async_read,
 };
 
 use super::{CsvAccessor, CsvDialect, CsvHeader, error};
 
 #[async_trait]
-impl<B> ScanPlanner for CsvAccessor<B>
+impl<B> crate::scan::FileScanPlanner for CsvAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
-    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
+    async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = self.binding.factory().clone();
         let Some(dialect) = format.parallel_dialect() else {
             return Ok(ScanPlan::whole_input(self.open(request).await?)

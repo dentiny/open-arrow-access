@@ -1,7 +1,7 @@
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, OrderRequirement, ReadRequest, ReaderFactory,
-    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, async_trait, into_async_read,
+    RecordMetadata, RecordReader, Result, ScanPlan, async_trait, into_async_read,
     record_stream_reader,
 };
 use xml_arrow::{XmlBatchBuilder, infer_records, read_records};
@@ -10,11 +10,11 @@ use super::{XmlAccessor, error};
 use crate::scan::chunks::RecordChunks;
 
 #[async_trait]
-impl<B> ScanPlanner for XmlAccessor<B>
+impl<B> crate::scan::FileScanPlanner for XmlAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
-    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
+    async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = self.binding.factory();
         let (validation_schema, mut options, explicit_schema) = format.prepare(&request)?;
         let input = self

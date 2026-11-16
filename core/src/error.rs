@@ -1,4 +1,6 @@
-use std::{error::Error as StdError, io, sync::Arc};
+use std::{error::Error as StdError, fmt, io, sync::Arc};
+
+use crate::ObjectRef;
 
 /// The result type shared by all components.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -85,9 +87,9 @@ impl ErrorKind {
 
 /// An error with operation context and an optional original error.
 #[derive(Debug, thiserror::Error)]
-#[error("{operation}: {message}")]
 pub struct Error {
     kind: ErrorKind,
+    object: Option<ObjectRef>,
     operation: &'static str,
     message: String,
     #[source]
@@ -100,12 +102,22 @@ impl Error {
     pub fn new(kind: ErrorKind, operation: &'static str, message: impl Into<String>) -> Self {
         Self {
             kind,
+            object: None,
             operation,
             message: message.into(),
             source: None,
             http_status: None,
             retry_after: None,
         }
+    }
+
+    /// Add the exact object locator without changing classification or the source chain.
+    /// The first object wins, so outer dataset readers retain the failing child object.
+    pub fn with_object(mut self, object: Option<&ObjectRef>) -> Self {
+        if self.object.is_none() {
+            self.object = object.cloned();
+        }
+        self
     }
 
     pub fn with_source<E>(mut self, source: E) -> Self
@@ -141,6 +153,16 @@ impl Error {
 
     pub fn operation(&self) -> &'static str {
         self.operation
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.operation)?;
+        if let Some(object) = &self.object {
+            write!(f, "object {:?}: ", object.locator())?;
+        }
+        f.write_str(&self.message)
     }
 }
 

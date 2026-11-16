@@ -54,7 +54,13 @@ pub struct TarArchive {
 
 impl TarArchive {
     pub async fn open(input: Box<dyn ByteReader>, limits: TarLimits) -> Result<Self> {
-        let source = ArchiveSource::new(input, "open_tar")?;
+        let object = input.metadata().source.clone();
+        let context = |error: open_arrow_access_core::Error| error.with_object(object.as_ref());
+        let source = ArchiveSource::new(input, "open_tar").map_err(context)?;
+        Self::inspect(source, limits).await.map_err(context)
+    }
+
+    async fn inspect(source: ArchiveSource, limits: TarLimits) -> Result<Self> {
         let input = &source.input;
         let mut offset = 0;
         let mut entries = Vec::new();
@@ -113,6 +119,9 @@ impl TarArchive {
             let bytes = input.read_range(position..next).await?;
             Ok(Some((bytes, (input, next))))
         });
-        Ok(Box::new(StreamReader::new(stream, metadata)))
+        let object = metadata.source.clone();
+        Ok(Box::new(
+            StreamReader::new(stream, metadata).with_object(object),
+        ))
     }
 }

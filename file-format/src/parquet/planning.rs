@@ -1,7 +1,7 @@
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, ReadRequest, RecordMetadata, Result, ScanPartition,
-    ScanPlan, ScanPlanner, async_trait,
+    ScanPlan, async_trait,
 };
 use parquet::arrow::{
     arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions},
@@ -17,11 +17,11 @@ use super::{
 };
 
 #[async_trait]
-impl<B> ScanPlanner for ParquetAccessor<B>
+impl<B> crate::scan::FileScanPlanner for ParquetAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + Clone + 'static,
 {
-    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
+    async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let storage = self.binding.storage().clone();
         let input = storage.open(ByteReadRequest::from(&request)).await?;
         validate_input(input.as_ref(), parquet_partition_input_error)?;

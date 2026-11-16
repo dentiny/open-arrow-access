@@ -69,7 +69,7 @@ impl TarStream {
             Ok(entry) => entry,
             Err(error) => {
                 state.finish();
-                return Err(error);
+                return Err(error.with_object(self.metadata.source.as_ref()));
             }
         };
         let Some(entry) = entry else {
@@ -102,7 +102,9 @@ impl TarStream {
                 Ok(Some((bytes, (state, remaining, token))))
             },
         );
-        Ok(Some((entry, Box::new(StreamReader::new(stream, metadata)))))
+        let object = metadata.source.clone();
+        let reader = StreamReader::new(stream, metadata).with_object(object);
+        Ok(Some((entry, Box::new(reader))))
     }
 }
 

@@ -29,6 +29,7 @@ use crate::{
 /// # }
 /// ```
 pub struct StreamReader<S, M, C = Capability> {
+    object: Option<ObjectRef>,
     capability: C,
     stream: Option<Pin<Box<S>>>,
     metadata: M,
@@ -38,6 +39,7 @@ impl<S, M> StreamReader<S, M> {
     /// Own and pin the stream without polling it.
     pub fn new(stream: S, metadata: M) -> Self {
         Self {
+            object: None,
             capability: Capability {
                 read: true,
                 read_with_range: false,
@@ -51,9 +53,16 @@ impl<S, M> StreamReader<S, M> {
 }
 
 impl<S, M, C> StreamReader<S, M, C> {
+    /// Attach object context to lazy errors without changing their source chain.
+    pub fn with_object(mut self, object: Option<ObjectRef>) -> Self {
+        self.object = object;
+        self
+    }
+
     /// Attach an explicitly declared capability to a generic stream.
     pub fn with_capability<N>(self, capability: N) -> StreamReader<S, M, N> {
         StreamReader {
+            object: self.object,
             stream: self.stream,
             metadata: self.metadata,
             capability,
@@ -64,7 +73,10 @@ impl<S, M, C> StreamReader<S, M, C> {
 impl<S> StreamReader<S, RecordMetadata, RecordCapability> {
     /// Construct a record stream with an explicit source ordering contract.
     pub fn records(stream: S, metadata: RecordMetadata, ordering: OrderRequirement) -> Self {
-        StreamReader::new(stream, metadata).with_capability(RecordCapability::sequential(ordering))
+        let object = metadata.source.clone();
+        StreamReader::new(stream, metadata)
+            .with_capability(RecordCapability::sequential(ordering))
+            .with_object(object)
     }
 }
 
@@ -96,7 +108,7 @@ where
         if !matches!(result, Ok(Some(_))) {
             self.stream = None;
         }
-        result
+        result.map_err(|error| error.with_object(self.object.as_ref()))
     }
 }
 
