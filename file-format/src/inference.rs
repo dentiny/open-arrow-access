@@ -19,3 +19,18 @@ pub(crate) trait SchemaInference: Sized + Send + Sync {
         input: Box<dyn ByteReader>,
     ) -> Result<Option<(Self, Box<dyn ByteReader>)>>;
 }
+
+/// Empty schema inference is a normal zero-column, zero-row scan.
+pub(crate) fn empty_plan(
+    request: open_arrow_access_core::ReadRequest,
+) -> open_arrow_access_core::ScanPlan {
+    use open_arrow_access_core::{OrderRequirement, RecordMetadata, ScanPlan, Schema};
+    ScanPlan::new(
+        RecordMetadata {
+            schema: std::sync::Arc::new(Schema::empty()),
+            source: Some(request.object),
+        },
+        vec![],
+    )
+    .with_ordering(OrderRequirement::Reorderable)
+}

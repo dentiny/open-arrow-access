@@ -49,11 +49,6 @@ where
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
         self.factory.open_reader(&self.storage, request).await
     }
-    async fn open_optional(&self, request: Self::Request) -> Result<Option<Box<Self::Reader>>> {
-        self.factory
-            .open_reader_optional(&self.storage, request)
-            .await
-    }
 }
 
 #[async_trait]

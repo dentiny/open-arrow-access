@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, FieldNameIndex, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result,
-    ScanPartition, ScanPlan, map_record_reader,
+    Accessor, FieldNameIndex, ReadRequest, Reader, RecordCapability, RecordMetadata, RecordReader,
+    Result, ScanPartition, ScanPlan, map_record_reader,
 };
 
 use super::{
@@ -34,12 +34,16 @@ where
     // samples and native partitions are not retained across the entire dataset.
     for request in request.into_requests() {
         selected = true;
-        let Some(inspected) = open_plan(inner.clone(), file_planner, request.clone()).await? else {
-            continue;
-        };
+        let inspected = open_plan(inner.clone(), file_planner, request.clone()).await?;
         validate_file_policy(&inspected)?;
-        ordering = ordering.combine(inspected.ordering);
-        let source = inspected.metadata.schema;
+        let file_ordering = inspected.ordering;
+        let source = inspected.metadata.schema.clone();
+        // A zero-field JSON object still has a row; only skip zero-column inputs
+        // after confirming they have no rows. Inspected readers are not reused.
+        if source.fields().is_empty() && !has_rows(inspected).await? {
+            continue;
+        }
+        ordering = ordering.combine(file_ordering);
         validate_fields(source.fields())?;
         union_schema.merge(source.as_ref())?;
         files.push((request, source));
@@ -90,9 +94,7 @@ where
         .then(move |(request, alignment)| {
             let inner = inner.clone();
             async move {
-                let plan = open_plan(inner, file_planner, request)
-                    .await?
-                    .ok_or_else(super::error::schema_mismatch)?;
+                let plan = open_plan(inner, file_planner, request).await?;
                 validate_file_policy(&plan)?;
                 validate_file_ordering(ordering, plan.ordering)?;
                 super::validation::validate_schema(&plan.metadata.schema, &alignment.source)?;
@@ -113,17 +115,24 @@ async fn open_plan<A>(
     inner: Arc<A>,
     file_planner: Option<FilePlanner<A>>,
     request: ReadRequest,
-) -> Result<Option<ScanPlan>>
+) -> Result<ScanPlan>
 where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
 {
     match file_planner {
         Some(plan) => plan(inner, request).await,
-        None => Ok(inner
-            .open_optional(request)
-            .await?
-            .map(ScanPlan::whole_input)),
+        None => Ok(ScanPlan::whole_input(inner.open(request).await?)),
     }
+}
+
+async fn has_rows(plan: ScanPlan) -> Result<bool> {
+    let mut reader = plan.into_reader();
+    while let Some(batch) = reader.next().await? {
+        if batch.num_rows() > 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn align_reader(

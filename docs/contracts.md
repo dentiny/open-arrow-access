@@ -342,19 +342,8 @@ reported as `Decode`. Identity column projections skip per-batch reordering.
 Workspace dependency requirements are declared in `Cargo.toml`; the committed
 `Cargo.lock` records resolved versions, including transitive dependencies.
 
-CSV and JSON schema inference return `None` when EOF is reached without records
-or a supplied schema, including after decompression. The optional hooks
-`Accessor::open_optional` and `ScanPlanner::plan_scan_optional` preserve this
-normal outcome through file opening and planning. Their default implementations
-wrap the existing required operations in `Some`; inference-aware accessors and
-transparent wrappers should override them to preserve `None`. `Arc` and factory
-bindings forward the optional hooks. Factory preparation still precedes storage
-I/O on both paths.
-
-Union-by-name file sets and directories skip `None` during preflight. If all
-selected inputs return `None`, the dataset reports that no schema can be inferred.
-Empty selections remain invalid. Existing `open` and `plan_scan` require a reader
-or plan and retain their inference error for standalone schema-less empty input.
-Malformed data, storage failures, and invalid inference options remain errors.
-Known-schema empty readers/plans, zero-column projections, and zero-field JSON
-objects remain `Some`; zero-field records retain their rows during alignment.
+CSV and JSON inputs with no records to infer from open as zero-column, zero-row
+readers/plans, including after decompression. Union-by-name skips those inputs
+and fails only if no selected input provides a schema or any rows. Zero-field
+JSON objects retain their rows. Known-schema empty inputs retain their schema;
+malformed content, storage failures, and invalid options remain errors.

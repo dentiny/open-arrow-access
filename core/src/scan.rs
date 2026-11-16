@@ -147,22 +147,11 @@ impl ScanPlan {
 #[async_trait]
 pub trait ScanPlanner: Accessor<Reader = dyn RecordReader> {
     async fn plan_scan(&self, request: Self::Request) -> Result<ScanPlan>;
-
-    /// Plan an input that may have no inferable schema. `None` has the same
-    /// meaning as in [`Accessor::open_optional`]; known-schema empty plans remain
-    /// `Some`. Sources without inference use the default implementation.
-    async fn plan_scan_optional(&self, request: Self::Request) -> Result<Option<ScanPlan>> {
-        self.plan_scan(request).await.map(Some)
-    }
 }
 
 #[async_trait]
 impl<A: ScanPlanner + ?Sized> ScanPlanner for Arc<A> {
     async fn plan_scan(&self, request: Self::Request) -> Result<ScanPlan> {
         (**self).plan_scan(request).await
-    }
-
-    async fn plan_scan_optional(&self, request: Self::Request) -> Result<Option<ScanPlan>> {
-        (**self).plan_scan_optional(request).await
     }
 }

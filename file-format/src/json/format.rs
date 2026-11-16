@@ -117,34 +117,24 @@ impl ReaderFactory for JsonFormat {
 
     async fn create_reader(
         &self,
-        token: &FactoryToken,
-        input: Box<dyn ByteReader>,
-        request: ReadRequest,
-        prepared: Self::Prepared,
-    ) -> Result<Box<dyn RecordReader>> {
-        self.create_reader_optional(token, input, request, prepared)
-            .await?
-            .ok_or_else(super::error::empty_inference_sample)
-    }
-
-    async fn create_reader_optional(
-        &self,
         _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
         prepared: Self::Prepared,
-    ) -> Result<Option<Box<dyn RecordReader>>> {
+    ) -> Result<Box<dyn RecordReader>> {
         let (input, schema, decoder) = match prepared {
             Some((schema, decoder)) => (input, schema, decoder),
             None => {
                 let Some((format, input)) = self.resolve_schema(input).await? else {
-                    return Ok(None);
+                    return Ok(Box::new(
+                        crate::inference::empty_plan(request).into_reader(),
+                    ));
                 };
                 let (schema, decoder) = format.prepare(&request)?.expect("resolved JSON schema");
                 (input, schema, decoder)
             }
         };
-        Ok(Some(Box::new(json_reader(
+        Ok(Box::new(json_reader(
             input,
             decoder,
             RecordMetadata {
@@ -152,6 +142,6 @@ impl ReaderFactory for JsonFormat {
                 source: Some(request.object),
             },
             request.options.batch_size.get(),
-        ))))
+        )))
     }
 }

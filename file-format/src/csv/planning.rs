@@ -18,18 +18,10 @@ where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        self.plan_scan_optional(request)
-            .await?
-            .ok_or_else(super::error::empty_inference_sample)
-    }
-
-    async fn plan_scan_optional(&self, request: ReadRequest) -> Result<Option<ScanPlan>> {
         let format = self.binding.factory().clone();
         let Some(dialect) = format.parallel_dialect() else {
-            return Ok(Some(
-                ScanPlan::whole_input(self.open(request).await?)
-                    .with_ordering(self.capability().ordering),
-            ));
+            return Ok(ScanPlan::whole_input(self.open(request).await?)
+                .with_ordering(self.capability().ordering));
         };
         let prepared = format.prepare_scan(&request)?;
         let input = self
@@ -38,7 +30,7 @@ where
             .open(ByteReadRequest::from(&request))
             .await?;
         let Some((format, input)) = format.resolve_schema(input).await? else {
-            return Ok(None);
+            return Ok(crate::inference::empty_plan(request));
         };
         let prepared = match prepared {
             Some(prepared) => prepared,
@@ -79,9 +71,7 @@ where
             }))
         })
         .try_flatten();
-        Ok(Some(
-            ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering),
-        ))
+        Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))
     }
 }
 

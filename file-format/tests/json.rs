@@ -350,14 +350,14 @@ async fn inference_deduces_nested_types_and_replays_sampled_records() {
 }
 
 #[tokio::test]
-async fn inference_requires_a_nonempty_sample_and_positive_limits() {
+async fn inference_accepts_empty_input_and_requires_positive_limits() {
     use open_arrow_access_file_format::json::JsonInferenceOptions;
-    assert!(
-        JsonAccessor::infer(MemoryAccessor::new(b"", 1))
-            .open(request(2, None))
-            .await
-            .is_err()
-    );
+    let mut reader = JsonAccessor::infer(MemoryAccessor::new(b"", 1))
+        .open(request(2, None))
+        .await
+        .unwrap();
+    assert!(reader.metadata().schema.fields().is_empty());
+    assert!(reader.next().await.unwrap().is_none());
     let input = MemoryAccessor::new(b"{}", 1);
     let observed = input.observations.clone();
     let accessor = JsonAccessor::infer(input).with_inference_options(JsonInferenceOptions {

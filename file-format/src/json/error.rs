@@ -21,14 +21,6 @@ pub(super) fn invalid_inference_limits() -> Error {
     )
 }
 
-pub(super) fn empty_inference_sample() -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "infer_json",
-        "cannot infer a schema from empty JSON input; supply an explicit schema",
-    )
-}
-
 pub(super) fn non_object_inference_record() -> Error {
     Error::new(ErrorKind::Decode, "infer_json", "expected a JSON object")
 }

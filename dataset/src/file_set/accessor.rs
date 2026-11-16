@@ -13,8 +13,7 @@ use super::{
     validation::{validate_file_ordering, validate_file_policy},
 };
 
-pub(super) type FilePlanner<A> =
-    fn(Arc<A>, ReadRequest) -> BoxFuture<'static, Result<Option<ScanPlan>>>;
+pub(super) type FilePlanner<A> = fn(Arc<A>, ReadRequest) -> BoxFuture<'static, Result<ScanPlan>>;
 
 /// Read files sequentially through one supplied format accessor.
 ///
@@ -52,8 +51,7 @@ impl<A> FileSetAccessor<A> {
     /// and filling missing fields with null. Inspect all files before emitting rows;
     /// readers are then reopened lazily with only selected source columns.
     /// Their projected schema must match the corresponding inspected fields.
-    /// Inputs returning `None` from optional opening/planning are skipped.
-    /// If every input is empty without a supplied schema, inference still fails.
+    /// Zero-column inputs with no rows are skipped; an all-empty inferred set fails.
     /// The default remains exact projected-schema matching.
     pub fn with_union_by_name(mut self) -> Self {
         self.union_by_name = true;
@@ -67,7 +65,7 @@ impl<A> FileSetAccessor<A> {
         A: ScanPlanner<Request = ReadRequest> + 'static,
     {
         self.file_planner =
-            Some(|inner, request| Box::pin(async move { inner.plan_scan_optional(request).await }));
+            Some(|inner, request| Box::pin(async move { inner.plan_scan(request).await }));
         self
     }
 }
@@ -125,9 +123,7 @@ where
         let mut requests = request.into_requests();
         let first = requests.next().ok_or_else(|| empty_selection(operation))?;
         let first = match file_planner {
-            Some(plan_file) => plan_file(self.inner.clone(), first)
-                .await?
-                .ok_or_else(|| super::error::no_inferred_schema(operation))?,
+            Some(plan_file) => plan_file(self.inner.clone(), first).await?,
             None => ScanPlan::whole_input(self.inner.open(first).await?),
         };
         validate_file_policy(&first)?;
@@ -143,9 +139,7 @@ where
                 let inner = inner.clone();
                 let schema = schema.clone();
                 async move {
-                    let plan = plan_file(inner, request)
-                        .await?
-                        .ok_or_else(|| super::error::no_inferred_schema(operation))?;
+                    let plan = plan_file(inner, request).await?;
                     validate_file_policy(&plan)?;
                     validate_file_ordering(ordering, plan.ordering)?;
                     super::validation::validate_schema(&plan.metadata.schema, &schema)?;

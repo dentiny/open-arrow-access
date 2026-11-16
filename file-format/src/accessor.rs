@@ -69,8 +69,4 @@ where
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
         self.binding.open(request).await
     }
-
-    async fn open_optional(&self, request: Self::Request) -> Result<Option<Box<Self::Reader>>> {
-        self.binding.open_optional(request).await
-    }
 }

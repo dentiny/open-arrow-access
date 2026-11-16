@@ -194,35 +194,25 @@ impl ReaderFactory for CsvFileFormat {
 
     async fn create_reader(
         &self,
-        token: &FactoryToken,
-        input: Box<dyn ByteReader>,
-        request: ReadRequest,
-        prepared: Self::Prepared,
-    ) -> Result<Box<dyn RecordReader>> {
-        self.create_reader_optional(token, input, request, prepared)
-            .await?
-            .ok_or_else(super::error::empty_inference_sample)
-    }
-
-    async fn create_reader_optional(
-        &self,
         _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
         prepared: Self::Prepared,
-    ) -> Result<Option<Box<dyn RecordReader>>> {
+    ) -> Result<Box<dyn RecordReader>> {
         let (input, schema, decoder, header) = match prepared {
             Some((schema, decoder, header)) => (input, schema, decoder, header),
             None => {
                 let Some((format, input)) = self.resolve_schema(input).await? else {
-                    return Ok(None);
+                    return Ok(Box::new(
+                        crate::inference::empty_plan(request).into_reader(),
+                    ));
                 };
                 let (schema, decoder, header) =
                     format.prepare(&request)?.expect("resolved CSV schema");
                 (input, schema, decoder, header)
             }
         };
-        Ok(Some(Box::new(csv_reader(
+        Ok(Box::new(csv_reader(
             input,
             decoder,
             header,
@@ -230,6 +220,6 @@ impl ReaderFactory for CsvFileFormat {
                 schema,
                 source: Some(request.object),
             },
-        ))))
+        )))
     }
 }

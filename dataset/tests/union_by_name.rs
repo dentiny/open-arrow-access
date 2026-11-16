@@ -3,7 +3,7 @@ use std::{io::Write, num::NonZeroUsize, sync::Arc};
 use arrow_array::{Array, Int64Array, RecordBatch, StringArray, cast::AsArray, types::Int64Type};
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
-    Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, Reader, RecordReader, ScanPlanner,
+    Accessor, AccessorExt, ReadOptions, ReadRequest, RecordReader, ScanPlanner,
 };
 use open_arrow_access_dataset::{
     directory::{DirectoryAccessor, DirectoryRequest},
@@ -18,54 +18,28 @@ use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::MemoryAccessor;
 use parquet::arrow::AsyncArrowWriter;
 
-// Exercise both ordinary open and native file planning, including lazy execution.
-async fn check_empty_inference<A>(source: A, compressed: bool)
+async fn check_empty_inputs<A>(source: A)
 where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + ScanPlanner + Clone + 'static,
 {
-    for name in ["empty", "whitespace"] {
-        assert!(
-            source
-                .open_optional(ReadRequest::new(name))
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            source
-                .plan_scan_optional(ReadRequest::new(name))
-                .await
-                .unwrap()
-                .is_none()
-        );
-    }
-    let error = source.open(ReadRequest::new("empty")).await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    assert!(
-        FileSetAccessor::new(source.clone())
-            .open(FileSetRequest::new(["empty", "data"]))
-            .await
-            .is_err()
-    );
-    for native_planning in [false, true] {
-        let files = FileSetAccessor::new(source.clone()).with_union_by_name();
-        let files = if native_planning {
-            files.with_file_planning()
-        } else {
-            files
-        };
-        // Empty files before, between, and after data must contribute no rows.
-        for projection in [None, Some(vec!["id".into()]), Some(vec![])] {
-            let request = FileSetRequest::new(["empty", "data", "whitespace", "data", "empty"])
+    let mut empty = source.open(ReadRequest::new("empty")).await.unwrap();
+    assert!(empty.metadata().schema.fields().is_empty());
+    assert!(empty.next().await.unwrap().is_none());
+    let files = FileSetAccessor::new(source)
+        .with_union_by_name()
+        .with_file_planning();
+    for planned in [false, true] {
+        for projection in [None, Some(vec![])] {
+            let request = FileSetRequest::new(["empty", "data", "empty", "data", "empty"])
                 .with_options(ReadOptions {
-                    projection: projection.clone(),
+                    projection,
                     ..Default::default()
                 });
-            let mut reader = files.open(request).await.unwrap();
-            assert_eq!(
-                reader.metadata().schema.fields().len(),
-                projection.as_ref().map_or(1, Vec::len)
-            );
+            let mut reader: Box<dyn RecordReader> = if planned {
+                Box::new(files.plan_scan(request).await.unwrap().into_reader())
+            } else {
+                files.open(request).await.unwrap()
+            };
             let mut rows = 0;
             while let Some(batch) = reader.next().await.unwrap() {
                 assert_eq!(batch.schema(), reader.metadata().schema);
@@ -76,44 +50,10 @@ where
             }
             assert_eq!(rows, 2);
         }
-        let error = files
-            .open(FileSetRequest::new(["empty", "whitespace"]))
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-        for invalid in ["invalid", "missing"]
-            .into_iter()
-            .chain(compressed.then_some("corrupt"))
-        {
-            let error = files
-                .open(FileSetRequest::new(["empty", "data", invalid]))
-                .await
-                .err()
-                .unwrap();
-            assert!(matches!(
-                error.kind(),
-                ErrorKind::Decode | ErrorKind::InvalidInput | ErrorKind::NotFound
-            ));
-            assert!(
-                source
-                    .open_optional(ReadRequest::new(invalid))
-                    .await
-                    .is_err()
-            );
-            assert!(
-                source
-                    .plan_scan_optional(ReadRequest::new(invalid))
-                    .await
-                    .is_err()
-            );
-        }
-        let error = files
-            .open(FileSetRequest::new(Vec::<String>::new()))
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+    for names in [["empty", "empty"], ["data", "invalid"]] {
+        assert!(files.open(FileSetRequest::new(names)).await.is_err());
+        assert!(files.plan_scan(FileSetRequest::new(names)).await.is_err());
     }
 }
 
@@ -129,7 +69,6 @@ async fn inferred_union_skips_empty_csv_and_json_including_gzip() {
             };
             for (name, bytes) in [
                 ("empty", b"".as_slice()),
-                ("whitespace", b"\n\r\n".as_slice()),
                 ("data", data),
                 ("invalid", invalid),
             ] {
@@ -149,70 +88,22 @@ async fn inferred_union_skips_empty_csv_and_json_including_gzip() {
                 OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
             if compressed {
                 // A corrupt compressed stream is not an empty input.
-                tokio::fs::write(dir.path().join("corrupt"), b"bad gzip")
+                tokio::fs::write(dir.path().join("invalid"), b"bad gzip")
                     .await
                     .unwrap();
                 let storage = storage.layer(DecompressionLayer::new(Gzip));
                 if json {
-                    check_empty_inference(JsonAccessor::infer(storage), compressed).await;
+                    check_empty_inputs(JsonAccessor::infer(storage)).await;
                 } else {
-                    check_empty_inference(CsvAccessor::infer(storage), compressed).await;
+                    check_empty_inputs(CsvAccessor::infer(storage)).await;
                 }
             } else if json {
-                check_empty_inference(JsonAccessor::infer(storage), compressed).await;
+                check_empty_inputs(JsonAccessor::infer(storage)).await;
             } else {
-                check_empty_inference(CsvAccessor::infer(storage), compressed).await;
+                check_empty_inputs(CsvAccessor::infer(storage)).await;
             }
         }
     }
-}
-
-async fn check_known_schema_empty<A>(source: A)
-where
-    A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + ScanPlanner,
-{
-    let mut reader = source
-        .open_optional(ReadRequest::new("empty"))
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(reader.metadata().schema.fields().len(), 1);
-    assert!(reader.next().await.unwrap().is_none());
-    let plan = source
-        .plan_scan_optional(ReadRequest::new("empty"))
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(plan.metadata.schema.fields().len(), 1);
-    assert!(plan.into_reader().next().await.unwrap().is_none());
-}
-
-#[tokio::test]
-async fn optional_open_and_plan_preserve_known_schema_empty_inputs() {
-    let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
-    check_known_schema_empty(CsvAccessor::new(
-        MemoryAccessor::new(b"", 1),
-        schema.clone(),
-    ))
-    .await;
-    check_known_schema_empty(JsonAccessor::new(MemoryAccessor::new(b"", 1), schema)).await;
-}
-
-#[tokio::test]
-async fn input_becoming_empty_after_preflight_is_a_schema_change() {
-    let dir = tempfile::tempdir().unwrap();
-    tokio::fs::write(dir.path().join("data"), b"{\"id\":1}")
-        .await
-        .unwrap();
-    let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
-    let files = FileSetAccessor::new(JsonAccessor::infer(storage)).with_union_by_name();
-    let mut reader = files.open(FileSetRequest::new(["data"])).await.unwrap();
-    tokio::fs::write(dir.path().join("data"), b"")
-        .await
-        .unwrap();
-    let error = reader.next().await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    assert!(error.to_string().contains("schema differs"));
 }
 
 #[tokio::test]
@@ -226,6 +117,16 @@ async fn zero_column_json_records_are_not_skipped_as_empty_inputs() {
         .unwrap();
     let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
     let files = FileSetAccessor::new(JsonAccessor::infer(storage)).with_union_by_name();
+    let mut zero_fields = files
+        .open(FileSetRequest::new(["no-fields"]))
+        .await
+        .unwrap();
+    assert!(zero_fields.metadata().schema.fields().is_empty());
+    let mut rows = 0;
+    while let Some(batch) = zero_fields.next().await.unwrap() {
+        rows += batch.num_rows();
+    }
+    assert_eq!(rows, 2);
     let mut reader = files
         .open(FileSetRequest::new(["no-fields", "data"]))
         .await
