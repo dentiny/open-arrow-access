@@ -7,11 +7,14 @@ use super::{
 use arrow_json::{ReaderBuilder, reader::Decoder};
 use open_arrow_access_core::{
     ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
-    RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
+    RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait, into_stream,
+    record_stream_reader,
 };
 
 /// Read whitespace-separated JSON objects, including JSONL, with an explicit or inferred fixed schema.
-/// Missing nullable fields become null; unknown fields are ignored. Top-level
+/// Missing nullable fields become null; unknown fields (including nested fields)
+/// are rejected. The full input schema is decoded before output projection, so
+/// unselected columns also undergo type and nullability checks. Top-level
 /// arrays and scalar records are rejected. Bare `NaN`, `Infinity`, and `-Infinity`
 /// values are accepted and decoded by Arrow as floating-point values.
 /// String fields also accept numbers and booleans; numeric text is preserved.
@@ -53,16 +56,17 @@ impl JsonFormat {
 
     pub(super) fn prepare_scan(&self, request: &ReadRequest) -> Result<Option<PreparedProjection>> {
         let prepared = self.prepare_projection(request)?;
-        if let Some(prepared) = &prepared {
+        if let Some(schema) = &self.schema {
             // Arrow exposes schema validation only through decoder construction.
             // Keep nested type/timezone errors before storage I/O and empty scans.
-            self.build_decoder(prepared.schema.clone(), request)?;
+            self.build_decoder(schema.clone(), request)?;
         }
         Ok(prepared)
     }
 
     fn build_decoder(&self, schema: SchemaRef, request: &ReadRequest) -> Result<Decoder> {
         ReaderBuilder::new(schema)
+            .with_strict_mode(true)
             .with_coerce_primitive(true)
             .with_batch_size(request.options.batch_size.get())
             .build_decoder()
@@ -74,8 +78,10 @@ impl JsonFormat {
         prepared: PreparedProjection,
         request: &ReadRequest,
     ) -> Result<(SchemaRef, Decoder)> {
-        let decoder = self.build_decoder(prepared.schema.clone(), request)?;
-        Ok((prepared.schema, decoder))
+        // Strict decoding must recognize known fields omitted from the output.
+        let schema = self.schema.clone().unwrap_or(prepared.schema);
+        let decoder = self.build_decoder(schema.clone(), request)?;
+        Ok((schema, decoder))
     }
 }
 
@@ -136,14 +142,25 @@ impl ReaderFactory for JsonFormat {
                 (input, schema, decoder)
             }
         };
-        Ok(Box::new(json_reader(
+        let (output_schema, projection) = request.options.resolve_projection(&schema)?;
+        let metadata = RecordMetadata {
+            schema,
+            source: Some(request.object),
+        };
+        let reader = json_reader(
             input,
             decoder,
-            RecordMetadata {
-                schema,
-                source: Some(request.object),
-            },
+            metadata.clone(),
             request.options.batch_size.get(),
+        );
+        Ok(Box::new(record_stream_reader(
+            into_stream(Box::new(reader)),
+            RecordMetadata {
+                schema: output_schema,
+                ..metadata
+            },
+            projection,
+            OrderRequirement::Reorderable,
         )))
     }
 }

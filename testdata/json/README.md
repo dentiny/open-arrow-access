@@ -6,7 +6,7 @@ syntax/types. Syntax is validated even with zero output columns.
 
 | File | Case |
 | --- | --- |
-| `good.json` | Four whitespace-separated objects; UTF-8 text, escaped newline, CRLF, blank lines, a pretty-printed object, unknown nested fields, null/missing titles, and no final newline. |
+| `good.json` | Four whitespace-separated objects; UTF-8 text, escaped newline, CRLF, blank lines, a pretty-printed object, nested fields (declared in the test source schema), null/missing titles, and no final newline. |
 | `projection.jsonl` | Two records with a missing nullable title, for column and zero-column projections. |
 | `many.jsonl` | One hundred ordered records, for verifying bounded incremental reads. |
 | `io-failure.jsonl` | Two records; the memory accessor injects an I/O failure after the first nine bytes. |

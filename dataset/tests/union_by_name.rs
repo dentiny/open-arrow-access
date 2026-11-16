@@ -80,7 +80,7 @@ async fn inferred_union_skips_empty_inputs() {
 }
 
 #[tokio::test]
-async fn union_projection_skips_invalid_unselected_json_values() {
+async fn union_projection_rejects_invalid_unselected_json_values() {
     let schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int64, false),
         Field::new("unused", DataType::Int64, false),
@@ -95,9 +95,8 @@ async fn union_projection_skips_invalid_unselected_json_values() {
         ..Default::default()
     });
     let mut reader = files.open(request).await.unwrap();
-    let batch = reader.next().await.unwrap().unwrap();
-    assert_eq!(batch.num_columns(), 1);
-    assert_eq!(batch.column(0).as_primitive::<Int64Type>().values(), &[1]);
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), open_arrow_access_core::ErrorKind::Decode);
     assert!(reader.next().await.unwrap().is_none());
 }
 

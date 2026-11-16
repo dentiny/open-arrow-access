@@ -54,17 +54,36 @@ fn ids(batch: &RecordBatch) -> &[i64] {
 
 #[tokio::test]
 async fn fragmented_json_objects_preserve_values_schema_and_batch_order() {
+    let source_schema = Arc::new(Schema::new_with_metadata(
+        vec![
+            schema().field(0).clone(),
+            schema().field(1).clone(),
+            Field::new(
+                "ignored",
+                DataType::Struct(
+                    vec![Field::new(
+                        "x",
+                        DataType::List(Arc::new(Field::new("item", DataType::Int64, true))),
+                        true,
+                    )]
+                    .into(),
+                ),
+                true,
+            ),
+        ],
+        schema().metadata().clone(),
+    ));
     for chunk_size in [1, 7, 4096] {
         let (input, _) = fixture("good.json", chunk_size).await;
-        let accessor = JsonAccessor::new(input, schema());
+        let accessor = JsonAccessor::new(input, source_schema.clone());
         let mut reader = accessor.open(request(2, None)).await.unwrap();
-        assert_eq!(reader.metadata().schema, schema());
+        assert_eq!(reader.metadata().schema, source_schema);
         assert_eq!(
             reader.metadata().source.as_ref().unwrap().locator(),
             "records.json"
         );
         let first = reader.next().await.unwrap().unwrap();
-        assert_eq!(first.schema(), schema());
+        assert_eq!(first.schema(), source_schema);
         assert_eq!(ids(&first), [0, 1]);
         let titles = first
             .column(1)
@@ -267,11 +286,27 @@ async fn parallel_json_framing_handles_nested_values_and_rejects_invalid_syntax(
         "  {{\"id\":1,\"title\":\"{}é\",\"extra\":[{{\"x\":\"}}\\\"\"}},null]}}\n\t",
         "x".repeat(16 * 1024)
     );
+    let source_schema = Arc::new(Schema::new(vec![
+        schema().field(0).clone(),
+        schema().field(1).clone(),
+        Field::new(
+            "extra",
+            DataType::List(Arc::new(Field::new(
+                "item",
+                DataType::Struct(vec![Field::new("x", DataType::Utf8, true)].into()),
+                true,
+            ))),
+            true,
+        ),
+    ]));
     for chunk_size in [7, 4096] {
-        let accessor = JsonAccessor::new(MemoryAccessor::new(raw.as_bytes(), chunk_size), schema())
-            .with_partition_options(DecodePartitionOptions {
-                target_bytes: NonZeroUsize::new(32).unwrap(),
-            });
+        let accessor = JsonAccessor::new(
+            MemoryAccessor::new(raw.as_bytes(), chunk_size),
+            source_schema.clone(),
+        )
+        .with_partition_options(DecodePartitionOptions {
+            target_bytes: NonZeroUsize::new(32).unwrap(),
+        });
         let mut expected = accessor.open(request(1, None)).await.unwrap();
         let mut actual = accessor
             .layer(ParallelReadLayer::new(
@@ -421,6 +456,7 @@ async fn nonfinite_values_survive_fragmentation_and_parallel_decoding() {
             true,
         ),
         Field::new("NaN", DataType::Utf8, true),
+        Field::new("extra", DataType::Utf8, true),
     ]));
     let raw = br#"{"value":NaN,"nested":{"values":[Infinity,-Infinity,null]},"NaN":"NaN Infinity -Infinity \""}
     {"value":Infinity} {"value":-Infinity} {"value":1.5} {"value":null} {"value":-1.5,"extra":"\\NaN"}"#;
@@ -597,6 +633,46 @@ async fn utf8_fields_coerce_scalars_without_reformatting_numbers() {
                     None
                 ]
             );
+        }
+    }
+}
+
+#[tokio::test]
+async fn rejects_unknown_fields_against_the_full_schema() {
+    use open_arrow_access_core::into_stream;
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new(
+            "nested",
+            DataType::Struct(vec![Field::new("known", DataType::Int64, true)].into()),
+            true,
+        ),
+    ]));
+    for (record, valid) in [
+        (r#"{"id":2,"nested":{"known":3}}"#, true),
+        (r#"{"id":2,"unknown":3}"#, false),
+        (r#"{"id":2,"nested":{"unknown":3}}"#, false),
+    ] {
+        let raw = format!(r#"{{"id":1,"nested":{{"known":2}}}} {record}"#);
+        let accessor = JsonAccessor::new(MemoryAccessor::new(raw.as_bytes(), 1), schema.clone());
+        for projection in [None, Some(vec!["id"]), Some(vec![])] {
+            for planned in [false, true] {
+                let selection = request(1, projection.clone());
+                let reader: Box<dyn RecordReader> = if planned {
+                    Box::new(accessor.plan_scan(selection).await.unwrap().into_reader())
+                } else {
+                    accessor.open(selection).await.unwrap()
+                };
+                let result = into_stream(reader).try_collect::<Vec<_>>().await;
+                if valid {
+                    assert!(result.is_ok(), "{result:?}");
+                } else {
+                    let error = result.unwrap_err();
+                    assert_eq!(error.kind(), ErrorKind::Decode);
+                    assert!(error.to_string().contains("unknown"), "{error}");
+                }
+            }
         }
     }
 }

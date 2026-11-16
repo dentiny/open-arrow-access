@@ -195,7 +195,7 @@ async fn read(operator: opendal::Operator) -> open_arrow_access::Result<()> {
 
 This expects objects such as `{"id":"doc-1","text":"..."}`, one per line or
 otherwise separated by whitespace. Top-level arrays are not expanded. Missing
-nullable fields become null; unknown fields are ignored. Read to EOF to complete
+nullable fields become null; unknown fields (including nested fields) are rejected. Read to EOF to complete
 gzip integrity checks.
 
 Replace the format accessor for other sequential inputs:
