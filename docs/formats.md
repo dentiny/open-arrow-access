@@ -88,17 +88,11 @@ Later incompatible values fail decoding. Empty inputs, samples explicitly marked
 Present that contain only a header, all-null sampled columns, and duplicate/empty
 headers require an explicit schema.
 For identifiers with significant leading zeros, supply an explicit string schema.
-CSV and TSV may share a file set or directory without extra configuration.
-Each input automatically uses comma for `.csv` or tab for `.tsv`,
-case-insensitively, including one optional `.gz`, `.bz2`, `.lz4`, `.zst`, or
-`.zstd` suffix. Other extensions use the configured delimiter (comma by default).
-Extension selection always overrides only the delimiter, including one set by
-`with_dialect` or `with_format`; quote, escape, header, and validation settings
-are preserved. Use an unrecognized extension for a custom delimiter.
-Locators remain opaque, so query and fragment characters are not stripped.
-Attach decompression separately; suffix selection does not decompress bytes.
-The selected delimiter is shared by inference, sequential decoding, and native
-parallel framing, including file-set union by name.
+CSV and TSV may share a file set: each input automatically uses comma for `.csv`
+or tab for `.tsv`, case-insensitively, also with a compression suffix
+(`.gz`, `.bz2`, `.lz4`, `.zst`, or `.zstd`). This overrides the configured delimiter;
+other extensions keep it. Other dialect options are preserved. Decompression
+remains separate, and query/fragment characters in locators are not stripped.
 
 Header policy is resolved once before parallel partitioning and shared by all workers.
 `CsvFormat` is this crate's options wrapper around Arrow 58's CSV format, with

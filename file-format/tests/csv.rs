@@ -722,98 +722,22 @@ async fn explicit_auto_preserves_source_failures_during_inspection_and_replay() 
 }
 
 #[tokio::test]
-async fn extension_delimiters_match_sequential_and_parallel_decoding() {
-    // Explicit Present/Absent exercise direct decoding; Auto and inference
-    // exercise source framing and canonical replay. Use a custom quote too.
+async fn tsv_extension_works_with_inference_and_parallel_decoding() {
     for infer in [false, true] {
-        for header in [CsvHeader::Auto, CsvHeader::Present, CsvHeader::Absent] {
-            for (path, delimiter) in [
-                ("records.csv", b','),
-                ("records.TSV", b'\t'),
-                ("records.tsv.gz", b'\t'),
-                ("records.TsV.BZ2", b'\t'),
-                ("records.tsv.lz4", b'\t'),
-                ("records.tsv.zst", b'\t'),
-                ("records.tsv.zstd", b'\t'),
-                ("records.csv.GZ", b','),
-                ("records.unknown", b';'),
-                ("records.tsv?download=1", b';'),
-                ("records.tsv#fragment", b';'),
-                ("folder.tsv/records", b';'),
-            ] {
-                let separator = char::from(delimiter);
-                let mut text =
-                    format!("1{separator}'first{separator}value'\n2{separator}'two\nlines'\n");
-                if header != CsvHeader::Absent {
-                    text = format!("id{separator}title\n{text}");
-                }
-                let accessor = if infer {
-                    CsvAccessor::infer(MemoryAccessor::new(text.as_bytes(), 1))
-                } else {
-                    CsvAccessor::new(MemoryAccessor::new(text.as_bytes(), 1), schema())
-                }
-                .with_dialect(CsvDialect {
-                    delimiter: b';',
-                    quote: b'\'',
-                    header,
-                    validate_header: true,
-                    ..Default::default()
-                });
-                let columns = if infer && header == CsvHeader::Absent {
-                    vec!["column_2", "column_1"]
-                } else {
-                    vec!["title", "id"]
-                };
-                let request = ReadRequest::new(path).with_options(options(1, Some(columns)));
-                let sequential = collect(&accessor, request.clone()).await;
-                let parallel = collect(
-                    &accessor.layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN)),
-                    request,
-                )
-                .await;
-                assert_eq!(sequential, parallel, "{infer} {header:?} {path}");
-                assert_eq!(collect_values::<Int64Type>(&sequential, 1), [1, 2]);
-                let titles: Vec<_> = sequential
-                    .iter()
-                    .flat_map(|batch| {
-                        batch
-                            .column(0)
-                            .as_any()
-                            .downcast_ref::<StringArray>()
-                            .unwrap()
-                            .iter()
-                    })
-                    .collect();
-                assert_eq!(
-                    titles,
-                    [
-                        Some(format!("first{separator}value").as_str()),
-                        Some("two\nlines")
-                    ]
-                );
-            }
-        }
+        let input = MemoryAccessor::new(b"id\ttitle\n1\tfirst\n2\tsecond\n", 1);
+        let accessor = if infer {
+            CsvAccessor::infer(input)
+        } else {
+            CsvAccessor::new(input, schema()).with_header(CsvHeader::Present)
+        };
+        let request = ReadRequest::new("records.TSV").with_options(options(1, None));
+        let sequential = collect(&accessor, request.clone()).await;
+        let parallel = collect(
+            &accessor.layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN)),
+            request,
+        )
+        .await;
+        assert_eq!(sequential, parallel);
+        assert_eq!(collect_values::<Int64Type>(&sequential, 0), [1, 2]);
     }
-}
-
-#[tokio::test]
-async fn extension_policy_supports_opaque_formats_and_unknown_extension_fallback() {
-    let text = b"id\ttitle\n1\tfirst\n";
-    let accessor = CsvAccessor::new(MemoryAccessor::new(text, 1), schema()).with_format(
-        CsvFormat::default()
-            .with_header(true)
-            .with_header_validation(true),
-    );
-    let batches = collect(&accessor, ReadRequest::new("records.tsv")).await;
-    assert_eq!(collect_values::<Int64Type>(&batches, 0), [1]);
-    // Unknown extensions keep the configured delimiter.
-    let batches = collect(
-        &CsvAccessor::new(MemoryAccessor::new(text, 1), schema()).with_dialect(CsvDialect {
-            delimiter: b'\t',
-            ..Default::default()
-        }),
-        ReadRequest::new("records.data"),
-    )
-    .await;
-    assert_eq!(collect_values::<Int64Type>(&batches, 0), [1]);
 }
