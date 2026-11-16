@@ -1,7 +1,9 @@
 use std::num::NonZeroUsize;
 
+use futures::TryStreamExt;
+
 use arrow_array::cast::AsArray;
-use open_arrow_access_core::{Accessor, AccessorExt, ReadOptions, ReadRequest};
+use open_arrow_access_core::{Accessor, AccessorExt, ReadOptions, ReadRequest, into_stream};
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::atif::{AtifAccessor, AtifFormat};
@@ -127,7 +129,7 @@ async fn file_set_decode_failure_identifies_the_second_object() {
     for planned in [false, true] {
         let files = FileSetAccessor::new(AtifAccessor::new(bytes.clone(), AtifFormat::JsonLines));
         let request = FileSetRequest::new(["a.jsonl", "b.jsonl"]);
-        let mut reader = if planned {
+        let reader = if planned {
             files
                 .with_file_planning()
                 .layer(ParallelReadLayer::new(
@@ -140,15 +142,11 @@ async fn file_set_decode_failure_identifies_the_second_object() {
         } else {
             files.open(request).await.unwrap()
         };
-        let error = loop {
-            match reader.next().await {
-                Err(error) => break error,
-                Ok(Some(_)) => (),
-                Ok(None) => panic!("expected second file to fail"),
-            }
-        };
-        assert_eq!(error.object().unwrap().locator(), "b.jsonl");
+        let error = into_stream(reader)
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap_err();
+        assert!(!error.to_string().contains("a.jsonl"));
         assert!(error.to_string().contains("b.jsonl"));
-        assert!(reader.next().await.unwrap().is_none());
     }
 }

@@ -50,7 +50,7 @@ impl ReaderFactory for WarcFormat {
         });
         Ok(Box::new(
             StreamReader::new(stream, request.object.clone())
-                .with_object(request.object)
+                .with_object(Some(request.object))
                 .with_capability(RecordCapability::sequential(OrderRequirement::Reorderable)),
         ))
     }

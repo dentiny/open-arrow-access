@@ -349,7 +349,7 @@ JSON objects retain their rows. Known-schema empty inputs retain their schema;
 malformed content, storage failures, and invalid options remain errors.
 
 File-format and decompression failures include the failing object locator in
-`Error` display text and expose it through `Error::object()`. Context preserves
+`Error` display text. Context preserves
 the error kind, operation, HTTP metadata, and original source chain. Locators
 are opaque and retained exactly as supplied (including relative paths); callers
 that need an absolute path or URI must supply that locator. Outer readers do not

@@ -147,12 +147,8 @@ pub(crate) fn assert_memory_read_error(error: &Error, kind: ErrorKind) {
 pub(crate) fn assert_memory_error(error: &Error, kind: ErrorKind, operation: &str, message: &str) {
     let original = memory_error(error, operation);
     assert_eq!(original.kind(), kind);
-    let expected = Error::new(kind, original.operation(), message);
-    let expected = match original.object() {
-        Some(object) => expected.with_object(object),
-        None => expected,
-    };
-    assert_eq!(original.to_string(), expected.to_string());
+    assert_eq!(original.operation(), operation);
+    assert!(original.to_string().ends_with(&format!(": {message}")));
     let cause = original
         .source()
         .unwrap()

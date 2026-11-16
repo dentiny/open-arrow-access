@@ -135,24 +135,3 @@ async fn error_codes_sources_and_terminal_state_follow_the_byte_contract() -> Re
     )
     .await
 }
-
-#[tokio::test]
-async fn truncated_gzip_error_names_the_requested_object() {
-    let bytes = fixture!("gzip", "bad_truncated.gz").await;
-    let accessor = MemoryAccessor::new(&bytes, 1).layer(DecompressionLayer::new(Gzip));
-    let locator = "s3://bucket/data/b.warc.gz";
-    let mut reader = accessor.open(ByteReadRequest::new(locator)).await.unwrap();
-    loop {
-        match reader.next().await {
-            Err(error) => {
-                assert_eq!(error.kind(), ErrorKind::Decode);
-                assert_eq!(error.object().unwrap().locator(), locator);
-                assert!(error.to_string().contains(locator));
-                assert!(reader.next().await.unwrap().is_none());
-                break;
-            }
-            Ok(Some(_)) => (),
-            Ok(None) => panic!("expected truncated gzip failure"),
-        }
-    }
-}

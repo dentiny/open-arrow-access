@@ -88,7 +88,7 @@ impl ErrorKind {
 #[error("{operation}: {message}")]
 pub struct Error {
     kind: ErrorKind,
-    object: Option<crate::ObjectRef>,
+    has_object_context: bool,
     operation: &'static str,
     message: String,
     #[source]
@@ -101,7 +101,7 @@ impl Error {
     pub fn new(kind: ErrorKind, operation: &'static str, message: impl Into<String>) -> Self {
         Self {
             kind,
-            object: None,
+            has_object_context: false,
             operation,
             message: message.into(),
             source: None,
@@ -112,19 +112,14 @@ impl Error {
 
     /// Add the exact object locator without changing classification or the source chain.
     /// The first object wins, so outer dataset readers retain the failing child object.
-    pub fn with_object<'a>(mut self, object: impl Into<Option<&'a crate::ObjectRef>>) -> Self {
-        if self.object.is_none()
-            && let Some(object) = object.into()
+    pub fn with_object(mut self, object: Option<&crate::ObjectRef>) -> Self {
+        if !self.has_object_context
+            && let Some(object) = object
         {
             self.message = format!("object {:?}: {}", object.locator(), self.message);
-            self.object = Some(object.clone());
+            self.has_object_context = true;
         }
         self
-    }
-
-    /// Object whose bytes or records caused this failure, when known.
-    pub fn object(&self) -> Option<&crate::ObjectRef> {
-        self.object.as_ref()
     }
 
     pub fn with_source<E>(mut self, source: E) -> Self

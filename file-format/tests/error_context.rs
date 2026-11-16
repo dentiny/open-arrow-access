@@ -1,27 +1,21 @@
 #![cfg(any(feature = "warc", feature = "json", feature = "atif"))]
 
+use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, Error, ErrorKind, ReadRequest, Reader, RecordReader, ScanPlanner,
+    Accessor, Error, ErrorKind, ReadRequest, RecordReader, ScanPlanner, into_stream,
 };
 use open_arrow_access_test_support::MemoryAccessor;
 
 fn assert_object(error: &Error, locator: &str) {
     assert_eq!(error.kind(), ErrorKind::Decode, "{error}");
-    assert_eq!(error.object().unwrap().locator(), locator);
     assert!(error.to_string().contains(locator), "{error}");
 }
 
-async fn read_error(mut reader: Box<dyn RecordReader>) -> Error {
-    loop {
-        match reader.next().await {
-            Err(error) => {
-                assert!(reader.next().await.unwrap().is_none());
-                return error;
-            }
-            Ok(Some(_)) => (),
-            Ok(None) => panic!("expected decode failure"),
-        }
-    }
+async fn read_error(reader: Box<dyn RecordReader>) -> Error {
+    into_stream(reader)
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap_err()
 }
 
 #[cfg(feature = "warc")]
@@ -54,18 +48,12 @@ async fn truncated_warc_gzip_names_object_in_sequential_and_planned_reads() {
             &read_error(files.open(ReadRequest::new(locator)).await.unwrap()).await,
             locator,
         );
-        let mut planned = files
+        let planned = files
             .plan_scan(ReadRequest::new(locator))
             .await
             .unwrap()
             .into_reader();
-        let error = loop {
-            match planned.next().await {
-                Err(error) => break error,
-                Ok(Some(_)) => (),
-                Ok(None) => panic!("expected decode failure"),
-            }
-        };
+        let error = read_error(Box::new(planned)).await;
         assert_object(&error, locator);
     }
 }

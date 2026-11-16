@@ -1,7 +1,7 @@
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, ReadRequest, RecordMetadata, Result, ScanPartition,
-    ScanPlan, ScanPlanner, async_trait,
+    ScanPlan, async_trait,
 };
 use parquet::arrow::{
     arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions},
@@ -17,31 +17,22 @@ use super::{
 };
 
 #[async_trait]
-impl<B> ScanPlanner for ParquetAccessor<B>
+impl<B> crate::scan::FileScanPlanner for ParquetAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + Clone + 'static,
 {
-    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        let object = request.object.clone();
-        let context = |error: open_arrow_access_core::Error| error.with_object(&object);
+    async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let storage = self.binding.storage().clone();
-        let input = storage
-            .open(ByteReadRequest::from(&request))
-            .await
-            .map_err(context)?;
-        validate_input(input.as_ref(), parquet_partition_input_error).map_err(context)?;
+        let input = storage.open(ByteReadRequest::from(&request)).await?;
+        validate_input(input.as_ref(), parquet_partition_input_error)?;
         let identity = input.metadata().clone();
         let metadata = ArrowReaderMetadata::load_async(
             &mut ParquetInput::new(input),
             ArrowReaderOptions::default(),
         )
         .await
-        .map_err(|error| decode_error("inspect_parquet", error))
-        .map_err(context)?;
-        let (schema, _) = request
-            .options
-            .resolve_projection(metadata.schema())
-            .map_err(context)?;
+        .map_err(|error| decode_error("inspect_parquet", error))?;
+        let (schema, _) = request.options.resolve_projection(metadata.schema())?;
         let output = RecordMetadata {
             schema,
             source: Some(request.object.clone()),

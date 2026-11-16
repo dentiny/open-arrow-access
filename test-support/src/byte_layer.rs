@@ -63,7 +63,6 @@ where
         operation,
     )
     .await;
-    assert_eq!(error.object().unwrap().locator(), "invalid");
     assert!(error.to_string().contains("invalid"));
     Ok(())
 }

@@ -27,6 +27,10 @@ impl ZipArchive {
         let object = input.metadata().source.clone();
         let context = |error: open_arrow_access_core::Error| error.with_object(object.as_ref());
         let source = ArchiveSource::new(input, "open_zip").map_err(context)?;
+        Self::inspect(source, limits).await.map_err(context)
+    }
+
+    async fn inspect(source: ArchiveSource, limits: ZipLimits) -> Result<Self> {
         let options = ZipOptions {
             max_uncompressed_size_per_file: limits.max_entry_bytes,
             max_compressed_size_per_file: limits.max_entry_bytes,
@@ -34,29 +38,21 @@ impl ZipArchive {
         };
         let parser = ZipArchiveReader::open_with_options(source.input.clone(), options)
             .await
-            .map_err(zip_error)
-            .map_err(context)?;
+            .map_err(zip_error)?;
         let entries = parser
             .cdrs()
             .iter()
             .enumerate()
             .map(|(index, entry)| {
-                super::validation::validate_offset(entry).map_err(context)?;
+                super::validation::validate_offset(entry)?;
                 Ok(ZipEntry {
                     index,
                     name: entry.insecure_file_name.as_bytes().to_vec(),
-                    compressed_size: entry
-                        .compressed_size()
-                        .map_err(zip_error)
-                        .map_err(context)?,
-                    uncompressed_size: entry
-                        .uncompressed_size()
-                        .map_err(zip_error)
-                        .map_err(context)?,
+                    compressed_size: entry.compressed_size().map_err(zip_error)?,
+                    uncompressed_size: entry.uncompressed_size().map_err(zip_error)?,
                 })
             })
-            .collect::<Result<Vec<_>>>()
-            .map_err(context)?;
+            .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             directory: parser.inner().clone(),
             source,

@@ -106,19 +106,6 @@ impl ScanPlan {
         metadata: RecordMetadata,
         partitions: impl futures::Stream<Item = Result<ScanPartition>> + Send + 'static,
     ) -> Self {
-        let object = metadata.source.clone();
-        let partitions = partitions.map(move |result| {
-            let object = object.clone();
-            result
-                .map_err(|error| error.with_object(object.as_ref()))
-                .map(|partition| {
-                    Box::pin(async move {
-                        partition
-                            .await
-                            .map_err(|error| error.with_object(object.as_ref()))
-                    }) as ScanPartition
-                })
-        });
         Self {
             metadata,
             ordering: OrderRequirement::PreserveGlobal,

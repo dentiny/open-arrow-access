@@ -2,7 +2,7 @@ use std::{num::NonZeroUsize, sync::atomic::Ordering};
 
 use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{Accessor, ByteReadOptions, ByteReadRequest, ErrorKind};
-use open_arrow_access_decompression::zip::{ZipAccessor, ZipArchive, ZipLimits};
+use open_arrow_access_decompression::zip::{ZipAccessor, ZipLimits};
 use open_arrow_access_test_support::{
     MemoryAccessor, byte_layer, collect_bytes, fixture, ranged_input,
 };
@@ -179,15 +179,13 @@ async fn malformed_missing_unsupported_and_sequential_inputs() {
     let data = fixture!("zip", "mixed.zip").await;
     for name in ["bad_magic.zip", "bad_truncated.zip"] {
         let bytes = fixture!("zip", name).await;
-        assert_eq!(
-            ZipAccessor::new(memory(&bytes), 0)
-                .open(ByteReadRequest::new("bad"))
-                .await
-                .err()
-                .unwrap()
-                .kind(),
-            ErrorKind::Decode
-        );
+        let error = ZipAccessor::new(memory(&bytes), 0)
+            .open(ByteReadRequest::new("bad"))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), ErrorKind::Decode);
+        assert!(error.to_string().contains("object \"bad\""));
     }
     let sequential = ZipAccessor::new(MemoryAccessor::new(&data, 1), 0);
     assert!(!sequential.capability().read);
@@ -296,19 +294,4 @@ async fn malformed_zip64_offset_is_a_decode_error() {
         .unwrap();
     assert_eq!(error.kind(), ErrorKind::Decode);
     assert_eq!(error.operation(), "read_zip");
-}
-
-#[tokio::test]
-async fn malformed_archive_errors_include_object_locator() {
-    let bytes = fixture!("zip", "bad_magic.zip").await;
-    let object = open_arrow_access_core::ObjectRef::new("s3://bucket/bad.zip");
-    let input = MemoryAccessor::new(&bytes, 1).with_ranges();
-    let error = ZipArchive::open(
-        input.open(object.clone().into()).await.unwrap(),
-        ZipLimits::default(),
-    )
-    .await
-    .err()
-    .unwrap();
-    assert_eq!(error.object(), Some(&object));
 }

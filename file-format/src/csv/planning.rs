@@ -7,42 +7,34 @@ use futures::{
 };
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactoryExt, RecordMetadata,
-    Result, ScanPartition, ScanPlan, ScanPlanner, async_trait, bytes_reader, into_async_read,
+    Result, ScanPartition, ScanPlan, async_trait, bytes_reader, into_async_read,
 };
 
 use super::{CsvAccessor, CsvDialect, CsvHeader, error};
 
 #[async_trait]
-impl<B> ScanPlanner for CsvAccessor<B>
+impl<B> crate::scan::FileScanPlanner for CsvAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
-    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        let object = request.object.clone();
-        let context = |error: open_arrow_access_core::Error| error.with_object(&object);
+    async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = self.binding.factory().clone();
         let Some(dialect) = format.parallel_dialect() else {
-            return Ok(
-                ScanPlan::whole_input(self.open(request).await.map_err(context)?)
-                    .with_ordering(self.capability().ordering),
-            );
+            return Ok(ScanPlan::whole_input(self.open(request).await?)
+                .with_ordering(self.capability().ordering));
         };
-        let prepared = format.prepare_scan(&request).map_err(context)?;
+        let prepared = format.prepare_scan(&request)?;
         let input = self
             .binding
             .storage()
             .open(ByteReadRequest::from(&request))
-            .await
-            .map_err(context)?;
-        let Some((format, input)) = format.resolve_schema(input).await.map_err(context)? else {
+            .await?;
+        let Some((format, input)) = format.resolve_schema(input).await? else {
             return Ok(crate::inference::empty_plan(request));
         };
         let prepared = match prepared {
             Some(prepared) => prepared,
-            None => format
-                .prepare_scan(&request)
-                .map_err(context)?
-                .expect("resolved CSV schema"),
+            None => format.prepare_scan(&request)?.expect("resolved CSV schema"),
         };
         let dialect = format.parallel_dialect().unwrap_or(dialect);
         let metadata = RecordMetadata {

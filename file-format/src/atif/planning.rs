@@ -4,28 +4,23 @@ use futures::{
 };
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ObjectRef, ReadRequest, ReaderFactory,
-    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, async_trait, bytes_reader,
-    read_lines,
+    RecordMetadata, RecordReader, Result, ScanPlan, async_trait, bytes_reader, read_lines,
 };
 
 use super::{AtifAccessor, AtifFormat, error::decode_error, reader::create_reader};
 use crate::scan::chunks::RecordChunks;
 
 #[async_trait]
-impl<B> ScanPlanner for AtifAccessor<B>
+impl<B> crate::scan::FileScanPlanner for AtifAccessor<B>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
-    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        let object = request.object.clone();
-        let context = |error: open_arrow_access_core::Error| error.with_object(&object);
+    async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = *self.binding.factory();
         if format != AtifFormat::JsonLines {
-            return Ok(ScanPlan::whole_input(
-                self.open(request).await.map_err(context)?,
-            ));
+            return Ok(ScanPlan::whole_input(self.open(request).await?));
         }
-        let (schema, projection) = format.prepare(&request).map_err(context)?;
+        let (schema, projection) = format.prepare(&request)?;
         let metadata = RecordMetadata {
             schema,
             source: Some(request.object.clone()),
@@ -34,8 +29,7 @@ where
             .binding
             .storage()
             .open(ByteReadRequest::from(&request))
-            .await
-            .map_err(context)?;
+            .await?;
         let frames = AtifFrames {
             lines: read_lines(input, None, "frame_atif").boxed(),
             next_index: 1,

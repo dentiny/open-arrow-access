@@ -54,8 +54,8 @@ impl<S, M> StreamReader<S, M> {
 
 impl<S, M, C> StreamReader<S, M, C> {
     /// Attach object context to lazy errors without changing their source chain.
-    pub fn with_object(mut self, object: impl Into<Option<ObjectRef>>) -> Self {
-        self.object = object.into();
+    pub fn with_object(mut self, object: Option<ObjectRef>) -> Self {
+        self.object = object;
         self
     }
 

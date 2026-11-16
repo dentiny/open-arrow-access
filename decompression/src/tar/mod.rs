@@ -57,33 +57,33 @@ impl TarArchive {
         let object = input.metadata().source.clone();
         let context = |error: open_arrow_access_core::Error| error.with_object(object.as_ref());
         let source = ArchiveSource::new(input, "open_tar").map_err(context)?;
+        Self::inspect(source, limits).await.map_err(context)
+    }
+
+    async fn inspect(source: ArchiveSource, limits: TarLimits) -> Result<Self> {
         let input = &source.input;
         let mut offset = 0;
         let mut entries = Vec::new();
         loop {
             if input.content_length().saturating_sub(offset) < BLOCK_SIZE {
-                return Err(context(decode("TAR archive has no complete end marker")));
+                return Err(decode("TAR archive has no complete end marker"));
             }
-            let bytes = input
-                .read_range(offset..offset + BLOCK_SIZE)
-                .await
-                .map_err(context)?;
+            let bytes = input.read_range(offset..offset + BLOCK_SIZE).await?;
             if bytes.iter().all(|byte| *byte == 0) {
                 if input.content_length().saturating_sub(offset) < 2 * BLOCK_SIZE
                     || !input
                         .read_range(offset + BLOCK_SIZE..offset + 2 * BLOCK_SIZE)
-                        .await
-                        .map_err(context)?
+                        .await?
                         .iter()
                         .all(|byte| *byte == 0)
                 {
-                    return Err(context(decode("TAR archive requires two zero end blocks")));
+                    return Err(decode("TAR archive requires two zero end blocks"));
                 }
                 break;
             }
-            let entry = parse_entry(&bytes, entries.len(), &limits).map_err(context)?;
+            let entry = parse_entry(&bytes, entries.len(), &limits)?;
             let start = offset + BLOCK_SIZE;
-            offset = entry_end(start, entry.size, input.content_length()).map_err(context)?;
+            offset = entry_end(start, entry.size, input.content_length())?;
             entries.push((entry, start));
         }
         Ok(Self {
