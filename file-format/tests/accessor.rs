@@ -111,17 +111,18 @@ async fn external_format_prepares_each_open_and_receives_request_options() {
         io_chunk_size: NonZeroUsize::new(17),
     };
     for (batch_size, object) in [(2, "first"), (7, "second")] {
-        let mut reader = accessor
-            .open(
-                ReadRequest::new(object)
-                    .with_options(ReadOptions {
-                        batch_size: NonZeroUsize::new(batch_size).unwrap(),
-                        ..ReadOptions::default()
-                    })
-                    .with_byte_options(byte_options),
-            )
-            .await
-            .unwrap();
+        let request = ReadRequest::new(object)
+            .with_options(ReadOptions {
+                batch_size: NonZeroUsize::new(batch_size).unwrap(),
+                ..ReadOptions::default()
+            })
+            .with_byte_options(byte_options);
+        let mut reader = if object == "first" {
+            accessor.open(request).await.unwrap()
+        } else {
+            // The optional hook's default retains a known-schema empty reader.
+            accessor.open_optional(request).await.unwrap().unwrap()
+        };
         assert_eq!(reader.metadata().source.as_ref().unwrap().locator(), object);
         assert!(reader.next().await.unwrap().is_none());
     }
@@ -160,6 +161,14 @@ async fn preparation_errors_prevent_storage_io_and_decode() {
     assert_eq!(*events.lock().unwrap(), ["prepare"]);
     assert!(observed.requests.lock().unwrap().is_empty());
     assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
+    let error = accessor
+        .open_optional(ReadRequest::new("file"))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.operation(), "prepare_probe");
+    assert_eq!(*events.lock().unwrap(), ["prepare", "prepare"]);
+    assert!(observed.requests.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

@@ -75,13 +75,6 @@ impl CsvInferenceOptions {
     }
 }
 
-pub(super) fn validate_sample(sample: &[u8]) -> Result<()> {
-    if sample.is_empty() {
-        return Err(super::error::empty_inference_sample());
-    }
-    Ok(())
-}
-
 pub(super) fn validate_inferred_schema(schema: &Schema) -> Result<()> {
     let mut names = HashSet::new();
     for field in schema.fields() {

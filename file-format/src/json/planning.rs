@@ -16,6 +16,12 @@ where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
+        self.plan_scan_optional(request)
+            .await?
+            .ok_or_else(super::error::empty_inference_sample)
+    }
+
+    async fn plan_scan_optional(&self, request: ReadRequest) -> Result<Option<ScanPlan>> {
         let format = self.binding.factory().clone();
         let prepared = format.prepare_scan(&request)?;
         let input = self
@@ -23,7 +29,9 @@ where
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
-        let (format, input) = format.resolve_schema(input).await?;
+        let Some((format, input)) = format.resolve_schema(input).await? else {
+            return Ok(None);
+        };
         let prepared = match prepared {
             Some(prepared) => prepared,
             None => format
@@ -54,7 +62,9 @@ where
                 Ok(Some((partition, frames)))
             }
         });
-        Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))
+        Ok(Some(
+            ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering),
+        ))
     }
 }
 

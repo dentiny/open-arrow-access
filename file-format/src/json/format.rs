@@ -82,12 +82,14 @@ impl SchemaInference for JsonFormat {
     async fn resolve_schema(
         &self,
         input: Box<dyn ByteReader>,
-    ) -> Result<(Self, Box<dyn ByteReader>)> {
+    ) -> Result<Option<(Self, Box<dyn ByteReader>)>> {
         if self.schema.is_some() {
-            return Ok((self.clone(), input));
+            return Ok(Some((self.clone(), input)));
         }
-        let (schema, input) = inference::infer(input, self.inference).await?;
-        Ok((Self::new(schema), input))
+        let Some((schema, input)) = inference::infer(input, self.inference).await? else {
+            return Ok(None);
+        };
+        Ok(Some((Self::new(schema), input)))
     }
 }
 
@@ -115,20 +117,34 @@ impl ReaderFactory for JsonFormat {
 
     async fn create_reader(
         &self,
-        _token: &FactoryToken,
+        token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
         prepared: Self::Prepared,
     ) -> Result<Box<dyn RecordReader>> {
+        self.create_reader_optional(token, input, request, prepared)
+            .await?
+            .ok_or_else(super::error::empty_inference_sample)
+    }
+
+    async fn create_reader_optional(
+        &self,
+        _token: &FactoryToken,
+        input: Box<dyn ByteReader>,
+        request: ReadRequest,
+        prepared: Self::Prepared,
+    ) -> Result<Option<Box<dyn RecordReader>>> {
         let (input, schema, decoder) = match prepared {
             Some((schema, decoder)) => (input, schema, decoder),
             None => {
-                let (format, input) = self.resolve_schema(input).await?;
+                let Some((format, input)) = self.resolve_schema(input).await? else {
+                    return Ok(None);
+                };
                 let (schema, decoder) = format.prepare(&request)?.expect("resolved JSON schema");
                 (input, schema, decoder)
             }
         };
-        Ok(Box::new(json_reader(
+        Ok(Some(Box::new(json_reader(
             input,
             decoder,
             RecordMetadata {
@@ -136,6 +152,6 @@ impl ReaderFactory for JsonFormat {
                 source: Some(request.object),
             },
             request.options.batch_size.get(),
-        )))
+        ))))
     }
 }

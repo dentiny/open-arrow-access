@@ -342,10 +342,19 @@ reported as `Decode`. Identity column projections skip per-batch reordering.
 Workspace dependency requirements are declared in `Cargo.toml`; the committed
 `Cargo.lock` records resolved versions, including transitive dependencies.
 
-CSV and JSON schema inference report `ErrorKind::EmptyInput` when EOF is
-reached without records (including after decompression). Standalone inference
-still fails. Union-by-name file sets and directories skip these inputs during
-preflight; if every selected input reports `EmptyInput`, the first such error
-is returned. Empty selections remain `InvalidInput`. Malformed data, storage
-failures, and invalid inference options are not skipped. A zero-field JSON
-object is a record and retains its row during alignment.
+CSV and JSON schema inference return `None` when EOF is reached without records
+or a supplied schema, including after decompression. The optional hooks
+`Accessor::open_optional` and `ScanPlanner::plan_scan_optional` preserve this
+normal outcome through file opening and planning. Their default implementations
+wrap the existing required operations in `Some`; inference-aware accessors and
+transparent wrappers should override them to preserve `None`. `Arc` and factory
+bindings forward the optional hooks. Factory preparation still precedes storage
+I/O on both paths.
+
+Union-by-name file sets and directories skip `None` during preflight. If all
+selected inputs return `None`, the dataset reports that no schema can be inferred.
+Empty selections remain invalid. Existing `open` and `plan_scan` require a reader
+or plan and retain their inference error for standalone schema-less empty input.
+Malformed data, storage failures, and invalid inference options remain errors.
+Known-schema empty readers/plans, zero-column projections, and zero-field JSON
+objects remain `Some`; zero-field records retain their rows during alignment.

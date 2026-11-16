@@ -34,6 +34,21 @@ pub trait ReaderFactory: Send + Sync {
         request: Self::Request,
         prepared: Self::Prepared,
     ) -> Result<Box<Self::Reader>>;
+
+    /// Like `create_reader`, returning `None` when inference reaches EOF without
+    /// records or a supplied schema. Configuration and input failures remain errors.
+    /// Factories without schema inference use the default implementation.
+    async fn create_reader_optional(
+        &self,
+        token: &FactoryToken,
+        input: Box<dyn ByteReader>,
+        request: Self::Request,
+        prepared: Self::Prepared,
+    ) -> Result<Option<Box<Self::Reader>>> {
+        self.create_reader(token, input, request, prepared)
+            .await
+            .map(Some)
+    }
 }
 
 /// Shared opening flow provided by one blanket implementation for all factories.
@@ -53,6 +68,15 @@ pub trait ReaderFactoryExt: ReaderFactory {
         storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
         request: Self::Request,
     ) -> Result<Box<Self::Reader>>
+    where
+        for<'a> ByteReadRequest: From<&'a Self::Request>;
+
+    /// Prepare before storage I/O, then preserve the factory's optional result.
+    async fn open_reader_optional(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<Option<Box<Self::Reader>>>
     where
         for<'a> ByteReadRequest: From<&'a Self::Request>;
 }
@@ -82,5 +106,19 @@ impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
         let input = storage.open(byte_request).await?;
         let token = FactoryToken { _private: () };
         self.create_reader(&token, input, request, prepared).await
+    }
+
+    async fn open_reader_optional(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<Option<Box<Self::Reader>>>
+    where
+        for<'a> ByteReadRequest: From<&'a Self::Request>,
+    {
+        let prepared = self.prepare(&request)?;
+        let input = storage.open(ByteReadRequest::from(&request)).await?;
+        self.create_reader_optional(&FactoryToken { _private: () }, input, request, prepared)
+            .await
     }
 }

@@ -148,20 +148,23 @@ impl SchemaInference for CsvFileFormat {
     async fn resolve_schema(
         &self,
         input: Box<dyn ByteReader>,
-    ) -> Result<(Self, Box<dyn ByteReader>)> {
+    ) -> Result<Option<(Self, Box<dyn ByteReader>)>> {
         if self.schema.is_some() && self.header != CsvHeader::Auto {
-            return Ok((self.clone(), input));
+            return Ok(Some((self.clone(), input)));
         }
         let dialect = validation::require_dialect(self.parallel_dialect())?;
-        let (schema, has_header, input) =
-            inference::resolve(input, dialect, self.inference, self.schema.clone()).await?;
+        let Some((schema, has_header, input)) =
+            inference::resolve(input, dialect, self.inference, self.schema.clone()).await?
+        else {
+            return Ok(None);
+        };
         let format = Self::new(schema).with_dialect(CsvDialect {
             header: has_header.into(),
             validate_header: dialect.validate_header,
             allow_truncated_rows: dialect.allow_truncated_rows,
             ..CsvDialect::default()
         });
-        Ok((format, input))
+        Ok(Some((format, input)))
     }
 }
 
@@ -191,21 +194,35 @@ impl ReaderFactory for CsvFileFormat {
 
     async fn create_reader(
         &self,
-        _token: &FactoryToken,
+        token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
         prepared: Self::Prepared,
     ) -> Result<Box<dyn RecordReader>> {
+        self.create_reader_optional(token, input, request, prepared)
+            .await?
+            .ok_or_else(super::error::empty_inference_sample)
+    }
+
+    async fn create_reader_optional(
+        &self,
+        _token: &FactoryToken,
+        input: Box<dyn ByteReader>,
+        request: ReadRequest,
+        prepared: Self::Prepared,
+    ) -> Result<Option<Box<dyn RecordReader>>> {
         let (input, schema, decoder, header) = match prepared {
             Some((schema, decoder, header)) => (input, schema, decoder, header),
             None => {
-                let (format, input) = self.resolve_schema(input).await?;
+                let Some((format, input)) = self.resolve_schema(input).await? else {
+                    return Ok(None);
+                };
                 let (schema, decoder, header) =
                     format.prepare(&request)?.expect("resolved CSV schema");
                 (input, schema, decoder, header)
             }
         };
-        Ok(Box::new(csv_reader(
+        Ok(Some(Box::new(csv_reader(
             input,
             decoder,
             header,
@@ -213,6 +230,6 @@ impl ReaderFactory for CsvFileFormat {
                 schema,
                 source: Some(request.object),
             },
-        )))
+        ))))
     }
 }

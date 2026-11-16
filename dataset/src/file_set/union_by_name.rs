@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, ErrorKind, FieldNameIndex, ReadRequest, RecordCapability, RecordMetadata,
-    RecordReader, Result, ScanPartition, ScanPlan, map_record_reader,
+    Accessor, FieldNameIndex, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result,
+    ScanPartition, ScanPlan, map_record_reader,
 };
 
 use super::{
@@ -27,21 +27,15 @@ where
     // A requested column may be absent in one file and present in another.
     request.options.projection = None;
     let mut files = Vec::new();
-    let mut empty_input = None;
+    let mut selected = false;
     let mut union_schema = schema::SchemaUnion::default();
     let mut ordering = inner.capability().ordering;
     // Drop each inspected reader/plan before opening the next file, so JSON
     // samples and native partitions are not retained across the entire dataset.
     for request in request.into_requests() {
-        let inspected = match open_plan(inner.clone(), file_planner, request.clone()).await {
-            Ok(plan) => plan,
-            Err(error) if error.kind() == ErrorKind::EmptyInput => {
-                // No records means no contribution to either schema or rows.
-                // Retain the first error in case no file has an inferable schema.
-                empty_input.get_or_insert(error);
-                continue;
-            }
-            Err(error) => return Err(error),
+        selected = true;
+        let Some(inspected) = open_plan(inner.clone(), file_planner, request.clone()).await? else {
+            continue;
         };
         validate_file_policy(&inspected)?;
         ordering = ordering.combine(inspected.ordering);
@@ -51,7 +45,11 @@ where
         files.push((request, source));
     }
     if files.is_empty() {
-        return Err(empty_input.unwrap_or_else(|| empty_selection("union_by_name")));
+        return Err(if selected {
+            super::error::no_inferred_schema("union_by_name")
+        } else {
+            empty_selection("union_by_name")
+        });
     }
     let union_schema = Arc::new(union_schema.finish());
     let (target, _) = options.resolve_projection(&union_schema)?;
@@ -92,7 +90,9 @@ where
         .then(move |(request, alignment)| {
             let inner = inner.clone();
             async move {
-                let plan = open_plan(inner, file_planner, request).await?;
+                let plan = open_plan(inner, file_planner, request)
+                    .await?
+                    .ok_or_else(super::error::schema_mismatch)?;
                 validate_file_policy(&plan)?;
                 validate_file_ordering(ordering, plan.ordering)?;
                 super::validation::validate_schema(&plan.metadata.schema, &alignment.source)?;
@@ -113,13 +113,16 @@ async fn open_plan<A>(
     inner: Arc<A>,
     file_planner: Option<FilePlanner<A>>,
     request: ReadRequest,
-) -> Result<ScanPlan>
+) -> Result<Option<ScanPlan>>
 where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
 {
     match file_planner {
         Some(plan) => plan(inner, request).await,
-        None => Ok(ScanPlan::whole_input(inner.open(request).await?)),
+        None => Ok(inner
+            .open_optional(request)
+            .await?
+            .map(ScanPlan::whole_input)),
     }
 }
 

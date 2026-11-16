@@ -28,6 +28,14 @@ pub trait Accessor: Send + Sync {
     /// or opening/inspection fails. Failures encountered while consuming items
     /// are subsequently returned by [`Reader::next`].
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>>;
+
+    /// Open an input that may have no records from which to infer a schema.
+    /// `None` means inspection reached EOF without records and without a supplied
+    /// schema. It does not mean an empty projection or a known-schema empty reader.
+    /// The default wraps `open`; accessors supporting inference may override it.
+    async fn open_optional(&self, request: Self::Request) -> Result<Option<Box<Self::Reader>>> {
+        self.open(request).await.map(Some)
+    }
 }
 
 #[async_trait]
@@ -41,6 +49,10 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
         (**self).open(request).await
+    }
+
+    async fn open_optional(&self, request: Self::Request) -> Result<Option<Box<Self::Reader>>> {
+        (**self).open_optional(request).await
     }
 }
 

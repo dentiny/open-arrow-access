@@ -8,9 +8,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[non_exhaustive]
 pub enum ErrorKind {
     InvalidInput,
-    /// Schema inference reached EOF without any records. Dataset planners may
-    /// skip this input; malformed data and invalid inference options use other kinds.
-    EmptyInput,
     Unsupported,
     NotFound,
     /// Credentials are missing, invalid, or required by a proxy or network.

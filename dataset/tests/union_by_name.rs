@@ -3,7 +3,7 @@ use std::{io::Write, num::NonZeroUsize, sync::Arc};
 use arrow_array::{Array, Int64Array, RecordBatch, StringArray, cast::AsArray, types::Int64Type};
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
-    Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, RecordReader, ScanPlanner,
+    Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, Reader, RecordReader, ScanPlanner,
 };
 use open_arrow_access_dataset::{
     directory::{DirectoryAccessor, DirectoryRequest},
@@ -23,8 +23,24 @@ async fn check_empty_inference<A>(source: A, compressed: bool)
 where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + ScanPlanner + Clone + 'static,
 {
+    for name in ["empty", "whitespace"] {
+        assert!(
+            source
+                .open_optional(ReadRequest::new(name))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            source
+                .plan_scan_optional(ReadRequest::new(name))
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
     let error = source.open(ReadRequest::new("empty")).await.err().unwrap();
-    assert_eq!(error.kind(), ErrorKind::EmptyInput);
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
     assert!(
         FileSetAccessor::new(source.clone())
             .open(FileSetRequest::new(["empty", "data"]))
@@ -65,7 +81,7 @@ where
             .await
             .err()
             .unwrap();
-        assert_eq!(error.kind(), ErrorKind::EmptyInput);
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
         for invalid in ["invalid", "missing"]
             .into_iter()
             .chain(compressed.then_some("corrupt"))
@@ -75,7 +91,22 @@ where
                 .await
                 .err()
                 .unwrap();
-            assert_ne!(error.kind(), ErrorKind::EmptyInput);
+            assert!(matches!(
+                error.kind(),
+                ErrorKind::Decode | ErrorKind::InvalidInput | ErrorKind::NotFound
+            ));
+            assert!(
+                source
+                    .open_optional(ReadRequest::new(invalid))
+                    .await
+                    .is_err()
+            );
+            assert!(
+                source
+                    .plan_scan_optional(ReadRequest::new(invalid))
+                    .await
+                    .is_err()
+            );
         }
         let error = files
             .open(FileSetRequest::new(Vec::<String>::new()))
@@ -134,6 +165,54 @@ async fn inferred_union_skips_empty_csv_and_json_including_gzip() {
             }
         }
     }
+}
+
+async fn check_known_schema_empty<A>(source: A)
+where
+    A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + ScanPlanner,
+{
+    let mut reader = source
+        .open_optional(ReadRequest::new("empty"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reader.metadata().schema.fields().len(), 1);
+    assert!(reader.next().await.unwrap().is_none());
+    let plan = source
+        .plan_scan_optional(ReadRequest::new("empty"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(plan.metadata.schema.fields().len(), 1);
+    assert!(plan.into_reader().next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn optional_open_and_plan_preserve_known_schema_empty_inputs() {
+    let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+    check_known_schema_empty(CsvAccessor::new(
+        MemoryAccessor::new(b"", 1),
+        schema.clone(),
+    ))
+    .await;
+    check_known_schema_empty(JsonAccessor::new(MemoryAccessor::new(b"", 1), schema)).await;
+}
+
+#[tokio::test]
+async fn input_becoming_empty_after_preflight_is_a_schema_change() {
+    let dir = tempfile::tempdir().unwrap();
+    tokio::fs::write(dir.path().join("data"), b"{\"id\":1}")
+        .await
+        .unwrap();
+    let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
+    let files = FileSetAccessor::new(JsonAccessor::infer(storage)).with_union_by_name();
+    let mut reader = files.open(FileSetRequest::new(["data"])).await.unwrap();
+    tokio::fs::write(dir.path().join("data"), b"")
+        .await
+        .unwrap();
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert!(error.to_string().contains("schema differs"));
 }
 
 #[tokio::test]
