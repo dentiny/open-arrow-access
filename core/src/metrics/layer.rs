@@ -1,4 +1,4 @@
-use std::{ops::Range, time::Instant};
+use std::{future::Future, ops::Range, time::Instant};
 
 use futures::{StreamExt, TryStreamExt};
 
@@ -86,21 +86,18 @@ where
         self.inner.capability()
     }
     async fn open(&self, request: A::Request) -> Result<Box<A::Reader>> {
-        let mut call = Call::new(&self.exporter, "open");
-        let result = self.inner.open(request).await;
-        call.finish(result.is_err());
-        result.map(|reader| reader.instrument(self.exporter.clone()))
+        Call::observe(&self.exporter, "open", self.inner.open(request))
+            .await
+            .map(|reader| reader.instrument(self.exporter.clone()))
     }
 }
 
 #[async_trait]
 impl<A: ByteAccessor, E: MetricsExporter> ByteAccessor for MetricsAccessor<A, E> {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        let mut call = Call::new(&self.exporter, "list");
-        let result = self.inner.list(request).await;
-        call.finish(result.is_err());
+        let entries = Call::observe(&self.exporter, "list", self.inner.list(request)).await?;
         let exporter = self.exporter.clone();
-        Ok(Box::pin(result?.inspect(move |item| {
+        Ok(Box::pin(entries.inspect(move |item| {
             counter(
                 &exporter,
                 if item.is_ok() {
@@ -118,30 +115,24 @@ impl<A: ByteAccessor, E: MetricsExporter> ByteAccessor for MetricsAccessor<A, E>
 #[async_trait]
 impl<A: StatisticsProvider, E: MetricsExporter> StatisticsProvider for MetricsAccessor<A, E> {
     async fn statistics(&self, request: A::Request) -> Result<ScanStatistics> {
-        let mut call = Call::new(&self.exporter, "statistics");
-        let result = self.inner.statistics(request).await;
-        call.finish(result.is_err());
-        result
+        Call::observe(&self.exporter, "statistics", self.inner.statistics(request)).await
     }
 }
 
 #[async_trait]
 impl<A: ScanPlanner, E: MetricsExporter> ScanPlanner for MetricsAccessor<A, E> {
     async fn plan_scan(&self, request: A::Request) -> Result<ScanPlan> {
-        let mut call = Call::new(&self.exporter, "plan_scan");
-        let result = self.inner.plan_scan(request).await;
-        call.finish(result.is_err());
-        let mut plan = result?;
+        let mut plan =
+            Call::observe(&self.exporter, "plan_scan", self.inner.plan_scan(request)).await?;
         let exporter = self.exporter.clone();
         plan.partitions = plan
             .partitions
             .map_ok(move |partition| {
                 let exporter = exporter.clone();
                 Box::pin(async move {
-                    let mut call = Call::new(&exporter, "partition_open");
-                    let result = partition.await;
-                    call.finish(result.is_err());
-                    result.map(|reader| reader.instrument(exporter.clone()))
+                    Call::observe(&exporter, "partition_open", partition)
+                        .await
+                        .map(|reader| reader.instrument(exporter.clone()))
                 }) as crate::ScanPartition
             })
             .boxed();
@@ -149,40 +140,44 @@ impl<A: ScanPlanner, E: MetricsExporter> ScanPlanner for MetricsAccessor<A, E> {
     }
 }
 
-struct Call<E: MetricsExporter> {
-    exporter: E,
+struct Call<'a, E: MetricsExporter> {
+    exporter: &'a E,
     operation: &'static str,
     start: Instant,
     finished: bool,
 }
 
-impl<E: MetricsExporter> Call<E> {
-    fn new(exporter: &E, operation: &'static str) -> Self {
+impl<'a, E: MetricsExporter> Call<'a, E> {
+    async fn observe<T>(
+        exporter: &'a E,
+        operation: &'static str,
+        future: impl Future<Output = Result<T>>,
+    ) -> Result<T> {
         counter(exporter, "oaa_calls_total", operation, 1);
         exporter.record(MetricEvent {
             name: "oaa_executing",
             operation,
             value: MetricValue::Gauge(1),
         });
-        Self {
-            exporter: exporter.clone(),
+        let mut call = Self {
+            exporter,
             operation,
             start: Instant::now(),
             finished: false,
+        };
+        let result = future.await;
+        call.finished = true;
+        if result.is_err() {
+            counter(exporter, "oaa_errors_total", operation, 1);
         }
-    }
-    fn finish(&mut self, error: bool) {
-        self.finished = true;
-        if error {
-            counter(&self.exporter, "oaa_errors_total", self.operation, 1);
-        }
+        result
     }
 }
 
-impl<E: MetricsExporter> Drop for Call<E> {
+impl<E: MetricsExporter> Drop for Call<'_, E> {
     fn drop(&mut self) {
         if !self.finished {
-            counter(&self.exporter, "oaa_cancelled_total", self.operation, 1);
+            counter(self.exporter, "oaa_cancelled_total", self.operation, 1);
         }
         self.exporter.record(MetricEvent {
             name: "oaa_call_duration_seconds",
@@ -268,9 +263,7 @@ where
         if self.terminal {
             return self.inner.next().await;
         }
-        let mut call = Call::new(&self.exporter, "next");
-        let result = self.inner.next().await;
-        call.finish(result.is_err());
+        let result = Call::observe(&self.exporter, "next", self.inner.next()).await;
         match &result {
             Ok(Some(item)) => item.record(&self.exporter),
             Ok(None) => {
@@ -289,9 +282,8 @@ where
 #[async_trait]
 impl<E: MetricsExporter> ByteReader for Measured<dyn ByteReader, E> {
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
-        let mut call = Call::new(&self.exporter, "read_range");
-        let result = self.inner.read_range(range).await;
-        call.finish(result.is_err());
+        let result =
+            Call::observe(&self.exporter, "read_range", self.inner.read_range(range)).await;
         if let Ok(bytes) = &result {
             counter(
                 &self.exporter,
@@ -303,9 +295,12 @@ impl<E: MetricsExporter> ByteReader for Measured<dyn ByteReader, E> {
         result
     }
     async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
-        let mut call = Call::new(&self.exporter, "read_ranges");
-        let result = self.inner.read_ranges(ranges).await;
-        call.finish(result.is_err());
+        let result = Call::observe(
+            &self.exporter,
+            "read_ranges",
+            self.inner.read_ranges(ranges),
+        )
+        .await;
         if let Ok(bytes) = &result {
             counter(
                 &self.exporter,
