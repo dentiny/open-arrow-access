@@ -600,3 +600,155 @@ async fn utf8_fields_coerce_scalars_without_reformatting_numbers() {
         }
     }
 }
+
+fn strict_schema() -> SchemaRef {
+    let fields = vec![Field::new("known", DataType::Int64, true)];
+    Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("nested", DataType::Struct(fields.clone().into()), true),
+        Field::new(
+            "items",
+            DataType::List(Arc::new(Field::new(
+                "item",
+                DataType::Struct(fields.into()),
+                true,
+            ))),
+            true,
+        ),
+    ]))
+}
+
+#[tokio::test]
+async fn strict_mode_rejects_unknown_fields_before_projection() {
+    for raw in [
+        br#"{"id":1,"unknown":2}"#.as_slice(),
+        br#"{"id":1} {"id":2,"unknown":2}"#,
+        br#"{"id":1,"nested":{"known":1,"unknown":2}}"#,
+        br#"{"id":1,"items":[{"known":1},{"unknown":2}]}"#,
+    ] {
+        for chunk_size in [1, 4096] {
+            for projection in [None, Some(vec!["id"]), Some(vec![])] {
+                for parallel in [false, true] {
+                    let accessor =
+                        JsonAccessor::new(MemoryAccessor::new(raw, chunk_size), strict_schema())
+                            .with_strict_mode(true)
+                            .with_partition_options(DecodePartitionOptions {
+                                target_bytes: NonZeroUsize::MIN,
+                            });
+                    let selection = request(1, projection.clone());
+                    let mut reader = if parallel {
+                        accessor
+                            .layer(ParallelReadLayer::new(
+                                NonZeroUsize::new(2).unwrap(),
+                                NonZeroUsize::MIN,
+                            ))
+                            .open(selection)
+                            .await
+                            .unwrap()
+                    } else {
+                        accessor.open(selection).await.unwrap()
+                    };
+                    loop {
+                        match reader.next().await {
+                            Ok(Some(_)) => continue,
+                            Ok(None) => panic!("accepted {raw:?}"),
+                            Err(error) => {
+                                assert_eq!(error.kind(), ErrorKind::Decode);
+                                assert!(error.to_string().contains("unknown"), "{error}");
+                                break;
+                            }
+                        }
+                    }
+                    assert!(reader.next().await.unwrap().is_none());
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn strict_mode_accepts_known_fields_and_preserves_output_projection() {
+    use open_arrow_access_file_format::json::JsonFormat;
+
+    let raw = br#"{"id":1,"nested":{"known":2},"items":[{"known":3},null]}
+        {"id":2,"nested":null,"items":[]} {"id":3}"#;
+    for projection in [
+        None,
+        Some(vec!["id"]),
+        Some(vec!["items", "id"]),
+        Some(vec![]),
+    ] {
+        for planned in [false, true] {
+            let accessor = JsonAccessor::from_format(
+                MemoryAccessor::new(raw, 1),
+                JsonFormat::new(strict_schema()).with_strict_mode(true),
+            );
+            let selection = request(2, projection.clone());
+            let (expected, _) = selection
+                .options
+                .resolve_projection(&strict_schema())
+                .unwrap();
+            let mut reader: Box<dyn RecordReader> = if planned {
+                Box::new(accessor.plan_scan(selection).await.unwrap().into_reader())
+            } else {
+                accessor.open(selection).await.unwrap()
+            };
+            assert_eq!(reader.metadata().schema, expected);
+            let mut rows = 0;
+            while let Some(batch) = reader.next().await.unwrap() {
+                assert_eq!(batch.schema(), expected);
+                rows += batch.num_rows();
+            }
+            assert_eq!(rows, 3);
+        }
+    }
+}
+
+#[tokio::test]
+async fn strict_inference_rejects_late_keys_and_can_be_disabled() {
+    use open_arrow_access_file_format::json::JsonInferenceOptions;
+
+    for raw in [
+        br#"{"id":1,"nested":{"known":1}} {"id":2,"unknown":1}"#.as_slice(),
+        br#"{"id":1,"nested":{"known":1}} {"id":2,"nested":{"unknown":1}}"#,
+    ] {
+        for strict in [false, true] {
+            for planned in [false, true] {
+                let accessor = JsonAccessor::infer(MemoryAccessor::new(raw, 1))
+                    .with_strict_mode(true)
+                    .with_strict_mode(strict)
+                    .with_inference_options(JsonInferenceOptions {
+                        max_records: 1,
+                        max_bytes: 1024,
+                    });
+                let selection = request(1, Some(vec!["id"]));
+                let mut reader: Box<dyn RecordReader> = if planned {
+                    Box::new(accessor.plan_scan(selection).await.unwrap().into_reader())
+                } else {
+                    accessor.open(selection).await.unwrap()
+                };
+                assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1]);
+                if strict {
+                    let error = reader.next().await.expect_err("accepted a late key");
+                    assert_eq!(error.kind(), ErrorKind::Decode);
+                    assert!(error.to_string().contains("unknown"), "{error}");
+                } else {
+                    assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [2]);
+                }
+                assert!(reader.next().await.unwrap().is_none());
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn default_mode_ignores_unknown_fields_with_explicit_schema() {
+    let raw = br#"{"id":1,"unknown":1,"nested":{"unknown":2},"items":[{"unknown":3}]}
+        {"id":2,"late":4}"#;
+    let mut reader = JsonAccessor::new(MemoryAccessor::new(raw, 1), strict_schema())
+        .open(request(2, None))
+        .await
+        .unwrap();
+    assert_eq!(ids(&reader.next().await.unwrap().unwrap()), [1, 2]);
+    assert!(reader.next().await.unwrap().is_none());
+}
