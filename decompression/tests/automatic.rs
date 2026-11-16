@@ -3,23 +3,51 @@ use open_arrow_access_decompression::{AutoDecompressionLayer, Compression};
 use open_arrow_access_test_support::{MemoryAccessor, collect_bytes};
 
 #[test]
-fn recognizes_only_complete_case_sensitive_compression_suffixes() {
+fn recognizes_complete_compression_suffixes_ignoring_ascii_case() {
     for (name, expected) in [
         #[cfg(feature = "gzip")]
         ("data.jsonl.gz", Compression::Gzip),
         #[cfg(feature = "gzip")]
+        ("目录/data.JSONL.GZ", Compression::Gzip),
+        #[cfg(feature = "gzip")]
+        ("data.Gz", Compression::Gzip),
+        #[cfg(feature = "gzip")]
         ("data.tgz", Compression::Gzip),
+        #[cfg(feature = "gzip")]
+        ("目录/data.JSONL.TGZ", Compression::Gzip),
+        #[cfg(feature = "gzip")]
+        ("data.Tgz", Compression::Gzip),
         #[cfg(feature = "bz2")]
         ("data.bz2", Compression::Bzip2),
+        #[cfg(feature = "bz2")]
+        ("目录/data.JSONL.BZ2", Compression::Bzip2),
+        #[cfg(feature = "bz2")]
+        ("data.Bz2", Compression::Bzip2),
         #[cfg(feature = "lz4")]
         ("data.lz4", Compression::Lz4),
+        #[cfg(feature = "lz4")]
+        ("目录/data.JSONL.LZ4", Compression::Lz4),
+        #[cfg(feature = "lz4")]
+        ("data.Lz4", Compression::Lz4),
         #[cfg(feature = "zstd")]
         ("data.zst", Compression::Zstd),
         #[cfg(feature = "zstd")]
+        ("目录/data.JSONL.ZST", Compression::Zstd),
+        #[cfg(feature = "zstd")]
+        ("data.Zst", Compression::Zstd),
+        #[cfg(feature = "zstd")]
         ("data.zstd", Compression::Zstd),
+        #[cfg(feature = "zstd")]
+        ("目录/data.JSONL.ZSTD", Compression::Zstd),
+        #[cfg(feature = "zstd")]
+        ("data.Zstd", Compression::Zstd),
+        ("data", Compression::Uncompressed),
+        ("data.GZ.backup", Compression::Uncompressed),
+        ("data.GZ?name=plain", Compression::Uncompressed),
+        ("data.GZ#fragment", Compression::Uncompressed),
+        ("dir.GZ/file", Compression::Uncompressed),
         ("data.tar", Compression::Uncompressed),
         ("data.zip", Compression::Uncompressed),
-        ("data.GZ", Compression::Uncompressed),
         ("data.gz.backup", Compression::Uncompressed),
         ("data.gz?name=plain", Compression::Uncompressed),
         ("dir.gz/file", Compression::Uncompressed),
@@ -69,9 +97,15 @@ async fn plain_objects_keep_ranges_metadata_and_storage_options() {
 async fn disabled_codec_is_rejected_before_storage_opens() {
     for (name, enabled) in [
         ("x.gz", cfg!(feature = "gzip")),
+        ("x.GZ", cfg!(feature = "gzip")),
+        ("x.TgZ", cfg!(feature = "gzip")),
         ("x.bz2", cfg!(feature = "bz2")),
+        ("x.Bz2", cfg!(feature = "bz2")),
         ("x.lz4", cfg!(feature = "lz4")),
+        ("x.LZ4", cfg!(feature = "lz4")),
         ("x.zst", cfg!(feature = "zstd")),
+        ("x.ZST", cfg!(feature = "zstd")),
+        ("x.ZsTd", cfg!(feature = "zstd")),
     ] {
         if enabled {
             continue;
@@ -129,21 +163,63 @@ async fn routes_gzip_with_chunk_limit_metadata_and_terminal_errors() {
 
 // Each enabled codec is exercised independently in single-feature builds too.
 macro_rules! codec_route_test {
-    ($test:ident, $feature:literal, $directory:literal, $fixture:literal, $name:literal) => {
+    ($test:ident, $feature:literal, $directory:literal, $fixture:literal, $($name:literal),+) => {
         #[cfg(feature = $feature)]
         #[tokio::test]
         async fn $test() {
             use open_arrow_access_test_support::fixture;
             let bytes = fixture!($directory, $fixture).await;
-            let accessor = MemoryAccessor::new(&bytes, 1).layer(AutoDecompressionLayer::new());
-            let mut reader = accessor.open($name.into()).await.unwrap();
-            assert!(!reader.capability().read_with_range);
-            assert_eq!(reader.metadata().content_length, None);
-            assert_eq!(reader.metadata().source.as_ref().unwrap().locator(), $name);
-            assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"payload");
+            for name in [$($name),+] {
+                let input = MemoryAccessor::new(&bytes, 1);
+                let observations = input.observations.clone();
+                let accessor = input.layer(AutoDecompressionLayer::new());
+                let mut reader = accessor.open(name.into()).await.unwrap();
+                assert!(!reader.capability().read_with_range);
+                assert_eq!(reader.metadata().content_length, None);
+                assert_eq!(reader.metadata().source.as_ref().unwrap().locator(), name);
+                assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"payload");
+                assert_eq!(observations.requests.lock().unwrap()[0].object.locator(), name);
+            }
         }
     };
 }
-codec_route_test!(routes_bzip2, "bz2", "bz2", "payload.bz2", "data.bz2");
-codec_route_test!(routes_lz4, "lz4", "lz4", "payload.lz4", "data.lz4");
-codec_route_test!(routes_zstd, "zstd", "zstd", "payload.zst", "data.zstd");
+codec_route_test!(
+    routes_gzip_suffixes,
+    "gzip",
+    "gzip",
+    "payload.gz",
+    "data.gz",
+    "data.JSONL.GZ",
+    "data.Gz",
+    "data.TGZ",
+    "data.TgZ"
+);
+codec_route_test!(
+    routes_bzip2,
+    "bz2",
+    "bz2",
+    "payload.bz2",
+    "data.bz2",
+    "data.BZ2",
+    "data.Bz2"
+);
+codec_route_test!(
+    routes_lz4,
+    "lz4",
+    "lz4",
+    "payload.lz4",
+    "data.lz4",
+    "data.LZ4",
+    "data.Lz4"
+);
+codec_route_test!(
+    routes_zstd,
+    "zstd",
+    "zstd",
+    "payload.zst",
+    "data.zstd",
+    "data.ZSTD",
+    "data.ZsTd",
+    "data.ZST",
+    "data.Zst"
+);

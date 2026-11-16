@@ -23,7 +23,7 @@ pub enum Compression {
 }
 
 impl Compression {
-    /// Recognize case-sensitive final suffixes without accessing storage.
+    /// Recognize ASCII case-insensitive final suffixes without accessing storage.
     /// Locators are opaque: query/fragment characters are not removed or decoded.
     /// ZIP/TAR are containers and are not selected by this function.
     /// Recognized compression with a disabled codec returns `Unsupported`;
@@ -41,13 +41,16 @@ impl Compression {
                 }
             }};
         }
-        if path.ends_with(".gz") || path.ends_with(".tgz") {
+        let Some((_, suffix)) = path.rsplit_once('.') else {
+            return Ok(Self::Uncompressed);
+        };
+        if suffix.eq_ignore_ascii_case("gz") || suffix.eq_ignore_ascii_case("tgz") {
             select!("gzip", Gzip)
-        } else if path.ends_with(".bz2") {
+        } else if suffix.eq_ignore_ascii_case("bz2") {
             select!("bz2", Bzip2)
-        } else if path.ends_with(".lz4") {
+        } else if suffix.eq_ignore_ascii_case("lz4") {
             select!("lz4", Lz4)
-        } else if path.ends_with(".zst") || path.ends_with(".zstd") {
+        } else if suffix.eq_ignore_ascii_case("zst") || suffix.eq_ignore_ascii_case("zstd") {
             select!("zstd", Zstd)
         } else {
             Ok(Self::Uncompressed)
