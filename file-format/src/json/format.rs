@@ -14,6 +14,7 @@ use open_arrow_access_core::{
 /// Missing nullable fields become null; unknown fields are ignored. Top-level
 /// arrays and scalar records are rejected. Bare `NaN`, `Infinity`, and `-Infinity`
 /// values are accepted and decoded by Arrow as floating-point values.
+/// String fields also accept numbers and booleans; numeric text is preserved.
 #[derive(Clone, Debug)]
 pub struct JsonFormat {
     schema: Option<SchemaRef>,
@@ -62,6 +63,7 @@ impl JsonFormat {
 
     fn build_decoder(&self, schema: SchemaRef, request: &ReadRequest) -> Result<Decoder> {
         ReaderBuilder::new(schema)
+            .with_coerce_primitive(true)
             .with_batch_size(request.options.batch_size.get())
             .build_decoder()
             .map_err(super::error::open_error)

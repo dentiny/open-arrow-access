@@ -13,7 +13,8 @@ use arrow_array::{Array, Int64Array, StringArray};
 use arrow_schema::{ArrowError, DataType, Field, IntervalUnit, Schema, TimeUnit};
 use more_asserts::assert_lt;
 use open_arrow_access_core::{
-    Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, RecordBatch, ScanPlanner, SchemaRef,
+    Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, RecordBatch, RecordReader,
+    ScanPlanner, SchemaRef,
 };
 
 use open_arrow_access_file_format::json::JsonAccessor;
@@ -540,4 +541,62 @@ async fn inference_deduces_float_types_for_bare_nonfinite_values_only() {
             .value(0)
             .is_nan()
     );
+}
+
+#[tokio::test]
+async fn utf8_fields_coerce_scalars_without_reformatting_numbers() {
+    let raw = br#"{"value":"text"} {"value":1} {"value":1.2300e+04}
+        {"value":9007199254740993} {"value":true} {"value":false} {"value":null}"#;
+    for infer in [false, true] {
+        let input = MemoryAccessor::new(raw, 1);
+        let accessor = if infer {
+            JsonAccessor::infer(input)
+        } else {
+            JsonAccessor::new(
+                input,
+                Arc::new(Schema::new(vec![Field::new("value", DataType::Utf8, true)])),
+            )
+        };
+        for planned in [false, true] {
+            let mut reader: Box<dyn RecordReader> = if planned {
+                Box::new(
+                    accessor
+                        .plan_scan(request(2, None))
+                        .await
+                        .unwrap()
+                        .into_reader(),
+                )
+            } else {
+                accessor.open(request(2, None)).await.unwrap()
+            };
+            assert_eq!(
+                reader.metadata().schema.field(0).data_type(),
+                &DataType::Utf8
+            );
+            let mut values = Vec::new();
+            while let Some(batch) = reader.next().await.unwrap() {
+                let strings = batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap();
+                values.extend(strings.iter().map(|value| value.map(str::to_owned)));
+            }
+            assert_eq!(
+                values
+                    .iter()
+                    .map(|value| value.as_deref())
+                    .collect::<Vec<_>>(),
+                [
+                    Some("text"),
+                    Some("1"),
+                    Some("1.2300e+04"),
+                    Some("9007199254740993"),
+                    Some("true"),
+                    Some("false"),
+                    None
+                ]
+            );
+        }
+    }
 }
