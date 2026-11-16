@@ -9,6 +9,7 @@ Byte decompression layers use the same contract but require [codec features](../
 
 | Layer | Use it for | Key behavior |
 | --- | --- | --- |
+| `MetricsLayer` | Observe byte/record reads | In-memory aggregates by default; optional OpenDAL instrumentation |
 | `SchemaEvolutionLayer` | Add computed columns, remove, rename, or cast top-level columns | Ordered DataFusion Expr / SQL operations; fixed output schema |
 | `SamplingLayer` | Seeded Bernoulli row sampling | Approximate count; preserves selected row order |
 | `ParallelReadLayer` | Execute independent scan partitions concurrently | Requires `ScanPlanner`; preserves output order by default |
@@ -155,3 +156,9 @@ state machine. Preserve the effective reader capability with `with_capability`.
 
 See [adding a layer](../docs/extending.md#add-a-layer) and the
 [`SamplingLayer` implementation](src/sampling.rs) for a compact complete example.
+
+## Metrics
+
+`MetricsLayer` observes byte or record accessors with a default in-memory exporter.
+See [read metrics](../docs/metrics.md) for OpenDAL I/O integration, snapshots,
+byte-count semantics and custom exporters.

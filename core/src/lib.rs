@@ -13,6 +13,7 @@ mod factory_accessor;
 mod field_index;
 mod layer;
 mod list_files;
+pub mod metrics;
 mod prepared_source;
 mod project_batch;
 mod read_all;
