@@ -1,3 +1,4 @@
+use open_arrow_access_decompression::tar::TarEntryReader;
 use std::{
     num::NonZeroUsize,
     sync::{Arc, OnceLock},
@@ -130,7 +131,7 @@ where
     A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,
 {
     async fn plan_scan(&self, request: ArxivReadRequest) -> Result<ScanPlan> {
-        let (schema, _) = request.options.resolve_projection(&record_schema())?;
+        let schema = request.options.resolve_projection(&record_schema())?.schema;
         let include_data = FieldNameIndex::new(schema.fields()).get("data").is_some();
         let archives = self
             .service
@@ -163,7 +164,11 @@ where
                         while builder.len() < rows
                             && (builder.is_empty() || payload_bytes < target_bytes)
                         {
-                            let Some((entry, mut body)) = tar.next_entry().await? else {
+                            let Some(TarEntryReader {
+                                entry,
+                                reader: mut body,
+                            }) = tar.next_entry().await?
+                            else {
                                 break;
                             };
                             if !entry.is_file {

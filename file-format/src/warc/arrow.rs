@@ -89,7 +89,7 @@ pub(super) fn raw_projection(output: &SchemaRef) -> Result<SchemaRef> {
         ..Default::default()
     }
     .resolve_projection(&raw_arrow_schema())
-    .map(|(schema, _)| schema)
+    .map(|projection| projection.schema)
 }
 
 #[async_trait]
@@ -112,7 +112,7 @@ impl ReaderFactory for WarcArrowFormat {
         request
             .options
             .resolve_projection(&arrow_schema())
-            .map(|(schema, _)| schema)
+            .map(|projection| projection.schema)
     }
 
     async fn create_reader(

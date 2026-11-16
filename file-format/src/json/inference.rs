@@ -25,10 +25,15 @@ impl Default for JsonInferenceOptions {
     }
 }
 
+pub(super) struct InferredJson {
+    pub schema: SchemaRef,
+    pub input: Box<dyn ByteReader>,
+}
+
 pub(super) async fn infer(
     mut input: Box<dyn ByteReader>,
     options: JsonInferenceOptions,
-) -> Result<Option<(SchemaRef, Box<dyn ByteReader>)>> {
+) -> Result<Option<InferredJson>> {
     let metadata = input.metadata().clone();
     let mut buffered = Vec::new();
     let mut offset = 0;
@@ -75,8 +80,8 @@ pub(super) async fn infer(
     // Replay every fetched byte, including any lookahead, without reopening storage.
     let replay = stream::iter((!buffered.is_empty()).then_some(Ok(buffered.into())))
         .chain(into_stream(input));
-    Ok(Some((
-        Arc::new(schema),
-        Box::new(StreamReader::new(replay, metadata)),
-    )))
+    Ok(Some(InferredJson {
+        schema: Arc::new(schema),
+        input: Box::new(StreamReader::new(replay, metadata)),
+    }))
 }

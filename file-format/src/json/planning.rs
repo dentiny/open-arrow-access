@@ -1,4 +1,4 @@
-use crate::inference::SchemaInference;
+use crate::inference::{ResolvedFormat, SchemaInference};
 
 use bytes::BytesMut;
 use futures::stream;
@@ -23,7 +23,7 @@ where
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
-        let Some((format, input)) = format.resolve_schema(input).await? else {
+        let Some(ResolvedFormat { format, input }) = format.resolve_schema(input).await? else {
             return Ok(crate::inference::empty_plan(request));
         };
         let prepared = match prepared {

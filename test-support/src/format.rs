@@ -78,8 +78,17 @@ pub async fn assert_terminal_error(
     crate::reader::assert_terminal_error(reader, reads, kind, metadata_snapshot).await
 }
 
-fn metadata_snapshot(metadata: &RecordMetadata) -> (SchemaRef, Option<ObjectRef>) {
-    (metadata.schema.clone(), metadata.source.clone())
+#[derive(Debug, PartialEq)]
+struct MetadataSnapshot {
+    schema: SchemaRef,
+    source: Option<ObjectRef>,
+}
+
+fn metadata_snapshot(metadata: &RecordMetadata) -> MetadataSnapshot {
+    MetadataSnapshot {
+        schema: metadata.schema.clone(),
+        source: metadata.source.clone(),
+    }
 }
 
 /// Collect a successful single-file read, checking source identity, schema

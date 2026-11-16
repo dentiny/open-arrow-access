@@ -56,7 +56,7 @@ where
         });
     }
     let union_schema = Arc::new(union_schema.finish());
-    let (target, _) = options.resolve_projection(&union_schema)?;
+    let target = options.resolve_projection(&union_schema)?.schema;
     let metadata = RecordMetadata {
         schema: target.clone(),
         source: None,
@@ -80,7 +80,7 @@ where
                         .map(|field| field.name().clone())
                         .collect(),
                 );
-                request.options.resolve_projection(&source)?.0
+                request.options.resolve_projection(&source)?.schema
             } else {
                 source
             };

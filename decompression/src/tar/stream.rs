@@ -13,6 +13,12 @@ use super::{
     validation::{BLOCK_SIZE, parse_entry},
 };
 
+/// A sequential TAR entry and its lazy, bounded body reader.
+pub struct TarEntryReader {
+    pub entry: TarEntry,
+    pub reader: Box<dyn ByteReader>,
+}
+
 /// Incremental TAR consumption over one sequential source. Entry bodies must be
 /// consumed or dropped before advancing. Dropped bodies are drained on the next
 /// call. No range requests or upfront header index are required. Partial header
@@ -57,7 +63,7 @@ impl TarStream {
 
     /// Advance by one header and return a lazy, bounded sequential body reader.
     /// Once a body is consumed, its reader remains at EOF even after advancement.
-    pub async fn next_entry(&mut self) -> Result<Option<(TarEntry, Box<dyn ByteReader>)>> {
+    pub async fn next_entry(&mut self) -> Result<Option<TarEntryReader>> {
         let mut state = self.state.try_lock().ok_or_else(active_entry)?;
         if state.finished {
             return Ok(None);
@@ -104,7 +110,10 @@ impl TarStream {
         );
         let object = metadata.source.clone();
         let reader = StreamReader::new(stream, metadata).with_object(object);
-        Ok(Some((entry, Box::new(reader))))
+        Ok(Some(TarEntryReader {
+            entry,
+            reader: Box::new(reader),
+        }))
     }
 }
 

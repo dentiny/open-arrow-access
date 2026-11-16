@@ -2,8 +2,8 @@ use super::xml_error;
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
-    RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
-    into_async_read, record_stream_reader,
+    RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result, SchemaRef,
+    async_trait, into_async_read, record_stream_reader,
 };
 use xml_arrow::{InferenceOptions, NamespaceBinding, ReaderOptions, XmlReader, XmlSchema};
 
@@ -101,11 +101,18 @@ impl XmlFormat {
     }
 }
 
+/// Validated XML configuration and optional explicit output schema.
+pub struct PreparedXmlReader {
+    pub validation_schema: XmlSchema,
+    pub options: ReaderOptions,
+    pub explicit_schema: Option<SchemaRef>,
+}
+
 #[async_trait]
 impl ReaderFactory for XmlFormat {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
-    type Prepared = (XmlSchema, ReaderOptions, Option<SchemaRef>);
+    type Prepared = PreparedXmlReader;
 
     fn capability(&self, input: Capability) -> RecordCapability {
         Capability {
@@ -139,17 +146,17 @@ impl ReaderFactory for XmlFormat {
             batch_size: options.batch_size.get(),
             projection: explicit_projection
                 .as_ref()
-                .and_then(|(_, projection)| projection.clone()),
+                .and_then(|projection| projection.indices.clone()),
             ..self.options()
         };
         options
             .validate(&validation_schema, &self.record_path)
             .map_err(xml_error)?;
-        Ok((
+        Ok(PreparedXmlReader {
             validation_schema,
             options,
-            explicit_projection.map(|(schema, _)| schema),
-        ))
+            explicit_schema: explicit_projection.map(|projection| projection.schema),
+        })
     }
 
     async fn create_reader(
@@ -157,7 +164,11 @@ impl ReaderFactory for XmlFormat {
         _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
-        (validation_schema, options, explicit_schema): Self::Prepared,
+        PreparedXmlReader {
+            validation_schema,
+            options,
+            explicit_schema,
+        }: Self::Prepared,
     ) -> Result<Box<dyn RecordReader>> {
         let bindings = self.bindings();
         let input = into_async_read(input, "read_xml");
@@ -175,7 +186,10 @@ impl ReaderFactory for XmlFormat {
             )
             .await
             .map_err(xml_error)?;
-            let (schema, projection) = request.options.resolve_projection(&reader.schema())?;
+            let ResolvedProjection {
+                schema,
+                indices: projection,
+            } = request.options.resolve_projection(&reader.schema())?;
             (reader, schema, projection)
         };
         Ok(Box::new(record_stream_reader(

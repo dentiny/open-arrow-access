@@ -4,7 +4,7 @@ use std::{
 };
 
 use arrow_schema::{DataType, Field, FieldRef, Schema, SchemaRef};
-use open_arrow_access_core::{ReadOptions, Result};
+use open_arrow_access_core::{ReadOptions, ResolvedProjection, Result};
 
 use super::{EvolutionStep, SchemaEvolutionPlan, SourceProjection};
 use crate::{
@@ -186,7 +186,10 @@ impl<'a> EvolutionPlanner<'a> {
             fields,
             self.source.metadata().clone(),
         ));
-        let (target_schema, projection) = options.resolve_projection(&target_schema)?;
+        let ResolvedProjection {
+            schema: target_schema,
+            indices: projection,
+        } = options.resolve_projection(&target_schema)?;
         if let Some(projection) = projection {
             output_indices = projection
                 .into_iter()

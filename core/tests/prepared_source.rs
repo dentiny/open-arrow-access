@@ -7,8 +7,8 @@ use arrow_array::record_batch;
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ErrorKind, OrderRequirement, PreparedSource, ReadOptions, ReadRequest, Reader,
-    RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan,
-    ScanPlanner, StreamReader, async_trait, project_batch,
+    RecordBatch, RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result,
+    ScanPartition, ScanPlan, ScanPlanner, StreamReader, async_trait, project_batch,
 };
 
 #[derive(Clone)]
@@ -41,7 +41,10 @@ impl Accessor for Dataset {
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         self.requests.lock().unwrap().push(request.clone());
         let batch = self.batch.lock().unwrap().clone();
-        let (schema, projection) = request.options.resolve_projection(&batch.schema())?;
+        let ResolvedProjection {
+            schema,
+            indices: projection,
+        } = request.options.resolve_projection(&batch.schema())?;
         let batch = project_batch(batch, projection.as_deref(), schema.clone())?;
         Ok(Box::new(StreamReader::records(
             stream::iter([Ok(batch)]),
@@ -58,9 +61,10 @@ impl Accessor for Dataset {
 impl ScanPlanner for Dataset {
     /// Expose two independent partitions without opening their readers.
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        let (schema, _) = request
+        let schema = request
             .options
-            .resolve_projection(&self.batch.lock().unwrap().schema())?;
+            .resolve_projection(&self.batch.lock().unwrap().schema())?
+            .schema;
         let partitions = (0..2)
             .map(|_| {
                 let dataset = self.clone();

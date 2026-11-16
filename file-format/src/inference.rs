@@ -1,5 +1,10 @@
 use open_arrow_access_core::{ByteReader, Result, async_trait};
 
+pub(crate) struct ResolvedFormat<F> {
+    pub format: F,
+    pub input: Box<dyn ByteReader>,
+}
+
 /// Resolve a format's schema before decoding or partitioning an opened input.
 ///
 /// An explicit schema leaves the input unread. Otherwise, implementations infer a
@@ -17,7 +22,7 @@ pub(crate) trait SchemaInference: Sized + Send + Sync {
     async fn resolve_schema(
         &self,
         input: Box<dyn ByteReader>,
-    ) -> Result<Option<(Self, Box<dyn ByteReader>)>>;
+    ) -> Result<Option<ResolvedFormat<Self>>>;
 }
 
 /// Empty schema inference is a normal zero-column, zero-row scan.

@@ -138,16 +138,22 @@ enum ListKind {
     FixedSizeList(i32),
 }
 
+struct ListType<'a> {
+    kind: ListKind,
+    item: &'a Field,
+}
+
 impl ListKind {
-    fn from_type(data_type: &DataType) -> Option<(Self, &Field)> {
-        Some(match data_type {
+    fn from_type(data_type: &DataType) -> Option<ListType<'_>> {
+        let (kind, item) = match data_type {
             DataType::List(item) => (Self::List, item),
             DataType::LargeList(item) => (Self::LargeList, item),
             DataType::ListView(item) => (Self::ListView, item),
             DataType::LargeListView(item) => (Self::LargeListView, item),
             DataType::FixedSizeList(item, size) => (Self::FixedSizeList(*size), item),
             _ => return None,
-        })
+        };
+        Some(ListType { kind, item })
     }
 
     fn finish(self, item: Field) -> DataType {
@@ -168,7 +174,7 @@ impl UnionType {
             let mut union = FieldUnion::default();
             union.merge(fields).expect("a new field has no conflicts");
             Self::Struct(union)
-        } else if let Some((kind, item)) = ListKind::from_type(data_type) {
+        } else if let Some(ListType { kind, item }) = ListKind::from_type(data_type) {
             Self::List {
                 kind,
                 item: Box::new(UnionField::new(item)),
@@ -189,9 +195,9 @@ impl UnionType {
         match (self, data_type) {
             (Self::Struct(union), DataType::Struct(fields)) => union.merge(fields),
             (Self::List { kind, item }, other)
-                if ListKind::from_type(other).is_some_and(|(other, _)| *kind == other) =>
+                if ListKind::from_type(other).is_some_and(|other| *kind == other.kind) =>
             {
-                item.merge(ListKind::from_type(other).unwrap().1)
+                item.merge(ListKind::from_type(other).unwrap().item)
             }
             (Self::Leaf(left), right) if left == right => Ok(()),
             (left, right) => {
@@ -296,7 +302,7 @@ mod tests {
                     )])
                 }),
             );
-            let (_, item) = ListKind::from_type(schema.field(0).data_type()).unwrap();
+            let ListType { item, .. } = ListKind::from_type(schema.field(0).data_type()).unwrap();
             assert!(!item.is_nullable());
             let DataType::Struct(children) = item.data_type() else {
                 panic!("expected struct");

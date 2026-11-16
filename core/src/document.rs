@@ -78,7 +78,10 @@ where
     async fn open(&self, request: D::Request) -> Result<Box<dyn RecordReader>> {
         let ordering = self.capability().ordering;
         let full_schema = self.decoder.prepare(&request)?;
-        let (schema, _) = request.read_options().resolve_projection(&full_schema)?;
+        let schema = request
+            .read_options()
+            .resolve_projection(&full_schema)?
+            .schema;
         let byte_request = ByteReadRequest::from(&request);
         let metadata = RecordMetadata {
             schema: schema.clone(),

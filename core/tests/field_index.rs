@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use arrow_schema::{DataType, Field, Schema};
-use open_arrow_access_core::{ErrorKind, FieldNameIndex, ReadOptions};
+use open_arrow_access_core::{ErrorKind, FieldNameIndex, ReadOptions, ResolvedProjection};
 
 #[test]
 fn owns_names_and_matches_first_duplicate_without_scanning() {
@@ -36,7 +36,10 @@ fn wide_projections_keep_requested_order_metadata_and_errors() {
         .rev()
         .map(|i| format!("c{i}"))
         .collect::<Vec<_>>();
-    let (projected, indices) = ReadOptions {
+    let ResolvedProjection {
+        schema: projected,
+        indices,
+    } = ReadOptions {
         projection: Some(columns.clone()),
         ..Default::default()
     }
@@ -61,7 +64,10 @@ fn wide_projections_keep_requested_order_metadata_and_errors() {
         .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
     }
-    let (empty, indices) = ReadOptions {
+    let ResolvedProjection {
+        schema: empty,
+        indices,
+    } = ReadOptions {
         projection: Some(vec![]),
         ..Default::default()
     }

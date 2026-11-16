@@ -58,7 +58,7 @@ pub use record_batch_builder::{FieldValue, RecordBatchBuilder, RecordBatchRow};
 pub use record_stream::{map_record_reader, record_stream_reader};
 pub use request::{
     ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ListRequest, ObjectRef, ReadOptions,
-    ReadOptionsProvider, ReadRequest,
+    ReadOptionsProvider, ReadRequest, ResolvedProjection,
 };
 pub use statistics::{ScanStatistics, Statistic, StatisticsProvider};
 pub use stream_reader::{StreamReader, bytes_reader};

@@ -1,5 +1,6 @@
 use open_arrow_access::{
     ByteReadOptions,
+    decompression::tar::TarEntryReader,
     service::arxiv::{ArxivKind, ArxivService},
     storage::{OpenDalAccessor, opendal},
 };
@@ -31,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .next()
             .map(|index| index.parse::<usize>())
             .transpose()?;
-        while let Some((entry, mut reader)) = archive.next_entry().await? {
+        while let Some(TarEntryReader { entry, mut reader }) = archive.next_entry().await? {
             println!(
                 "{}\t{}\t{} bytes",
                 entry.index,

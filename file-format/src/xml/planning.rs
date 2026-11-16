@@ -1,8 +1,8 @@
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, OrderRequirement, ReadRequest, ReaderFactory,
-    RecordMetadata, RecordReader, Result, ScanPlan, async_trait, into_async_read,
-    record_stream_reader,
+    RecordMetadata, RecordReader, ResolvedProjection, Result, ScanPlan, async_trait,
+    into_async_read, record_stream_reader,
 };
 use xml_arrow::{XmlBatchBuilder, infer_records, read_records};
 
@@ -16,7 +16,11 @@ where
 {
     async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = self.binding.factory();
-        let (validation_schema, mut options, explicit_schema) = format.prepare(&request)?;
+        let super::PreparedXmlReader {
+            validation_schema,
+            mut options,
+            explicit_schema,
+        } = format.prepare(&request)?;
         let input = self
             .binding
             .storage()
@@ -42,8 +46,10 @@ where
             )
             .await
             .map_err(error::xml_error)?;
-            let (output_schema, projection) =
-                request.options.resolve_projection(&schema.arrow_schema())?;
+            let ResolvedProjection {
+                schema: output_schema,
+                indices: projection,
+            } = request.options.resolve_projection(&schema.arrow_schema())?;
             options.projection = projection;
             (schema, records, output_schema)
         };

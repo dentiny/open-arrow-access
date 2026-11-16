@@ -10,6 +10,6 @@ mod reader;
 mod validation;
 
 pub use accessor::CsvAccessor;
-pub use csv_format::CsvFormat;
-pub use format::CsvFileFormat;
+pub use csv_format::{CsvFormat, CsvSchemaInference};
+pub use format::{CsvFileFormat, PreparedCsvReader};
 pub use inference::CsvInferenceOptions;
