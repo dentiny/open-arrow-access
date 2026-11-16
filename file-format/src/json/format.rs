@@ -97,9 +97,7 @@ impl SchemaInference for JsonFormat {
         let Some((schema, input)) = inference::infer(input, self.inference).await? else {
             return Ok(None);
         };
-        let mut resolved = self.clone();
-        resolved.schema = Some(schema);
-        Ok(Some((resolved, input)))
+        Ok(Some((Self::new(schema), input)))
     }
 }
 

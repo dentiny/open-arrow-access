@@ -62,9 +62,6 @@ The example expects `id` and `title` in the inferred schema. Use an explicit
 schema when the input contract is known. Projection uses top-level field names
 in caller order; an empty projection retains row counts with zero columns.
 Metadata declares a fixed schema before the first batch.
-JSON readers always reject unknown fields, including nested struct fields and
-new keys after schema inference. They validate and decode the full input schema
-before projection; unselected columns also undergo type and nullability checks.
 
 ## Composition and parallel reads
 
