@@ -7,6 +7,8 @@ pub use automatic::{AutoDecompressionAccessor, AutoDecompressionLayer, Compressi
 #[cfg(any(feature = "tar", feature = "zip"))]
 mod archive;
 mod codec;
+mod compression_factory;
+pub use compression_factory::CompressionFactory;
 mod decoded_reader;
 mod factory;
 mod layer;

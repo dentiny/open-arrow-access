@@ -91,15 +91,7 @@ impl CsvDialect {
 
 /// Inspect only suffixes; object locators are not URLs or filesystem paths here.
 pub(super) fn delimiter_from_path(path: &str) -> Option<u8> {
-    let (stem, extension) = path.rsplit_once('.')?;
-    let extension = if ["gz", "bz2", "lz4", "zst", "zstd"]
-        .iter()
-        .any(|suffix| extension.eq_ignore_ascii_case(suffix))
-    {
-        stem.rsplit_once('.')?.1
-    } else {
-        extension
-    };
+    let (_, extension) = path.rsplit_once('.')?;
     if extension.eq_ignore_ascii_case("csv") {
         Some(b',')
     } else if extension.eq_ignore_ascii_case("tsv") {

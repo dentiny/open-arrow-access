@@ -3,7 +3,7 @@ use open_arrow_access_decompression::{AutoDecompressionLayer, Compression};
 use open_arrow_access_test_support::{MemoryAccessor, collect_bytes};
 
 #[test]
-fn recognizes_only_complete_case_sensitive_compression_suffixes() {
+fn recognizes_only_complete_compression_suffixes() {
     for (name, expected) in [
         #[cfg(feature = "gzip")]
         ("data.jsonl.gz", Compression::Gzip),
@@ -19,7 +19,8 @@ fn recognizes_only_complete_case_sensitive_compression_suffixes() {
         ("data.zstd", Compression::Zstd),
         ("data.tar", Compression::Uncompressed),
         ("data.zip", Compression::Uncompressed),
-        ("data.GZ", Compression::Uncompressed),
+        #[cfg(feature = "gzip")]
+        ("data.GZ", Compression::Gzip),
         ("data.gz.backup", Compression::Uncompressed),
         ("data.gz?name=plain", Compression::Uncompressed),
         ("dir.gz/file", Compression::Uncompressed),
@@ -69,6 +70,7 @@ async fn plain_objects_keep_ranges_metadata_and_storage_options() {
 async fn disabled_codec_is_rejected_before_storage_opens() {
     for (name, enabled) in [
         ("x.gz", cfg!(feature = "gzip")),
+        ("x.GZ", cfg!(feature = "gzip")),
         ("x.bz2", cfg!(feature = "bz2")),
         ("x.lz4", cfg!(feature = "lz4")),
         ("x.zst", cfg!(feature = "zstd")),

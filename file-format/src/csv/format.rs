@@ -12,14 +12,15 @@ use open_arrow_access_core::{
     ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
     RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
 };
+use open_arrow_access_decompression::CompressionFactory;
 use std::sync::Arc;
 
 /// Incrementally read CSV or TSV using an explicit or inferred positional schema.
 /// Selects comma for `.csv` and tab for `.tsv` per input, with automatic header
 /// detection. Other extensions use the configured delimiter (comma by default). Use
 /// [`Self::with_dialect`] for structural options and [`Self::with_header`] to override.
-/// Extension matching is case-insensitive and ignores one optional `.gz`, `.bz2`,
-/// `.lz4`, `.zst`, or `.zstd` suffix; configure decompression separately.
+/// Extension matching is case-insensitive and strips one suffix registered with
+/// the compression factory; configure byte decompression separately.
 /// Recognized extensions override the configured delimiter, preserving all other
 /// dialect options. Locators are opaque: query/fragment characters are not stripped.
 #[derive(Clone, Debug)]
@@ -29,6 +30,7 @@ pub struct CsvFileFormat {
     options: CsvOptions,
     header: CsvHeader,
     delimiter_resolved: bool,
+    compression_factory: CompressionFactory,
 }
 
 #[derive(Clone, Debug)]
@@ -46,6 +48,7 @@ impl CsvFileFormat {
             options: CsvOptions::Dialect(CsvDialect::default()),
             header: CsvHeader::Auto,
             delimiter_resolved: false,
+            compression_factory: CompressionFactory::default(),
         }
     }
 
@@ -55,7 +58,10 @@ impl CsvFileFormat {
         // comma-separated bytes even when the original locator ends in `.tsv`.
         format.delimiter_resolved = true;
         if !self.delimiter_resolved
-            && let Some(delimiter) = super::dialect::delimiter_from_path(request.object.locator())
+            && let Some(delimiter) = super::dialect::delimiter_from_path(
+                self.compression_factory
+                    .strip_suffix(request.object.locator()),
+            )
         {
             match &mut format.options {
                 CsvOptions::Dialect(dialect) => dialect.delimiter = delimiter,
@@ -65,6 +71,13 @@ impl CsvFileFormat {
             }
         }
         format
+    }
+
+    /// Share compression suffix registrations with the byte decompression layer.
+    /// This affects suffix recognition only; bytes are still decoded by the layer.
+    pub fn with_compression_factory(mut self, factory: CompressionFactory) -> Self {
+        self.compression_factory = factory;
+        self
     }
 
     pub fn with_inference_options(mut self, options: CsvInferenceOptions) -> Self {

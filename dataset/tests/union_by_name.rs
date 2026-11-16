@@ -9,7 +9,7 @@ use open_arrow_access_dataset::{
     directory::{DirectoryAccessor, DirectoryRequest},
     file_set::{FileSetAccessor, FileSetRequest},
 };
-use open_arrow_access_decompression::AutoDecompressionLayer;
+use open_arrow_access_decompression::{AutoDecompressionLayer, CompressionFactory};
 use open_arrow_access_file_format::{
     csv::CsvAccessor, json::JsonAccessor, parquet::ParquetAccessor,
 };
@@ -317,7 +317,35 @@ async fn parquet_union_by_name_only_relaxes_missing_fields() {
 }
 
 #[tokio::test]
-async fn mixed_csv_and_gzip_tsv_file_set() {
+async fn mixed_csv_and_compressed_tsv_file_set() {
+    use futures::{StreamExt, TryStreamExt, io::AsyncReadExt};
+    use open_arrow_access_decompression::{Codec, CompressedInput, DecodedInput};
+
+    // Application-defined codec: XOR bytes, with an extension unknown to the library.
+    #[derive(Clone)]
+    struct Xor;
+    impl Codec for Xor {
+        fn name(&self) -> &'static str {
+            "xor"
+        }
+        fn decoder(&self, mut input: CompressedInput) -> DecodedInput {
+            Box::pin(
+                futures::stream::once(async move {
+                    let mut bytes = Vec::new();
+                    input.read_to_end(&mut bytes).await?;
+                    for byte in &mut bytes {
+                        *byte ^= 0x55;
+                    }
+                    Ok::<_, std::io::Error>(bytes)
+                })
+                .boxed()
+                .into_async_read(),
+            )
+        }
+    }
+    let mut factory = CompressionFactory::new();
+    factory.register(".XOR", Xor).unwrap();
+    assert!(factory.extensions().any(|extension| extension == "xor"));
     let dir = tempfile::tempdir().unwrap();
     tokio::fs::write(dir.path().join("a.csv"), b"id,title\n1,first\n")
         .await
@@ -327,8 +355,15 @@ async fn mixed_csv_and_gzip_tsv_file_set() {
     tokio::fs::write(dir.path().join("b.tsv.gz"), encoder.finish().unwrap())
         .await
         .unwrap();
+    let custom: Vec<_> = b"id\ttitle\n3\tcustom\n"
+        .iter()
+        .map(|byte| byte ^ 0x55)
+        .collect();
+    tokio::fs::write(dir.path().join("c.tsv.xor"), custom)
+        .await
+        .unwrap();
     let storage = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()))
-        .layer(AutoDecompressionLayer::new());
+        .layer(AutoDecompressionLayer::new().with_factory(factory.clone()));
     for infer in [false, true] {
         let source = if infer {
             CsvAccessor::infer(storage.clone())
@@ -342,11 +377,11 @@ async fn mixed_csv_and_gzip_tsv_file_set() {
             )
             .with_header(open_arrow_access_file_format::csv::CsvHeader::Present)
         };
-        let files = FileSetAccessor::new(source)
+        let files = FileSetAccessor::new(source.with_compression_factory(factory.clone()))
             .with_union_by_name()
             .with_file_planning();
         for planned in [false, true] {
-            let request = FileSetRequest::new(["a.csv", "b.tsv.gz"]);
+            let request = FileSetRequest::new(["a.csv", "b.tsv.gz", "c.tsv.xor"]);
             let mut reader = if planned {
                 files
                     .clone()
@@ -361,7 +396,7 @@ async fn mixed_csv_and_gzip_tsv_file_set() {
             while let Some(batch) = reader.next().await.unwrap() {
                 ids.extend(batch.column(0).as_primitive::<Int64Type>().iter());
             }
-            assert_eq!(ids, [Some(1), Some(2)]);
+            assert_eq!(ids, [Some(1), Some(2), Some(3)]);
         }
     }
 }

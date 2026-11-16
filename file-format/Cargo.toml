@@ -8,7 +8,7 @@ description = "Arrow file-format readers for Open Arrow Access"
 
 [features]
 atif = ["dep:atif-arrow"]
-csv = ["dep:arrow-array", "dep:arrow-csv", "dep:arrow-schema", "dep:csv", "dep:csv-async", "dep:regex"]
+csv = ["dep:open-arrow-access-decompression", "dep:arrow-array", "dep:arrow-csv", "dep:arrow-schema", "dep:csv", "dep:csv-async", "dep:regex"]
 default = []
 json = ["dep:arrow-json", "dep:arrow-schema", "dep:bytes", "dep:serde_json"]
 parquet = ["dep:parquet", "dep:arrow-schema"]
@@ -20,6 +20,7 @@ warc = ["dep:warc", "dep:arrow-schema", "dep:open-arrow-access-layers"]
 xml = ["dep:xml-arrow"]
 
 [dependencies]
+open-arrow-access-decompression = { workspace = true, optional = true }
 open-arrow-access-layers = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }

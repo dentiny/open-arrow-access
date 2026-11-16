@@ -4,6 +4,9 @@
 
 - Select CSV/TSV delimiters automatically per file extension in CSV accessors and formats,
   including compressed suffixes, schema inference, and native parallel scans.
+- Add `CompressionFactory` with user-defined codec registration and shared suffix
+  lookup for automatic decompression and CSV/TSV delimiter selection. Compression
+  suffix matching is now case-insensitive.
 
 ## 0.3.1
 
