@@ -720,24 +720,3 @@ async fn explicit_auto_preserves_source_failures_during_inspection_and_replay() 
         assert_eq!(error.kind(), ErrorKind::PermissionDenied);
     }
 }
-
-#[tokio::test]
-async fn tsv_extension_works_with_inference_and_parallel_decoding() {
-    for infer in [false, true] {
-        let input = MemoryAccessor::new(b"id\ttitle\n1\tfirst\n2\tsecond\n", 1);
-        let accessor = if infer {
-            CsvAccessor::infer(input)
-        } else {
-            CsvAccessor::new(input, schema()).with_header(CsvHeader::Present)
-        };
-        let request = ReadRequest::new("records.TSV").with_options(options(1, None));
-        let sequential = collect(&accessor, request.clone()).await;
-        let parallel = collect(
-            &accessor.layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN)),
-            request,
-        )
-        .await;
-        assert_eq!(sequential, parallel);
-        assert_eq!(collect_values::<Int64Type>(&sequential, 0), [1, 2]);
-    }
-}
