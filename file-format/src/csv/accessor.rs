@@ -11,6 +11,14 @@ impl<B> FileAccessor<B, CsvFileFormat> {
         Self::from_format(inner, CsvFileFormat::infer())
     }
 
+    /// Share registered compression suffixes with the byte decompression layer.
+    pub fn with_compression_factory(
+        self,
+        factory: open_arrow_access_decompression::CompressionFactory,
+    ) -> Self {
+        self.map_format(|format| format.with_compression_factory(factory))
+    }
+
     pub fn with_inference_options(self, options: CsvInferenceOptions) -> Self {
         self.map_format(|format| format.with_inference_options(options))
     }

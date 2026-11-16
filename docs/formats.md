@@ -88,7 +88,15 @@ Later incompatible values fail decoding. Empty inputs, samples explicitly marked
 Present that contain only a header, all-null sampled columns, and duplicate/empty
 headers require an explicit schema.
 For identifiers with significant leading zeros, supply an explicit string schema.
-Configure TSV with `with_dialect(CsvDialect { delimiter: b'\t', ..Default::default() })`.
+CSV and TSV may share a file set: each input automatically uses comma for `.csv`
+or tab for `.tsv`, case-insensitively, after stripping one suffix registered with
+`CompressionFactory`. This overrides the configured delimiter; other extensions
+keep it. Other dialect options are preserved. For custom codecs, pass the same
+configured factory to `AutoDecompressionLayer::with_factory` and
+`CsvAccessor::with_compression_factory` (or the corresponding format method).
+See [codec registration](../decompression/README.md#register-a-custom-codec).
+Decompression remains separate; query/fragment characters are not stripped.
+
 Header policy is resolved once before parallel partitioning and shared by all workers.
 `CsvFormat` is this crate's options wrapper around Arrow 58's CSV format, with
 the existing builder methods and `.with_header_validation(true)` preserved.

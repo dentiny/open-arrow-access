@@ -2,11 +2,11 @@
 use std::num::NonZeroUsize;
 
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, FactoryAccessor, FactoryToken,
-    Layer, ListRequest, ObjectStream, ReaderFactory, Result, async_trait,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, FactoryAccessor, Layer,
+    ListRequest, ObjectStream, Result, async_trait,
 };
 
-use crate::layer::DEFAULT_CHUNK_SIZE;
+use crate::CompressionFactory;
 
 /// Compression of one complete object. This is independent of its decoded file format.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -23,38 +23,10 @@ pub enum Compression {
 }
 
 impl Compression {
-    /// Recognize ASCII case-insensitive final suffixes without accessing storage.
-    /// Locators are opaque: query/fragment characters are not removed or decoded.
-    /// ZIP/TAR are containers and are not selected by this function.
-    /// Recognized compression with a disabled codec returns `Unsupported`;
-    /// it is never silently treated as uncompressed bytes.
+    /// Recognize registered built-in suffixes, case-insensitively, without I/O.
+    /// Disabled codecs return Unsupported before storage opens.
     pub fn from_path(path: &str) -> Result<Self> {
-        macro_rules! select {
-            ($feature:literal, $variant:ident) => {{
-                #[cfg(feature = $feature)]
-                {
-                    Ok(Self::$variant)
-                }
-                #[cfg(not(feature = $feature))]
-                {
-                    Err(crate::error::disabled_codec($feature))
-                }
-            }};
-        }
-        let Some((_, suffix)) = path.rsplit_once('.') else {
-            return Ok(Self::Uncompressed);
-        };
-        if suffix.eq_ignore_ascii_case("gz") || suffix.eq_ignore_ascii_case("tgz") {
-            select!("gzip", Gzip)
-        } else if suffix.eq_ignore_ascii_case("bz2") {
-            select!("bz2", Bzip2)
-        } else if suffix.eq_ignore_ascii_case("lz4") {
-            select!("lz4", Lz4)
-        } else if suffix.eq_ignore_ascii_case("zst") || suffix.eq_ignore_ascii_case("zstd") {
-            select!("zstd", Zstd)
-        } else {
-            Ok(Self::Uncompressed)
-        }
+        CompressionFactory::default().builtin_from_path(path)
     }
 }
 
@@ -63,7 +35,7 @@ impl Compression {
 /// select archive entries, rewrite locators, or infer the decoded record format.
 #[derive(Clone, Debug)]
 pub struct AutoDecompressionLayer {
-    chunk_size: NonZeroUsize,
+    factory: CompressionFactory,
 }
 
 impl Default for AutoDecompressionLayer {
@@ -75,13 +47,19 @@ impl Default for AutoDecompressionLayer {
 impl AutoDecompressionLayer {
     pub fn new() -> Self {
         Self {
-            chunk_size: DEFAULT_CHUNK_SIZE,
+            factory: CompressionFactory::default(),
         }
+    }
+
+    /// Use registered codecs and suffixes, including application-defined codecs.
+    pub fn with_factory(mut self, factory: CompressionFactory) -> Self {
+        self.factory = factory;
+        self
     }
 
     /// Bound each decoded output chunk; pass-through chunks are unchanged.
     pub fn with_chunk_size(mut self, chunk_size: NonZeroUsize) -> Self {
-        self.chunk_size = chunk_size;
+        self.factory = self.factory.with_chunk_size(chunk_size);
         self
     }
 }
@@ -91,12 +69,7 @@ impl<A: ByteAccessor> Layer<A> for AutoDecompressionLayer {
 
     fn layer(&self, inner: A) -> Self::Layered {
         AutoDecompressionAccessor {
-            binding: FactoryAccessor::new(
-                inner,
-                AutoFactory {
-                    chunk_size: self.chunk_size,
-                },
-            ),
+            binding: FactoryAccessor::new(inner, self.factory.clone()),
         }
     }
 }
@@ -104,7 +77,7 @@ impl<A: ByteAccessor> Layer<A> for AutoDecompressionLayer {
 /// A byte accessor that may decompress each object independently.
 #[derive(Clone, Debug)]
 pub struct AutoDecompressionAccessor<A> {
-    binding: FactoryAccessor<A, AutoFactory>,
+    binding: FactoryAccessor<A, CompressionFactory>,
 }
 
 #[async_trait]
@@ -127,63 +100,5 @@ impl<A: ByteAccessor> Accessor for AutoDecompressionAccessor<A> {
 impl<A: ByteAccessor> ByteAccessor for AutoDecompressionAccessor<A> {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
         self.binding.storage().list(request).await
-    }
-}
-
-#[derive(Clone, Debug)]
-struct AutoFactory {
-    chunk_size: NonZeroUsize,
-}
-
-#[async_trait]
-impl ReaderFactory for AutoFactory {
-    type Request = ByteReadRequest;
-    type Prepared = Compression;
-    type Reader = dyn ByteReader;
-
-    fn capability(&self, input: Capability) -> Capability {
-        // Per-object readers can be more specific; the mixed accessor cannot promise ranges.
-        Capability {
-            read: input.read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-    }
-
-    fn prepare(&self, request: &ByteReadRequest) -> Result<Compression> {
-        Compression::from_path(request.object.locator())
-    }
-
-    async fn create_reader(
-        &self,
-        _token: &FactoryToken,
-        input: Box<dyn ByteReader>,
-        _request: ByteReadRequest,
-        compression: Compression,
-    ) -> Result<Box<dyn ByteReader>> {
-        let _chunk_size = self.chunk_size;
-        // Keeping the concrete codec factories avoids a second decompression implementation.
-        #[allow(unused_macros)]
-        macro_rules! decode {
-            ($codec:expr) => {{
-                use open_arrow_access_core::ReaderFactoryExt;
-                crate::DecompressionFactory::new($codec)
-                    .with_chunk_size(_chunk_size)
-                    .open_input(input, _request)
-                    .await
-            }};
-        }
-        match compression {
-            Compression::Uncompressed => Ok(input),
-            #[cfg(feature = "gzip")]
-            Compression::Gzip => decode!(crate::gzip::Gzip),
-            #[cfg(feature = "bz2")]
-            Compression::Bzip2 => decode!(crate::bz2::Bzip2),
-            #[cfg(feature = "lz4")]
-            Compression::Lz4 => decode!(crate::lz4::Lz4),
-            #[cfg(feature = "zstd")]
-            Compression::Zstd => decode!(crate::zstd::Zstd),
-        }
     }
 }

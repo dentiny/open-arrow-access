@@ -1,11 +1,5 @@
 use open_arrow_access_core::{Error, ErrorKind};
 
-#[cfg(any(
-    not(feature = "gzip"),
-    not(feature = "bz2"),
-    not(feature = "lz4"),
-    not(feature = "zstd")
-))]
 pub(crate) fn disabled_codec(feature: &str) -> Error {
     Error::new(
         ErrorKind::Unsupported,

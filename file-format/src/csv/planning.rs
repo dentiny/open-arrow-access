@@ -18,7 +18,7 @@ where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
     async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        let format = self.binding.factory().clone();
+        let format = self.binding.factory().for_request(&request);
         let Some(dialect) = format.parallel_dialect() else {
             return Ok(ScanPlan::whole_input(self.open(request).await?)
                 .with_ordering(self.capability().ordering));

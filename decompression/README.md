@@ -53,6 +53,36 @@ fails before opening storage. Other suffixes pass through. This removes one
 compression layer, without sniffing bytes, stripping URL query strings, guessing
 record formats, or opening archive members.
 
+## Register a custom codec
+
+`CompressionFactory` owns extension-to-codec registrations. Its defaults include
+the built-in suffixes above; `register` adds or replaces a suffix with any
+application-defined `Codec`. `extensions()` lists registered suffixes, including
+built-in codecs whose features are disabled. `strip_suffix()` uses that same
+registry without decoding. Clones share immutable registrations; changing one
+clone does not change previously configured readers.
+
+For CSV/TSV, share the configured factory with both byte decoding and format
+selection so a custom suffix works without modifying the format crate:
+
+```rust,no_run
+use open_arrow_access::{
+    Accessor, AccessorExt, ByteAccessor, ReadRequest, Result,
+    decompression::{AutoDecompressionLayer, Codec, CompressionFactory},
+    file_format::csv::CsvAccessor,
+};
+
+async fn read_custom<B: ByteAccessor, C: Codec>(bytes: B, codec: C) -> Result<()> {
+    let mut factory = CompressionFactory::new();
+    factory.register("custom", codec)?;
+    let bytes = bytes.layer(AutoDecompressionLayer::new().with_factory(factory.clone()));
+    let csv = CsvAccessor::infer(bytes).with_compression_factory(factory);
+    let mut reader = csv.open(ReadRequest::new("records.tsv.custom")).await?;
+    while let Some(batch) = reader.next().await? { println!("{} rows", batch.num_rows()); }
+    Ok(())
+}
+```
+
 Decoded readers are sequential and have unknown decoded length; exact ranges
 are unsupported. Source/version still identify the compressed object. Listing
 and byte request options pass through. Parquet/ZIP cannot directly consume this

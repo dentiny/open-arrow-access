@@ -12,17 +12,25 @@ use open_arrow_access_core::{
     ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
     RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
 };
+use open_arrow_access_decompression::CompressionFactory;
 use std::sync::Arc;
 
 /// Incrementally read CSV or TSV using an explicit or inferred positional schema.
-/// Defaults to comma-separated input with automatic header detection. Use
+/// Selects comma for `.csv` and tab for `.tsv` per input, with automatic header
+/// detection. Other extensions use the configured delimiter (comma by default). Use
 /// [`Self::with_dialect`] for structural options and [`Self::with_header`] to override.
+/// Extension matching is case-insensitive and strips one suffix registered with
+/// the compression factory; configure byte decompression separately.
+/// Recognized extensions override the configured delimiter, preserving all other
+/// dialect options. Locators are opaque: query/fragment characters are not stripped.
 #[derive(Clone, Debug)]
 pub struct CsvFileFormat {
     schema: Option<SchemaRef>,
     inference: CsvInferenceOptions,
     options: CsvOptions,
     header: CsvHeader,
+    delimiter_resolved: bool,
+    compression_factory: CompressionFactory,
 }
 
 #[derive(Clone, Debug)]
@@ -39,7 +47,37 @@ impl CsvFileFormat {
             inference: CsvInferenceOptions::default(),
             options: CsvOptions::Dialect(CsvDialect::default()),
             header: CsvHeader::Auto,
+            delimiter_resolved: false,
+            compression_factory: CompressionFactory::default(),
         }
+    }
+
+    pub(super) fn for_request(&self, request: &ReadRequest) -> Self {
+        let mut format = self.clone();
+        // Resolve once, before inference or framing. Workers consume canonical
+        // comma-separated bytes even when the original locator ends in `.tsv`.
+        format.delimiter_resolved = true;
+        if !self.delimiter_resolved
+            && let Some(delimiter) = super::dialect::delimiter_from_path(
+                self.compression_factory
+                    .strip_suffix(request.object.locator()),
+            )
+        {
+            match &mut format.options {
+                CsvOptions::Dialect(dialect) => dialect.delimiter = delimiter,
+                CsvOptions::Custom(options) => {
+                    *options = options.clone().with_delimiter(delimiter);
+                }
+            }
+        }
+        format
+    }
+
+    /// Share compression suffix registrations with the byte decompression layer.
+    /// This affects suffix recognition only; bytes are still decoded by the layer.
+    pub fn with_compression_factory(mut self, factory: CompressionFactory) -> Self {
+        self.compression_factory = factory;
+        self
     }
 
     pub fn with_inference_options(mut self, options: CsvInferenceOptions) -> Self {
@@ -158,12 +196,14 @@ impl SchemaInference for CsvFileFormat {
         else {
             return Ok(None);
         };
-        let format = Self::new(schema).with_dialect(CsvDialect {
+        let mut format = Self::new(schema).with_dialect(CsvDialect {
             header: has_header.into(),
             validate_header: dialect.validate_header,
             allow_truncated_rows: dialect.allow_truncated_rows,
             ..CsvDialect::default()
         });
+        // Inference replays canonical CSV, regardless of the source extension.
+        format.delimiter_resolved = true;
         Ok(Some((format, input)))
     }
 }
@@ -185,11 +225,12 @@ impl ReaderFactory for CsvFileFormat {
     }
 
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
-        let prepared = self.prepare_scan(request)?;
-        if self.header == CsvHeader::Auto {
+        let format = self.for_request(request);
+        let prepared = format.prepare_scan(request)?;
+        if format.header == CsvHeader::Auto {
             return Ok(None);
         }
-        Ok(prepared.map(|prepared| self.decoder(prepared, request)))
+        Ok(prepared.map(|prepared| format.decoder(prepared, request)))
     }
 
     async fn create_reader(
@@ -202,7 +243,8 @@ impl ReaderFactory for CsvFileFormat {
         let (input, schema, decoder, header) = match prepared {
             Some((schema, decoder, header)) => (input, schema, decoder, header),
             None => {
-                let Some((format, input)) = self.resolve_schema(input).await? else {
+                let format = self.for_request(&request);
+                let Some((format, input)) = format.resolve_schema(input).await? else {
                     return Ok(Box::new(
                         crate::inference::empty_plan(request).into_reader(),
                     ));

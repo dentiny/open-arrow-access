@@ -357,7 +357,7 @@ async fn parallel_csv_custom_dialect_is_lazy_and_opaque_formats_remain_unsplit()
         .with_partition_options(DecodePartitionOptions {
             target_bytes: NonZeroUsize::new(4).unwrap(),
         });
-    let request = ReadRequest::new("custom.csv").with_options(options(10, None));
+    let request = ReadRequest::new("custom.data").with_options(options(10, None));
     let mut reader = accessor
         .clone()
         .layer(ParallelReadLayer::new(
