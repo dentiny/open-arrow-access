@@ -78,4 +78,6 @@ pub use async_trait::async_trait;
 pub use bytes::Bytes;
 
 mod scan;
-pub use scan::{EmissionPolicy, ParallelReadOptions, ScanPartition, ScanPlan, ScanPlanner};
+pub use scan::{
+    EmissionPolicy, ParallelReadOptions, RecordScanAccessor, ScanPartition, ScanPlan, ScanPlanner,
+};

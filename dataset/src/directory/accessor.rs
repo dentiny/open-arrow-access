@@ -71,37 +71,45 @@ where
     B: ByteAccessor,
 {
     async fn resolve(&self, request: DirectoryRequest) -> Result<FileSetRequest> {
-        let super::validation::ResolvedGlob {
-            prefix,
-            pattern: glob,
-        } = resolve_glob(request.prefix.locator())?;
-        let match_options = glob::MatchOptions {
-            case_sensitive: true,
-            require_literal_separator: true,
-            require_literal_leading_dot: false,
-        };
-        let objects = list_files(
-            &self.discovery,
-            ListRequest::new(prefix).with_recursive(request.recursive),
-            |relative| {
-                Ok(!relative.is_empty()
-                    && !relative.ends_with('/')
-                    && glob
-                        .as_ref()
-                        .is_none_or(|pattern| pattern.matches_with(relative, match_options))
-                    && request
-                        .suffix
-                        .as_ref()
-                        .is_none_or(|suffix| relative.ends_with(suffix)))
-            },
-        )
-        .await?;
-        Ok(FileSetRequest {
-            objects,
-            options: request.options,
-            byte_options: request.byte_options,
-        })
+        resolve_files(&self.discovery, request).await
     }
+}
+
+/// Shared directory discovery; preserves the existing glob, sorting and deduplication rules.
+pub(crate) async fn resolve_files<B: ByteAccessor>(
+    discovery: &B,
+    request: DirectoryRequest,
+) -> Result<FileSetRequest> {
+    let super::validation::ResolvedGlob {
+        prefix,
+        pattern: glob,
+    } = resolve_glob(request.prefix.locator())?;
+    let match_options = glob::MatchOptions {
+        case_sensitive: true,
+        require_literal_separator: true,
+        require_literal_leading_dot: false,
+    };
+    let objects = list_files(
+        discovery,
+        ListRequest::new(prefix).with_recursive(request.recursive),
+        |relative| {
+            Ok(!relative.is_empty()
+                && !relative.ends_with('/')
+                && glob
+                    .as_ref()
+                    .is_none_or(|pattern| pattern.matches_with(relative, match_options))
+                && request
+                    .suffix
+                    .as_ref()
+                    .is_none_or(|suffix| relative.ends_with(suffix)))
+        },
+    )
+    .await?;
+    Ok(FileSetRequest {
+        objects,
+        options: request.options,
+        byte_options: request.byte_options,
+    })
 }
 
 #[async_trait]

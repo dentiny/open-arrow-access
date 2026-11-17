@@ -9,7 +9,10 @@ description = "Sequential file-set and directory datasets for Open Arrow Access"
 [features]
 default = []
 directory = ["dep:glob"]
-auto-format = ["dep:open-arrow-access-decompression"]
+auto-format = ["directory", "dep:open-arrow-access-file-format", "dep:open-arrow-access-decompression"]
+format-csv = ["open-arrow-access-file-format/csv"]
+format-parquet = ["open-arrow-access-file-format/parquet"]
+format-warc = ["open-arrow-access-file-format/warc"]
 
 [dependencies]
 arrow-array.workspace = true
@@ -17,6 +20,7 @@ arrow-schema.workspace = true
 futures.workspace = true
 glob = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
+open-arrow-access-file-format = { workspace = true, optional = true }
 open-arrow-access-decompression = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -49,6 +53,10 @@ required-features = ["directory"]
 [[test]]
 name = "union_by_name"
 required-features = ["directory"]
+
+[[test]]
+name = "auto_format"
+required-features = ["auto-format", "format-csv", "format-parquet", "format-warc"]
 
 [[test]]
 name = "format_policy"

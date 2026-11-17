@@ -89,3 +89,28 @@ to expose file-internal partitions too. `UnorderedEmissionLayer` can opt eligibl
 sources into ready-batch emission; sources requiring global order reject it.
 See [layer composition](../layers/README.md) for placement of sampling and
 generated columns after parallel execution.
+
+## Select the format automatically
+
+Enable `dataset-auto-format` on the facade plus the `format-*` readers and
+`decompression-*` codecs you need. On this crate, use `auto-format` and `format-*`.
+
+```rust,ignore
+let auto = AutoFormatAccessor::new(storage);
+let request = AutoFormatRequest::Directory(DirectoryRequest::new("data/**/*"));
+let selected = auto.resolve(request.clone()).await?;
+let reader = auto.layer(ParallelReadLayer::new(concurrency, prefetch)).open(request).await?;
+```
+
+Suffix detection performs no I/O. `FormatPolicy` defaults to Parquet exclusivity,
+CSV/TSV compatibility, and ignoring unknown files. `resolve` also lists directories,
+but does not decode Arrow records. Mixed formats return
+`InvalidInput` with examples; no recognized files returns `NotFound`.
+
+CSV dialect and explicit CSV schemas are accessor settings; projection,
+batch size, and byte options remain on the request. Native file planning and union
+by name support record layers. Parquet keeps raw range reads and size hints already
+configured on storage with `with_content_lengths`. Discovery does not snapshot data.
+
+JSON and ATIF auto-detection are added in the next PR; JSON selections currently
+return `Unsupported`. Existing typed JSON/ATIF readers are unchanged.
