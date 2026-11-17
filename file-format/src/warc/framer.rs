@@ -4,14 +4,11 @@ use futures::{
     stream::{self, BoxStream},
 };
 use open_arrow_access_core::{
-    BytePosition, ByteReader, Error, ErrorKind, PositionedAsyncRead, Result,
-    into_positioned_async_read,
+    ByteReader, Error, ErrorKind, PositionedAsyncRead, Result, into_positioned_async_read,
 };
 use open_arrow_access_layers::{SourceFramer, SourceUnit};
 
-const UNIT_BYTES: usize = 64 << 20;
-
-/// Groups physical WARC records into independently decodable units.
+/// Frames each physical WARC record as an independently decodable unit.
 ///
 /// Use with `SourceColumnsLayer` and positioned input (for compressed storage,
 /// install `SourcePositionLayer` before this framer). Headers are parsed and
@@ -26,11 +23,7 @@ const UNIT_BYTES: usize = 64 << 20;
 ///     .with_framer(WarcFramer)
 ///     .with_offset("record_offset");
 /// ```
-/// Units group complete records until they reach an internal 64 MiB target.
-/// This is a batching target, not a size limit: the final record may take a unit
-/// past it, and individual records are never rejected because of their size.
-/// Units and decoded batches are buffered in memory; account for record size
-/// and concurrently executing units when budgeting memory.
+/// Each unit contains one complete record and its original byte coordinate.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WarcFramer;
 
@@ -38,34 +31,14 @@ impl SourceFramer for WarcFramer {
     fn frame(&self, input: Box<dyn ByteReader>) -> BoxStream<'static, Result<SourceUnit>> {
         let input = into_positioned_async_read(input, "frame_warc");
         stream::try_unfold(input, |mut input| async move {
-            let mut writer = warc::WarcWriter::new(Vec::new());
-            let mut positions = Vec::new();
-            let mut bytes = 0;
-            while bytes < UNIT_BYTES {
-                let Some((position, written)) = read_record(&mut input, &mut writer).await? else {
-                    break;
-                };
-                positions.push(position);
-                bytes += written;
-            }
-            Ok((!positions.is_empty()).then(|| {
-                (
-                    SourceUnit {
-                        bytes: writer.into_inner().into(),
-                        positions,
-                    },
-                    input,
-                )
-            }))
+            let unit = read_record(&mut input).await?;
+            Ok(unit.map(|unit| (unit, input)))
         })
         .boxed()
     }
 }
 
-async fn read_record(
-    input: &mut PositionedAsyncRead,
-    writer: &mut warc::WarcWriter<Vec<u8>>,
-) -> Result<Option<(BytePosition, usize)>> {
+async fn read_record(input: &mut PositionedAsyncRead) -> Result<Option<SourceUnit>> {
     // Ignore inter-record whitespace without buffering it or assigning it to a
     // record's coordinate. Do not wrap in BufReader: read-ahead would move marks.
     loop {
@@ -104,9 +77,13 @@ async fn read_record(
             "WARC input has no byte positions",
         )
     })?;
-    let written = writer
+    let mut writer = warc::WarcWriter::new(Vec::new());
+    writer
         .write_raw(record.0, &record.1)
         .await
         .map_err(super::decode_error)?;
-    Ok(Some((position, written)))
+    Ok(Some(SourceUnit {
+        bytes: writer.into_inner().into(),
+        positions: vec![position],
+    }))
 }

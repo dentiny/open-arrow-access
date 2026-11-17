@@ -49,8 +49,8 @@ The layer never inspects WARC headers or assumes one row per frame.
 Units must cover the input once in logical order and produce the same schema.
 Each unit becomes one lazy scan partition. Planning inspects the first unit;
 later units are discovered as the execution window has room. Each partition
-opens an ordinary format reader. Group several records per unit to amortize
-reader creation. The layer buffers decoded batches within a unit and validates
+opens an ordinary format reader. Custom framers may group several records per
+unit to amortize reader creation. The layer buffers decoded batches within a unit and validates
 its complete row count before exposing any batch, so memory usage depends on
 unit size and the parallel partition budget. Inference must resolve the same
 schema for each unit; use an explicit format schema when needed. An empty input
@@ -62,12 +62,9 @@ whitespace is skipped before marking the next record's coordinate. Header casing
 and order may change; bodies and source coordinates are preserved. It accepts
 positioned uncompressed or frame-decoded input; it does not decompress by itself.
 
-`WarcFramer` has no configuration fields. It groups complete records until a
-unit reaches an internal 64 MiB batching target, then starts the next unit.
-Individual records can exceed that target and are accepted without splitting.
-Memory usage depends on record size, parser buffers, decoded batches, and the
-number of parallel units. Malformed or truncated WARC returns `Decode`, and
-missing byte coordinates returns `Unsupported`.
+`WarcFramer` has no configuration fields. Each unit contains one complete record
+and its original byte coordinate. Malformed or truncated WARC returns `Decode`,
+and missing byte coordinates returns `Unsupported`.
 
 The WARC integration test uses the built-in framer to exercise compression
 members, Arrow batches, and layer composition. A separate CSV test supplies

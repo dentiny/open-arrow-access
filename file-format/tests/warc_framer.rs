@@ -47,7 +47,7 @@ async fn units_preserve_binary_bodies_case_insensitive_headers_and_coordinates()
         let units = frame(&input, chunk).await;
         assert_eq!(
             units.iter().map(|u| u.positions.len()).collect::<Vec<_>>(),
-            [5]
+            [1, 1, 1, 1, 1]
         );
         assert_eq!(
             units
@@ -115,12 +115,12 @@ async fn unpositioned_input_returns_unsupported() {
 }
 
 #[tokio::test]
-async fn records_larger_than_the_batching_target_are_accepted() {
-    let body = vec![b'x'; (64 << 20) + 1];
+async fn large_record_bodies_are_preserved() {
+    let body = vec![b'x'; 128 * 1024];
     let large = record(&body);
     let small = record(b"tail");
     let input = [large.as_slice(), small.as_slice()].concat();
-    let units = frame(&input, 1024 * 1024).await;
+    let units = frame(&input, 4096).await;
     assert_eq!(units.len(), 2);
     assert_eq!(units[0].positions, [BytePosition::Stored(0)]);
     assert_eq!(
