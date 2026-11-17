@@ -11,15 +11,17 @@ use crate::{
 #[cfg(any(feature = "format-csv", feature = "format-warc"))]
 use open_arrow_access_core::Layer;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, Capability, Error, ErrorKind, ObjectRef, ReadOptions,
-    ReadOptionsProvider, RecordCapability, RecordReader, RecordScanAccessor, Result, ScanPlan,
-    ScanPlanner, SchemaRef, async_trait,
+    Accessor, ByteAccessor, Capability, Error, ObjectRef, ReadOptions, ReadOptionsProvider,
+    RecordCapability, RecordReader, RecordScanAccessor, Result, ScanPlan, ScanPlanner, SchemaRef,
+    async_trait,
 };
 #[cfg(any(feature = "format-csv", feature = "format-warc"))]
 use open_arrow_access_decompression::AutoDecompressionLayer;
 use std::sync::Arc;
 
 mod detection;
+mod error;
+mod validation;
 pub use detection::{DetectedFormat, detect_format, select_format};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,10 +100,6 @@ impl<B> AutoFormatAccessor<B> {
     }
 }
 
-fn error(kind: ErrorKind, message: impl Into<String>, object: Option<&ObjectRef>) -> Error {
-    Error::new(kind, "resolve_auto_format", message).with_object(object)
-}
-
 impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
     #[cfg(any(feature = "format-csv", feature = "format-warc"))]
     fn decoded(&self) -> Arc<dyn ByteAccessor> {
@@ -140,10 +138,10 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
 
     async fn resolve_files(&self, request: &FileSetRequest) -> Result<ResolvedFormat> {
         let (detected, objects) = match self.format {
-            Some(_) if request.objects.is_empty() => {
-                return Err(error(ErrorKind::NotFound, "no dataset files", None));
+            Some(format) => {
+                validation::validate_files(&request.objects)?;
+                (format, request.objects.clone())
             }
-            Some(format) => (format, request.objects.clone()),
             None => select_format(&request.objects)?,
         };
         let format = match detected {
@@ -160,13 +158,7 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
         kind: ResolvedKind,
         object: Option<&ObjectRef>,
     ) -> Result<Arc<dyn RecordScanAccessor>> {
-        if self.schema.is_some() && !matches!(kind, ResolvedKind::CsvOrTsv | ResolvedKind::Json) {
-            return Err(error(
-                ErrorKind::InvalidInput,
-                "explicit schema is supported only for CSV and ordinary JSON",
-                object,
-            ));
-        }
+        validation::validate_schema(self.schema.as_ref(), kind, object)?;
         match kind {
             #[cfg(feature = "format-parquet")]
             ResolvedKind::Parquet => Ok(Arc::new(
@@ -191,11 +183,7 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
                 open_arrow_access_file_format::warc::WarcArrowAccessor::new(self.decoded()),
             )),
             #[allow(unreachable_patterns)]
-            _ => Err(error(
-                ErrorKind::Unsupported,
-                format!("reader feature is disabled for {kind:?}"),
-                object,
-            )),
+            _ => Err(error::disabled_reader(kind, object)),
         }
     }
 

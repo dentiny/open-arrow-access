@@ -1,4 +1,6 @@
-use open_arrow_access_core::{Error, ErrorKind, ObjectRef, Result};
+use open_arrow_access_core::{ObjectRef, Result};
+
+use super::{error, validation};
 use open_arrow_access_decompression::CompressionFactory;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,28 +56,12 @@ pub fn select_format(objects: &[ObjectRef]) -> Result<(DetectedFormat, Vec<Objec
         .iter()
         .filter_map(|object| detect_format(object.locator()).map(|format| (format, object)));
     let Some((first, example)) = detected.next() else {
-        return Err(Error::new(
-            ErrorKind::NotFound,
-            "select_format",
-            "no recognized dataset files",
-        )
-        .with_object(objects.first()));
+        return Err(error::no_recognized_files(objects.first()));
     };
     let mut selected = Vec::with_capacity(objects.len());
     selected.push(example.clone());
     for (other, object) in detected {
-        if other != first {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "select_format",
-                format!(
-                    "mixed formats {first:?} ({:?}) and {other:?} ({:?})",
-                    example.locator(),
-                    object.locator()
-                ),
-            )
-            .with_object(Some(object)));
-        }
+        validation::validate_same_format(first, example, other, object)?;
         selected.push(object.clone());
     }
     Ok((first, selected))
