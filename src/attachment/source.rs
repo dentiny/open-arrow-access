@@ -1,5 +1,9 @@
 use super::{AttachmentFormat, AttachmentOptions};
-use crate::{BinaryDecoder, BoundSource, ByteAccessor, DocumentAccessor, ReadRequest, Result};
+use crate::{
+    Accessor, BinaryDecoder, BoundSource, ByteAccessor, DocumentAccessor, ReadRequest,
+    RecordReader, Result,
+};
+use std::sync::Arc;
 
 /// Bind one logical attachment name and complete read request to an Arrow source.
 ///
@@ -36,7 +40,7 @@ where
     let accessor = options.outer_compression.apply(accessor);
     match options.format {
         AttachmentFormat::Binary => {
-            BoundSource::bind(DocumentAccessor::new(accessor, BinaryDecoder), request).await
+            bind_records(DocumentAccessor::new(accessor, BinaryDecoder), request).await
         }
         AttachmentFormat::Csv | AttachmentFormat::Tsv => {
             #[cfg(feature = "format-csv")]
@@ -54,7 +58,7 @@ where
                     },
                     ..Default::default()
                 });
-                BoundSource::bind(FileAccessor::from_format(accessor, format), request).await
+                bind_records(FileAccessor::from_format(accessor, format), request).await
             }
             #[cfg(not(feature = "format-csv"))]
             {
@@ -65,7 +69,7 @@ where
             #[cfg(feature = "format-json")]
             {
                 use crate::file_format::{FileAccessor, json::JsonFormat};
-                BoundSource::bind(
+                bind_records(
                     FileAccessor::from_format(accessor, JsonFormat::infer()),
                     request,
                 )
@@ -80,7 +84,7 @@ where
             #[cfg(feature = "format-parquet")]
             {
                 use crate::file_format::parquet::ParquetAccessor;
-                BoundSource::bind(ParquetAccessor::new(accessor), request).await
+                bind_records(ParquetAccessor::new(accessor), request).await
             }
             #[cfg(not(feature = "format-parquet"))]
             {
@@ -91,7 +95,7 @@ where
             #[cfg(feature = "format-xml")]
             {
                 use crate::file_format::{FileAccessor, xml::XmlFormat};
-                BoundSource::bind(
+                bind_records(
                     FileAccessor::from_format(accessor, XmlFormat::new(record_path)),
                     request,
                 )
@@ -104,4 +108,15 @@ where
             }
         }
     }
+}
+
+// Erase the record accessor before binding. Besides keeping the async state small,
+// this gives callers a Send future when using the helper from async-trait methods.
+async fn bind_records(
+    accessor: impl Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
+    request: ReadRequest,
+) -> Result<BoundSource> {
+    let accessor: Arc<dyn Accessor<Request = ReadRequest, Reader = dyn RecordReader>> =
+        Arc::new(accessor);
+    BoundSource::bind(accessor, request).await
 }
