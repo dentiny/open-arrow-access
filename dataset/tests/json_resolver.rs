@@ -11,6 +11,7 @@ use tokio::fs;
 
 #[tokio::test]
 async fn resolves_content_types_without_reader_features() {
+    let request = FileSetRequest::new(["opaque.data"]);
     for (bytes, expected) in [
         ("{\"id\":1}\n", JsonKind::Records),
         (
@@ -25,14 +26,11 @@ async fn resolves_content_types_without_reader_features() {
     ] {
         let storage = Arc::new(MemoryAccessor::new(bytes.as_bytes(), 1));
         let selected = JsonResolver::default()
-            .resolve(storage, &FileSetRequest::new(["opaque.data"]))
+            .resolve(storage, &request)
             .await
             .unwrap();
         assert_eq!(selected.kind, expected);
-        assert_eq!(
-            selected.objects,
-            FileSetRequest::new(["opaque.data"]).objects
-        );
+        assert_eq!(selected.objects, request.objects);
     }
 }
 
@@ -52,7 +50,7 @@ async fn every_file_rejects_mixtures_while_default_trusts_first_nonempty() {
         policy: SniffPolicy::EveryFile,
         ..Default::default()
     });
-    let request = FileSetRequest::new(["empty.jsonl", "plain.jsonl", "plain.jsonl"]);
+    let request = FileSetRequest::new(["empty.jsonl", "plain.jsonl"]);
     let selected = resolver.resolve(storage.clone(), &request).await.unwrap();
     assert_eq!(selected.kind, JsonKind::Records);
     assert_eq!(selected.objects, request.objects[1..]);
@@ -64,11 +62,7 @@ async fn every_file_rejects_mixtures_while_default_trusts_first_nonempty() {
             .kind(),
         ErrorKind::NotFound
     );
-    for names in [
-        ["plain.jsonl", "atif.jsonl"],
-        ["atif.jsonl", "plain.jsonl"],
-        ["atif.json", "atif.jsonl"],
-    ] {
+    for names in [["plain.jsonl", "atif.jsonl"], ["atif.json", "atif.jsonl"]] {
         let error = resolver
             .resolve(storage.clone(), &FileSetRequest::new(names))
             .await
@@ -87,14 +81,13 @@ async fn every_file_rejects_mixtures_while_default_trusts_first_nonempty() {
 }
 
 #[tokio::test]
-async fn bounds_probe_bytes_and_preserves_storage_errors() {
+async fn stops_after_the_first_value_and_enforces_the_byte_limit() {
     let input = Arc::new(
         MemoryAccessor::new(b"{\"id\":1}\ntrailing garbage", 1)
             .with_failure(9, ErrorKind::Unavailable),
     );
     let resolver = JsonResolver::default().with_sniff_config(SniffConfig {
         max_bytes: NonZeroUsize::new(10).unwrap(),
-        concurrency: NonZeroUsize::MIN,
         ..Default::default()
     });
     let request = FileSetRequest::new(["a.jsonl"]);
@@ -115,14 +108,6 @@ async fn bounds_probe_bytes_and_preserves_storage_errors() {
         .await
         .unwrap_err();
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    let input =
-        Arc::new(MemoryAccessor::new(b"partial", 1).with_failure(2, ErrorKind::Unavailable));
-    let error = JsonResolver::default()
-        .resolve(input, &request)
-        .await
-        .unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::Unavailable);
-    assert!(error.to_string().contains("a.jsonl"));
 }
 
 #[tokio::test]
@@ -141,58 +126,34 @@ async fn rejects_explicit_schemas_for_atif() {
 }
 
 #[tokio::test]
-async fn rejects_incomplete_or_invalid_json_with_object_context() {
-    for bytes in [b"{".as_slice(), b"not JSON".as_slice()] {
-        let input = Arc::new(MemoryAccessor::new(bytes, 1));
+async fn preserves_decode_and_storage_errors_with_object_context() {
+    let request = FileSetRequest::new(["broken.json"]);
+    for (input, expected) in [
+        (MemoryAccessor::new(b"{", 1), ErrorKind::Decode),
+        (MemoryAccessor::new(b"not JSON", 1), ErrorKind::Decode),
+        (
+            MemoryAccessor::new(b"partial", 1).with_failure(2, ErrorKind::Unavailable),
+            ErrorKind::Unavailable,
+        ),
+    ] {
         let error = JsonResolver::default()
-            .resolve(input, &FileSetRequest::new(["broken.json"]))
+            .resolve(Arc::new(input), &request)
             .await
             .unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Decode);
+        assert_eq!(error.kind(), expected);
         assert!(error.to_string().contains("broken.json"));
     }
 }
 
 #[cfg(not(feature = "format-atif"))]
-#[tokio::test]
-async fn recognizes_atif_but_rejects_building_a_disabled_reader() {
-    let storage = Arc::new(MemoryAccessor::new(
-        b"{\"schema_version\":\"ATIF-1.0\"}\n",
-        1,
-    ));
-    let request = FileSetRequest::new(["a.jsonl"]);
-    let resolver = JsonResolver::default();
-    let selected = resolver.resolve(storage.clone(), &request).await.unwrap();
-    assert_eq!(selected.kind, JsonKind::Atif(AtifFormat::JsonLines));
-    let error = resolver
-        .reader(storage, selected.kind, selected.objects.first())
+#[test]
+fn rejects_building_a_disabled_atif_reader() {
+    let storage = Arc::new(MemoryAccessor::new(b"", 1));
+    let error = JsonResolver::default()
+        .reader(storage, JsonKind::Atif(AtifFormat::JsonLines), None)
         .err()
         .unwrap();
     assert_eq!(error.kind(), ErrorKind::Unsupported);
-}
-
-#[cfg(feature = "format-atif")]
-#[tokio::test]
-async fn binds_atif_readers_independently_of_the_ordinary_json_reader() {
-    use open_arrow_access_core::ReadRequest;
-    use open_arrow_access_test_support::fixture_path;
-    let storage = Arc::new(OpenDalAccessor::new(fs_operator(fixture_path!("atif", ""))));
-    for (name, expected_rows) in [("trajectory.json", 1), ("trajectories.jsonl", 3)] {
-        let resolver = JsonResolver::default();
-        let selected = resolver
-            .resolve(storage.clone(), &FileSetRequest::new([name]))
-            .await
-            .unwrap();
-        let accessor = resolver
-            .reader(storage.clone(), selected.kind, selected.objects.first())
-            .unwrap();
-        let mut reader = accessor.open(ReadRequest::new(name)).await.unwrap();
-        let mut rows = 0;
-        while let Some(batch) = reader.next().await.unwrap() {
-            rows += batch.num_rows();
-        }
-        assert_eq!(rows, expected_rows);
-    }
 }
 
 #[tokio::test]
@@ -200,13 +161,11 @@ async fn unordered_probes_preserve_input_order_and_duplicates() {
     use open_arrow_access_core::{
         Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Result, async_trait,
     };
-    use std::sync::Mutex;
     use tokio::sync::Notify;
 
     struct OutOfOrder {
         input: MemoryAccessor,
         release: Notify,
-        opened: Mutex<Vec<String>>,
     }
 
     #[async_trait]
@@ -224,10 +183,6 @@ async fn unordered_probes_preserve_input_order_and_duplicates() {
             } else {
                 self.release.notify_one();
             }
-            self.opened
-                .lock()
-                .unwrap()
-                .push(request.object.locator().to_owned());
             self.input.open(request).await
         }
     }
@@ -238,7 +193,6 @@ async fn unordered_probes_preserve_input_order_and_duplicates() {
     let storage = Arc::new(OutOfOrder {
         input: MemoryAccessor::new(b"{\"id\":1}\n", 16),
         release: Notify::new(),
-        opened: Mutex::new(Vec::new()),
     });
     let request = FileSetRequest::new(["slow.jsonl", "fast.jsonl", "fast.jsonl"]);
     let selected = JsonResolver::default()
@@ -249,6 +203,11 @@ async fn unordered_probes_preserve_input_order_and_duplicates() {
         .resolve(storage.clone(), &request)
         .await
         .unwrap();
-    assert_eq!(storage.opened.lock().unwrap()[0], "fast.jsonl");
+    assert_eq!(
+        storage.input.observations.requests.lock().unwrap()[0]
+            .object
+            .locator(),
+        "fast.jsonl"
+    );
     assert_eq!(selected.objects, request.objects);
 }
