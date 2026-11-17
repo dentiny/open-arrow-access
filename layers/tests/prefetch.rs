@@ -52,7 +52,7 @@ fn input(
     ))
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn opening_is_lazy_and_each_reader_preserves_batches_and_metadata() {
     let input = batch(3);
     let batches = vec![input.clone(), input.slice(0, 0), input.slice(1, 2)];
