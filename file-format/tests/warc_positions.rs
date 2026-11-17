@@ -1,9 +1,7 @@
 #![cfg(feature = "warc")]
 
-use arrow_array::{LargeBinaryArray, StringArray};
 use open_arrow_access_core::{
-    BytePosition, ErrorKind, PositionedBatch, ReadOptions, ReadRequest, ReaderFactoryExt,
-    bytes_reader,
+    BytePosition, ErrorKind, ReadOptions, ReadRequest, ReaderFactoryExt, bytes_reader,
 };
 use open_arrow_access_file_format::warc::WarcArrowFormat;
 use open_arrow_access_test_support::MemoryAccessor;
@@ -21,78 +19,18 @@ fn record(body: &[u8]) -> Vec<u8> {
     record
 }
 
-async fn batches(input: &[u8], chunk: usize) -> Vec<PositionedBatch> {
-    let request = ReadRequest::new("data.warc").with_options(ReadOptions {
-        batch_size: NonZeroUsize::new(2).unwrap(),
-        ..Default::default()
-    });
-    let mut reader = WarcArrowFormat
-        .with_source_positions()
-        .open_reader(&MemoryAccessor::new(input, chunk), request)
-        .await
-        .unwrap();
-    let mut batches = Vec::new();
-    while let Some(batch) = reader.next().await.unwrap() {
-        batches.push(batch);
-    }
-    batches
-}
-
 #[tokio::test]
-async fn decoder_batches_preserve_binary_bodies_headers_and_original_coordinates() {
-    let body = b"\0\xff\r\nWARC/1.1\r\n";
-    let record = record(body);
-    let padding = b" \t\r\n";
-    let mut input = padding.to_vec();
-    let mut positions = Vec::new();
-    for _ in 0..5 {
-        positions.push(BytePosition::Stored(input.len() as u64));
-        input.extend_from_slice(&record);
-        input.extend_from_slice(padding);
-    }
-    for chunk in [1, 7, input.len()] {
-        let batches = batches(&input, chunk).await;
-        assert_eq!(
-            batches
-                .iter()
-                .map(|b| b.batch().num_rows())
-                .collect::<Vec<_>>(),
-            [2, 2, 1]
-        );
-        assert_eq!(
-            batches
-                .iter()
-                .flat_map(|b| b.positions().iter().copied())
-                .collect::<Vec<_>>(),
-            positions
-        );
-        for batch in batches {
-            let bodies = batch
-                .batch()
-                .column_by_name("body")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<LargeBinaryArray>()
-                .unwrap();
-            let ids = batch
-                .batch()
-                .column_by_name("record_id")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            for i in 0..batch.batch().num_rows() {
-                assert_eq!(bodies.value(i), body);
-                assert_eq!(ids.value(i), "<urn:test:0>");
-            }
-        }
-    }
-}
-
-#[tokio::test]
-async fn empty_and_whitespace_only_inputs_keep_schema_and_emit_no_batches() {
+async fn empty_and_whitespace_only_inputs_emit_no_batches() {
     for input in [b"".as_slice(), b" \t\r\n\r\n"] {
-        assert!(batches(input, 1).await.is_empty());
+        let mut reader = WarcArrowFormat
+            .with_source_positions()
+            .open_reader(
+                &MemoryAccessor::new(input, 1),
+                ReadRequest::new("data.warc"),
+            )
+            .await
+            .unwrap();
+        assert!(reader.next().await.unwrap().is_none());
     }
 }
 
@@ -189,40 +127,48 @@ async fn zero_column_projection_retains_positions_and_validation_without_read_ah
 }
 
 #[tokio::test]
-async fn positioned_decoding_matches_ordinary_arrow_output_for_all_projections() {
-    let first = record(b"\0\xffbinary");
-    let input = [first.as_slice(), record(b"tail").as_slice()].concat();
-    for projection in [
-        None,
-        Some(vec!["date".into(), "body".into()]),
-        Some(Vec::new()),
-    ] {
-        let request = ReadRequest::new("data.warc").with_options(ReadOptions {
-            batch_size: NonZeroUsize::MIN,
-            projection,
-        });
-        let storage = MemoryAccessor::new(&input, 7);
-        let mut ordinary = WarcArrowFormat
-            .open_reader(&storage, request.clone())
-            .await
-            .unwrap();
-        let mut positioned = WarcArrowFormat
-            .with_source_positions()
-            .open_reader(&storage, request)
-            .await
-            .unwrap();
-        assert_eq!(ordinary.metadata().schema, positioned.metadata().schema);
-        for offset in [0, first.len() as u64] {
-            let expected = ordinary.next().await.unwrap().unwrap();
-            let actual = positioned.next().await.unwrap().unwrap();
-            assert_eq!(actual.positions(), [BytePosition::Stored(offset)]);
-            assert_eq!(actual.batch().schema(), expected.schema());
-            assert_eq!(actual.batch().num_rows(), expected.num_rows());
-            for (actual, expected) in actual.batch().columns().iter().zip(expected.columns()) {
-                assert_eq!(actual.to_data(), expected.to_data());
+async fn positioned_decoding_matches_ordinary_batches_and_tracks_record_starts() {
+    let padding = b" \t\r\n";
+    let record = record(b"\0\xff\r\nWARC/1.1\r\n");
+    let unpadded = record.repeat(5);
+    let mut input = padding.to_vec();
+    let mut positions = Vec::new();
+    for _ in 0..5 {
+        positions.push(BytePosition::Stored(input.len() as u64));
+        input.extend_from_slice(&record);
+        input.extend_from_slice(padding);
+    }
+    for chunk in [1, 7, input.len()] {
+        for projection in [
+            None,
+            Some(vec!["date".into(), "body".into()]),
+            Some(Vec::new()),
+        ] {
+            let request = ReadRequest::new("data.warc").with_options(ReadOptions {
+                batch_size: NonZeroUsize::new(2).unwrap(),
+                projection,
+            });
+            let storage = MemoryAccessor::new(&input, chunk);
+            // The ordinary reader requires records without inter-record padding.
+            let mut ordinary = WarcArrowFormat
+                .open_reader(&MemoryAccessor::new(&unpadded, chunk), request.clone())
+                .await
+                .unwrap();
+            let mut positioned = WarcArrowFormat
+                .with_source_positions()
+                .open_reader(&storage, request)
+                .await
+                .unwrap();
+            assert_eq!(ordinary.metadata().schema, positioned.metadata().schema);
+            for expected_positions in positions.chunks(2) {
+                let expected = ordinary.next().await.unwrap().unwrap();
+                let actual = positioned.next().await.unwrap().unwrap();
+                assert_eq!(actual.positions(), expected_positions);
+                assert_eq!(actual.batch().num_rows(), expected_positions.len());
+                assert_eq!(actual.batch(), &expected);
             }
+            assert!(ordinary.next().await.unwrap().is_none());
+            assert!(positioned.next().await.unwrap().is_none());
         }
-        assert!(ordinary.next().await.unwrap().is_none());
-        assert!(positioned.next().await.unwrap().is_none());
     }
 }

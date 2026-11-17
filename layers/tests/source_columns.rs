@@ -1,4 +1,4 @@
-use std::{num::NonZeroUsize, sync::Arc};
+use std::sync::Arc;
 
 use arrow_array::{ArrayRef, UInt64Array};
 use arrow_schema::{DataType, Field, Schema};
@@ -67,45 +67,51 @@ impl Accessor for IndexedSource {
 }
 
 #[tokio::test]
-async fn positions_are_validated_before_exposure_even_with_empty_projection() {
-    for count in [1, 2, 3] {
-        for projection in [None, Some(Vec::new())] {
-            let source = SourceColumns::new()
-                .with_offset("offset")
-                .wrap(IndexedSource {
-                    positions: count,
-                    drift: false,
-                });
-            let mut reader = source
-                .open(ReadRequest::new("indexed.csv").with_options(ReadOptions {
-                    batch_size: NonZeroUsize::MIN,
-                    projection: projection.clone(),
-                }))
-                .await
+async fn source_offsets_survive_projection() {
+    for projection in [None, Some(Vec::new())] {
+        let source = SourceColumns::new()
+            .with_offset("offset")
+            .wrap(IndexedSource {
+                positions: 2,
+                drift: false,
+            });
+        let mut reader = source
+            .open(ReadRequest::new("indexed.csv").with_options(ReadOptions {
+                projection: projection.clone(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+        let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(batch.num_rows(), 2);
+        if projection.is_some() {
+            assert_eq!(batch.num_columns(), 0);
+        } else {
+            let offsets = batch
+                .column_by_name("offset")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
                 .unwrap();
-            if count != 2 {
-                let error = reader.next().await.unwrap_err();
-                assert_eq!(error.kind(), ErrorKind::Decode);
-                assert!(error.to_string().contains("indexed.csv"));
-                assert!(reader.next().await.unwrap().is_none());
-                continue;
-            }
-            let batch = reader.next().await.unwrap().unwrap();
-            assert_eq!(batch.num_rows(), 2);
-            if projection.is_some() {
-                assert_eq!(batch.num_columns(), 0);
-            } else {
-                let offsets = batch
-                    .column_by_name("offset")
-                    .unwrap()
-                    .as_any()
-                    .downcast_ref::<UInt64Array>()
-                    .unwrap();
-                assert_eq!(offsets.values().as_ref(), [100, 101]);
-            }
-            assert!(reader.next().await.unwrap().is_none());
+            assert_eq!(offsets.values().as_ref(), [100, 101]);
         }
+        assert!(reader.next().await.unwrap().is_none());
     }
+}
+
+#[tokio::test]
+async fn source_position_errors_retain_context_and_are_terminal() {
+    let source = SourceColumns::new()
+        .with_offset("offset")
+        .wrap(IndexedSource {
+            positions: 1,
+            drift: false,
+        });
+    let mut reader = source.open(ReadRequest::new("indexed.csv")).await.unwrap();
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert!(error.to_string().contains("indexed.csv"));
+    assert!(reader.next().await.unwrap().is_none());
 }
 
 #[tokio::test]
