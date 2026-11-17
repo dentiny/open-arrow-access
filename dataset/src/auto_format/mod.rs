@@ -27,7 +27,7 @@ use open_arrow_access_core::{
     ScanPlanner, SchemaRef, async_trait,
 };
 use open_arrow_access_decompression::AutoDecompressionLayer;
-use std::{num::NonZeroUsize, sync::Arc};
+use std::sync::Arc;
 
 // TODO: Support application-defined format registration; see the proposed
 // registration design in docs/extending.md and the tracking item in docs/roadmap.md.
@@ -36,14 +36,7 @@ mod error;
 mod validation;
 pub use detection::{DetectedFormat, detect_format, select_format};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum JsonDetection {
-    /// Inspect every file's first nonblank line; reject different JSON kinds.
-    #[default]
-    EveryFile,
-    /// Trust the first nonempty file. Later files are not checked for mixed kinds.
-    FirstFile,
-}
+pub use sniff::{SniffConfig, SniffPolicy};
 
 /// Resolved input kind, independent of enabled reader features.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,9 +90,7 @@ pub struct AutoFormatAccessor<B> {
     storage: Arc<B>,
     format: Option<DetectedFormat>,
     schema: Option<SchemaRef>,
-    detection: JsonDetection,
-    sniff_bytes: NonZeroUsize,
-    sniff_concurrency: NonZeroUsize,
+    sniff: SniffConfig,
 }
 impl<B> AutoFormatAccessor<B> {
     pub fn new(storage: B) -> Self {
@@ -107,9 +98,7 @@ impl<B> AutoFormatAccessor<B> {
             storage: Arc::new(storage),
             format: None,
             schema: None,
-            detection: JsonDetection::EveryFile,
-            sniff_bytes: NonZeroUsize::new(1024 * 1024).unwrap(),
-            sniff_concurrency: NonZeroUsize::new(8).unwrap(),
+            sniff: SniffConfig::default(),
         }
     }
     /// Read every selected object as this format, without suffix filtering.
@@ -127,18 +116,9 @@ impl<B> AutoFormatAccessor<B> {
         self.schema = schema;
         self
     }
-    pub fn with_json_detection(mut self, detection: JsonDetection) -> Self {
-        self.detection = detection;
-        self
-    }
-    /// Independent preflight budget; record execution layers do not govern discovery.
-    pub fn with_json_sniff_limits(
-        mut self,
-        bytes: NonZeroUsize,
-        concurrency: NonZeroUsize,
-    ) -> Self {
-        self.sniff_bytes = bytes;
-        self.sniff_concurrency = concurrency;
+    /// Configure content sniffing independently of record execution layers.
+    pub fn with_sniff_config(mut self, config: SniffConfig) -> Self {
+        self.sniff = config;
         self
     }
 }
@@ -201,9 +181,9 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
         }
         if format == ResolvedKind::Json {
             let decoded = self.decoded();
-            let concurrency = match self.detection {
-                JsonDetection::EveryFile => self.sniff_concurrency.get(),
-                JsonDetection::FirstFile => 1,
+            let concurrency = match self.sniff.policy {
+                SniffPolicy::EveryFile => self.sniff.concurrency.get(),
+                SniffPolicy::FirstFile => 1,
             };
             let probes = stream::iter(objects.iter().cloned().enumerate())
                 .map(|(index, object)| {
@@ -213,7 +193,7 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
                             decoded.as_ref(),
                             &object,
                             request.byte_options,
-                            self.sniff_bytes.get(),
+                            self.sniff.max_bytes.get(),
                         )
                         .await?;
                         Ok::<_, Error>(kind.map(|kind| (index, object, kind)))
@@ -230,7 +210,7 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
                 ));
             };
             let mut retained = vec![example.clone()];
-            if self.detection == JsonDetection::FirstFile {
+            if self.sniff.policy == SniffPolicy::FirstFile {
                 retained.extend_from_slice(&objects[index + 1..]);
             } else {
                 while let Some((_, object, other)) = probes.try_next().await? {

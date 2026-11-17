@@ -125,7 +125,9 @@ files returns `NotFound`.
 
 JSON probing checks every file's first nonblank line, skips empty files, and rejects
 mixed ordinary JSONL, ATIF JSONL, and ATIF document inputs. Probes have independent
-limits (8 concurrent files, 1 MiB consumed per file). `FirstFile` trusts the first
+limits (8 concurrent files, 1 MiB consumed per file), configured with
+`with_sniff_config(SniffConfig { policy, max_bytes, concurrency })`.
+`SniffPolicy::FirstFile` trusts the first
 nonempty file; later inputs are unchecked. Readers validate subsequent records.
 
 Explicit CSV/ordinary-JSON schemas are accessor settings; custom CSV dialects use

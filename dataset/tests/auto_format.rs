@@ -6,7 +6,8 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_dataset::{
     auto_format::{
-        AutoFormatAccessor, AutoFormatRequest, DetectedFormat, JsonDetection, ResolvedKind,
+        AutoFormatAccessor, AutoFormatRequest, DetectedFormat, ResolvedKind, SniffConfig,
+        SniffPolicy,
     },
     directory::DirectoryRequest,
     file_set::FileSetRequest,
@@ -100,7 +101,10 @@ async fn json_selection_skips_empty_inputs_rejects_mixtures_and_allows_opt_out()
             error.to_string().contains("plain.jsonl") && error.to_string().contains("atif.jsonl")
         );
     }
-    let trusted = auto.with_json_detection(JsonDetection::FirstFile);
+    let trusted = auto.with_sniff_config(SniffConfig {
+        policy: SniffPolicy::FirstFile,
+        ..Default::default()
+    });
     assert_eq!(
         trusted
             .resolve(files(&["empty.jsonl", "plain.jsonl", "missing.jsonl"]))
@@ -136,14 +140,21 @@ async fn resolves_and_opens_both_atif_framings() {
 async fn json_probe_bounds_reads_and_preserves_upstream_errors() {
     let input = MemoryAccessor::new(b"{\"id\":1}\ntrailing garbage", 1)
         .with_failure(9, ErrorKind::Unavailable);
-    let auto = AutoFormatAccessor::new(input)
-        .with_json_sniff_limits(NonZeroUsize::new(10).unwrap(), NonZeroUsize::MIN);
+    let auto = AutoFormatAccessor::new(input).with_sniff_config(SniffConfig {
+        max_bytes: NonZeroUsize::new(10).unwrap(),
+        concurrency: NonZeroUsize::MIN,
+        ..Default::default()
+    });
     assert_eq!(
         auto.resolve(files(&["a.jsonl"])).await.unwrap().format,
         ResolvedKind::Json
     );
     let error = auto
-        .with_json_sniff_limits(NonZeroUsize::new(8).unwrap(), NonZeroUsize::MIN)
+        .with_sniff_config(SniffConfig {
+            max_bytes: NonZeroUsize::new(8).unwrap(),
+            concurrency: NonZeroUsize::MIN,
+            ..Default::default()
+        })
         .resolve(files(&["a.jsonl"]))
         .await
         .unwrap_err();

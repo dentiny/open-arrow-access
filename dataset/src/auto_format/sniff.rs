@@ -3,6 +3,39 @@ use open_arrow_access_core::{
     ByteAccessor, ByteReadOptions, ByteReadRequest, ErrorKind, ObjectRef, Result,
 };
 
+use std::num::NonZeroUsize;
+
+/// How many selected files to inspect during content sniffing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SniffPolicy {
+    /// Inspect every file; reject different content kinds.
+    #[default]
+    EveryFile,
+    /// Trust the first nonempty file. Later files are not checked for mixed kinds.
+    FirstFile,
+}
+
+/// Content sniffing policy and preflight budgets, independent of record execution.
+/// Currently used to distinguish ordinary JSON and ATIF inputs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SniffConfig {
+    pub policy: SniffPolicy,
+    /// Maximum bytes consumed per file while identifying its content kind.
+    pub max_bytes: NonZeroUsize,
+    /// Maximum concurrent file probes. `FirstFile` always probes sequentially.
+    pub concurrency: NonZeroUsize,
+}
+
+impl Default for SniffConfig {
+    fn default() -> Self {
+        Self {
+            policy: SniffPolicy::EveryFile,
+            max_bytes: NonZeroUsize::new(1024 * 1024).unwrap(),
+            concurrency: NonZeroUsize::new(8).unwrap(),
+        }
+    }
+}
+
 /// Match the inspector convention: a partial first line is an ATIF document.
 fn classify(line: &[u8]) -> ResolvedKind {
     let atif = match serde_json::from_slice::<serde_json::Value>(line) {
