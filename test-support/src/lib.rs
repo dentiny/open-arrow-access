@@ -99,8 +99,7 @@ enum Fault {
 pub struct MemoryAccessor {
     data: Bytes,
     chunk_size: usize,
-    ranged: bool,
-    listing: bool,
+    capability: Capability,
     version: Option<String>,
     fault: Option<Fault>,
     open_failure: Option<ErrorKind>,
@@ -116,8 +115,12 @@ impl MemoryAccessor {
         Self {
             data: Bytes::copy_from_slice(data),
             chunk_size,
-            ranged: false,
-            listing: false,
+            capability: Capability {
+                read: true,
+                read_with_range: false,
+                read_parallel: false,
+                list: false,
+            },
             version: None,
             fault: None,
             open_failure: None,
@@ -129,7 +132,7 @@ impl MemoryAccessor {
     }
 
     pub fn with_ranges(mut self) -> Self {
-        self.ranged = true;
+        self.capability.read_with_range = true;
         self
     }
 
@@ -152,7 +155,7 @@ impl MemoryAccessor {
 
     /// Enable a minimal listing that returns the requested prefix as its only object.
     pub fn with_listing(mut self) -> Self {
-        self.listing = true;
+        self.capability.list = true;
         self
     }
 
@@ -188,12 +191,7 @@ impl Accessor for MemoryAccessor {
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: self.ranged,
-            read_parallel: false,
-            list: self.listing,
-        }
+        self.capability
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
@@ -205,10 +203,13 @@ impl Accessor for MemoryAccessor {
         if let Some(kind) = self.open_failure {
             return Err(crate::error::injected_open(kind));
         }
+        let mut capability = self.capability;
+        // Listing belongs to the accessor, not to an opened byte reader.
+        capability.list = false;
         Ok(Box::new(MemoryReader {
             data: self.data.clone(),
             chunk_size: self.chunk_size,
-            ranged: self.ranged,
+            capability,
             offset: 0,
             finished: false,
             fault: self.fault,
@@ -228,7 +229,7 @@ impl Accessor for MemoryAccessor {
 #[async_trait]
 impl ByteAccessor for MemoryAccessor {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        crate::validation::validate_listing(self.listing)?;
+        crate::validation::validate_listing(self.capability.list)?;
         Ok(Box::pin(futures::stream::iter([Ok(request.prefix)])))
     }
 }
@@ -236,7 +237,7 @@ impl ByteAccessor for MemoryAccessor {
 struct MemoryReader {
     data: Bytes,
     chunk_size: usize,
-    ranged: bool,
+    capability: Capability,
     offset: usize,
     finished: bool,
     fault: Option<Fault>,
@@ -254,12 +255,7 @@ impl Reader for MemoryReader {
     type Capability = Capability;
 
     fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: self.ranged,
-            read_parallel: false,
-            list: false,
-        }
+        self.capability
     }
 
     fn metadata(&self) -> &ByteMetadata {
@@ -306,7 +302,11 @@ impl ByteReader for MemoryReader {
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         self.observations.range_reads.fetch_add(1, Ordering::SeqCst);
         self.observations.ranges.lock().unwrap().push(range.clone());
-        crate::validation::validate_range(self.ranged, &range, self.data.len() as u64)?;
+        crate::validation::validate_range(
+            self.capability.read_with_range,
+            &range,
+            self.data.len() as u64,
+        )?;
         let call = self.range_calls;
         self.range_calls += 1;
         if let Some((after, kind)) = self.range_failure
