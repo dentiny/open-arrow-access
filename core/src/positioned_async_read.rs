@@ -11,6 +11,12 @@ use std::{
 };
 
 type Fetch = BoxFuture<'static, (Box<dyn ByteReader>, io::Result<Option<Bytes>>)>;
+enum InputState {
+    Ready(Box<dyn ByteReader>),
+    Reading(Fetch),
+    Finished,
+}
+
 /// A position observer. Marking records the first subsequently consumed byte,
 /// including when a buffered chunk or a compression frame ends at the mark.
 #[derive(Clone, Default)]
@@ -36,11 +42,9 @@ impl PositionObserver {
 }
 /// Buffered input whose position advances only when bytes are consumed.
 pub struct PositionedAsyncRead {
-    reader: Option<Box<dyn ByteReader>>,
-    pending: Option<Fetch>,
+    input: InputState,
     bytes: Bytes,
     observer: PositionObserver,
-    ended: bool,
     operation: &'static str,
 }
 /// Construct without I/O. Each chunk retains its own coordinate origin.
@@ -51,11 +55,9 @@ pub fn into_positioned_async_read(
     let observer = PositionObserver::default();
     observer.0.lock().unwrap().current = reader.position();
     PositionedAsyncRead {
-        reader: Some(reader),
-        pending: None,
+        input: InputState::Ready(reader),
         bytes: Bytes::new(),
         observer,
-        ended: false,
         operation,
     }
 }
@@ -70,40 +72,31 @@ impl PositionedAsyncRead {
 impl AsyncBufRead for PositionedAsyncRead {
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
         let this = self.get_mut();
-        if this.bytes.is_empty() && !this.ended {
-            if this.pending.is_none() {
-                let mut reader = this.reader.take().unwrap();
-                this.observer.0.lock().unwrap().current = reader.position();
-                this.pending = Some(Box::pin(async move {
-                    let result = reader.next().await.map_err(crate::error::byte_input_error);
-                    (reader, result)
-                }));
-            }
-            let (reader, result) =
-                std::task::ready!(this.pending.as_mut().unwrap().as_mut().poll(cx));
-            this.pending = None;
-            this.reader = Some(reader);
-            match result {
-                Ok(Some(bytes)) => {
-                    if let Err(error) =
-                        crate::validation::validate_positioned_chunk(&bytes, this.operation)
-                    {
-                        this.ended = true;
-                        this.reader = None;
-                        return Poll::Ready(Err(error));
-                    }
-                    this.bytes = bytes;
+        if this.bytes.is_empty() {
+            let mut pending = match std::mem::replace(&mut this.input, InputState::Finished) {
+                InputState::Ready(mut reader) => {
+                    this.observer.0.lock().unwrap().current = reader.position();
+                    Box::pin(async move {
+                        let result = reader.next().await.map_err(crate::error::byte_input_error);
+                        (reader, result)
+                    }) as Fetch
                 }
-                Ok(None) => {
-                    this.ended = true;
-                    this.reader = None;
+                InputState::Reading(pending) => pending,
+                InputState::Finished => return Poll::Ready(Ok(&this.bytes)),
+            };
+            let (reader, result) = match pending.as_mut().poll(cx) {
+                Poll::Pending => {
+                    this.input = InputState::Reading(pending);
+                    return Poll::Pending;
                 }
-                Err(error) => {
-                    this.ended = true;
-                    this.reader = None;
-                    return Poll::Ready(Err(error));
-                }
-            }
+                Poll::Ready(result) => result,
+            };
+            let Some(bytes) = result? else {
+                return Poll::Ready(Ok(&this.bytes));
+            };
+            crate::validation::validate_positioned_chunk(&bytes, this.operation)?;
+            this.bytes = bytes;
+            this.input = InputState::Ready(reader);
         }
         Poll::Ready(Ok(&this.bytes))
     }

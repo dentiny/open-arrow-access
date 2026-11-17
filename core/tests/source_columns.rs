@@ -24,3 +24,28 @@ async fn buffered_position_tracks_consumption_and_marks_chunk_boundaries() {
     assert_eq!(observer.marked_position(), Some(BytePosition::Stored(4)));
     assert_eq!(input.position(), Some(BytePosition::Stored(7)));
 }
+
+#[tokio::test]
+async fn pending_fetch_is_retained_until_ready() {
+    use open_arrow_access_core::{ByteMetadata, Bytes, StreamReader};
+    use std::task::Poll;
+
+    let mut pending = true;
+    let mut bytes = Some(Bytes::from_static(b"abc"));
+    let stream = futures::stream::poll_fn(move |cx| {
+        if std::mem::take(&mut pending) {
+            cx.waker().wake_by_ref();
+            return Poll::Pending;
+        }
+        Poll::Ready(bytes.take().map(Ok))
+    });
+    let mut input = into_positioned_async_read(
+        Box::new(StreamReader::new(stream, ByteMetadata::default())),
+        "test",
+    );
+    let mut first = Box::pin(input.fill_buf());
+    assert!(futures::poll!(first.as_mut()).is_pending());
+    assert_eq!(first.await.unwrap(), b"abc");
+    input.consume_unpin(3);
+    assert!(input.fill_buf().await.unwrap().is_empty());
+}

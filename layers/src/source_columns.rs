@@ -3,7 +3,8 @@ use arrow_schema::Schema;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use open_arrow_access_core::{
     Accessor, Layer, ReadOptions, ReadOptionsProvider, RecordBatch, RecordCapability, RecordReader,
-    Result, ScanPlan, ScanPlanner, SchemaRef, SourceColumn, async_trait, map_record_reader,
+    ResolvedProjection, Result, ScanPlan, ScanPlanner, SchemaRef, SourceColumn,
+    SourceColumnRequestAccessor, async_trait, map_record_reader,
 };
 use std::sync::Arc;
 
@@ -47,12 +48,16 @@ impl SourceColumnsLayer {
         }
         self
     }
-    fn request<R: ReadOptionsProvider>(&self, request: &mut R) -> Option<Vec<String>> {
+    fn take_projection<R: ReadOptionsProvider>(&self, request: &mut R) -> Option<Vec<String>> {
         let options = request.read_options_mut();
         // Resolve projection after renaming, so callers may select the chosen names.
         options.projection.take()
     }
-    fn transform(&self, input: &SchemaRef, projection: Option<Vec<String>>) -> Result<Transform> {
+    fn projection(
+        &self,
+        input: &SchemaRef,
+        projection: Option<Vec<String>>,
+    ) -> Result<ResolvedProjection> {
         let fields = input
             .fields()
             .iter()
@@ -68,57 +73,41 @@ impl SourceColumnsLayer {
             .collect::<Vec<_>>();
         crate::validation::validate_source_column_names(input, &fields, &self.columns)?;
         let renamed = Arc::new(Schema::new_with_metadata(fields, input.metadata().clone()));
-        let projection = ReadOptions {
+        ReadOptions {
             projection,
             ..Default::default()
         }
-        .resolve_projection(&renamed)?;
-        Ok(Transform {
-            schema: projection.schema,
-            indices: projection.indices,
-        })
+        .resolve_projection(&renamed)
     }
 }
-#[derive(Clone)]
-struct Transform {
-    schema: SchemaRef,
-    indices: Option<Vec<usize>>,
-}
-impl Transform {
-    fn wrap(self, reader: Box<dyn RecordReader>) -> Box<dyn RecordReader> {
-        let capability = RecordCapability::sequential(reader.capability().ordering);
-        let output = self.schema.clone();
-        Box::new(map_record_reader(
-            reader,
-            output,
-            capability,
-            move |batch| {
-                let columns = match &self.indices {
-                    Some(indices) => indices.iter().map(|&i| batch.column(i).clone()).collect(),
-                    None => batch.columns().to_vec(),
-                };
-                RecordBatch::try_new_with_options(
-                    self.schema.clone(),
-                    columns,
-                    &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
-                )
-                .map_err(crate::error::source_column_batch_error)
-            },
-        ))
-    }
+
+fn project_reader(
+    reader: Box<dyn RecordReader>,
+    projection: ResolvedProjection,
+) -> Box<dyn RecordReader> {
+    let capability = RecordCapability::sequential(reader.capability().ordering);
+    let output = projection.schema.clone();
+    Box::new(map_record_reader(
+        reader,
+        output,
+        capability,
+        move |batch| {
+            let columns = match &projection.indices {
+                Some(indices) => indices.iter().map(|&i| batch.column(i).clone()).collect(),
+                None => batch.columns().to_vec(),
+            };
+            RecordBatch::try_new_with_options(
+                projection.schema.clone(),
+                columns,
+                &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
+            )
+            .map_err(crate::error::source_column_batch_error)
+        },
+    ))
 }
 pub struct SourceColumnsAccessor<A> {
-    inner: A,
+    inner: SourceColumnRequestAccessor<A>,
     layer: SourceColumnsLayer,
-}
-impl<A> SourceColumnsAccessor<A> {
-    fn columns(&self) -> Vec<SourceColumn> {
-        self.layer
-            .columns
-            .iter()
-            .map(|(column, _)| *column)
-            .collect()
-    }
 }
 impl<A> Layer<A> for SourceColumnsLayer
 where
@@ -128,7 +117,10 @@ where
     type Layered = SourceColumnsAccessor<A>;
     fn layer(&self, inner: A) -> Self::Layered {
         SourceColumnsAccessor {
-            inner,
+            inner: SourceColumnRequestAccessor::new(
+                inner,
+                self.columns.iter().map(|(column, _)| *column).collect(),
+            ),
             layer: self.clone(),
         }
     }
@@ -145,14 +137,13 @@ where
         self.inner.capability()
     }
     async fn open(&self, mut request: Self::Request) -> Result<Box<dyn RecordReader>> {
-        let projection = self.layer.request(&mut request);
-        let columns = self.columns();
-        let reader = self.inner.open_source_columns(request, &columns).await?;
-        let transform = self
+        let selection = self.layer.take_projection(&mut request);
+        let reader = self.inner.open(request).await?;
+        let projection = self
             .layer
-            .transform(&reader.metadata().schema, projection)
+            .projection(&reader.metadata().schema, selection)
             .map_err(|e| e.with_object(reader.metadata().source.as_ref()))?;
-        Ok(transform.wrap(reader))
+        Ok(project_reader(reader, projection))
     }
 }
 #[async_trait]
@@ -162,19 +153,18 @@ where
     A::Request: ReadOptionsProvider,
 {
     async fn plan_scan(&self, mut request: Self::Request) -> Result<ScanPlan> {
-        let projection = self.layer.request(&mut request);
-        let columns = self.columns();
-        let mut plan = self.inner.plan_source_columns(request, &columns).await?;
-        let transform = self
+        let selection = self.layer.take_projection(&mut request);
+        let mut plan = self.inner.plan_scan(request).await?;
+        let projection = self
             .layer
-            .transform(&plan.metadata.schema, projection)
+            .projection(&plan.metadata.schema, selection)
             .map_err(|e| e.with_object(plan.metadata.source.as_ref()))?;
-        plan.metadata.schema = transform.schema.clone();
+        plan.metadata.schema = projection.schema.clone();
         plan.partitions = plan
             .partitions
             .map_ok(move |partition| {
-                let transform = transform.clone();
-                async move { Ok(transform.wrap(partition.await?)) }.boxed()
+                let projection = projection.clone();
+                async move { Ok(project_reader(partition.await?, projection)) }.boxed()
             })
             .boxed();
         Ok(plan)
