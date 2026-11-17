@@ -1,7 +1,9 @@
-use arrow_array::{RecordBatchOptions, builder::*};
+use arrow_array::builder::*;
 use arrow_schema::{DataType, Field, Fields};
 
-use crate::{FieldNameIndex, RecordBatch, ResolvedProjection, Result, SchemaRef};
+use crate::{
+    FieldNameIndex, RecordBatch, ResolvedProjection, Result, SchemaRef, record_batch_with_rows,
+};
 use crate::{
     error::{failed_builder, record_batch_decode as decode},
     validation::validate_record_batch_fields,
@@ -104,12 +106,8 @@ impl RecordBatchBuilder {
             .finish()
             .columns()
             .to_vec();
-        RecordBatch::try_new_with_options(
-            self.schema,
-            columns,
-            &RecordBatchOptions::new().with_row_count(Some(self.rows)),
-        )
-        .map_err(crate::error::record_batch_error)
+        record_batch_with_rows(self.schema, columns, self.rows)
+            .map_err(crate::error::record_batch_error)
     }
 }
 

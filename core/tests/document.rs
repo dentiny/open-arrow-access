@@ -1,10 +1,11 @@
 use std::{num::NonZeroUsize, sync::Arc};
 
-use arrow_array::{RecordBatchOptions, cast::AsArray};
+use arrow_array::cast::AsArray;
 use open_arrow_access_core::{
     Accessor, BinaryDecoder, ByteReadOptions, ByteReadRequest, ByteReader, Capability,
     DocumentAccessor, DocumentDecoder, Error, ErrorKind, OrderRequirement, ReadOptions,
     ReadRequest, RecordBatch, RecordCapability, Result, Schema, SchemaRef, async_trait,
+    record_batch_with_rows,
 };
 use open_arrow_access_test_support::{MemoryAccessor, expect_err_kind, fixture};
 
@@ -147,12 +148,8 @@ impl DocumentDecoder for InvalidDocument {
                 ));
             }
         };
-        RecordBatch::try_new_with_options(
-            schema,
-            vec![],
-            &RecordBatchOptions::new().with_row_count(Some(rows)),
-        )
-        .map_err(|error| Error::new(ErrorKind::Decode, "fixture", error.to_string()))
+        record_batch_with_rows(schema, vec![], rows)
+            .map_err(|error| Error::new(ErrorKind::Decode, "fixture", error.to_string()))
     }
 }
 

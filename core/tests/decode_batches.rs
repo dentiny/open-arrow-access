@@ -1,10 +1,10 @@
 use std::{collections::VecDeque, sync::Arc};
 
-use arrow_array::RecordBatchOptions;
 use futures::stream;
 use open_arrow_access_core::{
     BatchDecoder, ByteMetadata, ByteReader, Bytes, Error, ErrorKind, OrderRequirement, Reader,
     RecordBatch, RecordMetadata, Result, Schema, StreamReader, decode_batches,
+    record_batch_with_rows,
 };
 use open_arrow_access_test_support::fixture;
 
@@ -41,12 +41,7 @@ impl BatchDecoder for Decoder {
     fn flush(&mut self) -> Result<Option<RecordBatch>> {
         self.ready = false;
         Ok(Some(
-            RecordBatch::try_new_with_options(
-                Arc::new(Schema::empty()),
-                vec![],
-                &RecordBatchOptions::new().with_row_count(Some(1)),
-            )
-            .unwrap(),
+            record_batch_with_rows(Arc::new(Schema::empty()), vec![], 1).unwrap(),
         ))
     }
 

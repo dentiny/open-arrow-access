@@ -27,6 +27,7 @@ mod read_object;
 mod read_state;
 mod reader;
 mod reader_factory;
+mod record_batch;
 mod record_batch_builder;
 mod record_stream;
 mod request;
@@ -64,6 +65,7 @@ pub use reader::{
     ByteMetadata, ByteReader, Reader, RecordMetadata, RecordReader, RecordStream, into_stream,
 };
 pub use reader_factory::{FactoryToken, ReaderFactory, ReaderFactoryExt};
+pub use record_batch::record_batch_with_rows;
 pub use record_batch_builder::{FieldValue, RecordBatchBuilder, RecordBatchRow};
 pub use record_stream::{
     map_positioned_reader, map_record_reader, map_record_stream, record_stream_reader,
