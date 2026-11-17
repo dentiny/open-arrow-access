@@ -1,4 +1,4 @@
-//! Pure suffix detection and policy-driven selection of dataset files.
+//! Pure suffix detection and selection of dataset files.
 
-mod policy;
-pub use policy::{DetectedFormat, FormatPolicy, detect_format};
+mod detection;
+pub use detection::{DetectedFormat, detect_format, select_format};

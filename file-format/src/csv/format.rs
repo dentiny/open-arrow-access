@@ -70,7 +70,8 @@ impl CsvFileFormat {
         if !self.delimiter_resolved
             && let Some(delimiter) = super::dialect::delimiter_from_path(
                 self.compression_factory
-                    .strip_suffix(request.object.locator()),
+                    .strip_suffix(request.object.locator())
+                    .as_ref(),
             )
         {
             match &mut format.options {

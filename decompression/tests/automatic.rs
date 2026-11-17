@@ -1,5 +1,5 @@
 use open_arrow_access_core::{Accessor, AccessorExt, ByteReadRequest, ErrorKind};
-use open_arrow_access_decompression::{AutoDecompressionLayer, Compression};
+use open_arrow_access_decompression::{AutoDecompressionLayer, Compression, CompressionFactory};
 use open_arrow_access_test_support::{MemoryAccessor, collect_bytes};
 
 #[test]
@@ -223,3 +223,22 @@ codec_route_test!(
     "data.ZST",
     "data.Zst"
 );
+
+#[test]
+fn stripping_compression_preserves_the_decoded_format() {
+    let factory = CompressionFactory::default();
+    for (path, decoded) in [
+        ("records.CSV.GZ", "records.CSV"),
+        ("records.tsv.zstd", "records.tsv"),
+        ("records.jsonl.bz2", "records.jsonl"),
+        ("records.json.lz4", "records.json"),
+        ("archive.tgz", "archive.tar"),
+        ("records.csv.TGZ", "records.csv.tar"),
+        ("records.tsv.tgz", "records.tsv.tar"),
+        ("archive.tar.gz", "archive.tar"),
+        ("dir.gz/file", "dir.gz/file"),
+        ("records.zip", "records.zip"),
+    ] {
+        assert_eq!(factory.strip_suffix(path), decoded, "{path}");
+    }
+}

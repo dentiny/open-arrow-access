@@ -51,5 +51,5 @@ name = "union_by_name"
 required-features = ["directory"]
 
 [[test]]
-name = "format_policy"
+name = "format_detection"
 required-features = ["auto-format"]
