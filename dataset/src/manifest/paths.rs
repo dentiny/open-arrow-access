@@ -1,12 +1,12 @@
 use super::{ManifestBase, PathsManifest};
 use percent_encoding::percent_decode_str;
-use url::Url;
+use url::{Origin, Url};
 
 type PathResult<T> = Result<T, &'static str>;
 
 pub(super) struct Context {
     pub manifest_key: String,
-    origin: Option<Url>,
+    origin: Option<Origin>,
     base: String,
 }
 impl Context {
@@ -14,7 +14,7 @@ impl Context {
         let configured = spec.origin.as_deref().map(origin).transpose()?;
         let (manifest_origin, manifest_key) = location(spec.manifest.locator())?;
         if let (Some(expected), Some(actual)) = (&configured, &manifest_origin)
-            && expected.origin() != actual.origin()
+            && expected != actual
         {
             return Err("manifest URL does not match configured origin");
         }
@@ -39,12 +39,8 @@ impl Context {
     }
     pub fn resolve(&self, value: &str) -> PathResult<String> {
         let (origin, mut key) = location(value)?;
-        if let Some(url) = origin {
-            if !self
-                .origin
-                .as_ref()
-                .is_some_and(|o| o.origin() == url.origin())
-            {
+        if let Some(origin) = origin {
+            if self.origin.as_ref() != Some(&origin) {
                 return Err("absolute URL origin is not allowed");
             }
         } else if !value.starts_with('/') {
@@ -57,21 +53,21 @@ impl Context {
     }
 }
 // Manifests and their entries use the same URL-to-storage-key rules.
-fn location(value: &str) -> PathResult<(Option<Url>, String)> {
+fn location(value: &str) -> PathResult<(Option<Origin>, String)> {
     if value.contains(':') {
         let url = http_url(value)?;
         let key = key_path(url.path())?;
-        Ok((Some(url), key))
+        Ok((Some(url.origin()), key))
     } else {
         Ok((None, key_path(value)?))
     }
 }
-fn origin(value: &str) -> PathResult<Url> {
+fn origin(value: &str) -> PathResult<Origin> {
     let url = http_url(value)?;
     if url.path() != "/" {
         return Err("expected an HTTP(S) origin without path, query or fragment");
     }
-    Ok(url)
+    Ok(url.origin())
 }
 fn http_url(value: &str) -> PathResult<Url> {
     validate_raw(value)?;

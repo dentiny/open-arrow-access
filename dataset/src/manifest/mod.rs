@@ -120,33 +120,9 @@ impl PathsManifest {
             number = index + 1;
             let line =
                 line.map_err(|e| self.error(e.kind(), number, e.to_string()).with_source(e))?;
-            let value = std::str::from_utf8(&line).map_err(|e| {
-                self.error(ErrorKind::Decode, number, "manifest is not UTF-8")
-                    .with_source(e)
-            })?;
-            let value = value.strip_suffix('\n').unwrap_or(value);
-            let value = value.strip_suffix('\r').unwrap_or(value);
-            if value.is_empty() {
+            let Some(path) = self.selected_path(&line, number, &context)? else {
                 continue;
-            }
-            let path = context
-                .resolve(value)
-                .map_err(|e| self.error(ErrorKind::Decode, number, e))?;
-            if self.prefix.as_ref().is_some_and(|p| !path.starts_with(p)) {
-                continue;
-            }
-            if let Some((formats, on_mismatch)) = &self.formats
-                && detect_format(&path).is_none_or(|f| !formats.contains(&f))
-            {
-                if *on_mismatch == Mismatch::Skip {
-                    continue;
-                }
-                return Err(self.error(
-                    ErrorKind::Decode,
-                    number,
-                    "file format does not match selection",
-                ));
-            }
+            };
             if !seen.insert(path.clone()) {
                 if self.duplicates == Duplicates::Dedupe {
                     continue;
@@ -163,6 +139,41 @@ impl PathsManifest {
             ));
         }
         Ok(FileSetRequest::new(objects).with_byte_options(self.byte_options))
+    }
+    fn selected_path(
+        &self,
+        line: &[u8],
+        number: usize,
+        context: &paths::Context,
+    ) -> Result<Option<String>> {
+        let value = std::str::from_utf8(line).map_err(|e| {
+            self.error(ErrorKind::Decode, number, "manifest is not UTF-8")
+                .with_source(e)
+        })?;
+        let value = value.strip_suffix('\n').unwrap_or(value);
+        let value = value.strip_suffix('\r').unwrap_or(value);
+        if value.is_empty() {
+            return Ok(None);
+        }
+        let path = context
+            .resolve(value)
+            .map_err(|e| self.error(ErrorKind::Decode, number, e))?;
+        if self.prefix.as_ref().is_some_and(|p| !path.starts_with(p)) {
+            return Ok(None);
+        }
+        if let Some((formats, on_mismatch)) = &self.formats
+            && detect_format(&path).is_none_or(|f| !formats.contains(&f))
+        {
+            if *on_mismatch == Mismatch::Skip {
+                return Ok(None);
+            }
+            return Err(self.error(
+                ErrorKind::Decode,
+                number,
+                "file format does not match selection",
+            ));
+        }
+        Ok(Some(path))
     }
     fn error(&self, kind: ErrorKind, number: usize, message: impl std::fmt::Display) -> Error {
         Error::new(
