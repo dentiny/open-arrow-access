@@ -1,4 +1,4 @@
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{future::Future, num::NonZeroUsize, sync::Arc};
 
 use futures::{
     StreamExt, TryStreamExt,
@@ -31,6 +31,16 @@ pub struct ParallelReadOptions {
 /// A lazy, independently owned partition opener. Partition stream order defines logical order.
 /// Each opener must create its own reader/decoder state and preserve order within it.
 pub type ScanPartition = BoxFuture<'static, Result<Box<dyn RecordReader>>>;
+
+/// Erase a future that opens a concrete record reader into a scan partition.
+/// Construction does not poll the future; opening failures pass through unchanged.
+/// The opener must own its state and preserve the reader's schema and row order.
+pub fn scan_partition<R>(open: impl Future<Output = Result<R>> + Send + 'static) -> ScanPartition
+where
+    R: RecordReader + 'static,
+{
+    Box::pin(async move { Ok(Box::new(open.await?) as Box<dyn RecordReader>) })
+}
 
 /// A fixed-schema, ordered scan. Planning may inspect the first input, but must not
 /// eagerly open all partitions. Duplicate selections remain distinct partitions.
@@ -74,22 +84,14 @@ impl ScanPlan {
                 let schema = schema.clone();
                 async move {
                     let reader = partition.await?;
-                    crate::validation::validate_scan_schema(
-                        &reader.metadata().schema,
-                        &schema,
-                        schema_error,
-                    )?;
+                    crate::validate_schema(&reader.metadata().schema, &schema, schema_error)?;
                     Ok(into_stream(reader))
                 }
             })
             .try_flatten()
             .map(move |result| {
                 let batch = result?;
-                crate::validation::validate_scan_schema(
-                    &batch.schema(),
-                    &batch_schema,
-                    schema_error,
-                )?;
+                crate::validate_schema(&batch.schema(), &batch_schema, schema_error)?;
                 Ok(batch)
             });
         StreamReader::records(batches, self.metadata, self.ordering)
@@ -97,6 +99,16 @@ impl ScanPlan {
 
     /// Plan an already known ordered partition list without opening its readers.
     pub fn new(metadata: RecordMetadata, partitions: Vec<ScanPartition>) -> Self {
+        Self::from_iter(metadata, partitions)
+    }
+
+    /// Plan an ordered partition iterator without collecting it or opening readers.
+    /// The iterator is advanced only as partition discovery is polled.
+    pub fn from_iter<I>(metadata: RecordMetadata, partitions: I) -> Self
+    where
+        I: IntoIterator<Item = ScanPartition>,
+        I::IntoIter: Send + 'static,
+    {
         Self::from_stream(metadata, stream::iter(partitions.into_iter().map(Ok)))
     }
 

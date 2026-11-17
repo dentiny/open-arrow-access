@@ -63,6 +63,9 @@ registry without decoding, preserving the inner format of combined suffixes
 (`archive.tgz` becomes `archive.tar`). Clones share immutable registrations; changing one
 clone does not change previously configured readers.
 
+`strip_compression_suffixes(path)` removes all trailing built-in compression
+suffixes without decoding.
+
 For CSV/TSV, share the configured factory with both byte decoding and format
 selection so a custom suffix works without modifying the format crate:
 

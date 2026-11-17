@@ -19,7 +19,7 @@ Enable facade feature `service-govinfo`. See [example setup](README.md#example-s
 | `package(id)` | `/packages/{id}/summary` | `RemoteFiles<ApiDocument>` |
 
 Use `new(None)` for public bulk access or `new(Some(key))` for API query-key
-configuration. Start package paging with `"*"`; page size is 1–1000. Package file
+configuration; an empty configured key is rejected before I/O. Start package paging with `"*"`; page size is 1–1000. Package file
 names are keys in the response's `download` map. Downloads are sequential bytes.
 The service does not recursively walk bulk folders. A ZIP and its separately
 published XML members are distinct representations of potentially overlapping data.

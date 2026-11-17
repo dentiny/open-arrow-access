@@ -105,7 +105,7 @@ pub trait ByteReader:
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecordMetadata {
     pub schema: SchemaRef,
     pub source: Option<ObjectRef>,

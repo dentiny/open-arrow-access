@@ -5,11 +5,13 @@ use futures::{
     lock::Mutex,
     stream::{self, BoxStream},
 };
-use open_arrow_access_core::{ByteMetadata, ByteReader, Bytes, Result, StreamReader, into_stream};
+use open_arrow_access_core::{
+    ByteMetadata, ByteReader, Bytes, Result, StreamReader, empty_chunk, into_stream,
+};
 
 use super::{
     TarEntry, TarLimits,
-    error::{active_entry, decode, empty_chunk},
+    error::{active_entry, decode},
     validation::{BLOCK_SIZE, parse_entry},
 };
 
@@ -108,8 +110,7 @@ impl TarStream {
                 Ok(Some((bytes, (state, remaining, token))))
             },
         );
-        let object = metadata.source.clone();
-        let reader = StreamReader::new(stream, metadata).with_object(object);
+        let reader = StreamReader::bytes(stream, metadata);
         Ok(Some(TarEntryReader {
             entry,
             reader: Box::new(reader),
@@ -134,7 +135,7 @@ impl State {
                 .transpose()?
                 .ok_or_else(|| decode("truncated TAR stream"))?;
             if self.pending.is_empty() {
-                return Err(empty_chunk());
+                return Err(empty_chunk("read_tar"));
             }
         }
         Ok(self.pending.split_to(limit.min(self.pending.len())))

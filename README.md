@@ -147,7 +147,6 @@ Set features on the dependency used by your application:
 open-arrow-access = { version = "0.3.0", default-features = false, features = [
     "format-json",
     "decompression-gzip",
-    "dataset-directory",
     "service-huggingface",
 ] }
 ```
@@ -161,8 +160,8 @@ Enabling a feature compiles an API; construct the accessor/layer to use it.
 | Additional Parquet page codecs | `format-parquet-zstd`, `format-parquet-lz4`, `format-parquet-gzip`, `format-parquet-brotli` (each also enables Parquet; Snappy is included in `format-parquet`) |
 | Compressed byte streams | `decompression-gzip`, `decompression-bz2`, `decompression-lz4`, `decompression-zstd` |
 | Archive members | `decompression-zip`, `decompression-tar` |
-| Directory or explicit file-set reads | `dataset-directory` |
-| Automatic dataset format selection | `dataset-auto-format` plus `format-*` readers |
+| Directory or explicit file-set reads | Always available; enable the selected `format-*` reader |
+| Automatic dataset format selection | Always available; enable the selected `format-*` readers |
 | A provider | `service-<name>`; see the [complete service table](service/README.md#choose-a-service) |
 | Core contracts, storage, shared service HTTP utilities, record layers | Always available; no extra facade feature |
 | Fs, S3, or another storage backend | Enable `services-fs`, `services-s3`, etc. on your **OpenDAL** dependency |

@@ -1,4 +1,8 @@
-use std::io;
+use std::{
+    io,
+    pin::Pin,
+    task::{Context, Poll, ready},
+};
 
 use futures::{TryStreamExt, io::AsyncBufRead};
 
@@ -33,13 +37,29 @@ where
     R: ByteReader + ?Sized + 'static,
 {
     let stream = futures::stream::try_unfold(reader, move |mut reader| async move {
-        let Some(bytes) = reader.next().await.map_err(io::Error::other)? else {
+        let Some(bytes) = crate::next_nonempty(reader.as_mut(), || crate::empty_chunk(operation))
+            .await
+            .map_err(io::Error::other)?
+        else {
             return Ok(None);
         };
-        if bytes.is_empty() {
-            return Err(io::Error::other(crate::error::empty_chunk(operation)));
-        }
         Ok(Some((bytes, reader)))
     });
     Box::pin(stream).into_async_read()
+}
+
+/// Copy available buffered bytes and advance through the adapter's own consume hook.
+pub(crate) fn poll_read_from_buf<R: AsyncBufRead + ?Sized>(
+    mut reader: Pin<&mut R>,
+    cx: &mut Context<'_>,
+    output: &mut [u8],
+) -> Poll<io::Result<usize>> {
+    if output.is_empty() {
+        return Poll::Ready(Ok(0));
+    }
+    let bytes = ready!(reader.as_mut().poll_fill_buf(cx))?;
+    let count = bytes.len().min(output.len());
+    output[..count].copy_from_slice(&bytes[..count]);
+    reader.consume(count);
+    Poll::Ready(Ok(count))
 }

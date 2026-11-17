@@ -3,7 +3,7 @@ use std::{
     num::NonZeroUsize,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll, ready},
+    task::{Context, Poll},
 };
 
 use crate::{ByteReader, Bytes, Result, validate_byte_range};
@@ -127,18 +127,11 @@ impl AsyncBufRead for SeekableInput {
 
 impl AsyncRead for SeekableInput {
     fn poll_read(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         output: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        if output.is_empty() {
-            return Poll::Ready(Ok(0));
-        }
-        let bytes = ready!(self.as_mut().poll_fill_buf(cx))?;
-        let count = bytes.len().min(output.len());
-        output[..count].copy_from_slice(&bytes[..count]);
-        self.consume(count);
-        Poll::Ready(Ok(count))
+        crate::async_read::poll_read_from_buf(self, cx, output)
     }
 }
 

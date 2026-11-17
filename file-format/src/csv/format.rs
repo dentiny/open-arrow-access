@@ -12,8 +12,8 @@ use super::{
 use arrow_csv::{ReaderBuilder, reader::Decoder};
 use arrow_schema::{DataType, Schema};
 use open_arrow_access_core::{
-    ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
-    RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
+    Accessor, ByteReadRequest, ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest,
+    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
 };
 use open_arrow_access_decompression::CompressionFactory;
 use std::sync::Arc;
@@ -248,6 +248,43 @@ impl ReaderFactory for CsvFileFormat {
             return Ok(None);
         }
         Ok(prepared.map(|prepared| format.decoder(prepared, request)))
+    }
+
+    async fn metadata(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<RecordMetadata> {
+        Ok(self
+            .inspect_metadata(storage, request.clone())
+            .await?
+            .unwrap_or_else(|| crate::inference::empty_plan(request).metadata))
+    }
+
+    async fn inspect_metadata(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<Option<RecordMetadata>> {
+        let format = self.for_request(&request);
+        format.prepare_scan(&request)?;
+        let format = if format.schema.is_some() && format.header != CsvHeader::Auto {
+            format
+        } else {
+            let input = storage.open(ByteReadRequest::from(&request)).await?;
+            let Some(resolved) = format.resolve_schema(input).await? else {
+                return Ok(None);
+            };
+            resolved.format
+        };
+        let schema = format
+            .prepare_scan(&request)?
+            .expect("resolved CSV schema")
+            .schema;
+        Ok(Some(RecordMetadata {
+            schema,
+            source: Some(request.object),
+        }))
     }
 
     async fn create_reader(

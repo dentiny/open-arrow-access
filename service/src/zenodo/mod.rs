@@ -24,6 +24,13 @@ pub struct ZenodoService {
 }
 
 impl ZenodoService {
+    /// Override the transport for metadata and lazy file requests.
+    /// Existing HTTP policies and credentials are retained.
+    pub fn with_context(mut self, context: opendal::OperationContext) -> Self {
+        self.http = self.http.with_context(context);
+        self
+    }
+
     /// Apply the same HTTP policy to metadata and lazy file requests.
     pub fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
         self.http = self.http.with_http_config(config)?;

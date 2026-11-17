@@ -1,3 +1,4 @@
+use open_arrow_access_test_support::record::field_names;
 use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
 use arrow_array::{cast::AsArray, types::TimestampMillisecondType};
@@ -351,15 +352,7 @@ async fn five_metadata_columns_preserve_order_and_optional_header_nulls_without_
             .as_ref(),
         &[1_594_176_775_000; 3],
     );
-    assert_eq!(
-        batch
-            .schema()
-            .fields()
-            .iter()
-            .map(|field| field.name().as_str())
-            .collect::<Vec<_>>(),
-        fields,
-    );
+    assert_eq!(field_names(batch.schema_ref()), fields);
     assert_eq!(
         batch["target_uri"]
             .as_string::<i64>()
@@ -520,6 +513,42 @@ async fn standard_headers_survive_sequential_parallel_and_positioned_projection(
                     schema.fields().iter().map(|f| f.name()).collect::<Vec<_>>(),
                     names.iter().collect::<Vec<_>>()
                 );
+            }
+            if projection.is_none() {
+                assert_eq!(
+                    schema
+                        .fields()
+                        .iter()
+                        .map(|f| f.name().as_str())
+                        .collect::<Vec<_>>(),
+                    [
+                        "record_id",
+                        "record_type",
+                        "warc_version",
+                        "date",
+                        "source_uri",
+                        "target_uri",
+                        "content_type",
+                        "body",
+                        "content_length",
+                        "block_digest",
+                        "payload_digest",
+                        "concurrent_to",
+                        "filename",
+                        "identified_payload_type",
+                        "ip_address",
+                        "profile",
+                        "refers_to",
+                        "segment_number",
+                        "segment_origin_id",
+                        "segment_total_length",
+                        "truncated",
+                        "warcinfo_id",
+                    ]
+                );
+                let target = schema.field_with_name("target_uri").unwrap();
+                assert_eq!(target.data_type(), &arrow_schema::DataType::LargeUtf8);
+                assert!(target.is_nullable());
             }
             let mut rows = 0;
             while let Some(batch) = reader.next().await.unwrap() {

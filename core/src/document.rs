@@ -75,6 +75,17 @@ where
         self.decoder.capability(self.storage.capability())
     }
 
+    async fn metadata(&self, request: D::Request) -> Result<RecordMetadata> {
+        let full_schema = self.decoder.prepare(&request)?;
+        Ok(RecordMetadata {
+            schema: request
+                .read_options()
+                .resolve_projection(&full_schema)?
+                .schema,
+            source: Some(ByteReadRequest::from(&request).object),
+        })
+    }
+
     async fn open(&self, request: D::Request) -> Result<Box<dyn RecordReader>> {
         let ordering = self.capability().ordering;
         let full_schema = self.decoder.prepare(&request)?;

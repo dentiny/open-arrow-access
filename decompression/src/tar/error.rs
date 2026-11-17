@@ -27,11 +27,3 @@ pub(super) fn active_entry() -> Error {
         "consume or drop the current entry reader before advancing",
     )
 }
-
-pub(super) fn empty_chunk() -> Error {
-    Error::new(
-        ErrorKind::Io,
-        "read_tar",
-        "byte reader returned an empty chunk",
-    )
-}
