@@ -6,6 +6,7 @@ that matches your input/output; core has no registry that you must modify.
 | You want to add | Extension boundary | Bind it with |
 | --- | --- | --- |
 | A byte-to-record format | `ReaderFactory` | `FactoryAccessor::new(storage, format)` or `FileAccessor::from_format` |
+| A format with row byte coordinates | `ReaderFactory` returning `PositionedRecordReader` | `PositionedBatch::try_new`, then `SourceColumns::wrap` |
 | An incremental Arrow parser | `BatchDecoder` inside a factory | `decode_batches` |
 | An upstream Arrow stream | Factory plus error mapping | `record_stream_reader` |
 | One document → one Arrow row | `DocumentDecoder` | `DocumentAccessor::new(storage, decoder)` |

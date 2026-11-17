@@ -3,7 +3,9 @@ use std::{collections::HashMap, sync::Arc};
 use arrow_array::{Array, ArrayRef, LargeStringArray, RecordBatch, cast::AsArray};
 use arrow_cast::{CastOptions, cast_with_options};
 use arrow_schema::{ArrowError, DataType};
-use open_arrow_access_core::{RecordReader, Result, map_record_reader};
+use open_arrow_access_core::{
+    PositionedRecordReader, RecordReader, Result, map_positioned_reader, map_record_reader,
+};
 
 use super::plan::{EvolutionStep, SchemaEvolutionPlan};
 use crate::{batch::assemble_batch, validation};
@@ -29,6 +31,21 @@ impl SchemaEvolutionPlan {
         let capability = inner.capability();
         let schema = Arc::clone(&self.target_schema);
         Ok(Box::new(map_record_reader(
+            inner,
+            schema,
+            capability,
+            move |batch| self.convert(batch),
+        )))
+    }
+
+    pub(super) fn into_positioned_reader(
+        self,
+        inner: Box<dyn PositionedRecordReader>,
+    ) -> Result<Box<dyn PositionedRecordReader>> {
+        validation::validate_evolution_input_schema(&inner.metadata().schema, &self.source_schema)?;
+        let capability = inner.capability();
+        let schema = self.target_schema.clone();
+        Ok(Box::new(map_positioned_reader(
             inner,
             schema,
             capability,

@@ -47,3 +47,26 @@ where
     let batches = into_stream(reader).map(move |batch| transform(batch?));
     StreamReader::records(batches, metadata, capability.ordering).with_capability(capability)
 }
+
+/// Apply a row-preserving batch transform while retaining each row's coordinate.
+/// Plans and other transform state are captured once when the reader opens.
+/// A transform that changes the row count fails before exposing that batch.
+pub fn map_positioned_reader<F>(
+    reader: Box<dyn crate::PositionedRecordReader>,
+    schema: SchemaRef,
+    capability: RecordCapability,
+    mut transform: F,
+) -> impl crate::PositionedRecordReader
+where
+    F: FnMut(RecordBatch) -> Result<RecordBatch> + Send,
+{
+    let metadata = RecordMetadata {
+        schema,
+        source: reader.metadata().source.clone(),
+    };
+    let batches = into_stream(reader).map(move |batch| {
+        let (batch, positions) = batch?.into_parts();
+        crate::PositionedBatch::try_new(transform(batch)?, positions)
+    });
+    StreamReader::records(batches, metadata, capability.ordering).with_capability(capability)
+}

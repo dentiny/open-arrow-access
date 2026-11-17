@@ -112,6 +112,7 @@ pub struct RecordMetadata {
 }
 
 /// Record specialization used by formats, datasets, services and record layers.
+/// Decoders supplying row byte coordinates use [`crate::PositionedRecordReader`].
 pub trait RecordReader:
     Reader<Item = RecordBatch, Metadata = RecordMetadata, Capability = RecordCapability>
 {

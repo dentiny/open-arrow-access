@@ -66,7 +66,7 @@ pub fn arrow_schema() -> SchemaRef {
         .clone()
 }
 
-fn date_type() -> DataType {
+pub(super) fn date_type() -> DataType {
     DataType::Timestamp(TimeUnit::Millisecond, /*timezone=*/ None)
 }
 

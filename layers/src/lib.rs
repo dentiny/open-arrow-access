@@ -31,7 +31,7 @@ pub use schema_evolution::{
 pub use open_arrow_access_core::metrics::{MetricsAccessor, MetricsLayer};
 
 mod source_columns;
-pub use source_columns::{SourceColumnsAccessor, SourceColumnsLayer, SourceFramer, SourceUnit};
+pub use source_columns::{SourceColumnBatch, SourceColumns, SourceColumnsAccessor};
 
 #[cfg(feature = "source-positions")]
 pub use source_columns::{SourcePositionAccessor, SourcePositionLayer};
