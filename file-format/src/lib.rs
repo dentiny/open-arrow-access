@@ -42,3 +42,6 @@ pub mod atif;
 mod document;
 #[cfg(any(feature = "xml", feature = "json", feature = "csv"))]
 pub use document::read_document;
+
+mod detection;
+pub use detection::{DetectedFormat, detect_format};
