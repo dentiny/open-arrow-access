@@ -16,8 +16,34 @@ use open_arrow_access_core::{
     ErrorKind, ListRequest, ObjectStream, Reader, Result, async_trait,
 };
 
+/// Assert the complete metadata contract without consuming any output items.
+/// Returns the opened reader for output assertions; use counters to bound inspection I/O.
+pub async fn assert_metadata_matches_open<A>(accessor: &A, request: A::Request) -> Box<A::Reader>
+where
+    A: Accessor + ?Sized,
+    A::Request: Clone,
+    <A::Reader as Reader>::Metadata: Clone + PartialEq + std::fmt::Debug,
+{
+    let inspected = accessor.metadata(request.clone()).await.unwrap();
+    let reader = accessor.open(request).await.unwrap();
+    assert_eq!(&inspected, reader.metadata());
+    reader
+}
+
 mod drop_probe;
 pub use drop_probe::DropProbe;
+
+/// Require an error of the expected category and return it for context assertions.
+/// Unlike `unwrap_err`, this does not require the successful value to implement
+/// `Debug`, so it also accepts results containing trait-object readers.
+pub fn expect_err_kind<T>(result: Result<T>, kind: ErrorKind) -> Error {
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("expected {kind:?} error, but the operation succeeded"),
+    };
+    assert_eq!(error.kind(), kind, "unexpected error category: {error}");
+    error
+}
 
 /// Configure the filesystem SDK backend for test fixtures.
 pub fn fs_operator(root: impl AsRef<Path>) -> opendal::Operator {

@@ -39,6 +39,13 @@ impl<A: ScanPlanner> Accessor for UnorderedEmissionAccessor<A> {
         self.policy.capability()
     }
 
+    async fn metadata(
+        &self,
+        request: Self::Request,
+    ) -> Result<open_arrow_access_core::RecordMetadata> {
+        self.policy.metadata(request).await
+    }
+
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
         self.policy.open(request).await
     }

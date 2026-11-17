@@ -1,4 +1,4 @@
-pub(super) use crate::common::{decode, invalid};
+pub(super) use crate::common::decode;
 
 pub(super) fn unauthorized() -> open_arrow_access_core::Error {
     open_arrow_access_core::Error::new(

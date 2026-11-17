@@ -9,6 +9,7 @@ use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::atif::{AtifAccessor, AtifFormat};
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_storage::OpenDalAccessor;
+use open_arrow_access_test_support::record::assert_same_batches;
 
 #[tokio::test]
 async fn reads_atif_jsonl_and_ordered_file_sets() {
@@ -69,14 +70,7 @@ async fn parallel_atif_matches_sequential_values_and_source_context() {
         .open(request)
         .await
         .unwrap();
-    loop {
-        let expected = sequential.next().await.unwrap();
-        let actual = parallel.next().await.unwrap();
-        assert_eq!(actual, expected);
-        if expected.is_none() {
-            break;
-        }
-    }
+    assert_same_batches(sequential.as_mut(), parallel.as_mut()).await;
 }
 
 #[tokio::test]
@@ -96,14 +90,7 @@ async fn parallel_atif_composes_with_independent_gzip_readers() {
         .open(request)
         .await
         .unwrap();
-    loop {
-        let expected = sequential.next().await.unwrap();
-        let actual = parallel.next().await.unwrap();
-        assert_eq!(actual, expected);
-        if expected.is_none() {
-            break;
-        }
-    }
+    assert_same_batches(sequential.as_mut(), parallel.as_mut()).await;
 }
 
 #[tokio::test]
