@@ -1,7 +1,7 @@
-use futures::stream;
+use futures::StreamExt;
 use open_arrow_access_core::{
     Accessor, ReadRequest, Reader, RecordCapability, RecordMetadata, RecordReader, Result,
-    ScanPlan, ScanPlanner, StreamReader, async_trait,
+    ScanPlan, ScanPlanner, StreamReader, async_trait, into_stream,
 };
 
 mod column;
@@ -95,17 +95,9 @@ where
         metadata.schema = output.schema();
         let source = metadata.source.clone();
         let ordering = reader.capability().ordering;
-        let batches = stream::try_unfold(reader, move |mut reader| {
-            let output = output.clone();
-            let source = source.clone();
-            async move {
-                let Some(item) = reader.next().await? else {
-                    return Ok(None);
-                };
-                let (batch, positions) = item.into_source_parts();
-                let batch = output.batch(batch, source.as_ref(), &positions)?;
-                Ok(Some((batch, reader)))
-            }
+        let batches = into_stream(reader).map(move |item| {
+            let (batch, positions) = item?.into_source_parts();
+            output.batch(batch, source.as_ref(), &positions)
         });
         Ok(Box::new(StreamReader::records(batches, metadata, ordering)))
     }

@@ -8,10 +8,9 @@ use open_arrow_access_core::{
 
 use super::SourceColumn;
 
-#[derive(Clone)]
 pub(super) struct SourceOutput {
     input: SchemaRef,
-    columns: Vec<(SourceColumn, String)>,
+    columns: Vec<SourceColumn>,
     projection: ResolvedProjection,
 }
 impl SourceOutput {
@@ -39,7 +38,7 @@ impl SourceOutput {
         .resolve_projection(&schema)?;
         Ok(Self {
             input: input.clone(),
-            columns: columns.to_vec(),
+            columns: columns.iter().map(|(column, _)| *column).collect(),
             projection,
         })
     }
@@ -54,7 +53,7 @@ impl SourceOutput {
     ) -> Result<RecordBatch> {
         crate::validation::validate_source_schema(&batch.schema(), &self.input)?;
         let mut arrays = batch.columns().to_vec();
-        for (column, _) in &self.columns {
+        for column in &self.columns {
             let array: ArrayRef = match column {
                 SourceColumn::Object => {
                     let object = crate::validation::validate_source_object(object)?;
