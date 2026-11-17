@@ -5,6 +5,9 @@ use open_arrow_access_core::{
 
 use std::num::NonZeroUsize;
 
+const DEFAULT_MAX_BYTES: NonZeroUsize = NonZeroUsize::new(1024 * 1024).unwrap();
+const DEFAULT_CONCURRENCY: NonZeroUsize = NonZeroUsize::new(8).unwrap();
+
 /// How many selected files to inspect during content sniffing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SniffPolicy {
@@ -30,8 +33,8 @@ impl Default for SniffConfig {
     fn default() -> Self {
         Self {
             policy: SniffPolicy::default(),
-            max_bytes: NonZeroUsize::new(1024 * 1024).unwrap(),
-            concurrency: NonZeroUsize::new(8).unwrap(),
+            max_bytes: DEFAULT_MAX_BYTES,
+            concurrency: DEFAULT_CONCURRENCY,
         }
     }
 }
