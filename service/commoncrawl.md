@@ -79,7 +79,7 @@ async fn read_crawl(crawl: &str) -> Result<()> {
         create_http_accessor("https://data.commoncrawl.org")?.layer(DecompressionLayer::new(Gzip));
     let dataset = CommonCrawlWarcAccessor::from_warc_bytes(manifests, bytes);
     let request = CommonCrawlWarcRequest::new(crawl)?.with_options(ReadOptions {
-        projection: Some(vec!["record_id".into(), "target_uri".into()]),
+        projection: Some(vec!["id".into(), "target_uri".into()]),
         ..Default::default()
     });
     let mut reader = dataset.open(request).await?;

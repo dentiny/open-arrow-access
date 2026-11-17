@@ -95,7 +95,7 @@ const HEADER_COLUMNS: &[(&str, WarcHeader, DataType, bool)] = &[
         true,
     ),
     ("truncated", WarcHeader::Truncated, DataType::Utf8, true),
-    ("warcinfo_id", WarcHeader::WarcInfoID, DataType::Utf8, true),
+    ("warc_info_id", WarcHeader::WarcInfoID, DataType::Utf8, true),
 ];
 
 fn raw_arrow_schema() -> SchemaRef {
@@ -103,8 +103,8 @@ fn raw_arrow_schema() -> SchemaRef {
     SCHEMA
         .get_or_init(|| {
             let mut fields = vec![
-                Field::new("record_id", DataType::Utf8, false),
-                Field::new("record_type", DataType::Utf8, false),
+                Field::new("id", DataType::Utf8, false),
+                Field::new("type", DataType::Utf8, false),
                 Field::new("warc_version", DataType::Utf8, false),
                 Field::new("date", DataType::Utf8, false),
                 Field::new("source_uri", DataType::LargeUtf8, false),
@@ -258,8 +258,8 @@ pub(super) fn append_record(
     source_uri: &str,
 ) -> Result<()> {
     batch.push(|row| {
-        row.append("record_id", record.warc_id())?;
-        row.append("record_type", record.warc_type().as_str())?;
+        row.append("id", record.warc_id())?;
+        row.append("type", record.warc_type().as_str())?;
         row.append("warc_version", record.warc_version())?;
         row.append("date", record.date().to_rfc3339().as_str())?;
         row.append("source_uri", source_uri)?;
