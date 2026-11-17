@@ -35,7 +35,7 @@ mod named_files;
 pub use named_files::NamedFileAccessor;
 pub use validation::validate_file_names;
 
-pub use error::opendal_error_kind;
+pub use error::{classify_opendal_error, opendal_error_kind};
 
 mod metrics;
 pub use metrics::opendal_metrics_layer;

@@ -1,8 +1,7 @@
 use open_arrow_access_core::{Error, ErrorKind};
 
 pub(crate) fn map_error(operation: &'static str, path: &str, error: opendal::Error) -> Error {
-    let kind =
-        ErrorKind::from_source(&error).unwrap_or_else(|| crate::opendal_error_kind(error.kind()));
+    let kind = classify_opendal_error(&error);
     Error::new(kind, operation, format!("object {path:?}")).with_source(error)
 }
 
@@ -40,6 +39,14 @@ pub(crate) fn short_read(operation: &'static str) -> Error {
         operation,
         "unexpected short read; input may have changed",
     )
+}
+
+/// Classify an OpenDAL failure, preserving a shared category from its source chain.
+///
+/// Without a nested core error, this uses [`opendal_error_kind`]. Configuration
+/// errors retain the storage fallback of `Io`; provider callers may distinguish them.
+pub fn classify_opendal_error(error: &opendal::Error) -> ErrorKind {
+    ErrorKind::from_source(error).unwrap_or_else(|| opendal_error_kind(error.kind()))
 }
 
 /// Classify OpenDAL I/O failures; unrecognized categories map to `Io`.

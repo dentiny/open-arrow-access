@@ -1,8 +1,7 @@
 use open_arrow_access_core::{Error, ErrorKind};
 
 pub(crate) fn transport_error(operation: &'static str, error: opendal::Error) -> Error {
-    let kind =
-        ErrorKind::from_source(&error).unwrap_or_else(|| crate::error::error_kind(error.kind()));
+    let kind = crate::error::error_kind(&error);
     Error::new(kind, operation, "provider HTTP operation failed").with_source(error)
 }
 

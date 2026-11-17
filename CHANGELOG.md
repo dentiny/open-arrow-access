@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Preserve nested core error categories in Hugging Face OpenDAL failures and expose a source-aware OpenDAL classifier.
+
 ## 0.4.0 - 2026-11-16
 
 - Add opt-in source columns and source positions with user-configurable record framing.

@@ -416,3 +416,25 @@ async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor
         assert_eq!(reader.read_range(4..8).await.unwrap().as_ref(), b"efgh");
     }
 }
+
+#[test]
+fn opendal_classification_preserves_sources_and_storage_fallbacks() {
+    use open_arrow_access_core::Error;
+    use open_arrow_access_storage::classify_opendal_error;
+
+    for (sdk_kind, expected) in [
+        (opendal::ErrorKind::NotFound, ErrorKind::NotFound),
+        (
+            opendal::ErrorKind::PermissionDenied,
+            ErrorKind::PermissionDenied,
+        ),
+        (opendal::ErrorKind::Unsupported, ErrorKind::Unsupported),
+        (opendal::ErrorKind::ConfigInvalid, ErrorKind::Io),
+        (opendal::ErrorKind::Unexpected, ErrorKind::Io),
+    ] {
+        let error = opendal::Error::new(sdk_kind, "SDK failure");
+        assert_eq!(classify_opendal_error(&error), expected);
+        let nested = error.set_source(Error::new(ErrorKind::Timeout, "read", "timeout"));
+        assert_eq!(classify_opendal_error(&nested), ErrorKind::Timeout);
+    }
+}
