@@ -1,8 +1,6 @@
-use open_arrow_access::{
-    Accessor, ReadRequest,
-    file_format::parquet::ParquetAccessor,
-    storage::{OpenDalAccessor, opendal},
-};
+mod common;
+
+use open_arrow_access::{Accessor, ReadRequest, file_format::parquet::ParquetAccessor};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -10,10 +8,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = args.next().unwrap_or_else(|| ".".into());
     let path = args.next().unwrap_or_else(|| "data.parquet".into());
     let root = std::path::absolute(root)?;
-    let operator = opendal::Operator::new(
-        opendal::services::Fs::default().root(root.to_str().ok_or("root must be valid UTF-8")?),
-    )?;
-    let accessor = ParquetAccessor::new(OpenDalAccessor::new(operator));
+    let bytes = common::fs_accessor(root.to_str().ok_or("root must be valid UTF-8")?)?;
+    let accessor = ParquetAccessor::new(bytes);
     let mut reader = accessor.open(ReadRequest::new(path)).await?;
     println!("Schema: {:?}", reader.metadata().schema);
     let mut rows = 0;

@@ -1,3 +1,5 @@
+mod common;
+
 use open_arrow_access::{Accessor, service::internet_archive::InternetArchiveService};
 
 #[tokio::main]
@@ -12,10 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(name) = args.next() {
         let mut reader = item.open(name.into()).await?;
-        let mut count = 0;
-        while let Some(bytes) = reader.next().await? {
-            count += bytes.len();
-        }
+        let count = common::count_bytes(reader.as_mut()).await?;
         println!("Read {count} bytes");
     }
     Ok(())

@@ -1,9 +1,10 @@
+mod common;
+
 use std::num::NonZeroUsize;
 
 use open_arrow_access::{
     Accessor, ByteReadRequest,
     decompression::zip::{ZipArchive, ZipLimits},
-    storage::{OpenDalAccessor, opendal},
 };
 
 #[tokio::main]
@@ -12,9 +13,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.len() != 4 {
         return Err("usage: read_zip <root> <archive> <entry-index>".into());
     }
-    let operator = opendal::Operator::new(opendal::services::Fs::default().root(&args[1]))?;
+    let bytes = common::fs_accessor(&args[1])?;
     let request = ByteReadRequest::new(args[2].as_str());
-    let input = OpenDalAccessor::new(operator).open(request).await?;
+    let input = bytes.open(request).await?;
     let archive = ZipArchive::open(input, ZipLimits::default()).await?;
     for entry in archive.entries() {
         println!(
@@ -27,10 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut reader = archive
         .open_entry(args[3].parse()?, NonZeroUsize::new(64 * 1024).unwrap())
         .await?;
-    let mut count = 0;
-    while let Some(chunk) = reader.next().await? {
-        count += chunk.len();
-    }
+    let count = common::count_bytes(reader.as_mut()).await?;
     println!("Decoded {count} bytes from entry {}", args[3]);
     Ok(())
 }

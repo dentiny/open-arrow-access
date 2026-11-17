@@ -1,8 +1,6 @@
-use open_arrow_access::{
-    Accessor, ReadRequest,
-    service::gutenberg::GutenbergAccessor,
-    storage::{OpenDalAccessor, opendal},
-};
+mod common;
+
+use open_arrow_access::{Accessor, ReadRequest, service::gutenberg::GutenbergAccessor};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -11,8 +9,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let metadata = args
         .next()
         .unwrap_or_else(|| "testdata/gutenberg/book.rdf".into());
-    let operator = opendal::Operator::new(opendal::services::Fs::default().root(&root))?;
-    let books = GutenbergAccessor::with_default_decoder(OpenDalAccessor::new(operator));
+    let bytes = common::fs_accessor(&root)?;
+    let books = GutenbergAccessor::with_default_decoder(bytes);
     let mut reader = books.open(ReadRequest::new(metadata)).await?;
     println!("schema: {:?}", reader.metadata().schema);
     while let Some(batch) = reader.next().await? {

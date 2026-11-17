@@ -1,8 +1,8 @@
+mod common;
+
 use open_arrow_access::{
     ByteReadOptions,
-    decompression::tar::TarEntryReader,
     service::arxiv::{ArxivKind, ArxivService},
-    storage::{OpenDalAccessor, opendal},
 };
 
 #[tokio::main]
@@ -12,8 +12,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .next()
         .ok_or("usage: read_arxiv <local-mirror-root> <YYMM> [archive-index] [entry-index]")?;
     let month: u16 = args.next().ok_or("missing YYMM month")?.parse()?;
-    let operator = opendal::Operator::new(opendal::services::Fs::default().root(&root))?;
-    let service = ArxivService::new(OpenDalAccessor::new(operator));
+    let bytes = common::fs_accessor(&root)?;
+    let service = ArxivService::new(bytes);
     let archives = service
         .manifest(ArxivKind::Auto, Some(month), ByteReadOptions::default())
         .await?;
@@ -32,24 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .next()
             .map(|index| index.parse::<usize>())
             .transpose()?;
-        while let Some(TarEntryReader { entry, mut reader }) = archive.next_entry().await? {
-            println!(
-                "{}\t{}\t{} bytes",
-                entry.index,
-                String::from_utf8_lossy(&entry.name),
-                entry.size
-            );
-            let mut bytes = 0;
-            while let Some(chunk) = reader.next().await? {
-                bytes += chunk.len();
-            }
-            if selected.is_none_or(|index| entry.index == index) {
-                println!("Read {bytes} entry bytes");
-            }
-            if selected == Some(entry.index) {
-                break;
-            }
-        }
+        common::print_tar_entries(&mut archive, selected).await?;
     }
     Ok(())
 }

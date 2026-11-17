@@ -1,3 +1,5 @@
+mod common;
+
 use std::num::NonZeroU64;
 
 use open_arrow_access::{Accessor, service::zenodo::ZenodoService};
@@ -15,10 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(key) = args.next() {
         let mut reader = record.open(key.into()).await?;
-        let mut bytes = 0;
-        while let Some(chunk) = reader.next().await? {
-            bytes += chunk.len();
-        }
+        let bytes = common::count_bytes(reader.as_mut()).await?;
         println!("Read {bytes} bytes");
     }
     Ok(())

@@ -1,16 +1,14 @@
+mod common;
+
 use open_arrow_access::{
     Accessor, ReadRequest,
     file_format::atif::{AtifAccessor, AtifFormat},
-    storage::{OpenDalAccessor, opendal},
 };
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::env::current_dir()?;
-    let operator = opendal::Operator::new(
-        opendal::services::Fs::default().root(root.to_str().ok_or("root must be valid UTF-8")?),
-    )?;
-    let bytes = OpenDalAccessor::new(operator);
+    let bytes = common::fs_accessor(root.to_str().ok_or("root must be valid UTF-8")?)?;
     let mut args = std::env::args().skip(1);
     let path = args
         .next()

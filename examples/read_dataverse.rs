@@ -1,3 +1,5 @@
+mod common;
+
 use open_arrow_access::{Accessor, service::dataverse::DataverseService};
 
 #[tokio::main]
@@ -16,10 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(name) = args.next() {
         let mut reader = dataset.open(name.into()).await?;
-        let mut bytes = 0;
-        while let Some(chunk) = reader.next().await? {
-            bytes += chunk.len();
-        }
+        let bytes = common::count_bytes(reader.as_mut()).await?;
         println!("Read {bytes} original bytes");
     }
     Ok(())

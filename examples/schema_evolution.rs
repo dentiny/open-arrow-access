@@ -1,5 +1,6 @@
 //! Add, remove, rename, and cast columns, then project using output names.
 //! Run: cargo run --locked --example schema_evolution --features format-json
+mod common;
 
 use std::sync::Arc;
 
@@ -9,21 +10,18 @@ use open_arrow_access::{
     Accessor, AccessorExt, ReadOptions, ReadRequest,
     file_format::json::JsonAccessor,
     layers::{ColumnEvolution, SchemaEvolutionLayer},
-    storage::{OpenDalAccessor, opendal},
 };
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Use a checked-in fixture; no network access or external dataset is needed.
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/json");
-    let operator = opendal::Operator::new(
-        opendal::services::Fs::default().root(root.to_str().ok_or("root must be valid UTF-8")?),
-    )?;
+    let bytes = common::fs_accessor(root.to_str().ok_or("root must be valid UTF-8")?)?;
     let source_schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int64, true),
         Field::new("title", DataType::Utf8, true),
     ]));
-    let source = JsonAccessor::new(OpenDalAccessor::new(operator), source_schema.clone());
+    let source = JsonAccessor::new(bytes, source_schema.clone());
     // Layers are always available. Enabling format-json only enables the decoder.
     let records = source.layer(
         SchemaEvolutionLayer::try_new(vec![
