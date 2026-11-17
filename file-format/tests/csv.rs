@@ -476,12 +476,7 @@ async fn inference_detects_numeric_headerless_data_and_allows_string_header_over
 async fn inference_preserves_tsv_dialect_bom_gzip_and_zero_column_rows() {
     use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
     use open_arrow_access_file_format::csv::CsvDialect;
-    use std::io::Write;
-    let mut encoded = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoded
-        .write_all(b"\xef\xbb\xbfid\ttitle\r\n1\t'first\tvalue'\r\n2\t'next'\r\n")
-        .unwrap();
-    let bytes = encoded.finish().unwrap();
+    let bytes = fixture!("csv", "bom-single-quote.tsv.gz").await;
     for infer in [false, true] {
         let input = MemoryAccessor::new(&bytes, 1).layer(DecompressionLayer::new(Gzip));
         let accessor = if infer {

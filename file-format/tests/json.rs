@@ -2,8 +2,6 @@ use futures::TryStreamExt;
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::DecodePartitionOptions;
 use open_arrow_access_layers::ParallelReadLayer;
-use open_arrow_access_test_support::record::assert_same_batches;
-use std::io::Write;
 use std::{
     error::Error as _,
     num::NonZeroUsize,
@@ -20,7 +18,8 @@ use open_arrow_access_core::{
 
 use open_arrow_access_file_format::json::JsonAccessor;
 use open_arrow_access_test_support::{
-    MemoryAccessor, Observations, fixture, format, record::collect_nullable_strings,
+    MemoryAccessor, Observations, fixture, format,
+    record::{assert_same_batches, collect_nullable_strings},
 };
 
 fn schema() -> SchemaRef {
@@ -217,13 +216,7 @@ async fn decoder_configuration_errors_are_classified_before_opening_bytes() {
 
 #[tokio::test]
 async fn parallel_object_chunks_preserve_pretty_json_and_gzip_projection() {
-    let raw = br#"{ "id": 1, "title": "brace } and \"quote\"" }
-    {
-      "id": 2, "title": "nested"
-    } {"id":3,"title":null}"#;
-    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    gzip.write_all(raw).unwrap();
-    let bytes = gzip.finish().unwrap();
+    let bytes = fixture!("json", "pretty-objects.json.gz").await;
     for projection in [None, Some(vec!["title", "id"]), Some(vec![])] {
         let accessor = JsonAccessor::new(
             MemoryAccessor::new(&bytes, 1).layer(DecompressionLayer::new(Gzip)),

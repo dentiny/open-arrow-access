@@ -51,6 +51,32 @@ pub fn fs_operator(root: impl AsRef<Path>) -> opendal::Operator {
         .unwrap()
 }
 
+/// Populate an isolated filesystem with fixture bytes and return its SDK backend.
+///
+/// Paths must be relative to the temporary root and cannot contain `..`.
+/// Parent directories are created as needed. Keep the returned `TempDir` alive
+/// until all operators, accessors, and readers using its files have been dropped.
+/// Panics if a path is invalid or filesystem setup fails.
+pub fn temp_fs(files: &[(&str, &[u8])]) -> (tempfile::TempDir, opendal::Operator) {
+    let root = tempfile::tempdir().unwrap();
+    for (name, contents) in files {
+        let relative = Path::new(name);
+        assert!(
+            !name.is_empty()
+                && relative.components().all(|component| matches!(
+                    component,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
+                )),
+            "temporary fixture path must stay within the root: {name}"
+        );
+        let path = root.path().join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+    let operator = fs_operator(root.path());
+    (root, operator)
+}
+
 /// Calls observed across accessor clones and all readers opened from them.
 #[derive(Default)]
 pub struct Observations {

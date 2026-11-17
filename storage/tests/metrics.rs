@@ -5,7 +5,7 @@ use open_arrow_access_core::{
     metrics::{InMemoryExporter, MetricAggregate, MetricsLayer},
 };
 use open_arrow_access_storage::{OpenDalAccessor, opendal_metrics_layer};
-use open_arrow_access_test_support::{collect_bytes, fs_operator, http::HttpFixture};
+use open_arrow_access_test_support::{collect_bytes, http::HttpFixture, temp_fs};
 
 fn counter(exporter: &InMemoryExporter, name: &'static str, operation: &'static str) -> u64 {
     match exporter.snapshot().get(&(name, operation)) {
@@ -17,10 +17,9 @@ fn counter(exporter: &InMemoryExporter, name: &'static str, operation: &'static 
 
 #[tokio::test]
 async fn opendal_and_reader_metrics_share_an_exporter_but_keep_byte_counts_separate() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("data"), b"abcdef").unwrap();
+    let (_dir, operator) = temp_fs(&[("data", b"abcdef")]);
     let metrics = MetricsLayer::default();
-    let operator = fs_operator(dir.path()).layer(opendal_metrics_layer(metrics.exporter().clone()));
+    let operator = operator.layer(opendal_metrics_layer(metrics.exporter().clone()));
     let accessor = OpenDalAccessor::new(operator)
         .with_chunk_size(NonZeroUsize::new(2).unwrap())
         .layer(metrics.clone());
