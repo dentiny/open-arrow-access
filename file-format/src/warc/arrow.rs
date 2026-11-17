@@ -15,7 +15,8 @@ use crate::FileAccessor;
 /// Physical WARC records as Arrow rows. Bodies are unmodified LargeBinary;
 /// dates default to millisecond timestamps without a timezone;
 /// target URIs remain strings and are never fetched. No HTTP/entity decoding or
-/// revisit resolution is performed. Use the native parser to inspect other headers.
+/// revisit resolution is performed. Standard WARC headers are exposed as strings;
+/// use the native parser for custom headers.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WarcArrowFormat;
 
@@ -40,6 +41,20 @@ fn raw_arrow_schema() -> SchemaRef {
                 Field::new("target_uri", DataType::LargeUtf8, true),
                 Field::new("content_type", DataType::Utf8, true),
                 Field::new("body", DataType::LargeBinary, false),
+                Field::new("content_length", DataType::Utf8, false),
+                Field::new("block_digest", DataType::Utf8, true),
+                Field::new("payload_digest", DataType::Utf8, true),
+                Field::new("concurrent_to", DataType::Utf8, true),
+                Field::new("filename", DataType::Utf8, true),
+                Field::new("identified_payload_type", DataType::Utf8, true),
+                Field::new("ip_address", DataType::Utf8, true),
+                Field::new("profile", DataType::Utf8, true),
+                Field::new("refers_to", DataType::Utf8, true),
+                Field::new("segment_number", DataType::Utf8, true),
+                Field::new("segment_origin_id", DataType::Utf8, true),
+                Field::new("segment_total_length", DataType::Utf8, true),
+                Field::new("truncated", DataType::Utf8, true),
+                Field::new("warcinfo_id", DataType::Utf8, true),
             ]))
         })
         .clone()
@@ -189,6 +204,50 @@ pub(super) fn append_record(
         row.append(
             "content_type",
             record.header(WarcHeader::ContentType).as_deref(),
+        )?;
+        row.append(
+            "content_length",
+            record.header(WarcHeader::ContentLength).as_deref(),
+        )?;
+        row.append(
+            "block_digest",
+            record.header(WarcHeader::BlockDigest).as_deref(),
+        )?;
+        row.append(
+            "payload_digest",
+            record.header(WarcHeader::PayloadDigest).as_deref(),
+        )?;
+        row.append(
+            "concurrent_to",
+            record.header(WarcHeader::ConcurrentTo).as_deref(),
+        )?;
+        row.append("filename", record.header(WarcHeader::Filename).as_deref())?;
+        row.append(
+            "identified_payload_type",
+            record.header(WarcHeader::IdentifiedPayloadType).as_deref(),
+        )?;
+        row.append(
+            "ip_address",
+            record.header(WarcHeader::IPAddress).as_deref(),
+        )?;
+        row.append("profile", record.header(WarcHeader::Profile).as_deref())?;
+        row.append("refers_to", record.header(WarcHeader::RefersTo).as_deref())?;
+        row.append(
+            "segment_number",
+            record.header(WarcHeader::SegmentNumber).as_deref(),
+        )?;
+        row.append(
+            "segment_origin_id",
+            record.header(WarcHeader::SegmentOriginID).as_deref(),
+        )?;
+        row.append(
+            "segment_total_length",
+            record.header(WarcHeader::SegmentTotalLength).as_deref(),
+        )?;
+        row.append("truncated", record.header(WarcHeader::Truncated).as_deref())?;
+        row.append(
+            "warcinfo_id",
+            record.header(WarcHeader::WarcInfoID).as_deref(),
         )?;
         row.append("body", record.body())
     })

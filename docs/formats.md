@@ -288,7 +288,7 @@ while let Some(batch) = reader.next().await? {
 }
 ```
 
-The fixed schema has eight top-level fields:
+The fixed schema has 22 top-level fields:
 
 | Field | Arrow type | Nullable |
 | --- | --- | --- |
@@ -300,6 +300,20 @@ The fixed schema has eight top-level fields:
 | `target_uri` | LargeUtf8 | Yes |
 | `content_type` | Utf8 | Yes |
 | `body` | LargeBinary | No |
+| `content_length` | Utf8 | No |
+| `block_digest` | Utf8 | Yes |
+| `payload_digest` | Utf8 | Yes |
+| `concurrent_to` | Utf8 | Yes |
+| `filename` | Utf8 | Yes |
+| `identified_payload_type` | Utf8 | Yes |
+| `ip_address` | Utf8 | Yes |
+| `profile` | Utf8 | Yes |
+| `refers_to` | Utf8 | Yes |
+| `segment_number` | Utf8 | Yes |
+| `segment_origin_id` | Utf8 | Yes |
+| `segment_total_length` | Utf8 | Yes |
+| `truncated` | Utf8 | Yes |
+| `warcinfo_id` | Utf8 | Yes |
 
 The default Arrow reader applies `SchemaEvolutionLayer` to convert parsed RFC 3339
 dates to UTC epoch milliseconds, stored without timezone metadata. Sequential and
@@ -310,8 +324,10 @@ retain the parser's date representation.
 Each physical WARC record produces one row, including warcinfo and continuation
 records. Bodies retain their original bytes; embedded HTTP messages are not
 extracted or decoded, target URIs are not fetched, and revisits are not resolved.
-Use the native accessor for headers outside this schema. `projection: None`
-selects all eight fields; an empty projection preserves row counts with zero
+Standard header values are exposed as strings from `warc-rs`, including numeric
+headers such as `content_length` and `segment_number`; absent optional headers
+are null. Use the native accessor for custom headers outside this schema.
+`projection: None` selects all 22 fields; an empty projection preserves row counts with zero
 columns. Unknown and duplicate field names fail before source I/O.
 
 Projection avoids building Arrow arrays for omitted fields. The parser still
