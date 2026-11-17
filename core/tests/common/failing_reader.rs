@@ -23,12 +23,7 @@ impl Reader for FailingReader {
     type Capability = Capability;
 
     fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        Capability::sequential(true)
     }
 
     fn metadata(&self) -> &() {

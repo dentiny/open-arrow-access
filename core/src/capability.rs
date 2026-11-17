@@ -5,8 +5,8 @@
 /// current interface, not every operation supported by its underlying backend.
 /// Transparent layers forward them; transforming layers must update them to
 /// match the operations they actually expose. Unset flags mean unsupported.
-/// Construct values by explicitly assigning every flag instead of using defaults
-/// or struct update syntax.
+/// Construct values by explicitly assigning every flag or using a named constructor
+/// instead of defaults or struct update syntax.
 ///
 /// Accessors report supported operations before opening. Readers report the
 /// abilities of the opened representation, which can be more specific. `read`
@@ -72,8 +72,19 @@ pub struct RecordCapability {
 }
 
 impl Capability {
+    /// Declare sequential reading support with no range, parallel or list access.
+    /// Pass the input's read support when adapting an existing interface.
+    pub const fn sequential(read: bool) -> Self {
+        Self {
+            read,
+            read_with_range: false,
+            read_parallel: false,
+            list: false,
+        }
+    }
+
     /// Declare the ordering contract while constructing a record capability.
-    pub fn with_ordering(self, ordering: OrderRequirement) -> RecordCapability {
+    pub const fn with_ordering(self, ordering: OrderRequirement) -> RecordCapability {
         RecordCapability {
             read: self.read,
             read_with_range: self.read_with_range,
@@ -85,14 +96,13 @@ impl Capability {
 }
 
 impl RecordCapability {
+    /// Declare sequential record reading support with an explicit ordering contract.
+    pub const fn sequential_if(read: bool, ordering: OrderRequirement) -> Self {
+        Capability::sequential(read).with_ordering(ordering)
+    }
+
     /// Capabilities of an opened sequential record stream, with explicit ordering.
-    pub fn sequential(ordering: OrderRequirement) -> Self {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(ordering)
+    pub const fn sequential(ordering: OrderRequirement) -> Self {
+        Self::sequential_if(true, ordering)
     }
 }

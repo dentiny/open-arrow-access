@@ -6,9 +6,9 @@ use std::{
 use arrow_schema::{DataType, Field, Schema};
 use futures::{lock::Mutex, stream};
 use open_arrow_access_core::{
-    Accessor, Bytes, Capability, FieldNameIndex, OrderRequirement, ReadOptions,
-    ReadOptionsProvider, RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader,
-    Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, read_all,
+    Accessor, Bytes, FieldNameIndex, OrderRequirement, ReadOptions, ReadOptionsProvider,
+    RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition,
+    ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, read_all,
 };
 
 use open_arrow_access_decompression::zip::ZipArchive;
@@ -93,13 +93,7 @@ impl Accessor for MecaRecords {
     type Request = MecaReadRequest;
     type Reader = dyn RecordReader;
     fn capability(&self) -> RecordCapability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::Reorderable)
+        RecordCapability::sequential(OrderRequirement::Reorderable)
     }
     async fn open(&self, request: MecaReadRequest) -> Result<Box<dyn RecordReader>> {
         Ok(Box::new(self.plan_scan(request).await?.into_reader()))

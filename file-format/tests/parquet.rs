@@ -227,12 +227,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> Accessor
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
-        Capability {
-            read: self.0.capability().read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        Capability::sequential(self.0.capability().read)
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
@@ -249,12 +244,7 @@ impl Reader for SequentialReader {
     type Capability = Capability;
 
     fn capability(&self) -> Capability {
-        Capability {
-            read: self.0.capability().read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        Capability::sequential(self.0.capability().read)
     }
 
     fn metadata(&self) -> &ByteMetadata {

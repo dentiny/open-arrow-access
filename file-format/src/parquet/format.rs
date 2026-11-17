@@ -20,13 +20,10 @@ impl ReaderFactory for ParquetFormat {
     type Prepared = ();
 
     fn capability(&self, input: Capability) -> RecordCapability {
-        Capability {
-            read: input.read && input.read_with_range,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::Reorderable)
+        RecordCapability::sequential_if(
+            input.read && input.read_with_range,
+            OrderRequirement::Reorderable,
+        )
     }
 
     fn prepare(&self, _request: &ReadRequest) -> Result<()> {

@@ -78,13 +78,7 @@ impl Accessor for Files {
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> RecordCapability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::PreserveGlobal)
+        RecordCapability::sequential(OrderRequirement::PreserveGlobal)
     }
 
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
@@ -124,13 +118,7 @@ impl Reader for Batches {
     type Metadata = RecordMetadata;
     type Capability = RecordCapability;
     fn capability(&self) -> RecordCapability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::PreserveGlobal)
+        RecordCapability::sequential(OrderRequirement::PreserveGlobal)
     }
     fn metadata(&self) -> &RecordMetadata {
         &self.metadata

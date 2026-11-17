@@ -25,13 +25,7 @@ impl ReaderFactory for AtifFormat {
     type Prepared = ResolvedProjection;
 
     fn capability(&self, input: Capability) -> RecordCapability {
-        Capability {
-            read: input.read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::PreserveGlobal)
+        RecordCapability::sequential_if(input.read, OrderRequirement::PreserveGlobal)
     }
 
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {

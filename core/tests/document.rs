@@ -118,13 +118,7 @@ enum InvalidDocument {
 impl DocumentDecoder for InvalidDocument {
     type Request = ReadRequest;
     fn capability(&self, input: Capability) -> RecordCapability {
-        Capability {
-            read: input.read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::Reorderable)
+        RecordCapability::sequential_if(input.read, OrderRequirement::Reorderable)
     }
 
     fn prepare(&self, _: &ReadRequest) -> Result<SchemaRef> {

@@ -2,7 +2,7 @@ use std::{future::Future, marker::PhantomData, sync::Arc};
 
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, Capability, OrderRequirement, RecordCapability, RecordMetadata, RecordReader, Result,
+    Accessor, OrderRequirement, RecordCapability, RecordMetadata, RecordReader, Result,
     ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 
@@ -54,13 +54,7 @@ where
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> RecordCapability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::PreserveGlobal)
+        RecordCapability::sequential(OrderRequirement::PreserveGlobal)
     }
 
     async fn open(&self, requests: Vec<R>) -> Result<Box<dyn RecordReader>> {

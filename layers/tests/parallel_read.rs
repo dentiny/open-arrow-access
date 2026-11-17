@@ -36,13 +36,7 @@ impl Accessor for Source {
     type Request = ScanPlan;
     type Reader = dyn RecordReader;
     fn capability(&self) -> RecordCapability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(self.0)
+        RecordCapability::sequential(self.0)
     }
     async fn open(&self, _: ScanPlan) -> Result<Box<dyn RecordReader>> {
         unreachable!()

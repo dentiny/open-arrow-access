@@ -52,13 +52,8 @@ where
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> RecordCapability {
-        Capability {
-            read: self.discovery.capability().list && self.files.capability().read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(self.files.capability().ordering)
+        Capability::sequential(self.discovery.capability().list && self.files.capability().read)
+            .with_ordering(self.files.capability().ordering)
     }
 
     async fn open(&self, request: DirectoryRequest) -> Result<Box<dyn RecordReader>> {

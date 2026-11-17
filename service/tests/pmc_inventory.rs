@@ -36,12 +36,7 @@ impl Accessor for Objects {
     type Request = ByteReadRequest;
     type Reader = dyn ByteReader;
     fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        Capability::sequential(true)
     }
     async fn open(&self, r: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         self.opened.lock().unwrap().push(r.clone());

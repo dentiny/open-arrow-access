@@ -79,13 +79,8 @@ where
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> RecordCapability {
-        Capability {
-            read: self.inner.capability().read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(self.inner.capability().ordering)
+        Capability::sequential(self.inner.capability().read)
+            .with_ordering(self.inner.capability().ordering)
     }
 
     async fn open(&self, request: FileSetRequest) -> Result<Box<dyn RecordReader>> {

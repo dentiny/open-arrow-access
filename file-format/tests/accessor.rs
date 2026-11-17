@@ -26,13 +26,7 @@ impl FileFormat for ProbeFormat {
     type Prepared = usize;
 
     fn capability(&self, input: Capability) -> RecordCapability {
-        Capability {
-            read: input.read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::Reorderable)
+        RecordCapability::sequential_if(input.read, OrderRequirement::Reorderable)
     }
 
     fn prepare(&self, request: &ReadRequest) -> Result<usize> {
@@ -96,13 +90,7 @@ async fn external_format_prepares_each_open_and_receives_request_options() {
     });
     assert_eq!(
         accessor.capability(),
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::Reorderable)
+        RecordCapability::sequential(OrderRequirement::Reorderable)
     );
     assert!(events.lock().unwrap().is_empty());
     assert!(observed.requests.lock().unwrap().is_empty());

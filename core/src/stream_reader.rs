@@ -40,12 +40,7 @@ impl<S, M> StreamReader<S, M> {
     pub fn new(stream: S, metadata: M) -> Self {
         Self {
             object: None,
-            capability: Capability {
-                read: true,
-                read_with_range: false,
-                read_parallel: false,
-                list: false,
-            },
+            capability: Capability::sequential(true),
             stream: Some(Box::pin(stream)),
             metadata,
         }

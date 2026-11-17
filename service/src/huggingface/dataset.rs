@@ -1,7 +1,6 @@
 use open_arrow_access_core::{
-    Accessor, Capability, ErrorKind, ListRequest, ObjectRef, OrderRequirement, RecordCapability,
-    RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait, into_stream,
-    list_files,
+    Accessor, ErrorKind, ListRequest, ObjectRef, OrderRequirement, RecordCapability, RecordReader,
+    Result, ScanPlan, ScanPlanner, StreamReader, async_trait, into_stream, list_files,
 };
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
 use open_arrow_access_file_format::parquet::ParquetAccessor;
@@ -69,13 +68,7 @@ impl Accessor for HuggingFaceService {
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> RecordCapability {
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::PreserveGlobal)
+        RecordCapability::sequential(OrderRequirement::PreserveGlobal)
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {

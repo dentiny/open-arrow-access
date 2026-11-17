@@ -7,10 +7,10 @@ use std::{
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, FieldNameIndex,
-    ObjectRef, OrderRequirement, ReadOptions, ReadOptionsProvider, RecordBatchBuilder,
-    RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner,
-    SchemaRef, StreamReader, async_trait, read_all,
+    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, FieldNameIndex, ObjectRef,
+    OrderRequirement, ReadOptions, ReadOptionsProvider, RecordBatchBuilder, RecordCapability,
+    RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef,
+    StreamReader, async_trait, read_all,
 };
 
 use super::{ArxivKind, ArxivService};
@@ -111,13 +111,10 @@ where
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> RecordCapability {
-        Capability {
-            read: self.service.storage.capability().read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::Reorderable)
+        RecordCapability::sequential_if(
+            self.service.storage.capability().read,
+            OrderRequirement::Reorderable,
+        )
     }
 
     async fn open(&self, request: ArxivReadRequest) -> Result<Box<dyn RecordReader>> {

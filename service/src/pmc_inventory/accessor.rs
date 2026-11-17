@@ -2,7 +2,7 @@ use super::{manifest, reader::InventoryTransform};
 use arrow_schema::Schema;
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, Capability, ObjectRef, OrderRequirement, ReadRequest,
+    Accessor, ByteAccessor, ByteReadRequest, ObjectRef, OrderRequirement, ReadRequest,
     RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner,
     async_trait,
 };
@@ -37,13 +37,7 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
     fn capability(&self) -> RecordCapability {
-        Capability {
-            read: self.inner.capability().read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::Reorderable)
+        RecordCapability::sequential_if(self.inner.capability().read, OrderRequirement::Reorderable)
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         let PreparedInventoryScan {

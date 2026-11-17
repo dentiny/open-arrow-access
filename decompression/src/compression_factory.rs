@@ -167,12 +167,7 @@ impl ReaderFactory for CompressionFactory {
     type Prepared = Option<String>;
 
     fn capability(&self, input: Capability) -> Capability {
-        Capability {
-            read: input.read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
+        Capability::sequential(input.read)
     }
 
     fn prepare(&self, request: &ByteReadRequest) -> Result<Self::Prepared> {

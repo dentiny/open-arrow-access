@@ -125,13 +125,7 @@ impl ReaderFactory for JsonFormat {
     type Prepared = Option<PreparedJsonReader>;
 
     fn capability(&self, input: Capability) -> RecordCapability {
-        Capability {
-            read: input.read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::Reorderable)
+        RecordCapability::sequential_if(input.read, OrderRequirement::Reorderable)
     }
 
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {

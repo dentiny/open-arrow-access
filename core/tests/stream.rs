@@ -41,15 +41,7 @@ async fn stream_reader_is_lazy_preserves_order_and_fuses_non_unpin_streams() {
     .then(|item| async move { item });
     let mut reader = StreamReader::new(stream, String::from("source"));
     assert_eq!(reader.metadata(), "source");
-    assert_eq!(
-        reader.capability(),
-        Capability {
-            read: true,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-    );
+    assert_eq!(reader.capability(), Capability::sequential(true));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert_eq!(reader.next().await.unwrap(), Some(10));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
