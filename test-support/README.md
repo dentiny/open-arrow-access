@@ -57,6 +57,10 @@ reads and source errors for native record types too. Use `collect_bytes` to
 consume byte output while asserting nonempty chunks. `DropProbe` observes release
 of streams/readers on EOF, errors, and explicit drop.
 
+Use `expect_err_kind(result, kind)` to assert an error category without requiring
+the success type to implement `Debug` (such as a boxed reader). It returns the
+original error for additional operation, source, or object-context assertions.
+
 ## Isolate HTTP tests
 
 `http::HttpFixture` supplies local transport responses and captures methods,

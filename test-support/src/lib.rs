@@ -19,6 +19,18 @@ use open_arrow_access_core::{
 mod drop_probe;
 pub use drop_probe::DropProbe;
 
+/// Require an error of the expected category and return it for context assertions.
+/// Unlike `unwrap_err`, this does not require the successful value to implement
+/// `Debug`, so it also accepts results containing trait-object readers.
+pub fn expect_err_kind<T>(result: Result<T>, kind: ErrorKind) -> Error {
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("expected {kind:?} error, but the operation succeeded"),
+    };
+    assert_eq!(error.kind(), kind, "unexpected error category: {error}");
+    error
+}
+
 /// Configure the filesystem SDK backend for test fixtures.
 pub fn fs_operator(root: impl AsRef<Path>) -> opendal::Operator {
     opendal::Operator::new(opendal::services::Fs::default().root(root.as_ref().to_str().unwrap()))

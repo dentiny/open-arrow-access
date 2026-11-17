@@ -3,7 +3,7 @@ use std::num::NonZeroUsize;
 use open_arrow_access_core::{Accessor, ErrorKind};
 use open_arrow_access_decompression::tar::{TarArchive, TarEntryReader, TarLimits};
 use open_arrow_access_test_support::{
-    MemoryAccessor, byte_layer, collect_bytes, fixture, ranged_input,
+    MemoryAccessor, byte_layer, collect_bytes, expect_err_kind, fixture, ranged_input,
 };
 
 async fn source(name: &str) -> MemoryAccessor {
@@ -195,10 +195,7 @@ async fn streams_first_body_without_scanning_later_headers_or_using_ranges() {
     assert_eq!(first.metadata().version.as_deref(), Some("snapshot"));
     assert_eq!(first.metadata().content_length, Some(entry.size));
     assert_eq!(source.observations.reads.load(Ordering::SeqCst), 16);
-    assert_eq!(
-        archive.next_entry().await.err().unwrap().kind(),
-        ErrorKind::InvalidInput
-    );
+    expect_err_kind(archive.next_entry().await, ErrorKind::InvalidInput);
     byte_layer::assert_output(first.as_mut(), b"%PDF-first-paper", 64)
         .await
         .unwrap();
@@ -265,7 +262,7 @@ async fn sequential_failures_are_terminal_and_share_header_limits() {
             source.open("archive".into()).await.unwrap(),
             TarLimits::default(),
         );
-        assert_eq!(archive.next_entry().await.err().unwrap().kind(), kind);
+        expect_err_kind(archive.next_entry().await, kind);
         assert!(archive.next_entry().await.unwrap().is_none());
     }
     let bytes = fixture!("tar", "mixed.tar").await;
@@ -278,10 +275,7 @@ async fn sequential_failures_are_terminal_and_share_header_limits() {
         },
     );
     drop(archive.next_entry().await.unwrap().unwrap());
-    assert_eq!(
-        archive.next_entry().await.err().unwrap().kind(),
-        ErrorKind::Unsupported
-    );
+    expect_err_kind(archive.next_entry().await, ErrorKind::Unsupported);
     assert!(archive.next_entry().await.unwrap().is_none());
 }
 
@@ -365,10 +359,7 @@ async fn sequential_body_source_errors_and_truncation_terminate_archive() {
             entry: _,
             reader: mut body,
         } = archive.next_entry().await.unwrap().unwrap();
-        assert_eq!(
-            collect_bytes(body.as_mut()).await.err().unwrap().kind(),
-            kind
-        );
+        expect_err_kind(collect_bytes(body.as_mut()).await, kind);
         assert!(body.next().await.unwrap().is_none());
         assert!(archive.next_entry().await.unwrap().is_none());
     }
@@ -479,10 +470,7 @@ async fn sequential_completion_and_malformed_headers_release_source_with_archive
         let mut archive = TarStream::new(input, TarLimits::default());
         assert!(!dropped.load(Ordering::SeqCst));
         if malformed {
-            assert_eq!(
-                archive.next_entry().await.err().unwrap().kind(),
-                ErrorKind::Decode
-            );
+            expect_err_kind(archive.next_entry().await, ErrorKind::Decode);
         } else {
             while let Some(TarEntryReader {
                 entry: _,
