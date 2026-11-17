@@ -57,6 +57,10 @@ reads and source errors for native record types too. Use `collect_bytes` to
 consume byte output while asserting nonempty chunks. `DropProbe` observes release
 of streams/readers on EOF, errors, and explicit drop.
 
+Use `expect_err_kind(result, kind)` to assert an error category without requiring
+the success type to implement `Debug` (such as a boxed reader). It returns the
+original error for additional operation, source, or object-context assertions.
+
 ## Isolate HTTP tests
 
 `http::HttpFixture` supplies local transport responses and captures methods,
@@ -80,3 +84,12 @@ selected file metadata. Keep tests offline.
 See [testing guidance](../docs/testing.md) and the suites in
 [`file-format/tests`](../file-format/tests/), [`decompression/tests`](../decompression/tests/),
 and [`service/tests`](../service/tests/) for complete examples.
+
+## Inspect record values
+
+`record::column::<T>(&batch, name)` borrows a named array with a checked concrete
+Arrow type. `field_names(&schema)` returns names in schema order.
+`collect_strings::<i32>(reader, index)` drains a reader and rejects nulls;
+`collect_nullable_strings::<i32>(&batches, index)` preserves nulls and empty
+strings. Use `i64` for LargeUtf8 instead of Utf8; neither helper coerces layouts.
+Primitive columns use `collect_values` or the draining `collect_column`.

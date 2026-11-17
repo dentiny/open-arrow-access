@@ -2,7 +2,7 @@
 mod error;
 mod parser;
 mod validation;
-use crate::common::{ApiDocument, Connection, RemoteFiles, filename};
+use crate::common::{ApiDocument, ApiKey, Connection, RemoteFiles, filename};
 use open_arrow_access_core::Result;
 #[derive(Clone, Debug)]
 pub struct UsptoService {
@@ -16,8 +16,11 @@ impl UsptoService {
     /// Set or replace the API key while preserving the configured connection.
     /// The key is validated locally and sent as `X-API-KEY` only within its origin.
     pub fn with_key(mut self, key: &str) -> Result<Self> {
-        validation::validate_key(key)?;
-        self.connection = self.connection.with_header("X-API-KEY", key)?;
+        self.connection = self.connection.with_api_key_message(
+            ApiKey::Header("X-API-KEY"),
+            key,
+            "USPTO requires an ODP API key",
+        )?;
         Ok(self)
     }
 

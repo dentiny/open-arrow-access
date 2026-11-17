@@ -108,8 +108,7 @@ impl TarStream {
                 Ok(Some((bytes, (state, remaining, token))))
             },
         );
-        let object = metadata.source.clone();
-        let reader = StreamReader::new(stream, metadata).with_object(object);
+        let reader = StreamReader::bytes(stream, metadata);
         Ok(Some(TarEntryReader {
             entry,
             reader: Box::new(reader),

@@ -6,7 +6,7 @@ use open_arrow_access_core::{
     DocumentAccessor, DocumentDecoder, Error, ErrorKind, OrderRequirement, ReadOptions,
     ReadRequest, RecordBatch, RecordCapability, Result, Schema, SchemaRef, async_trait,
 };
-use open_arrow_access_test_support::{MemoryAccessor, fixture};
+use open_arrow_access_test_support::{MemoryAccessor, expect_err_kind, fixture};
 
 // Neither the storage nor the decoder implements Clone. Accessor clones share
 // their ownership handles while each opened reader keeps independent state.
@@ -86,10 +86,7 @@ async fn rejects_bad_projection_and_preserves_source_errors() {
         projection: Some(vec!["unknown".into()]),
         ..Default::default()
     });
-    assert_eq!(
-        accessor.open(request).await.err().unwrap().kind(),
-        ErrorKind::InvalidInput
-    );
+    expect_err_kind(accessor.open(request).await, ErrorKind::InvalidInput);
     assert!(observed.requests.lock().unwrap().is_empty());
     let mut reader = accessor.open(ReadRequest::new("input")).await.unwrap();
     assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
@@ -101,8 +98,7 @@ async fn rejects_bad_projection_and_preserves_source_errors() {
         .open(ReadRequest::new("input"))
         .await
         .unwrap();
-    let error = reader.next().await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+    let error = expect_err_kind(reader.next().await, ErrorKind::PermissionDenied);
     assert_eq!(error.operation(), "memory_read");
     assert!(reader.next().await.unwrap().is_none());
 }
@@ -175,8 +171,7 @@ async fn rejects_invalid_output_and_preserves_decoder_errors() {
         .open(ReadRequest::new("empty"))
         .await
         .unwrap();
-        let error = reader.next().await.unwrap_err();
-        assert_eq!(error.kind(), kind);
+        let error = expect_err_kind(reader.next().await, kind);
         if kind == ErrorKind::Unsupported {
             assert_eq!(error.operation(), "source_decode");
         }

@@ -1,14 +1,7 @@
-use super::error::{self, decode, invalid};
+use super::error::{self, decode};
 use crate::common::{array, text};
 use open_arrow_access_core::Result;
 use serde_json::Value;
-
-pub(super) fn validate_key(value: &str) -> Result<()> {
-    if value.is_empty() {
-        return Err(invalid("empty BHL API key"));
-    }
-    Ok(())
-}
 
 pub(super) fn validate_parameters(parameters: &[(&str, &str)]) -> Result<()> {
     crate::common::reject_reserved_parameters(
