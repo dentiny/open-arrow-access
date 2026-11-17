@@ -15,7 +15,7 @@ Enable facade feature `service-warc`. See [example setup](README.md#example-setu
 | `CommonCrawl::new("CC-MAIN-YYYY-NN")` / `from_url(crawl_url)` | Validated crawl ID/origin |
 | `CommonCrawlWarcRequest::new(crawl)` | Crawl-wide selector; inventory is `crawl-data/{crawl}/warc.paths.gz` |
 | `CommonCrawlSegmentRequest::new(crawl, segment)` | Exact segment selector over the same inventory |
-| Either request `.with_manifest_url(url)` | Custom inventory file; configure its accessor with `manifest_origin()` |
+| `CommonCrawlWarcRequest::from_manifest_url(crawl, url)` / `CommonCrawlSegmentRequest::from_manifest_url(crawl, segment, url)` | Custom inventory source |
 | WARC/segment accessor `resolve(request)` | `FileSetRequest { objects, options, byte_options }` in inventory order |
 | WARC/segment accessor `open(request)` | Arrow reader from the native WARC view or a caller-supplied record accessor |
 
@@ -103,10 +103,12 @@ Single-segment reads are supported by `CommonCrawlSegmentRequest::from_url` or
 `new(crawl, segment)`. They filter the crawl inventory by the exact
 `crawl-data/<crawl>/segments/<segment>/warc/` prefix, preserving inventory order.
 
-Both crawl and segment requests accept `with_manifest_url(url)` for an inventory
-at an arbitrary HTTP(S) file location. Configure the manifest accessor with
-`request.manifest_origin()` and the record accessor with `request.origin()`;
-these origins may differ. Request URLs do not reconfigure injected accessors.
+Both crawl and segment requests accept `from_manifest_url` for an inventory
+at an arbitrary HTTP(S) file location. A request has one source: either a
+standard crawl or an explicit inventory. `request.origin()` is that source's
+origin; configure origin-rooted accessors with it. Request URLs do not
+reconfigure injected accessors. If record files live elsewhere, supply a record
+accessor configured for that site explicitly.
 Inventory entries must still be origin-rooted `crawl-data/...` keys for the
 selected crawl/segment. The inventory URL's directory is not a base for entries.
 URLs follow the Common Crawl canonical URL rules (no credentials, query,
@@ -122,10 +124,11 @@ use open_arrow_access::{
 };
 
 async fn read_segment() -> Result<()> {
-    let request = CommonCrawlSegmentRequest::from_url(
-        "https://data.commoncrawl.org/crawl-data/CC-MAIN-2022-40/segments/1664030338280.51/",
-    )?.with_manifest_url("https://mirror.example/inventories/warc.paths.gz")?;
-    let manifests = create_http_accessor(&request.manifest_origin())?
+    let request = CommonCrawlSegmentRequest::from_manifest_url(
+        "CC-MAIN-2022-40", "1664030338280.51",
+        "https://mirror.example/inventories/warc.paths.gz",
+    )?;
+    let manifests = create_http_accessor(request.origin())?
         .layer(DecompressionLayer::new(Gzip));
     let bytes = create_http_accessor(request.origin())?
         .layer(DecompressionLayer::new(Gzip));

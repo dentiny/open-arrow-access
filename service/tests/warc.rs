@@ -33,16 +33,21 @@ fn dataset_request_uses_the_crawl_inventory_and_mirror_origin() {
 }
 
 #[test]
-fn custom_manifest_url_preserves_warc_identity_and_validates_before_io() {
-    let request = request();
-    assert_eq!(request.manifest_origin(), request.origin());
-    let request = request
-        .with_manifest_url("http://inventory.example:8080/manifests/selected.paths.gz")
-        .unwrap();
-    assert_eq!(request.manifest_origin(), "http://inventory.example:8080");
+fn custom_manifest_source_has_one_origin_and_validates_before_io() {
+    let request = CommonCrawlWarcRequest::from_manifest_url(
+        "CC-MAIN-2022-40",
+        "http://inventory.example:8080/manifests/selected.paths.gz",
+    )
+    .unwrap();
+    assert_eq!(request.origin(), "http://inventory.example:8080");
     assert_eq!(request.manifest().locator(), "manifests/selected.paths.gz");
     assert_eq!(request.crawl(), "CC-MAIN-2022-40");
-    assert_eq!(request.origin(), "https://data.commoncrawl.org");
+    assert_eq!(
+        CommonCrawlWarcRequest::from_manifest_url("invalid", "https://host/warc.paths")
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidInput,
+    );
     for value in [
         "file:///tmp/warc.paths",
         "https://host/",
@@ -55,7 +60,9 @@ fn custom_manifest_url_preserves_warc_identity_and_validates_before_io() {
         "https://host/a//warc.paths",
     ] {
         assert_eq!(
-            request.clone().with_manifest_url(value).unwrap_err().kind(),
+            CommonCrawlWarcRequest::from_manifest_url("CC-MAIN-2022-40", value)
+                .unwrap_err()
+                .kind(),
             ErrorKind::InvalidInput,
             "{value}"
         );
@@ -69,13 +76,15 @@ async fn dataset_reads_all_segments_in_manifest_order_and_forwards_options() {
     let records = Records::default();
     let opens = records.opens.clone();
     let accessor = CommonCrawlWarcAccessor::new(manifests, records);
-    let mut selection = request()
-        .with_manifest_url("https://inventory.example/custom/warc.paths")
-        .unwrap()
-        .with_byte_options(ByteReadOptions {
-            io_concurrency: NonZeroUsize::new(3).unwrap(),
-            io_chunk_size: NonZeroUsize::new(4),
-        });
+    let mut selection = CommonCrawlWarcRequest::from_manifest_url(
+        "CC-MAIN-2022-40",
+        "https://inventory.example/custom/warc.paths",
+    )
+    .unwrap()
+    .with_byte_options(ByteReadOptions {
+        io_concurrency: NonZeroUsize::new(3).unwrap(),
+        io_chunk_size: NonZeroUsize::new(4),
+    });
     selection.read_options_mut().batch_size = NonZeroUsize::new(2).unwrap();
     let reader = accessor.open(selection).await.unwrap();
     assert!(reader.metadata().source.is_none());
