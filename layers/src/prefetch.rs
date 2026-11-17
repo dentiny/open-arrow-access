@@ -98,6 +98,13 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for PrefetchAccessor<A> {
         self.inner.capability()
     }
 
+    async fn metadata(
+        &self,
+        request: Self::Request,
+    ) -> Result<open_arrow_access_core::RecordMetadata> {
+        self.inner.metadata(request).await
+    }
+
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
         let inner = self.inner.open(request).await?;
         let metadata = inner.metadata().clone();
@@ -111,10 +118,9 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for PrefetchAccessor<A> {
             }))
         })
         .try_flatten();
-        Ok(Box::new(
-            StreamReader::records(batches, metadata, capability.ordering)
-                .with_capability(capability),
-        ))
+        Ok(Box::new(StreamReader::records_with_capability(
+            batches, metadata, capability,
+        )))
     }
 }
 

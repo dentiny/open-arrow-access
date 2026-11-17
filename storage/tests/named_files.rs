@@ -1,7 +1,7 @@
 use futures::TryStreamExt;
 use open_arrow_access_core::{Accessor, ByteAccessor, ByteReadRequest, ErrorKind, ListRequest};
 use open_arrow_access_storage::{NamedFileAccessor, validate_file_names};
-use open_arrow_access_test_support::{MemoryAccessor, collect_bytes};
+use open_arrow_access_test_support::{MemoryAccessor, collect_bytes, expect_err_kind};
 
 #[tokio::test]
 async fn maps_names_and_lists_without_storage_io() {
@@ -29,10 +29,7 @@ async fn maps_names_and_lists_without_storage_io() {
         );
     }
     assert!(accessor.list("subdir".into()).await.is_err());
-    assert_eq!(
-        accessor.open("missing".into()).await.err().unwrap().kind(),
-        ErrorKind::NotFound
-    );
+    expect_err_kind(accessor.open("missing".into()).await, ErrorKind::NotFound);
     assert!(observations.requests.lock().unwrap().is_empty());
     let options = open_arrow_access_core::ByteReadOptions {
         io_concurrency: std::num::NonZeroUsize::new(3).unwrap(),
@@ -74,11 +71,9 @@ fn validation_and_construction_share_namespace_rules(
     assert_eq!(validation.is_ok(), valid);
     assert_eq!(construction.is_ok(), valid);
     if !valid {
-        let expected = validation.unwrap_err();
-        let actual = construction.err().unwrap();
-        assert_eq!(expected.kind(), ErrorKind::InvalidInput);
+        let expected = expect_err_kind(validation, ErrorKind::InvalidInput);
+        let actual = expect_err_kind(construction, expected.kind());
         assert_eq!(expected.operation(), "configure_named_files");
-        assert_eq!(actual.kind(), expected.kind());
         assert_eq!(actual.operation(), expected.operation());
     }
 }

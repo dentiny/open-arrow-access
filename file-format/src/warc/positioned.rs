@@ -1,8 +1,9 @@
 use futures::{io::AsyncBufReadExt, stream};
 use open_arrow_access_core::{
-    BytePosition, ByteReader, Capability, Error, ErrorKind, FactoryToken, PositionedAsyncRead,
-    PositionedBatch, PositionedRecordReader, ReadRequest, ReaderFactory, RecordCapability,
-    RecordMetadata, Result, SchemaRef, StreamReader, async_trait, into_positioned_async_read,
+    Accessor, BytePosition, ByteReadRequest, ByteReader, Capability, Error, ErrorKind,
+    FactoryToken, PositionedAsyncRead, PositionedBatch, PositionedRecordReader, ReadRequest,
+    ReaderFactory, RecordCapability, RecordMetadata, Result, SchemaRef, StreamReader, async_trait,
+    into_positioned_async_read,
 };
 use open_arrow_access_layers::{ColumnEvolution, SchemaEvolutionLayer};
 
@@ -53,6 +54,17 @@ impl ReaderFactory for PositionedWarcArrowFormat {
     }
     fn prepare(&self, request: &ReadRequest) -> Result<SchemaRef> {
         WarcArrowFormat.prepare(request)
+    }
+
+    async fn metadata(
+        &self,
+        _storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<RecordMetadata> {
+        Ok(RecordMetadata {
+            schema: self.prepare(&request)?,
+            source: Some(request.object),
+        })
     }
 
     async fn create_reader(

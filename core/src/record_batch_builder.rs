@@ -1,7 +1,7 @@
 use arrow_array::{RecordBatchOptions, builder::*};
 use arrow_schema::{DataType, Field, Fields};
 
-use crate::{FieldNameIndex, ReadOptions, RecordBatch, Result, SchemaRef};
+use crate::{FieldNameIndex, RecordBatch, ResolvedProjection, Result, SchemaRef};
 use crate::{
     error::{failed_builder, record_batch_decode as decode},
     validation::validate_record_batch_fields,
@@ -44,12 +44,7 @@ impl RecordBatchBuilder {
     /// Select top-level fields in caller order; reject unknown or duplicate names.
     pub fn new(schema: SchemaRef, projection: Option<Vec<String>>) -> Result<Self> {
         let fields = schema.fields().clone();
-        let schema = ReadOptions {
-            projection,
-            ..Default::default()
-        }
-        .resolve_projection(&schema)?
-        .schema;
+        let schema = ResolvedProjection::resolve(&schema, projection.as_deref())?.schema;
         validate_record_batch_fields(&fields)?;
         Self::from_fields(fields, schema)
     }

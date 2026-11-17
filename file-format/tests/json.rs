@@ -2,6 +2,7 @@ use futures::TryStreamExt;
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::DecodePartitionOptions;
 use open_arrow_access_layers::ParallelReadLayer;
+use open_arrow_access_test_support::record::assert_same_batches;
 use std::io::Write;
 use std::{
     error::Error as _,
@@ -18,7 +19,9 @@ use open_arrow_access_core::{
 };
 
 use open_arrow_access_file_format::json::JsonAccessor;
-use open_arrow_access_test_support::{MemoryAccessor, Observations, fixture, format};
+use open_arrow_access_test_support::{
+    MemoryAccessor, Observations, fixture, format, record::collect_nullable_strings,
+};
 
 fn schema() -> SchemaRef {
     Arc::new(Schema::new_with_metadata(
@@ -241,13 +244,7 @@ async fn parallel_object_chunks_preserve_pretty_json_and_gzip_projection() {
             .open(selection)
             .await
             .unwrap();
-        loop {
-            let batch = expected.next().await.unwrap();
-            assert_eq!(actual.next().await.unwrap(), batch);
-            if batch.is_none() {
-                break;
-            }
-        }
+        assert_same_batches(expected.as_mut(), actual.as_mut()).await;
     }
 }
 
@@ -594,7 +591,7 @@ async fn utf8_fields_coerce_scalars_without_reformatting_numbers() {
             )
         };
         for planned in [false, true] {
-            let mut reader: Box<dyn RecordReader> = if planned {
+            let reader: Box<dyn RecordReader> = if planned {
                 Box::new(
                     accessor
                         .plan_scan(request(2, None))
@@ -609,15 +606,11 @@ async fn utf8_fields_coerce_scalars_without_reformatting_numbers() {
                 reader.metadata().schema.field(0).data_type(),
                 &DataType::Utf8
             );
-            let mut values = Vec::new();
-            while let Some(batch) = reader.next().await.unwrap() {
-                let strings = batch
-                    .column(0)
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .unwrap();
-                values.extend(strings.iter().map(|value| value.map(str::to_owned)));
-            }
+            let batches = open_arrow_access_core::into_stream(reader)
+                .try_collect::<Vec<_>>()
+                .await
+                .unwrap();
+            let values = collect_nullable_strings::<i32>(&batches, 0);
             assert_eq!(
                 values
                     .iter()

@@ -1,3 +1,4 @@
+use open_arrow_access_test_support::record::assert_same_batches;
 use std::{
     num::NonZeroUsize,
     sync::{Arc, atomic::Ordering},
@@ -19,7 +20,7 @@ use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_test_support::{
     MemoryAccessor, fixture,
     format::{self, collect_batches as collect},
-    record::collect_values,
+    record::{collect_values, column},
 };
 
 const BAD_FILES: [&str; 4] = [
@@ -77,13 +78,7 @@ async fn fragmented_csv_preserves_values_nulls_order_schema_and_source() {
         [2, 2, 1]
     );
     assert_eq!(collect_values::<Int64Type>(&batches, 0), [1, 2, 3, 4, 5]);
-    let title = |batch: usize| {
-        batches[batch]
-            .column(1)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap()
-    };
+    let title = |batch: usize| column::<StringArray>(&batches[batch], "title");
     assert_eq!(title(0).value(0), "hello,world");
     assert!(title(0).is_null(1));
     assert_eq!(title(1).value(0), "two\nlines");
@@ -101,11 +96,7 @@ async fn tsv_handles_utf8_and_configured_header_without_a_final_newline() {
     .with_format(CsvFormat::default().with_delimiter(b'\t').with_header(true));
     let batches = collect(&accessor, ReadRequest::new("data.tsv")).await;
     assert_eq!(collect_values::<Int64Type>(&batches, 0), [1, 2]);
-    let title = batches[0]
-        .column(1)
-        .as_any()
-        .downcast_ref::<StringArray>()
-        .unwrap();
+    let title = column::<StringArray>(&batches[0], "title");
     assert_eq!(title.value(0), "你好");
     assert_eq!(title.value(1), "two\tcolumns");
 }
@@ -304,13 +295,7 @@ async fn parallel_csv_preserves_multiline_quotes_comments_header_and_projection(
             .open(request)
             .await
             .unwrap();
-        loop {
-            let batch = expected.next().await.unwrap();
-            assert_eq!(actual.next().await.unwrap(), batch);
-            if batch.is_none() {
-                break;
-            }
-        }
+        assert_same_batches(expected.as_mut(), actual.as_mut()).await;
     }
 }
 

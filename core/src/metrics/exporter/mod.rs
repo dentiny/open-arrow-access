@@ -19,6 +19,24 @@ pub trait MetricsExporter: Clone + Send + Sync + 'static {
             value: MetricValue::Counter(n),
         });
     }
+
+    /// Add a signed delta to a gauge in this exporter's recording scope.
+    fn record_gauge(&self, name: &'static str, operation: &'static str, n: i64) {
+        self.record(MetricEvent {
+            name,
+            operation,
+            value: MetricValue::Gauge(n),
+        });
+    }
+
+    /// Record one nonnegative observation in this exporter's recording scope.
+    fn record_observation(&self, name: &'static str, operation: &'static str, n: f64) {
+        self.record(MetricEvent {
+            name,
+            operation,
+            value: MetricValue::Observation(n),
+        });
+    }
 }
 
 /// Constant-space summary; individual samples are never retained.

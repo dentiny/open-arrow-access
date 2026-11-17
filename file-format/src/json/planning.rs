@@ -1,10 +1,10 @@
 use crate::inference::{ResolvedFormat, SchemaInference};
 
 use bytes::BytesMut;
-use futures::stream;
+use futures::future;
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactoryExt, RecordMetadata,
-    Result, ScanPartition, ScanPlan, async_trait, bytes_reader,
+    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, RecordMetadata, Result, ScanPlan,
+    async_trait,
 };
 use serde_json::{Deserializer, value::RawValue};
 
@@ -40,22 +40,12 @@ where
             input: super::nonfinite::normalize_input(input),
             pending_input: BytesMut::new(),
         };
-        let rows = request.options.batch_size.get();
-        let target_bytes = self.partition_options.target_bytes.get();
-        let partitions = stream::try_unfold(frames, move |mut frames| {
-            let request = request.clone();
-            let format = format.clone();
-            async move {
-                let Some(bytes) = frames.next_chunk(rows, target_bytes).await? else {
-                    return Ok(None);
-                };
-                let partition: ScanPartition = Box::pin(async move {
-                    let input = bytes_reader(bytes, Some(request.object.clone()));
-                    format.open_input(Box::new(input), request).await
-                });
-                Ok(Some((partition, frames)))
-            }
-        });
+        let partitions = crate::scan::byte_chunks::byte_chunk_partitions(
+            future::ready(Ok(frames)),
+            format,
+            request,
+            self.partition_options.target_bytes.get(),
+        );
         Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))
     }
 }
@@ -67,7 +57,7 @@ struct JsonFrames {
     pending_input: BytesMut,
 }
 
-impl JsonFrames {
+impl crate::scan::byte_chunks::ByteChunks for JsonFrames {
     async fn next_chunk(&mut self, row_target: usize, byte_target: usize) -> Result<Option<Bytes>> {
         let mut framed = 0usize;
         let mut rows = 0usize;
