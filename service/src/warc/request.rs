@@ -42,13 +42,7 @@ impl CommonCrawlWarcRequest {
     pub fn from_manifest_url(crawl: impl Into<String>, manifest_url: &str) -> Result<Self> {
         let crawl = CommonCrawl::new(crawl)?;
         let url = crate::commoncrawl::url::parse_url(manifest_url)?;
-        if url.path().ends_with('/') {
-            return Err(open_arrow_access_core::Error::new(
-                open_arrow_access_core::ErrorKind::InvalidInput,
-                "configure_commoncrawl_manifest",
-                "expected an HTTP(S) manifest file URL",
-            ));
-        }
+        super::validation::validate_manifest_url(&url)?;
         Ok(Self {
             source: Source::Manifest {
                 crawl: crawl.crawl().to_owned(),
