@@ -111,10 +111,9 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for PrefetchAccessor<A> {
             }))
         })
         .try_flatten();
-        Ok(Box::new(
-            StreamReader::records(batches, metadata, capability.ordering)
-                .with_capability(capability),
-        ))
+        Ok(Box::new(StreamReader::records_with_capability(
+            batches, metadata, capability,
+        )))
     }
 }
 
