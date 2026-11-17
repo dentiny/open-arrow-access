@@ -14,13 +14,14 @@ use open_arrow_access_core::{
 use tokio::{sync::mpsc, task::JoinSet};
 
 use crate::{
-    error::partition_task_error,
+    error::{task_join_error, task_runtime_error},
     scan_policy::{ScanPolicy, ScanPolicyAccessor},
     validation::{validate_emission_policy, validate_parallel_read_settings},
 };
 
 /// Execute independent partitions concurrently, preserving logical order by default.
-/// Requires an active Tokio runtime.
+/// Workers start lazily when the output reader is polled. Starting a worker
+/// without an active Tokio runtime returns [`open_arrow_access_core::ErrorKind::InvalidInput`].
 #[derive(Clone, Copy, Debug)]
 pub struct ParallelReadLayer {
     /// Maximum resident partitions, including completed partitions with queued batches.
@@ -122,25 +123,31 @@ impl ParallelReader {
         }
     }
 
-    fn spawn_partition(&mut self, open: ScanPartition) {
+    fn spawn_partition(&mut self, open: ScanPartition) -> Result<()> {
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|error| task_runtime_error("parallel_read", error))?;
         let (sender, receiver) = mpsc::channel(self.settings.prefetch.get());
         let schema = self.metadata.schema.clone();
-        self.tasks.spawn(async move {
-            let mut reader = open.await?;
-            crate::validation::validate_partition_schema(&reader.metadata().schema, &schema)?;
-            loop {
-                // Reserve before decoding so a full queue cannot hide an extra batch.
-                let Ok(permit) = sender.reserve().await else {
-                    return Ok(());
-                };
-                let Some(batch) = reader.next().await? else {
-                    return Ok(());
-                };
-                crate::validation::validate_partition_schema(&batch.schema(), &schema)?;
-                permit.send(batch);
-            }
-        });
+        self.tasks.spawn_on(
+            async move {
+                let mut reader = open.await?;
+                crate::validation::validate_partition_schema(&reader.metadata().schema, &schema)?;
+                loop {
+                    // Reserve before decoding so a full queue cannot hide an extra batch.
+                    let Ok(permit) = sender.reserve().await else {
+                        return Ok(());
+                    };
+                    let Some(batch) = reader.next().await? else {
+                        return Ok(());
+                    };
+                    crate::validation::validate_partition_schema(&batch.schema(), &schema)?;
+                    permit.send(batch);
+                }
+            },
+            &runtime,
+        );
         self.partition_receivers.push_back(receiver);
+        Ok(())
     }
 
     fn stop(&mut self) {
@@ -161,12 +168,12 @@ impl ParallelReader {
                 biased;
                 joined = self.tasks.join_next(), if !self.tasks.is_empty() => {
                     if let Some(joined) = joined {
-                        joined.map_err(partition_task_error)??;
+                        joined.map_err(|error| task_join_error("parallel_read", error))??;
                     }
                 }
                 partition = self.remaining.next(), if can_discover => {
                     if let Some(partition) = partition {
-                        self.spawn_partition(partition?);
+                        self.spawn_partition(partition?)?;
                     }
                 }
                 (index, batch) = poll_fn(|cx| {

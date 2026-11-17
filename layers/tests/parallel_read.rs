@@ -337,3 +337,42 @@ async fn emission_and_parallel_layers_collect_one_budget_in_either_order() {
         ErrorKind::InvalidInput
     );
 }
+
+#[test]
+fn starting_workers_without_a_runtime_returns_a_terminal_error() {
+    use std::error::Error as _;
+
+    futures::executor::block_on(async {
+        let mut reader = open(vec![part(vec![1])], 1).await;
+        let error = reader.next().await.unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(error.operation(), "parallel_read");
+        assert!(
+            error
+                .source()
+                .unwrap()
+                .is::<tokio::runtime::TryCurrentError>()
+        );
+        assert!(reader.next().await.unwrap().is_none());
+        assert!(reader.next().await.unwrap().is_none());
+    });
+}
+
+#[tokio::test]
+async fn partition_panics_preserve_the_join_error_and_are_terminal() {
+    use std::error::Error as _;
+
+    let partition: ScanPartition = Box::pin(async { panic!("partition failed") });
+    let mut reader = open(vec![partition], 1).await;
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Internal);
+    assert_eq!(error.operation(), "parallel_read");
+    let joined = error
+        .source()
+        .unwrap()
+        .downcast_ref::<tokio::task::JoinError>()
+        .unwrap();
+    assert!(joined.is_panic());
+    assert!(reader.next().await.unwrap().is_none());
+    assert!(reader.next().await.unwrap().is_none());
+}

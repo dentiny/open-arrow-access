@@ -27,12 +27,13 @@ pub(crate) fn schema_error() -> Error {
     )
 }
 
-pub(crate) fn partition_task_error(error: tokio::task::JoinError) -> Error {
+pub(crate) fn task_join_error(operation: &'static str, error: tokio::task::JoinError) -> Error {
     Error::new(
-        ErrorKind::Decode,
-        "parallel_read",
-        format!("partition task failed: {error}"),
+        ErrorKind::Internal,
+        operation,
+        format!("background task failed: {error}"),
     )
+    .with_source(error)
 }
 
 pub(crate) fn invalid_probability() -> Error {
@@ -247,20 +248,14 @@ pub(crate) fn source_frame_decode_error(error: std::io::Error) -> Error {
     .with_source(error)
 }
 
-pub(crate) fn prefetch_runtime_error(error: tokio::runtime::TryCurrentError) -> Error {
+pub(crate) fn task_runtime_error(
+    operation: &'static str,
+    error: tokio::runtime::TryCurrentError,
+) -> Error {
     Error::new(
         ErrorKind::InvalidInput,
-        "prefetch",
-        "prefetch requires a Tokio runtime",
-    )
-    .with_source(error)
-}
-
-pub(crate) fn prefetch_task_error(error: tokio::task::JoinError) -> Error {
-    Error::new(
-        ErrorKind::Internal,
-        "prefetch",
-        format!("prefetch task failed: {error}"),
+        operation,
+        format!("{operation} requires a Tokio runtime"),
     )
     .with_source(error)
 }

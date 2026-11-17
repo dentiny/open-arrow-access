@@ -151,3 +151,46 @@ async fn dropping_the_reader_aborts_a_pending_upstream_read() {
     drop(reader);
     assert!(dropped.await.is_err());
 }
+
+#[tokio::test]
+async fn worker_panics_preserve_the_join_error_and_are_terminal() {
+    let stream = stream::once(async { panic!("prefetch failed") });
+    let mut reader = Source
+        .layer(PrefetchLayer::rows(n(1)))
+        .open(input(stream))
+        .await
+        .unwrap();
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Internal);
+    assert_eq!(error.operation(), "prefetch");
+    let joined = error
+        .source()
+        .unwrap()
+        .downcast_ref::<tokio::task::JoinError>()
+        .unwrap();
+    assert!(joined.is_panic());
+    assert!(reader.next().await.unwrap().is_none());
+    assert!(reader.next().await.unwrap().is_none());
+}
+
+#[test]
+fn starting_prefetch_without_a_runtime_returns_a_terminal_error() {
+    futures::executor::block_on(async {
+        let mut reader = Source
+            .layer(PrefetchLayer::rows(n(1)))
+            .open(input(stream::iter([Ok(batch(1))])))
+            .await
+            .unwrap();
+        let error = reader.next().await.unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert_eq!(error.operation(), "prefetch");
+        assert!(
+            error
+                .source()
+                .unwrap()
+                .is::<tokio::runtime::TryCurrentError>()
+        );
+        assert!(reader.next().await.unwrap().is_none());
+        assert!(reader.next().await.unwrap().is_none());
+    });
+}

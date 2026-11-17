@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Report parallel-read worker panics as `Internal` errors with their `JoinError` source, and return `InvalidInput` instead of panicking when parallel reads start outside a Tokio runtime.
+
 ## 0.4.0 - 2026-11-16
 
 - Add opt-in source columns and source positions with user-configurable record framing.

@@ -193,8 +193,8 @@ struct PrefetchState {
 
 impl PrefetchState {
     fn start(inner: Box<dyn RecordReader>, settings: PrefetchLayer) -> Result<Self> {
-        let runtime =
-            tokio::runtime::Handle::try_current().map_err(crate::error::prefetch_runtime_error)?;
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|error| crate::error::task_runtime_error("prefetch", error))?;
         let (sender, receiver) = mpsc::unbounded_channel();
         let (releases, released) = mpsc::unbounded_channel();
         let mut tasks = JoinSet::new();
@@ -224,7 +224,7 @@ impl PrefetchState {
         }
         // Drain queued batches before reporting the worker's error or panic.
         if let Some(joined) = self.tasks.join_next().await {
-            joined.map_err(crate::error::prefetch_task_error)??;
+            joined.map_err(|error| crate::error::task_join_error("prefetch", error))??;
         }
         Ok(None)
     }
