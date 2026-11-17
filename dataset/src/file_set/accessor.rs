@@ -13,6 +13,8 @@ use super::{
     validation::{validate_file_ordering, validate_file_policy},
 };
 
+const METADATA_CONCURRENCY: usize = 16;
+
 pub(super) type FilePlanner<A> = fn(Arc<A>, ReadRequest) -> BoxFuture<'static, Result<ScanPlan>>;
 
 /// Read files sequentially through one supplied format accessor.
@@ -123,7 +125,7 @@ where
         // Strict mode retains empty schemas and validates every selected file.
         let mut inspected = stream::iter(request.into_requests())
             .map(|request| self.inner.metadata(request))
-            .buffered(16);
+            .buffered(METADATA_CONCURRENCY);
         let first = inspected
             .next()
             .await
@@ -143,7 +145,7 @@ where
         request.options.projection = None;
         let mut inspected = stream::iter(request.into_requests())
             .map(|request| self.inner.inspect_metadata(request))
-            .buffered(16);
+            .buffered(METADATA_CONCURRENCY);
         let first = inspected
             .next()
             .await
