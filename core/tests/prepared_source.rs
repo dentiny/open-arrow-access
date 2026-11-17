@@ -85,10 +85,9 @@ impl ScanPlanner for Dataset {
 #[tokio::test]
 async fn scan_applies_execution_options_to_the_bound_selection() {
     let dataset = Dataset::new();
-    let options = ReadOptions {
-        batch_size: NonZeroUsize::new(2).unwrap(),
-        projection: Some(vec!["label".into()]),
-    };
+    let options = ReadOptions::default()
+        .with_batch_size(NonZeroUsize::new(2).unwrap())
+        .with_projection(["label"]);
     let prepared = PreparedSource::prepare(
         dataset.clone(),
         ReadRequest::new("dataset").with_options(options.clone()),
@@ -121,10 +120,7 @@ async fn compatible_scan_reuses_the_cached_reader_once() {
         .await
         .unwrap();
     prepared
-        .scan(ReadOptions {
-            projection: Some(vec![]),
-            ..ReadOptions::default()
-        })
+        .scan(ReadOptions::default().with_projection([] as [&str; 0]))
         .await
         .unwrap();
     assert_eq!(dataset.requests.lock().unwrap().len(), 2);
@@ -154,10 +150,7 @@ async fn scan_rejects_schema_changes_after_preparation() {
         *batch = RecordBatch::try_new(schema, batch.columns().to_vec()).unwrap();
     }
     let error = prepared
-        .scan(ReadOptions {
-            projection: Some(vec!["label".into()]),
-            ..ReadOptions::default()
-        })
+        .scan(ReadOptions::default().with_projection(["label"]))
         .await
         .err()
         .unwrap();
@@ -171,10 +164,7 @@ async fn prepared_source_retains_lazy_projected_partitions() {
         .await
         .unwrap();
     let plan = prepared
-        .plan_scan(ReadOptions {
-            projection: Some(vec!["label".into()]),
-            ..ReadOptions::default()
-        })
+        .plan_scan(ReadOptions::default().with_projection(["label"]))
         .await
         .unwrap();
     assert_eq!(dataset.requests.lock().unwrap().len(), 1);

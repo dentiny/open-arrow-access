@@ -3,8 +3,8 @@ use std::{num::NonZeroUsize, sync::Arc};
 use arrow_array::{RecordBatchOptions, cast::AsArray};
 use open_arrow_access_core::{
     Accessor, BinaryDecoder, ByteReadOptions, ByteReadRequest, ByteReader, Capability,
-    DocumentAccessor, DocumentDecoder, Error, ErrorKind, OrderRequirement, ReadOptions,
-    ReadRequest, RecordBatch, RecordCapability, Result, Schema, SchemaRef, async_trait,
+    DocumentAccessor, DocumentDecoder, Error, ErrorKind, OrderRequirement, ReadRequest,
+    RecordBatch, RecordCapability, Result, Schema, SchemaRef, async_trait,
 };
 use open_arrow_access_test_support::{MemoryAccessor, fixture};
 
@@ -38,10 +38,7 @@ async fn default_decoder_constructor_clones_non_clone_inputs_and_opens_independe
         ..Default::default()
     };
     let mut projected = accessor
-        .open(ReadRequest::new("projected").with_options(ReadOptions {
-            projection: Some(vec![]),
-            ..Default::default()
-        }))
+        .open(ReadRequest::new("projected").with_projection([] as [&str; 0]))
         .await
         .unwrap();
     let mut full = cloned
@@ -82,10 +79,7 @@ async fn rejects_bad_projection_and_preserves_source_errors() {
     let source = MemoryAccessor::new(&fixture!("bytes", "input.bin").await, 1);
     let observed = source.observations.clone();
     let accessor = DocumentAccessor::new(source, BinaryDecoder);
-    let request = ReadRequest::new("input").with_options(ReadOptions {
-        projection: Some(vec!["unknown".into()]),
-        ..Default::default()
-    });
+    let request = ReadRequest::new("input").with_projection(["unknown"]);
     assert_eq!(
         accessor.open(request).await.err().unwrap().kind(),
         ErrorKind::InvalidInput
