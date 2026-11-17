@@ -81,10 +81,11 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for SamplingAccessor<A> {
         let capability = inner.capability();
         if self.settings.threshold == 0 {
             // Drop the source immediately without polling any batches.
-            return Ok(Box::new(
-                StreamReader::records(stream::empty(), metadata, capability.ordering)
-                    .with_capability(capability),
-            ));
+            return Ok(Box::new(StreamReader::records_with_capability(
+                stream::empty(),
+                metadata,
+                capability,
+            )));
         }
         let threshold = self.settings.threshold;
         let mut random = SplitMix64(self.settings.seed);
@@ -99,10 +100,9 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for SamplingAccessor<A> {
                     .map_err(crate::error::sample_error),
             )
         });
-        Ok(Box::new(
-            StreamReader::records(batches, metadata, capability.ordering)
-                .with_capability(capability),
-        ))
+        Ok(Box::new(StreamReader::records_with_capability(
+            batches, metadata, capability,
+        )))
     }
 }
 

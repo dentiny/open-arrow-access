@@ -84,9 +84,8 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for LimitAccessor<A> {
             let inner = (remaining != 0).then_some(inner);
             Some((Ok(batch), (inner, remaining)))
         });
-        Ok(Box::new(
-            StreamReader::records(batches, metadata, capability.ordering)
-                .with_capability(capability),
-        ))
+        Ok(Box::new(StreamReader::records_with_capability(
+            batches, metadata, capability,
+        )))
     }
 }

@@ -45,7 +45,7 @@ where
         source: reader.metadata().source.clone(),
     };
     let batches = into_stream(reader).map(move |batch| transform(batch?));
-    StreamReader::records(batches, metadata, capability.ordering).with_capability(capability)
+    StreamReader::records_with_capability(batches, metadata, capability)
 }
 
 /// Apply a row-preserving batch transform while retaining each row's coordinate.
@@ -68,5 +68,5 @@ where
         let (batch, positions) = batch?.into_parts();
         crate::PositionedBatch::try_new(transform(batch)?, positions)
     });
-    StreamReader::records(batches, metadata, capability.ordering).with_capability(capability)
+    StreamReader::records_with_capability(batches, metadata, capability)
 }
