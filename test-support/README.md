@@ -14,6 +14,12 @@ Serialized inputs live in [`testdata/`](../testdata/README.md). Load committed
 bytes with `fixture!(directory, name)` or use `fixture_path!` for filesystem
 inputs. Keep expected schemas, values, and request options in the owning test.
 
+Use `temp_fs(&[("sub/file", &bytes)])` to install fixture bytes in an isolated
+filesystem and receive `(TempDir, opendal::Operator)`. Keep the directory guard
+alive through all reads. Nested parent directories are created automatically;
+paths must remain relative to the temporary root. Wrap the operator in the
+accessor or layers needed by the owning test.
+
 ## Configure a byte source
 
 `MemoryAccessor::new(&bytes, chunk_size)` supplies sequential reads and known

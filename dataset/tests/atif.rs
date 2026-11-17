@@ -81,17 +81,10 @@ async fn parallel_atif_matches_sequential_values_and_source_context() {
 
 #[tokio::test]
 async fn parallel_atif_composes_with_independent_gzip_readers() {
-    let root = tempfile::tempdir().unwrap();
-    for name in ["a.gz", "b.gz"] {
-        tokio::fs::copy(
-            open_arrow_access_test_support::fixture_path!("atif", "trajectories.jsonl.gz"),
-            root.path().join(name),
-        )
-        .await
-        .unwrap();
-    }
-    let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(root.path()))
-        .layer(DecompressionLayer::new(Gzip));
+    let contents = open_arrow_access_test_support::fixture!("atif", "trajectories.jsonl.gz").await;
+    let (_root, operator) =
+        open_arrow_access_test_support::temp_fs(&[("a.gz", &contents), ("b.gz", &contents)]);
+    let bytes = OpenDalAccessor::new(operator).layer(DecompressionLayer::new(Gzip));
     let files = FileSetAccessor::new(AtifAccessor::new(bytes, AtifFormat::JsonLines));
     let request = FileSetRequest::new(["b.gz", "a.gz", "b.gz"]);
     let mut sequential = files.open(request.clone()).await.unwrap();
