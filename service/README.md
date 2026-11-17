@@ -126,8 +126,7 @@ timeout, and authentication settings.
 
 Bind an explicit format through `ResolvedFileSet::records(format)` and select
 names with `service::FileSetRequest` to decode resolved files. The service module
-also exports `FileSetAccessor`; facade consumers do not need `dataset-directory`
-for provider attachments. See [multi-attachment record scans](remote-files.md#multi-attachment-record-scans).
+also exports `FileSetAccessor` for provider attachments. See [multi-attachment record scans](remote-files.md#multi-attachment-record-scans).
 For API metadata use
 `ApiDocument::records_at(pointer, format)`; OAI pages expose `records(format)`.
 These bindings do not follow PDF/HTML URLs, infer content mappings, or discover

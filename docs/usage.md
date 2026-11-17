@@ -223,7 +223,7 @@ External gzip cannot directly feed Parquet because it removes range access.
 
 ## Read multiple shards
 
-Enable `dataset-directory` and the format feature. Use `FileSetAccessor` for a
+Enable the format feature. Use `FileSetAccessor` for a
 manifest's declared order:
 
 ```rust,no_run
