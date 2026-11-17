@@ -109,8 +109,9 @@ Relative manifest keys need `with_origin` to accept absolute entries.
 
 Security checks run before prefix filtering: dot segments (even contained ones),
 credentials, network-path references, malformed encoding, encoded delimiters,
-backslashes and controls are rejected. Query/fragment and foreign origins are rejected.
-Transport and redirect policy remain the caller's responsibility.
+backslashes and controls are rejected. Query/fragment and foreign origins require
+explicit opt-in. Allowlisted foreign entries remain URLs and need a multi-origin
+accessor; transport and redirect policy remain the caller's responsibility.
 
 Blank lines are ignored. Format mismatches and selected duplicates error by
 default; `Mismatch::Skip` and `Duplicates::Dedupe` retain the other entries in

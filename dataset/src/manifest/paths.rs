@@ -4,9 +4,15 @@ use url::Url;
 
 type PathResult<T> = Result<T, &'static str>;
 
+pub(super) struct Resolved {
+    pub locator: String,
+    pub path: String,
+}
+
 pub(super) struct Context {
     pub manifest_key: String,
     origin: Option<Url>,
+    allowed: Vec<Url>,
     base: String,
 }
 impl Context {
@@ -31,6 +37,11 @@ impl Context {
             }
             (configured, key_path(spec.manifest.locator())?)
         };
+        let allowed = spec
+            .allowed_origins
+            .iter()
+            .map(|o| origin(o))
+            .collect::<Result<Vec<_>, _>>()?;
         let base = match &spec.base {
             ManifestBase::Origin => String::new(),
             ManifestBase::ManifestDirectory => manifest_key
@@ -47,27 +58,28 @@ impl Context {
         Ok(Self {
             manifest_key,
             origin: manifest_origin,
+            allowed,
             base,
         })
     }
-    pub fn resolve(&self, value: &str) -> PathResult<String> {
+    pub fn resolve(&self, spec: &PathsManifest, value: &str) -> PathResult<Resolved> {
         validate_raw(value)?;
         if value.starts_with("//") {
             return Err("network-path references are forbidden");
         }
         let absolute = value.split(['?', '#']).next().unwrap().contains(':');
-        let (key, suffix) = if absolute {
+        let (key, suffix, foreign) = if absolute {
             let url = http_url(value)?;
             let same = self
                 .origin
                 .as_ref()
                 .is_some_and(|o| o.origin() == url.origin());
-            if !same {
+            if !same && !self.allowed.iter().any(|o| o.origin() == url.origin()) {
                 return Err("absolute URL origin is not allowed");
             }
             let key = key_path(url.path())?;
             let suffix = &url[url::Position::AfterPath..];
-            (key, suffix.to_owned())
+            (key, suffix.to_owned(), (!same).then_some(url))
         } else {
             let split = value.find(['?', '#']).unwrap_or(value.len());
             let path = &value[..split];
@@ -77,15 +89,21 @@ impl Context {
             } else {
                 format!("{}{key}", self.base)
             };
-            (key, value[split..].to_owned())
+            (key, value[split..].to_owned(), None)
         };
-        if !suffix.is_empty() {
+        if !spec.allow_query_fragment && !suffix.is_empty() {
             return Err("query and fragment are forbidden");
         }
         if !key.starts_with(&self.base) {
             return Err("path escapes the configured base");
         }
-        Ok(key)
+        let locator = if let Some(mut url) = foreign {
+            url.set_path(&format!("/{key}"));
+            url.into()
+        } else {
+            format!("{key}{suffix}")
+        };
+        Ok(Resolved { locator, path: key })
     }
 }
 fn origin(value: &str) -> PathResult<Url> {

@@ -159,6 +159,7 @@ async fn invalid_configuration_fails_before_io() {
     for spec in [
         PathsManifest::new("../warc.paths"),
         manifest().with_origin("https://other"),
+        manifest().with_allowed_origins(["https://host/path"]),
         PathsManifest::new("warc.paths").with_origin("https://host/a/.."),
         manifest().with_base(ManifestBase::Explicit("../data".into())),
     ] {
@@ -209,5 +210,20 @@ async fn gzip_and_decoded_inputs_share_validation() {
     assert_eq!(
         spec.resolve_reader(input).await.unwrap().objects[0].locator(),
         "a.warc"
+    );
+}
+
+#[tokio::test]
+async fn explicit_url_policies_filter_and_deduplicate_foreign_paths() {
+    let spec = manifest()
+        .with_allowed_origins(["https://mirror.test"])
+        .with_prefix("data/")
+        .with_query_fragment(true)
+        .with_duplicates(Duplicates::Dedupe);
+    let entries =
+        b"https://mirror.test/data/%61.warc\nhttps://mirror.test/data/a.warc\ndata/b.warc?q=1#f";
+    assert_eq!(
+        resolve(spec, entries).await.unwrap(),
+        ["https://mirror.test/data/a.warc", "data/b.warc?q=1#f"]
     );
 }

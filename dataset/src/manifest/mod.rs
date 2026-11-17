@@ -45,6 +45,8 @@ pub struct PathsManifest {
     on_mismatch: Mismatch,
     duplicates: Duplicates,
     origin: Option<String>,
+    allowed_origins: Vec<String>,
+    allow_query_fragment: bool,
     byte_options: ByteReadOptions,
 }
 impl PathsManifest {
@@ -57,6 +59,8 @@ impl PathsManifest {
             on_mismatch: Mismatch::Error,
             duplicates: Duplicates::Error,
             origin: None,
+            allowed_origins: Vec::new(),
+            allow_query_fragment: false,
             byte_options: ByteReadOptions::default(),
         }
     }
@@ -81,6 +85,21 @@ impl PathsManifest {
     /// HTTP(S) origin of a relative manifest key. Validated before any I/O.
     pub fn with_origin(mut self, origin: impl Into<String>) -> Self {
         self.origin = Some(origin.into());
+        self
+    }
+    /// Additional HTTP(S) origins. Cross-origin results retain full URLs and
+    /// require a multi-origin accessor; a single origin-bound storage cannot open them.
+    pub fn with_allowed_origins(
+        mut self,
+        origins: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.allowed_origins = origins.into_iter().map(Into::into).collect();
+        self
+    }
+    /// Preserve query/fragment in output locators; the caller's accessor must
+    /// support these semantics. Fragments are never sent by HTTP itself.
+    pub fn with_query_fragment(mut self, allow: bool) -> Self {
+        self.allow_query_fragment = allow;
         self
     }
     pub fn with_byte_options(mut self, options: ByteReadOptions) -> Self {
@@ -132,17 +151,19 @@ impl PathsManifest {
             if value.is_empty() {
                 continue;
             }
-            let path = context
-                .resolve(value)
+            let resolved = context
+                .resolve(self, value)
                 .map_err(|e| self.error(ErrorKind::Decode, number, e))?;
-            if self.prefix.as_ref().is_some_and(|p| !path.starts_with(p)) {
+            if self
+                .prefix
+                .as_ref()
+                .is_some_and(|p| !resolved.path.starts_with(p))
+            {
                 continue;
             }
-            if self
-                .formats
-                .as_ref()
-                .is_some_and(|formats| detect_format(&path).is_none_or(|f| !formats.contains(&f)))
-            {
+            if self.formats.as_ref().is_some_and(|formats| {
+                detect_format(&resolved.path).is_none_or(|f| !formats.contains(&f))
+            }) {
                 if self.on_mismatch == Mismatch::Skip {
                     continue;
                 }
@@ -152,13 +173,13 @@ impl PathsManifest {
                     "file format does not match selection",
                 ));
             }
-            if !seen.insert(path.clone()) {
+            if !seen.insert(resolved.locator.clone()) {
                 if self.duplicates == Duplicates::Dedupe {
                     continue;
                 }
                 return Err(self.error(ErrorKind::Decode, number, "duplicate selected file"));
             }
-            objects.push(ObjectRef::new(path));
+            objects.push(ObjectRef::new(resolved.locator));
         }
         if objects.is_empty() {
             return Err(self.error(
