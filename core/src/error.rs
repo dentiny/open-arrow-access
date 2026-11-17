@@ -27,6 +27,9 @@ pub enum ErrorKind {
     ResourceExhausted,
     Io,
     Decode,
+    /// An internal execution failure, such as a background worker panic.
+    /// This does not indicate invalid source data or imply that retrying is safe.
+    Internal,
 }
 
 impl ErrorKind {
