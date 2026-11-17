@@ -63,6 +63,7 @@ pub struct CompressionFactory {
     // Maps lowercase extensions without a leading dot to codec registrations.
     registrations: Arc<BTreeMap<String, Registration>>,
     chunk_size: NonZeroUsize,
+    url_suffixes: bool,
 }
 
 impl fmt::Debug for CompressionFactory {
@@ -79,6 +80,7 @@ impl Default for CompressionFactory {
         let mut factory = Self {
             registrations: Arc::new(BTreeMap::new()),
             chunk_size: crate::layer::DEFAULT_CHUNK_SIZE,
+            url_suffixes: false,
         };
         macro_rules! builtin {
             ($feature:literal, $variant:ident, $codec:expr, [$($suffix:literal),+]) => {{
@@ -98,6 +100,21 @@ impl Default for CompressionFactory {
 }
 
 impl CompressionFactory {
+    /// Interpret suffixes before a URL query or fragment, preserving the original
+    /// locator when opening storage. Disabled by default for opaque object keys.
+    pub fn with_url_suffixes(mut self, enabled: bool) -> Self {
+        self.url_suffixes = enabled;
+        self
+    }
+
+    fn suffix_path<'a>(&self, path: &'a str) -> &'a str {
+        if self.url_suffixes {
+            path.split(['?', '#']).next().unwrap_or(path)
+        } else {
+            path
+        }
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -125,9 +142,11 @@ impl CompressionFactory {
         self.registrations.keys().map(String::as_str)
     }
 
-    /// Remove one registered suffix without decoding or interpreting the locator as a URL.
+    /// Remove one registered suffix without decoding. URL query/fragment text is
+    /// ignored only when explicitly enabled by `with_url_suffixes`.
     /// Recognition is independent of whether a built-in codec feature is enabled.
     pub fn strip_suffix<'a>(&self, path: &'a str) -> &'a str {
+        let path = self.suffix_path(path);
         match path.rsplit_once('.') {
             Some((stem, extension)) if self.lookup(extension).is_some() => stem,
             _ => path,
@@ -176,7 +195,8 @@ impl ReaderFactory for CompressionFactory {
     }
 
     fn prepare(&self, request: &ByteReadRequest) -> Result<Self::Prepared> {
-        let Some((_, extension)) = request.object.locator().rsplit_once('.') else {
+        let Some((_, extension)) = self.suffix_path(request.object.locator()).rsplit_once('.')
+        else {
             return Ok(None);
         };
         let Some(RegisteredExtension {

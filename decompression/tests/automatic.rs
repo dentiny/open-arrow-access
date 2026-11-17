@@ -223,3 +223,32 @@ codec_route_test!(
     "data.ZST",
     "data.Zst"
 );
+
+#[cfg(feature = "gzip")]
+#[tokio::test]
+async fn url_suffix_routing_is_opt_in_and_preserves_the_locator() {
+    use open_arrow_access_decompression::CompressionFactory;
+    use open_arrow_access_test_support::fixture;
+    let bytes = fixture!("gzip", "payload.gz").await;
+    let locator = "data.GZ?token=secret#fragment";
+    for enabled in [false, true] {
+        let input = MemoryAccessor::new(&bytes, 1);
+        let observations = input.observations.clone();
+        let factory = CompressionFactory::default().with_url_suffixes(enabled);
+        let accessor = input.layer(AutoDecompressionLayer::new().with_factory(factory));
+        let mut reader = accessor.open(locator.into()).await.unwrap();
+        let output = collect_bytes(reader.as_mut()).await.unwrap();
+        assert_eq!(
+            output.as_slice(),
+            if enabled {
+                b"payload".as_slice()
+            } else {
+                bytes.as_slice()
+            }
+        );
+        assert_eq!(
+            observations.requests.lock().unwrap()[0].object.locator(),
+            locator
+        );
+    }
+}
