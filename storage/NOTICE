@@ -1,8 +1,0 @@
-storage/src/retry.rs contains modified retry state handling from opendal-layer-retry 0.59.5,
-licensed under Apache-2.0 (see LICENSE-APACHE).
-
-Apache OpenDAL
-Copyright 2023-2026 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).

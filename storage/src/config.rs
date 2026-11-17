@@ -66,7 +66,7 @@ impl StorageConfig {
             );
         }
         if let Some(retry) = &self.retry {
-            operator = operator.layer(crate::retry::Policy::new(retry));
+            operator = operator.layer(crate::retry::HttpRetryLayer::new(retry));
         }
         Ok(operator)
     }

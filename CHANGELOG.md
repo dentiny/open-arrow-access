@@ -1,9 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Honor HTTP 429/503 `Retry-After` in storage retries without including backoff in per-attempt timeouts.
-
 ## 0.5.0 - 2026-11-17
 
 - Make directory and file-set dataset APIs unconditional; remove the `directory` and `dataset-directory` Cargo features.
