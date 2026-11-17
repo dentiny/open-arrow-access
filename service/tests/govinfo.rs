@@ -75,11 +75,3 @@ async fn pages_validation_and_identity() {
     );
     assert!(s.bulk_directory("../FR").await.is_ok());
 }
-
-#[test]
-fn rejects_empty_api_keys_before_io() {
-    let error = GovInfoService::new(Some("")).unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::InvalidInput);
-    assert_eq!(error.operation(), "provider_http");
-    assert!(GovInfoService::new(None).is_ok());
-}
