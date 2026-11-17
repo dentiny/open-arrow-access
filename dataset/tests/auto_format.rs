@@ -5,14 +5,19 @@ use open_arrow_access_core::{
     Accessor, AccessorExt, ErrorKind, ReadOptions, ReadOptionsProvider, ScanPlanner,
 };
 use open_arrow_access_dataset::{
-    auto_format::{AutoFormatAccessor, AutoFormatRequest},
+    auto_format::{AutoFormatAccessor, AutoFormatRequest, JsonDetection, ResolvedKind},
     directory::DirectoryRequest,
     file_set::FileSetRequest,
 };
-use open_arrow_access_file_format::csv::{CsvDialect, CsvHeader};
+use open_arrow_access_file_format::{
+    atif::AtifFormat,
+    csv::{CsvDialect, CsvHeader},
+};
 use open_arrow_access_layers::{ColumnEvolution, ParallelReadLayer, SchemaEvolutionLayer};
 use open_arrow_access_storage::OpenDalAccessor;
-use open_arrow_access_test_support::{fixture_path, fs_operator, record::collect_column};
+use open_arrow_access_test_support::{
+    MemoryAccessor, fixture_path, fs_operator, record::collect_column,
+};
 use std::{io::Write, num::NonZeroUsize, sync::Arc};
 
 fn files(names: &[&str]) -> AutoFormatRequest {
@@ -69,6 +74,93 @@ async fn directory_routes_csv_tsv_and_forwards_options_through_layers() {
         );
     }
     assert_eq!(values, [2, 3]);
+}
+
+#[tokio::test]
+async fn json_selection_skips_empty_inputs_rejects_mixtures_and_allows_opt_out() {
+    let root = tempfile::tempdir().unwrap();
+    for (name, bytes) in [
+        ("empty.jsonl", " \n"),
+        ("plain.jsonl", "{\"id\":1}\n"),
+        ("atif.jsonl", "{\"schema_version\":\"ATIF-1.0\"}\n"),
+    ] {
+        std::fs::write(root.path().join(name), bytes).unwrap();
+    }
+    let auto = AutoFormatAccessor::new(storage(root.path()));
+    let selected = auto
+        .resolve(files(&["empty.jsonl", "plain.jsonl"]))
+        .await
+        .unwrap();
+    assert_eq!(selected.format, ResolvedKind::Json);
+    assert_eq!(selected.objects.len(), 1);
+    assert_eq!(
+        auto.resolve(files(&["empty.jsonl"]))
+            .await
+            .unwrap_err()
+            .kind(),
+        ErrorKind::NotFound
+    );
+    for names in [["plain.jsonl", "atif.jsonl"], ["atif.jsonl", "plain.jsonl"]] {
+        let error = auto.open(files(&names)).await.err().unwrap();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert!(
+            error.to_string().contains("plain.jsonl") && error.to_string().contains("atif.jsonl")
+        );
+    }
+    let trusted = auto.with_json_detection(JsonDetection::FirstFile);
+    assert_eq!(
+        trusted
+            .resolve(files(&["empty.jsonl", "plain.jsonl", "missing.jsonl"]))
+            .await
+            .unwrap()
+            .objects
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn resolves_and_opens_both_atif_framings() {
+    for (name, format, rows) in [
+        ("trajectory.json", AtifFormat::Json, 1),
+        ("trajectories.jsonl", AtifFormat::JsonLines, 3),
+    ] {
+        let auto = AutoFormatAccessor::new(storage(&fixture_path!("atif", "")));
+        assert_eq!(
+            auto.resolve(files(&[name])).await.unwrap().format,
+            ResolvedKind::Atif(format)
+        );
+        let mut reader = auto.open(files(&[name])).await.unwrap();
+        let mut count = 0;
+        while let Some(batch) = reader.next().await.unwrap() {
+            count += batch.num_rows();
+        }
+        assert_eq!(count, rows);
+    }
+}
+
+#[tokio::test]
+async fn json_probe_bounds_reads_and_preserves_upstream_errors() {
+    let input = MemoryAccessor::new(b"{\"id\":1}\ntrailing garbage", 1)
+        .with_failure(9, ErrorKind::Unavailable);
+    let auto = AutoFormatAccessor::new(input)
+        .with_json_sniff_limits(NonZeroUsize::new(10).unwrap(), NonZeroUsize::MIN);
+    assert_eq!(
+        auto.resolve(files(&["a.jsonl"])).await.unwrap().format,
+        ResolvedKind::Json
+    );
+    let error = auto
+        .with_json_sniff_limits(NonZeroUsize::new(8).unwrap(), NonZeroUsize::MIN)
+        .resolve(files(&["a.jsonl"]))
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    let broken = AutoFormatAccessor::new(
+        MemoryAccessor::new(b"partial", 1).with_failure(2, ErrorKind::Unavailable),
+    );
+    let error = broken.resolve(files(&["broken.jsonl"])).await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Unavailable);
+    assert!(error.to_string().contains("broken.jsonl"));
 }
 
 #[tokio::test]

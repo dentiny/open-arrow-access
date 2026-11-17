@@ -103,14 +103,16 @@ let reader = auto.layer(ParallelReadLayer::new(concurrency, prefetch)).open(requ
 ```
 
 Suffix detection performs no I/O. `FormatPolicy` defaults to Parquet exclusivity,
-CSV/TSV compatibility, and ignoring unknown files. `resolve` also lists directories,
-but does not decode Arrow records. Mixed formats return
-`InvalidInput` with examples; no recognized files returns `NotFound`.
+CSV/TSV compatibility, and ignoring unknown files. `resolve` also lists directories
+and probes JSON, but does not decode Arrow records. Mixed formats return
+`InvalidInput` with examples; no recognized or nonempty JSON files returns `NotFound`.
 
-CSV dialect and explicit CSV schemas are accessor settings; projection,
+JSON probing checks every file's first nonblank line, skips empty files, and rejects
+mixed ordinary JSONL, ATIF JSONL, and ATIF document inputs. Probes have independent
+limits (8 concurrent files, 1 MiB consumed per file). `FirstFile` trusts the first
+nonempty file; later inputs are unchecked. Readers validate subsequent records.
+
+CSV dialect and explicit CSV/ordinary-JSON schemas are accessor settings; projection,
 batch size, and byte options remain on the request. Native file planning and union
 by name support record layers. Parquet keeps raw range reads and size hints already
 configured on storage with `with_content_lengths`. Discovery does not snapshot data.
-
-JSON and ATIF auto-detection are added in the next PR; JSON selections currently
-return `Unsupported`. Existing typed JSON/ATIF readers are unchanged.
