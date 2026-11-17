@@ -145,6 +145,7 @@ impl ExportHub {
         )
         .await
         .unwrap()
+        .with_context(self.http.context())
     }
 
     pub(super) async fn read_ids(&self, request: HuggingFaceDatasetRequest) -> Vec<i64> {

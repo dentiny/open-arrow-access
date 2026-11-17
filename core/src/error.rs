@@ -272,7 +272,9 @@ pub(crate) fn unknown_field(name: &str) -> arrow_schema::ArrowError {
     arrow_schema::ArrowError::SchemaError(format!("unknown field {name:?}"))
 }
 
-pub(crate) fn empty_chunk(operation: &'static str) -> Error {
+/// Report a byte reader contract violation with the consumer's operation.
+/// Empty chunks are I/O failures; EOF is represented by `None`.
+pub fn empty_chunk(operation: &'static str) -> Error {
     Error::new(
         ErrorKind::Io,
         operation,
@@ -378,9 +380,6 @@ pub(crate) fn record_batch_error(source: arrow_schema::ArrowError) -> Error {
 
 pub(crate) fn byte_input_error(error: Error) -> std::io::Error {
     std::io::Error::other(error)
-}
-pub(crate) fn empty_chunk_io(operation: &'static str) -> std::io::Error {
-    byte_input_error(empty_chunk(operation))
 }
 
 pub(crate) fn prepared_schema_mismatch() -> Error {

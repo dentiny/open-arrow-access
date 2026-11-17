@@ -1,7 +1,7 @@
 # Multi-file datasets
 
-Enable `dataset-directory` on `open-arrow-access` (`directory` on this component
-crate) to combine a single-file Arrow accessor across multiple objects.
+Combine a single-file Arrow accessor across multiple objects. Directory and
+file-set APIs are always available; enable the format readers you use.
 
 | Accessor | Selection | Output order |
 | --- | --- | --- |
@@ -10,7 +10,7 @@ crate) to combine a single-file Arrow accessor across multiple objects.
 
 ## Read selected shards
 
-Enable `format-json` and `dataset-directory`. This function reads two files with
+Enable `format-json`. This function reads two files with
 the same inferred schema from a caller-configured storage operator:
 
 ```rust,no_run
@@ -92,8 +92,8 @@ generated columns after parallel execution.
 
 ## Select the format automatically
 
-Enable `dataset-auto-format` on the facade plus the `format-*` readers and
-`decompression-*` codecs you need. On this crate, use `auto-format` and `format-*`.
+Automatic format selection is always available. Enable the `format-*` readers and
+`decompression-*` codecs you need on the facade, or `format-*` on this crate.
 
 ```rust,ignore
 let auto = AutoFormatAccessor::new(storage);

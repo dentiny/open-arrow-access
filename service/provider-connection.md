@@ -13,6 +13,7 @@ Available without a provider feature. See [example setup](README.md#example-setu
 | Request | Response |
 | --- | --- |
 | `Connection::new(origin)` | Connection configuration; no HTTP request |
+| `with_api_key(ApiKey::Header(name) / ApiKey::Query(name), key)` | Validated, replaceable origin-scoped API key |
 | `with_header(name, value)` / `with_query(name, value)` | Explicit origin-scoped credentials/settings |
 | `json(relative_path, query)` / `json_url(same_origin_url)` | `ApiDocument` |
 | `bytes(url, accept)` | Fully collected `Bytes` for small metadata |
@@ -23,6 +24,11 @@ Metadata and initial download GETs require HTTP 200. Responses with failure stat
 `Error::http_status()` and textual `retry_after()` when available; retries are opt-in as described below. Downloads follow redirects with origin-scoped authentication.
 Listing on a bare Connection is unsupported; a resolved file manifest supplies
 listing. A Connection implements `ByteAccessor` for direct byte-layer composition.
+
+`with_api_key` rejects empty keys before I/O, replaces an existing credential with
+the same name, and marks header values sensitive. It preserves keys verbatim,
+including whitespace; it does not trim them. BHL, Regulations.gov, Semantic
+Scholar, USPTO and GovInfo use this validation when configuring API keys.
 
 ## Attachment range reads
 

@@ -227,3 +227,39 @@ impl ReaderFactory for CompressionFactory {
             .await
     }
 }
+
+/// Strip all trailing built-in compression suffixes, case-insensitively.
+/// Recognition does not require enabled codecs. This only processes a path;
+/// it performs no I/O, decompression, or URL query/fragment parsing.
+/// Combined suffixes preserve the archive format: `.tgz` becomes `.tar`.
+pub fn strip_compression_suffixes(mut path: &str) -> Cow<'_, str> {
+    let factory = CompressionFactory::default();
+    loop {
+        match factory.strip_suffix(path) {
+            Cow::Borrowed(stripped) if stripped == path => return Cow::Borrowed(path),
+            Cow::Borrowed(stripped) => path = stripped,
+            // Combined suffixes resolve to the inner archive format, not another
+            // compression suffix, so no further stripping is needed.
+            Cow::Owned(archive) => return Cow::Owned(archive),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_compression_suffixes;
+
+    #[test]
+    fn strips_nested_suffixes_until_an_unknown_extension() {
+        for (path, expected) in [
+            ("archive.tgz.gz", "archive.tar"),
+            ("records.csv.TGZ", "records.csv.tar"),
+            ("a.warc", "a.warc"),
+            ("a.warc.gz.gz", "a.warc"),
+            ("a.WARC.GZ.ZST", "a.WARC"),
+            ("a.warc.gz.unknown", "a.warc.gz.unknown"),
+        ] {
+            assert_eq!(strip_compression_suffixes(path), expected);
+        }
+    }
+}

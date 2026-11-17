@@ -19,10 +19,9 @@ where
         .unwrap_or(0)
         .min(MAX_PREALLOCATION_BYTES) as usize;
     let mut output = Vec::new();
-    while let Some(bytes) = reader.next().await? {
-        if bytes.is_empty() {
-            return Err(crate::error::empty_chunk(operation));
-        }
+    while let Some(bytes) =
+        crate::next_nonempty(reader.as_mut(), || crate::empty_chunk(operation)).await?
+    {
         if output.is_empty() {
             output.reserve_exact(initial_capacity);
         }

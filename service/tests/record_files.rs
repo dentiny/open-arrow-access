@@ -17,7 +17,7 @@ async fn resolved_files_keep_membership_order_duplicates_and_lazy_parallel_reads
     server.file("/b", "{\"id\":2}\n");
     let connection = Connection::new(server.endpoint())
         .unwrap()
-        .with_context(opendal::OperationContext::new());
+        .with_context(server.context());
     let files = connection
         .files(
             vec![
@@ -83,7 +83,7 @@ async fn selected_attachments_union_schemas_and_restore_projection_order() {
     server.file("/b", "{\"id\":2,\"right\":\"B\"}\n");
     let files = Connection::new(server.endpoint())
         .unwrap()
-        .with_context(opendal::OperationContext::new())
+        .with_context(server.context())
         .files(
             vec![
                 MetadataLink {

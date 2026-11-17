@@ -45,10 +45,13 @@ fn validate_record_batch_type(data_type: &DataType) -> Result<()> {
     }
 }
 
-pub(crate) fn validate_scan_schema(
-    actual: &arrow_schema::SchemaRef,
-    expected: &arrow_schema::SchemaRef,
-    schema_error: fn() -> crate::Error,
+/// Require exact Arrow schema equality, including field and schema metadata.
+/// The caller's error factory runs only on mismatch; its category and context
+/// are retained unchanged.
+pub fn validate_schema(
+    actual: &SchemaRef,
+    expected: &SchemaRef,
+    schema_error: impl FnOnce() -> crate::Error,
 ) -> Result<()> {
     if actual != expected {
         return Err(schema_error());
@@ -104,22 +107,6 @@ pub(crate) fn validate_range_length(
     Ok(())
 }
 
-pub(crate) fn validate_prepared_schema(actual: &SchemaRef, expected: &SchemaRef) -> Result<()> {
-    if actual != expected {
-        return Err(crate::error::prepared_schema_mismatch());
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_positioned_chunk(
-    bytes: &crate::Bytes,
-    operation: &'static str,
-) -> std::io::Result<()> {
-    if bytes.is_empty() {
-        return Err(crate::error::empty_chunk_io(operation));
-    }
-    Ok(())
-}
 pub(crate) fn validate_buffer_consumption(amount: usize, available: usize) {
     assert!(amount <= available);
 }

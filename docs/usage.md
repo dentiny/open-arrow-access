@@ -223,7 +223,7 @@ External gzip cannot directly feed Parquet because it removes range access.
 
 ## Read multiple shards
 
-Enable `dataset-directory` and the format feature. Use `FileSetAccessor` for a
+Enable the format feature. Use `FileSetAccessor` for a
 manifest's declared order:
 
 ```rust,no_run
@@ -368,3 +368,23 @@ content or supplies a text-extraction pipeline.
 
 See [architecture](architecture.md) for ownership and concurrency semantics and
 [API contracts](contracts.md) for custom stream and reader adapters.
+
+## Inspect a source before reading
+
+Use the same configured accessor and request for inspection and execution:
+
+```rust,no_run
+use open_arrow_access::{Accessor, ReadRequest, RecordReader, Result, SchemaRef};
+
+async fn inspect(
+    source: &impl Accessor<Request = ReadRequest, Reader = dyn RecordReader>,
+    request: ReadRequest,
+) -> Result<SchemaRef> {
+    Ok(source.metadata(request).await?.schema)
+}
+```
+
+This includes projection and schema-changing layers. It shares inference and
+schema merging with readers, so clients do not need separate format inspectors.
+See [metadata contracts](contracts.md#metadata-inspection) for I/O and fallback
+semantics.

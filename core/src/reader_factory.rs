@@ -24,6 +24,34 @@ pub trait ReaderFactory: Send + Sync {
     /// Validate configuration before storage opens; return configuration errors here.
     fn prepare(&self, request: &Self::Request) -> Result<Self::Prepared>;
 
+    /// Inspect output metadata through storage. The default opens and drops a reader;
+    /// override to avoid decoder construction and opening side effects when possible.
+    async fn metadata(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<<Self::Reader as Reader>::Metadata>
+    where
+        for<'a> ByteReadRequest: From<&'a Self::Request>,
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        Ok(self.open_reader(storage, request).await?.metadata().clone())
+    }
+
+    /// Return `None` only when bounded inference proves the input empty with no schema.
+    /// Explicit schemas and unknown row presence must retain `Some(metadata)`.
+    async fn inspect_metadata(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<Option<<Self::Reader as Reader>::Metadata>>
+    where
+        for<'a> ByteReadRequest: From<&'a Self::Request>,
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        Ok(Some(self.metadata(storage, request).await?))
+    }
+
     /// Inspect opened bytes and return an owned reader with metadata available.
     /// Preserve source errors and lifecycle; inspection may perform I/O.
     /// `token` is supplied by the shared [`ReaderFactoryExt`] opening methods.

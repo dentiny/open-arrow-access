@@ -56,8 +56,8 @@ provider metadata versus parsed `ApiDocument` metadata.
 `ResolvedFileSet::records(format)` binds one explicit format to the resolved
 namespace. Select logical names with `service::FileSetRequest`; the service
 module also exports `FileSetAccessor` for callers that need to name the type.
-These exports are available through the facade without `dataset-directory` or a
-direct dataset-crate dependency. Enable the chosen format, such as `format-json`.
+These exports are available through the facade without a direct dataset-crate
+dependency. Enable the chosen format, such as `format-json`.
 
 ```rust
 use open_arrow_access::{

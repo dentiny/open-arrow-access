@@ -86,8 +86,8 @@ and the [TAR example](../examples/read_tar.rs).
 
 | Selection | Feature | Ordering | Schema policy |
 | --- | --- | --- | --- |
-| `DirectoryAccessor` | `dataset-directory` | Recursive by default; suffix selection; lexicographically sorted and deduplicated paths | Exact projected schema by default; opt-in union by name with `with_union_by_name()` |
-| `FileSetAccessor` | `dataset-directory` | Caller order; repeated objects retained | Same strict/union-by-name policies; empty selection is invalid |
+| `DirectoryAccessor` | Always available | Recursive by default; suffix selection; lexicographically sorted and deduplicated paths | Exact projected schema by default; opt-in union by name with `with_union_by_name()` |
+| `FileSetAccessor` | Always available | Caller order; repeated objects retained | Same strict/union-by-name policies; empty selection is invalid |
 | Hugging Face Parquet split | `service-huggingface` | Sorted shards from the selected config/split and pinned export commit | Reuses Parquet and FileSet |
 
 With union by name enabled, each file is inspected in sequence before data is

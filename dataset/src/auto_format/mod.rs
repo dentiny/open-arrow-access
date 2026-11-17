@@ -1,6 +1,6 @@
 //! File discovery and format detection, followed by native file planning.
 //!
-//! Enable `auto-format` and the `format-*` readers you need. Compression features
+//! Enable the `format-*` readers you need. Compression features
 //! remain on the decompression crate. Configure storage (including known content
 //! lengths) before passing it here; Parquet retains its original range-capable storage.
 
@@ -8,12 +8,14 @@ use crate::{
     directory::DirectoryRequest,
     file_set::{FileSetAccessor, FileSetRequest},
 };
+#[cfg(any(feature = "format-csv", feature = "format-warc"))]
 use open_arrow_access_core::Layer;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, Capability, Error, ErrorKind, ObjectRef, ReadOptions,
     ReadOptionsProvider, RecordCapability, RecordReader, RecordScanAccessor, Result, ScanPlan,
     ScanPlanner, SchemaRef, async_trait,
 };
+#[cfg(any(feature = "format-csv", feature = "format-warc"))]
 use open_arrow_access_decompression::AutoDecompressionLayer;
 use std::sync::Arc;
 
@@ -113,6 +115,7 @@ fn error(kind: ErrorKind, message: impl Into<String>, object: Option<&ObjectRef>
 }
 
 impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
+    #[cfg(any(feature = "format-csv", feature = "format-warc"))]
     fn decoded(&self) -> Arc<dyn ByteAccessor> {
         Arc::new(AutoDecompressionLayer::new().layer(self.storage.clone()))
     }

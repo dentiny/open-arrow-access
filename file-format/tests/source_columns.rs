@@ -10,19 +10,15 @@ use open_arrow_access_file_format::warc::WarcArrowFormat;
 use open_arrow_access_layers::{
     ColumnEvolution, ParallelReadLayer, SchemaEvolutionLayer, SourceColumns, SourcePositionLayer,
 };
-use open_arrow_access_test_support::MemoryAccessor;
-use std::{
-    io::{Read, Write},
-    num::NonZeroUsize,
-};
+use open_arrow_access_test_support::{MemoryAccessor, fixture};
+use std::{io::Read, num::NonZeroUsize};
 
-fn records() -> Vec<Vec<u8>> {
-    (0..3).map(|i| format!("WARC/1.1\r\nWARC-Type: resource\r\nWARC-Record-ID: <urn:test:{i}>\r\nWARC-Date: 2020-07-08T02:52:55Z\r\nContent-Length: 5\r\n\r\nbody{i}\r\n\r\n").into_bytes()).collect()
-}
-fn gzip(bytes: &[u8]) -> Vec<u8> {
-    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder.write_all(bytes).unwrap();
-    encoder.finish().unwrap()
+async fn records() -> Vec<Vec<u8>> {
+    vec![
+        fixture!("warc", "position-record-0.warc").await,
+        fixture!("warc", "position-record-1.warc").await,
+        fixture!("warc", "position-record-2.warc").await,
+    ]
 }
 type Row = (String, u64, u64);
 async fn rows(mut reader: Box<dyn RecordReader>) -> Vec<Row> {
@@ -73,13 +69,17 @@ fn columns() -> SourceColumns {
 }
 #[tokio::test]
 async fn record_coordinates_survive_projection_parallelism_and_resume() {
-    let records = records();
-    let members = records.iter().map(|r| gzip(r)).collect::<Vec<_>>();
+    let records = records().await;
+    let members = [
+        fixture!("warc", "position-record-0.warc.gz").await,
+        fixture!("warc", "position-record-1.warc.gz").await,
+        fixture!("warc", "position-record-2.warc.gz").await,
+    ];
     for mode in 0..3 {
         let input = match mode {
-            0 => records.concat(),
-            1 => members.concat(),
-            _ => gzip(&records.concat()),
+            0 => fixture!("warc", "position-records.warc").await,
+            1 => fixture!("warc", "position-record-members.warc.gz").await,
+            _ => fixture!("warc", "position-records.warc.gz").await,
         };
         let object = if mode == 0 {
             "data.warc"
@@ -144,14 +144,8 @@ async fn record_coordinates_survive_projection_parallelism_and_resume() {
 }
 #[tokio::test]
 async fn records_spanning_compression_members_keep_their_start_coordinates() {
-    let mut input = gzip(b" \t\r\n");
-    let mut expected = Vec::new();
-    for record in records() {
-        expected.push(("data.warc.gz".to_owned(), input.len() as u64, 0));
-        let split = record.len() / 2;
-        input.extend(gzip(&record[..split]));
-        input.extend(gzip(&record[split..]));
-    }
+    let input = fixture!("warc", "position-split-members.warc.gz").await;
+    let expected = [24, 176, 328].map(|offset| ("data.warc.gz".to_owned(), offset, 0));
     let source = columns().wrap(FactoryAccessor::new(
         MemoryAccessor::new(&input, 7).layer(SourcePositionLayer::default()),
         WarcArrowFormat.with_source_positions(),
@@ -164,8 +158,8 @@ async fn records_spanning_compression_members_keep_their_start_coordinates() {
 
 #[tokio::test]
 async fn file_set_union_parallel_and_generated_columns_compose() {
-    let records = records();
-    let input = gzip(&records.concat());
+    let records = records().await;
+    let input = fixture!("warc", "position-records.warc.gz").await;
     let decoded_offsets = [0, records[0].len(), records[0].len() + records[1].len()];
     let objects = ["first.warc.gz", "second.warc.gz"];
     let expected = objects
@@ -237,7 +231,7 @@ async fn file_set_union_parallel_and_generated_columns_compose() {
 #[tokio::test]
 async fn stored_offsets_reject_predecoded_input() {
     use open_arrow_access_core::ErrorKind;
-    let input = gzip(&records().concat());
+    let input = fixture!("warc", "position-records.warc.gz").await;
     let source = MemoryAccessor::new(&input, 3)
         .layer(AutoDecompressionLayer::new())
         .layer(SourcePositionLayer::default());
@@ -309,7 +303,7 @@ async fn collisions_fail_and_empty_streams_keep_their_schema() {
     let source = SourceColumns::new()
         .with_offset("record_id")
         .wrap(FactoryAccessor::new(
-            MemoryAccessor::new(&records().concat(), 3),
+            MemoryAccessor::new(&fixture!("warc", "position-records.warc").await, 3),
             WarcArrowFormat.with_source_positions(),
         ));
     assert_eq!(
@@ -322,7 +316,8 @@ async fn collisions_fail_and_empty_streams_keep_their_schema() {
         ErrorKind::InvalidInput
     );
     let source = columns().wrap(FactoryAccessor::new(
-        MemoryAccessor::new(&gzip(b""), 1).layer(SourcePositionLayer::default()),
+        MemoryAccessor::new(&fixture!("gzip", "empty_member.gz").await, 1)
+            .layer(SourcePositionLayer::default()),
         WarcArrowFormat.with_source_positions(),
     ));
     let mut reader = source

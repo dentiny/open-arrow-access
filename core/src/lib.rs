@@ -15,6 +15,7 @@ mod field_index;
 mod layer;
 mod list_files;
 pub mod metrics;
+mod next_nonempty;
 mod positioned_async_read;
 mod positioned_batch;
 mod prepared_source;
@@ -26,6 +27,7 @@ mod read_object;
 mod read_state;
 mod reader;
 mod reader_factory;
+mod record_batch;
 mod record_batch_builder;
 mod record_stream;
 mod request;
@@ -42,11 +44,12 @@ pub use byte_position::BytePosition;
 pub use capability::{Capability, OrderRequirement, RecordCapability};
 pub use decode_batches::{BatchDecoder, decode_batches};
 pub use document::{DocumentAccessor, DocumentDecoder};
-pub use error::{Error, ErrorKind, Result};
+pub use error::{Error, ErrorKind, Result, empty_chunk};
 pub use factory_accessor::FactoryAccessor;
 pub use field_index::FieldNameIndex;
 pub use layer::{AccessorExt, Layer};
 pub use list_files::list_files;
+pub use next_nonempty::next_nonempty;
 pub use positioned_async_read::{
     PositionObserver, PositionedAsyncRead, into_positioned_async_read,
 };
@@ -62,15 +65,19 @@ pub use reader::{
     ByteMetadata, ByteReader, Reader, RecordMetadata, RecordReader, RecordStream, into_stream,
 };
 pub use reader_factory::{FactoryToken, ReaderFactory, ReaderFactoryExt};
+pub use record_batch::record_batch_with_rows;
 pub use record_batch_builder::{FieldValue, RecordBatchBuilder, RecordBatchRow};
-pub use record_stream::{map_positioned_reader, map_record_reader, record_stream_reader};
+pub use record_stream::{
+    map_positioned_reader, map_record_reader, map_record_stream, record_stream_reader,
+    schema_checked_reader,
+};
 pub use request::{
     ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ListRequest, ObjectRef, ReadOptions,
     ReadOptionsProvider, ReadRequest, ResolvedProjection,
 };
 pub use statistics::{ScanStatistics, Statistic, StatisticsProvider};
 pub use stream_reader::{StreamReader, bytes_reader};
-pub use validation::validate_byte_range;
+pub use validation::{validate_byte_range, validate_schema};
 
 pub use arrow_array::RecordBatch;
 pub use arrow_schema::{Schema, SchemaRef};
@@ -80,4 +87,5 @@ pub use bytes::Bytes;
 mod scan;
 pub use scan::{
     EmissionPolicy, ParallelReadOptions, RecordScanAccessor, ScanPartition, ScanPlan, ScanPlanner,
+    scan_partition,
 };
