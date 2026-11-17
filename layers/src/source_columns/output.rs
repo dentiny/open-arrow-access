@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
-use arrow_array::{ArrayRef, RecordBatchOptions, StringArray, UInt64Array};
+use arrow_array::{ArrayRef, StringArray, UInt64Array};
 use arrow_schema::Schema;
 use open_arrow_access_core::{
     BytePosition, ObjectRef, ReadOptions, RecordBatch, ResolvedProjection, Result, SchemaRef,
+    record_batch_with_rows,
 };
 
 use super::SourceColumn;
@@ -75,11 +76,7 @@ impl SourceOutput {
             Some(indices) => indices.iter().map(|&i| arrays[i].clone()).collect(),
             None => arrays,
         };
-        RecordBatch::try_new_with_options(
-            self.schema(),
-            arrays,
-            &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
-        )
-        .map_err(crate::error::source_column_batch_error)
+        record_batch_with_rows(self.schema(), arrays, batch.num_rows())
+            .map_err(crate::error::source_column_batch_error)
     }
 }
