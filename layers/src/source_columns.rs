@@ -2,11 +2,11 @@ use arrow_array::RecordBatchOptions;
 use arrow_schema::Schema;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use open_arrow_access_core::{
-    Accessor, Error, ErrorKind, Layer, ReadOptions, ReadOptionsProvider, RecordBatch,
-    RecordCapability, RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, SchemaRef,
-    SourceColumn, StreamReader, async_trait, into_stream,
+    Accessor, Layer, ReadOptions, ReadOptionsProvider, RecordBatch, RecordCapability,
+    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, SchemaRef, SourceColumn,
+    StreamReader, async_trait, into_stream,
 };
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 /// Request provenance from the source and rename its reserved output columns.
 /// Apply before generated-column evolution. Scan partitions retain their locators.
@@ -54,7 +54,7 @@ impl SourceColumnsLayer {
         options.projection.take()
     }
     fn transform(&self, input: &SchemaRef, projection: Option<Vec<String>>) -> Result<Transform> {
-        let mut names = HashSet::new();
+        crate::validation::validate_source_column_names(input, &self.columns)?;
         let fields = input
             .fields()
             .iter()
@@ -65,25 +65,9 @@ impl SourceColumnsLayer {
                     .find(|(c, _)| c.name() == field.name())
                     .map(|(_, n)| n.as_str())
                     .unwrap_or(field.name());
-                if target.is_empty() || !names.insert(target.to_owned()) {
-                    return Err(Error::new(
-                        ErrorKind::InvalidInput,
-                        "source_columns",
-                        format!("conflicting output field {target:?}"),
-                    ));
-                }
-                Ok(field.as_ref().clone().with_name(target))
+                field.as_ref().clone().with_name(target)
             })
-            .collect::<Result<Vec<_>>>()?;
-        for (column, _) in &self.columns {
-            if input.index_of(column.name()).is_err() {
-                return Err(Error::new(
-                    ErrorKind::Unsupported,
-                    "source_columns",
-                    format!("source did not provide {}", column.name()),
-                ));
-            }
-        }
+            .collect::<Vec<_>>();
         let renamed = Arc::new(Schema::new_with_metadata(fields, input.metadata().clone()));
         let projection = ReadOptions {
             projection,
@@ -119,10 +103,7 @@ impl Transform {
                     columns,
                     &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
                 )
-                .map_err(|error| {
-                    Error::new(ErrorKind::Decode, "source_columns", error.to_string())
-                        .with_source(error)
-                })
+                .map_err(crate::error::source_column_batch_error)
             })
             .and_then(futures::future::ready);
         Box::new(StreamReader::records(batches, metadata, ordering))

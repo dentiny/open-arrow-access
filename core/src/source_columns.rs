@@ -209,7 +209,7 @@ mod positioned {
                     let mut reader = this.reader.take().unwrap();
                     this.observer.0.lock().unwrap().current = reader.position();
                     this.pending = Some(Box::pin(async move {
-                        let result = reader.next().await.map_err(io::Error::other);
+                        let result = reader.next().await.map_err(crate::error::byte_input_error);
                         (reader, result)
                     }));
                 }
@@ -218,13 +218,15 @@ mod positioned {
                 this.pending = None;
                 this.reader = Some(reader);
                 match result {
-                    Ok(Some(bytes)) if !bytes.is_empty() => this.bytes = bytes,
-                    Ok(Some(_)) => {
-                        this.ended = true;
-                        this.reader = None;
-                        return Poll::Ready(Err(io::Error::other(crate::error::empty_chunk(
-                            this.operation,
-                        ))));
+                    Ok(Some(bytes)) => {
+                        if let Err(error) =
+                            crate::validation::validate_positioned_chunk(&bytes, this.operation)
+                        {
+                            this.ended = true;
+                            this.reader = None;
+                            return Poll::Ready(Err(error));
+                        }
+                        this.bytes = bytes;
                     }
                     Ok(None) => {
                         this.ended = true;
@@ -241,7 +243,7 @@ mod positioned {
         }
         fn consume(self: Pin<&mut Self>, amount: usize) {
             let this = self.get_mut();
-            assert!(amount <= this.bytes.len());
+            crate::validation::validate_buffer_consumption(amount, this.bytes.len());
             if amount > 0 {
                 let mut state = this.observer.0.lock().unwrap();
                 if state.armed {

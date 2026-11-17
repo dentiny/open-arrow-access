@@ -3,8 +3,8 @@ use async_compression::futures::bufread::{BzDecoder, GzipDecoder, Lz4Decoder, Zs
 use futures::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt};
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteMetadata, BytePosition, ByteReadRequest, ByteReader, Bytes,
-    Capability, Error, ErrorKind, Layer, ListRequest, ObjectStream, PositionObserver, Reader,
-    Result, async_trait, into_positioned_async_read,
+    Capability, Layer, ListRequest, ObjectStream, PositionObserver, Reader, Result, async_trait,
+    into_positioned_async_read,
 };
 use std::{num::NonZeroUsize, pin::Pin};
 
@@ -103,14 +103,7 @@ impl<A: ByteAccessor> Accessor for SourcePositionAccessor<A> {
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let codec = Codec::from_path(request.object.locator());
         let input = self.inner.open(request.clone()).await?;
-        if !matches!(input.position(), Some(BytePosition::Stored(_))) {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "source_columns",
-                "byte_positions() requires raw stored bytes; install it before any decoder",
-            )
-            .with_object(Some(&request.object)));
-        }
+        crate::validation::validate_raw_source_position(input.position(), &request.object)?;
         let Some(codec) = codec else {
             return Ok(input);
         };
@@ -169,14 +162,13 @@ impl FrameReader {
         loop {
             if self.decoder.is_none() {
                 let mut input = self.input.take().unwrap();
-                if input.fill_buf().await.map_err(decode_error)?.is_empty() {
-                    if !self.started {
-                        return Err(Error::new(
-                            ErrorKind::Decode,
-                            "source_positions",
-                            "empty compressed input",
-                        ));
-                    }
+                if input
+                    .fill_buf()
+                    .await
+                    .map_err(crate::error::source_frame_decode_error)?
+                    .is_empty()
+                {
+                    crate::validation::validate_compressed_source_end(self.started)?;
                     return Ok(None);
                 }
                 self.started = true;
@@ -194,7 +186,7 @@ impl FrameReader {
                 .unwrap()
                 .read(&mut output)
                 .await
-                .map_err(decode_error)?;
+                .map_err(crate::error::source_frame_decode_error)?;
             if n == 0 {
                 self.input = Some(self.decoder.take().unwrap().into_input());
                 continue;
@@ -208,14 +200,6 @@ impl FrameReader {
             return Ok(Some((position, Bytes::from(output))));
         }
     }
-}
-fn decode_error(error: std::io::Error) -> Error {
-    Error::new(
-        ErrorKind::from_source(&error).unwrap_or(ErrorKind::Decode),
-        "source_positions",
-        "frame decoding failed",
-    )
-    .with_source(error)
 }
 #[async_trait]
 impl Reader for FrameReader {

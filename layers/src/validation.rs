@@ -462,3 +462,46 @@ pub(crate) fn validate_evolution_input_schema(
     }
     Ok(())
 }
+
+pub(crate) fn validate_source_column_names(
+    input: &arrow_schema::SchemaRef,
+    columns: &[(open_arrow_access_core::SourceColumn, String)],
+) -> Result<()> {
+    let mut names = HashSet::new();
+    for field in input.fields() {
+        let target = columns
+            .iter()
+            .find(|(c, _)| c.name() == field.name())
+            .map(|(_, name)| name.as_str())
+            .unwrap_or(field.name());
+        if target.is_empty() || !names.insert(target.to_owned()) {
+            return Err(crate::error::source_column_name_conflict(target));
+        }
+    }
+    for (column, _) in columns {
+        if input.index_of(column.name()).is_err() {
+            return Err(crate::error::missing_source_column(*column));
+        }
+    }
+    Ok(())
+}
+#[cfg(feature = "source-positions")]
+pub(crate) fn validate_raw_source_position(
+    position: Option<open_arrow_access_core::BytePosition>,
+    object: &open_arrow_access_core::ObjectRef,
+) -> Result<()> {
+    if !matches!(
+        position,
+        Some(open_arrow_access_core::BytePosition::Stored(_))
+    ) {
+        return Err(crate::error::raw_source_bytes_required(object));
+    }
+    Ok(())
+}
+#[cfg(feature = "source-positions")]
+pub(crate) fn validate_compressed_source_end(started: bool) -> Result<()> {
+    if !started {
+        return Err(crate::error::empty_compressed_source());
+    }
+    Ok(())
+}

@@ -3,8 +3,8 @@ use arrow_array::{ArrayRef, StringArray};
 use arrow_schema::{Schema, SchemaRef};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Error, ErrorKind, ObjectRef, ReadRequest, ReaderFactory,
-    ReaderFactoryExt, RecordBatch, RecordMetadata, RecordReader, Result, ScanPlan, SourceColumn,
+    Accessor, ByteReadRequest, ByteReader, ObjectRef, ReadRequest, ReaderFactory, ReaderFactoryExt,
+    RecordBatch, RecordMetadata, RecordReader, Result, ScanPlan, SourceColumn,
     SourceColumnAccessor, SourceColumnPlanner, StreamReader, async_trait, into_stream,
 };
 use std::sync::Arc;
@@ -66,18 +66,11 @@ where
     }
 }
 
-pub(crate) fn invalid(message: impl Into<String>) -> Error {
-    Error::new(ErrorKind::InvalidInput, "source_columns", message)
-}
 pub(crate) fn schema(input: &SchemaRef, columns: &[SourceColumn]) -> Result<SchemaRef> {
     if columns.is_empty() {
         return Ok(input.clone());
     }
-    if columns.contains(&SourceColumn::Object)
-        && input.index_of(SourceColumn::Object.name()).is_ok()
-    {
-        return Err(invalid("source object column conflicts with data field"));
-    }
+    crate::validation::validate_source_object_column(input, columns)?;
     let mut fields = input
         .fields()
         .iter()
@@ -121,14 +114,12 @@ pub(crate) fn wrap(
                             std::iter::repeat_n(object.locator(), batch.num_rows()),
                         )))
                     } else {
-                        Ok(batch
-                            .column_by_name(field.name())
-                            .ok_or_else(|| invalid("missing source field"))?
-                            .clone())
+                        crate::validation::require_source_field(&batch, field.name())
                     }
                 })
                 .collect::<Result<Vec<_>>>()?;
-            RecordBatch::try_new(output.clone(), arrays).map_err(|e| invalid(e.to_string()))
+            RecordBatch::try_new(output.clone(), arrays)
+                .map_err(crate::error::source_column_batch_error)
         })();
         futures::future::ready(result)
     });

@@ -2,7 +2,7 @@ use std::{collections::HashSet, ops::Range};
 
 use arrow_schema::{DataType, Fields};
 
-use crate::{Error, ErrorKind, Result, SchemaRef};
+use crate::{Result, SchemaRef};
 
 /// Validate a half-open byte range against the current representation's length.
 /// Empty ranges at or before EOF are valid. This performs no I/O and leaves
@@ -17,11 +17,7 @@ pub fn validate_byte_range(range: &Range<u64>, len: u64, operation: &'static str
 /// Reject record offsets for a parser that supports only object locators.
 pub fn validate_object_source_columns(columns: &[crate::SourceColumn]) -> Result<()> {
     if columns.iter().any(|c| *c != crate::SourceColumn::Object) {
-        return Err(Error::new(
-            ErrorKind::Unsupported,
-            "source_columns",
-            "format does not support source offsets",
-        ));
+        return Err(crate::error::source_offsets_unsupported());
     }
     Ok(())
 }
@@ -118,11 +114,20 @@ pub(crate) fn validate_range_length(
 
 pub(crate) fn validate_prepared_schema(actual: &SchemaRef, expected: &SchemaRef) -> Result<()> {
     if actual != expected {
-        return Err(Error::new(
-            ErrorKind::Decode,
-            "prepared_source_scan",
-            "scan schema differs from the projected schema fixed at preparation",
-        ));
+        return Err(crate::error::prepared_schema_mismatch());
     }
     Ok(())
+}
+
+pub(crate) fn validate_positioned_chunk(
+    bytes: &crate::Bytes,
+    operation: &'static str,
+) -> std::io::Result<()> {
+    if bytes.is_empty() {
+        return Err(crate::error::empty_chunk_io(operation));
+    }
+    Ok(())
+}
+pub(crate) fn validate_buffer_consumption(amount: usize, available: usize) {
+    assert!(amount <= available);
 }

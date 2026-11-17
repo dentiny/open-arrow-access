@@ -130,13 +130,8 @@ impl ReaderFactory for WarcArrowFormat {
     ) -> Result<SchemaRef> {
         let schema = request.options.resolve_projection(&arrow_schema())?.schema;
         let mut fields = schema.fields().to_vec();
-        let mut seen = std::collections::HashSet::new();
+        crate::validation::validate_source_columns(columns, &arrow_schema())?;
         for &column in columns {
-            if !seen.insert(column) || arrow_schema().index_of(column.name()).is_ok() {
-                return Err(crate::source_columns::invalid(
-                    "source column conflicts with data field",
-                ));
-            }
             if column != open_arrow_access_core::SourceColumn::Object {
                 fields.push(Arc::new(column.field()));
             }
@@ -278,21 +273,12 @@ pub(super) mod positions {
         StreamExt,
         stream::{self, BoxStream},
     };
-    use open_arrow_access_core::{
-        BytePosition, ByteReader, Error, ErrorKind, Result, into_positioned_async_read,
-    };
+    use open_arrow_access_core::{BytePosition, ByteReader, Result, into_positioned_async_read};
     pub(in crate::warc) type RawRecord = (warc::RawRecordHeader, Vec<u8>);
     pub(in crate::warc) fn positioned_records(
         input: Box<dyn ByteReader>,
     ) -> Result<BoxStream<'static, Result<(RawRecord, BytePosition)>>> {
-        if input.position().is_none() {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "read_warc",
-                "byte input does not provide source positions",
-            )
-            .with_object(input.metadata().source.as_ref()));
-        }
+        crate::validation::validate_positioned_source(input.as_ref())?;
         let input = into_positioned_async_read(input, "read_warc");
         let observer = input.observer();
         let records = warc::WarcReader::new(input).iter_raw_records();
@@ -302,13 +288,8 @@ pub(super) mod positions {
                 let Some(record) = records.next().await.transpose().map_err(decode_error)? else {
                     return Ok(None);
                 };
-                let position = observer.marked_position().ok_or_else(|| {
-                    Error::new(
-                        ErrorKind::Unsupported,
-                        "read_warc",
-                        "byte input lost source positions",
-                    )
-                })?;
+                let position =
+                    crate::validation::require_source_position(observer.marked_position())?;
                 Ok(Some(((record, position), (records, observer))))
             })
             .boxed(),
