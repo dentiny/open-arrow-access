@@ -1,38 +1,69 @@
 # SourceColumnsLayer
 
-`SourceColumnsLayer` adds an object locator and optional record positions. It owns
-column selection, names and projection. Ordinary `ReadOptions`, `ByteReadOptions`,
-file opens and the existing decompression crate are unchanged.
+`SourceColumnsLayer` is an opt-in, format-independent layer over core's
+`FactoryAccessor`. It uses an ordinary `ReaderFactory`; formats need no source
+column hooks. The WARC implementation and existing decompression pipeline are
+unchanged. The caller chooses the framer and the source column names.
 
 ```rust,ignore
 let columns = SourceColumnsLayer::new()
+    .with_framer(my_framer)
     .with_object("source_path")
     .with_offset("record_offset")
     .with_offset_in_frame("record_offset_in_frame");
 
-// Enable the `source-positions` feature for the optional byte adapter.
-// It takes RAW storage bytes, before any decompression.
-let bytes = storage.layer(columns.byte_positions());
-let format = WarcArrowAccessor::new(bytes);
-let source = FileSetAccessor::new(format)
+// Optional byte adapter, enabled by the `source-positions` feature.
+// It takes raw storage bytes, before any decompression.
+let bytes = storage.layer(SourcePositionLayer::default());
+let records = FactoryAccessor::new(bytes, WarcArrowFormat).layer(columns);
+let source = FileSetAccessor::new(records)
     .with_union_by_name()
     .with_file_planning()
-    .layer(columns)
     .layer(ParallelReadLayer::new(concurrency, NonZeroUsize::MIN))
     .layer(SchemaEvolutionLayer::try_new(evolution)?);
 ```
 
-Apply source columns before `ParallelReadLayer`. Its scan-plan extension renames
-each partition and preserves file-internal planning. Generated SQL columns can
-reference the chosen names, then remove the position columns. Projection may
-select the chosen names, including an empty selection that retains row counts.
+Apply the layer before FileSet and parallel reading. Object-only columns do not
+need a framer: omit `with_framer` and use the ordinary whole-input format reader.
+Requesting offsets without a framer fails before opening storage. Installing no
+source layer keeps the existing format reading path.
+
+## User-provided framing
+
+Implement `SourceFramer::frame(Box<dyn ByteReader>)` to return a stream of
+`Result<SourceUnit>`. Each unit contains:
+
+- `bytes`: complete input an ordinary format reader can decode independently,
+  including any required headers.
+- `positions`: one `BytePosition` per output row, in parser order.
+
+The framer owns record boundaries and coordinate accuracy. A compression frame
+is not automatically a record: one frame can contain several records, and a
+record may span frames. The framer must account for records skipped or expanded
+by the chosen parser. It can observe consumed byte positions using
+`into_positioned_async_read`, or obtain coordinates from an external index.
+The layer never inspects WARC headers or assumes one row per frame.
+
+Units must cover the input once in logical order and produce the same schema.
+Each unit becomes one lazy scan partition. Planning inspects the first unit;
+later units are discovered as the execution window has room. Each partition
+opens an ordinary format reader. Group several records per unit to amortize
+reader creation. The layer buffers decoded batches within a unit and validates
+its complete row count before exposing any batch, so memory usage depends on
+unit size and the parallel partition budget. Inference must resolve the same
+schema for each unit; use an explicit format schema when needed. An empty input
+uses an empty ordinary format reader to establish its schema.
+
+The WARC integration test supplies a caller-owned framer and groups two records
+per unit. A separate CSV test supplies indexed coordinates through the same
+interface, without compression or positioned input.
+
+## Columns and coordinates
 
 Object columns are Utf8; offsets are UInt64. Names must be unique and must not
-collide with data fields. Every Arrow file format supports object locators.
-WARC also supports record offsets; unsupported requests fail before opening
-storage. JSONL/ATIF offsets are a later parser extension.
-
-## Position semantics
+collide with data fields. Projection resolves against the final chosen names,
+including an empty selection that retains row counts. Generated SQL columns can
+reference these names, then remove intermediate source columns.
 
 | Input | `record_offset` | `record_offset_in_frame` |
 | --- | --- | --- |
@@ -41,37 +72,25 @@ storage. JSONL/ATIF offsets are a later parser extension.
 | Whole-file frame | 0 | decoded record offset |
 | Several records per frame | stored frame start | decoded record offset within the frame |
 
-To resume, start decoding at the stored offset, skip the in-frame decoded offset,
-then parse the record. Common Crawl member offsets match CDX coordinates. These
-coordinates identify positions in one stable object version; keep object
-versions or fingerprints in the pipeline manifest.
+These semantics depend on the positions supplied by the framer. To resume,
+decode from the stored offset, skip the in-frame decoded offset, then parse the
+record. For Common Crawl, member starts match CDX coordinates. Coordinates refer
+to one stable object version; keep versions or fingerprints in a pipeline
+manifest.
 
-## Isolated byte adapter
+## Optional byte adapter
 
-`columns.byte_positions()` is an optional adapter implemented inside the layer.
-It passes uncompressed bytes through and recognizes `.gz`, `.tgz`, `.bz2`, `.zst`,
-`.zstd`, and `.lz4`. It consumes a single frame at a time and preserves unread
-compressed bytes for the next frame. Output chunks never cross frame boundaries.
-Its chunk size can be set independently with `with_chunk_size`.
+`SourcePositionLayer` passes uncompressed bytes through and recognizes `.gz`,
+`.tgz`, `.bz2`, `.zst`, `.zstd`, and `.lz4`. It decodes one compression frame at a
+time and preserves unread stored bytes for the next frame. Output chunks never
+cross frame boundaries; `with_chunk_size` controls their size. Install it on raw
+storage in place of automatic decompression when framing needs stored offsets.
+Installing it after a decoder fails because stored coordinates are unavailable.
+For uncompressed positioned storage or externally indexed framing, this adapter
+is unnecessary. Object-only columns can use existing decompression.
 
-This adapter replaces automatic decompression in the provenance-enabled branch.
-It does not modify `Codec`, `CompressionFactory`, `DecompressionFactory`, or
-`AutoDecompressionLayer`. Installing it after a decoder fails explicitly because
-stored coordinates have already been lost. An ordinary decoder still returns
-unknown positions, and a record-offset request on that input is Unsupported.
-
-For uncompressed inputs, a storage reader that provides positions needs no byte
-adapter. Object-only provenance can use the existing decompression pipeline.
-
-## Small parser extension
-
-Core adds `BytePosition`, a default-unknown `ByteReader::position()`, and buffered
-position observation that advances only on consume. OpenDAL reports its stored
-cursor; byte metrics forward it. The first byte consumed after a parser mark
-identifies the record start even at a frame boundary.
-
-`SourceColumnAccessor` / `SourceColumnPlanner` are opt-in extension interfaces.
-FileSet forwards their selection with a configured accessor instead of adding
-fields to every request. Default factory hooks support object columns and reject
-offsets; WARC overrides those hooks to capture record starts in sequential and
-planned reads. Existing factory and reader implementations retain default hooks.
+Core adds `BytePosition`, a default-unknown `ByteReader::position()`, and a
+buffered observer that advances only on consume. OpenDAL exposes its stored
+cursor and byte metrics forward it. Marking captures the first consumed byte,
+including at chunk and compression-frame boundaries. Core factory/request APIs,
+FileSet, all format implementations, and the decompression crate need no changes.

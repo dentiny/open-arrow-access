@@ -373,13 +373,6 @@ pub(crate) fn record_batch_error(source: arrow_schema::ArrowError) -> Error {
     record_batch_decode(source.to_string()).with_source(source)
 }
 
-pub(crate) fn source_offsets_unsupported() -> Error {
-    Error::new(
-        ErrorKind::Unsupported,
-        "source_columns",
-        "format does not support source offsets",
-    )
-}
 pub(crate) fn byte_input_error(error: Error) -> std::io::Error {
     std::io::Error::other(error)
 }

@@ -463,21 +463,56 @@ pub(crate) fn validate_evolution_input_schema(
     Ok(())
 }
 
-pub(crate) fn validate_source_column_names(
-    input: &arrow_schema::SchemaRef,
-    fields: &[Field],
-    columns: &[(open_arrow_access_core::SourceColumn, String)],
-) -> Result<()> {
+pub(crate) fn validate_source_column_names(fields: &[Field]) -> Result<()> {
     let mut names = HashSet::new();
     for field in fields {
         if field.name().is_empty() || !names.insert(field.name()) {
             return Err(crate::error::source_column_name_conflict(field.name()));
         }
     }
-    for (column, _) in columns {
-        if input.index_of(column.name()).is_err() {
-            return Err(crate::error::missing_source_column(*column));
-        }
+    Ok(())
+}
+
+pub(crate) fn validate_source_framer(
+    columns: &[(crate::source_columns::SourceColumn, String)],
+    has_framer: bool,
+) -> Result<()> {
+    if !has_framer
+        && columns
+            .iter()
+            .any(|(c, _)| *c != crate::source_columns::SourceColumn::Object)
+    {
+        return Err(crate::error::source_framer_required());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_source_object(
+    object: Option<&open_arrow_access_core::ObjectRef>,
+) -> Result<&open_arrow_access_core::ObjectRef> {
+    object.ok_or_else(crate::error::source_object_required)
+}
+
+pub(crate) fn validate_source_schema(
+    actual: &arrow_schema::SchemaRef,
+    expected: &arrow_schema::SchemaRef,
+) -> Result<()> {
+    if actual != expected {
+        return Err(crate::error::source_schema_mismatch());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_source_row_bound(actual: usize, expected: usize) -> Result<()> {
+    if actual > expected {
+        return Err(crate::error::source_row_count_mismatch(actual, expected));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_source_row_count(actual: usize, expected: usize) -> Result<()> {
+    if actual != expected {
+        return Err(crate::error::source_row_count_mismatch(actual, expected));
     }
     Ok(())
 }

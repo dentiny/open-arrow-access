@@ -1,18 +1,15 @@
 use std::sync::{Arc, OnceLock};
 
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
-use futures::{TryStreamExt, stream};
+use futures::stream;
 use open_arrow_access_core::{
-    ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
-    RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef,
-    StreamReader, async_trait,
+    ByteReadRequest, ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest,
+    ReaderFactory, RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, Result,
+    SchemaRef, StreamReader, async_trait,
 };
 use open_arrow_access_layers::{ColumnEvolution, SchemaEvolutionLayer};
 
-use super::{
-    WarcHeader,
-    records::{RawRecord, read_records},
-};
+use super::{WarcFormat, WarcHeader, WarcRecord};
 use crate::FileAccessor;
 
 /// Physical WARC records as Arrow rows. Bodies are unmodified LargeBinary;
@@ -81,21 +78,18 @@ pub(super) fn evolve_reader(reader: Box<dyn RecordReader>) -> Result<Box<dyn Rec
         .wrap_reader(reader)
 }
 
-// Projection is already resolved by prepare; only the parser's date
-// representation differs from the public Arrow schema.
-fn parser_schema(output: &SchemaRef) -> SchemaRef {
-    let fields = output
+pub(super) fn raw_projection(output: &SchemaRef) -> Result<SchemaRef> {
+    let names = output
         .fields()
         .iter()
-        .map(|field| {
-            if field.name() == "date" {
-                Arc::new(field.as_ref().clone().with_data_type(DataType::Utf8))
-            } else {
-                field.clone()
-            }
-        })
-        .collect::<Vec<_>>();
-    Arc::new(Schema::new_with_metadata(fields, output.metadata().clone()))
+        .map(|field| field.name().clone())
+        .collect();
+    open_arrow_access_core::ReadOptions {
+        projection: Some(names),
+        ..Default::default()
+    }
+    .resolve_projection(&raw_arrow_schema())
+    .map(|projection| projection.schema)
 }
 
 #[async_trait]
@@ -120,21 +114,6 @@ impl ReaderFactory for WarcArrowFormat {
             .resolve_projection(&arrow_schema())
             .map(|projection| projection.schema)
     }
-    fn prepare_source_columns(
-        &self,
-        request: &ReadRequest,
-        columns: &[open_arrow_access_core::SourceColumn],
-    ) -> Result<SchemaRef> {
-        let schema = request.options.resolve_projection(&arrow_schema())?.schema;
-        let mut fields = schema.fields().to_vec();
-        crate::validation::validate_source_columns(columns, &arrow_schema())?;
-        for &column in columns {
-            if column != open_arrow_access_core::SourceColumn::Object {
-                fields.push(Arc::new(column.field()));
-            }
-        }
-        Ok(Arc::new(Schema::new(fields)))
-    }
 
     async fn create_reader(
         &self,
@@ -143,21 +122,12 @@ impl ReaderFactory for WarcArrowFormat {
         request: ReadRequest,
         schema: SchemaRef,
     ) -> Result<Box<dyn RecordReader>> {
-        self.create_reader_with_source_columns(token, input, request, schema, &[])
-            .await
-    }
-    async fn create_reader_with_source_columns(
-        &self,
-        _token: &FactoryToken,
-        input: Box<dyn ByteReader>,
-        request: ReadRequest,
-        schema: SchemaRef,
-        columns: &[open_arrow_access_core::SourceColumn],
-    ) -> Result<Box<dyn RecordReader>> {
         let source = request.object.clone();
-        let records = read_records(input, columns)?;
+        let records = WarcFormat
+            .create_reader(token, input, ByteReadRequest::from(&request), ())
+            .await?;
         let batch_size = request.options.batch_size.get();
-        let schema = parser_schema(&schema);
+        let schema = raw_projection(&schema)?;
         let output = schema.clone();
         let source_uri = request.object.locator().to_owned();
         let batches = stream::try_unfold(records, move |mut records| {
@@ -166,10 +136,10 @@ impl ReaderFactory for WarcArrowFormat {
             async move {
                 let mut batch = new_batch(&output)?;
                 while batch.len() < batch_size {
-                    let Some(record) = records.try_next().await? else {
+                    let Some(record) = records.next().await? else {
                         break;
                     };
-                    append_record(&mut batch, record, &source_uri)?;
+                    append_record(&mut batch, &record, &source_uri)?;
                 }
                 if batch.is_empty() {
                     return Ok(None);
@@ -188,24 +158,9 @@ impl ReaderFactory for WarcArrowFormat {
     }
 }
 
-fn raw_schema_for(output: &SchemaRef) -> SchemaRef {
-    let mut fields = raw_arrow_schema().fields().to_vec();
-    if output.index_of("_source_offset").is_ok()
-        || output.index_of("_source_offset_in_frame").is_ok()
-    {
-        fields.push(Arc::new(
-            open_arrow_access_core::SourceColumn::Offset.field(),
-        ));
-        fields.push(Arc::new(
-            open_arrow_access_core::SourceColumn::OffsetInFrame.field(),
-        ));
-    }
-    Arc::new(Schema::new(fields))
-}
-
 pub(super) fn new_batch(output: &SchemaRef) -> Result<RecordBatchBuilder> {
     RecordBatchBuilder::new(
-        raw_schema_for(output),
+        raw_arrow_schema(),
         Some(
             output
                 .fields()
@@ -218,18 +173,10 @@ pub(super) fn new_batch(output: &SchemaRef) -> Result<RecordBatchBuilder> {
 
 pub(super) fn append_record(
     batch: &mut RecordBatchBuilder,
-    raw: RawRecord,
+    record: &WarcRecord,
     source_uri: &str,
 ) -> Result<()> {
-    let position = raw.position;
-    let record = warc::Record::<warc::EmptyBody>::try_from(raw.headers)
-        .map_err(super::decode_error)?
-        .add_body(raw.body);
     batch.push(|row| {
-        if let Some(position) = position {
-            row.append("_source_offset", position.offset())?;
-            row.append("_source_offset_in_frame", position.offset_in_frame())?;
-        }
         row.append("record_id", record.warc_id())?;
         row.append("record_type", record.warc_type().as_str())?;
         row.append("warc_version", record.warc_version())?;

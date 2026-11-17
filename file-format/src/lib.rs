@@ -6,9 +6,14 @@ mod inference;
 #[cfg(any(feature = "csv", feature = "json"))]
 mod preparation;
 mod scan;
-mod source_columns;
-mod validation;
 pub use scan::DecodePartitionOptions;
+#[cfg(any(
+    feature = "parquet",
+    feature = "warc",
+    feature = "xml",
+    feature = "json",
+    feature = "csv"
+))]
 mod error;
 
 pub use accessor::FileAccessor;

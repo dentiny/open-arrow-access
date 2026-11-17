@@ -33,14 +33,6 @@ pub(crate) trait FileScanPlanner:
     Accessor<Request = ReadRequest, Reader = dyn RecordReader>
 {
     async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan>;
-    async fn plan_file_scan_with_source_columns(
-        &self,
-        request: ReadRequest,
-        columns: &[open_arrow_access_core::SourceColumn],
-    ) -> Result<ScanPlan> {
-        open_arrow_access_core::validate_object_source_columns(columns)?;
-        self.plan_file_scan(request).await
-    }
 }
 
 #[async_trait]

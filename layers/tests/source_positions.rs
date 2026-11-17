@@ -1,17 +1,14 @@
 #![cfg(feature = "source-positions")]
 use open_arrow_access_core::{Accessor, AccessorExt, BytePosition, ErrorKind};
-use open_arrow_access_layers::SourceColumnsLayer;
+use open_arrow_access_layers::SourcePositionLayer;
 use open_arrow_access_test_support::{MemoryAccessor, collect_bytes, fixture};
 use std::num::NonZeroUsize;
 async fn check(extension: &str, member: Vec<u8>) {
     let mut compressed = member.clone();
     compressed.extend_from_slice(&member);
     for input_chunk in [1, compressed.len()] {
-        let accessor = MemoryAccessor::new(&compressed, input_chunk).layer(
-            SourceColumnsLayer::new()
-                .byte_positions()
-                .with_chunk_size(NonZeroUsize::new(3).unwrap()),
-        );
+        let accessor = MemoryAccessor::new(&compressed, input_chunk)
+            .layer(SourcePositionLayer::default().with_chunk_size(NonZeroUsize::new(3).unwrap()));
         let mut reader = accessor
             .open(format!("object.{extension}").into())
             .await
@@ -45,8 +42,7 @@ async fn check(extension: &str, member: Vec<u8>) {
         member[..member.len() - 1].to_vec(),
         [member.as_slice(), b"garbage", member.as_slice()].concat(),
     ] {
-        let accessor =
-            MemoryAccessor::new(&data, 1).layer(SourceColumnsLayer::new().byte_positions());
+        let accessor = MemoryAccessor::new(&data, 1).layer(SourcePositionLayer::default());
         let error = match accessor.open(format!("broken.{extension}").into()).await {
             Err(error) => error,
             Ok(mut reader) => {

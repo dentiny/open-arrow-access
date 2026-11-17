@@ -196,11 +196,32 @@ pub(crate) fn source_column_name_conflict(name: &str) -> Error {
         format!("conflicting output field {name:?}"),
     )
 }
-pub(crate) fn missing_source_column(column: open_arrow_access_core::SourceColumn) -> Error {
+pub(crate) fn source_framer_required() -> Error {
     Error::new(
         ErrorKind::Unsupported,
         "source_columns",
-        format!("source did not provide {}", column.name()),
+        "source offsets require a user-provided framer",
+    )
+}
+pub(crate) fn source_object_required() -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        "source_columns",
+        "source object locator is unavailable",
+    )
+}
+pub(crate) fn source_schema_mismatch() -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "source_columns",
+        "unit schema differs from the first unit",
+    )
+}
+pub(crate) fn source_row_count_mismatch(actual: usize, expected: usize) -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "source_columns",
+        format!("unit produced {actual} rows for {expected} source positions"),
     )
 }
 pub(crate) fn source_column_batch_error(error: ArrowError) -> Error {
@@ -211,7 +232,7 @@ pub(crate) fn raw_source_bytes_required(object: &open_arrow_access_core::ObjectR
     Error::new(
         ErrorKind::Unsupported,
         "source_columns",
-        "byte_positions() requires raw stored bytes; install it before any decoder",
+        "SourcePositionLayer requires raw stored bytes; install it before any decoder",
     )
     .with_object(Some(object))
 }

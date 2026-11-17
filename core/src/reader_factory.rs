@@ -24,29 +24,6 @@ pub trait ReaderFactory: Send + Sync {
     /// Validate configuration before storage opens; return configuration errors here.
     fn prepare(&self, request: &Self::Request) -> Result<Self::Prepared>;
 
-    /// Optional provenance preparation used only by SourceColumnsLayer.
-    /// Object locators need no parser support; offsets require an explicit override.
-    fn prepare_source_columns(
-        &self,
-        request: &Self::Request,
-        columns: &[crate::SourceColumn],
-    ) -> Result<Self::Prepared> {
-        crate::validation::validate_object_source_columns(columns)?;
-        self.prepare(request)
-    }
-
-    /// Optional provenance-aware parser hook. Ordinary opens use create_reader.
-    async fn create_reader_with_source_columns(
-        &self,
-        token: &FactoryToken,
-        input: Box<dyn ByteReader>,
-        request: Self::Request,
-        prepared: Self::Prepared,
-        _columns: &[crate::SourceColumn],
-    ) -> Result<Box<Self::Reader>> {
-        self.create_reader(token, input, request, prepared).await
-    }
-
     /// Inspect opened bytes and return an owned reader with metadata available.
     /// Preserve source errors and lifecycle; inspection may perform I/O.
     /// `token` is supplied by the shared [`ReaderFactoryExt`] opening methods.
@@ -62,15 +39,6 @@ pub trait ReaderFactory: Send + Sync {
 /// Shared opening flow provided by one blanket implementation for all factories.
 #[async_trait]
 pub trait ReaderFactoryExt: ReaderFactory {
-    async fn open_source_reader(
-        &self,
-        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
-        request: Self::Request,
-        columns: &[crate::SourceColumn],
-    ) -> Result<Box<Self::Reader>>
-    where
-        for<'a> ByteReadRequest: From<&'a Self::Request>;
-
     /// Prepare a format and decode an already-open byte reader. Preparation
     /// finishes before the factory can poll the supplied input.
     async fn open_input(
@@ -91,18 +59,6 @@ pub trait ReaderFactoryExt: ReaderFactory {
 
 #[async_trait]
 impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
-    async fn open_source_reader(
-        &self,
-        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
-        request: Self::Request,
-        columns: &[crate::SourceColumn],
-    ) -> Result<Box<Self::Reader>>
-    where
-        for<'a> ByteReadRequest: From<&'a Self::Request>,
-    {
-        open_factory(self, storage, request, Some(columns)).await
-    }
-
     async fn open_input(
         &self,
         input: Box<dyn ByteReader>,
@@ -124,42 +80,14 @@ impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
     where
         for<'a> ByteReadRequest: From<&'a Self::Request>,
     {
-        open_factory(self, storage, request, None).await
+        let byte_request = ByteReadRequest::from(&request);
+        let object = byte_request.object.clone();
+        let context = |error: crate::Error| error.with_object(Some(&object));
+        let prepared = self.prepare(&request).map_err(context)?;
+        let input = storage.open(byte_request).await.map_err(context)?;
+        let token = FactoryToken { _private: () };
+        self.create_reader(&token, input, request, prepared)
+            .await
+            .map_err(context)
     }
-}
-
-// Share preparation, storage opening and object context while preserving the
-// distinction between ordinary and explicitly requested provenance hooks.
-async fn open_factory<F: ReaderFactory + ?Sized>(
-    factory: &F,
-    storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
-    request: F::Request,
-    columns: Option<&[crate::SourceColumn]>,
-) -> Result<Box<F::Reader>>
-where
-    for<'a> ByteReadRequest: From<&'a F::Request>,
-{
-    let byte_request = ByteReadRequest::from(&request);
-    let object = byte_request.object.clone();
-    let context = |error: crate::Error| error.with_object(Some(&object));
-    let prepared = match columns {
-        Some(columns) => factory.prepare_source_columns(&request, columns),
-        None => factory.prepare(&request),
-    }
-    .map_err(context)?;
-    let input = storage.open(byte_request).await.map_err(context)?;
-    let token = FactoryToken { _private: () };
-    match columns {
-        Some(columns) => {
-            factory
-                .create_reader_with_source_columns(&token, input, request, prepared, columns)
-                .await
-        }
-        None => {
-            factory
-                .create_reader(&token, input, request, prepared)
-                .await
-        }
-    }
-    .map_err(context)
 }

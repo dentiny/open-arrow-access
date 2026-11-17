@@ -1,6 +1,6 @@
 /// An opt-in record provenance column.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SourceColumn {
+pub(crate) enum SourceColumn {
     Object,
     Offset,
     OffsetInFrame,

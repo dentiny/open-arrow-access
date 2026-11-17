@@ -24,9 +24,6 @@ mod read_lines;
 mod read_object;
 mod read_state;
 mod reader;
-mod source_column;
-mod source_columns;
-
 mod reader_factory;
 mod record_batch_builder;
 mod record_stream;
@@ -69,11 +66,9 @@ pub use request::{
     ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ListRequest, ObjectRef, ReadOptions,
     ReadOptionsProvider, ReadRequest, ResolvedProjection,
 };
-pub use source_column::SourceColumn;
-pub use source_columns::{SourceColumnAccessor, SourceColumnPlanner, SourceColumnRequestAccessor};
 pub use statistics::{ScanStatistics, Statistic, StatisticsProvider};
 pub use stream_reader::{StreamReader, bytes_reader};
-pub use validation::{validate_byte_range, validate_object_source_columns};
+pub use validation::validate_byte_range;
 
 pub use arrow_array::RecordBatch;
 pub use arrow_schema::{Schema, SchemaRef};

@@ -1,16 +1,18 @@
-use futures::stream;
+use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, OrderRequirement, ReadRequest, ReaderFactory,
-    RecordMetadata, Result, ScanPlan, StreamReader, async_trait,
+    RecordMetadata, Result, ScanPlan, StreamReader, async_trait, into_async_read,
 };
 
 use super::{
     WarcArrowAccessor,
-    arrow::{append_record, evolve_reader, new_batch},
-    records::{RawRecord, read_records},
+    arrow::{append_record, evolve_reader, new_batch, raw_projection},
+    decode_error,
 };
 
 use crate::scan::chunks::RecordChunks;
+
+type RawRecord = (warc::RawRecordHeader, Vec<u8>);
 
 #[async_trait]
 impl<B> crate::scan::FileScanPlanner for WarcArrowAccessor<B>
@@ -18,17 +20,7 @@ where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
     async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        self.plan_file_scan_with_source_columns(request, &[]).await
-    }
-    async fn plan_file_scan_with_source_columns(
-        &self,
-        request: ReadRequest,
-        columns: &[open_arrow_access_core::SourceColumn],
-    ) -> Result<ScanPlan> {
-        let schema = self
-            .binding
-            .factory()
-            .prepare_source_columns(&request, columns)?;
+        let schema = self.binding.factory().prepare(&request)?;
         let metadata = RecordMetadata {
             schema,
             source: Some(request.object.clone()),
@@ -38,7 +30,16 @@ where
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
-        let records = read_records(input, columns)?;
+        let records = warc::WarcReader::new(into_async_read(input, "read_warc")).iter_raw_records();
+        let records = stream::try_unfold(records, |mut records| async move {
+            Ok(records
+                .next()
+                .await
+                .transpose()
+                .map_err(decode_error)?
+                .map(|record| (record, records)))
+        })
+        .boxed();
         let plan = RecordChunks::new(records).into_plan(
             metadata,
             request.options.batch_size.get(),
@@ -48,12 +49,15 @@ where
                 Box::pin(async move {
                     let mut batch = new_batch(&metadata.schema)?;
                     let source = metadata.source.as_ref().unwrap().locator();
-                    for record in records {
-                        append_record(&mut batch, record, source)?;
+                    for (headers, body) in records {
+                        let record = warc::Record::<warc::EmptyBody>::try_from(headers)
+                            .map_err(decode_error)?
+                            .add_body(body);
+                        append_record(&mut batch, &record, source)?;
                     }
                     let batch = batch.finish()?;
                     let metadata = RecordMetadata {
-                        schema: batch.schema(),
+                        schema: raw_projection(&metadata.schema)?,
                         ..metadata
                     };
                     evolve_reader(Box::new(StreamReader::records(
@@ -70,7 +74,7 @@ where
 
 // Approximate serialized size after the parser normalizes header spelling/duplicates.
 // Includes all retained headers, not just projected columns; one record may exceed the target.
-fn record_size(RawRecord { headers, body, .. }: &RawRecord) -> usize {
+fn record_size((headers, body): &RawRecord) -> usize {
     headers.headers.iter().fold(
         body.len()
             .saturating_add(headers.version.len())
