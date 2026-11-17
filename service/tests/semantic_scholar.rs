@@ -22,11 +22,9 @@ async fn pins_latest_and_preserves_signed_partitions_without_leaking_key() {
         raw.into_bytes(),
     );
     download.file("/part?signature=a%2Bb", Bytes::from_static(b"raw-data"));
-    let s = SemanticScholarService::with_connection(
-        providers::connection(&f)
-            .with_header("x-api-key", "test")
-            .unwrap(),
-    );
+    let s = SemanticScholarService::with_connection(providers::connection(&f))
+        .with_key("test")
+        .unwrap();
     let files = s.dataset("latest", "s2orc").await.unwrap();
     assert_eq!(files.metadata().release_id, "2026-10-27");
     assert_eq!(files.metadata().dataset.value()["README"], "source license");
