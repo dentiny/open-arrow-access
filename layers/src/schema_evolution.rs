@@ -142,6 +142,24 @@ impl SchemaEvolutionLayer {
         .into_reader(reader)
     }
 
+    /// Apply the same row-preserving evolution while carrying row coordinates.
+    /// The plan is built once at open; every output batch retains its positions.
+    pub fn wrap_positioned_reader(
+        &self,
+        reader: Box<dyn open_arrow_access_core::PositionedRecordReader>,
+    ) -> Result<Box<dyn open_arrow_access_core::PositionedRecordReader>> {
+        if self.changes.is_empty() {
+            return Ok(reader);
+        }
+        SchemaEvolutionPlan::new(
+            &self.changes,
+            &reader.metadata().schema,
+            &Default::default(),
+            false,
+        )?
+        .into_positioned_reader(reader)
+    }
+
     /// Supply the complete source schema to push dependencies down without
     /// opening another reader for schema discovery.
     pub fn with_source_schema(mut self, schema: SchemaRef) -> Self {

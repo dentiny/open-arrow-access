@@ -6,10 +6,9 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
 use open_arrow_access_decompression::AutoDecompressionLayer;
-use open_arrow_access_file_format::warc::{WarcArrowFormat, WarcFramer};
+use open_arrow_access_file_format::warc::WarcArrowFormat;
 use open_arrow_access_layers::{
-    ColumnEvolution, ParallelReadLayer, SchemaEvolutionLayer, SourceColumnsLayer,
-    SourcePositionLayer,
+    ColumnEvolution, ParallelReadLayer, SchemaEvolutionLayer, SourceColumns, SourcePositionLayer,
 };
 use open_arrow_access_test_support::MemoryAccessor;
 use std::{
@@ -66,9 +65,8 @@ async fn rows(mut reader: Box<dyn RecordReader>) -> Vec<Row> {
     }
     result
 }
-fn columns() -> SourceColumnsLayer {
-    SourceColumnsLayer::new()
-        .with_framer(WarcFramer)
+fn columns() -> SourceColumns {
+    SourceColumns::new()
         .with_object("path")
         .with_offset("offset")
         .with_offset_in_frame("decoded")
@@ -108,11 +106,10 @@ async fn record_coordinates_survive_projection_parallelism_and_resume() {
                 result
             })
             .collect::<Vec<_>>();
-        let source = FactoryAccessor::new(
+        let source = columns().wrap(FactoryAccessor::new(
             MemoryAccessor::new(&input, 7).layer(SourcePositionLayer::default()),
-            WarcArrowFormat,
-        )
-        .layer(columns());
+            WarcArrowFormat.with_source_positions(),
+        ));
         let request = ReadRequest::new(object).with_options(ReadOptions {
             batch_size: NonZeroUsize::MIN,
             projection: Some(vec![
@@ -155,11 +152,10 @@ async fn records_spanning_compression_members_keep_their_start_coordinates() {
         input.extend(gzip(&record[..split]));
         input.extend(gzip(&record[split..]));
     }
-    let source = FactoryAccessor::new(
+    let source = columns().wrap(FactoryAccessor::new(
         MemoryAccessor::new(&input, 7).layer(SourcePositionLayer::default()),
-        WarcArrowFormat,
-    )
-    .layer(columns());
+        WarcArrowFormat.with_source_positions(),
+    ));
     assert_eq!(
         rows(source.open(ReadRequest::new("data.warc.gz")).await.unwrap()).await,
         expected
@@ -181,11 +177,10 @@ async fn file_set_union_parallel_and_generated_columns_compose() {
         })
         .collect::<Vec<_>>();
     for union in [false, true] {
-        let format = FactoryAccessor::new(
+        let format = columns().wrap(FactoryAccessor::new(
             MemoryAccessor::new(&input, 7).layer(SourcePositionLayer::default()),
-            WarcArrowFormat,
-        )
-        .layer(columns());
+            WarcArrowFormat.with_source_positions(),
+        ));
         let files = FileSetAccessor::new(format).with_file_planning();
         let files = if union {
             files.with_union_by_name()
@@ -263,8 +258,9 @@ async fn object_is_generic_but_offsets_fail_before_storage_open() {
     use open_arrow_access_file_format::csv::CsvFileFormat;
     let input = MemoryAccessor::new(b"id\n1\n2\n", 1);
     let observations = input.observations.clone();
-    let source = FactoryAccessor::new(input.clone(), CsvFileFormat::infer())
-        .layer(SourceColumnsLayer::new().with_offset("offset"));
+    let source = SourceColumns::new()
+        .with_offset("offset")
+        .wrap(FactoryAccessor::new(input.clone(), CsvFileFormat::infer()));
     assert_eq!(
         source
             .open(ReadRequest::new("data.csv"))
@@ -284,8 +280,9 @@ async fn object_is_generic_but_offsets_fail_before_storage_open() {
         ErrorKind::Unsupported
     );
     assert!(observations.requests.lock().unwrap().is_empty());
-    let source = FactoryAccessor::new(input, CsvFileFormat::infer())
-        .layer(SourceColumnsLayer::new().with_object("path"));
+    let source = SourceColumns::new()
+        .with_object("path")
+        .wrap(FactoryAccessor::new(input, CsvFileFormat::infer()));
     let mut reader = source
         .open(ReadRequest::new("data.csv").with_options(ReadOptions {
             projection: Some(vec!["path".into()]),
@@ -309,12 +306,12 @@ async fn object_is_generic_but_offsets_fail_before_storage_open() {
 #[tokio::test]
 async fn collisions_fail_and_empty_streams_keep_their_schema() {
     use open_arrow_access_core::ErrorKind;
-    let source = FactoryAccessor::new(MemoryAccessor::new(&records().concat(), 3), WarcArrowFormat)
-        .layer(
-            SourceColumnsLayer::new()
-                .with_framer(WarcFramer)
-                .with_offset("record_id"),
-        );
+    let source = SourceColumns::new()
+        .with_offset("record_id")
+        .wrap(FactoryAccessor::new(
+            MemoryAccessor::new(&records().concat(), 3),
+            WarcArrowFormat.with_source_positions(),
+        ));
     assert_eq!(
         source
             .open(ReadRequest::new("data.warc"))
@@ -324,11 +321,10 @@ async fn collisions_fail_and_empty_streams_keep_their_schema() {
             .kind(),
         ErrorKind::InvalidInput
     );
-    let source = FactoryAccessor::new(
+    let source = columns().wrap(FactoryAccessor::new(
         MemoryAccessor::new(&gzip(b""), 1).layer(SourcePositionLayer::default()),
-        WarcArrowFormat,
-    )
-    .layer(columns());
+        WarcArrowFormat.with_source_positions(),
+    ));
     let mut reader = source
         .open(ReadRequest::new("empty.warc.gz"))
         .await

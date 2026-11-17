@@ -58,7 +58,7 @@ impl Codec {
         }
     }
 }
-/// Opt-in byte input for SourceColumnsLayer. Install on raw storage, in place
+/// Opt-in byte input for positioned format readers. Install on raw storage, in place
 /// of a decompression layer. Uncompressed bytes pass through unchanged.
 #[derive(Clone, Debug)]
 pub struct SourcePositionLayer {

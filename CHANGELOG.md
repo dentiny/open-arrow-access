@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Replace byte-based `SourceFramer` / `SourceUnit` with `PositionedBatch` and `PositionedRecordReader` so decoders return rows and coordinates together.
+- Add `WarcArrowFormat.with_source_positions()` for one-pass positioned WARC decoding with the ordinary batch size and one date-cast plan per reader.
+- Replace `SourceColumnsLayer` with the explicit `SourceColumns::wrap` adapter. See [migration](docs/source-positions.md#migration).
+
 ## 0.4.0 - 2026-11-16
 
 - Add opt-in source columns and source positions with user-configurable record framing.

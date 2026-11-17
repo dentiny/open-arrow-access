@@ -2,10 +2,10 @@ mod accessor;
 mod arrow;
 mod error;
 mod format;
-mod framer;
 mod planning;
+mod positioned;
 pub use arrow::{WarcArrowAccessor, WarcArrowFormat, arrow_schema};
-pub use framer::WarcFramer;
+pub use positioned::PositionedWarcArrowFormat;
 
 pub use accessor::WarcAccessor;
 pub use format::WarcFormat;

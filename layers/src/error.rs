@@ -196,11 +196,11 @@ pub(crate) fn source_column_name_conflict(name: &str) -> Error {
         format!("conflicting output field {name:?}"),
     )
 }
-pub(crate) fn source_framer_required() -> Error {
+pub(crate) fn source_positions_required() -> Error {
     Error::new(
         ErrorKind::Unsupported,
         "source_columns",
-        "source offsets require a user-provided framer",
+        "source offsets require a positioned record reader",
     )
 }
 pub(crate) fn source_object_required() -> Error {
@@ -214,14 +214,7 @@ pub(crate) fn source_schema_mismatch() -> Error {
     Error::new(
         ErrorKind::Decode,
         "source_columns",
-        "unit schema differs from the first unit",
-    )
-}
-pub(crate) fn source_row_count_mismatch(actual: usize, expected: usize) -> Error {
-    Error::new(
-        ErrorKind::Decode,
-        "source_columns",
-        format!("unit produced {actual} rows for {expected} source positions"),
+        "source batch schema differs from the opened schema",
     )
 }
 pub(crate) fn source_column_batch_error(error: ArrowError) -> Error {

@@ -16,6 +16,7 @@ mod layer;
 mod list_files;
 pub mod metrics;
 mod positioned_async_read;
+mod positioned_batch;
 mod prepared_source;
 mod project_batch;
 mod read_all;
@@ -49,6 +50,7 @@ pub use list_files::list_files;
 pub use positioned_async_read::{
     PositionObserver, PositionedAsyncRead, into_positioned_async_read,
 };
+pub use positioned_batch::{PositionedBatch, PositionedRecordReader};
 pub use prepared_source::PreparedSource;
 pub use project_batch::project_batch;
 pub use read_all::read_all;
@@ -61,7 +63,7 @@ pub use reader::{
 };
 pub use reader_factory::{FactoryToken, ReaderFactory, ReaderFactoryExt};
 pub use record_batch_builder::{FieldValue, RecordBatchBuilder, RecordBatchRow};
-pub use record_stream::{map_record_reader, record_stream_reader};
+pub use record_stream::{map_positioned_reader, map_record_reader, record_stream_reader};
 pub use request::{
     ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ListRequest, ObjectRef, ReadOptions,
     ReadOptionsProvider, ReadRequest, ResolvedProjection,

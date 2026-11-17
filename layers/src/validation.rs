@@ -473,16 +473,16 @@ pub(crate) fn validate_source_column_names(fields: &[Field]) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn validate_source_framer(
+pub(crate) fn validate_source_positions(
     columns: &[(crate::source_columns::SourceColumn, String)],
-    has_framer: bool,
+    has_positions: bool,
 ) -> Result<()> {
-    if !has_framer
+    if !has_positions
         && columns
             .iter()
             .any(|(c, _)| *c != crate::source_columns::SourceColumn::Object)
     {
-        return Err(crate::error::source_framer_required());
+        return Err(crate::error::source_positions_required());
     }
     Ok(())
 }
@@ -503,19 +503,6 @@ pub(crate) fn validate_source_schema(
     Ok(())
 }
 
-pub(crate) fn validate_source_row_bound(actual: usize, expected: usize) -> Result<()> {
-    if actual > expected {
-        return Err(crate::error::source_row_count_mismatch(actual, expected));
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_source_row_count(actual: usize, expected: usize) -> Result<()> {
-    if actual != expected {
-        return Err(crate::error::source_row_count_mismatch(actual, expected));
-    }
-    Ok(())
-}
 #[cfg(feature = "source-positions")]
 pub(crate) fn validate_raw_source_position(
     position: Option<open_arrow_access_core::BytePosition>,
