@@ -18,6 +18,15 @@ pub enum OuterCompression {
     Auto,
 }
 
+impl OuterCompression {
+    pub(crate) fn apply<A: ByteAccessor + 'static>(self, accessor: A) -> Arc<dyn ByteAccessor> {
+        match self {
+            Self::None => Arc::new(accessor),
+            Self::Auto => Arc::new(accessor.layer(AutoDecompressionLayer::new())),
+        }
+    }
+}
+
 /// Compose storage, optional outer decompression and a typed record format.
 ///
 /// Construction performs no I/O or schema inspection. The returned accessor can
@@ -65,11 +74,7 @@ fn file_storage(
     operator: opendal::Operator,
     compression: OuterCompression,
 ) -> Arc<dyn ByteAccessor> {
-    let storage = OpenDalAccessor::new(operator);
-    match compression {
-        OuterCompression::None => Arc::new(storage),
-        OuterCompression::Auto => Arc::new(storage.layer(AutoDecompressionLayer::new())),
-    }
+    compression.apply(OpenDalAccessor::new(operator))
 }
 
 /// Compose file storage and a typed format while retaining native scan planning.
