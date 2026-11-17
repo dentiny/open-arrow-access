@@ -8,7 +8,7 @@ use open_arrow_access_core::{
 
 use super::{PmcAccessor, schema};
 
-/// Read a metadata directory recursively, or one `.json` object.
+/// Read a metadata directory ending in `/` recursively, or one `.json` object.
 /// Paths are relative to the supplied bucket-root storage. Discovery streams in
 /// storage order; a live directory listing is not an atomic release snapshot.
 pub struct PmcDatasetAccessor<A> {
@@ -26,9 +26,13 @@ impl<A> PmcDatasetAccessor<A> {
 impl<A: ByteAccessor + 'static> PmcDatasetAccessor<A> {
     /// Stream metadata keys without collecting the directory into memory.
     /// An exact `.json` object requires no listing.
+    /// Other locators must end in `/` to avoid matching sibling prefixes.
     pub async fn metadata_paths(&self, request: &ReadRequest) -> Result<ObjectStream> {
         if request.object.locator().ends_with(".json") {
             return Ok(stream::once(futures::future::ready(Ok(request.object.clone()))).boxed());
+        }
+        if !request.object.locator().ends_with('/') {
+            return Err(super::error::invalid_metadata_path().with_object(Some(&request.object)));
         }
         Ok(self
             .storage
