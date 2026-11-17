@@ -266,6 +266,9 @@ where
 
 #[async_trait]
 impl<E: MetricsExporter> ByteReader for Measured<dyn ByteReader, E> {
+    fn position(&self) -> Option<crate::BytePosition> {
+        self.inner.position()
+    }
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         let result =
             Call::observe(&self.exporter, "read_range", self.inner.read_range(range)).await;

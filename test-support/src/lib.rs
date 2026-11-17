@@ -246,6 +246,11 @@ impl Reader for MemoryReader {
 
 #[async_trait]
 impl ByteReader for MemoryReader {
+    fn position(&self) -> Option<open_arrow_access_core::BytePosition> {
+        Some(open_arrow_access_core::BytePosition::Stored(
+            self.offset as u64,
+        ))
+    }
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         self.observations.range_reads.fetch_add(1, Ordering::SeqCst);
         self.observations.ranges.lock().unwrap().push(range.clone());

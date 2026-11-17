@@ -462,3 +462,77 @@ pub(crate) fn validate_evolution_input_schema(
     }
     Ok(())
 }
+
+pub(crate) fn validate_source_column_names(fields: &[Field]) -> Result<()> {
+    let mut names = HashSet::new();
+    for field in fields {
+        if field.name().is_empty() || !names.insert(field.name()) {
+            return Err(crate::error::source_column_name_conflict(field.name()));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_source_framer(
+    columns: &[(crate::source_columns::SourceColumn, String)],
+    has_framer: bool,
+) -> Result<()> {
+    if !has_framer
+        && columns
+            .iter()
+            .any(|(c, _)| *c != crate::source_columns::SourceColumn::Object)
+    {
+        return Err(crate::error::source_framer_required());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_source_object(
+    object: Option<&open_arrow_access_core::ObjectRef>,
+) -> Result<&open_arrow_access_core::ObjectRef> {
+    object.ok_or_else(crate::error::source_object_required)
+}
+
+pub(crate) fn validate_source_schema(
+    actual: &arrow_schema::SchemaRef,
+    expected: &arrow_schema::SchemaRef,
+) -> Result<()> {
+    if actual != expected {
+        return Err(crate::error::source_schema_mismatch());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_source_row_bound(actual: usize, expected: usize) -> Result<()> {
+    if actual > expected {
+        return Err(crate::error::source_row_count_mismatch(actual, expected));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_source_row_count(actual: usize, expected: usize) -> Result<()> {
+    if actual != expected {
+        return Err(crate::error::source_row_count_mismatch(actual, expected));
+    }
+    Ok(())
+}
+#[cfg(feature = "source-positions")]
+pub(crate) fn validate_raw_source_position(
+    position: Option<open_arrow_access_core::BytePosition>,
+    object: &open_arrow_access_core::ObjectRef,
+) -> Result<()> {
+    if !matches!(
+        position,
+        Some(open_arrow_access_core::BytePosition::Stored(_))
+    ) {
+        return Err(crate::error::raw_source_bytes_required(object));
+    }
+    Ok(())
+}
+#[cfg(feature = "source-positions")]
+pub(crate) fn validate_compressed_source_end(started: bool) -> Result<()> {
+    if !started {
+        return Err(crate::error::empty_compressed_source());
+    }
+    Ok(())
+}

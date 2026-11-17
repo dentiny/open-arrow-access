@@ -188,3 +188,68 @@ pub(crate) fn evolution_expression_type(
 pub(crate) fn evolution_batch(source: ArrowError) -> Error {
     Error::new(ErrorKind::Decode, "evolve_schema", source.to_string()).with_source(source)
 }
+
+pub(crate) fn source_column_name_conflict(name: &str) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "source_columns",
+        format!("conflicting output field {name:?}"),
+    )
+}
+pub(crate) fn source_framer_required() -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        "source_columns",
+        "source offsets require a user-provided framer",
+    )
+}
+pub(crate) fn source_object_required() -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        "source_columns",
+        "source object locator is unavailable",
+    )
+}
+pub(crate) fn source_schema_mismatch() -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "source_columns",
+        "unit schema differs from the first unit",
+    )
+}
+pub(crate) fn source_row_count_mismatch(actual: usize, expected: usize) -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "source_columns",
+        format!("unit produced {actual} rows for {expected} source positions"),
+    )
+}
+pub(crate) fn source_column_batch_error(error: ArrowError) -> Error {
+    Error::new(ErrorKind::Decode, "source_columns", error.to_string()).with_source(error)
+}
+#[cfg(feature = "source-positions")]
+pub(crate) fn raw_source_bytes_required(object: &open_arrow_access_core::ObjectRef) -> Error {
+    Error::new(
+        ErrorKind::Unsupported,
+        "source_columns",
+        "SourcePositionLayer requires raw stored bytes; install it before any decoder",
+    )
+    .with_object(Some(object))
+}
+#[cfg(feature = "source-positions")]
+pub(crate) fn empty_compressed_source() -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "source_positions",
+        "empty compressed input",
+    )
+}
+#[cfg(feature = "source-positions")]
+pub(crate) fn source_frame_decode_error(error: std::io::Error) -> Error {
+    Error::new(
+        ErrorKind::from_source(&error).unwrap_or(ErrorKind::Decode),
+        "source_positions",
+        "frame decoding failed",
+    )
+    .with_source(error)
+}

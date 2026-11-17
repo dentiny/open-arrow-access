@@ -70,6 +70,11 @@ pub struct ByteMetadata {
 pub trait ByteReader:
     Reader<Item = Bytes, Metadata = ByteMetadata, Capability = Capability>
 {
+    /// Coordinates of the next chunk. Byte transformations default to unknown.
+    fn position(&self) -> Option<crate::BytePosition> {
+        None
+    }
+
     /// Read exactly the half-open `range` in the current byte representation.
     ///
     /// Range reads leave the sequential cursor unchanged. Valid empty ranges

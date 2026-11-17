@@ -372,3 +372,18 @@ pub(crate) fn default_range_unsupported() -> Error {
 pub(crate) fn record_batch_error(source: arrow_schema::ArrowError) -> Error {
     record_batch_decode(source.to_string()).with_source(source)
 }
+
+pub(crate) fn byte_input_error(error: Error) -> std::io::Error {
+    std::io::Error::other(error)
+}
+pub(crate) fn empty_chunk_io(operation: &'static str) -> std::io::Error {
+    byte_input_error(empty_chunk(operation))
+}
+
+pub(crate) fn prepared_schema_mismatch() -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "prepared_source_scan",
+        "scan schema differs from the projected schema fixed at preparation",
+    )
+}

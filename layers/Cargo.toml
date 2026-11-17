@@ -6,7 +6,12 @@ license.workspace = true
 repository.workspace = true
 description = "Composable Arrow record layers for Open Arrow Access"
 
+[features]
+# Explicit byte adapter for stored frame offsets; existing decompression stays unchanged.
+source-positions = ["dep:async-compression"]
+
 [dependencies]
+async-compression = { workspace = true, optional = true, features = ["gzip", "bzip2", "zstd", "lz4"] }
 datafusion = { workspace = true, features = ["sql"] }
 futures.workspace = true
 indexmap.workspace = true
