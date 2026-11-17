@@ -1,0 +1,240 @@
+use std::num::NonZeroUsize;
+
+use futures::stream;
+use open_arrow_access_core::{
+    Accessor, Layer, RecordBatch, RecordCapability, RecordReader, Result, StreamReader, async_trait,
+};
+use tokio::{sync::mpsc, task::JoinSet};
+
+/// Read ahead in one background task, preserving batches, metadata and order.
+///
+/// Configure a row limit, an estimated-byte limit, or both. With both configured,
+/// the queue must fit both budgets. Byte estimates use
+/// [`RecordBatch::get_array_memory_size`], including array overhead; shared buffers
+/// can be counted more than once. Empty batches cost at least one unit in each
+/// enabled budget so they cannot create an unbounded queue.
+///
+/// Batches are never split. A batch larger than a budget occupies that entire
+/// budget and is queued only by itself. In addition to the bounded queue, the
+/// producer can hold one batch awaiting admission (its size is unknown before
+/// reading). These budgets exclude decoder allocations and caller-owned batches;
+/// they are not a hard cap on process memory. Configure decoder batch sizes too.
+///
+/// Construction and opening start no task and poll no batches. The first `next`
+/// requires a Tokio runtime and starts prefetching. Dropping the output reader
+/// aborts the worker, including when it is blocked in an upstream read.
+/// Place this outside `ParallelReadLayer` for a single scan-wide queue.
+#[derive(Clone, Copy, Debug)]
+pub struct PrefetchLayer {
+    max_rows: Option<NonZeroUsize>,
+    max_estimated_bytes: Option<NonZeroUsize>,
+}
+
+impl PrefetchLayer {
+    /// Bound queued rows. Oversized batches are admitted alone.
+    pub fn rows(max_rows: NonZeroUsize) -> Self {
+        Self {
+            max_rows: Some(max_rows),
+            max_estimated_bytes: None,
+        }
+    }
+
+    /// Bound queued estimated Arrow array bytes. Oversized batches are admitted alone.
+    pub fn estimated_bytes(max_estimated_bytes: NonZeroUsize) -> Self {
+        Self {
+            max_rows: None,
+            max_estimated_bytes: Some(max_estimated_bytes),
+        }
+    }
+
+    /// Set a row budget in addition to any byte budget.
+    pub fn with_max_rows(mut self, max_rows: NonZeroUsize) -> Self {
+        self.max_rows = Some(max_rows);
+        self
+    }
+
+    /// Set a byte budget in addition to any row budget.
+    pub fn with_max_estimated_bytes(mut self, max_estimated_bytes: NonZeroUsize) -> Self {
+        self.max_estimated_bytes = Some(max_estimated_bytes);
+        self
+    }
+
+    fn cost(self, rows: usize, bytes: usize) -> Cost {
+        Cost {
+            rows: self.max_rows.map_or(0, |max| rows.max(1).min(max.get())),
+            bytes: self
+                .max_estimated_bytes
+                .map_or(0, |max| bytes.max(1).min(max.get())),
+        }
+    }
+}
+
+/// A record accessor decorated by [`PrefetchLayer`], with independent per-open budgets.
+/// Does not expose `ScanPlanner`: its queue covers the opened stream, not partitions.
+#[derive(Clone, Debug)]
+pub struct PrefetchAccessor<A> {
+    inner: A,
+    settings: PrefetchLayer,
+}
+
+impl<A: Accessor<Reader = dyn RecordReader>> Layer<A> for PrefetchLayer {
+    type Layered = PrefetchAccessor<A>;
+
+    fn layer(&self, inner: A) -> Self::Layered {
+        PrefetchAccessor {
+            inner,
+            settings: *self,
+        }
+    }
+}
+
+#[async_trait]
+impl<A: Accessor<Reader = dyn RecordReader>> Accessor for PrefetchAccessor<A> {
+    type Request = A::Request;
+    type Reader = dyn RecordReader;
+
+    fn capability(&self) -> RecordCapability {
+        self.inner.capability()
+    }
+
+    async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
+        let inner = self.inner.open(request).await?;
+        let metadata = inner.metadata().clone();
+        let capability = inner.capability();
+        let state = PrefetchState {
+            inner: Some(inner),
+            settings: self.settings,
+            receiver: None,
+            releases: None,
+            tasks: JoinSet::new(),
+        };
+        let batches = stream::unfold(state, |mut state| async move {
+            state.next().await.transpose().map(|item| (item, state))
+        });
+        Ok(Box::new(
+            StreamReader::records(batches, metadata, capability.ordering)
+                .with_capability(capability),
+        ))
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct Cost {
+    rows: usize,
+    bytes: usize,
+}
+
+/// Only the producer owns accounting. Consumption returns credits through a
+/// channel, avoiding shared locks and keeping each reservation cancellation-safe.
+struct Budget {
+    settings: PrefetchLayer,
+    used: Cost,
+    releases: mpsc::UnboundedReceiver<Cost>,
+}
+
+impl Budget {
+    fn fits(&self, cost: Cost) -> bool {
+        self.settings
+            .max_rows
+            .is_none_or(|max| cost.rows <= max.get() - self.used.rows)
+            && self
+                .settings
+                .max_estimated_bytes
+                .is_none_or(|max| cost.bytes <= max.get() - self.used.bytes)
+    }
+
+    fn release(&mut self, cost: Cost) {
+        self.used.rows -= cost.rows;
+        self.used.bytes -= cost.bytes;
+    }
+
+    async fn wait_for(&mut self, cost: Cost) -> bool {
+        while let Ok(released) = self.releases.try_recv() {
+            self.release(released);
+        }
+        while !self.fits(cost) {
+            let Some(released) = self.releases.recv().await else {
+                return false;
+            };
+            self.release(released);
+        }
+        true
+    }
+}
+
+async fn produce(
+    mut inner: Box<dyn RecordReader>,
+    sender: mpsc::UnboundedSender<(Result<RecordBatch>, Cost)>,
+    mut budget: Budget,
+) {
+    // Reserve no extra batch when either enabled budget is already full.
+    while budget.wait_for(budget.settings.cost(1, 1)).await {
+        tokio::task::consume_budget().await;
+        let batch = match inner.next().await {
+            Ok(Some(batch)) => batch,
+            Ok(None) => return,
+            Err(error) => {
+                let _ = sender.send((Err(error), Cost::default()));
+                return;
+            }
+        };
+        let bytes = if budget.settings.max_estimated_bytes.is_some() {
+            batch.get_array_memory_size()
+        } else {
+            0
+        };
+        let cost = budget.settings.cost(batch.num_rows(), bytes);
+        if !budget.wait_for(cost).await {
+            return;
+        }
+        budget.used.rows += cost.rows;
+        budget.used.bytes += cost.bytes;
+        if sender.send((Ok(batch), cost)).is_err() {
+            return;
+        }
+    }
+}
+
+struct PrefetchState {
+    inner: Option<Box<dyn RecordReader>>,
+    settings: PrefetchLayer,
+    receiver: Option<mpsc::UnboundedReceiver<(Result<RecordBatch>, Cost)>>,
+    releases: Option<mpsc::UnboundedSender<Cost>>,
+    // JoinSet aborts its worker when the stream is dropped, even during unfold's await.
+    tasks: JoinSet<()>,
+}
+
+impl PrefetchState {
+    async fn next(&mut self) -> Result<Option<RecordBatch>> {
+        if let Some(inner) = self.inner.take() {
+            let runtime = tokio::runtime::Handle::try_current()
+                .map_err(crate::error::prefetch_runtime_error)?;
+            let (sender, receiver) = mpsc::unbounded_channel();
+            let (releases, released) = mpsc::unbounded_channel();
+            self.receiver = Some(receiver);
+            self.releases = Some(releases);
+            self.tasks.spawn_on(
+                produce(
+                    inner,
+                    sender,
+                    Budget {
+                        settings: self.settings,
+                        used: Cost::default(),
+                        releases: released,
+                    },
+                ),
+                &runtime,
+            );
+        }
+        if let Some((result, cost)) = self.receiver.as_mut().unwrap().recv().await {
+            let _ = self.releases.as_ref().unwrap().send(cost);
+            return result.map(Some);
+        }
+        // A closed queue is EOF only after checking for a worker panic. Queued
+        // batches (and source errors) retain their original delivery order.
+        if let Some(joined) = self.tasks.join_next().await {
+            joined.map_err(crate::error::prefetch_task_error)?;
+        }
+        Ok(None)
+    }
+}

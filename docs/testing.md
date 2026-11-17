@@ -15,6 +15,7 @@ crate whose behavior they exercise; the facade file-source smoke test lives in r
 | XML | [`file-format/tests/xml.rs`](../file-format/tests/xml.rs) |
 | ATIF format | [`file-format/tests/atif.rs`](../file-format/tests/atif.rs) |
 | Schema evolution | [`layers/tests/schema_evolution.rs`](../layers/tests/schema_evolution.rs) |
+| Record prefetch budgets and worker lifecycle | [`layers/tests/prefetch.rs`](../layers/tests/prefetch.rs) |
 | Parquet and byte/record layer composition | [`file-format/tests/parquet.rs`](../file-format/tests/parquet.rs) |
 | Directory and file-set behavior | [`dataset/tests/directory.rs`](../dataset/tests/directory.rs) |
 | Directory, storage and Parquet composition | [`dataset/tests/directory_parquet.rs`](../dataset/tests/directory_parquet.rs) |
