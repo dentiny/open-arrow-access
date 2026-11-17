@@ -39,9 +39,9 @@ impl CommonCrawlWarcRequest {
     /// Configure origin-rooted accessors with `origin()`. Entries remain WARC keys
     /// rooted at that origin, not paths relative to the manifest's directory.
     /// URLs follow the same canonical rules as `from_url`; directory URLs are rejected.
-    pub fn from_manifest_url(crawl: impl Into<String>, value: &str) -> Result<Self> {
+    pub fn from_manifest_url(crawl: impl Into<String>, manifest_url: &str) -> Result<Self> {
         let crawl = CommonCrawl::new(crawl)?;
-        let url = crate::commoncrawl::url::parse_url(value)?;
+        let url = crate::commoncrawl::url::parse_url(manifest_url)?;
         if url.path().ends_with('/') {
             return Err(open_arrow_access_core::Error::new(
                 open_arrow_access_core::ErrorKind::InvalidInput,
