@@ -49,15 +49,15 @@ async fn product_file_page_keeps_release_metadata_and_scopes_authentication() {
 async fn rejects_wrong_product_and_missing_file_membership() {
     let f = HttpFixture::new();
     let s = UsptoService::with_connection(providers::connection(&f));
-    for raw in [
-        b"{\"bulkDataProductBag\":[]}".as_slice(),
-        b"{\"bulkDataProductBag\":[{\"productIdentifier\":\"OTHER\"}]}",
-        b"{\"bulkDataProductBag\":[{\"productIdentifier\":\"PTGRXML\"}]}",
+    for name in [
+        "bad-empty-products.json",
+        "bad-identity.json",
+        "bad-missing-files.json",
     ] {
         f.respond(
             "/api/v1/datasets/products/PTGRXML?includeFiles=true&offset=0&limit=1",
             StatusCode::OK,
-            Bytes::copy_from_slice(raw),
+            fixture!("uspto", name).await,
         );
         assert_eq!(
             s.product("PTGRXML", 0, 1).await.unwrap_err().kind(),

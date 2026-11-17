@@ -119,9 +119,6 @@ impl TarArchive {
             let bytes = input.read_range(position..next).await?;
             Ok(Some((bytes, (input, next))))
         });
-        let object = metadata.source.clone();
-        Ok(Box::new(
-            StreamReader::new(stream, metadata).with_object(object),
-        ))
+        Ok(Box::new(StreamReader::bytes(stream, metadata)))
     }
 }

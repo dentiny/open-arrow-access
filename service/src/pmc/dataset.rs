@@ -6,7 +6,7 @@ use open_arrow_access_core::{
     RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 
-use super::{PmcAccessor, schema};
+use super::{PmcAccessor, schema, validation::validate_metadata_path};
 
 /// Read a metadata directory ending in `/` recursively, or one `.json` object.
 /// Paths are relative to the supplied bucket-root storage. Discovery streams in
@@ -28,11 +28,9 @@ impl<A: ByteAccessor + 'static> PmcDatasetAccessor<A> {
     /// An exact `.json` object requires no listing.
     /// Other locators must end in `/` to avoid matching sibling prefixes.
     pub async fn metadata_paths(&self, request: &ReadRequest) -> Result<ObjectStream> {
+        validate_metadata_path(&request.object)?;
         if request.object.locator().ends_with(".json") {
             return Ok(stream::once(futures::future::ready(Ok(request.object.clone()))).boxed());
-        }
-        if !request.object.locator().ends_with('/') {
-            return Err(super::error::invalid_metadata_path().with_object(Some(&request.object)));
         }
         Ok(self
             .storage
@@ -53,11 +51,7 @@ impl<A: ByteAccessor + 'static> Accessor for PmcDatasetAccessor<A> {
     }
 
     async fn metadata(&self, request: ReadRequest) -> Result<RecordMetadata> {
-        // Validate the selection without listing or opening article documents.
-        let path = request.object.locator();
-        if !path.ends_with(".json") && !path.ends_with('/') {
-            return Err(super::error::invalid_metadata_path().with_object(Some(&request.object)));
-        }
+        validate_metadata_path(&request.object)?;
         Ok(RecordMetadata {
             schema: request.options.resolve_projection(&schema())?.schema,
             source: None,

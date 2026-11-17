@@ -11,8 +11,6 @@ pub(crate) fn validate_range(enabled: bool, range: &Range<u64>, length: u64) -> 
     if !enabled {
         return Err(crate::error::sequential_only());
     }
-    if range.start > range.end || range.end > length {
-        return Err(crate::error::invalid_range());
-    }
-    Ok(())
+    open_arrow_access_core::validate_byte_range(range, length, "read_range")
+        .map_err(|_| crate::error::invalid_range())
 }

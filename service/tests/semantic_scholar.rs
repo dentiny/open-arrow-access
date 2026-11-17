@@ -49,7 +49,7 @@ async fn validates_identity_and_required_arrays() {
     f.respond(
         "/datasets/v1/release/2026-10-27/dataset/s2orc",
         StatusCode::OK,
-        Bytes::from_static(b"{\"name\":\"wrong\",\"files\":[]}"),
+        fixture!("semantic-scholar", "bad-dataset-identity.json").await,
     );
     let s = SemanticScholarService::with_connection(providers::connection(&f));
     assert_eq!(

@@ -14,6 +14,12 @@ Serialized inputs live in [`testdata/`](../testdata/README.md). Load committed
 bytes with `fixture!(directory, name)` or use `fixture_path!` for filesystem
 inputs. Keep expected schemas, values, and request options in the owning test.
 
+Use `temp_fs(&[("sub/file", &bytes)])` to install fixture bytes in an isolated
+filesystem and receive `(TempDir, opendal::Operator)`. Keep the directory guard
+alive through all reads. Nested parent directories are created automatically;
+paths must remain relative to the temporary root. Wrap the operator in the
+accessor or layers needed by the owning test.
+
 ## Configure a byte source
 
 `MemoryAccessor::new(&bytes, chunk_size)` supplies sequential reads and known
@@ -57,6 +63,10 @@ reads and source errors for native record types too. Use `collect_bytes` to
 consume byte output while asserting nonempty chunks. `DropProbe` observes release
 of streams/readers on EOF, errors, and explicit drop.
 
+Use `expect_err_kind(result, kind)` to assert an error category without requiring
+the success type to implement `Debug` (such as a boxed reader). It returns the
+original error for additional operation, source, or object-context assertions.
+
 ## Isolate HTTP tests
 
 `http::HttpFixture` supplies local transport responses and captures methods,
@@ -65,6 +75,14 @@ over the dynamic `handle` fallback. `http::response` and `file_response` support
 fragmentation and file HEAD/range behavior. Use `clear_requests()` between phases
 and `CapturedRequest::range()` for range assertions.
 
+Fixtures never install a process-wide transport. Pass `fixture.context()` to
+`Connection::with_context`, a service's `with_context`, or an OpenDAL operator's
+`with_context` before performing I/O. Keep every fixture alive through the last
+request; one injected context can route redirects between live fixture hosts.
+Unknown or expired fixture hosts return an OpenDAL error.
+`assert_resolution_cases` supplies both the endpoint and context to its resolver
+closure, so failure-table cases remain explicitly scoped too.
+
 Provider tests should verify that metadata resolution does not eagerly download
 attachments. Configure only fixture-backed routes, then assert the requests and
 selected file metadata. Keep tests offline.
@@ -72,3 +90,12 @@ selected file metadata. Keep tests offline.
 See [testing guidance](../docs/testing.md) and the suites in
 [`file-format/tests`](../file-format/tests/), [`decompression/tests`](../decompression/tests/),
 and [`service/tests`](../service/tests/) for complete examples.
+
+## Inspect record values
+
+`record::column::<T>(&batch, name)` borrows a named array with a checked concrete
+Arrow type. `field_names(&schema)` returns names in schema order.
+`collect_strings::<i32>(reader, index)` drains a reader and rejects nulls;
+`collect_nullable_strings::<i32>(&batches, index)` preserves nulls and empty
+strings. Use `i64` for LargeUtf8 instead of Utf8; neither helper coerces layouts.
+Primitive columns use `collect_values` or the draining `collect_column`.
