@@ -11,6 +11,7 @@ Byte decompression layers use the same contract but require [codec features](../
 | --- | --- | --- |
 | `MetricsLayer` | Observe byte/record reads | In-memory aggregates by default; optional OpenDAL instrumentation |
 | `SchemaEvolutionLayer` | Add computed columns, remove, rename, or cast top-level columns | Ordered DataFusion Expr / SQL operations; fixed output schema |
+| `LimitLayer` | Keep at most N rows | One budget per open; stops and releases the source at the limit |
 | `SamplingLayer` | Seeded Bernoulli row sampling | Approximate count; preserves selected row order |
 | `ParallelReadLayer` | Execute independent scan partitions concurrently | Requires `ScanPlanner`; preserves output order by default |
 | `UnorderedEmissionLayer` | Emit ready batches from a reorderable scan | Use with parallel execution; global-order sources reject it |
@@ -26,7 +27,8 @@ flowchart LR
     Format --> Parallel["ParallelReadLayer: execute partitions"]
     Parallel --> Generated["SchemaEvolutionLayer: compute after merge"]
     Generated --> Sampling["SamplingLayer: one seeded stream"]
-    Sampling --> App["Application"]
+    Sampling --> Limit["LimitLayer: cap sampled rows"]
+    Limit --> App["Application"]
 ```
 
 `source.layer(a).layer(b)` makes `b` outermost: opening goes through `b`, then
@@ -38,7 +40,7 @@ Enable `format-json` for this complete composition function:
 use open_arrow_access::{
     Accessor, AccessorExt, ReadRequest,
     file_format::json::JsonAccessor,
-    layers::{ColumnEvolution, SchemaEvolutionLayer, ParallelReadLayer, SamplingLayer},
+    layers::{ColumnEvolution, SchemaEvolutionLayer, ParallelReadLayer, SamplingLayer, LimitLayer},
     storage::{OpenDalAccessor, opendal},
 };
 use std::num::NonZeroUsize;
@@ -51,7 +53,8 @@ async fn read(operator: opendal::Operator) -> open_arrow_access::Result<()> {
     let records = source
         .layer(ParallelReadLayer::new(NonZeroUsize::new(4).unwrap(), NonZeroUsize::MIN))
         .layer(evolution)
-        .layer(SamplingLayer::try_new(0.1, 42)?);
+        .layer(SamplingLayer::try_new(0.1, 42)?)
+        .layer(LimitLayer::new(100));
     let mut reader = records.open(ReadRequest::new("records.jsonl")).await?;
     while let Some(batch) = reader.next().await? {
         println!("{} sampled rows", batch.num_rows());
@@ -63,11 +66,14 @@ async fn read(operator: opendal::Operator) -> open_arrow_access::Result<()> {
 This expects a string `title` column. Sampling keeps each row with probability
 0.1; it does not request an exact 10% count. The same seed and ordered input
 produce the same selection across different batch boundaries. Unordered input
-can change the sample.
+can change the sample. `LimitLayer` then keeps at most 100 selected rows;
+without sampling it keeps the first 100 input rows. This is not uniform random
+fixed-size sampling. If fewer rows are available, all available rows are returned.
+Zero reads no batches (the source is still opened for metadata).
 
-Keep schema evolution and sampling **outside** `ParallelReadLayer` so they run
+Keep schema evolution, sampling, and limits **outside** `ParallelReadLayer` so they run
 over one merged scan. They do not implement `ScanPlanner`; putting the parallel
-layer outside either is unsupported. Supply a complete `with_source_schema` to
+layer outside any of them is unsupported. Supply a complete `with_source_schema` to
 read only the source columns needed by all changes and the final output. Without
 it, adding, removing or renaming columns requires reading the full source schema.
 All configured computations run before final projection.
