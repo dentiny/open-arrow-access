@@ -33,18 +33,15 @@ async fn identity_embargo_and_missing_membership_fail() {
     let f = HttpFixture::new();
     let service = FigshareService::with_connection(providers::connection(&f));
     let id = std::num::NonZeroU64::new(1).unwrap();
-    for (raw, kind) in [
-        (b"{\"id\":2,\"files\":[]}".as_slice(), ErrorKind::Decode),
-        (
-            b"{\"id\":1,\"is_embargoed\":true,\"files\":[]}",
-            ErrorKind::PermissionDenied,
-        ),
-        (b"{\"id\":1}", ErrorKind::Decode),
+    for (name, kind) in [
+        ("bad-identity.json", ErrorKind::Decode),
+        ("bad-embargo.json", ErrorKind::PermissionDenied),
+        ("bad-missing-files.json", ErrorKind::Decode),
     ] {
         f.respond(
             "/v2/articles/1",
             StatusCode::OK,
-            Bytes::copy_from_slice(raw),
+            fixture!("figshare", name).await,
         );
         assert_eq!(service.article(id, None).await.unwrap_err().kind(), kind);
     }
