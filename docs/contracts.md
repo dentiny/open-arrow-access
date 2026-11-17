@@ -355,3 +355,15 @@ are opaque and retained exactly as supplied (including relative paths); callers
 that need an absolute path or URI must supply that locator. Outer readers do not
 replace an already identified child object. Readers without a known source cannot
 supply object context.
+
+## Metadata inspection
+
+`Accessor::metadata(request)` returns the metadata of `open(request)` for the
+same unchanged input and configuration, including projection and source identity.
+The compatibility default opens and drops a reader; custom implementations must
+override it to avoid opening side effects. `ReaderFactory::metadata` provides the
+corresponding hook for factory-backed accessors. Only these methods require
+cloneable metadata; existing reader metadata types need not implement `Clone`.
+
+Tests use `open_arrow_access_test_support::assert_metadata_matches_open` plus
+I/O counters to check metadata equality and execution boundaries.

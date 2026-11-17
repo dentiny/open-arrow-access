@@ -16,6 +16,20 @@ use open_arrow_access_core::{
     ErrorKind, ListRequest, ObjectStream, Reader, Result, async_trait,
 };
 
+/// Assert the complete metadata contract without consuming any output items.
+/// Returns the opened reader for output assertions; use counters to bound inspection I/O.
+pub async fn assert_metadata_matches_open<A>(accessor: &A, request: A::Request) -> Box<A::Reader>
+where
+    A: Accessor + ?Sized,
+    A::Request: Clone,
+    <A::Reader as Reader>::Metadata: Clone + PartialEq + std::fmt::Debug,
+{
+    let inspected = accessor.metadata(request.clone()).await.unwrap();
+    let reader = accessor.open(request).await.unwrap();
+    assert_eq!(&inspected, reader.metadata());
+    reader
+}
+
 mod drop_probe;
 pub use drop_probe::DropProbe;
 

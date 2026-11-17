@@ -79,6 +79,22 @@ where
     fn capability(&self) -> RecordCapability {
         self.inner.capability()
     }
+    async fn metadata(&self, mut request: ReadRequest) -> Result<RecordMetadata> {
+        let object = request.object.clone();
+        let context = |e: open_arrow_access_core::Error| e.with_object(Some(&object));
+        crate::validation::validate_source_positions(
+            &self.config.columns,
+            <<A::Reader as Reader>::Item as SourceColumnBatch>::HAS_POSITIONS,
+        )
+        .map_err(context)?;
+        let projection = request.options.projection.take();
+        let mut metadata = self.inner.metadata(request).await.map_err(context)?;
+        let output = SourceOutput::new(&metadata.schema, &self.config.columns, projection)
+            .map_err(context)?;
+        metadata.schema = output.schema();
+        Ok(metadata)
+    }
+
     async fn open(&self, mut request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         let object = request.object.clone();
         let context = |e: open_arrow_access_core::Error| e.with_object(Some(&object));
