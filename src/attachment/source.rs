@@ -1,10 +1,5 @@
-use std::sync::Arc;
-
 use super::{AttachmentFormat, AttachmentOptions};
-use crate::{
-    AccessorExt, BinaryDecoder, BoundSource, ByteAccessor, DocumentAccessor, OuterCompression,
-    ReadRequest, Result, decompression::AutoDecompressionLayer,
-};
+use crate::{BinaryDecoder, BoundSource, ByteAccessor, DocumentAccessor, ReadRequest, Result};
 
 /// Bind one logical attachment name and complete read request to an Arrow source.
 ///
@@ -38,10 +33,7 @@ where
     A: ByteAccessor + 'static,
 {
     options.validate()?;
-    let accessor: Arc<dyn ByteAccessor> = match options.outer_compression {
-        OuterCompression::None => Arc::new(accessor),
-        OuterCompression::Auto => Arc::new(accessor.layer(AutoDecompressionLayer::new())),
-    };
+    let accessor = options.outer_compression.apply(accessor);
     match options.format {
         AttachmentFormat::Binary => {
             BoundSource::bind(DocumentAccessor::new(accessor, BinaryDecoder), request).await
