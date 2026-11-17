@@ -8,15 +8,11 @@ use crate::{
     directory::DirectoryRequest,
     file_set::{FileSetAccessor, FileSetRequest},
 };
-#[cfg(any(feature = "format-csv", feature = "format-warc"))]
-use open_arrow_access_core::Layer;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, Capability, Error, ObjectRef, ReadOptions, ReadOptionsProvider,
     RecordCapability, RecordReader, RecordScanAccessor, Result, ScanPlan, ScanPlanner, SchemaRef,
     async_trait,
 };
-#[cfg(any(feature = "format-csv", feature = "format-warc"))]
-use open_arrow_access_decompression::AutoDecompressionLayer;
 use std::sync::Arc;
 
 mod detection;
@@ -101,11 +97,6 @@ impl<B> AutoFormatAccessor<B> {
 }
 
 impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
-    #[cfg(any(feature = "format-csv", feature = "format-warc"))]
-    fn decoded(&self) -> Arc<dyn ByteAccessor> {
-        Arc::new(AutoDecompressionLayer::new().layer(self.storage.clone()))
-    }
-
     async fn files(&self, request: AutoFormatRequest) -> Result<FileSetRequest> {
         match request {
             AutoFormatRequest::Files(files) => Ok(files),
@@ -166,10 +157,15 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
             )),
             #[cfg(feature = "format-csv")]
             ResolvedKind::CsvOrTsv => {
+                use open_arrow_access_core::Layer;
+                use open_arrow_access_decompression::AutoDecompressionLayer;
                 use open_arrow_access_file_format::csv::CsvAccessor;
+
+                let decoded: Arc<dyn ByteAccessor> =
+                    Arc::new(AutoDecompressionLayer::new().layer(self.storage.clone()));
                 let reader = match &self.schema {
-                    Some(schema) => CsvAccessor::new(self.decoded(), schema.clone()),
-                    None => CsvAccessor::infer(self.decoded()),
+                    Some(schema) => CsvAccessor::new(decoded, schema.clone()),
+                    None => CsvAccessor::infer(decoded),
                 };
                 let reader = match self.format {
                     Some(DetectedFormat::Csv) => reader.with_delimiter(b','),
@@ -179,9 +175,15 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
                 Ok(Arc::new(reader))
             }
             #[cfg(feature = "format-warc")]
-            ResolvedKind::Warc => Ok(Arc::new(
-                open_arrow_access_file_format::warc::WarcArrowAccessor::new(self.decoded()),
-            )),
+            ResolvedKind::Warc => {
+                use open_arrow_access_core::Layer;
+                use open_arrow_access_decompression::AutoDecompressionLayer;
+                use open_arrow_access_file_format::warc::WarcArrowAccessor;
+
+                let decoded: Arc<dyn ByteAccessor> =
+                    Arc::new(AutoDecompressionLayer::new().layer(self.storage.clone()));
+                Ok(Arc::new(WarcArrowAccessor::new(decoded)))
+            }
             #[allow(unreachable_patterns)]
             _ => Err(error::disabled_reader(kind, object)),
         }
