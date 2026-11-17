@@ -1,4 +1,4 @@
-//! Policy-driven file discovery and format selection, followed by native file planning.
+//! File discovery and format detection, followed by native file planning.
 //!
 //! Enable `auto-format` and the `format-*` readers you need. Compression features
 //! remain on the decompression crate. Configure storage (including known content
@@ -20,8 +20,8 @@ use open_arrow_access_core::{
 use open_arrow_access_decompression::AutoDecompressionLayer;
 use std::{num::NonZeroUsize, sync::Arc};
 
-mod policy;
-pub use policy::{DetectedFormat, FormatPolicy, detect_format};
+mod detection;
+pub use detection::{DetectedFormat, detect_format, select_format};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum JsonDetection {
@@ -82,7 +82,7 @@ pub struct ResolvedFormat {
 
 pub struct AutoFormatAccessor<B> {
     storage: Arc<B>,
-    policy: FormatPolicy,
+    format: Option<DetectedFormat>,
     schema: Option<SchemaRef>,
     #[cfg(feature = "format-csv")]
     dialect: open_arrow_access_file_format::csv::CsvDialect,
@@ -94,7 +94,7 @@ impl<B> AutoFormatAccessor<B> {
     pub fn new(storage: B) -> Self {
         Self {
             storage: Arc::new(storage),
-            policy: FormatPolicy::default(),
+            format: None,
             schema: None,
             #[cfg(feature = "format-csv")]
             dialect: Default::default(),
@@ -103,8 +103,11 @@ impl<B> AutoFormatAccessor<B> {
             sniff_concurrency: NonZeroUsize::new(8).unwrap(),
         }
     }
-    pub fn with_policy(mut self, policy: FormatPolicy) -> Self {
-        self.policy = policy;
+    /// Read every selected object as this format, without suffix filtering.
+    /// By default, detect suffixes and require one format. Explicit CSV uses the
+    /// configured dialect delimiter; explicit TSV uses tabs, regardless of suffix.
+    pub fn with_format(mut self, format: DetectedFormat) -> Self {
+        self.format = Some(format);
         self
     }
     pub fn with_schema(mut self, schema: SchemaRef) -> Self {
@@ -157,7 +160,7 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
         }
     }
 
-    /// Resolve policy and JSON kind without decoding Arrow records. Non-JSON
+    /// Resolve format and JSON kind without decoding Arrow records. Non-JSON
     /// explicit lists perform no I/O. JSON reads only a bounded first nonblank line.
     pub async fn resolve(&self, request: AutoFormatRequest) -> Result<ResolvedFormat> {
         self.prepare(request).await.map(|(resolved, _, _)| resolved)
@@ -179,7 +182,13 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
     }
 
     async fn resolve_files(&self, request: &FileSetRequest) -> Result<ResolvedFormat> {
-        let (detected, objects) = self.policy.select(&request.objects)?;
+        let (detected, objects) = match self.format {
+            Some(_) if request.objects.is_empty() => {
+                return Err(error(ErrorKind::NotFound, "no dataset files", None));
+            }
+            Some(format) => (format, request.objects.clone()),
+            None => select_format(&request.objects)?,
+        };
         let format = match detected {
             DetectedFormat::Parquet => ResolvedKind::Parquet,
             DetectedFormat::Csv | DetectedFormat::Tsv => ResolvedKind::Delimited,
@@ -274,7 +283,13 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
                     Some(schema) => CsvAccessor::new(self.decoded(), schema.clone()),
                     None => CsvAccessor::infer(self.decoded()),
                 };
-                Ok(Arc::new(reader.with_dialect(self.dialect)))
+                let reader = reader.with_dialect(self.dialect);
+                let reader = match self.format {
+                    Some(DetectedFormat::Csv) => reader.with_delimiter(self.dialect.delimiter),
+                    Some(DetectedFormat::Tsv) => reader.with_delimiter(b'\t'),
+                    _ => reader,
+                };
+                Ok(Arc::new(reader))
             }
             #[cfg(feature = "format-json")]
             ResolvedKind::Json => {

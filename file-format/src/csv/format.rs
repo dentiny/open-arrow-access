@@ -70,7 +70,8 @@ impl CsvFileFormat {
         if !self.delimiter_resolved
             && let Some(delimiter) = super::dialect::delimiter_from_path(
                 self.compression_factory
-                    .strip_suffix(request.object.locator()),
+                    .strip_suffix(request.object.locator())
+                    .as_ref(),
             )
         {
             match &mut format.options {
@@ -124,6 +125,18 @@ impl CsvFileFormat {
     pub fn with_dialect(mut self, dialect: CsvDialect) -> Self {
         self.header = dialect.header;
         self.options = CsvOptions::Dialect(dialect);
+        self
+    }
+
+    /// Use this delimiter for every input, overriding CSV/TSV suffix detection.
+    pub fn with_delimiter(mut self, delimiter: u8) -> Self {
+        match &mut self.options {
+            CsvOptions::Dialect(dialect) => dialect.delimiter = delimiter,
+            CsvOptions::Custom(format) => {
+                *format = format.clone().with_delimiter(delimiter);
+            }
+        }
+        self.delimiter_resolved = true;
         self
     }
 

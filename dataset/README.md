@@ -102,10 +102,15 @@ let selected = auto.resolve(request.clone()).await?;
 let reader = auto.layer(ParallelReadLayer::new(concurrency, prefetch)).open(request).await?;
 ```
 
-Suffix detection performs no I/O. `FormatPolicy` defaults to Parquet exclusivity,
-CSV/TSV compatibility, and ignoring unknown files. `resolve` also lists directories
-and probes JSON, but does not decode Arrow records. Mixed formats return
-`InvalidInput` with examples; no recognized or nonempty JSON files returns `NotFound`.
+Suffix detection performs no I/O. Automatic selection ignores unknown suffixes
+and requires one format; CSV and TSV are distinct formats. No format takes priority.
+Use `.with_format(DetectedFormat::Json)` (or another format) to read every supplied
+object as that format, including files without a recognized suffix. Explicit CSV
+uses the configured dialect delimiter; explicit TSV uses tabs, regardless of filename.
+
+`resolve` also lists directories and probes JSON, but does not decode Arrow records.
+Mixed formats return `InvalidInput` with examples; no recognized or nonempty JSON
+files returns `NotFound`.
 
 JSON probing checks every file's first nonblank line, skips empty files, and rejects
 mixed ordinary JSONL, ATIF JSONL, and ATIF document inputs. Probes have independent

@@ -62,5 +62,5 @@ name = "auto_format"
 required-features = ["auto-format", "format-csv", "format-json", "format-atif", "format-parquet", "format-warc"]
 
 [[test]]
-name = "format_policy"
+name = "format_detection"
 required-features = ["auto-format"]
