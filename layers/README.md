@@ -13,6 +13,7 @@ Byte decompression layers use the same contract but require [codec features](../
 | `SchemaEvolutionLayer` | Add computed columns, remove, rename, or cast top-level columns | Ordered DataFusion Expr / SQL operations; fixed output schema |
 | `LimitLayer` | Keep at most N rows | One budget per open; stops and releases the source at the limit |
 | `SamplingLayer` | Seeded Bernoulli row sampling | Approximate count; preserves selected row order |
+| `PrefetchLayer` | Read ahead while the caller processes batches | Per-open row and/or estimated-byte queue budgets; preserves batch boundaries |
 | `ParallelReadLayer` | Execute independent scan partitions concurrently | Requires `ScanPlanner`; preserves output order by default |
 | `UnorderedEmissionLayer` | Emit ready batches from a reorderable scan | Use with parallel execution; global-order sources reject it |
 
@@ -77,6 +78,63 @@ layer outside any of them is unsupported. Supply a complete `with_source_schema`
 read only the source columns needed by all changes and the final output. Without
 it, adding, removing or renaming columns requires reading the full source schema.
 All configured computations run before final projection.
+
+## Prefetch records
+
+`PrefetchLayer` overlaps upstream reading/decoding with caller work. It wraps any
+`Accessor<Reader = dyn RecordReader>`; requests, schema, source metadata, batch
+boundaries, row order and source ordering requirements are preserved. Each open
+has its own queue. No batches are read and no tasks start during construction or
+opening. The first `next()` starts one worker on the current Tokio runtime;
+reading without a runtime returns an error. The worker keeps reading when the
+caller pauses, until backpressure prevents another read or queue admission.
+
+```rust
+use std::num::NonZeroUsize;
+use open_arrow_access_core::{Accessor, AccessorExt, RecordReader};
+use open_arrow_access_layers::{PrefetchAccessor, PrefetchLayer};
+
+fn prefetch<A: Accessor<Reader = dyn RecordReader>>(source: A) -> PrefetchAccessor<A> {
+    source.layer(
+        PrefetchLayer::rows(NonZeroUsize::new(10_000).unwrap())
+            .with_max_estimated_bytes(NonZeroUsize::new(64 * 1024 * 1024).unwrap()),
+    )
+}
+```
+
+For only a byte budget, use `PrefetchLayer::estimated_bytes(bytes)`. Both budgets
+use `NonZeroUsize` so zero and completely unbounded configurations cannot be
+constructed. With both enabled, queued batches must fit **both** limits; reaching
+either stops further reads. If a decoded batch does not fit the remaining space,
+the producer waits for consumption before admitting it. Delivery releases its
+queue budget immediately, even while the caller retains the returned batch.
+
+Byte estimates use Arrow's `RecordBatch::get_array_memory_size()`, which includes
+array overhead and can count shared buffers repeatedly. They describe decoded
+Arrow arrays, not compressed/source bytes or exact resident memory. Slices may
+retain larger backing buffers. Each empty or zero-byte batch costs at least one
+unit of each enabled budget, preventing unbounded queues of empty batches.
+
+Batches are never split or copied. A batch larger than a configured budget is
+admitted alone. The producer may also hold **one decoded batch awaiting queue
+admission**, because its size is unknown before reading. Thus total prefetch
+memory includes the queue, one in-flight/staged batch, and upstream decoder
+allocations; configure decoder batch sizes separately. Caller-retained output
+batches and queues in other layers are outside this budget.
+
+Queued batches precede a subsequent upstream error; errors retain their original
+classification, source chain and HTTP metadata. EOF and errors are terminal.
+Worker panics become read errors after the queue is drained. Dropping the reader
+aborts its worker even during a pending read or while awaiting budget. As with
+other stateful readers, drop the reader after cancelling an in-flight `next()`.
+
+Place prefetch **outside** `ParallelReadLayer` for one queue over the merged scan.
+The parallel layer's per-partition batch queues remain independent and additive.
+Place it before an expensive schema transformation to overlap input work, or
+after the transformation to precompute output batches. `PrefetchAccessor` does
+not expose `ScanPlanner`, so planning/execution layers must be installed inside
+it. An outer `LimitLayer` cancels prefetch when its row limit is reached; already
+prefetched input can exceed the number of rows delivered by that limit.
 
 ## Evolve a schema
 

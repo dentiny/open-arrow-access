@@ -7,6 +7,9 @@ mod scan_policy;
 mod validation;
 mod value_lifetime;
 
+mod prefetch;
+pub use prefetch::{PrefetchAccessor, PrefetchLayer};
+
 mod parallel_read;
 pub use parallel_read::{ParallelReadAccessor, ParallelReadLayer};
 
