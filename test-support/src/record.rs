@@ -49,6 +49,7 @@ pub async fn collect_column<T: ArrowPrimitiveType>(
 pub struct MemoryRecordAccessor {
     pub schema: SchemaRef,
     batches: Vec<RecordBatch>,
+    ordering: OrderRequirement,
     /// Input stream polls, including the first EOF poll (but not reads after EOF).
     pub polls: Arc<AtomicUsize>,
     /// Input batches yielded, including batches with zero rows; excludes EOF.
@@ -66,10 +67,18 @@ impl MemoryRecordAccessor {
                 .expect("record fixture requires at least one batch")
                 .schema(),
             batches,
+            ordering: OrderRequirement::Reorderable,
             polls: Arc::default(),
             batches_read: Arc::default(),
             projections: Arc::default(),
         }
+    }
+
+    /// Set the ordering reported by this source and every reader it opens.
+    /// Defaults to [`OrderRequirement::Reorderable`].
+    pub fn with_ordering(mut self, ordering: OrderRequirement) -> Self {
+        self.ordering = ordering;
+        self
     }
 }
 
@@ -79,7 +88,7 @@ impl Accessor for MemoryRecordAccessor {
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> RecordCapability {
-        RecordCapability::sequential(OrderRequirement::Reorderable)
+        RecordCapability::sequential(self.ordering)
     }
 
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
@@ -109,7 +118,7 @@ impl Accessor for MemoryRecordAccessor {
                 source: Some(request.object),
             },
             projection,
-            OrderRequirement::Reorderable,
+            self.ordering,
         )))
     }
 }

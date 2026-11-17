@@ -72,3 +72,48 @@ async fn restores_schema_and_field_metadata_for_full_reordered_and_empty_project
     }
     assert!(reader.next().await.unwrap().is_none());
 }
+
+#[rstest::rstest]
+#[case::reorderable(OrderRequirement::Reorderable)]
+#[case::global(OrderRequirement::PreserveGlobal)]
+#[tokio::test]
+async fn memory_source_and_projected_readers_share_ordering(#[case] ordering: OrderRequirement) {
+    use std::sync::atomic::Ordering;
+
+    use open_arrow_access_core::{Accessor, ReadOptions, ReadRequest, RecordCapability};
+    use open_arrow_access_test_support::MemoryRecordAccessor;
+
+    let batch = batch();
+    let source = MemoryRecordAccessor::new(vec![batch.clone()]);
+    assert_eq!(source.capability().ordering, OrderRequirement::Reorderable);
+    let source = source.with_ordering(ordering);
+    let cloned = source.clone();
+    let expected = RecordCapability::sequential(ordering);
+    assert_eq!(source.capability(), expected);
+    assert_eq!(cloned.capability(), expected);
+    let mut projected = cloned
+        .open(ReadRequest::new("projected").with_options(ReadOptions {
+            projection: Some(vec!["right".into()]),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+    let mut full = source.open(ReadRequest::new("full")).await.unwrap();
+    assert_eq!(projected.capability(), expected);
+    assert_eq!(full.capability(), expected);
+    assert_eq!(source.polls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        *source.projections.lock().unwrap(),
+        [Some(vec!["right".into()]), None]
+    );
+    assert_eq!(
+        projected.next().await.unwrap().unwrap(),
+        batch.project(&[1]).unwrap()
+    );
+    assert_eq!(full.next().await.unwrap().unwrap(), batch);
+    assert!(projected.next().await.unwrap().is_none());
+    assert!(full.next().await.unwrap().is_none());
+    assert!(projected.next().await.unwrap().is_none());
+    assert_eq!(source.polls.load(Ordering::SeqCst), 4);
+    assert_eq!(source.batches_read.load(Ordering::SeqCst), 2);
+}

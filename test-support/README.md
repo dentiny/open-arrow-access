@@ -72,3 +72,8 @@ selected file metadata. Keep tests offline.
 See [testing guidance](../docs/testing.md) and the suites in
 [`file-format/tests`](../file-format/tests/), [`decompression/tests`](../decompression/tests/),
 and [`service/tests`](../service/tests/) for complete examples.
+
+`MemoryRecordAccessor::new(batches)` supplies independent record cursors and
+observes projections, polls, and yielded batches. Use `.with_ordering(ordering)`
+to declare the same ordering on the source and its opened readers; the default is
+`OrderRequirement::Reorderable`.
