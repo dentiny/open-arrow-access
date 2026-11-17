@@ -95,3 +95,11 @@ arrays for unselected fields; complete WARC bodies are still read and validated.
 Use `CommonCrawlWarcAccessor::new(manifests, format)` for a custom record schema.
 `resolve(request)` can instead return selected paths without opening record files.
 Use `CommonCrawlSegmentAccessor` and `CommonCrawlSegmentRequest` for one segment.
+
+Crawl and segment membership now uses the dataset `PathsManifest` resolver. It
+validates paths before prefix filtering, resolves same-origin URLs to storage
+keys, rejects unsafe paths and non-WARC selected files, and reports duplicates
+with manifest/line context. Existing caller-configured manifest decompression is
+preserved. For arbitrary plain or compressed paths files, enable
+`dataset-manifest` and use `dataset::manifest::PathsManifest` directly; see the
+[dataset guide](../dataset/README.md#resolve-a-paths-manifest).

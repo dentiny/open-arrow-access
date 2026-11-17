@@ -1,9 +1,10 @@
-use super::{CommonCrawlWarcRequest, manifest::read_manifest};
+use super::CommonCrawlWarcRequest;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, Capability, ReadRequest, RecordCapability,
     RecordReader, Result, ScanPlan, ScanPlanner, async_trait,
 };
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
+use open_arrow_access_dataset::manifest::{DetectedFormat, Mismatch, PathsManifest};
 
 /// Read a crawl's WARC files in manifest order.
 /// `manifests` supplies decoded paths; `format` supplies Arrow batches.
@@ -47,9 +48,15 @@ impl<M: ByteAccessor, F> CommonCrawlWarcAccessor<M, F> {
         let input = self
             .manifests
             .open(ByteReadRequest::new(request.manifest()).with_options(request.byte_options))
+            .await
+            .map_err(|error| error.with_object(Some(&request.manifest())))?;
+        let files = PathsManifest::new(request.manifest())
+            .with_origin(request.origin())
+            .with_prefix(prefix)
+            .with_formats(&[DetectedFormat::Warc], Mismatch::Error)
+            .resolve_reader(input)
             .await?;
-        let objects = read_manifest(input, prefix).await?;
-        Ok(FileSetRequest::new(objects)
+        Ok(files
             .with_options(request.options)
             .with_byte_options(request.byte_options))
     }

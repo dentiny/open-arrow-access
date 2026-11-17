@@ -52,7 +52,7 @@ pmc = [
 regulations = []
 semantic-scholar = []
 uspto = []
-warc = ["open-arrow-access-file-format/warc"]
+warc = ["open-arrow-access-file-format/warc", "open-arrow-access-dataset/manifest"]
 zenodo = []
 
 format-xml = [

@@ -234,19 +234,15 @@ async fn native_parallel_warc_view_keeps_source_urls_and_binary_bodies() {
 }
 
 #[tokio::test]
-async fn forwards_selected_manifest_paths_without_validation() {
-    for name in [
-        "bad_traversal.paths",
-        "bad_encoding.paths",
-        "bad_query.paths",
-        "bad_suffix.paths",
-    ] {
+async fn selected_manifest_paths_are_validated_before_records_open() {
+    for name in ["bad_traversal.paths", "bad_query.paths", "bad_suffix.paths"] {
         let records = Records::default();
         let opens = records.opens.clone();
         let accessor = CommonCrawlWarcAccessor::new(manifest(name, 19), records);
-        let reader = accessor.open(request()).await.unwrap();
-        let paths = commoncrawl_support::paths(reader).await;
-        assert_eq!(paths.len(), 1, "{name}");
-        assert_eq!(opens.lock().unwrap()[0].object.locator(), paths[0]);
+        let error = accessor.resolve(request()).await.unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Decode, "{name}: {error}");
+        assert!(error.to_string().contains("line 1"), "{error}");
+        assert!(error.to_string().contains("warc.paths.gz"), "{error}");
+        assert!(opens.lock().unwrap().is_empty());
     }
 }
