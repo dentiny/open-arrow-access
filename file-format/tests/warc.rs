@@ -418,3 +418,133 @@ async fn empty_parallel_projection_preserves_rows_and_validates_unselected_bodie
         assert!(reader.next().await.unwrap().is_none());
     }
 }
+
+#[tokio::test]
+async fn standard_headers_survive_sequential_parallel_and_positioned_projection() {
+    use open_arrow_access_core::{FactoryAccessor, RecordReader};
+    use open_arrow_access_file_format::warc::WarcArrowFormat;
+    use open_arrow_access_layers::SourceColumns;
+
+    let first = concat!(
+        "WARC/1.1\r\n",
+        "WARC-Type: resource\r\n",
+        "WARC-Record-ID: <urn:test:headers>\r\n",
+        "WARC-Date: 2020-07-08T02:52:55Z\r\n",
+        "Content-Length: 3\r\n",
+        "WARC-Block-Digest: sha1:block\r\n",
+        "WARC-Payload-Digest: sha1:payload\r\n",
+        "WARC-Concurrent-To: <urn:test:concurrent>\r\n",
+        "WARC-Filename: example.warc\r\n",
+        "WARC-Identified-Payload-Type: text/plain\r\n",
+        "WARC-IP-Address: 2001:db8::1\r\n",
+        "WARC-Profile: https://example.com/profile\r\n",
+        "WARC-Refers-To: <urn:test:original>\r\n",
+        "WARC-Segment-Number: 2\r\n",
+        "WARC-Segment-Origin-ID: <urn:test:origin>\r\n",
+        "WARC-Segment-Total-Length: 12345\r\n",
+        "WARC-Truncated: length\r\n",
+        "WARC-Warcinfo-ID: <urn:test:info>\r\n",
+        "\r\nabc\r\n\r\n",
+    );
+    let second = concat!(
+        "WARC/1.1\r\n",
+        "WARC-Type: warcinfo\r\n",
+        "WARC-Record-ID: <urn:test:empty>\r\n",
+        "WARC-Date: 2020-07-08T02:52:55Z\r\n",
+        "Content-Length: 0\r\n\r\n\r\n\r\n",
+    );
+    let input = [first, second].concat();
+    let headers = [
+        ("content_length", "3"),
+        ("block_digest", "sha1:block"),
+        ("payload_digest", "sha1:payload"),
+        ("concurrent_to", "<urn:test:concurrent>"),
+        ("filename", "example.warc"),
+        ("identified_payload_type", "text/plain"),
+        ("ip_address", "2001:db8::1"),
+        ("profile", "https://example.com/profile"),
+        ("refers_to", "<urn:test:original>"),
+        ("segment_number", "2"),
+        ("segment_origin_id", "<urn:test:origin>"),
+        ("segment_total_length", "12345"),
+        ("truncated", "length"),
+        ("warcinfo_id", "<urn:test:info>"),
+    ];
+    for projection in [
+        None,
+        Some(
+            headers
+                .iter()
+                .rev()
+                .map(|(name, _)| (*name).into())
+                .collect(),
+        ),
+        Some(Vec::new()),
+    ] {
+        let request = ReadRequest::new("headers.warc").with_options(ReadOptions {
+            batch_size: NonZeroUsize::MIN,
+            projection: projection.clone(),
+        });
+        let sequential = WarcArrowAccessor::new(MemoryAccessor::new(input.as_bytes(), 7))
+            .open(request.clone())
+            .await
+            .unwrap();
+        let parallel = WarcArrowAccessor::new(MemoryAccessor::new(input.as_bytes(), 7))
+            .with_partition_options(DecodePartitionOptions {
+                target_bytes: NonZeroUsize::MIN,
+            })
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::MIN,
+            ))
+            .open(request.clone())
+            .await
+            .unwrap();
+        let positioned = SourceColumns::new()
+            .wrap(FactoryAccessor::new(
+                MemoryAccessor::new(input.as_bytes(), 7),
+                WarcArrowFormat.with_source_positions(),
+            ))
+            .open(request)
+            .await
+            .unwrap();
+        let readers: [Box<dyn RecordReader>; 3] = [sequential, parallel, positioned];
+        for mut reader in readers {
+            let schema = reader.metadata().schema.clone();
+            assert_eq!(
+                schema.fields().len(),
+                projection.as_ref().map_or(22, Vec::len)
+            );
+            if let Some(names) = &projection {
+                assert_eq!(
+                    schema.fields().iter().map(|f| f.name()).collect::<Vec<_>>(),
+                    names.iter().collect::<Vec<_>>()
+                );
+            }
+            let mut rows = 0;
+            while let Some(batch) = reader.next().await.unwrap() {
+                assert_eq!(batch.schema(), schema);
+                for (name, value) in headers {
+                    if let Some(column) = batch.column_by_name(name) {
+                        let field = schema.field_with_name(name).unwrap();
+                        assert_eq!(field.data_type(), &arrow_schema::DataType::Utf8);
+                        assert_eq!(field.is_nullable(), name != "content_length");
+                        assert_eq!(
+                            column.as_string::<i32>().iter().collect::<Vec<_>>(),
+                            [if rows == 0 {
+                                Some(value)
+                            } else if name == "content_length" {
+                                Some("0")
+                            } else {
+                                None
+                            }],
+                            "{name}",
+                        );
+                    }
+                }
+                rows += batch.num_rows();
+            }
+            assert_eq!(rows, 2);
+        }
+    }
+}
