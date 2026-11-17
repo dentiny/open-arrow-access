@@ -9,8 +9,13 @@ description = "Sequential file-set and directory datasets for Open Arrow Access"
 [features]
 default = []
 directory = ["dep:glob"]
+manifest = ["dep:url", "dep:percent-encoding", "dep:open-arrow-access-decompression", "dep:open-arrow-access-file-format"]
 
 [dependencies]
+url = { workspace = true, optional = true }
+percent-encoding = { workspace = true, optional = true }
+open-arrow-access-decompression = { workspace = true, optional = true }
+open-arrow-access-file-format = { workspace = true, optional = true }
 arrow-array.workspace = true
 arrow-schema.workspace = true
 futures.workspace = true
@@ -47,3 +52,7 @@ required-features = ["directory"]
 [[test]]
 name = "union_by_name"
 required-features = ["directory"]
+
+[[test]]
+name = "manifest"
+required-features = ["manifest"]

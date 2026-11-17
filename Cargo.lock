@@ -2881,8 +2881,10 @@ dependencies = [
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
  "parquet",
+ "percent-encoding",
  "tempfile",
  "tokio",
+ "url",
 ]
 
 [[package]]

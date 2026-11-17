@@ -89,3 +89,31 @@ to expose file-internal partitions too. `UnorderedEmissionLayer` can opt eligibl
 sources into ready-batch emission; sources requiring global order reject it.
 See [layer composition](../layers/README.md) for placement of sampling and
 generated columns after parallel execution.
+
+## Resolve a paths manifest
+
+Enable `dataset-manifest` (`manifest` on this crate) and the required
+`decompression-*` codecs. Bind storage to the origin root:
+
+```rust,ignore
+let files = PathsManifest::new("crawl-data/CC-MAIN-2022-40/warc.paths.gz")
+    .with_origin("https://data.commoncrawl.org")
+    .with_prefix("crawl-data/CC-MAIN-2022-40/segments/1664030338280.51/")
+    .with_formats(&[DetectedFormat::Warc], Mismatch::Error)
+    .resolve(&storage).await?;
+```
+
+The default base is the origin root; `ManifestDirectory` and `Explicit(ObjectRef)`
+select a directory instead. Same-origin URLs become decoded storage keys.
+Relative manifest keys need `with_origin` to accept absolute entries.
+
+Security checks run before prefix filtering: dot segments (even contained ones),
+credentials, network-path references, malformed encoding, encoded delimiters,
+backslashes and controls are rejected. Query/fragment and foreign origins are rejected.
+Transport and redirect policy remain the caller's responsibility.
+
+Blank lines are ignored. Format mismatches and selected duplicates error by
+default; `Mismatch::Skip` and `Duplicates::Dedupe` retain the other entries in
+manifest order. Empty results return `InvalidInput`; errors name the manifest and
+line. Only selected keys are accumulated. `resolve` decompresses raw bytes by
+suffix; `resolve_reader` accepts already-decoded bytes.

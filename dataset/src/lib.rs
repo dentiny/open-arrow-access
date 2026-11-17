@@ -2,5 +2,7 @@
 
 #[cfg(feature = "directory")]
 pub mod directory;
-#[cfg(feature = "directory")]
+#[cfg(any(feature = "directory", feature = "manifest"))]
 pub mod file_set;
+#[cfg(feature = "manifest")]
+pub mod manifest;
