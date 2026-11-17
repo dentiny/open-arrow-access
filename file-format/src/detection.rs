@@ -10,13 +10,19 @@ pub enum DetectedFormat {
     Xml,
 }
 
-/// Inspect a path suffix without I/O. One outer compression suffix is ignored;
+/// Inspect a path suffix without I/O. Trailing compression suffixes are ignored;
 /// query and fragment text is excluded. Detection does not enable a decoder.
 /// Semantic formats such as ATIF require an explicitly selected reader.
 pub fn detect_format(path: &str) -> Option<DetectedFormat> {
-    let path = path.split(['?', '#']).next()?;
+    let mut path = path.split(['?', '#']).next()?;
     let compression = open_arrow_access_decompression::CompressionFactory::default();
-    let path = compression.strip_suffix(path);
+    loop {
+        let stripped = compression.strip_suffix(path);
+        if stripped == path {
+            break;
+        }
+        path = stripped;
+    }
     let extension = path.rsplit_once('.')?.1.to_ascii_lowercase();
     Some(match extension.as_str() {
         "parquet" => DetectedFormat::Parquet,
@@ -43,6 +49,8 @@ mod tests {
             ("a.json", Some(DetectedFormat::Json)),
             ("a.ndjson.zstd?download=1", Some(DetectedFormat::JsonLines)),
             ("a.WARC.GZ", Some(DetectedFormat::Warc)),
+            ("a.warc.gz.gz", Some(DetectedFormat::Warc)),
+            ("a.WARC.GZ.ZST?download=1", Some(DetectedFormat::Warc)),
             ("a.xml", Some(DetectedFormat::Xml)),
             ("a.atif", None),
             ("warc.paths.gz", None),
