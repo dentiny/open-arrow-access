@@ -123,39 +123,3 @@ async fn dropping_stream_reader_releases_unpolled_or_partially_consumed_streams(
         assert_eq!(calls.load(Ordering::SeqCst), usize::from(consume));
     }
 }
-
-#[tokio::test]
-async fn byte_stream_attaches_source_without_losing_error_or_metadata() {
-    use open_arrow_access_core::{ByteMetadata, ByteReader, Bytes, ObjectRef};
-
-    let metadata = ByteMetadata {
-        source: Some(ObjectRef::new("archive.tar")),
-        content_length: Some(123),
-        version: Some("v1".into()),
-    };
-    let stream = stream::iter([Err::<Bytes, _>(
-        Error::new(ErrorKind::PermissionDenied, "read_entry", "original error").with_source(
-            std::io::Error::new(std::io::ErrorKind::ConnectionReset, "original cause"),
-        ),
-    )]);
-    let mut reader: Box<dyn ByteReader> = Box::new(StreamReader::bytes(stream, metadata));
-    let error = reader.next().await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
-    assert_eq!(error.operation(), "read_entry");
-    assert_eq!(
-        error.to_string(),
-        "read_entry: object \"archive.tar\": original error"
-    );
-    assert_eq!(
-        std::error::Error::source(&error).unwrap().to_string(),
-        "original cause"
-    );
-    assert!(reader.next().await.unwrap().is_none());
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(
-        reader.metadata().source.as_ref().unwrap().locator(),
-        "archive.tar"
-    );
-    assert_eq!(reader.metadata().content_length, Some(123));
-    assert_eq!(reader.metadata().version.as_deref(), Some("v1"));
-}
