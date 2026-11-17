@@ -62,6 +62,9 @@ built-in codecs whose features are disabled. `strip_suffix()` uses that same
 registry without decoding. Clones share immutable registrations; changing one
 clone does not change previously configured readers.
 
+`strip_compression_suffixes(path)` removes all trailing built-in compression
+suffixes without decoding.
+
 For CSV/TSV, share the configured factory with both byte decoding and format
 selection so a custom suffix works without modifying the format crate:
 

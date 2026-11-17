@@ -2,6 +2,7 @@ use futures::TryStreamExt;
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::DecodePartitionOptions;
 use open_arrow_access_layers::ParallelReadLayer;
+use open_arrow_access_test_support::record::assert_same_batches;
 use std::io::Write;
 use std::{
     error::Error as _,
@@ -243,13 +244,7 @@ async fn parallel_object_chunks_preserve_pretty_json_and_gzip_projection() {
             .open(selection)
             .await
             .unwrap();
-        loop {
-            let batch = expected.next().await.unwrap();
-            assert_eq!(actual.next().await.unwrap(), batch);
-            if batch.is_none() {
-                break;
-            }
-        }
+        assert_same_batches(expected.as_mut(), actual.as_mut()).await;
     }
 }
 

@@ -72,6 +72,22 @@ pub async fn collect_strings<O: OffsetSizeTrait>(
     values
 }
 
+/// Assert exact schema and batch equality, including batch boundaries and both EOFs.
+///
+/// Panics if either reader fails or one reader ends before the other. Readers are
+/// consumed through their first EOF; metadata other than the schema is ignored.
+pub async fn assert_same_batches(expected: &mut dyn RecordReader, actual: &mut dyn RecordReader) {
+    assert_eq!(actual.metadata().schema, expected.metadata().schema);
+    loop {
+        let expected_batch = expected.next().await.unwrap();
+        let actual_batch = actual.next().await.unwrap();
+        assert_eq!(actual_batch, expected_batch);
+        if expected_batch.is_none() {
+            break;
+        }
+    }
+}
+
 /// Collect a non-null primitive column in batch order.
 pub fn collect_values<T: ArrowPrimitiveType>(
     batches: &[RecordBatch],

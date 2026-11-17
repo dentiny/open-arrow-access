@@ -73,9 +73,21 @@ impl<S, M, C> StreamReader<S, M, C> {
 impl<S> StreamReader<S, RecordMetadata, RecordCapability> {
     /// Construct a record stream with an explicit source ordering contract.
     pub fn records(stream: S, metadata: RecordMetadata, ordering: OrderRequirement) -> Self {
+        Self::records_with_capability(stream, metadata, RecordCapability::sequential(ordering))
+    }
+
+    /// Construct a record stream retaining the caller's full capability declaration.
+    /// The caller must ensure the stream supports the declared operations. Like
+    /// [`Self::records`], this attaches `metadata.source` to lazy errors without
+    /// polling the stream.
+    pub fn records_with_capability(
+        stream: S,
+        metadata: RecordMetadata,
+        capability: RecordCapability,
+    ) -> Self {
         let object = metadata.source.clone();
         StreamReader::new(stream, metadata)
-            .with_capability(RecordCapability::sequential(ordering))
+            .with_capability(capability)
             .with_object(object)
     }
 }

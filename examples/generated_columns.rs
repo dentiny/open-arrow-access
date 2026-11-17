@@ -2,7 +2,7 @@
 //! Run: cargo run --locked --example generated_columns --features format-json
 
 use open_arrow_access::{
-    Accessor, AccessorExt, ReadOptions, ReadRequest,
+    Accessor, AccessorExt, ReadRequest,
     file_format::json::JsonAccessor,
     layers::{ColumnEvolution, SchemaEvolutionLayer},
     storage::{OpenDalAccessor, opendal},
@@ -21,10 +21,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ColumnEvolution::add_column_sql("doubled_next_id", "next_id * 2"),
     ])?);
     // The layer reads expression dependencies even when they are not projected.
-    let request = ReadRequest::new("projection.jsonl").with_options(ReadOptions {
-        projection: Some(vec!["next_id".into(), "doubled_next_id".into()]),
-        ..Default::default()
-    });
+    let request =
+        ReadRequest::new("projection.jsonl").with_projection(["next_id", "doubled_next_id"]);
     let mut reader = records.open(request).await?;
     println!("Output schema: {:?}", reader.metadata().schema);
     while let Some(batch) = reader.next().await? {

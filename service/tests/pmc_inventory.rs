@@ -7,7 +7,7 @@ use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::pmc_inventory::PmcInventoryAccessor;
 use open_arrow_access_test_support::{
     MemoryAccessor, fixture,
-    record::{column, field_names},
+    record::{assert_same_batches, column, field_names},
 };
 use std::{
     collections::HashMap,
@@ -219,14 +219,7 @@ async fn parallel_inventory_matches_order_metadata_projection_and_validation() {
             .open(request(projection))
             .await
             .unwrap();
-        assert_eq!(actual.metadata().schema, expected.metadata().schema);
-        loop {
-            let e = expected.next().await.unwrap();
-            assert_eq!(actual.next().await.unwrap(), e);
-            if e.is_none() {
-                break;
-            }
-        }
+        assert_same_batches(expected.as_mut(), actual.as_mut()).await;
     }
     let mut source = Objects::fixture().await;
     source.insert(

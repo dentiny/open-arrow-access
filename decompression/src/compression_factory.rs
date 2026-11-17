@@ -213,3 +213,34 @@ impl ReaderFactory for CompressionFactory {
             .await
     }
 }
+
+/// Strip all trailing built-in compression suffixes, case-insensitively.
+/// Recognition does not require enabled codecs. This only processes a path;
+/// it performs no I/O, decompression, or URL query/fragment parsing.
+pub fn strip_compression_suffixes(mut path: &str) -> &str {
+    let factory = CompressionFactory::default();
+    loop {
+        let stripped = factory.strip_suffix(path);
+        if stripped == path {
+            return path;
+        }
+        path = stripped;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_compression_suffixes;
+
+    #[test]
+    fn strips_nested_suffixes_until_an_unknown_extension() {
+        for (path, expected) in [
+            ("a.warc", "a.warc"),
+            ("a.warc.gz.gz", "a.warc"),
+            ("a.WARC.GZ.ZST", "a.WARC"),
+            ("a.warc.gz.unknown", "a.warc.gz.unknown"),
+        ] {
+            assert_eq!(strip_compression_suffixes(path), expected);
+        }
+    }
+}
