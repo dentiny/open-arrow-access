@@ -38,7 +38,6 @@ crate whose behavior they exercise; the facade file-source smoke test lives in r
 | Streaming and indexed TAR entries | [`decompression/tests/tar.rs`](../decompression/tests/tar.rs) |
 | Document accessor | [`core/tests/document.rs`](../core/tests/document.rs) |
 | Field-name index and wide projections | [`core/tests/field_index.rs`](../core/tests/field_index.rs) |
-| Scoped HTTP fixture transports | [`test-support/tests/http.rs`](../test-support/tests/http.rs) |
 | Shared HTTP status classification | [`core/tests/error.rs`](../core/tests/error.rs) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
 | Sequential scan schema and lazy partition execution | [`core/tests/scan.rs`](../core/tests/scan.rs) |

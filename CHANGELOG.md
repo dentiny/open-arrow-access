@@ -1,9 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Add explicit transport context overrides to Zenodo and Hugging Face services for scoped transports and deterministic tests.
-
 ## 0.4.0 - 2026-11-16
 
 - Add opt-in source columns and source positions with user-configurable record framing.
