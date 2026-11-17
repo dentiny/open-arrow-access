@@ -189,6 +189,12 @@ do not add backend/format cases to a core enumeration.
 An index existing on disk is insufficient. Bind it to source identity/version
 or a verified fingerprint, size, parser configuration and index schema. Check
 the coordinate space: storage-byte offsets and decoded-byte offsets differ.
+Opt-in [source position columns](source-positions.md) represent a record as
+`(object, stored frame offset, decoded offset within the frame)`. Uncompressed
+records use their stored byte offset with a zero in-frame offset; record-at-a-time
+gzip uses the member start with a zero in-frame offset. A single whole-file frame
+uses frame offset zero and the actual decoded record offset. These coordinates
+are preserved by WARC file planning but do not themselves provide an index.
 Selected logical-record boundaries and any shared decode context must be valid.
 
 For `.warc.gz`, compressed offsets need independently decodable members/frames

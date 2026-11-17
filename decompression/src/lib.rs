@@ -12,9 +12,10 @@ pub use compression_factory::CompressionFactory;
 mod decoded_reader;
 mod factory;
 mod layer;
+mod positioned;
 
 pub use accessor::DecompressionAccessor;
-pub use codec::{Codec, CompressedInput, DecodedInput};
+pub use codec::{Codec, CompressedInput, DecodedFrame, DecodedInput, FrameDecoder};
 pub use decoded_reader::decoded_reader;
 pub use factory::DecompressionFactory;
 pub use layer::DecompressionLayer;

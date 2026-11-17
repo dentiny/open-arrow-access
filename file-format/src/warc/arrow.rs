@@ -1,7 +1,7 @@
 use std::sync::{Arc, OnceLock};
 
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
-use futures::stream;
+use futures::{TryStreamExt, stream};
 use open_arrow_access_core::{
     ByteReadRequest, ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest,
     ReaderFactory, RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, Result,
@@ -84,11 +84,20 @@ pub(super) fn raw_projection(output: &SchemaRef) -> Result<SchemaRef> {
         .iter()
         .map(|field| field.name().clone())
         .collect();
+    let mut fields = raw_arrow_schema().fields().to_vec();
+    for column in [
+        open_arrow_access_core::SourceColumn::Offset,
+        open_arrow_access_core::SourceColumn::OffsetInFrame,
+    ] {
+        if output.index_of(column.name()).is_ok() {
+            fields.push(Arc::new(column.field()));
+        }
+    }
     open_arrow_access_core::ReadOptions {
         projection: Some(names),
         ..Default::default()
     }
-    .resolve_projection(&raw_arrow_schema())
+    .resolve_projection(&Arc::new(Schema::new(fields)))
     .map(|projection| projection.schema)
 }
 
@@ -108,11 +117,25 @@ impl ReaderFactory for WarcArrowFormat {
         .with_ordering(OrderRequirement::Reorderable)
     }
 
+    fn supports_source_column(&self, _: open_arrow_access_core::SourceColumn) -> bool {
+        true
+    }
+
     fn prepare(&self, request: &ReadRequest) -> Result<SchemaRef> {
-        request
-            .options
-            .resolve_projection(&arrow_schema())
-            .map(|projection| projection.schema)
+        let schema = request.options.resolve_projection(&arrow_schema())?.schema;
+        let mut fields = schema.fields().to_vec();
+        let mut seen = std::collections::HashSet::new();
+        for &column in &request.options.source_columns {
+            if !seen.insert(column) || arrow_schema().index_of(column.name()).is_ok() {
+                return Err(crate::source::invalid(
+                    "source column conflicts with data field",
+                ));
+            }
+            if column != open_arrow_access_core::SourceColumn::Object {
+                fields.push(Arc::new(column.field()));
+            }
+        }
+        Ok(Arc::new(Schema::new(fields)))
     }
 
     async fn create_reader(
@@ -123,9 +146,33 @@ impl ReaderFactory for WarcArrowFormat {
         schema: SchemaRef,
     ) -> Result<Box<dyn RecordReader>> {
         let source = request.object.clone();
-        let records = WarcFormat
-            .create_reader(token, input, ByteReadRequest::from(&request), ())
-            .await?;
+        let track = request
+            .options
+            .source_columns
+            .iter()
+            .any(|c| *c != open_arrow_access_core::SourceColumn::Object);
+        let records: futures::stream::BoxStream<
+            'static,
+            Result<(WarcRecord, Option<open_arrow_access_core::BytePosition>)>,
+        > = if track {
+            use futures::StreamExt;
+            super::positions::positioned_records(input)?
+                .map_ok(|((headers, body), position)| {
+                    warc::Record::<warc::EmptyBody>::try_from(headers)
+                        .map_err(super::decode_error)
+                        .map(|record| (record.add_body(body), Some(position)))
+                })
+                .and_then(futures::future::ready)
+                .boxed()
+        } else {
+            let records = WarcFormat
+                .create_reader(token, input, ByteReadRequest::from(&request), ())
+                .await?;
+            use futures::StreamExt;
+            open_arrow_access_core::into_stream(records)
+                .map_ok(|record| (record, None))
+                .boxed()
+        };
         let batch_size = request.options.batch_size.get();
         let schema = raw_projection(&schema)?;
         let output = schema.clone();
@@ -136,10 +183,10 @@ impl ReaderFactory for WarcArrowFormat {
             async move {
                 let mut batch = new_batch(&output)?;
                 while batch.len() < batch_size {
-                    let Some(record) = records.next().await? else {
+                    let Some((record, position)) = records.try_next().await? else {
                         break;
                     };
-                    append_record(&mut batch, &record, &source_uri)?;
+                    append_record(&mut batch, &record, &source_uri, position)?;
                 }
                 if batch.is_empty() {
                     return Ok(None);
@@ -159,8 +206,19 @@ impl ReaderFactory for WarcArrowFormat {
 }
 
 pub(super) fn new_batch(output: &SchemaRef) -> Result<RecordBatchBuilder> {
+    let mut fields = raw_arrow_schema().fields().to_vec();
+    if output.index_of("_source_offset").is_ok()
+        || output.index_of("_source_offset_in_frame").is_ok()
+    {
+        fields.push(Arc::new(
+            open_arrow_access_core::SourceColumn::Offset.field(),
+        ));
+        fields.push(Arc::new(
+            open_arrow_access_core::SourceColumn::OffsetInFrame.field(),
+        ));
+    }
     RecordBatchBuilder::new(
-        raw_arrow_schema(),
+        Arc::new(Schema::new(fields)),
         Some(
             output
                 .fields()
@@ -175,8 +233,13 @@ pub(super) fn append_record(
     batch: &mut RecordBatchBuilder,
     record: &WarcRecord,
     source_uri: &str,
+    position: Option<open_arrow_access_core::BytePosition>,
 ) -> Result<()> {
     batch.push(|row| {
+        if let Some(position) = position {
+            row.append("_source_offset", position.offset())?;
+            row.append("_source_offset_in_frame", position.offset_in_frame())?;
+        }
         row.append("record_id", record.warc_id())?;
         row.append("record_type", record.warc_type().as_str())?;
         row.append("warc_version", record.warc_version())?;

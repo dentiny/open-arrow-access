@@ -35,6 +35,7 @@ async fn members_preserve_order_and_output_chunk_limit() -> Result<()> {
 #[tokio::test]
 async fn layer_preserves_metadata_options_and_listing_but_removes_ranges() -> Result<()> {
     let options = ByteReadOptions {
+        track_positions: false,
         io_concurrency: NonZeroUsize::new(4).unwrap(),
         io_chunk_size: NonZeroUsize::new(17),
     };

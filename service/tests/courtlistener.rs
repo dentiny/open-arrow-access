@@ -64,6 +64,7 @@ async fn explicit_read_reuses_bzip2_and_forwards_io_options() -> Result<()> {
     );
     let snapshot = CourtListenerSnapshot::new("courts", "2026-09-30")?;
     let options = ByteReadOptions {
+        track_positions: false,
         io_concurrency: NonZeroUsize::new(3).unwrap(),
         io_chunk_size: NonZeroUsize::new(7),
     };

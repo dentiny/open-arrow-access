@@ -363,6 +363,9 @@ impl Reader for OpenDalReader {
 
 #[async_trait]
 impl ByteReader for OpenDalReader {
+    fn position(&self) -> Option<open_arrow_access_core::BytePosition> {
+        Some(open_arrow_access_core::BytePosition::Stored(self.offset))
+    }
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         self.read_exact_range(range).await
     }

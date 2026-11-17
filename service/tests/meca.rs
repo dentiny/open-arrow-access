@@ -59,6 +59,7 @@ async fn native_parallel_entries_preserve_manifest_fields_and_binary_data() {
         let files = archive.files().to_vec();
         let records = archive.records();
         let request = MecaReadRequest::default().with_options(ReadOptions {
+            source_columns: Vec::new(),
             projection,
             batch_size: NonZeroUsize::MIN,
         });

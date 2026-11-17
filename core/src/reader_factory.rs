@@ -21,6 +21,11 @@ pub trait ReaderFactory: Send + Sync {
     /// Required for every factory: record formats must explicitly declare ordering.
     fn capability(&self, input: Capability) -> <Self::Reader as Reader>::Capability;
 
+    /// Declare optional record provenance support without opening bytes.
+    fn supports_source_column(&self, column: crate::SourceColumn) -> bool {
+        column == crate::SourceColumn::Object
+    }
+
     /// Validate configuration before storage opens; return configuration errors here.
     fn prepare(&self, request: &Self::Request) -> Result<Self::Prepared>;
 

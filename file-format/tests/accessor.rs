@@ -107,6 +107,7 @@ async fn external_format_prepares_each_open_and_receives_request_options() {
     assert!(events.lock().unwrap().is_empty());
     assert!(observed.requests.lock().unwrap().is_empty());
     let byte_options = ByteReadOptions {
+        track_positions: false,
         io_concurrency: NonZeroUsize::new(3).unwrap(),
         io_chunk_size: NonZeroUsize::new(17),
     };

@@ -103,6 +103,7 @@ async fn sequential_output_chunks_reuse_storage_requests_when_ranges_are_interle
     let mut reader = accessor
         .open(
             ByteReadRequest::new("data.bin").with_options(ByteReadOptions {
+                track_positions: false,
                 io_chunk_size: std::num::NonZeroUsize::new(4),
                 io_concurrency: std::num::NonZeroUsize::new(4).unwrap(),
             }),
@@ -143,6 +144,7 @@ async fn large_single_and_bulk_ranges_preserve_values_and_cursor() {
         let mut reader = accessor
             .open(
                 ByteReadRequest::new("large.bin").with_options(ByteReadOptions {
+                    track_positions: false,
                     io_concurrency: std::num::NonZeroUsize::new(concurrency).unwrap(),
                     io_chunk_size: chunk_size,
                 }),
@@ -316,6 +318,7 @@ async fn io_options_enable_bounded_backend_concurrency_for_single_and_bulk_reads
         let mut reader = accessor
             .open(
                 ByteReadRequest::new("data.bin").with_options(ByteReadOptions {
+                    track_positions: false,
                     io_concurrency: std::num::NonZeroUsize::new(concurrency).unwrap(),
                     io_chunk_size: std::num::NonZeroUsize::new(8),
                 }),
@@ -375,6 +378,7 @@ async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor
         let mut reader = fs
             .open(
                 ByteReadRequest::new("data.bin").with_options(ByteReadOptions {
+                    track_positions: false,
                     io_concurrency: NonZeroUsize::new(concurrency).unwrap(),
                     io_chunk_size: NonZeroUsize::new(2),
                 }),
@@ -415,4 +419,24 @@ async fn byte_io_options_preserve_range_order_empty_ranges_and_sequential_cursor
         );
         assert_eq!(reader.read_range(4..8).await.unwrap().as_ref(), b"efgh");
     }
+}
+
+#[tokio::test]
+async fn sequential_source_positions_survive_ranges_and_metrics() {
+    use open_arrow_access_core::{AccessorExt, BytePosition, metrics::MetricsLayer};
+    let dir = tempfile::tempdir().unwrap();
+    tokio::fs::write(dir.path().join("positions.bin"), b"abcdefghij")
+        .await
+        .unwrap();
+    let accessor = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()))
+        .with_chunk_size(NonZeroUsize::new(3).unwrap())
+        .layer(MetricsLayer::default());
+    let mut reader = accessor.open("positions.bin".into()).await.unwrap();
+    assert_eq!(reader.position(), Some(BytePosition::Stored(0)));
+    assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"abc");
+    assert_eq!(reader.position(), Some(BytePosition::Stored(3)));
+    assert_eq!(reader.read_range(7..10).await.unwrap().as_ref(), b"hij");
+    assert_eq!(reader.position(), Some(BytePosition::Stored(3)));
+    assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), b"def");
+    assert_eq!(reader.position(), Some(BytePosition::Stored(6)));
 }

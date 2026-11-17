@@ -2843,6 +2843,7 @@ dependencies = [
  "futures",
  "more-asserts",
  "open-arrow-access-core",
+ "open-arrow-access-dataset",
  "open-arrow-access-decompression",
  "open-arrow-access-layers",
  "open-arrow-access-storage",

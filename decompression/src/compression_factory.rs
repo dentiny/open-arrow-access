@@ -11,11 +11,16 @@ use crate::{Codec, CompressedInput, Compression, DecodedInput, DecompressionFact
 struct RegisteredCodec {
     name: &'static str,
     decoder: Arc<dyn Fn(CompressedInput) -> DecodedInput + Send + Sync>,
+    frame_decoder: Arc<dyn Fn(CompressedInput) -> Result<crate::DecodedFrame> + Send + Sync>,
 }
 
 impl Codec for RegisteredCodec {
     fn name(&self) -> &'static str {
         self.name
+    }
+
+    fn frame_decoder(&self, input: CompressedInput) -> Result<crate::DecodedFrame> {
+        (self.frame_decoder)(input)
     }
 
     fn decoder(&self, input: CompressedInput) -> DecodedInput {
@@ -37,11 +42,13 @@ struct RegisteredExtension<'a> {
 
 impl Registration {
     fn new<C: Codec>(codec: C, builtin: Option<Compression>) -> Self {
+        let frame_codec = codec.clone();
         Self {
             name: codec.name(),
             codec: Some(RegisteredCodec {
                 name: codec.name(),
                 decoder: Arc::new(move |input| codec.decoder(input)),
+                frame_decoder: Arc::new(move |input| frame_codec.frame_decoder(input)),
             }),
             builtin,
         }

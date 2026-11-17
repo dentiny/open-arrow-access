@@ -63,6 +63,7 @@ async fn enumerate_then_read_selected_members_with_bounded_io() {
     source.observations.ranges.lock().unwrap().clear();
 
     let options = ByteReadOptions {
+        track_positions: false,
         io_concurrency: NonZeroUsize::new(2).unwrap(),
         io_chunk_size: NonZeroUsize::new(4096),
     };
