@@ -46,6 +46,15 @@ impl CommonCrawlSegmentRequest {
     pub fn segment(&self) -> &str {
         &self.segment
     }
+    /// Use a custom inventory while retaining exact segment selection.
+    /// Configure the manifest byte accessor with `manifest_origin()`.
+    pub fn with_manifest_url(mut self, value: &str) -> Result<Self> {
+        self.dataset = self.dataset.with_manifest_url(value)?;
+        Ok(self)
+    }
+    pub fn manifest_origin(&self) -> String {
+        self.dataset.manifest_origin()
+    }
     pub fn manifest(&self) -> ObjectRef {
         self.dataset.manifest()
     }

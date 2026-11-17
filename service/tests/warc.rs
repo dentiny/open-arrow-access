@@ -32,6 +32,36 @@ fn dataset_request_uses_the_crawl_inventory_and_mirror_origin() {
     );
 }
 
+#[test]
+fn custom_manifest_url_preserves_warc_identity_and_validates_before_io() {
+    let request = request();
+    assert_eq!(request.manifest_origin(), request.origin());
+    let request = request
+        .with_manifest_url("http://inventory.example:8080/manifests/selected.paths.gz")
+        .unwrap();
+    assert_eq!(request.manifest_origin(), "http://inventory.example:8080");
+    assert_eq!(request.manifest().locator(), "manifests/selected.paths.gz");
+    assert_eq!(request.crawl(), "CC-MAIN-2022-40");
+    assert_eq!(request.origin(), "https://data.commoncrawl.org");
+    for value in [
+        "file:///tmp/warc.paths",
+        "https://host/",
+        "https://host/dir/",
+        "https://user:pass@host/warc.paths",
+        "https://host/warc.paths?q=1",
+        "https://host/warc.paths#fragment",
+        "https://host/a/../warc.paths",
+        "https://host/%2e/warc.paths",
+        "https://host/a//warc.paths",
+    ] {
+        assert_eq!(
+            request.clone().with_manifest_url(value).unwrap_err().kind(),
+            ErrorKind::InvalidInput,
+            "{value}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn dataset_reads_all_segments_in_manifest_order_and_forwards_options() {
     let manifests = manifest("crawl.paths", 1);
@@ -39,10 +69,13 @@ async fn dataset_reads_all_segments_in_manifest_order_and_forwards_options() {
     let records = Records::default();
     let opens = records.opens.clone();
     let accessor = CommonCrawlWarcAccessor::new(manifests, records);
-    let mut selection = request().with_byte_options(ByteReadOptions {
-        io_concurrency: NonZeroUsize::new(3).unwrap(),
-        io_chunk_size: NonZeroUsize::new(4),
-    });
+    let mut selection = request()
+        .with_manifest_url("https://inventory.example/custom/warc.paths")
+        .unwrap()
+        .with_byte_options(ByteReadOptions {
+            io_concurrency: NonZeroUsize::new(3).unwrap(),
+            io_chunk_size: NonZeroUsize::new(4),
+        });
     selection.read_options_mut().batch_size = NonZeroUsize::new(2).unwrap();
     let reader = accessor.open(selection).await.unwrap();
     assert!(reader.metadata().source.is_none());
@@ -58,7 +91,7 @@ async fn dataset_reads_all_segments_in_manifest_order_and_forwards_options() {
         ]
     );
     let manifest_opens = manifest_opens.requests.lock().unwrap();
-    assert_eq!(manifest_opens[0].object, request().manifest());
+    assert_eq!(manifest_opens[0].object.locator(), "custom/warc.paths");
     assert_eq!(manifest_opens[0].options.io_concurrency.get(), 3);
     assert!(
         opens
