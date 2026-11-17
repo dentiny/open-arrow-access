@@ -61,7 +61,8 @@ pub fn select_format(objects: &[ObjectRef]) -> Result<(DetectedFormat, Vec<Objec
         )
         .with_object(objects.first()));
     };
-    let mut selected = vec![example.clone()];
+    let mut selected = Vec::with_capacity(objects.len());
+    selected.push(example.clone());
     for (other, object) in detected {
         if other != first {
             return Err(Error::new(
