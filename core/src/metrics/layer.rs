@@ -77,6 +77,13 @@ where
     fn capability(&self) -> <A::Reader as Reader>::Capability {
         self.inner.capability()
     }
+    async fn metadata(&self, request: Self::Request) -> Result<<Self::Reader as Reader>::Metadata>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        self.inner.metadata(request).await
+    }
+
     async fn open(&self, request: A::Request) -> Result<Box<A::Reader>> {
         Call::observe(&self.exporter, "open", self.inner.open(request))
             .await

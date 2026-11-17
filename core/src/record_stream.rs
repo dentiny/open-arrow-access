@@ -70,3 +70,32 @@ where
     });
     StreamReader::records_with_capability(batches, metadata, capability)
 }
+
+/// Require an opened reader's metadata and every batch to match a fixed schema.
+///
+/// Schema equality includes field and schema metadata. Metadata is checked
+/// immediately without polling input; batches are checked lazily. The error
+/// factory supplies the category and operation for mismatches. Capabilities and
+/// source metadata are retained, and lazy errors gain the reader's source context
+/// just like [`map_record_reader`]. EOF or any error releases the input and makes
+/// later reads return EOF. Upstream error categories and sources pass through.
+pub fn schema_checked_reader<F>(
+    reader: Box<dyn RecordReader>,
+    schema: SchemaRef,
+    schema_error: F,
+) -> Result<Box<dyn RecordReader>>
+where
+    F: Fn() -> crate::Error + Send + 'static,
+{
+    crate::validate_schema(&reader.metadata().schema, &schema, &schema_error)?;
+    let capability = reader.capability();
+    Ok(Box::new(map_record_reader(
+        reader,
+        schema.clone(),
+        capability,
+        move |batch| {
+            crate::validate_schema(&batch.schema(), &schema, &schema_error)?;
+            Ok(batch)
+        },
+    )))
+}

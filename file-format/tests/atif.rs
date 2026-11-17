@@ -2,6 +2,7 @@ use futures::TryStreamExt;
 use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_layers::{ParallelReadLayer, UnorderedEmissionLayer};
+use open_arrow_access_test_support::record::assert_same_batches;
 use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
 use arrow_array::{RecordBatch, cast::AsArray};
@@ -235,13 +236,7 @@ async fn parallel_gzip_trajectories_keep_global_indices_raw_json_and_projection(
             .open(request)
             .await
             .unwrap();
-        loop {
-            let batch = expected.next().await.unwrap();
-            assert_eq!(actual.next().await.unwrap(), batch);
-            if batch.is_none() {
-                break;
-            }
-        }
+        assert_same_batches(expected.as_mut(), actual.as_mut()).await;
     }
 }
 

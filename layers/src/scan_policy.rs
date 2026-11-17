@@ -47,6 +47,13 @@ impl<A: ScanPlanner, P: ScanPolicy> Accessor for ScanPolicyAccessor<A, P> {
         .with_ordering(inner.ordering)
     }
 
+    async fn metadata(
+        &self,
+        request: Self::Request,
+    ) -> Result<open_arrow_access_core::RecordMetadata> {
+        self.inner.metadata(request).await
+    }
+
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
         open_plan(self.plan_scan(request).await?)
     }

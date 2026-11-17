@@ -161,11 +161,38 @@ pub struct ResolvedProjection {
 }
 
 impl ReadOptions {
+    /// Set the target number of rows per output batch.
+    pub fn with_batch_size(mut self, batch_size: NonZeroUsize) -> Self {
+        self.batch_size = batch_size;
+        self
+    }
+
+    /// Select top-level fields in caller order, replacing any prior projection.
+    /// An empty iterator selects zero columns while preserving row counts.
+    /// Names are validated against the input schema when the projection resolves.
+    pub fn with_projection<I, S>(mut self, columns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.projection = Some(columns.into_iter().map(Into::into).collect());
+        self
+    }
+
     /// Resolve the output schema and selected top-level indices in caller order.
     /// None retains the original schema; an empty projection retains only row counts.
     /// Unknown or duplicate field names return InvalidInput.
     pub fn resolve_projection(&self, schema: &SchemaRef) -> Result<ResolvedProjection> {
-        let Some(columns) = &self.projection else {
+        ResolvedProjection::resolve(schema, self.projection.as_deref())
+    }
+}
+
+impl ResolvedProjection {
+    /// Resolve a selection without constructing read options.
+    /// `None` retains the input schema; an empty selection preserves only row counts.
+    /// Unknown or duplicate names return InvalidInput; output follows caller order.
+    pub fn resolve(schema: &SchemaRef, projection: Option<&[String]>) -> Result<Self> {
+        let Some(columns) = projection else {
             return Ok(ResolvedProjection {
                 schema: schema.clone(),
                 indices: None,
@@ -240,6 +267,22 @@ impl ReadRequest {
 
     pub fn with_options(mut self, options: ReadOptions) -> Self {
         self.options = options;
+        self
+    }
+
+    /// Set the row-count target while retaining the object and byte settings.
+    pub fn with_batch_size(mut self, batch_size: NonZeroUsize) -> Self {
+        self.options = self.options.with_batch_size(batch_size);
+        self
+    }
+
+    /// Select output fields in caller order while retaining other request settings.
+    pub fn with_projection<I, S>(mut self, columns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.options = self.options.with_projection(columns);
         self
     }
 
