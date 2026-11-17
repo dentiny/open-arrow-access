@@ -142,19 +142,28 @@ async fn validates_selection_before_io_and_reads_chunked_metadata() {
     assert!(service.item(ITEM).await.is_ok());
 }
 
+#[rstest::rstest]
+#[case("traversal.json")]
+#[case("absolute.json")]
+#[case("backslash.json")]
 #[tokio::test]
-async fn preserves_file_names_without_path_validation() {
+async fn rejects_download_paths_that_could_escape_item_root(#[case] name: &str) {
     let http = HttpFixture::new();
     http.respond(
         METADATA,
         StatusCode::OK,
-        fixture!("internet_archive", "traversal.json").await,
+        fixture!("internet_archive", name).await,
     );
-    let item = InternetArchiveService::with_endpoint(http.endpoint())
+    let error = InternetArchiveService::with_endpoint(http.endpoint())
         .unwrap()
         .item(ITEM)
         .await
-        .unwrap();
-    assert_eq!(item.files()[0].name, "papers/../secret");
-    assert_eq!(http.requests().len(), 1);
+        .unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert_eq!(error.operation(), "resolve_internet_archive");
+    assert_eq!(
+        http.requests().len(),
+        1,
+        "invalid metadata never opens files"
+    );
 }

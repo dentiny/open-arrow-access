@@ -5,11 +5,12 @@ use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 use serde::de::DeserializeOwned;
 use url::Url;
 
-use super::{HttpClient, resolve_origin};
+use super::{HttpClient, resolve_origin, validation::validate_relative_object};
 use crate::{ResolvedFileSet, file_manifest::FileSpec};
 
 /// Canonical download root, ordered logical-name mappings and provider metadata.
-/// Providers validate identity and availability; binding validates the file namespace.
+/// Providers validate identity and availability; binding validates the file namespace
+/// and requires canonical relative download objects without dot segments.
 pub(crate) struct ResolvedFilesPlan<M> {
     /// Download path prefix relative to the service's HTTP origin.
     root: String,
@@ -150,6 +151,10 @@ impl HttpFileService {
             .json(metadata_url.as_str(), self.token.as_deref(), self.operation)
             .await?;
         let plan = resolve(response)?;
+        // Logical names are opaque aliases; only download objects become URL paths.
+        for file in &plan.files {
+            validate_relative_object(file.object.locator(), self.operation)?;
+        }
         let lengths = plan.files.iter().filter_map(|file| {
             file.content_length
                 .map(|length| (file.object.locator().to_owned(), length))
@@ -170,7 +175,7 @@ impl HttpFileService {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileSpec, HttpFileService, ResolvedFilesPlan};
+    use super::{FileSpec, HttpFileService, ResolvedFilesPlan, validate_relative_object};
     use futures::TryStreamExt;
     use open_arrow_access_core::{Accessor, ByteAccessor, ListRequest, read_all};
     use open_arrow_access_test_support::{fixture, http::HttpFixture};
@@ -183,6 +188,36 @@ mod tests {
         }
     }
 
+    #[rstest::rstest]
+    #[case("")]
+    #[case(".")]
+    #[case("..")]
+    #[case("../secret")]
+    #[case("nested/../secret")]
+    #[case("nested/./file")]
+    #[case("/absolute")]
+    #[case("//host/path")]
+    #[case("nested//file")]
+    #[case("nested/")]
+    #[case("nested\\file")]
+    #[case("nul\0file")]
+    fn rejects_noncanonical_download_objects(#[case] path: &str) {
+        let error = validate_relative_object(path, "resolve_fixture").unwrap_err();
+        assert_eq!(error.kind(), open_arrow_access_core::ErrorKind::Decode);
+        assert_eq!(error.operation(), "resolve_fixture");
+    }
+
+    #[rstest::rstest]
+    #[case("paper.pdf")]
+    #[case("papers/第二行 #1%.pdf")]
+    #[case("papers/%2e%2e/file")]
+    #[case("papers/.%2E/file")]
+    #[case("papers/%2Ffile")]
+    #[case("papers/.../file")]
+    fn keeps_literal_download_object_names(#[case] path: &str) {
+        validate_relative_object(path, "resolve_fixture").unwrap();
+    }
+
     #[tokio::test]
     async fn ordered_aliases_share_object_lengths_and_keep_provider_metadata() {
         let fixture = HttpFixture::new();
@@ -193,6 +228,7 @@ mod tests {
         );
         fixture.file("/files/shared", "data");
         fixture.file("/files/unknown", "other");
+        fixture.file("/files/papers/%252e%252e/file", "literal");
         let service = HttpFileService::new(
             fixture.endpoint(),
             "configure_fixture",
@@ -209,6 +245,7 @@ mod tests {
                         file("../opaque", "shared", Some(4)),
                         file("alias", "shared", Some(4)),
                         file("unknown length", "unknown", None),
+                        file("encoded-looking name", "papers/%2e%2e/file", Some(7)),
                     ],
                     metadata,
                 ))
@@ -228,7 +265,12 @@ mod tests {
                 .iter()
                 .map(|object| object.locator())
                 .collect::<Vec<_>>(),
-            ["../opaque", "alias", "unknown length"]
+            [
+                "../opaque",
+                "alias",
+                "unknown length",
+                "encoded-looking name"
+            ]
         );
         assert_eq!(
             fixture.requests().len(),
@@ -245,6 +287,8 @@ mod tests {
         let reader = files.open("unknown length".into()).await.unwrap();
         assert_eq!(reader.metadata().content_length, Some(5));
         assert_eq!(read_all(reader, "test").await.unwrap(), b"other");
+        let reader = files.open("encoded-looking name".into()).await.unwrap();
+        assert_eq!(read_all(reader, "test").await.unwrap(), b"literal");
         let requests = fixture.requests();
         assert!(
             !requests

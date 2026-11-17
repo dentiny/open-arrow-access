@@ -65,3 +65,22 @@ pub(super) fn bearer_header(token: &str, operation: &'static str) -> Result<http
 pub(super) fn is_retry_safe_method(method: &http::Method) -> bool {
     matches!(*method, http::Method::GET | http::Method::HEAD)
 }
+
+/// OpenDAL keeps slash and dot characters when encoding HTTP paths. Reject
+/// segments a URL parser could normalize outside the provider's download root.
+pub(super) fn validate_relative_object(path: &str, operation: &'static str) -> Result<()> {
+    if path.contains(['\\', '\0'])
+        || path
+            .split('/')
+            .any(|segment| matches!(segment, "" | "." | ".."))
+    {
+        return Err(Error::new(
+            ErrorKind::Decode,
+            operation,
+            "metadata contains an invalid relative download object path",
+        ));
+    }
+    // Percent signs are encoded by OpenDAL, so e.g. `%2e` is a literal name,
+    // not an encoded dot segment. Do not decode provider-supplied filenames.
+    Ok(())
+}

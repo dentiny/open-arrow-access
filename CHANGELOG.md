@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Reject noncanonical relative download paths from provider manifests before binding lazy HTTP file access, preventing dot segments from escaping the selected record or item root. Logical aliases and literal percent-encoded-looking filenames remain opaque.
+
 ## 0.4.0 - 2026-11-16
 
 - Add opt-in source columns and source positions with user-configurable record framing.

@@ -109,10 +109,19 @@ async fn record_metadata_can_exceed_the_previous_size_limit() {
     assert!(!service.record(ID).await.unwrap().files().is_empty());
 }
 
+#[rstest::rstest]
+#[case("traversal")]
+#[case("absolute")]
+#[case("backslash")]
 #[tokio::test]
-async fn preserves_attachment_keys_without_path_validation() {
-    let (http, service) = fixture_service("traversal").await;
-    let record = service.record(ID).await.unwrap();
-    assert_eq!(record.files()[0].key, "../paper.pdf");
-    assert_eq!(http.requests().len(), 1);
+async fn rejects_download_paths_that_could_escape_record_root(#[case] name: &str) {
+    let (http, service) = fixture_service(name).await;
+    let error = service.record(ID).await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert_eq!(error.operation(), "resolve_zenodo");
+    assert_eq!(
+        http.requests().len(),
+        1,
+        "invalid metadata never opens files"
+    );
 }

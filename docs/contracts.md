@@ -293,7 +293,11 @@ Independent configuration and domain checks live in the owning crate or module's
 `validation.rs`. Constructors, parsers and readers call those checks at the original
 validation boundary. Checks coupled to indexing or streaming state may remain with
 that operation. Logical namespace names stay opaque and are not interpreted as
-storage paths.
+storage paths. HTTP manifest providers validate the separate download objects
+before binding storage: objects must be relative paths with nonempty segments,
+without `.` or `..` segments, backslashes or NUL characters. Nested paths and
+literal percent signs in filenames are preserved; download objects are encoded
+by the HTTP backend rather than interpreted as pre-encoded URLs.
 
 - `core/` depends on common types and Arrow, never concrete backends or formats.
   It exposes `ReaderFactory`, with `ReaderFactoryExt` providing shared opening
