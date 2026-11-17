@@ -6,8 +6,8 @@ use futures::{
     stream,
 };
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactoryExt, RecordMetadata,
-    Result, ScanPartition, ScanPlan, async_trait, bytes_reader, into_async_read,
+    Accessor, ByteReadRequest, ByteReader, Bytes, OrderRequirement, ReadRequest, ReaderFactoryExt,
+    RecordMetadata, Result, ScanPartition, ScanPlan, async_trait, bytes_reader, into_async_read,
 };
 
 use super::{CsvAccessor, CsvDialect, CsvHeader, error};
@@ -20,15 +20,10 @@ where
     async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let format = self.binding.factory().for_request(&request);
         let Some(dialect) = format.parallel_dialect() else {
-            return Ok(ScanPlan::whole_input(self.open(request).await?)
-                .with_ordering(self.capability().ordering));
+            return Ok(ScanPlan::whole_input(self.open(request).await?));
         };
         let prepared = format.prepare_scan(&request)?;
-        let input = self
-            .binding
-            .storage()
-            .open(ByteReadRequest::from(&request))
-            .await?;
+        let input = self.open_bytes(&request).await?;
         let Some(ResolvedFormat { format, input }) = format.resolve_schema(input).await? else {
             return Ok(crate::inference::empty_plan(request));
         };
@@ -71,7 +66,10 @@ where
             }))
         })
         .try_flatten();
-        Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))
+        Ok(
+            ScanPlan::from_stream(metadata, partitions)
+                .with_ordering(OrderRequirement::Reorderable),
+        )
     }
 }
 

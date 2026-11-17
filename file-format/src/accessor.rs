@@ -1,5 +1,6 @@
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, FactoryAccessor, ReaderFactory, Result, async_trait,
+    Accessor, ByteReadRequest, ByteReader, FactoryAccessor, ReadRequest, ReaderFactory, Result,
+    async_trait,
 };
 
 /// Compose byte storage with a [`ReaderFactory`] using the common read protocol.
@@ -49,6 +50,20 @@ impl<B, F> FileAccessor<B, F> {
             binding: self.binding.map_factory(map),
             partition_options: self.partition_options,
         }
+    }
+}
+
+impl<B, F> FileAccessor<B, F>
+where
+    B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+{
+    /// Forward the record request's object and byte options without preparing a format.
+    #[allow(dead_code)] // Builds without native file formats have no callers.
+    pub(crate) async fn open_bytes(&self, request: &ReadRequest) -> Result<Box<dyn ByteReader>> {
+        self.binding
+            .storage()
+            .open(ByteReadRequest::from(request))
+            .await
     }
 }
 

@@ -27,7 +27,7 @@ impl Default for DecodePartitionOptions {
 #[allow(dead_code)] // Some builds enable no formats that use record chunking.
 pub(crate) mod chunks;
 
-/// File formats implement planning; the shared accessor attaches input context.
+/// File formats declare native ordering; the shared accessor adds its requirement and input context.
 #[async_trait]
 pub(crate) trait FileScanPlanner:
     Accessor<Request = ReadRequest, Reader = dyn RecordReader>
@@ -43,7 +43,11 @@ where
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let object = request.object.clone();
         let context = move |error: open_arrow_access_core::Error| error.with_object(Some(&object));
-        let mut plan = self.plan_file_scan(request).await.map_err(&context)?;
+        let mut plan = self
+            .plan_file_scan(request)
+            .await
+            .map_err(&context)?
+            .require_ordering(self.capability().ordering);
         plan.partitions = plan
             .partitions
             .map_err(context.clone())

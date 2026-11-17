@@ -25,11 +25,7 @@ where
             schema,
             source: Some(request.object.clone()),
         };
-        let input = self
-            .binding
-            .storage()
-            .open(ByteReadRequest::from(&request))
-            .await?;
+        let input = self.open_bytes(&request).await?;
         let records = warc::WarcReader::new(into_async_read(input, "read_warc")).iter_raw_records();
         let records = stream::try_unfold(records, |mut records| async move {
             Ok(records
@@ -68,7 +64,7 @@ where
                 })
             },
         );
-        Ok(plan.with_ordering(self.capability().ordering))
+        Ok(plan.with_ordering(OrderRequirement::Reorderable))
     }
 }
 

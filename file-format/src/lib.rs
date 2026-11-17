@@ -42,3 +42,7 @@ pub mod atif;
 mod document;
 #[cfg(any(feature = "xml", feature = "json", feature = "csv"))]
 pub use document::read_document;
+
+#[cfg(test)]
+#[path = "../tests/unit/scan.rs"]
+mod scan_tests;

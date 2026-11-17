@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Preserve stricter reader and native-plan ordering requirements when planning file scans.
+
 ## 0.4.0 - 2026-11-16
 
 - Add opt-in source columns and source positions with user-configurable record framing.

@@ -3,9 +3,9 @@ use futures::{
     stream::{self, BoxStream},
 };
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Bytes, ObjectRef, ReadRequest, ReaderFactory,
-    RecordMetadata, RecordReader, ResolvedProjection, Result, ScanPlan, async_trait, bytes_reader,
-    read_lines,
+    Accessor, ByteReadRequest, ByteReader, Bytes, ObjectRef, OrderRequirement, ReadRequest,
+    ReaderFactory, RecordMetadata, RecordReader, ResolvedProjection, Result, ScanPlan, async_trait,
+    bytes_reader, read_lines,
 };
 
 use super::{AtifAccessor, AtifFormat, error::decode_error, reader::create_reader};
@@ -29,11 +29,7 @@ where
             schema,
             source: Some(request.object.clone()),
         };
-        let input = self
-            .binding
-            .storage()
-            .open(ByteReadRequest::from(&request))
-            .await?;
+        let input = self.open_bytes(&request).await?;
         let frames = AtifFrames {
             lines: read_lines(input, None, "frame_atif").boxed(),
             next_index: 1,
@@ -73,7 +69,7 @@ where
                     })
                 },
             )
-            .with_ordering(self.capability().ordering))
+            .with_ordering(OrderRequirement::PreserveGlobal))
     }
 }
 

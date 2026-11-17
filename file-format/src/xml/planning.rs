@@ -21,11 +21,7 @@ where
             mut options,
             explicit_schema,
         } = format.prepare(&request)?;
-        let input = self
-            .binding
-            .storage()
-            .open(ByteReadRequest::from(&request))
-            .await?;
+        let input = self.open_bytes(&request).await?;
         let input = into_async_read(input, "read_xml");
         let (schema, records, output_schema) = if let Some(output_schema) = explicit_schema {
             let records = read_records(
@@ -112,6 +108,6 @@ where
                 })
             },
         );
-        Ok(plan.with_ordering(self.capability().ordering))
+        Ok(plan.with_ordering(OrderRequirement::Reorderable))
     }
 }

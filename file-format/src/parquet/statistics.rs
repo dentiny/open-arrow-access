@@ -20,11 +20,7 @@ where
     /// Projection is validated against the footer schema but does not change
     /// row count or encoded source size. Byte read options are forwarded unchanged.
     async fn statistics(&self, request: ReadRequest) -> Result<ScanStatistics> {
-        let input = self
-            .binding
-            .storage()
-            .open(ByteReadRequest::from(&request))
-            .await?;
+        let input = self.open_bytes(&request).await?;
         validate_input(input.as_ref(), parquet_statistics_input_error)?;
         let source_bytes = input
             .metadata()
