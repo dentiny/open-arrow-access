@@ -40,6 +40,7 @@ meca = [
 oapen = ["oai"]
 openstax = []
 pmc = [
+    "dep:arrow-json",
     "dep:arrow-array",
     "dep:arrow-schema",
     "open-arrow-access-file-format/csv",
@@ -62,6 +63,7 @@ format-xml = [
 oai = ["format-xml"]
 
 [dependencies]
+arrow-json = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
 backon = { version = "1.6", default-features = false, features = ["std", "tokio-sleep"] }
 chrono = { workspace = true, optional = true }
