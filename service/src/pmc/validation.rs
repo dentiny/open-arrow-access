@@ -53,3 +53,23 @@ pub(super) fn validate_metadata(
     }
     Ok(())
 }
+
+/// Reject ambiguous keys rather than relying on backend normalization.
+pub(super) fn validate_metadata_path(path: &str, prefix: bool) -> Result<()> {
+    if path.contains(['?', '#', '%', '\\', '*'])
+        || path.chars().any(char::is_control)
+        || path
+            .trim_end_matches('/')
+            .split('/')
+            .any(|part| part.trim() != part || matches!(part, "" | "." | ".."))
+        || path.ends_with("//")
+        || if prefix {
+            !path.ends_with('/')
+        } else {
+            !path.ends_with(".json")
+        }
+    {
+        return Err(super::error::invalid_selection());
+    }
+    Ok(())
+}

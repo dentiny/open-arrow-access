@@ -1,11 +1,17 @@
 //! One article-version JSON object per row; content URLs are not fetched.
 
 mod accessor;
+mod bucket;
+mod dataset;
 mod error;
 mod metadata;
+mod request;
 mod validation;
 
 pub use accessor::{PmcAccessor, PmcDecoder};
+pub use bucket::{BUCKET_URL, bucket_operator};
+pub use dataset::PmcDatasetAccessor;
+pub use request::PmcRequest;
 
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use std::{

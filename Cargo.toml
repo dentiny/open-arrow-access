@@ -230,3 +230,7 @@ required-features = ["format-json"]
 [[example]]
 name = "parallel_sampling"
 required-features = ["format-json"]
+
+[[example]]
+name = "read_pmc_release"
+required-features = ["service-pmc"]
