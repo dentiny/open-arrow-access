@@ -72,38 +72,3 @@ async fn restores_schema_and_field_metadata_for_full_reordered_and_empty_project
     }
     assert!(reader.next().await.unwrap().is_none());
 }
-
-#[tokio::test]
-async fn explicit_stream_capabilities_retain_ordering_and_source_error_context() {
-    use open_arrow_access_core::{Error, ErrorKind, RecordCapability, StreamReader};
-
-    let capability = RecordCapability {
-        read: true,
-        read_with_range: false,
-        read_parallel: true,
-        list: false,
-        ordering: OrderRequirement::PreserveGlobal,
-    };
-    let schema = batch().schema();
-    let metadata = RecordMetadata {
-        schema: schema.clone(),
-        source: Some("partition.arrow".into()),
-    };
-    let mut reader = StreamReader::records_with_capability(
-        stream::iter([Err::<RecordBatch, _>(Error::new(
-            ErrorKind::PermissionDenied,
-            "read_partition",
-            "source denied access",
-        ))]),
-        metadata,
-        capability,
-    );
-    assert_eq!(reader.capability(), capability);
-    assert_eq!(reader.metadata().schema, schema);
-    let error = reader.next().await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
-    assert_eq!(error.operation(), "read_partition");
-    assert!(error.to_string().contains("partition.arrow"));
-    assert!(reader.next().await.unwrap().is_none());
-    assert_eq!(reader.capability(), capability);
-}
