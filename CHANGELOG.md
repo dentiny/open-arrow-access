@@ -1,16 +1,5 @@
 # Changelog
 
-## 0.5.0 - 2026-11-17
-
-- Make directory and file-set dataset APIs unconditional; remove the `directory` and `dataset-directory` Cargo features.
-- Add accessor, file-format, and dataset metadata inspection with optional schemas and suffix-based format detection.
-- Add record prefetch with row and byte budgets, propagate source positions with decoded Arrow batches, and preserve positioned readers through identity schema evolution.
-- Add projection and batch-size builders, source-aware byte streams, capability-preserving record stream helpers, and lazy scan partition helpers.
-- Expose standard WARC header columns and add PMC release discovery and public-bucket storage.
-- Centralize provider API key configuration, add observation and gauge exporter helpers, and simplify storage and decompression reader handling.
-- Remove example directories and consolidate committed test fixtures and reader contract assertions.
-- Release all public workspace crates at 0.5.0.
-
 ## 0.4.0 - 2026-11-16
 
 - Add opt-in source columns and source positions with user-configurable record framing.
