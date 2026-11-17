@@ -1,10 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Add `LimitLayer` for global row limits across a merged scan, composable with
-  seeded ratio sampling and parallel reads. Stop upstream work at the row cap.
-
 ## 0.3.1
 
 - Align OpenDAL and its HTTP/metrics components on 0.59.5, allowing compatible patch updates.
