@@ -1,9 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Add projection and batch-size builders to read options and requests, and direct projection resolution.
-
 ## 0.4.0 - 2026-11-16
 
 - Add opt-in source columns and source positions with user-configurable record framing.
