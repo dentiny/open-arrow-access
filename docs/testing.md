@@ -42,6 +42,7 @@ crate whose behavior they exercise; the facade file-source smoke test lives in r
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
 | Sequential scan schema and lazy partition execution | [`core/tests/scan.rs`](../core/tests/scan.rs) |
 | Parallel execution, backpressure, cancellation and queue rotation | [`layers/tests/parallel_read.rs`](../layers/tests/parallel_read.rs), [`layers/tests/unit/parallel_read.rs`](../layers/tests/unit/parallel_read.rs) |
+| Exact schema, batch boundaries and reader EOF comparisons | [`test-support/tests/record.rs`](../test-support/tests/record.rs) |
 | Shared resource lifetime probe | [`test-support/src/drop_probe.rs`](../test-support/src/drop_probe.rs), used by core stream and TAR tests |
 | Generic file-format extension protocol | [`file-format/tests/accessor.rs`](../file-format/tests/accessor.rs), also runs with no format features |
 | Shared format contract assertions | [`test-support/src/format.rs`](../test-support/src/format.rs), used by format and Parquet suites |

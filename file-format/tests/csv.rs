@@ -1,3 +1,4 @@
+use open_arrow_access_test_support::record::assert_same_batches;
 use std::{
     num::NonZeroUsize,
     sync::{Arc, atomic::Ordering},
@@ -304,13 +305,7 @@ async fn parallel_csv_preserves_multiline_quotes_comments_header_and_projection(
             .open(request)
             .await
             .unwrap();
-        loop {
-            let batch = expected.next().await.unwrap();
-            assert_eq!(actual.next().await.unwrap(), batch);
-            if batch.is_none() {
-                break;
-            }
-        }
+        assert_same_batches(expected.as_mut(), actual.as_mut()).await;
     }
 }
 
