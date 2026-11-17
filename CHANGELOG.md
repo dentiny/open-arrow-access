@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 - 2026-11-16
+
+- Add opt-in source columns and source positions with user-configurable record framing.
+- Add global row limits for record scans and registered compression codecs.
+- Select CSV delimiters per file, enforce strict JSON schemas, and coerce JSON scalar values into strings.
+- Include object locators in decode/decompression errors, handle compression suffixes case-insensitively, and skip empty inferred inputs in union-by-name file sets.
+- Require ATIF 0.5.2, XML 0.3.2, and WARC 0.3.5; release all public workspace crates at 0.4.0.
+
 ## 0.3.1
 
 - Align OpenDAL and its HTTP/metrics components on 0.59.5, allowing compatible patch updates.
