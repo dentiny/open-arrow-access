@@ -66,6 +66,7 @@ async fn unsafe_entries_report_the_manifest_and_line() {
         "a%GG.warc",
         "a%00.warc",
         "//other.test/a.warc",
+        "//example.test:443/a.warc",
         "https://other.test/a.warc",
         "http://example.test/a.warc",
         "https://example.test:123/a.warc",
@@ -76,6 +77,8 @@ async fn unsafe_entries_report_the_manifest_and_line() {
         "a\\b.warc",
         "a.warc?x=1",
         "a.warc#x",
+        "https://example.test/a.warc?x=1",
+        "https://example.test/a.warc#x",
     ] {
         let error = resolve(manifest(), format!("\n{value}").as_bytes())
             .await
@@ -158,8 +161,17 @@ async fn selection_policies_preserve_order_and_detect_aliases() {
 async fn invalid_configuration_fails_before_io() {
     for spec in [
         PathsManifest::new("../warc.paths"),
+        PathsManifest::new("warc.paths?x=1"),
+        PathsManifest::new("warc.paths#x"),
+        PathsManifest::new("//example.test/warc.paths"),
+        PathsManifest::new("https://example.test/x/../warc.paths"),
+        PathsManifest::new("https://u:p@example.test/warc.paths"),
+        PathsManifest::new("https://example.test/warc.paths?x=1"),
+        PathsManifest::new("https://example.test/warc.paths#x"),
         manifest().with_origin("https://other"),
         PathsManifest::new("warc.paths").with_origin("https://host/a/.."),
+        PathsManifest::new("warc.paths").with_origin("https://host?x=1"),
+        PathsManifest::new("warc.paths").with_origin("https://host#x"),
         manifest().with_base(ManifestBase::Explicit("../data".into())),
     ] {
         let storage = MemoryAccessor::new(b"a.warc", 1);

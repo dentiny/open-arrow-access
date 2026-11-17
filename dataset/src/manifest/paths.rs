@@ -12,25 +12,12 @@ pub(super) struct Context {
 impl Context {
     pub fn new(spec: &PathsManifest) -> PathResult<Self> {
         let configured = spec.origin.as_deref().map(origin).transpose()?;
-        let (manifest_origin, manifest_key) = if spec.manifest.locator().contains(':') {
-            validate_raw(spec.manifest.locator())?;
-            let url = http_url(spec.manifest.locator())?;
-            if configured
-                .as_ref()
-                .is_some_and(|o| o.origin() != url.origin())
-            {
-                return Err("manifest URL does not match configured origin");
-            }
-            if url.query().is_some() || url.fragment().is_some() {
-                return Err("manifest URL cannot contain query or fragment");
-            }
-            (Some(url.clone()), key_path(url.path())?)
-        } else {
-            if spec.manifest.locator().contains(['?', '#']) {
-                return Err("manifest key cannot contain query or fragment");
-            }
-            (configured, key_path(spec.manifest.locator())?)
-        };
+        let (manifest_origin, manifest_key) = location(spec.manifest.locator())?;
+        if let (Some(expected), Some(actual)) = (&configured, &manifest_origin)
+            && expected.origin() != actual.origin()
+        {
+            return Err("manifest URL does not match configured origin");
+        }
         let base = match &spec.base {
             ManifestBase::Origin => String::new(),
             ManifestBase::ManifestDirectory => manifest_key
@@ -46,41 +33,22 @@ impl Context {
         };
         Ok(Self {
             manifest_key,
-            origin: manifest_origin,
+            origin: manifest_origin.or(configured),
             base,
         })
     }
     pub fn resolve(&self, value: &str) -> PathResult<String> {
-        validate_raw(value)?;
-        if value.starts_with("//") {
-            return Err("network-path references are forbidden");
-        }
-        let absolute = value.split(['?', '#']).next().unwrap().contains(':');
-        let (key, suffix) = if absolute {
-            let url = http_url(value)?;
-            let same = self
+        let (origin, mut key) = location(value)?;
+        if let Some(url) = origin {
+            if !self
                 .origin
                 .as_ref()
-                .is_some_and(|o| o.origin() == url.origin());
-            if !same {
+                .is_some_and(|o| o.origin() == url.origin())
+            {
                 return Err("absolute URL origin is not allowed");
             }
-            let key = key_path(url.path())?;
-            let suffix = &url[url::Position::AfterPath..];
-            (key, suffix.to_owned())
-        } else {
-            let split = value.find(['?', '#']).unwrap_or(value.len());
-            let path = &value[..split];
-            let key = key_path(path)?;
-            let key = if path.starts_with('/') {
-                key
-            } else {
-                format!("{}{key}", self.base)
-            };
-            (key, value[split..].to_owned())
-        };
-        if !suffix.is_empty() {
-            return Err("query and fragment are forbidden");
+        } else if !value.starts_with('/') {
+            key = format!("{}{key}", self.base);
         }
         if !key.starts_with(&self.base) {
             return Err("path escapes the configured base");
@@ -88,15 +56,25 @@ impl Context {
         Ok(key)
     }
 }
+// Manifests and their entries use the same URL-to-storage-key rules.
+fn location(value: &str) -> PathResult<(Option<Url>, String)> {
+    if value.contains(':') {
+        let url = http_url(value)?;
+        let key = key_path(url.path())?;
+        Ok((Some(url), key))
+    } else {
+        Ok((None, key_path(value)?))
+    }
+}
 fn origin(value: &str) -> PathResult<Url> {
-    validate_raw(value)?;
     let url = http_url(value)?;
-    if url.path() != "/" || url.query().is_some() || url.fragment().is_some() {
+    if url.path() != "/" {
         return Err("expected an HTTP(S) origin without path, query or fragment");
     }
     Ok(url)
 }
 fn http_url(value: &str) -> PathResult<Url> {
+    validate_raw(value)?;
     let url = Url::parse(value).map_err(|_| "invalid URL")?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
@@ -104,6 +82,9 @@ fn http_url(value: &str) -> PathResult<Url> {
         || url.password().is_some()
     {
         return Err("expected an HTTP(S) URL without credentials");
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err("query and fragment are forbidden");
     }
     Ok(url)
 }

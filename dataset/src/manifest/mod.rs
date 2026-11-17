@@ -41,8 +41,7 @@ pub struct PathsManifest {
     manifest: ObjectRef,
     base: ManifestBase,
     prefix: Option<String>,
-    formats: Option<Vec<DetectedFormat>>,
-    on_mismatch: Mismatch,
+    formats: Option<(Vec<DetectedFormat>, Mismatch)>,
     duplicates: Duplicates,
     origin: Option<String>,
     byte_options: ByteReadOptions,
@@ -54,7 +53,6 @@ impl PathsManifest {
             base: ManifestBase::Origin,
             prefix: None,
             formats: None,
-            on_mismatch: Mismatch::Error,
             duplicates: Duplicates::Error,
             origin: None,
             byte_options: ByteReadOptions::default(),
@@ -70,8 +68,7 @@ impl PathsManifest {
         self
     }
     pub fn with_formats(mut self, formats: &[DetectedFormat], on_mismatch: Mismatch) -> Self {
-        self.formats = Some(formats.to_vec());
-        self.on_mismatch = on_mismatch;
+        self.formats = Some((formats.to_vec(), on_mismatch));
         self
     }
     pub fn with_duplicates(mut self, duplicates: Duplicates) -> Self {
@@ -138,12 +135,10 @@ impl PathsManifest {
             if self.prefix.as_ref().is_some_and(|p| !path.starts_with(p)) {
                 continue;
             }
-            if self
-                .formats
-                .as_ref()
-                .is_some_and(|formats| detect_format(&path).is_none_or(|f| !formats.contains(&f)))
+            if let Some((formats, on_mismatch)) = &self.formats
+                && detect_format(&path).is_none_or(|f| !formats.contains(&f))
             {
-                if self.on_mismatch == Mismatch::Skip {
+                if *on_mismatch == Mismatch::Skip {
                     continue;
                 }
                 return Err(self.error(
