@@ -12,11 +12,27 @@ pub enum DetectedFormat {
 
 /// Detect suffixes without I/O, independently of enabled readers and codecs.
 /// Queries/fragments affect routing only; storage retains the original locator.
+///
+/// # Examples
+///
+/// ```
+/// use open_arrow_access_dataset::auto_format::{DetectedFormat, detect_format};
+///
+/// assert_eq!(detect_format("data/events.v1.JSONL.gz?token=x"), Some(DetectedFormat::Json));
+/// assert_eq!(detect_format("data/records.TSV.zstd"), Some(DetectedFormat::Tsv));
+/// assert_eq!(detect_format("dir.csv/records.gz"), None);
+/// assert_eq!(detect_format("data/archive.tgz"), None);
+/// ```
 pub fn detect_format(locator: &str) -> Option<DetectedFormat> {
     let path = locator.split(['?', '#']).next()?;
     let factory = CompressionFactory::default();
     let inner = factory.strip_suffix(path);
+    // Inspect only the filename, so dots in parent directories cannot supply a
+    // format suffix: `dir.csv/records.gz` becomes `records`, which has none.
     let name = inner.rsplit('/').next()?;
+    // Take the final extension (`events.v1.JSONL` -> `JSONL`) and normalize its
+    // ASCII case. `as_deref` borrows the resulting Option<String> as Option<&str>
+    // so the match below can use string-literal patterns such as Some("jsonl").
     match name
         .rsplit_once('.')
         .map(|(_, ext)| ext.to_ascii_lowercase())
