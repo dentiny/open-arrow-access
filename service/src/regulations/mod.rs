@@ -1,7 +1,7 @@
 //! Read-only Regulations.gov API v4 discovery, metadata and attachments.
 mod parser;
 mod validation;
-use crate::common::{ApiDocument, Connection, RemoteFiles, segment};
+use crate::common::{ApiDocument, ApiKey, Connection, RemoteFiles, segment};
 use open_arrow_access_core::Result;
 #[derive(Clone, Copy, Debug)]
 pub enum RegulationsResource {
@@ -30,8 +30,11 @@ impl RegulationsService {
     /// Set or replace the API key while preserving the configured connection.
     /// The key is validated locally and sent as `X-Api-Key` only within its origin.
     pub fn with_key(mut self, key: &str) -> Result<Self> {
-        validation::validate_key(key)?;
-        self.connection = self.connection.with_header("X-Api-Key", key)?;
+        self.connection = self.connection.with_api_key_message(
+            ApiKey::Header("X-Api-Key"),
+            key,
+            "Regulations.gov requires an API key",
+        )?;
         Ok(self)
     }
 
