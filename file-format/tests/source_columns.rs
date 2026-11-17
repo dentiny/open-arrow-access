@@ -6,76 +6,16 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
 use open_arrow_access_decompression::AutoDecompressionLayer;
-use open_arrow_access_file_format::warc::WarcArrowFormat;
+use open_arrow_access_file_format::warc::{WarcArrowFormat, WarcFramer};
 use open_arrow_access_layers::{
-    ColumnEvolution, ParallelReadLayer, SchemaEvolutionLayer, SourceColumnsLayer, SourceFramer,
-    SourcePositionLayer, SourceUnit,
+    ColumnEvolution, ParallelReadLayer, SchemaEvolutionLayer, SourceColumnsLayer,
+    SourcePositionLayer,
 };
 use open_arrow_access_test_support::MemoryAccessor;
 use std::{
     io::{Read, Write},
     num::NonZeroUsize,
 };
-
-// This is caller-owned framing for the fixtures, not a WARC format extension.
-// Two records per unit also exercises units spanning gzip members and batches.
-struct WarcFramer;
-impl SourceFramer for WarcFramer {
-    fn frame(
-        &self,
-        input: Box<dyn open_arrow_access_core::ByteReader>,
-    ) -> futures::stream::BoxStream<'static, open_arrow_access_core::Result<SourceUnit>> {
-        use futures::{
-            StreamExt,
-            io::{AsyncBufReadExt, AsyncReadExt},
-            stream,
-        };
-        let input = open_arrow_access_core::into_positioned_async_read(input, "test_framer");
-        stream::unfold(input, |mut input| async move {
-            let mut bytes = Vec::new();
-            let mut positions = Vec::new();
-            for _ in 0..2 {
-                input.observer().mark();
-                let mut header = Vec::new();
-                if input.read_until(b'\n', &mut header).await.unwrap() == 0 {
-                    break;
-                }
-                let position = input.observer().marked_position().unwrap();
-                loop {
-                    let start = header.len();
-                    input.read_until(b'\n', &mut header).await.unwrap();
-                    if &header[start..] == b"\r\n" {
-                        break;
-                    }
-                }
-                let len: usize = std::str::from_utf8(&header)
-                    .unwrap()
-                    .lines()
-                    .find_map(|line| line.strip_prefix("Content-Length: "))
-                    .unwrap()
-                    .parse()
-                    .unwrap();
-                bytes.extend(header);
-                let start = bytes.len();
-                bytes.resize(start + len + 4, 0);
-                input.read_exact(&mut bytes[start..]).await.unwrap();
-                positions.push(position);
-            }
-            if positions.is_empty() {
-                None
-            } else {
-                Some((
-                    Ok(SourceUnit {
-                        bytes: bytes.into(),
-                        positions,
-                    }),
-                    input,
-                ))
-            }
-        })
-        .boxed()
-    }
-}
 
 fn records() -> Vec<Vec<u8>> {
     (0..3).map(|i| format!("WARC/1.1\r\nWARC-Type: resource\r\nWARC-Record-ID: <urn:test:{i}>\r\nWARC-Date: 2020-07-08T02:52:55Z\r\nContent-Length: 5\r\n\r\nbody{i}\r\n\r\n").into_bytes()).collect()
@@ -128,7 +68,7 @@ async fn rows(mut reader: Box<dyn RecordReader>) -> Vec<Row> {
 }
 fn columns() -> SourceColumnsLayer {
     SourceColumnsLayer::new()
-        .with_framer(WarcFramer)
+        .with_framer(WarcFramer::default().with_unit_bytes(records()[0].len() * 2))
         .with_object("path")
         .with_offset("offset")
         .with_offset_in_frame("decoded")
@@ -205,6 +145,27 @@ async fn record_coordinates_survive_projection_parallelism_and_resume() {
         }
     }
 }
+#[tokio::test]
+async fn records_spanning_compression_members_keep_their_start_coordinates() {
+    let mut input = gzip(b" \t\r\n");
+    let mut expected = Vec::new();
+    for record in records() {
+        expected.push(("data.warc.gz".to_owned(), input.len() as u64, 0));
+        let split = record.len() / 2;
+        input.extend(gzip(&record[..split]));
+        input.extend(gzip(&record[split..]));
+    }
+    let source = FactoryAccessor::new(
+        MemoryAccessor::new(&input, 7).layer(SourcePositionLayer::default()),
+        WarcArrowFormat,
+    )
+    .layer(columns());
+    assert_eq!(
+        rows(source.open(ReadRequest::new("data.warc.gz")).await.unwrap()).await,
+        expected
+    );
+}
+
 #[tokio::test]
 async fn file_set_union_parallel_and_generated_columns_compose() {
     let records = records();
@@ -351,7 +312,7 @@ async fn collisions_fail_and_empty_streams_keep_their_schema() {
     let source = FactoryAccessor::new(MemoryAccessor::new(&records().concat(), 3), WarcArrowFormat)
         .layer(
             SourceColumnsLayer::new()
-                .with_framer(WarcFramer)
+                .with_framer(WarcFramer::default())
                 .with_offset("record_id"),
         );
     assert_eq!(

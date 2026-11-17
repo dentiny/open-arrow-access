@@ -13,7 +13,7 @@ pub struct SourceUnit {
     pub positions: Vec<BytePosition>,
 }
 
-/// User-supplied record framing; the source layer has no format-specific parser.
+/// Caller-selected record framing; the source layer has no format-specific parser.
 ///
 /// Units must cover the input exactly once in logical record order. The framer
 /// owns boundary detection and row coordinates, including any records a parser

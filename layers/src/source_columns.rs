@@ -20,7 +20,7 @@ pub use bytes::{SourcePositionAccessor, SourcePositionLayer};
 
 /// Opt-in source columns around an ordinary format factory.
 ///
-/// Apply to a record-producing `FactoryAccessor`. Offsets require an explicit user-provided framer;
+/// Apply to a record-producing `FactoryAccessor`. Offsets require an explicit framer;
 /// object-only columns use the factory's normal whole-input reader.
 #[derive(Clone, Default)]
 pub struct SourceColumnsLayer {

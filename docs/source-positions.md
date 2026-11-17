@@ -2,12 +2,14 @@
 
 `SourceColumnsLayer` is an opt-in, format-independent layer over core's
 `FactoryAccessor`. It uses an ordinary `ReaderFactory`; formats need no source
-column hooks. The WARC implementation and existing decompression pipeline are
-unchanged. The caller chooses the framer and the source column names.
+column hooks. The caller chooses the framer and the source column names. The
+`warc` feature in file-format (facade: `format-warc`) provides `WarcFramer`.
 
 ```rust,ignore
+use open_arrow_access::file_format::warc::WarcFramer;
+
 let columns = SourceColumnsLayer::new()
-    .with_framer(my_framer)
+    .with_framer(WarcFramer::default().with_unit_bytes(64 << 20))
     .with_object("source_path")
     .with_offset("record_offset")
     .with_offset_in_frame("record_offset_in_frame");
@@ -54,9 +56,25 @@ unit size and the parallel partition budget. Inference must resolve the same
 schema for each unit; use an explicit format schema when needed. An empty input
 uses an empty ordinary format reader to establish its schema.
 
-The WARC integration test supplies a caller-owned framer and groups two records
-per unit. A separate CSV test supplies indexed coordinates through the same
-interface, without compression or positioned input.
+`WarcFramer` uses warc-rs for header parsing (including its 4 MiB header limit),
+body length checks, record terminators, and reserialization. Inter-record ASCII
+whitespace is skipped before marking the next record's coordinate. Header casing
+and order may change; bodies and source coordinates are preserved. It accepts
+positioned uncompressed or frame-decoded input; it does not decompress by itself.
+
+`with_unit_bytes` sets a hard cap on serialized unit size, defaulting to 64 MiB.
+Complete records are packed up to the cap; any single record exceeding it on
+input or after reserialization returns `Decode`. Parser input is bounded before
+buffering bodies. Zero is rejected with `InvalidInput`. Framing can also hold one
+bounded lookahead record and parser scratch space, so the cap is not a total
+process memory budget. Include decoded batches and parallel units when budgeting
+memory. Malformed or truncated WARC returns `Decode`, and missing byte coordinates
+returns `Unsupported`.
+
+The WARC integration test uses the built-in framer with a small byte cap to
+exercise multiple units across compression members and Arrow batches. A separate
+CSV test supplies indexed coordinates through the same interface, without
+compression or positioned input.
 
 ## Columns and coordinates
 
