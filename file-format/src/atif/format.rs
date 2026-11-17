@@ -1,8 +1,9 @@
 use super::reader::create_reader;
 use atif_arrow::trajectory_schema;
 use open_arrow_access_core::{
-    ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
-    RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result, async_trait,
+    Accessor, ByteReadRequest, ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest,
+    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result,
+    async_trait,
 };
 
 /// ATIF document framing; extensions are not inspected.
@@ -37,6 +38,17 @@ impl ReaderFactory for AtifFormat {
     fn prepare(&self, request: &ReadRequest) -> Result<Self::Prepared> {
         let options = &request.options;
         options.resolve_projection(&trajectory_schema())
+    }
+
+    async fn metadata(
+        &self,
+        _storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<RecordMetadata> {
+        Ok(RecordMetadata {
+            schema: self.prepare(&request)?.schema,
+            source: Some(request.object),
+        })
     }
 
     async fn create_reader(

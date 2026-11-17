@@ -26,6 +26,7 @@ async fn pins_membership_preserves_logical_names_and_reads_original_bytes() {
     }
     let dataset = DataverseService::new(http.endpoint())
         .unwrap()
+        .with_context(http.context())
         .dataset(PID, "1.0")
         .await
         .unwrap();
@@ -89,7 +90,12 @@ async fn rejects_invalid_metadata_and_unsupported_files() {
             ),
             ("restricted.json", StatusCode::OK, ErrorKind::Unsupported),
         ],
-        |endpoint| async move { DataverseService::new(&endpoint)?.dataset(PID, "1.0").await },
+        |endpoint, context| async move {
+            DataverseService::new(&endpoint)?
+                .with_context(context)
+                .dataset(PID, "1.0")
+                .await
+        },
     )
     .await;
     let http = HttpFixture::new();
@@ -100,6 +106,7 @@ async fn rejects_invalid_metadata_and_unsupported_files() {
     );
     let dataset = DataverseService::new(http.endpoint())
         .unwrap()
+        .with_context(http.context())
         .dataset(PID, "1.0")
         .await
         .unwrap();
@@ -118,6 +125,7 @@ async fn accepts_equivalent_doi_casing() {
     );
     let dataset = DataverseService::new(http.endpoint())
         .unwrap()
+        .with_context(http.context())
         .dataset(&PID.to_ascii_lowercase(), "1.0")
         .await
         .unwrap();
@@ -132,6 +140,7 @@ async fn preserves_logical_names_without_path_validation() {
         http.respond(METADATA, StatusCode::OK, fixture!("dataverse", name).await);
         let dataset = DataverseService::new(http.endpoint())
             .unwrap()
+            .with_context(http.context())
             .dataset(PID, "1.0")
             .await
             .unwrap();
@@ -149,7 +158,7 @@ impl DataverseFixture {
     fn service(&self) -> DataverseService {
         DataverseService::new(self.http.endpoint())
             .unwrap()
-            .with_context(opendal::OperationContext::new())
+            .with_context(self.http.context())
     }
 }
 

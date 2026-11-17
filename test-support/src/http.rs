@@ -5,7 +5,7 @@ use std::{
     future::Future,
     ops::Range,
     sync::{
-        Arc, LazyLock, Mutex, Once, Weak,
+        Arc, LazyLock, Mutex, Weak,
         atomic::{AtomicUsize, Ordering},
     },
 };
@@ -13,19 +13,20 @@ use std::{
 use futures::stream;
 use http::{HeaderMap, Method, Request, Response, StatusCode};
 use open_arrow_access_core::{Bytes, ErrorKind, Result};
-use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter};
+use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext};
 
 static FIXTURES: LazyLock<Mutex<HashMap<String, Weak<State>>>> = LazyLock::new(Mutex::default);
 
 /// Resolve each committed metadata fixture and require its expected error.
-/// The resolver receives an owned endpoint so its future can own the service.
+/// The resolver receives an owned endpoint and explicit fixture context so its
+/// future can own the service without installing a process-wide transport.
 /// Exactly one metadata request is allowed; no attachment routes are installed.
 pub async fn assert_resolution_cases<A, F>(
     manifest_dir: &str,
     fixture_format: &str,
     metadata_path: &str,
     cases: &[(&str, StatusCode, ErrorKind)],
-    resolve: impl Fn(String) -> F,
+    resolve: impl Fn(String, OperationContext) -> F,
 ) where
     F: Future<Output = Result<A>>,
 {
@@ -37,7 +38,7 @@ pub async fn assert_resolution_cases<A, F>(
             status,
             crate::read_fixture(manifest_dir, fixture_format, filename).await,
         );
-        let error = resolve(fixture.endpoint().to_owned())
+        let error = resolve(fixture.endpoint().to_owned(), fixture.context())
             .await
             .err()
             .expect("provider accepted failing metadata");
@@ -91,9 +92,7 @@ impl Default for HttpFixture {
 
 impl HttpFixture {
     pub fn new() -> Self {
-        static INSTALL: Once = Once::new();
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        INSTALL.call_once(|| HttpTransporter::install_default(FixtureTransport));
         let host = format!(
             "http-fixture-{}.invalid",
             NEXT.fetch_add(1, Ordering::Relaxed)
@@ -107,6 +106,13 @@ impl HttpFixture {
             endpoint: format!("https://{host}"),
             state,
         }
+    }
+
+    /// Explicit transport for fixture hosts, including redirects between fixtures.
+    /// Creating a fixture never changes the process-wide default transport.
+    /// Keep the fixtures alive while this context is in use.
+    pub fn context(&self) -> OperationContext {
+        OperationContext::new().with_http_transport(HttpTransporter::new(FixtureTransport))
     }
 
     pub fn endpoint(&self) -> &str {
@@ -167,9 +173,15 @@ impl HttpTransport for FixtureTransport {
         let state = FIXTURES
             .lock()
             .unwrap()
-            .get(request.uri().host().unwrap())
+            .get(request.uri().host().unwrap_or_default())
             .and_then(Weak::upgrade)
-            .expect("unexpected request or expired HTTP fixture");
+            .ok_or_else(|| {
+                opendal::Error::new(
+                    opendal::ErrorKind::Unexpected,
+                    "unknown host or expired HTTP fixture",
+                )
+                .with_operation("FixtureTransport::fetch")
+            })?;
         let path = request.uri().path_and_query().unwrap().as_str();
         state.requests.lock().unwrap().push(CapturedRequest {
             method: request.method().clone(),

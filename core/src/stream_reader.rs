@@ -11,8 +11,8 @@ use crate::{
 /// Pins without polling; EOF or errors drop the stream and make later reads return
 /// EOF. Items must match the metadata; byte chunks must be nonempty. Use
 /// [`StreamReader::records`] with an explicit ordering contract for Arrow records.
-/// [`StreamReader::new`] uses byte/generic capabilities; bytes with [`ByteMetadata`]
-/// implement [`ByteReader`].
+/// [`StreamReader::bytes`] retains byte metadata and attaches its source to lazy
+/// errors. [`StreamReader::new`] supports generic item and metadata types.
 ///
 /// ```
 /// use futures::stream;
@@ -52,6 +52,15 @@ impl<S, M> StreamReader<S, M> {
     }
 }
 
+impl<S> StreamReader<S, ByteMetadata> {
+    /// Construct a sequential byte stream, attaching its source to lazy errors.
+    /// Construction does not poll the stream; metadata is retained after EOF or errors.
+    pub fn bytes(stream: S, metadata: ByteMetadata) -> Self {
+        let object = metadata.source.clone();
+        Self::new(stream, metadata).with_object(object)
+    }
+}
+
 impl<S, M, C> StreamReader<S, M, C> {
     /// Attach object context to lazy errors without changing their source chain.
     pub fn with_object(mut self, object: Option<ObjectRef>) -> Self {
@@ -73,9 +82,21 @@ impl<S, M, C> StreamReader<S, M, C> {
 impl<S> StreamReader<S, RecordMetadata, RecordCapability> {
     /// Construct a record stream with an explicit source ordering contract.
     pub fn records(stream: S, metadata: RecordMetadata, ordering: OrderRequirement) -> Self {
+        Self::records_with_capability(stream, metadata, RecordCapability::sequential(ordering))
+    }
+
+    /// Construct a record stream retaining the caller's full capability declaration.
+    /// The caller must ensure the stream supports the declared operations. Like
+    /// [`Self::records`], this attaches `metadata.source` to lazy errors without
+    /// polling the stream.
+    pub fn records_with_capability(
+        stream: S,
+        metadata: RecordMetadata,
+        capability: RecordCapability,
+    ) -> Self {
         let object = metadata.source.clone();
         StreamReader::new(stream, metadata)
-            .with_capability(RecordCapability::sequential(ordering))
+            .with_capability(capability)
             .with_object(object)
     }
 }
@@ -123,7 +144,7 @@ pub fn bytes_reader(bytes: Bytes, source: Option<ObjectRef>) -> impl ByteReader 
         content_length: Some(bytes.len() as u64),
         version: None,
     };
-    StreamReader::new(
+    StreamReader::bytes(
         futures::stream::iter((!bytes.is_empty()).then_some(Ok(bytes))),
         metadata,
     )

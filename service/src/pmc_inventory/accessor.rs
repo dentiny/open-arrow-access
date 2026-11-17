@@ -1,10 +1,9 @@
 use super::{manifest, reader::InventoryTransform};
 use arrow_schema::Schema;
-use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, Capability, ObjectRef, OrderRequirement, ReadRequest,
-    RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner,
-    async_trait,
+    RecordCapability, RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, async_trait,
+    scan_partition,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -134,16 +133,8 @@ impl<A: ByteAccessor + 'static> ScanPlanner for PmcInventoryAccessor<A> {
             let transform = transform.clone();
             let source = source.clone();
             let request = request.clone();
-            Box::pin(async move {
-                Ok(
-                    Box::new(transform.create_reader(source, vec![file], request))
-                        as Box<dyn RecordReader>,
-                )
-            }) as ScanPartition
+            scan_partition(async move { Ok(transform.create_reader(source, vec![file], request)) })
         });
-        Ok(
-            ScanPlan::from_stream(metadata, stream::iter(partitions.map(Ok)))
-                .with_ordering(self.capability().ordering),
-        )
+        Ok(ScanPlan::from_iter(metadata, partitions).with_ordering(self.capability().ordering))
     }
 }

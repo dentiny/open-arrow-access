@@ -2,7 +2,7 @@ use std::{future::Future, ops::Range, time::Instant};
 
 use futures::{StreamExt, TryStreamExt};
 
-use super::{InMemoryExporter, MetricEvent, MetricValue, MetricsExporter};
+use super::{InMemoryExporter, MetricsExporter};
 use crate::{
     Accessor, ByteAccessor, ByteReader, Bytes, Layer, ListRequest, ObjectStream, Reader,
     RecordBatch, RecordReader, Result, ScanPlan, ScanPlanner, ScanStatistics, StatisticsProvider,
@@ -77,6 +77,13 @@ where
     fn capability(&self) -> <A::Reader as Reader>::Capability {
         self.inner.capability()
     }
+    async fn metadata(&self, request: Self::Request) -> Result<<Self::Reader as Reader>::Metadata>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        self.inner.metadata(request).await
+    }
+
     async fn open(&self, request: A::Request) -> Result<Box<A::Reader>> {
         Call::observe(&self.exporter, "open", self.inner.open(request))
             .await
@@ -145,11 +152,7 @@ impl<'a, E: MetricsExporter> Call<'a, E> {
         future: impl Future<Output = Result<T>>,
     ) -> Result<T> {
         exporter.record_counter("oaa_calls_total", operation, 1);
-        exporter.record(MetricEvent {
-            name: "oaa_executing",
-            operation,
-            value: MetricValue::Gauge(1),
-        });
+        exporter.record_gauge("oaa_executing", operation, 1);
         let mut call = Self {
             exporter,
             operation,
@@ -171,16 +174,13 @@ impl<E: MetricsExporter> Drop for Call<'_, E> {
             self.exporter
                 .record_counter("oaa_cancelled_total", self.operation, 1);
         }
-        self.exporter.record(MetricEvent {
-            name: "oaa_call_duration_seconds",
-            operation: self.operation,
-            value: MetricValue::Observation(self.start.elapsed().as_secs_f64()),
-        });
-        self.exporter.record(MetricEvent {
-            name: "oaa_executing",
-            operation: self.operation,
-            value: MetricValue::Gauge(-1),
-        });
+        self.exporter.record_observation(
+            "oaa_call_duration_seconds",
+            self.operation,
+            self.start.elapsed().as_secs_f64(),
+        );
+        self.exporter
+            .record_gauge("oaa_executing", self.operation, -1);
     }
 }
 

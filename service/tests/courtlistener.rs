@@ -1,6 +1,5 @@
 use std::{num::NonZeroUsize, sync::Arc};
 
-use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteReadOptions, ByteReadRequest, ErrorKind, Result, ScanPlanner,
@@ -159,7 +158,7 @@ async fn snapshot_record_plans_preserve_validation_order_and_quoted_csv() {
     let plan = records.plan_scan(selection.clone()).await.unwrap();
     assert_eq!(plan.partitions.size_hint().0, 2);
     drop(plan);
-    let mut reader = records
+    let reader = records
         .layer(ParallelReadLayer::new(
             NonZeroUsize::new(2).unwrap(),
             NonZeroUsize::new(1).unwrap(),
@@ -167,15 +166,7 @@ async fn snapshot_record_plans_preserve_validation_order_and_quoted_csv() {
         .open(selection)
         .await
         .unwrap();
-    let mut ids = Vec::new();
-    while let Some(batch) = reader.next().await.unwrap() {
-        ids.extend(
-            batch["id"]
-                .as_string::<i32>()
-                .iter()
-                .map(|value| value.unwrap().to_owned()),
-        );
-    }
+    let ids = open_arrow_access_test_support::record::collect_strings::<i32>(reader, 0).await;
     assert_eq!(
         ids,
         ["nc", "minnag", "arizsuper", "nc", "minnag", "arizsuper"]

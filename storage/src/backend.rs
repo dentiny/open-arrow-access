@@ -225,6 +225,11 @@ struct OpenDalReader {
 }
 
 impl OpenDalReader {
+    fn clear_sequential_input(&mut self) {
+        self.sequential = None;
+        self.pending = opendal::Buffer::new();
+    }
+
     async fn read_next_chunk(&mut self) -> Result<Bytes> {
         let path = self.metadata.source.as_ref().unwrap().locator();
         if self.sequential.is_none() {
@@ -274,6 +279,7 @@ impl OpenDalReader {
         if range.is_empty() {
             return Ok(Bytes::new());
         }
+        let path = self.metadata.source.as_ref().unwrap().locator();
         let expected = range.end - range.start;
         if expected > MAX_FETCH_BATCH_SIZE {
             // Parquet requires contiguous Bytes. Copy incrementally into the
@@ -284,16 +290,15 @@ impl OpenDalReader {
                 .inner
                 .read_into(&mut output, range)
                 .await
-                .map_err(|e| {
-                    map_error("read", self.metadata.source.as_ref().unwrap().locator(), e)
-                })?;
+                .map_err(|error| map_error("read", path, error))?;
             crate::validation::validate_read_length(read as u64, capacity as u64, "read_range")?;
             return Ok(Bytes::from(output));
         }
-        let buffer =
-            self.inner.read(range).await.map_err(|e| {
-                map_error("read", self.metadata.source.as_ref().unwrap().locator(), e)
-            })?;
+        let buffer = self
+            .inner
+            .read(range)
+            .await
+            .map_err(|error| map_error("read", path, error))?;
         crate::validation::validate_read_length(buffer.len() as u64, expected, "read_range")?;
         Ok(buffer.to_bytes())
     }
@@ -303,13 +308,12 @@ impl OpenDalReader {
             .iter()
             .map(|range| range.end - range.start)
             .collect::<Vec<_>>();
-        let buffers = self.inner.fetch(ranges).await.map_err(|e| {
-            map_error(
-                "read_ranges",
-                self.metadata.source.as_ref().unwrap().locator(),
-                e,
-            )
-        })?;
+        let path = self.metadata.source.as_ref().unwrap().locator();
+        let buffers = self
+            .inner
+            .fetch(ranges)
+            .await
+            .map_err(|error| map_error("read_ranges", path, error))?;
         buffers
             .into_iter()
             .zip(lengths)
@@ -347,15 +351,13 @@ impl Reader for OpenDalReader {
     async fn next(&mut self) -> Result<Option<Bytes>> {
         if self.state.is_finished() || self.offset == self.len {
             self.state.finish();
-            self.sequential = None;
-            self.pending = opendal::Buffer::new();
+            self.clear_sequential_input();
             return Ok(None);
         }
         let result = self.read_next_chunk().await.map(Some);
         self.state.observe(&result);
         if self.state.is_finished() {
-            self.sequential = None;
-            self.pending = opendal::Buffer::new();
+            self.clear_sequential_input();
         }
         result
     }
@@ -418,9 +420,5 @@ fn compact_range_buffer(buffer: opendal::Buffer) -> Bytes {
     if buffer.len() > 4096 {
         return buffer.to_bytes();
     }
-    let mut output = Vec::with_capacity(buffer.len());
-    for chunk in buffer {
-        output.extend_from_slice(&chunk);
-    }
-    Bytes::from(output)
+    Bytes::from(buffer.to_vec())
 }

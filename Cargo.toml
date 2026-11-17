@@ -157,76 +157,8 @@ open-arrow-access-test-support.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
 tokio.workspace = true
 
-[[example]]
-name = "read_huggingface"
-required-features = ["service-huggingface"]
-
-[[example]]
-name = "read_gutenberg"
-required-features = ["service-gutenberg"]
-
-[[example]]
-name = "read_pmc"
-required-features = ["service-pmc"]
-
-[[example]]
-name = "read_parquet"
-required-features = ["format-parquet"]
-
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
 [lints]
 workspace = true
-
-[[example]]
-name = "read_xml"
-required-features = ["format-xml"]
-
-[[example]]
-name = "read_atif"
-required-features = ["format-atif"]
-
-[[example]]
-name = "read_pmc_inventory"
-required-features = ["service-pmc"]
-
-[[example]]
-name = "read_courtlistener"
-required-features = ["service-courtlistener"]
-
-[[example]]
-name = "read_zip"
-required-features = ["decompression-zip"]
-
-[[example]]
-name = "read_zenodo"
-required-features = ["service-zenodo"]
-
-[[example]]
-name = "read_dataverse"
-required-features = ["service-dataverse"]
-
-[[example]]
-name = "read_tar"
-required-features = ["decompression-tar"]
-
-[[example]]
-name = "read_arxiv"
-required-features = ["service-arxiv"]
-
-[[example]]
-name = "read_internet_archive"
-required-features = ["service-internet-archive"]
-
-[[example]]
-name = "schema_evolution"
-required-features = ["format-json"]
-
-[[example]]
-name = "generated_columns"
-required-features = ["format-json"]
-
-[[example]]
-name = "parallel_sampling"
-required-features = ["format-json"]
