@@ -59,8 +59,8 @@ impl PrefetchLayer {
         self
     }
 
-    fn cost(self, rows: usize, bytes: usize) -> Cost {
-        Cost {
+    fn usage(self, rows: usize, bytes: usize) -> BudgetUsage {
+        BudgetUsage {
             rows: self.max_rows.map_or(0, |max| rows.max(1).min(max.get())),
             bytes: self
                 .max_estimated_bytes
@@ -119,7 +119,7 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for PrefetchAccessor<A> {
 }
 
 #[derive(Clone, Copy, Default)]
-struct Cost {
+struct BudgetUsage {
     rows: usize,
     bytes: usize,
 }
@@ -128,31 +128,31 @@ struct Cost {
 /// channel, avoiding shared locks and keeping each reservation cancellation-safe.
 struct Budget {
     settings: PrefetchLayer,
-    used: Cost,
-    releases: mpsc::UnboundedReceiver<Cost>,
+    used: BudgetUsage,
+    releases: mpsc::UnboundedReceiver<BudgetUsage>,
 }
 
 impl Budget {
-    fn fits(&self, cost: Cost) -> bool {
+    fn fits(&self, usage: BudgetUsage) -> bool {
         self.settings
             .max_rows
-            .is_none_or(|max| cost.rows <= max.get() - self.used.rows)
+            .is_none_or(|max| usage.rows <= max.get() - self.used.rows)
             && self
                 .settings
                 .max_estimated_bytes
-                .is_none_or(|max| cost.bytes <= max.get() - self.used.bytes)
+                .is_none_or(|max| usage.bytes <= max.get() - self.used.bytes)
     }
 
-    fn release(&mut self, cost: Cost) {
-        self.used.rows -= cost.rows;
-        self.used.bytes -= cost.bytes;
+    fn release(&mut self, usage: BudgetUsage) {
+        self.used.rows -= usage.rows;
+        self.used.bytes -= usage.bytes;
     }
 
-    async fn wait_for(&mut self, cost: Cost) -> bool {
+    async fn wait_for(&mut self, usage: BudgetUsage) -> bool {
         while let Ok(released) = self.releases.try_recv() {
             self.release(released);
         }
-        while !self.fits(cost) {
+        while !self.fits(usage) {
             let Some(released) = self.releases.recv().await else {
                 return false;
             };
@@ -164,17 +164,17 @@ impl Budget {
 
 async fn produce(
     mut inner: Box<dyn RecordReader>,
-    sender: mpsc::UnboundedSender<(Result<RecordBatch>, Cost)>,
+    sender: mpsc::UnboundedSender<(Result<RecordBatch>, BudgetUsage)>,
     mut budget: Budget,
 ) {
     // Reserve no extra batch when either enabled budget is already full.
-    while budget.wait_for(budget.settings.cost(1, 1)).await {
+    while budget.wait_for(budget.settings.usage(1, 1)).await {
         tokio::task::consume_budget().await;
         let batch = match inner.next().await {
             Ok(Some(batch)) => batch,
             Ok(None) => return,
             Err(error) => {
-                let _ = sender.send((Err(error), Cost::default()));
+                let _ = sender.send((Err(error), BudgetUsage::default()));
                 return;
             }
         };
@@ -183,13 +183,13 @@ async fn produce(
         } else {
             0
         };
-        let cost = budget.settings.cost(batch.num_rows(), bytes);
-        if !budget.wait_for(cost).await {
+        let usage = budget.settings.usage(batch.num_rows(), bytes);
+        if !budget.wait_for(usage).await {
             return;
         }
-        budget.used.rows += cost.rows;
-        budget.used.bytes += cost.bytes;
-        if sender.send((Ok(batch), cost)).is_err() {
+        budget.used.rows += usage.rows;
+        budget.used.bytes += usage.bytes;
+        if sender.send((Ok(batch), usage)).is_err() {
             return;
         }
     }
@@ -198,8 +198,8 @@ async fn produce(
 struct PrefetchState {
     inner: Option<Box<dyn RecordReader>>,
     settings: PrefetchLayer,
-    receiver: Option<mpsc::UnboundedReceiver<(Result<RecordBatch>, Cost)>>,
-    releases: Option<mpsc::UnboundedSender<Cost>>,
+    receiver: Option<mpsc::UnboundedReceiver<(Result<RecordBatch>, BudgetUsage)>>,
+    releases: Option<mpsc::UnboundedSender<BudgetUsage>>,
     // JoinSet aborts its worker when the stream is dropped, even during unfold's await.
     tasks: JoinSet<()>,
 }
@@ -219,15 +219,15 @@ impl PrefetchState {
                     sender,
                     Budget {
                         settings: self.settings,
-                        used: Cost::default(),
+                        used: BudgetUsage::default(),
                         releases: released,
                     },
                 ),
                 &runtime,
             );
         }
-        if let Some((result, cost)) = self.receiver.as_mut().unwrap().recv().await {
-            let _ = self.releases.as_ref().unwrap().send(cost);
+        if let Some((result, usage)) = self.receiver.as_mut().unwrap().recv().await {
+            let _ = self.releases.as_ref().unwrap().send(usage);
             return result.map(Some);
         }
         // A closed queue is EOF only after checking for a worker panic. Queued
