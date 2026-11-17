@@ -50,45 +50,42 @@ fn input(
     ))
 }
 
+#[rstest::rstest]
+#[case::rows(PrefetchLayer::rows(n(4)), 3)]
+#[case::bytes(PrefetchLayer::estimated_bytes(n(batch(2).get_array_memory_size())), 2)]
+#[case::oversized_rows(PrefetchLayer::rows(n(1)), 2)]
+#[case::oversized_bytes(PrefetchLayer::estimated_bytes(n(1)), 2)]
+#[case::both_bytes_first(
+    PrefetchLayer::rows(n(100)).with_max_estimated_bytes(n(batch(2).get_array_memory_size())),
+    2,
+)]
+#[case::both_rows_first(
+    PrefetchLayer::estimated_bytes(n(batch(2).get_array_memory_size() * 100)).with_max_rows(n(4)),
+    3,
+)]
 #[tokio::test]
-async fn reads_ahead_to_the_first_enabled_budget_and_refills_on_consumption() {
+async fn reads_ahead_to_the_first_enabled_budget_and_refills_on_consumption(
+    #[case] layer: PrefetchLayer,
+    #[case] depth: u32,
+) {
+    let produced = Arc::new(Semaphore::new(0));
+    let signal = produced.clone();
     let value = batch(2);
-    let bytes = value.get_array_memory_size();
-    // Each limit can independently stop read-ahead, including when both are set.
-    // Oversized batches must still make progress, one queued batch at a time.
-    for (layer, depth) in [
-        (PrefetchLayer::rows(n(4)), 3),
-        (PrefetchLayer::estimated_bytes(n(bytes)), 2),
-        (PrefetchLayer::rows(n(1)), 2),
-        (PrefetchLayer::estimated_bytes(n(1)), 2),
-        (
-            PrefetchLayer::rows(n(100)).with_max_estimated_bytes(n(bytes)),
-            2,
-        ),
-        (
-            PrefetchLayer::estimated_bytes(n(bytes * 100)).with_max_rows(n(4)),
-            3,
-        ),
-    ] {
-        let produced = Arc::new(Semaphore::new(0));
-        let signal = produced.clone();
-        let value = value.clone();
-        let stream = stream::iter((0..12).map(move |_| Ok(value.clone())))
-            .inspect(move |_| signal.add_permits(1));
-        let mut reader = Source.layer(layer).open(input(stream)).await.unwrap();
-        reader.next().await.unwrap().unwrap();
-        // Current-thread scheduling lets the worker run until its next suspension.
-        produced.acquire_many(depth).await.unwrap().forget();
-        assert_eq!(produced.available_permits(), 0);
-        reader.next().await.unwrap().unwrap();
-        produced.acquire().await.unwrap().forget();
-        assert_eq!(produced.available_permits(), 0);
-        let mut count = 2;
-        while reader.next().await.unwrap().is_some() {
-            count += 1;
-        }
-        assert_eq!(count, 12);
+    let stream = stream::iter((0..12).map(move |_| Ok(value.clone())))
+        .inspect(move |_| signal.add_permits(1));
+    let mut reader = Source.layer(layer).open(input(stream)).await.unwrap();
+    reader.next().await.unwrap().unwrap();
+    // Current-thread scheduling lets the worker run until its next suspension.
+    produced.acquire_many(depth).await.unwrap().forget();
+    assert_eq!(produced.available_permits(), 0);
+    reader.next().await.unwrap().unwrap();
+    produced.acquire().await.unwrap().forget();
+    assert_eq!(produced.available_permits(), 0);
+    let mut count = 2;
+    while reader.next().await.unwrap().is_some() {
+        count += 1;
     }
+    assert_eq!(count, 12);
 }
 
 #[tokio::test]
