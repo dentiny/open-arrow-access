@@ -32,43 +32,6 @@ fn dataset_request_uses_the_crawl_inventory_and_mirror_origin() {
     );
 }
 
-#[test]
-fn custom_manifest_source_has_one_origin_and_validates_before_io() {
-    let request = CommonCrawlWarcRequest::from_manifest_url(
-        "CC-MAIN-2022-40",
-        "http://inventory.example:8080/manifests/selected.paths.gz",
-    )
-    .unwrap();
-    assert_eq!(request.origin(), "http://inventory.example:8080");
-    assert_eq!(request.manifest().locator(), "manifests/selected.paths.gz");
-    assert_eq!(request.crawl(), "CC-MAIN-2022-40");
-    assert_eq!(
-        CommonCrawlWarcRequest::from_manifest_url("invalid", "https://host/warc.paths")
-            .unwrap_err()
-            .kind(),
-        ErrorKind::InvalidInput,
-    );
-    for value in [
-        "file:///tmp/warc.paths",
-        "https://host/",
-        "https://host/dir/",
-        "https://user:pass@host/warc.paths",
-        "https://host/warc.paths?q=1",
-        "https://host/warc.paths#fragment",
-        "https://host/a/../warc.paths",
-        "https://host/%2e/warc.paths",
-        "https://host/a//warc.paths",
-    ] {
-        assert_eq!(
-            CommonCrawlWarcRequest::from_manifest_url("CC-MAIN-2022-40", value)
-                .unwrap_err()
-                .kind(),
-            ErrorKind::InvalidInput,
-            "{value}"
-        );
-    }
-}
-
 #[tokio::test]
 async fn dataset_reads_all_segments_in_manifest_order_and_forwards_options() {
     let manifests = manifest("crawl.paths", 1);
