@@ -18,14 +18,7 @@ impl SchemaEvolutionPlan {
         let source = &inner.metadata().schema;
         validation::validate_evolution_input_schema(source, &self.source_schema)?;
         self.source_schema = source.clone();
-        if self.steps.is_empty()
-            && self.target_schema == *source
-            && self
-                .output_indices
-                .iter()
-                .copied()
-                .eq(0..source.fields().len())
-        {
+        if self.is_identity(source) {
             return Ok(inner);
         }
         let capability = inner.capability();
@@ -39,10 +32,15 @@ impl SchemaEvolutionPlan {
     }
 
     pub(super) fn into_positioned_reader(
-        self,
+        mut self,
         inner: Box<dyn PositionedRecordReader>,
     ) -> Result<Box<dyn PositionedRecordReader>> {
-        validation::validate_evolution_input_schema(&inner.metadata().schema, &self.source_schema)?;
+        let source = &inner.metadata().schema;
+        validation::validate_evolution_input_schema(source, &self.source_schema)?;
+        self.source_schema = source.clone();
+        if self.is_identity(source) {
+            return Ok(inner);
+        }
         let capability = inner.capability();
         let schema = self.target_schema.clone();
         Ok(Box::new(map_positioned_reader(
@@ -51,6 +49,16 @@ impl SchemaEvolutionPlan {
             capability,
             move |batch| self.convert(batch),
         )))
+    }
+
+    fn is_identity(&self, source: &arrow_schema::SchemaRef) -> bool {
+        self.steps.is_empty()
+            && self.target_schema == *source
+            && self
+                .output_indices
+                .iter()
+                .copied()
+                .eq(0..source.fields().len())
     }
 
     fn convert(&self, batch: RecordBatch) -> Result<RecordBatch> {
