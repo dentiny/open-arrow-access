@@ -1,6 +1,6 @@
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, Layer, RecordCapability, RecordReader, Result, StreamReader, async_trait,
+    Accessor, Layer, RecordCapability, RecordReader, Result, async_trait, map_record_stream,
 };
 
 /// Keep at most the first `rows` rows of each opened record scan.
@@ -70,29 +70,27 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for LimitAccessor<A> {
 
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
         let inner = self.inner.open(request).await?;
-        let metadata = inner.metadata().clone();
-        let capability = inner.capability();
-        let inner = (self.rows != 0).then_some(inner);
-        let batches = stream::unfold((inner, self.rows), |(inner, remaining)| async move {
-            let mut inner = inner?;
-            let batch = match inner.next().await {
-                Ok(Some(batch)) => batch,
-                Ok(None) => return None,
-                Err(error) => return Some((Err(error), (None, 0))),
-            };
-            let rows = remaining.min(batch.num_rows() as u64) as usize;
-            let batch = if rows < batch.num_rows() {
-                batch.slice(0, rows)
-            } else {
-                batch
-            };
-            let remaining = remaining - rows as u64;
-            // Release even when the caller never asks for EOF after the last batch.
-            let inner = (remaining != 0).then_some(inner);
-            Some((Ok(batch), (inner, remaining)))
-        });
-        Ok(Box::new(StreamReader::records_with_capability(
-            batches, metadata, capability,
-        )))
+        let rows = self.rows;
+        Ok(Box::new(map_record_stream(inner, move |inner| {
+            let inner = (rows != 0).then_some(inner);
+            stream::unfold((inner, rows), |(inner, remaining)| async move {
+                let mut inner = inner?;
+                let batch = match inner.next().await {
+                    Ok(Some(batch)) => batch,
+                    Ok(None) => return None,
+                    Err(error) => return Some((Err(error), (None, 0))),
+                };
+                let rows = remaining.min(batch.num_rows() as u64) as usize;
+                let batch = if rows < batch.num_rows() {
+                    batch.slice(0, rows)
+                } else {
+                    batch
+                };
+                let remaining = remaining - rows as u64;
+                // Release even when the caller never asks for EOF after the last batch.
+                let inner = (remaining != 0).then_some(inner);
+                Some((Ok(batch), (inner, remaining)))
+            })
+        })))
     }
 }

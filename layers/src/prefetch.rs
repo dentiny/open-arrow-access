@@ -2,8 +2,8 @@ use std::num::NonZeroUsize;
 
 use futures::{TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, Error, Layer, RecordBatch, RecordCapability, RecordReader, Result, StreamReader,
-    async_trait,
+    Accessor, Error, Layer, RecordBatch, RecordCapability, RecordReader, Result, async_trait,
+    map_record_stream,
 };
 use tokio::{sync::mpsc, task::JoinSet};
 
@@ -107,20 +107,17 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for PrefetchAccessor<A> {
 
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
         let inner = self.inner.open(request).await?;
-        let metadata = inner.metadata().clone();
-        let capability = inner.capability();
         let settings = self.settings;
-        let batches = stream::once(async move {
-            let state = PrefetchState::start(inner, settings)?;
-            Ok::<_, Error>(stream::try_unfold(state, |mut state| async move {
-                let batch = state.next().await?;
-                Ok::<_, Error>(batch.map(|batch| (batch, state)))
-            }))
-        })
-        .try_flatten();
-        Ok(Box::new(StreamReader::records_with_capability(
-            batches, metadata, capability,
-        )))
+        Ok(Box::new(map_record_stream(inner, move |inner| {
+            stream::once(async move {
+                let state = PrefetchState::start(inner, settings)?;
+                Ok::<_, Error>(stream::try_unfold(state, |mut state| async move {
+                    let batch = state.next().await?;
+                    Ok::<_, Error>(batch.map(|batch| (batch, state)))
+                }))
+            })
+            .try_flatten()
+        })))
     }
 }
 
