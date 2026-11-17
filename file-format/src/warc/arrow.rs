@@ -157,13 +157,9 @@ pub(super) fn raw_projection(output: &SchemaRef) -> Result<SchemaRef> {
         .fields()
         .iter()
         .map(|field| field.name().clone())
-        .collect();
-    open_arrow_access_core::ReadOptions {
-        projection: Some(names),
-        ..Default::default()
-    }
-    .resolve_projection(&raw_arrow_schema())
-    .map(|projection| projection.schema)
+        .collect::<Vec<_>>();
+    open_arrow_access_core::ResolvedProjection::resolve(&raw_arrow_schema(), Some(&names))
+        .map(|projection| projection.schema)
 }
 
 #[async_trait]

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use arrow_schema::{DataType, Field, Schema};
 use datafusion::prelude::{col, lit};
 use open_arrow_access::{
-    Accessor, AccessorExt, ReadOptions, ReadRequest,
+    Accessor, AccessorExt, ReadRequest,
     file_format::json::JsonAccessor,
     layers::{ColumnEvolution, SchemaEvolutionLayer},
     storage::{OpenDalAccessor, opendal},
@@ -35,10 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_source_schema(source_schema),
     );
     // Unlisted fields are preserved. Projection uses evolved names and order.
-    let request = ReadRequest::new("projection.jsonl").with_options(ReadOptions {
-        projection: Some(vec!["next_id".into(), "record_id".into()]),
-        ..Default::default()
-    });
+    let request = ReadRequest::new("projection.jsonl").with_projection(["next_id", "record_id"]);
     let mut reader = records.open(request).await?;
     println!("Output schema: {:?}", reader.metadata().schema);
     while let Some(batch) = reader.next().await? {
