@@ -75,25 +75,19 @@ async fn medrxiv_empty_windows_and_validation() {
             .kind(),
         ErrorKind::InvalidInput
     );
-    assert_eq!(Server::Medrxiv.bulk_bucket(), "medrxiv-src-monthly");
-}
-
-#[rstest::rstest]
-#[case::wrong_cursor("bad-cursor.json")]
-#[case::inconsistent_count("bad-count.json")]
-#[case::api_error("bad-status.json")]
-#[tokio::test]
-async fn malformed_pagination_and_api_errors_fail(#[case] name: &str) {
-    open_arrow_access_test_support::http::assert_resolution_cases(
-        env!("CARGO_MANIFEST_DIR"),
-        "biorxiv",
-        "/details/biorxiv/2026-11-01/2026-11-01/0/json",
-        &[(name, StatusCode::OK, ErrorKind::Decode)],
-        |endpoint, context| async move {
-            BiorxivService::with_connection(providers::connection_at(&endpoint, context))
-                .details(Server::Biorxiv, "2026-11-01", "2026-11-01", 0)
+    for name in ["bad-cursor.json", "bad-count.json", "bad-status.json"] {
+        api.respond(
+            "/details/biorxiv/2026-11-01/2026-11-01/0/json",
+            StatusCode::OK,
+            fixture!("biorxiv", name).await,
+        );
+        assert_eq!(
+            s.details(Server::Biorxiv, "2026-11-01", "2026-11-01", 0)
                 .await
-        },
-    )
-    .await;
+                .unwrap_err()
+                .kind(),
+            ErrorKind::Decode
+        );
+    }
+    assert_eq!(Server::Medrxiv.bulk_bucket(), "medrxiv-src-monthly");
 }

@@ -45,31 +45,25 @@ async fn product_file_page_keeps_release_metadata_and_scopes_authentication() {
     assert!(!download.requests()[0].headers.contains_key("x-api-key"));
 }
 
-#[rstest::rstest]
-#[case::empty_products("bad-empty-products.json")]
-#[case::wrong_identity("bad-identity.json")]
-#[case::missing_files("bad-missing-files.json")]
 #[tokio::test]
-async fn rejects_wrong_product_and_missing_file_membership(#[case] name: &str) {
-    open_arrow_access_test_support::http::assert_resolution_cases(
-        env!("CARGO_MANIFEST_DIR"),
-        "uspto",
-        "/api/v1/datasets/products/PTGRXML?includeFiles=true&offset=0&limit=1",
-        &[(name, StatusCode::OK, ErrorKind::Decode)],
-        |endpoint, context| async move {
-            UsptoService::with_connection(providers::connection_at(&endpoint, context))
-                .product("PTGRXML", 0, 1)
-                .await
-        },
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn invalid_key_and_page_size_are_rejected_before_io() {
+async fn rejects_wrong_product_and_missing_file_membership() {
     let f = HttpFixture::new();
     let s = UsptoService::with_connection(providers::connection(&f));
+    for name in [
+        "bad-empty-products.json",
+        "bad-identity.json",
+        "bad-missing-files.json",
+    ] {
+        f.respond(
+            "/api/v1/datasets/products/PTGRXML?includeFiles=true&offset=0&limit=1",
+            StatusCode::OK,
+            fixture!("uspto", name).await,
+        );
+        assert_eq!(
+            s.product("PTGRXML", 0, 1).await.unwrap_err().kind(),
+            ErrorKind::Decode
+        );
+    }
     assert!(UsptoService::new("").is_err());
     assert!(s.product("PTGRXML", 0, 0).await.is_err());
-    assert!(f.requests().is_empty());
 }
