@@ -277,6 +277,11 @@ row/order semantics unless the layer explicitly changes them, and terminal
 EOF/error behavior. Byte wrappers must forward range/listing operations or
 remove their capabilities. Record wrappers must explicitly forward/strengthen
 ordering. A schema transformation must describe every output batch consistently.
+Use core's `schema_checked_reader(reader, expected_schema, error_factory)` when
+an extension needs an exact fixed-schema contract. It checks opened metadata
+without polling and validates each batch lazily, retaining source and capability
+metadata. The supplied error factory controls mismatch classification and
+operation; `validate_schema` provides the same equality check without a wrapper.
 See [`SamplingLayer`](../layers/src/sampling.rs) for a complete reader wrapper.
 
 `source.layer(a).layer(b)` puts `b` outermost. Generated columns and sampling

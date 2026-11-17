@@ -115,13 +115,13 @@ impl BoundSource {
             Some(reader) => reader,
             None => self.selection.open().await?,
         };
-        if reader.metadata().schema != self.metadata.schema {
-            return Err(Error::new(
+        crate::validate_schema(&reader.metadata().schema, &self.metadata.schema, || {
+            Error::new(
                 ErrorKind::Decode,
                 "bound_source_reader",
                 "source schema differs from the schema fixed at bind",
-            ));
-        }
+            )
+        })?;
         Ok(reader)
     }
 }

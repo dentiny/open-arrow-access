@@ -15,7 +15,7 @@ use open_arrow_access_file_format::{
 };
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_storage::OpenDalAccessor;
-use open_arrow_access_test_support::MemoryAccessor;
+use open_arrow_access_test_support::{MemoryAccessor, record::collect_nullable_strings};
 use parquet::arrow::AsyncArrowWriter;
 
 #[tokio::test]
@@ -302,13 +302,10 @@ async fn parquet_union_by_name_only_relaxes_missing_fields() {
     while let Some(batch) = reader.next().await.unwrap() {
         ids.extend_from_slice(batch.column(0).as_primitive::<Int64Type>().values());
         left_values.extend(batch.column(1).as_primitive::<Int64Type>().iter());
-        right_values.extend(
-            batch
-                .column(2)
-                .as_string::<i32>()
-                .iter()
-                .map(|value| value.map(str::to_owned)),
-        );
+        right_values.extend(collect_nullable_strings::<i32>(
+            std::slice::from_ref(&batch),
+            2,
+        ));
     }
     assert_eq!(ids, [1, 2, 3]);
     assert_eq!(left_values, [Some(10), Some(20), None]);

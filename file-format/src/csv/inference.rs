@@ -1,3 +1,5 @@
+use crate::scan::byte_chunks::ByteChunks;
+
 use std::{io::Cursor, sync::Arc};
 
 use arrow_schema::{DataType, Schema};

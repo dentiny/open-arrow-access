@@ -74,22 +74,14 @@ impl ScanPlan {
                 let schema = schema.clone();
                 async move {
                     let reader = partition.await?;
-                    crate::validation::validate_scan_schema(
-                        &reader.metadata().schema,
-                        &schema,
-                        schema_error,
-                    )?;
+                    crate::validate_schema(&reader.metadata().schema, &schema, schema_error)?;
                     Ok(into_stream(reader))
                 }
             })
             .try_flatten()
             .map(move |result| {
                 let batch = result?;
-                crate::validation::validate_scan_schema(
-                    &batch.schema(),
-                    &batch_schema,
-                    schema_error,
-                )?;
+                crate::validate_schema(&batch.schema(), &batch_schema, schema_error)?;
                 Ok(batch)
             });
         StreamReader::records(batches, self.metadata, self.ordering)
