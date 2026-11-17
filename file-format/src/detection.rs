@@ -8,16 +8,17 @@ pub enum DetectedFormat {
     JsonLines,
     Warc,
     Xml,
-    Atif,
 }
 
 /// Inspect a path suffix without I/O. One outer compression suffix is ignored;
 /// query and fragment text is excluded. Detection does not enable a decoder.
+/// Semantic formats such as ATIF require an explicitly selected reader.
 pub fn detect_format(path: &str) -> Option<DetectedFormat> {
-    let path = path.split(['?', '#']).next()?.to_ascii_lowercase();
+    let path = path.split(['?', '#']).next()?;
     let compression = open_arrow_access_decompression::CompressionFactory::default();
-    let path = compression.strip_suffix(&path);
-    Some(match path.rsplit_once('.')?.1 {
+    let path = compression.strip_suffix(path);
+    let extension = path.rsplit_once('.')?.1.to_ascii_lowercase();
+    Some(match extension.as_str() {
         "parquet" => DetectedFormat::Parquet,
         "csv" => DetectedFormat::Csv,
         "tsv" => DetectedFormat::Tsv,
@@ -25,7 +26,6 @@ pub fn detect_format(path: &str) -> Option<DetectedFormat> {
         "jsonl" | "ndjson" => DetectedFormat::JsonLines,
         "warc" => DetectedFormat::Warc,
         "xml" => DetectedFormat::Xml,
-        "atif" => DetectedFormat::Atif,
         _ => return None,
     })
 }
@@ -44,7 +44,7 @@ mod tests {
             ("a.ndjson.zstd?download=1", Some(DetectedFormat::JsonLines)),
             ("a.WARC.GZ", Some(DetectedFormat::Warc)),
             ("a.xml", Some(DetectedFormat::Xml)),
-            ("a.atif", Some(DetectedFormat::Atif)),
+            ("a.atif", None),
             ("warc.paths.gz", None),
         ] {
             assert_eq!(detect_format(path), format, "{path}");
