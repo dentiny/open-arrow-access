@@ -24,6 +24,8 @@ use open_arrow_access_core::{
 };
 use std::sync::Arc;
 
+// TODO: Support application-defined format registration; see the proposed
+// registration design in docs/extending.md and the tracking item in docs/roadmap.md.
 mod detection;
 mod error;
 mod validation;

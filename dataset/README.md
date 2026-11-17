@@ -103,6 +103,8 @@ Applications can still define their own formats by implementing `ReaderFactory`
 and binding them with `FileAccessor::from_format(storage, format)`. Compose that
 accessor with `FileSetAccessor` to read multiple files. These custom formats are
 not selected by `AutoFormatAccessor`, which currently has no registration API.
+See the [proposed registration design](../docs/extending.md#custom-format-registration-proposed)
+and its [roadmap TODO](../docs/roadmap.md#planned-capabilities).
 
 ```rust,ignore
 let auto = AutoFormatAccessor::new(storage);

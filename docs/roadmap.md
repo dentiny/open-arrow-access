@@ -28,6 +28,10 @@ new project-specific storage implementation.
 
 ## Planned capabilities
 
+- [ ] Allow applications to register custom formats with `AutoFormatAccessor`.
+  See the [proposed registration design](extending.md#custom-format-registration-proposed).
+
+
 | Workstream | Intended result | Prerequisite / completion boundary |
 | --- | --- | --- |
 | Cross-file union by name | Implemented: opt-in union and alignment of compatible shards | `with_union_by_name()`; conflicting types/metadata fail; implicit casts remain unsupported |
