@@ -25,16 +25,9 @@ impl<'a> XmlDocument<'a> {
             let (namespace, event) = reader.read_resolved_event().map_err(error::xml)?;
             match event {
                 Event::Start(element) | Event::Empty(element) => {
-                    validation::validate_root_name(
-                        std::str::from_utf8(element.local_name().as_ref()).map_err(error::xml)?,
-                        expected_root,
-                    )?;
+                    validation::validate_root_name(element.local_name().as_ref(), expected_root)?;
                     let namespace = match namespace {
-                        ResolveResult::Bound(namespace) => Some(
-                            std::str::from_utf8(namespace.as_ref())
-                                .map_err(error::xml)?
-                                .to_owned(),
-                        ),
+                        ResolveResult::Bound(namespace) => Some(namespace.as_ref().to_owned()),
                         ResolveResult::Unbound => None,
                         ResolveResult::Unknown(_) => {
                             return Err(error::invalid("unbound XML prefix"));
@@ -55,10 +48,7 @@ impl<'a> XmlDocument<'a> {
                     });
                 }
                 Event::DocType(value) => {
-                    validation::validate_doctype(
-                        std::str::from_utf8(value.as_ref()).map_err(error::xml)?,
-                        doctype.is_some(),
-                    )?;
+                    validation::validate_doctype(value.as_ref(), doctype.is_some())?;
                     doctype = Some((start, reader.buffer_position() as usize));
                 }
                 Event::Decl(_) | Event::Comment(_) | Event::PI(_) => {}

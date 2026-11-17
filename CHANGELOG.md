@@ -3,6 +3,7 @@
 ## 0.4.0 - 2026-11-16
 
 - Add opt-in source columns and source positions with user-configurable record framing.
+- Adapt XML metadata parsing to the quick-xml 0.42 string interfaces.
 - Replace compound return tuples with named result structs.
 - Add global row limits for record scans and registered compression codecs.
 - Select CSV delimiters per file, enforce strict JSON schemas, and coerce JSON scalar values into strings.
