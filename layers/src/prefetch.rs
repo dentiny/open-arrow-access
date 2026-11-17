@@ -1,8 +1,9 @@
 use std::num::NonZeroUsize;
 
-use futures::stream;
+use futures::{TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, Layer, RecordBatch, RecordCapability, RecordReader, Result, StreamReader, async_trait,
+    Accessor, Error, Layer, RecordBatch, RecordCapability, RecordReader, Result, StreamReader,
+    async_trait,
 };
 use tokio::{sync::mpsc, task::JoinSet};
 
@@ -101,16 +102,15 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for PrefetchAccessor<A> {
         let inner = self.inner.open(request).await?;
         let metadata = inner.metadata().clone();
         let capability = inner.capability();
-        let state = PrefetchState {
-            inner: Some(inner),
-            settings: self.settings,
-            receiver: None,
-            releases: None,
-            tasks: JoinSet::new(),
-        };
-        let batches = stream::unfold(state, |mut state| async move {
-            state.next().await.transpose().map(|item| (item, state))
-        });
+        let settings = self.settings;
+        let batches = stream::once(async move {
+            let state = PrefetchState::start(inner, settings)?;
+            Ok::<_, Error>(stream::try_unfold(state, |mut state| async move {
+                let batch = state.next().await?;
+                Ok::<_, Error>(batch.map(|batch| (batch, state)))
+            }))
+        })
+        .try_flatten();
         Ok(Box::new(
             StreamReader::records(batches, metadata, capability.ordering)
                 .with_capability(capability),
@@ -143,20 +143,13 @@ impl Budget {
                 .is_none_or(|max| usage.bytes <= max.get() - self.used.bytes)
     }
 
-    fn release(&mut self, usage: BudgetUsage) {
-        self.used.rows -= usage.rows;
-        self.used.bytes -= usage.bytes;
-    }
-
     async fn wait_for(&mut self, usage: BudgetUsage) -> bool {
-        while let Ok(released) = self.releases.try_recv() {
-            self.release(released);
-        }
         while !self.fits(usage) {
             let Some(released) = self.releases.recv().await else {
                 return false;
             };
-            self.release(released);
+            self.used.rows -= released.rows;
+            self.used.bytes -= released.bytes;
         }
         true
     }
@@ -164,19 +157,14 @@ impl Budget {
 
 async fn produce(
     mut inner: Box<dyn RecordReader>,
-    sender: mpsc::UnboundedSender<(Result<RecordBatch>, BudgetUsage)>,
+    sender: mpsc::UnboundedSender<(RecordBatch, BudgetUsage)>,
     mut budget: Budget,
-) {
+) -> Result<()> {
     // Reserve no extra batch when either enabled budget is already full.
     while budget.wait_for(budget.settings.usage(1, 1)).await {
         tokio::task::consume_budget().await;
-        let batch = match inner.next().await {
-            Ok(Some(batch)) => batch,
-            Ok(None) => return,
-            Err(error) => {
-                let _ = sender.send((Err(error), BudgetUsage::default()));
-                return;
-            }
+        let Some(batch) = inner.next().await? else {
+            break;
         };
         let bytes = if budget.settings.max_estimated_bytes.is_some() {
             batch.get_array_memory_size()
@@ -185,55 +173,58 @@ async fn produce(
         };
         let usage = budget.settings.usage(batch.num_rows(), bytes);
         if !budget.wait_for(usage).await {
-            return;
+            break;
         }
         budget.used.rows += usage.rows;
         budget.used.bytes += usage.bytes;
-        if sender.send((Ok(batch), usage)).is_err() {
-            return;
+        if sender.send((batch, usage)).is_err() {
+            break;
         }
     }
+    Ok(())
 }
 
 struct PrefetchState {
-    inner: Option<Box<dyn RecordReader>>,
-    settings: PrefetchLayer,
-    receiver: Option<mpsc::UnboundedReceiver<(Result<RecordBatch>, BudgetUsage)>>,
-    releases: Option<mpsc::UnboundedSender<BudgetUsage>>,
-    // JoinSet aborts its worker when the stream is dropped, even during unfold's await.
-    tasks: JoinSet<()>,
+    receiver: mpsc::UnboundedReceiver<(RecordBatch, BudgetUsage)>,
+    releases: mpsc::UnboundedSender<BudgetUsage>,
+    // Dropping the stream aborts the worker, including during a pending read.
+    tasks: JoinSet<Result<()>>,
 }
 
 impl PrefetchState {
+    fn start(inner: Box<dyn RecordReader>, settings: PrefetchLayer) -> Result<Self> {
+        let runtime =
+            tokio::runtime::Handle::try_current().map_err(crate::error::prefetch_runtime_error)?;
+        let (sender, receiver) = mpsc::unbounded_channel();
+        let (releases, released) = mpsc::unbounded_channel();
+        let mut tasks = JoinSet::new();
+        tasks.spawn_on(
+            produce(
+                inner,
+                sender,
+                Budget {
+                    settings,
+                    used: BudgetUsage::default(),
+                    releases: released,
+                },
+            ),
+            &runtime,
+        );
+        Ok(Self {
+            receiver,
+            releases,
+            tasks,
+        })
+    }
+
     async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if let Some(inner) = self.inner.take() {
-            let runtime = tokio::runtime::Handle::try_current()
-                .map_err(crate::error::prefetch_runtime_error)?;
-            let (sender, receiver) = mpsc::unbounded_channel();
-            let (releases, released) = mpsc::unbounded_channel();
-            self.receiver = Some(receiver);
-            self.releases = Some(releases);
-            self.tasks.spawn_on(
-                produce(
-                    inner,
-                    sender,
-                    Budget {
-                        settings: self.settings,
-                        used: BudgetUsage::default(),
-                        releases: released,
-                    },
-                ),
-                &runtime,
-            );
+        if let Some((batch, usage)) = self.receiver.recv().await {
+            let _ = self.releases.send(usage);
+            return Ok(Some(batch));
         }
-        if let Some((result, usage)) = self.receiver.as_mut().unwrap().recv().await {
-            let _ = self.releases.as_ref().unwrap().send(usage);
-            return result.map(Some);
-        }
-        // A closed queue is EOF only after checking for a worker panic. Queued
-        // batches (and source errors) retain their original delivery order.
+        // Drain queued batches before reporting the worker's error or panic.
         if let Some(joined) = self.tasks.join_next().await {
-            joined.map_err(crate::error::prefetch_task_error)?;
+            joined.map_err(crate::error::prefetch_task_error)??;
         }
         Ok(None)
     }
