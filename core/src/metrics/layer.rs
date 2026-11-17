@@ -87,7 +87,7 @@ where
     async fn inspect_metadata(
         &self,
         request: Self::Request,
-    ) -> Result<crate::MetadataInspection<<Self::Reader as Reader>::Metadata>>
+    ) -> Result<Option<<Self::Reader as Reader>::Metadata>>
     where
         <Self::Reader as Reader>::Metadata: Clone,
     {

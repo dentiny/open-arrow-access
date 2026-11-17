@@ -40,9 +40,7 @@ where
         let source = inspected.metadata.schema.clone();
         // A zero-field JSON object still has a row. Only skip an input when
         // inference proves it empty, without polling an output decoder.
-        if source.fields().is_empty()
-            && inner.inspect_metadata(request.clone()).await?.is_empty == Some(true)
-        {
+        if source.fields().is_empty() && inner.inspect_metadata(request.clone()).await?.is_none() {
             continue;
         }
         ordering = ordering.combine(file_ordering);

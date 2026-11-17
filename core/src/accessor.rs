@@ -4,15 +4,6 @@ use futures::stream::BoxStream;
 
 use crate::{ByteReadRequest, ByteReader, ListRequest, ObjectRef, Reader, Result, async_trait};
 
-/// Metadata inspection plus an optional proof of whether the output has no rows.
-/// A zero-column schema alone cannot distinguish an empty file from a JSON `{}` row.
-#[derive(Clone, Debug)]
-pub struct MetadataInspection<M> {
-    pub metadata: M,
-    /// `None` means unknown without reading output. Never infer emptiness from field count.
-    pub is_empty: Option<bool>,
-}
-
 /// Factory for independently owned readers, with typed requests and outputs.
 /// Use the re-exported `#[async_trait]` for `dyn` accessors with Send futures.
 #[async_trait]
@@ -41,19 +32,17 @@ pub trait Accessor: Send + Sync {
         Ok(self.open(request).await?.metadata().clone())
     }
 
-    /// Inspect metadata and optionally report emptiness established during inference.
-    /// The default leaves row presence unknown and preserves `metadata`'s fallback.
+    /// Inspect metadata, returning `None` only for a proven empty input with no schema.
+    /// Preserve `Some` for unknown row presence, explicit schemas, and JSON `{}` rows.
+    /// The default wraps `metadata` in `Some` and inherits its fallback.
     async fn inspect_metadata(
         &self,
         request: Self::Request,
-    ) -> Result<MetadataInspection<<Self::Reader as Reader>::Metadata>>
+    ) -> Result<Option<<Self::Reader as Reader>::Metadata>>
     where
         <Self::Reader as Reader>::Metadata: Clone,
     {
-        Ok(MetadataInspection {
-            metadata: self.metadata(request).await?,
-            is_empty: None,
-        })
+        Ok(Some(self.metadata(request).await?))
     }
 
     /// Open the accessor-defined selection and options in `request`.
@@ -87,7 +76,7 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
     async fn inspect_metadata(
         &self,
         request: Self::Request,
-    ) -> Result<MetadataInspection<<Self::Reader as Reader>::Metadata>>
+    ) -> Result<Option<<Self::Reader as Reader>::Metadata>>
     where
         <Self::Reader as Reader>::Metadata: Clone,
     {

@@ -4,8 +4,8 @@ use super::{
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Capability, FactoryToken, FieldNameIndex,
-    MetadataInspection, OrderRequirement, ReadRequest, ReaderFactory, RecordCapability,
-    RecordMetadata, RecordReader, ResolvedProjection, Result, async_trait, record_stream_reader,
+    OrderRequirement, ReadRequest, ReaderFactory, RecordCapability, RecordMetadata, RecordReader,
+    ResolvedProjection, Result, async_trait, record_stream_reader,
 };
 use parquet::arrow::{ProjectionMask, async_reader::ParquetRecordBatchStreamBuilder};
 
@@ -36,28 +36,17 @@ impl ReaderFactory for ParquetFormat {
     async fn metadata(
         &self,
         storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
-        request: Self::Request,
+        request: ReadRequest,
     ) -> Result<RecordMetadata> {
-        Ok(self.inspect_metadata(storage, request).await?.metadata)
-    }
-
-    async fn inspect_metadata(
-        &self,
-        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
-        request: Self::Request,
-    ) -> Result<MetadataInspection<RecordMetadata>> {
         let input = storage.open(ByteReadRequest::from(&request)).await?;
         validate_input(input.as_ref(), parquet_input_error)?;
         let builder = ParquetRecordBatchStreamBuilder::new(ParquetInput::new(input))
             .await
             .map_err(|e| decode_error("inspect_parquet", e))?;
         let schema = request.options.resolve_projection(builder.schema())?.schema;
-        Ok(MetadataInspection {
-            is_empty: Some(builder.metadata().file_metadata().num_rows() == 0),
-            metadata: RecordMetadata {
-                schema,
-                source: Some(request.object),
-            },
+        Ok(RecordMetadata {
+            schema,
+            source: Some(request.object),
         })
     }
 

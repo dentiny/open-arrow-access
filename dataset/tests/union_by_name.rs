@@ -48,6 +48,18 @@ async fn inferred_union_skips_empty_inputs() {
             } else {
                 Arc::new(CsvAccessor::infer(storage))
             };
+            let strict = FileSetAccessor::new(source.clone());
+            open_arrow_access_test_support::assert_metadata_matches_open(
+                &strict,
+                FileSetRequest::new([path("empty")]),
+            )
+            .await;
+            assert!(
+                strict
+                    .metadata(FileSetRequest::new([path("empty"), path("data")]))
+                    .await
+                    .is_err()
+            );
             let files = FileSetAccessor::new(source)
                 .with_union_by_name()
                 .with_file_planning();

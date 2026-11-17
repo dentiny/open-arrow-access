@@ -1,6 +1,6 @@
 use crate::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, MetadataInspection, Reader, ReaderFactory,
-    ReaderFactoryExt, Result, async_trait,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Reader, ReaderFactory, ReaderFactoryExt,
+    Result, async_trait,
 };
 
 /// Bind byte storage to a reader factory through the shared opening protocol.
@@ -60,7 +60,7 @@ where
     async fn inspect_metadata(
         &self,
         request: Self::Request,
-    ) -> Result<MetadataInspection<<Self::Reader as Reader>::Metadata>>
+    ) -> Result<Option<<Self::Reader as Reader>::Metadata>>
     where
         <Self::Reader as Reader>::Metadata: Clone,
     {

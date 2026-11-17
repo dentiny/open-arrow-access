@@ -97,3 +97,88 @@ async fn parquet_reads_only_footer_for_metadata() {
     );
     assert_metadata_matches_open(&source, request).await;
 }
+
+#[cfg(feature = "json")]
+#[tokio::test]
+async fn json_inspection_distinguishes_empty_input_from_zero_column_rows() {
+    use open_arrow_access_file_format::json::JsonAccessor;
+    for (bytes, absent) in [(b"".as_slice(), true), (b" \n", true), (b"{}", false)] {
+        let source = std::sync::Arc::new(JsonAccessor::infer(MemoryAccessor::new(bytes, 1)));
+        let request = ReadRequest::new("object.json");
+        let inspected = source.inspect_metadata(request.clone()).await.unwrap();
+        assert_eq!(inspected.is_none(), absent);
+        let metadata = source.metadata(request.clone()).await.unwrap();
+        assert!(metadata.schema.fields().is_empty());
+        if let Some(inspected) = inspected {
+            assert_eq!(inspected.schema, metadata.schema);
+            assert_eq!(inspected.source, metadata.source);
+        }
+        assert_metadata_matches_open(&source, request).await;
+    }
+}
+
+#[cfg(feature = "json")]
+#[tokio::test]
+async fn json_inspection_preserves_explicit_schema_without_opening_storage() {
+    use arrow_schema::{DataType, Field, Schema};
+    use open_arrow_access_core::ErrorKind;
+    use open_arrow_access_file_format::json::JsonAccessor;
+    use std::sync::Arc;
+    let input = MemoryAccessor::new(b"", 1).with_open_failure(ErrorKind::Io);
+    let observed = input.observations.clone();
+    let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+    let source = JsonAccessor::new(input, schema.clone());
+    let metadata = source
+        .inspect_metadata(ReadRequest::new("object.json"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(metadata.schema, schema);
+    assert!(observed.requests.lock().unwrap().is_empty());
+}
+
+#[cfg(feature = "csv")]
+#[tokio::test]
+async fn csv_inspection_distinguishes_empty_input_and_inferred_schema() {
+    use open_arrow_access_file_format::csv::{CsvAccessor, CsvHeader};
+    for (bytes, absent) in [(b"".as_slice(), true), (b"id\n1\n", false)] {
+        let source =
+            CsvAccessor::infer(MemoryAccessor::new(bytes, 1)).with_header(CsvHeader::Present);
+        let request = ReadRequest::new("object.csv");
+        let inspected = source.inspect_metadata(request.clone()).await.unwrap();
+        assert_eq!(inspected.is_none(), absent);
+        if let Some(metadata) = inspected {
+            assert_eq!(metadata.schema.field(0).name(), "id");
+        }
+        assert_metadata_matches_open(&source, request).await;
+    }
+}
+
+#[cfg(feature = "csv")]
+#[tokio::test]
+async fn csv_header_only_inspection_requires_column_types() {
+    use arrow_schema::{DataType, Field, Schema};
+    use open_arrow_access_file_format::csv::{CsvAccessor, CsvHeader};
+    use std::sync::Arc;
+    let input = MemoryAccessor::new(b"id\n", 1);
+    let request = ReadRequest::new("object.csv");
+    assert!(
+        CsvAccessor::infer(input.clone())
+            .with_header(CsvHeader::Present)
+            .inspect_metadata(request.clone())
+            .await
+            .is_err()
+    );
+    let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+    let source = CsvAccessor::new(input, schema.clone()).with_header(CsvHeader::Present);
+    assert_eq!(
+        source
+            .inspect_metadata(request.clone())
+            .await
+            .unwrap()
+            .unwrap()
+            .schema,
+        schema
+    );
+    assert_metadata_matches_open(&source, request).await;
+}

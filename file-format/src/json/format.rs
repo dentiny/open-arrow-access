@@ -9,9 +9,9 @@ use super::{
 };
 use arrow_json::{ReaderBuilder, reader::Decoder};
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Capability, FactoryToken, MetadataInspection,
-    OrderRequirement, ReadRequest, ReaderFactory, RecordCapability, RecordMetadata, RecordReader,
-    ResolvedProjection, Result, SchemaRef, async_trait, into_stream, record_stream_reader,
+    Accessor, ByteReadRequest, ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest,
+    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result,
+    SchemaRef, async_trait, into_stream, record_stream_reader,
 };
 
 /// Read whitespace-separated JSON objects, including JSONL, with an explicit or inferred fixed schema.
@@ -145,44 +145,35 @@ impl ReaderFactory for JsonFormat {
         storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
         request: Self::Request,
     ) -> Result<RecordMetadata> {
-        Ok(self.inspect_metadata(storage, request).await?.metadata)
+        Ok(self
+            .inspect_metadata(storage, request.clone())
+            .await?
+            .unwrap_or_else(|| crate::inference::empty_plan(request).metadata))
     }
 
     async fn inspect_metadata(
         &self,
         storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
         request: Self::Request,
-    ) -> Result<MetadataInspection<RecordMetadata>> {
+    ) -> Result<Option<RecordMetadata>> {
         let prepared = self.prepare_projection(&request)?;
-        if let Some(prepared) = prepared {
-            return Ok(MetadataInspection {
-                metadata: RecordMetadata {
-                    schema: prepared.schema,
-                    source: Some(request.object),
-                },
-                is_empty: None,
-            });
-        }
-        let input = storage.open(ByteReadRequest::from(&request)).await?;
-        let resolved = self.resolve_schema(input).await?;
-        let (metadata, is_empty) = match resolved {
-            Some(resolved) => (
-                RecordMetadata {
-                    schema: resolved
-                        .format
-                        .prepare_projection(&request)?
-                        .expect("resolved JSON schema")
-                        .schema,
-                    source: Some(request.object),
-                },
-                false,
-            ),
-            None => (crate::inference::empty_plan(request).metadata, true),
+        let schema = if let Some(prepared) = prepared {
+            prepared.schema
+        } else {
+            let input = storage.open(ByteReadRequest::from(&request)).await?;
+            let Some(resolved) = self.resolve_schema(input).await? else {
+                return Ok(None);
+            };
+            resolved
+                .format
+                .prepare_projection(&request)?
+                .expect("resolved JSON schema")
+                .schema
         };
-        Ok(MetadataInspection {
-            metadata,
-            is_empty: Some(is_empty),
-        })
+        Ok(Some(RecordMetadata {
+            schema,
+            source: Some(request.object),
+        }))
     }
 
     async fn create_reader(

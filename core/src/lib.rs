@@ -33,7 +33,7 @@ mod statistics;
 mod stream_reader;
 mod validation;
 
-pub use accessor::{Accessor, ByteAccessor, MetadataInspection, ObjectStream};
+pub use accessor::{Accessor, ByteAccessor, ObjectStream};
 pub use async_read::into_async_read;
 pub use async_seek::{SeekableInput, into_async_seek};
 pub use binary::BinaryDecoder;

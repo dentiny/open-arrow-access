@@ -38,20 +38,18 @@ pub trait ReaderFactory: Send + Sync {
         Ok(self.open_reader(storage, request).await?.metadata().clone())
     }
 
-    /// Preserve row-presence information already established by bounded inference.
+    /// Return `None` only when bounded inference proves the input empty with no schema.
+    /// Explicit schemas and unknown row presence must retain `Some(metadata)`.
     async fn inspect_metadata(
         &self,
         storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
         request: Self::Request,
-    ) -> Result<crate::MetadataInspection<<Self::Reader as Reader>::Metadata>>
+    ) -> Result<Option<<Self::Reader as Reader>::Metadata>>
     where
         for<'a> ByteReadRequest: From<&'a Self::Request>,
         <Self::Reader as Reader>::Metadata: Clone,
     {
-        Ok(crate::MetadataInspection {
-            metadata: self.metadata(storage, request).await?,
-            is_empty: None,
-        })
+        Ok(Some(self.metadata(storage, request).await?))
     }
 
     /// Inspect opened bytes and return an owned reader with metadata available.

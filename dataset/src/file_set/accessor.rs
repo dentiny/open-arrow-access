@@ -89,10 +89,26 @@ where
     }
 
     async fn metadata(&self, mut request: FileSetRequest) -> Result<RecordMetadata> {
-        let options = request.options.clone();
-        if self.union_by_name {
-            request.options.projection = None;
+        if !self.union_by_name {
+            // Strict mode retains empty schemas and validates every selected file.
+            let mut inspected = stream::iter(request.into_requests())
+                .map(|request| self.inner.metadata(request))
+                .buffered(16);
+            let first = inspected
+                .next()
+                .await
+                .ok_or_else(|| empty_selection("metadata_file_set"))??;
+            let schema = first.schema;
+            while let Some(file) = inspected.next().await {
+                super::validation::validate_schema(&file?.schema, &schema)?;
+            }
+            return Ok(RecordMetadata {
+                schema,
+                source: None,
+            });
         }
+        let options = request.options.clone();
+        request.options.projection = None;
         let mut inspected = stream::iter(request.into_requests())
             .map(|request| self.inner.inspect_metadata(request))
             .buffered(16);
@@ -100,29 +116,16 @@ where
             .next()
             .await
             .ok_or_else(|| empty_selection("metadata_file_set"))??;
-        if !self.union_by_name {
-            // As with ordinary open, the first file establishes the output schema.
-            // Validate later files during inspection without opening record readers.
-            let schema = first.metadata.schema;
-            while let Some(file) = inspected.next().await {
-                super::validation::validate_schema(&file?.metadata.schema, &schema)?;
-            }
-            return Ok(RecordMetadata {
-                schema,
-                source: None,
-            });
-        }
         let mut union = super::schema::SchemaUnion::default();
         let mut selected = false;
         let inspected = stream::once(async { Ok(first) }).chain(inspected);
         futures::pin_mut!(inspected);
         while let Some(file) = inspected.next().await {
-            let file = file?;
-            if file.metadata.schema.fields().is_empty() && file.is_empty == Some(true) {
+            let Some(file) = file? else {
                 continue;
-            }
-            super::validation::validate_fields(file.metadata.schema.fields())?;
-            union.merge(&file.metadata.schema)?;
+            };
+            super::validation::validate_fields(file.schema.fields())?;
+            union.merge(&file.schema)?;
             selected = true;
         }
         if !selected {
