@@ -5,6 +5,7 @@ mod async_read;
 mod async_seek;
 mod binary;
 mod bound_source;
+mod byte_position;
 mod capability;
 mod decode_batches;
 mod document;
@@ -14,6 +15,7 @@ mod field_index;
 mod layer;
 mod list_files;
 pub mod metrics;
+mod positioned_async_read;
 mod prepared_source;
 mod project_batch;
 mod read_all;
@@ -22,12 +24,9 @@ mod read_lines;
 mod read_object;
 mod read_state;
 mod reader;
+mod source_column;
 mod source_columns;
 
-pub use source_columns::{
-    BytePosition, PositionObserver, PositionedAsyncRead, SourceColumn, SourceColumnAccessor,
-    SourceColumnPlanner, SourceColumnRequestAccessor, into_positioned_async_read,
-};
 mod reader_factory;
 mod record_batch_builder;
 mod record_stream;
@@ -41,6 +40,7 @@ pub use async_read::into_async_read;
 pub use async_seek::{SeekableInput, into_async_seek};
 pub use binary::BinaryDecoder;
 pub use bound_source::BoundSource;
+pub use byte_position::BytePosition;
 pub use capability::{Capability, OrderRequirement, RecordCapability};
 pub use decode_batches::{BatchDecoder, decode_batches};
 pub use document::{DocumentAccessor, DocumentDecoder};
@@ -49,6 +49,9 @@ pub use factory_accessor::FactoryAccessor;
 pub use field_index::FieldNameIndex;
 pub use layer::{AccessorExt, Layer};
 pub use list_files::list_files;
+pub use positioned_async_read::{
+    PositionObserver, PositionedAsyncRead, into_positioned_async_read,
+};
 pub use prepared_source::PreparedSource;
 pub use project_batch::project_batch;
 pub use read_all::read_all;
@@ -66,6 +69,8 @@ pub use request::{
     ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ListRequest, ObjectRef, ReadOptions,
     ReadOptionsProvider, ReadRequest, ResolvedProjection,
 };
+pub use source_column::SourceColumn;
+pub use source_columns::{SourceColumnAccessor, SourceColumnPlanner, SourceColumnRequestAccessor};
 pub use statistics::{ScanStatistics, Statistic, StatisticsProvider};
 pub use stream_reader::{StreamReader, bytes_reader};
 pub use validation::{validate_byte_range, validate_object_source_columns};
