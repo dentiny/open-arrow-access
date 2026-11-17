@@ -521,6 +521,42 @@ async fn standard_headers_survive_sequential_parallel_and_positioned_projection(
                     names.iter().collect::<Vec<_>>()
                 );
             }
+            if projection.is_none() {
+                assert_eq!(
+                    schema
+                        .fields()
+                        .iter()
+                        .map(|f| f.name().as_str())
+                        .collect::<Vec<_>>(),
+                    [
+                        "record_id",
+                        "record_type",
+                        "warc_version",
+                        "date",
+                        "source_uri",
+                        "target_uri",
+                        "content_type",
+                        "body",
+                        "content_length",
+                        "block_digest",
+                        "payload_digest",
+                        "concurrent_to",
+                        "filename",
+                        "identified_payload_type",
+                        "ip_address",
+                        "profile",
+                        "refers_to",
+                        "segment_number",
+                        "segment_origin_id",
+                        "segment_total_length",
+                        "truncated",
+                        "warcinfo_id",
+                    ]
+                );
+                let target = schema.field_with_name("target_uri").unwrap();
+                assert_eq!(target.data_type(), &arrow_schema::DataType::LargeUtf8);
+                assert!(target.is_nullable());
+            }
             let mut rows = 0;
             while let Some(batch) = reader.next().await.unwrap() {
                 assert_eq!(batch.schema(), schema);
