@@ -31,13 +31,7 @@ pub trait ReaderFactory: Send + Sync {
         request: &Self::Request,
         columns: &[crate::SourceColumn],
     ) -> Result<Self::Prepared> {
-        if columns.iter().any(|c| *c != crate::SourceColumn::Object) {
-            return Err(crate::Error::new(
-                crate::ErrorKind::Unsupported,
-                "source_columns",
-                "format does not support source offsets",
-            ));
-        }
+        crate::validation::validate_object_source_columns(columns)?;
         self.prepare(request)
     }
 

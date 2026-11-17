@@ -14,6 +14,18 @@ pub fn validate_byte_range(range: &Range<u64>, len: u64, operation: &'static str
     Ok(())
 }
 
+/// Reject record offsets for a parser that supports only object locators.
+pub fn validate_object_source_columns(columns: &[crate::SourceColumn]) -> Result<()> {
+    if columns.iter().any(|c| *c != crate::SourceColumn::Object) {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "source_columns",
+            "format does not support source offsets",
+        ));
+    }
+    Ok(())
+}
+
 // These restrictions apply to RecordBatchBuilder, not to arbitrary Arrow schemas.
 pub(crate) fn validate_record_batch_fields(fields: &Fields) -> Result<()> {
     let mut seen = HashSet::new();

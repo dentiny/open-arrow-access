@@ -68,7 +68,7 @@ pub use request::{
 };
 pub use statistics::{ScanStatistics, Statistic, StatisticsProvider};
 pub use stream_reader::{StreamReader, bytes_reader};
-pub use validation::validate_byte_range;
+pub use validation::{validate_byte_range, validate_object_source_columns};
 
 pub use arrow_array::RecordBatch;
 pub use arrow_schema::{Schema, SchemaRef};
