@@ -95,6 +95,17 @@ generated columns after parallel execution.
 Automatic format selection is always available. Enable the `format-*` readers and
 `decompression-*` codecs you need on the facade, or `format-*` on this crate.
 
+`AutoFormatAccessor` routes only the built-in `DetectedFormat` / `ResolvedKind`
+variants with an enabled reader. This version reads CSV, TSV, Parquet, WARC, ordinary JSON, and ATIF;
+recognizing a suffix does not guarantee an available reader.
+
+Applications can still define their own formats by implementing `ReaderFactory`
+and binding them with `FileAccessor::from_format(storage, format)`. Compose that
+accessor with `FileSetAccessor` to read multiple files. These custom formats are
+not selected by `AutoFormatAccessor`, which currently has no registration API.
+See the [proposed registration design](../docs/extending.md#custom-format-registration-proposed)
+and its [roadmap TODO](../docs/roadmap.md#planned-capabilities).
+
 ```rust,ignore
 let auto = AutoFormatAccessor::new(storage);
 let request = AutoFormatRequest::Directory(DirectoryRequest::new("data/**/*"));
@@ -106,7 +117,7 @@ Suffix detection performs no I/O. Automatic selection ignores unknown suffixes
 and requires one format; CSV and TSV are distinct formats. No format takes priority.
 Use `.with_format(DetectedFormat::Json)` (or another format) to read every supplied
 object as that format, including files without a recognized suffix. Explicit CSV
-uses the configured dialect delimiter; explicit TSV uses tabs, regardless of filename.
+uses commas; explicit TSV uses tabs, regardless of filename.
 
 `resolve` also lists directories and probes JSON, but does not decode Arrow records.
 Mixed formats return `InvalidInput` with examples; no recognized or nonempty JSON
@@ -117,7 +128,8 @@ mixed ordinary JSONL, ATIF JSONL, and ATIF document inputs. Probes have independ
 limits (8 concurrent files, 1 MiB consumed per file). `FirstFile` trusts the first
 nonempty file; later inputs are unchecked. Readers validate subsequent records.
 
-CSV dialect and explicit CSV/ordinary-JSON schemas are accessor settings; projection,
+Explicit CSV/ordinary-JSON schemas are accessor settings; custom CSV dialects use
+`CsvAccessor` directly. Projection,
 batch size, and byte options remain on the request. Native file planning and union
 by name support record layers. Parquet keeps raw range reads and size hints already
 configured on storage with `with_content_lengths`. Discovery does not snapshot data.

@@ -3,6 +3,15 @@
 //! Enable the `format-*` readers you need. Compression features
 //! remain on the decompression crate. Configure storage (including known content
 //! lengths) before passing it here; Parquet retains its original range-capable storage.
+//!
+//! Automatic routing is limited to the built-in [`DetectedFormat`] and
+//! [`ResolvedKind`] variants and their enabled readers. This version reads CSV,
+//! TSV, Parquet, WARC, ordinary JSON, and ATIF (with their reader features).
+//! Applications can implement `open_arrow_access_core::ReaderFactory` and use
+//! `open_arrow_access_file_format::FileAccessor::from_format` for custom formats,
+//! including with [`FileSetAccessor`] for multiple files. Custom formats are not
+//! registered with or selected by `AutoFormatAccessor`; runtime registration is
+//! not currently supported.
 
 mod sniff;
 
@@ -20,7 +29,11 @@ use open_arrow_access_core::{
 use open_arrow_access_decompression::AutoDecompressionLayer;
 use std::{num::NonZeroUsize, sync::Arc};
 
+// TODO: Support application-defined format registration; see the proposed
+// registration design in docs/extending.md and the tracking item in docs/roadmap.md.
 mod detection;
+mod error;
+mod validation;
 pub use detection::{DetectedFormat, detect_format, select_format};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -35,7 +48,7 @@ pub enum JsonDetection {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResolvedKind {
     Parquet,
-    Delimited,
+    CsvOrTsv,
     Json,
     #[cfg(feature = "format-atif")]
     Atif(open_arrow_access_file_format::atif::AtifFormat),
@@ -84,8 +97,6 @@ pub struct AutoFormatAccessor<B> {
     storage: Arc<B>,
     format: Option<DetectedFormat>,
     schema: Option<SchemaRef>,
-    #[cfg(feature = "format-csv")]
-    dialect: open_arrow_access_file_format::csv::CsvDialect,
     detection: JsonDetection,
     sniff_bytes: NonZeroUsize,
     sniff_concurrency: NonZeroUsize,
@@ -96,16 +107,14 @@ impl<B> AutoFormatAccessor<B> {
             storage: Arc::new(storage),
             format: None,
             schema: None,
-            #[cfg(feature = "format-csv")]
-            dialect: Default::default(),
             detection: JsonDetection::EveryFile,
             sniff_bytes: NonZeroUsize::new(1024 * 1024).unwrap(),
             sniff_concurrency: NonZeroUsize::new(8).unwrap(),
         }
     }
     /// Read every selected object as this format, without suffix filtering.
-    /// By default, detect suffixes and require one format. Explicit CSV uses the
-    /// configured dialect delimiter; explicit TSV uses tabs, regardless of suffix.
+    /// By default, detect suffixes and require one format. Explicit CSV uses commas;
+    /// explicit TSV uses tabs, regardless of suffix.
     pub fn with_format(mut self, format: DetectedFormat) -> Self {
         self.format = Some(format);
         self
@@ -116,14 +125,6 @@ impl<B> AutoFormatAccessor<B> {
     }
     pub fn with_schema_opt(mut self, schema: Option<SchemaRef>) -> Self {
         self.schema = schema;
-        self
-    }
-    #[cfg(feature = "format-csv")]
-    pub fn with_csv_dialect(
-        mut self,
-        dialect: open_arrow_access_file_format::csv::CsvDialect,
-    ) -> Self {
-        self.dialect = dialect;
         self
     }
     pub fn with_json_detection(mut self, detection: JsonDetection) -> Self {
@@ -140,10 +141,6 @@ impl<B> AutoFormatAccessor<B> {
         self.sniff_concurrency = concurrency;
         self
     }
-}
-
-fn error(kind: ErrorKind, message: impl Into<String>, object: Option<&ObjectRef>) -> Error {
-    Error::new(kind, "resolve_auto_format", message).with_object(object)
 }
 
 impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
@@ -183,20 +180,20 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
 
     async fn resolve_files(&self, request: &FileSetRequest) -> Result<ResolvedFormat> {
         let (detected, objects) = match self.format {
-            Some(_) if request.objects.is_empty() => {
-                return Err(error(ErrorKind::NotFound, "no dataset files", None));
+            Some(format) => {
+                validation::validate_files(&request.objects)?;
+                (format, request.objects.clone())
             }
-            Some(format) => (format, request.objects.clone()),
             None => select_format(&request.objects)?,
         };
         let format = match detected {
             DetectedFormat::Parquet => ResolvedKind::Parquet,
-            DetectedFormat::Csv | DetectedFormat::Tsv => ResolvedKind::Delimited,
+            DetectedFormat::Csv | DetectedFormat::Tsv => ResolvedKind::CsvOrTsv,
             DetectedFormat::Json => ResolvedKind::Json,
             DetectedFormat::Warc => ResolvedKind::Warc,
         };
         if format == ResolvedKind::Json && !cfg!(feature = "format-json") {
-            return Err(error(
+            return Err(error::resolve(
                 ErrorKind::Unsupported,
                 "JSON reader feature is disabled",
                 objects.first(),
@@ -226,7 +223,7 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
                 .try_filter_map(|sample| futures::future::ready(Ok(sample)));
             futures::pin_mut!(probes);
             let Some((index, example, kind)) = probes.try_next().await? else {
-                return Err(error(
+                return Err(error::resolve(
                     ErrorKind::NotFound,
                     "JSON selection contains only empty files",
                     objects.first(),
@@ -238,7 +235,7 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
             } else {
                 while let Some((_, object, other)) = probes.try_next().await? {
                     if other != kind {
-                        return Err(error(
+                        return Err(error::resolve(
                             ErrorKind::InvalidInput,
                             format!(
                                 "mixed JSON kinds {kind:?} ({:?}) and {other:?} ({:?})",
@@ -264,28 +261,26 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
         kind: ResolvedKind,
         object: Option<&ObjectRef>,
     ) -> Result<Arc<dyn RecordScanAccessor>> {
-        if self.schema.is_some() && !matches!(kind, ResolvedKind::Delimited | ResolvedKind::Json) {
-            return Err(error(
-                ErrorKind::InvalidInput,
-                "explicit schema is supported only for CSV and ordinary JSON",
-                object,
-            ));
-        }
+        validation::validate_schema(self.schema.as_ref(), kind, object)?;
         match kind {
             #[cfg(feature = "format-parquet")]
             ResolvedKind::Parquet => Ok(Arc::new(
                 open_arrow_access_file_format::parquet::ParquetAccessor::new(self.storage.clone()),
             )),
             #[cfg(feature = "format-csv")]
-            ResolvedKind::Delimited => {
+            ResolvedKind::CsvOrTsv => {
+                use open_arrow_access_core::Layer;
+                use open_arrow_access_decompression::AutoDecompressionLayer;
                 use open_arrow_access_file_format::csv::CsvAccessor;
+
+                let decoded: Arc<dyn ByteAccessor> =
+                    Arc::new(AutoDecompressionLayer::new().layer(self.storage.clone()));
                 let reader = match &self.schema {
-                    Some(schema) => CsvAccessor::new(self.decoded(), schema.clone()),
-                    None => CsvAccessor::infer(self.decoded()),
+                    Some(schema) => CsvAccessor::new(decoded, schema.clone()),
+                    None => CsvAccessor::infer(decoded),
                 };
-                let reader = reader.with_dialect(self.dialect);
                 let reader = match self.format {
-                    Some(DetectedFormat::Csv) => reader.with_delimiter(self.dialect.delimiter),
+                    Some(DetectedFormat::Csv) => reader.with_delimiter(b','),
                     Some(DetectedFormat::Tsv) => reader.with_delimiter(b'\t'),
                     _ => reader,
                 };
@@ -304,15 +299,17 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
                 open_arrow_access_file_format::atif::AtifAccessor::new(self.decoded(), format),
             )),
             #[cfg(feature = "format-warc")]
-            ResolvedKind::Warc => Ok(Arc::new(
-                open_arrow_access_file_format::warc::WarcArrowAccessor::new(self.decoded()),
-            )),
+            ResolvedKind::Warc => {
+                use open_arrow_access_core::Layer;
+                use open_arrow_access_decompression::AutoDecompressionLayer;
+                use open_arrow_access_file_format::warc::WarcArrowAccessor;
+
+                let decoded: Arc<dyn ByteAccessor> =
+                    Arc::new(AutoDecompressionLayer::new().layer(self.storage.clone()));
+                Ok(Arc::new(WarcArrowAccessor::new(decoded)))
+            }
             #[allow(unreachable_patterns)]
-            _ => Err(error(
-                ErrorKind::Unsupported,
-                format!("reader feature is disabled for {kind:?}"),
-                object,
-            )),
+            _ => Err(error::disabled_reader(kind, object)),
         }
     }
 

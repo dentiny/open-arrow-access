@@ -1,4 +1,4 @@
-use super::{ResolvedKind, error};
+use super::{ResolvedKind, error::resolve as error};
 use open_arrow_access_core::{
     ByteAccessor, ByteReadOptions, ByteReadRequest, ErrorKind, ObjectRef, Result,
 };
