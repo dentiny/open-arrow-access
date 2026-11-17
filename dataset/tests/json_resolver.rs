@@ -194,3 +194,57 @@ async fn binds_atif_readers_independently_of_the_ordinary_json_reader() {
         assert_eq!(rows, expected_rows);
     }
 }
+
+#[tokio::test]
+async fn unordered_probes_preserve_input_order_and_duplicates() {
+    use open_arrow_access_core::{
+        Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, Result, async_trait,
+    };
+    use std::sync::Mutex;
+    use tokio::sync::Notify;
+
+    struct OutOfOrder {
+        input: MemoryAccessor,
+        release: Notify,
+        opened: Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl Accessor for OutOfOrder {
+        type Request = ByteReadRequest;
+        type Reader = dyn ByteReader;
+
+        fn capability(&self) -> Capability {
+            self.input.capability()
+        }
+
+        async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+            if request.object.locator() == "slow.jsonl" {
+                self.release.notified().await;
+            } else {
+                self.release.notify_one();
+            }
+            self.opened
+                .lock()
+                .unwrap()
+                .push(request.object.locator().to_owned());
+            self.input.open(request).await
+        }
+    }
+
+    #[async_trait]
+    impl ByteAccessor for OutOfOrder {}
+
+    let storage = Arc::new(OutOfOrder {
+        input: MemoryAccessor::new(b"{\"id\":1}\n", 16),
+        release: Notify::new(),
+        opened: Mutex::new(Vec::new()),
+    });
+    let request = FileSetRequest::new(["slow.jsonl", "fast.jsonl", "fast.jsonl"]);
+    let selected = JsonResolver::default()
+        .resolve(storage.clone(), &request)
+        .await
+        .unwrap();
+    assert_eq!(storage.opened.lock().unwrap()[0], "fast.jsonl");
+    assert_eq!(selected.objects, request.objects);
+}

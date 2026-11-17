@@ -78,22 +78,25 @@ impl JsonResolver {
                     Ok::<_, Error>(kind.map(|kind| (index, object, kind)))
                 }
             })
-            .buffered(concurrency)
+            .buffer_unordered(concurrency)
             .try_filter_map(|sample| futures::future::ready(Ok(sample)));
         futures::pin_mut!(probes);
         let Some((index, example, kind)) = probes.try_next().await? else {
             return Err(error::empty_selection(request.objects.first()));
         };
         validation::validate_schema(self.schema.as_ref(), kind, Some(&example))?;
-        let mut objects = vec![example.clone()];
         if self.sniff.policy == SniffPolicy::FirstFile {
+            let mut objects = vec![example];
             objects.extend_from_slice(&request.objects[index + 1..]);
-        } else {
-            while let Some((_, object, other)) = probes.try_next().await? {
-                validation::validate_same_kind(kind, &example, other, &object)?;
-                objects.push(object);
-            }
+            return Ok(ResolvedJsonFormat { kind, objects });
         }
+        let mut selected = vec![(index, example.clone())];
+        while let Some((index, object, other)) = probes.try_next().await? {
+            validation::validate_same_kind(kind, &example, other, &object)?;
+            selected.push((index, object));
+        }
+        selected.sort_unstable_by_key(|(index, _)| *index);
+        let objects = selected.into_iter().map(|(_, object)| object).collect();
         Ok(ResolvedJsonFormat { kind, objects })
     }
 

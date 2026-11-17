@@ -54,7 +54,8 @@ JSON remains ordinary JSON; this resolver does not broaden the native JSON
 reader's supported framing. Malformed or truncated input reports a decode error
 with the original object context. Native readers validate full records later.
 
-The default policy checks every selected file, preserving order and duplicates,
+The default policy processes bounded concurrent probes as they complete, then
+restores input order by original index, preserving duplicates. It checks every file
 and rejects mixed ordinary JSON, ATIF JSONL, and ATIF document inputs before
 schema union. Whitespace-only files are omitted; an all-empty selection is
 `NotFound`. `FirstFile` uses sequential probes to find the first nonempty file,
