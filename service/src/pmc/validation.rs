@@ -1,5 +1,13 @@
-use super::error::decode;
-use open_arrow_access_core::{FieldNameIndex, Result};
+use super::error::{decode, invalid_metadata_path};
+use open_arrow_access_core::{FieldNameIndex, ObjectRef, Result};
+
+pub(super) fn validate_metadata_path(object: &ObjectRef) -> Result<()> {
+    let path = object.locator();
+    if !path.ends_with(".json") && !path.ends_with('/') {
+        return Err(invalid_metadata_path().with_object(Some(object)));
+    }
+    Ok(())
+}
 
 pub(super) fn validate_pmcid(pmcid: &str, path: &str) -> Result<()> {
     let value = pmcid.trim();
