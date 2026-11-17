@@ -52,6 +52,18 @@ impl<A: ByteAccessor + 'static> Accessor for PmcDatasetAccessor<A> {
         PmcAccessor::with_default_decoder(self.storage.clone()).capability()
     }
 
+    async fn metadata(&self, request: ReadRequest) -> Result<RecordMetadata> {
+        // Validate the selection without listing or opening article documents.
+        let path = request.object.locator();
+        if !path.ends_with(".json") && !path.ends_with('/') {
+            return Err(super::error::invalid_metadata_path().with_object(Some(&request.object)));
+        }
+        Ok(RecordMetadata {
+            schema: request.options.resolve_projection(&schema())?.schema,
+            source: None,
+        })
+    }
+
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         Ok(Box::new(self.plan_scan(request).await?.into_reader()))
     }

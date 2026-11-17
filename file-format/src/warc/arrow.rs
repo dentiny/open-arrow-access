@@ -3,7 +3,7 @@ use std::sync::{Arc, OnceLock};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use futures::stream;
 use open_arrow_access_core::{
-    ByteReadRequest, ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest,
+    Accessor, ByteReadRequest, ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest,
     ReaderFactory, RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, Result,
     SchemaRef, StreamReader, async_trait,
 };
@@ -128,6 +128,17 @@ impl ReaderFactory for WarcArrowFormat {
             .options
             .resolve_projection(&arrow_schema())
             .map(|projection| projection.schema)
+    }
+
+    async fn metadata(
+        &self,
+        _storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<RecordMetadata> {
+        Ok(RecordMetadata {
+            schema: self.prepare(&request)?,
+            source: Some(request.object),
+        })
     }
 
     async fn create_reader(
