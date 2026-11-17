@@ -2,12 +2,11 @@ use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, ReadRequest, Result, ScanStatistics, Statistic,
     StatisticsProvider, async_trait,
 };
-use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions};
 
 use super::{
-    ParquetAccessor, decode_error,
+    ParquetAccessor,
     error::parquet_statistics_input_error,
-    input::ParquetInput,
+    input::load_metadata,
     validation::{validate_input, validate_statistics_row_count},
 };
 
@@ -30,12 +29,7 @@ where
             .metadata()
             .content_length
             .map_or(Statistic::Unknown, Statistic::Exact);
-        let metadata = ArrowReaderMetadata::load_async(
-            &mut ParquetInput::new(input),
-            ArrowReaderOptions::default(),
-        )
-        .await
-        .map_err(|error| decode_error("inspect_parquet_statistics", error))?;
+        let metadata = load_metadata(input, "inspect_parquet_statistics").await?;
         request.options.resolve_projection(metadata.schema())?;
         let rows = validate_statistics_row_count(metadata.metadata().file_metadata().num_rows())?;
         Ok(ScanStatistics {

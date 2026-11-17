@@ -1,12 +1,24 @@
 use std::{ops::Range, sync::Arc};
 
 use futures::future::BoxFuture;
-use open_arrow_access_core::{ByteReader, Bytes};
+use open_arrow_access_core::{ByteReader, Bytes, Result};
 use parquet::{
-    arrow::{arrow_reader::ArrowReaderOptions, async_reader::AsyncFileReader},
+    arrow::{
+        arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions},
+        async_reader::AsyncFileReader,
+    },
     errors::Result as ParquetResult,
     file::metadata::{PageIndexPolicy, ParquetMetaData, ParquetMetaDataReader},
 };
+
+pub(super) async fn load_metadata(
+    input: Box<dyn ByteReader>,
+    operation: &'static str,
+) -> Result<ArrowReaderMetadata> {
+    ArrowReaderMetadata::load_async(&mut ParquetInput::new(input), ArrowReaderOptions::default())
+        .await
+        .map_err(|error| super::decode_error(operation, error))
+}
 
 /// Bridge shared byte access to the Parquet decoder.
 pub(super) struct ParquetInput {
