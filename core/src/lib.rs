@@ -86,5 +86,6 @@ pub use bytes::Bytes;
 
 mod scan;
 pub use scan::{
-    EmissionPolicy, ParallelReadOptions, ScanPartition, ScanPlan, ScanPlanner, scan_partition,
+    EmissionPolicy, ParallelReadOptions, RecordScanAccessor, ScanPartition, ScanPlan, ScanPlanner,
+    scan_partition,
 };

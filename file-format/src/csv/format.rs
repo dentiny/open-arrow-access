@@ -128,6 +128,18 @@ impl CsvFileFormat {
         self
     }
 
+    /// Use this delimiter for every input, overriding CSV/TSV suffix detection.
+    pub fn with_delimiter(mut self, delimiter: u8) -> Self {
+        match &mut self.options {
+            CsvOptions::Dialect(dialect) => dialect.delimiter = delimiter,
+            CsvOptions::Custom(format) => {
+                *format = format.clone().with_delimiter(delimiter);
+            }
+        }
+        self.delimiter_resolved = true;
+        self
+    }
+
     /// Override the header policy. Auto requires an inspectable CsvDialect;
     /// opaque with_format settings support only Present and Absent.
     pub fn with_header(mut self, header: CsvHeader) -> Self {

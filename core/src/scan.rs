@@ -153,6 +153,16 @@ impl ScanPlan {
     }
 }
 
+/// Object-safe record source retaining single-file scan planning.
+pub trait RecordScanAccessor:
+    Accessor<Request = crate::ReadRequest, Reader = dyn RecordReader> + ScanPlanner
+{
+}
+impl<T> RecordScanAccessor for T where
+    T: Accessor<Request = crate::ReadRequest, Reader = dyn RecordReader> + ScanPlanner + ?Sized
+{
+}
+
 /// Optional extension for sources that can expose independent record partitions.
 /// Normal `Accessor::open` remains the sequential path. A plan's partitions must
 /// cover the selection exactly once and be listed in the source's logical order.

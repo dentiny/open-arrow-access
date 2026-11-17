@@ -2870,6 +2870,7 @@ version = "0.4.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
+ "flate2",
  "futures",
  "glob",
  "more-asserts",

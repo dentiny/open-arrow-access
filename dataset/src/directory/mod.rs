@@ -1,4 +1,4 @@
-mod accessor;
+pub(crate) mod accessor;
 mod error;
 mod request;
 mod validation;

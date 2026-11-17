@@ -336,3 +336,36 @@ request forwarding, and source errors. Keep parser/domain values in the owning
 suite and serialized inputs in documented [fixtures](../testdata/README.md).
 The [API contracts](contracts.md) define full capability, reader, and planning
 requirements.
+
+## Custom format registration (proposed)
+
+TODO: allow `AutoFormatAccessor` to route application-defined formats alongside
+its built-in readers. This is a follow-up design, not an implemented API. Today,
+custom formats use `ReaderFactory` and `FileAccessor::from_format` directly.
+
+The proposed registry belongs to each accessor instance and contains immutable,
+shared registrations. Each registration provides a stable format identifier,
+a locator matcher, and a constructor that binds caller-configured storage to an
+`Arc<dyn RecordScanAccessor>`. Adapt custom `ReaderFactory` implementations through
+`FileAccessor`, preserving the existing scan and dataset contracts.
+
+- Introduce an extensible format identifier for routing and resolved results;
+  retain built-in enums as convenient selectors. Applications must not need to
+  modify those enums to add a format.
+- Keep initial detection based on locators without I/O. Match against the same
+  normalized locator used for built-in detection, while passing the original
+  `ObjectRef` to storage. Content probing would require a separate design.
+- Reject duplicate identifiers and ambiguous matches, including collisions with
+  built-ins. Do not let registration order silently override another reader.
+  Explicit format selection bypasses detection and preserves all supplied objects.
+- Let constructors own format-specific configuration and choose raw or decoded
+  bytes. Preserve range access for readers that need it; avoid adding custom
+  options or Cargo feature gates to `AutoFormatAccessor`.
+- Route registered readers through the existing file-set planner, preserving
+  order, schema policies, projection, batch size, and byte options. Continue to
+  reject automatically selected mixed formats unless explicitly supported later.
+
+Before implementation, settle identifier and constructor API shapes, unsupported
+reader errors, and backward compatibility for `DetectedFormat` / `ResolvedKind`.
+Validation should cover a custom format, collision rejection, explicit selection,
+unknown suffixes, and reader-option forwarding through dataset planning.
