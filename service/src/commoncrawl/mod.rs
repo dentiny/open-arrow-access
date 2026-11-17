@@ -1,7 +1,7 @@
 mod error;
 mod http;
 mod source;
-mod url;
+pub(crate) mod url;
 mod validation;
 
 pub use http::create_http_accessor;

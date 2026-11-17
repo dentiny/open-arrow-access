@@ -9,7 +9,7 @@ pub(super) fn parse_origin(value: &str, operation: &'static str) -> Result<Url> 
     Ok(url)
 }
 
-pub(super) fn parse_url(value: &str) -> Result<Url> {
+pub(crate) fn parse_url(value: &str) -> Result<Url> {
     let url = Url::parse(value).map_err(super::error::url_parse)?;
     validation::validate_url(value, &url)?;
     Ok(url)

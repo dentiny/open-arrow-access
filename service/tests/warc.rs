@@ -39,7 +39,12 @@ async fn dataset_reads_all_segments_in_manifest_order_and_forwards_options() {
     let records = Records::default();
     let opens = records.opens.clone();
     let accessor = CommonCrawlWarcAccessor::new(manifests, records);
-    let mut selection = request().with_byte_options(ByteReadOptions {
+    let mut selection = CommonCrawlWarcRequest::from_manifest_url(
+        "CC-MAIN-2022-40",
+        "https://inventory.example/custom/warc.paths",
+    )
+    .unwrap()
+    .with_byte_options(ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
         io_chunk_size: NonZeroUsize::new(4),
     });
@@ -58,7 +63,7 @@ async fn dataset_reads_all_segments_in_manifest_order_and_forwards_options() {
         ]
     );
     let manifest_opens = manifest_opens.requests.lock().unwrap();
-    assert_eq!(manifest_opens[0].object, request().manifest());
+    assert_eq!(manifest_opens[0].object.locator(), "custom/warc.paths");
     assert_eq!(manifest_opens[0].options.io_concurrency.get(), 3);
     assert!(
         opens
