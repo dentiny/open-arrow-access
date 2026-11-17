@@ -45,7 +45,7 @@ async fn rows(mut reader: Box<dyn RecordReader>) -> Vec<Row> {
             .downcast_ref::<StringArray>()
             .unwrap();
         let ids = batch
-            .column_by_name("record_id")
+            .column_by_name("id")
             .unwrap()
             .as_any()
             .downcast_ref::<StringArray>()
@@ -113,7 +113,7 @@ async fn record_coordinates_survive_projection_parallelism_and_resume() {
         let request = ReadRequest::new(object).with_options(ReadOptions {
             batch_size: NonZeroUsize::MIN,
             projection: Some(vec![
-                "record_id".into(),
+                "id".into(),
                 "offset".into(),
                 "decoded".into(),
                 "path".into(),
@@ -301,7 +301,7 @@ async fn object_is_generic_but_offsets_fail_before_storage_open() {
 async fn collisions_fail_and_empty_streams_keep_their_schema() {
     use open_arrow_access_core::ErrorKind;
     let source = SourceColumns::new()
-        .with_offset("record_id")
+        .with_offset("id")
         .wrap(FactoryAccessor::new(
             MemoryAccessor::new(&fixture!("warc", "position-records.warc").await, 3),
             WarcArrowFormat.with_source_positions(),

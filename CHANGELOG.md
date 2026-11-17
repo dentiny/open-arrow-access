@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Rename WARC Arrow columns `record_id`, `record_type`, and `warcinfo_id` to `id`, `type`, and `warc_info_id`, matching existing WARC-to-Lance datasets. Callers projecting or reading the old names must update them.
+
 ## 0.5.0 - 2026-11-17
 
 - Make directory and file-set dataset APIs unconditional; remove the `directory` and `dataset-directory` Cargo features.
