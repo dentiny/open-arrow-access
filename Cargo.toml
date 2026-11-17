@@ -92,6 +92,7 @@ open-arrow-access-service = { path = "service", version = "0.4.0", default-featu
 [features]
 source-positions = ["open-arrow-access-layers/source-positions"]
 blocking = ["dep:arrow-array", "dep:arrow-schema", "dep:tokio"]
+dataset-auto-format = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/auto-format"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 decompression-bz2 = ["open-arrow-access-decompression/bz2"]
 decompression-gzip = ["open-arrow-access-decompression/gzip"]
