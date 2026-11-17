@@ -118,11 +118,9 @@ impl<A: ByteAccessor> Accessor for SourcePositionAccessor<A> {
             input: Some(Box::pin(input)),
             observer,
             decoder: None,
-            frame: None,
-            decoded: 0,
+            position: None,
             chunk_size: self.chunk_size.get(),
             pending: Ok(None),
-            ended: false,
             started: false,
         };
         reader.pending = Ok(reader.pull().await?);
@@ -135,22 +133,23 @@ impl<A: ByteAccessor> ByteAccessor for SourcePositionAccessor<A> {
         self.inner.list(request).await
     }
 }
-type Chunk = Option<(Option<BytePosition>, Bytes)>;
+struct PositionedChunk {
+    position: Option<BytePosition>,
+    bytes: Bytes,
+}
 struct FrameReader {
     codec: Codec,
     metadata: ByteMetadata,
     input: Option<Input>,
     observer: PositionObserver,
     decoder: Option<Box<dyn Frame>>,
-    frame: Option<u64>,
-    decoded: u64,
+    position: Option<BytePosition>,
     chunk_size: usize,
-    pending: Result<Chunk>,
-    ended: bool,
+    pending: Result<Option<PositionedChunk>>,
     started: bool,
 }
 impl FrameReader {
-    async fn pull(&mut self) -> Result<Chunk> {
+    async fn pull(&mut self) -> Result<Option<PositionedChunk>> {
         let result = self.pull_inner().await;
         if result.is_err() {
             self.decoder = None;
@@ -158,7 +157,7 @@ impl FrameReader {
         }
         result.map_err(|error| error.with_object(self.metadata.source.as_ref()))
     }
-    async fn pull_inner(&mut self) -> Result<Chunk> {
+    async fn pull_inner(&mut self) -> Result<Option<PositionedChunk>> {
         loop {
             if self.decoder.is_none() {
                 let mut input = self.input.take().unwrap();
@@ -172,11 +171,12 @@ impl FrameReader {
                     return Ok(None);
                 }
                 self.started = true;
-                self.frame = match self.observer.position() {
-                    Some(BytePosition::Stored(n)) => Some(n),
+                self.position = match self.observer.position() {
+                    Some(BytePosition::Stored(frame)) => {
+                        Some(BytePosition::Frame { frame, decoded: 0 })
+                    }
                     _ => None,
                 };
-                self.decoded = 0;
                 self.decoder = Some(self.codec.decoder(input));
             }
             let mut output = vec![0; self.chunk_size];
@@ -192,12 +192,12 @@ impl FrameReader {
                 continue;
             }
             output.truncate(n);
-            let position = self.frame.map(|frame| BytePosition::Frame {
-                frame,
-                decoded: self.decoded,
-            });
-            self.decoded += n as u64;
-            return Ok(Some((position, Bytes::from(output))));
+            let position = self.position;
+            self.position = position.map(|position| position.advance(n as u64));
+            return Ok(Some(PositionedChunk {
+                position,
+                bytes: Bytes::from(output),
+            }));
         }
     }
 }
@@ -216,33 +216,18 @@ impl Reader for FrameReader {
         &self.metadata
     }
     async fn next(&mut self) -> Result<Option<Bytes>> {
-        if self.ended {
+        let Some(chunk) = std::mem::replace(&mut self.pending, Ok(None))? else {
             return Ok(None);
-        }
-        match std::mem::replace(&mut self.pending, Ok(None)) {
-            Ok(Some((_, bytes))) => {
-                self.pending = self.pull().await;
-                Ok(Some(bytes))
-            }
-            Ok(None) => {
-                self.ended = true;
-                Ok(None)
-            }
-            Err(error) => {
-                self.ended = true;
-                Err(error)
-            }
-        }
+        };
+        self.pending = self.pull().await;
+        Ok(Some(chunk.bytes))
     }
 }
 impl ByteReader for FrameReader {
     fn position(&self) -> Option<BytePosition> {
         match &self.pending {
-            Ok(Some((position, _))) => *position,
-            Ok(None) => self.frame.map(|frame| BytePosition::Frame {
-                frame,
-                decoded: self.decoded,
-            }),
+            Ok(Some(chunk)) => chunk.position,
+            Ok(None) => self.position,
             Err(_) => None,
         }
     }

@@ -4,8 +4,8 @@ use arrow_schema::{Schema, SchemaRef};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, ObjectRef, ReadRequest, ReaderFactory, ReaderFactoryExt,
-    RecordBatch, RecordMetadata, RecordReader, Result, ScanPlan, SourceColumn,
-    SourceColumnAccessor, SourceColumnPlanner, StreamReader, async_trait, into_stream,
+    RecordBatch, RecordCapability, RecordReader, Result, ScanPlan, SourceColumn,
+    SourceColumnAccessor, SourceColumnPlanner, async_trait, map_record_reader,
 };
 use std::sync::Arc;
 
@@ -96,13 +96,12 @@ pub(crate) fn wrap(
         return Ok(reader);
     }
     let output = schema(&reader.metadata().schema, &columns)?;
-    let metadata = RecordMetadata {
-        schema: output.clone(),
-        ..reader.metadata().clone()
-    };
-    let ordering = reader.capability().ordering;
-    let batches = into_stream(reader).and_then(move |batch| {
-        let result = (|| {
+    let capability = RecordCapability::sequential(reader.capability().ordering);
+    Ok(Box::new(map_record_reader(
+        reader,
+        output.clone(),
+        capability,
+        move |batch| {
             let arrays = output
                 .fields()
                 .iter()
@@ -120,8 +119,6 @@ pub(crate) fn wrap(
                 .collect::<Result<Vec<_>>>()?;
             RecordBatch::try_new(output.clone(), arrays)
                 .map_err(crate::error::source_column_batch_error)
-        })();
-        futures::future::ready(result)
-    });
-    Ok(Box::new(StreamReader::records(batches, metadata, ordering)))
+        },
+    )))
 }

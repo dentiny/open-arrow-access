@@ -3,6 +3,7 @@ mod arrow;
 mod error;
 mod format;
 mod planning;
+mod records;
 pub use arrow::{WarcArrowAccessor, WarcArrowFormat, arrow_schema};
 
 pub use accessor::WarcAccessor;

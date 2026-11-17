@@ -100,22 +100,7 @@ impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
     where
         for<'a> ByteReadRequest: From<&'a Self::Request>,
     {
-        let byte_request = ByteReadRequest::from(&request);
-        let object = byte_request.object.clone();
-        let context = |error: crate::Error| error.with_object(Some(&object));
-        let prepared = self
-            .prepare_source_columns(&request, columns)
-            .map_err(context)?;
-        let input = storage.open(byte_request).await.map_err(context)?;
-        self.create_reader_with_source_columns(
-            &FactoryToken { _private: () },
-            input,
-            request,
-            prepared,
-            columns,
-        )
-        .await
-        .map_err(context)
+        open_factory(self, storage, request, Some(columns)).await
     }
 
     async fn open_input(
@@ -139,14 +124,42 @@ impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
     where
         for<'a> ByteReadRequest: From<&'a Self::Request>,
     {
-        let byte_request = ByteReadRequest::from(&request);
-        let object = byte_request.object.clone();
-        let context = |error: crate::Error| error.with_object(Some(&object));
-        let prepared = self.prepare(&request).map_err(context)?;
-        let input = storage.open(byte_request).await.map_err(context)?;
-        let token = FactoryToken { _private: () };
-        self.create_reader(&token, input, request, prepared)
-            .await
-            .map_err(context)
+        open_factory(self, storage, request, None).await
     }
+}
+
+// Share preparation, storage opening and object context while preserving the
+// distinction between ordinary and explicitly requested provenance hooks.
+async fn open_factory<F: ReaderFactory + ?Sized>(
+    factory: &F,
+    storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+    request: F::Request,
+    columns: Option<&[crate::SourceColumn]>,
+) -> Result<Box<F::Reader>>
+where
+    for<'a> ByteReadRequest: From<&'a F::Request>,
+{
+    let byte_request = ByteReadRequest::from(&request);
+    let object = byte_request.object.clone();
+    let context = |error: crate::Error| error.with_object(Some(&object));
+    let prepared = match columns {
+        Some(columns) => factory.prepare_source_columns(&request, columns),
+        None => factory.prepare(&request),
+    }
+    .map_err(context)?;
+    let input = storage.open(byte_request).await.map_err(context)?;
+    let token = FactoryToken { _private: () };
+    match columns {
+        Some(columns) => {
+            factory
+                .create_reader_with_source_columns(&token, input, request, prepared, columns)
+                .await
+        }
+        None => {
+            factory
+                .create_reader(&token, input, request, prepared)
+                .await
+        }
+    }
+    .map_err(context)
 }

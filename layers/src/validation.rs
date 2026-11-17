@@ -465,17 +465,13 @@ pub(crate) fn validate_evolution_input_schema(
 
 pub(crate) fn validate_source_column_names(
     input: &arrow_schema::SchemaRef,
+    fields: &[Field],
     columns: &[(open_arrow_access_core::SourceColumn, String)],
 ) -> Result<()> {
     let mut names = HashSet::new();
-    for field in input.fields() {
-        let target = columns
-            .iter()
-            .find(|(c, _)| c.name() == field.name())
-            .map(|(_, name)| name.as_str())
-            .unwrap_or(field.name());
-        if target.is_empty() || !names.insert(target.to_owned()) {
-            return Err(crate::error::source_column_name_conflict(target));
+    for field in fields {
+        if field.name().is_empty() || !names.insert(field.name()) {
+            return Err(crate::error::source_column_name_conflict(field.name()));
         }
     }
     for (column, _) in columns {

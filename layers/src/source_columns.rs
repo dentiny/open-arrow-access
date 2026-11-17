@@ -2,9 +2,8 @@ use arrow_array::RecordBatchOptions;
 use arrow_schema::Schema;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use open_arrow_access_core::{
-    Accessor, Layer, ReadOptions, ReadOptionsProvider, RecordBatch, RecordCapability,
-    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, SchemaRef, SourceColumn,
-    StreamReader, async_trait, into_stream,
+    Accessor, Layer, ReadOptions, ReadOptionsProvider, RecordBatch, RecordCapability, RecordReader,
+    Result, ScanPlan, ScanPlanner, SchemaRef, SourceColumn, async_trait, map_record_reader,
 };
 use std::sync::Arc;
 
@@ -54,7 +53,6 @@ impl SourceColumnsLayer {
         options.projection.take()
     }
     fn transform(&self, input: &SchemaRef, projection: Option<Vec<String>>) -> Result<Transform> {
-        crate::validation::validate_source_column_names(input, &self.columns)?;
         let fields = input
             .fields()
             .iter()
@@ -68,6 +66,7 @@ impl SourceColumnsLayer {
                 field.as_ref().clone().with_name(target)
             })
             .collect::<Vec<_>>();
+        crate::validation::validate_source_column_names(input, &fields, &self.columns)?;
         let renamed = Arc::new(Schema::new_with_metadata(fields, input.metadata().clone()));
         let projection = ReadOptions {
             projection,
@@ -87,13 +86,13 @@ struct Transform {
 }
 impl Transform {
     fn wrap(self, reader: Box<dyn RecordReader>) -> Box<dyn RecordReader> {
-        let metadata = RecordMetadata {
-            schema: self.schema.clone(),
-            ..reader.metadata().clone()
-        };
-        let ordering = reader.capability().ordering;
-        let batches = into_stream(reader)
-            .map_ok(move |batch| {
+        let capability = RecordCapability::sequential(reader.capability().ordering);
+        let output = self.schema.clone();
+        Box::new(map_record_reader(
+            reader,
+            output,
+            capability,
+            move |batch| {
                 let columns = match &self.indices {
                     Some(indices) => indices.iter().map(|&i| batch.column(i).clone()).collect(),
                     None => batch.columns().to_vec(),
@@ -104,9 +103,8 @@ impl Transform {
                     &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
                 )
                 .map_err(crate::error::source_column_batch_error)
-            })
-            .and_then(futures::future::ready);
-        Box::new(StreamReader::records(batches, metadata, ordering))
+            },
+        ))
     }
 }
 pub struct SourceColumnsAccessor<A> {
