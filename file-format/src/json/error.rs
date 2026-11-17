@@ -25,24 +25,8 @@ pub(super) fn non_object_inference_record() -> Error {
     Error::new(ErrorKind::Decode, "infer_json", "expected a JSON object")
 }
 
-pub(super) fn empty_inference_chunk() -> Error {
-    Error::new(
-        ErrorKind::Decode,
-        "infer_json",
-        "byte reader emitted an empty chunk",
-    )
-}
-
 pub(super) fn inference_error(source: impl std::error::Error + Send + Sync + 'static) -> Error {
     Error::new(ErrorKind::Decode, "infer_json", source.to_string()).with_source(source)
-}
-
-pub(super) fn empty_read_chunk() -> Error {
-    Error::new(
-        ErrorKind::Io,
-        "read_json",
-        "byte reader emitted an empty chunk",
-    )
 }
 
 pub(super) fn open_error(error: arrow_schema::ArrowError) -> Error {

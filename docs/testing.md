@@ -39,6 +39,7 @@ crate whose behavior they exercise; the facade file-source smoke test lives in r
 | Document accessor | [`core/tests/document.rs`](../core/tests/document.rs) |
 | Field-name index and wide projections | [`core/tests/field_index.rs`](../core/tests/field_index.rs) |
 | Shared HTTP status classification | [`core/tests/error.rs`](../core/tests/error.rs) |
+| Empty byte-chunk rejection | [`core/tests/next_nonempty.rs`](../core/tests/next_nonempty.rs) |
 | Core reader contract | [`core/tests/stream.rs`](../core/tests/stream.rs) |
 | Sequential scan schema and lazy partition execution | [`core/tests/scan.rs`](../core/tests/scan.rs) |
 | Parallel execution, backpressure, cancellation and queue rotation | [`layers/tests/parallel_read.rs`](../layers/tests/parallel_read.rs), [`layers/tests/unit/parallel_read.rs`](../layers/tests/unit/parallel_read.rs) |

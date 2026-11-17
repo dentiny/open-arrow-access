@@ -1,7 +1,5 @@
 use futures::{StreamExt, stream, stream::BoxStream};
-use open_arrow_access_core::{ByteReader, Bytes, Result};
-
-use super::error::empty_chunk;
+use open_arrow_access_core::{ByteReader, Bytes, Result, empty_chunk, next_nonempty};
 
 /// Frame complete JSON objects without relying on extensions or line boundaries.
 pub(super) fn documents(input: Box<dyn ByteReader>) -> BoxStream<'static, Result<Bytes>> {
@@ -29,8 +27,7 @@ impl Documents {
         let mut framer = ObjectFramer::default();
         loop {
             if self.pending.is_empty() {
-                match self.input.next().await? {
-                    Some(bytes) if bytes.is_empty() => return Err(empty_chunk()),
+                match next_nonempty(self.input.as_mut(), || empty_chunk("read_atif")).await? {
                     Some(bytes) => self.pending = bytes,
                     None => {
                         // Let the trajectory decoder report an incomplete final object.

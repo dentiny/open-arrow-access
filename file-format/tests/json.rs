@@ -676,3 +676,47 @@ async fn rejects_unknown_fields_against_the_full_schema() {
         }
     }
 }
+
+#[rstest::rstest]
+#[case(false, false)]
+#[case(false, true)]
+#[case(true, false)]
+#[case(true, true)]
+#[tokio::test]
+async fn empty_input_chunks_are_io_failures_during_inference_and_decoding(
+    #[case] infer: bool,
+    #[case] planned: bool,
+) {
+    let input = MemoryAccessor::new(&fixture!("json", "good.json").await, 1).with_empty_chunk(0);
+    let accessor = if infer {
+        JsonAccessor::infer(input)
+    } else {
+        JsonAccessor::new(input, schema())
+    };
+    let result = if planned {
+        accessor
+            .plan_scan(request(1, None))
+            .await
+            .map(|plan| Box::new(plan.into_reader()) as Box<dyn RecordReader>)
+    } else {
+        accessor.open(request(1, None)).await
+    };
+    let error = match result {
+        Err(error) => error,
+        Ok(mut reader) => {
+            let error = reader.next().await.unwrap_err();
+            assert!(reader.next().await.unwrap().is_none());
+            error
+        }
+    };
+    assert_eq!(error.kind(), ErrorKind::Io);
+    assert_eq!(
+        error.operation(),
+        if infer { "infer_json" } else { "read_json" }
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("byte reader returned an empty chunk")
+    );
+}

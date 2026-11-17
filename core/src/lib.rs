@@ -15,6 +15,7 @@ mod field_index;
 mod layer;
 mod list_files;
 pub mod metrics;
+mod next_nonempty;
 mod positioned_async_read;
 mod positioned_batch;
 mod prepared_source;
@@ -42,11 +43,12 @@ pub use byte_position::BytePosition;
 pub use capability::{Capability, OrderRequirement, RecordCapability};
 pub use decode_batches::{BatchDecoder, decode_batches};
 pub use document::{DocumentAccessor, DocumentDecoder};
-pub use error::{Error, ErrorKind, Result};
+pub use error::{Error, ErrorKind, Result, empty_chunk};
 pub use factory_accessor::FactoryAccessor;
 pub use field_index::FieldNameIndex;
 pub use layer::{AccessorExt, Layer};
 pub use list_files::list_files;
+pub use next_nonempty::next_nonempty;
 pub use positioned_async_read::{
     PositionObserver, PositionedAsyncRead, into_positioned_async_read,
 };
