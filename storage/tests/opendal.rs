@@ -14,7 +14,7 @@ use opendal::{
 };
 
 use open_arrow_access_storage::OpenDalAccessor;
-use open_arrow_access_test_support::{byte_accessor, fixture, fixture_path};
+use open_arrow_access_test_support::{byte_accessor, fixture, fixture_path, reader};
 
 #[tokio::test]
 async fn filesystem_read_contract() {
@@ -70,13 +70,7 @@ async fn sequential_reads_report_short_input_and_terminate() {
     tokio::fs::copy(fixture_path!("bytes", "short_truncated.bin"), &path)
         .await
         .unwrap();
-    let error = loop {
-        match reader.next().await {
-            Ok(Some(_)) => {}
-            Ok(None) => panic!("short input was accepted as complete"),
-            Err(error) => break error,
-        }
-    };
+    let error = reader::next_error(reader.as_mut()).await;
     assert_eq!(error.kind(), ErrorKind::Io);
     assert!(reader.next().await.unwrap().is_none());
 }

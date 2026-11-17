@@ -125,7 +125,7 @@ async fn disabled_codec_is_rejected_before_storage_opens() {
 #[tokio::test]
 async fn routes_gzip_with_chunk_limit_metadata_and_terminal_errors() {
     use more_asserts::assert_le;
-    use open_arrow_access_test_support::fixture;
+    use open_arrow_access_test_support::{fixture, reader};
     use std::num::NonZeroUsize;
 
     // Fragmentation matrices belong to the codec suite; this checks the auto
@@ -148,16 +148,10 @@ async fn routes_gzip_with_chunk_limit_metadata_and_terminal_errors() {
     let accessor = MemoryAccessor::new(&fixture!("gzip", "bad_truncated.gz").await, 1)
         .layer(AutoDecompressionLayer::new());
     let mut reader = accessor.open("input.gz".into()).await.unwrap();
-    loop {
-        match reader.next().await {
-            Ok(Some(_)) => {}
-            Err(error) => {
-                assert_eq!(error.kind(), ErrorKind::Decode);
-                break;
-            }
-            Ok(None) => panic!("truncated gzip accepted"),
-        }
-    }
+    assert_eq!(
+        reader::next_error(reader.as_mut()).await.kind(),
+        ErrorKind::Decode
+    );
     assert!(reader.next().await.unwrap().is_none());
 }
 

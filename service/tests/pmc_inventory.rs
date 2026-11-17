@@ -5,7 +5,7 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::pmc_inventory::PmcInventoryAccessor;
-use open_arrow_access_test_support::{MemoryAccessor, fixture};
+use open_arrow_access_test_support::{MemoryAccessor, fixture, reader};
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
@@ -252,13 +252,7 @@ async fn parallel_inventory_matches_order_metadata_projection_and_validation() {
         .open(request(Some(vec![])))
         .await
         .unwrap();
-    loop {
-        match reader.next().await {
-            Err(_) => break,
-            Ok(Some(_)) => {}
-            Ok(None) => panic!("invalid bucket bypassed validation"),
-        }
-    }
+    reader::next_error(reader.as_mut()).await;
 }
 
 #[tokio::test]

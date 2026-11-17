@@ -52,6 +52,19 @@ where
     error
 }
 
+/// Drain successful items and return the first reader error.
+/// Panics if the reader reaches EOF before reporting an error. Terminal-state
+/// and metadata assertions remain the caller's responsibility.
+pub async fn next_error<R: Reader + ?Sized>(reader: &mut R) -> Error {
+    loop {
+        match reader.next().await {
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("reader reached EOF before the expected error"),
+            Err(error) => return error,
+        }
+    }
+}
+
 async fn read_error<A, M>(
     accessor: A,
     request: &A::Request,
@@ -67,13 +80,7 @@ where
     let error = match accessor.open(request.clone()).await {
         Err(error) => error,
         Ok(mut reader) => {
-            let error = loop {
-                match reader.next().await {
-                    Ok(Some(_)) => {}
-                    Ok(None) => panic!("reader ignored an injected input failure"),
-                    Err(error) => break error,
-                }
-            };
+            let error = next_error(reader.as_mut()).await;
             assert_finished(reader.as_mut(), &observed.reads, snapshot).await;
             error
         }
@@ -156,4 +163,27 @@ pub(crate) fn assert_memory_error(error: &Error, kind: ErrorKind, operation: &st
         .unwrap();
     assert_eq!(cause.kind(), std::io::ErrorKind::ConnectionReset);
     assert_eq!(cause.to_string(), message);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn next_error_drains_successes_and_preserves_the_failure() {
+        let input = MemoryAccessor::new(b"ab", 1).with_failure(1, ErrorKind::PermissionDenied);
+        let observed = input.observations.clone();
+        let mut reader = input.open("input".into()).await.unwrap();
+        let error = next_error(reader.as_mut()).await;
+        assert_memory_read_error(&error, ErrorKind::PermissionDenied);
+        assert_eq!(observed.reads.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "reader reached EOF before the expected error")]
+    async fn next_error_rejects_successful_eof() {
+        let input = MemoryAccessor::new(b"", 1);
+        let mut reader = input.open("input".into()).await.unwrap();
+        next_error(reader.as_mut()).await;
+    }
 }

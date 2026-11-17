@@ -18,7 +18,7 @@ use open_arrow_access_core::{
 };
 
 use open_arrow_access_file_format::json::JsonAccessor;
-use open_arrow_access_test_support::{MemoryAccessor, Observations, fixture, format};
+use open_arrow_access_test_support::{MemoryAccessor, Observations, fixture, format, reader};
 
 fn schema() -> SchemaRef {
     Arc::new(Schema::new_with_metadata(
@@ -528,16 +528,11 @@ async fn nonfinite_compatibility_does_not_accept_malformed_json() {
             } else {
                 accessor.open(request(2, None)).await.unwrap()
             };
-            loop {
-                match reader.next().await {
-                    Ok(Some(_)) => continue,
-                    Ok(None) => panic!("accepted {raw:?}"),
-                    Err(error) => {
-                        assert_eq!(error.kind(), ErrorKind::Decode);
-                        break;
-                    }
-                }
-            }
+            assert_eq!(
+                reader::next_error(reader.as_mut()).await.kind(),
+                ErrorKind::Decode,
+                "accepted {raw:?}",
+            );
             assert!(reader.next().await.unwrap().is_none());
         }
     }

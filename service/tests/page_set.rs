@@ -1,3 +1,4 @@
+use open_arrow_access_test_support::reader;
 use std::{
     num::NonZeroUsize,
     sync::{
@@ -100,16 +101,10 @@ async fn page_set_schema_drift_is_rejected_by_both_executors() {
             });
             let mut reader = open_pages(pages, vec![0, 1], parallel).await;
             // A later worker may fail before the first page is delivered.
-            loop {
-                match reader.next().await {
-                    Ok(Some(_)) => {}
-                    Err(error) => {
-                        assert_eq!(error.kind(), ErrorKind::Decode);
-                        break;
-                    }
-                    Ok(None) => panic!("schema drift must fail the scan"),
-                }
-            }
+            assert_eq!(
+                reader::next_error(reader.as_mut()).await.kind(),
+                ErrorKind::Decode
+            );
             assert!(reader.next().await.unwrap().is_none());
         }
     }
