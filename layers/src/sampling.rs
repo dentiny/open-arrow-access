@@ -72,6 +72,13 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for SamplingAccessor<A> {
         self.inner.capability()
     }
 
+    async fn metadata(
+        &self,
+        request: Self::Request,
+    ) -> Result<open_arrow_access_core::RecordMetadata> {
+        self.inner.metadata(request).await
+    }
+
     async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
         let inner = self.inner.open(request).await?;
         if self.settings.threshold == SCALE {

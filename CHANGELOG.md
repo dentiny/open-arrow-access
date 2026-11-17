@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add accessor metadata inspection and schema derivation through record layers.
+
 ## 0.4.0 - 2026-11-16
 
 - Add opt-in source columns and source positions with user-configurable record framing.
