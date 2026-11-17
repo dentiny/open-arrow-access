@@ -131,34 +131,43 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
         let context = request.context_object().cloned();
         async {
             let files = self.files(request).await?;
-            let mut resolved = self.resolve_files(&files).await?;
-            let reader = if resolved.format == ResolvedKind::Json {
-                use crate::json_resolver::JsonResolver;
-                use open_arrow_access_core::Layer;
-                use open_arrow_access_decompression::AutoDecompressionLayer;
-
-                let decoded: Arc<dyn ByteAccessor> =
-                    Arc::new(AutoDecompressionLayer::new().layer(self.storage.clone()));
-                let resolver = JsonResolver::default().with_schema_opt(self.schema.clone());
-                let json = resolver
-                    .resolve(
-                        decoded.clone(),
-                        &FileSetRequest {
-                            objects: resolved.objects,
-                            ..files.clone()
-                        },
-                    )
-                    .await?;
-                let reader = resolver.reader(decoded, json.kind, json.objects.first())?;
-                resolved.objects = json.objects;
-                reader
-            } else {
-                self.reader(resolved.format, resolved.objects.first())?
-            };
+            let resolved = self.resolve_files(&files).await?;
+            let (resolved, reader) = self.resolve_reader(resolved, &files).await?;
             Ok((resolved, files, reader))
         }
         .await
         .map_err(|error: Error| error.with_object(context.as_ref()))
+    }
+
+    async fn resolve_reader(
+        &self,
+        mut resolved: ResolvedFormat,
+        files: &FileSetRequest,
+    ) -> Result<(ResolvedFormat, Arc<dyn RecordScanAccessor>)> {
+        let reader = if resolved.format == ResolvedKind::Json {
+            use crate::json_resolver::JsonResolver;
+            use open_arrow_access_core::Layer;
+            use open_arrow_access_decompression::AutoDecompressionLayer;
+
+            let decoded: Arc<dyn ByteAccessor> =
+                Arc::new(AutoDecompressionLayer::new().layer(self.storage.clone()));
+            let resolver = JsonResolver::default().with_schema_opt(self.schema.clone());
+            let json = resolver
+                .resolve(
+                    decoded.clone(),
+                    &FileSetRequest {
+                        objects: resolved.objects,
+                        ..files.clone()
+                    },
+                )
+                .await?;
+            let reader = resolver.reader(decoded, json.kind, json.objects.first())?;
+            resolved.objects = json.objects;
+            reader
+        } else {
+            self.reader(resolved.format, resolved.objects.first())?
+        };
+        Ok((resolved, reader))
     }
 
     async fn resolve_files(&self, request: &FileSetRequest) -> Result<ResolvedFormat> {
