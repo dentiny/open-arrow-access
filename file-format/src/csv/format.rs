@@ -12,8 +12,9 @@ use super::{
 use arrow_csv::{ReaderBuilder, reader::Decoder};
 use arrow_schema::{DataType, Schema};
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest,
-    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
+    Accessor, ByteReadRequest, ByteReader, Capability, FactoryToken, MetadataInspection,
+    OrderRequirement, ReadRequest, ReaderFactory, RecordCapability, RecordMetadata, RecordReader,
+    Result, SchemaRef, async_trait,
 };
 use open_arrow_access_decompression::CompressionFactory;
 use std::sync::Arc;
@@ -252,8 +253,16 @@ impl ReaderFactory for CsvFileFormat {
     async fn metadata(
         &self,
         storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
-        request: ReadRequest,
+        request: Self::Request,
     ) -> Result<RecordMetadata> {
+        Ok(self.inspect_metadata(storage, request).await?.metadata)
+    }
+
+    async fn inspect_metadata(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<MetadataInspection<RecordMetadata>> {
         let format = self.for_request(&request);
         format.prepare_scan(&request)?;
         let format = if format.schema.is_some() && format.header != CsvHeader::Auto {
@@ -261,7 +270,10 @@ impl ReaderFactory for CsvFileFormat {
         } else {
             let input = storage.open(ByteReadRequest::from(&request)).await?;
             let Some(resolved) = format.resolve_schema(input).await? else {
-                return Ok(crate::inference::empty_plan(request).metadata);
+                return Ok(MetadataInspection {
+                    metadata: crate::inference::empty_plan(request).metadata,
+                    is_empty: Some(true),
+                });
             };
             resolved.format
         };
@@ -269,9 +281,12 @@ impl ReaderFactory for CsvFileFormat {
             .prepare_scan(&request)?
             .expect("resolved CSV schema")
             .schema;
-        Ok(RecordMetadata {
-            schema,
-            source: Some(request.object),
+        Ok(MetadataInspection {
+            metadata: RecordMetadata {
+                schema,
+                source: Some(request.object),
+            },
+            is_empty: None,
         })
     }
 

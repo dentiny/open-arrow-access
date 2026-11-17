@@ -369,5 +369,9 @@ Built-in record formats reuse bounded inference or footer reads. Fixed schemas
 and record layers derive metadata without starting record execution. Inspection
 is not a snapshot and does not validate rows beyond the inference sample.
 
+`inspect_metadata` also carries an optional emptiness proof, so union-by-name can
+skip empty inferred inputs without confusing them with JSON `{}` rows. Unknown
+row presence is retained rather than polling output batches to discover it.
+
 Tests use `open_arrow_access_test_support::assert_metadata_matches_open` plus
 I/O counters to check metadata equality and execution boundaries.

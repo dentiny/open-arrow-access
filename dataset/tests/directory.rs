@@ -87,6 +87,17 @@ impl Accessor for Files {
         .with_ordering(OrderRequirement::PreserveGlobal)
     }
 
+    async fn metadata(&self, request: ReadRequest) -> Result<RecordMetadata> {
+        let file = self
+            .files
+            .get(request.object.locator())
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "open_fixture", "missing"))?;
+        Ok(RecordMetadata {
+            schema: file.schema.clone(),
+            source: Some(request.object),
+        })
+    }
+
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         self.opens.lock().unwrap().push(request.clone());
         let file = self
@@ -871,5 +882,24 @@ async fn glob_selection_respects_paths_recursion_and_existing_suffix_filter() {
         request.suffix = suffix.map(str::to_owned);
         let reader = accessor.open(request).await.unwrap();
         assert_eq!(values(reader).await, expected, "{pattern}");
+    }
+}
+
+#[tokio::test]
+async fn metadata_uses_file_metadata_without_opening_readers() {
+    let files = Files::new([("a", FileData::new(schema("same"), vec![]))]);
+    for union in [false, true] {
+        let accessor = FileSetAccessor::new(files.clone());
+        let accessor = if union {
+            accessor.with_union_by_name()
+        } else {
+            accessor
+        };
+        let request = FileSetRequest::new(["a", "a"]);
+        let opens = files.opens.lock().unwrap().len();
+        let metadata = accessor.metadata(request.clone()).await.unwrap();
+        assert_eq!(metadata.schema, schema("same"));
+        assert_eq!(files.opens.lock().unwrap().len(), opens);
+        open_arrow_access_test_support::assert_metadata_matches_open(&accessor, request).await;
     }
 }

@@ -38,6 +38,22 @@ pub trait ReaderFactory: Send + Sync {
         Ok(self.open_reader(storage, request).await?.metadata().clone())
     }
 
+    /// Preserve row-presence information already established by bounded inference.
+    async fn inspect_metadata(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<crate::MetadataInspection<<Self::Reader as Reader>::Metadata>>
+    where
+        for<'a> ByteReadRequest: From<&'a Self::Request>,
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        Ok(crate::MetadataInspection {
+            metadata: self.metadata(storage, request).await?,
+            is_empty: None,
+        })
+    }
+
     /// Inspect opened bytes and return an owned reader with metadata available.
     /// Preserve source errors and lifecycle; inspection may perform I/O.
     /// `token` is supplied by the shared [`ReaderFactoryExt`] opening methods.

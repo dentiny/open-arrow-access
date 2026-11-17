@@ -1,6 +1,6 @@
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, FactoryAccessor, Reader, ReaderFactory, Result,
-    async_trait,
+    Accessor, ByteReadRequest, ByteReader, FactoryAccessor, MetadataInspection, Reader,
+    ReaderFactory, Result, async_trait,
 };
 
 /// Compose byte storage with a [`ReaderFactory`] using the common read protocol.
@@ -72,6 +72,16 @@ where
         <Self::Reader as Reader>::Metadata: Clone,
     {
         self.binding.metadata(request).await
+    }
+
+    async fn inspect_metadata(
+        &self,
+        request: Self::Request,
+    ) -> Result<MetadataInspection<<Self::Reader as Reader>::Metadata>>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        self.binding.inspect_metadata(request).await
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {

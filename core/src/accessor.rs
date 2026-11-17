@@ -4,6 +4,15 @@ use futures::stream::BoxStream;
 
 use crate::{ByteReadRequest, ByteReader, ListRequest, ObjectRef, Reader, Result, async_trait};
 
+/// Metadata inspection plus an optional proof of whether the output has no rows.
+/// A zero-column schema alone cannot distinguish an empty file from a JSON `{}` row.
+#[derive(Clone, Debug)]
+pub struct MetadataInspection<M> {
+    pub metadata: M,
+    /// `None` means unknown without reading output. Never infer emptiness from field count.
+    pub is_empty: Option<bool>,
+}
+
 /// Factory for independently owned readers, with typed requests and outputs.
 /// Use the re-exported `#[async_trait]` for `dyn` accessors with Send futures.
 #[async_trait]
@@ -32,6 +41,21 @@ pub trait Accessor: Send + Sync {
         Ok(self.open(request).await?.metadata().clone())
     }
 
+    /// Inspect metadata and optionally report emptiness established during inference.
+    /// The default leaves row presence unknown and preserves `metadata`'s fallback.
+    async fn inspect_metadata(
+        &self,
+        request: Self::Request,
+    ) -> Result<MetadataInspection<<Self::Reader as Reader>::Metadata>>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        Ok(MetadataInspection {
+            metadata: self.metadata(request).await?,
+            is_empty: None,
+        })
+    }
+
     /// Open the accessor-defined selection and options in `request`.
     /// Opening may perform I/O and schema inspection; metadata is available on return
     /// without requiring all items to be loaded.
@@ -58,6 +82,16 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
         <Self::Reader as Reader>::Metadata: Clone,
     {
         (**self).metadata(request).await
+    }
+
+    async fn inspect_metadata(
+        &self,
+        request: Self::Request,
+    ) -> Result<MetadataInspection<<Self::Reader as Reader>::Metadata>>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        (**self).inspect_metadata(request).await
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {

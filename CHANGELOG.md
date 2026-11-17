@@ -4,6 +4,7 @@
 
 - Add accessor metadata inspection and schema derivation through record layers.
 - Inspect CSV/JSON inference samples, Parquet footers, and fixed record schemas without executing readers.
+- Inspect file sets and directories with optional empty-input proofs for zero-column schemas.
 
 ## 0.4.0 - 2026-11-16
 
