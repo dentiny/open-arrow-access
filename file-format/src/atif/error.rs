@@ -21,11 +21,3 @@ pub(super) fn expected_object(object: Option<&ObjectRef>, record_index: u64) -> 
         std::io::Error::new(std::io::ErrorKind::InvalidData, "expected a JSON object"),
     )
 }
-
-pub(super) fn empty_chunk() -> Error {
-    Error::new(
-        ErrorKind::Io,
-        "read_atif",
-        "byte reader emitted an empty chunk",
-    )
-}

@@ -50,9 +50,7 @@ async fn bulk_export_uses_shared_figshare_and_api_denials_are_not_empty_data() {
     f.respond(
         "/api3?op=GetStats&format=json&apikey=test",
         StatusCode::OK,
-        Bytes::from_static(
-            b"{\"Status\":\"unauthorized\",\"ErrorMessage\":\"key rejected\",\"Result\":[]}",
-        ),
+        fixture!("bhl", "bad-api-denial.json").await,
     );
     let s = BhlService::with_services(
         providers::connection(&f),

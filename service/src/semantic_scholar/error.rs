@@ -1,1 +1,1 @@
-pub(super) use crate::common::{decode, invalid};
+pub(super) use crate::common::decode;

@@ -46,7 +46,7 @@ async fn pages_validation_and_identity() {
     f.respond(
         "/collections/FR/2026-01-01?offsetMark=*&pageSize=10",
         StatusCode::OK,
-        Bytes::from_static(b"{\"packages\":[],\"nextPage\":null}"),
+        fixture!("govinfo", "empty-packages.json").await,
     );
     let s = GovInfoService::with_connections(connection(&f), connection(&f));
     assert!(
@@ -60,7 +60,7 @@ async fn pages_validation_and_identity() {
     f.respond(
         "/packages/P1/summary",
         StatusCode::OK,
-        Bytes::from_static(b"{\"packageId\":\"wrong\",\"download\":{}}"),
+        fixture!("govinfo", "bad-package-identity.json").await,
     );
     assert_eq!(s.package("P1").await.unwrap_err().kind(), ErrorKind::Decode);
     assert!(

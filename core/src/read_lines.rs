@@ -67,10 +67,8 @@ impl<R: ByteReader + ?Sized> LineState<R> {
                 let Some(input) = self.input.as_mut() else {
                     return Ok((!line.is_empty()).then(|| Bytes::from(line)));
                 };
-                match input.next().await? {
-                    Some(bytes) if bytes.is_empty() => {
-                        return Err(crate::error::empty_chunk(operation));
-                    }
+                match crate::next_nonempty(input.as_mut(), || crate::empty_chunk(operation)).await?
+                {
                     Some(bytes) => self.pending = bytes,
                     None => {
                         self.input = None;

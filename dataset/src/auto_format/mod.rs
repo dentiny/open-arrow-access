@@ -1,6 +1,6 @@
 //! File discovery and format detection, followed by native file planning.
 //!
-//! Enable `auto-format` and the `format-*` readers you need. Compression features
+//! Enable the `format-*` readers you need. Compression features
 //! remain on the decompression crate. Configure storage (including known content
 //! lengths) before passing it here; Parquet retains its original range-capable storage.
 

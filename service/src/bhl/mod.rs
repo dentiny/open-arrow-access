@@ -3,7 +3,7 @@ mod error;
 mod resolver;
 mod validation;
 use crate::{
-    common::{ApiDocument, Connection, RemoteFiles},
+    common::{ApiDocument, ApiKey, Connection, RemoteFiles},
     figshare::FigshareService,
 };
 use open_arrow_access_core::Result;
@@ -49,8 +49,11 @@ impl BhlService {
     /// Set or replace the API v3 key without changing the configured API or
     /// Figshare connections. Query credentials stay scoped to the API origin.
     pub fn with_key(mut self, key: &str) -> Result<Self> {
-        validation::validate_key(key)?;
-        self.connection = self.connection.with_query("apikey", key);
+        self.connection = self.connection.with_api_key_message(
+            ApiKey::Query("apikey"),
+            key,
+            "empty BHL API key",
+        )?;
         Ok(self)
     }
 

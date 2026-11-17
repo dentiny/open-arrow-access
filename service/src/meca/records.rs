@@ -8,7 +8,7 @@ use futures::{lock::Mutex, stream};
 use open_arrow_access_core::{
     Accessor, Bytes, Capability, FieldNameIndex, OrderRequirement, ReadOptions,
     ReadOptionsProvider, RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader,
-    Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, read_all,
+    Result, ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, read_all, scan_partition,
 };
 
 use open_arrow_access_decompression::zip::ZipArchive;
@@ -122,7 +122,7 @@ impl ScanPlanner for MecaRecords {
             let archive = archive.clone();
             let request = request.clone();
             let schema = schema.clone();
-            Box::pin(async move {
+            scan_partition(async move {
                 let metadata = RecordMetadata {
                     schema,
                     source: None,
@@ -149,16 +149,13 @@ impl ScanPlanner for MecaRecords {
                     })?;
                     builder.finish()
                 });
-                Ok(Box::new(StreamReader::records(
+                Ok(StreamReader::records(
                     batches,
                     metadata,
                     OrderRequirement::Reorderable,
-                )) as Box<dyn RecordReader>)
-            }) as ScanPartition
+                ))
+            })
         });
-        Ok(
-            ScanPlan::from_stream(metadata, stream::iter(partitions.map(Ok)))
-                .with_ordering(self.capability().ordering),
-        )
+        Ok(ScanPlan::from_iter(metadata, partitions).with_ordering(self.capability().ordering))
     }
 }

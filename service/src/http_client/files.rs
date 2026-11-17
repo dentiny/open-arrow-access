@@ -199,7 +199,8 @@ mod tests {
             "resolve_fixture",
             |error| error,
         )
-        .unwrap();
+        .unwrap()
+        .with_context(fixture.context());
         let url = service.endpoint().join("manifest").unwrap();
         let files = service
             .resolve_files(&url, |metadata: serde_json::Value| {

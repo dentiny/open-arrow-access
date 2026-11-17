@@ -8,13 +8,12 @@ use futures::TryStreamExt;
 use more_asserts::{assert_gt, assert_le};
 use open_arrow_access_core::{Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, ErrorKind};
 use opendal::{
-    Execute, Executor, OperationContext, Operator,
+    Execute, Executor, OperationContext,
     raw::{BoxedStaticFuture, Layer, Servicer},
-    services::Fs,
 };
 
 use open_arrow_access_storage::OpenDalAccessor;
-use open_arrow_access_test_support::{byte_accessor, fixture, fixture_path};
+use open_arrow_access_test_support::{byte_accessor, fixture, fixture_path, temp_fs};
 
 #[tokio::test]
 async fn filesystem_read_contract() {
@@ -90,15 +89,10 @@ struct TaskCounts {
 
 #[tokio::test]
 async fn sequential_output_chunks_reuse_storage_requests_when_ranges_are_interleaved() {
-    let dir = tempfile::tempdir().unwrap();
     let contents = fixture!("bytes", "sequence.bin").await;
-    tokio::fs::write(dir.path().join("data.bin"), &contents)
-        .await
-        .unwrap();
+    let (_dir, operator) = temp_fs(&[("data.bin", &contents)]);
     let counts = Arc::new(TaskCounts::default());
-    let operator = Operator::new(Fs::default().root(dir.path().to_str().unwrap()))
-        .unwrap()
-        .layer(CountTasksLayer(counts.clone()));
+    let operator = operator.layer(CountTasksLayer(counts.clone()));
     let accessor = OpenDalAccessor::new(operator).with_chunk_size(std::num::NonZeroUsize::MIN);
     let mut reader = accessor
         .open(
@@ -126,13 +120,10 @@ async fn sequential_output_chunks_reuse_storage_requests_when_ranges_are_interle
 
 #[tokio::test]
 async fn large_single_and_bulk_ranges_preserve_values_and_cursor() {
-    let dir = tempfile::tempdir().unwrap();
     let mib = 1024 * 1024;
     let contents = fixture!("bytes", "large.bin").await;
-    tokio::fs::write(dir.path().join("large.bin"), &contents)
-        .await
-        .unwrap();
-    let accessor = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(dir.path()));
+    let (_dir, operator) = temp_fs(&[("large.bin", &contents)]);
+    let accessor = OpenDalAccessor::new(operator);
     for (concurrency, chunk_size) in [
         (1, None),
         (4, None),
@@ -240,17 +231,12 @@ impl Layer for CountTasksLayer {
 
 #[tokio::test]
 async fn filesystem_bulk_reads_do_not_merge_across_unrequested_gaps() {
-    let dir = tempfile::tempdir().unwrap();
     let middle = 512 * 1024;
     let end = 1024 * 1024;
     let contents = fixture!("bytes", "gaps.bin").await;
-    tokio::fs::write(dir.path().join("data.bin"), &contents)
-        .await
-        .unwrap();
+    let (_dir, operator) = temp_fs(&[("data.bin", &contents)]);
     let counts = Arc::new(TaskCounts::default());
-    let operator = Operator::new(Fs::default().root(dir.path().to_str().unwrap()))
-        .unwrap()
-        .layer(CountTasksLayer(counts.clone()));
+    let operator = operator.layer(CountTasksLayer(counts.clone()));
     let accessor = OpenDalAccessor::new(operator);
     let mut reader = accessor
         .open(
@@ -302,16 +288,11 @@ async fn filesystem_bulk_reads_do_not_merge_across_unrequested_gaps() {
 
 #[tokio::test]
 async fn io_options_enable_bounded_backend_concurrency_for_single_and_bulk_reads() {
-    let dir = tempfile::tempdir().unwrap();
     let contents = fixture!("bytes", "sequence.bin").await;
-    tokio::fs::write(dir.path().join("data.bin"), &contents)
-        .await
-        .unwrap();
+    let (_dir, operator) = temp_fs(&[("data.bin", &contents)]);
     for concurrency in [1, 4] {
         let counts = Arc::new(TaskCounts::default());
-        let operator = Operator::new(Fs::default().root(dir.path().to_str().unwrap()))
-            .unwrap()
-            .layer(CountTasksLayer(counts.clone()));
+        let operator = operator.clone().layer(CountTasksLayer(counts.clone()));
         let accessor = OpenDalAccessor::new(operator);
         let mut reader = accessor
             .open(

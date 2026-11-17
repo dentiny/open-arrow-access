@@ -42,7 +42,7 @@ async fn rejects_unsupported_repositories_and_unpinned_responses() {
     f.respond(
         "/repos/openstax/osbooks-physics/commits/main",
         StatusCode::OK,
-        Bytes::from_static(b"{\"sha\":\"main\"}"),
+        fixture!("openstax", "bad-unpinned-commit.json").await,
     );
     assert_eq!(
         s.book("osbooks-physics", "main").await.unwrap_err().kind(),

@@ -18,6 +18,33 @@ pub trait Accessor: Send + Sync {
     /// Opened readers report their own abilities via [`Reader::capability`].
     fn capability(&self) -> <Self::Reader as Reader>::Capability;
 
+    /// Return the metadata exposed by `open(request)`, without consuming output items.
+    ///
+    /// For unchanged input and configuration, this must equal the opened reader's
+    /// metadata, including projection and source identity. The compatibility default
+    /// opens and immediately drops a reader; it inherits any opening side effects.
+    /// Implementations should override it to inspect only bounded inference samples
+    /// or format metadata, without starting background work or retaining readers.
+    async fn metadata(&self, request: Self::Request) -> Result<<Self::Reader as Reader>::Metadata>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        Ok(self.open(request).await?.metadata().clone())
+    }
+
+    /// Inspect metadata, returning `None` only for a proven empty input with no schema.
+    /// Preserve `Some` for unknown row presence, explicit schemas, and JSON `{}` rows.
+    /// The default wraps `metadata` in `Some` and inherits its fallback.
+    async fn inspect_metadata(
+        &self,
+        request: Self::Request,
+    ) -> Result<Option<<Self::Reader as Reader>::Metadata>>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        Ok(Some(self.metadata(request).await?))
+    }
+
     /// Open the accessor-defined selection and options in `request`.
     /// Opening may perform I/O and schema inspection; metadata is available on return
     /// without requiring all items to be loaded.
@@ -37,6 +64,23 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
 
     fn capability(&self) -> <Self::Reader as Reader>::Capability {
         (**self).capability()
+    }
+
+    async fn metadata(&self, request: Self::Request) -> Result<<Self::Reader as Reader>::Metadata>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        (**self).metadata(request).await
+    }
+
+    async fn inspect_metadata(
+        &self,
+        request: Self::Request,
+    ) -> Result<Option<<Self::Reader as Reader>::Metadata>>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        (**self).inspect_metadata(request).await
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {

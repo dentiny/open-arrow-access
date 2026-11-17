@@ -320,10 +320,7 @@ pub(crate) fn validate_partition_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,
 ) -> Result<()> {
-    if actual != expected {
-        return Err(crate::error::schema_error());
-    }
-    Ok(())
+    open_arrow_access_core::validate_schema(actual, expected, crate::error::schema_error)
 }
 
 pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Result<()> {
@@ -457,10 +454,11 @@ pub(crate) fn validate_evolution_input_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,
 ) -> Result<()> {
-    if actual != expected {
-        return Err(crate::error::evolution_schema_mismatch());
-    }
-    Ok(())
+    open_arrow_access_core::validate_schema(
+        actual,
+        expected,
+        crate::error::evolution_schema_mismatch,
+    )
 }
 
 pub(crate) fn validate_source_column_names(fields: &[Field]) -> Result<()> {
@@ -497,10 +495,7 @@ pub(crate) fn validate_source_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,
 ) -> Result<()> {
-    if actual != expected {
-        return Err(crate::error::source_schema_mismatch());
-    }
-    Ok(())
+    open_arrow_access_core::validate_schema(actual, expected, crate::error::source_schema_mismatch)
 }
 
 #[cfg(feature = "source-positions")]
