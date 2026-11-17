@@ -68,7 +68,6 @@ async fn segment_selects_exact_membership_in_order_with_forwarded_options() {
     let opens = records.opens.clone();
     let accessor = CommonCrawlSegmentAccessor::new(manifests, records);
     let mut selection = request().with_byte_options(ByteReadOptions {
-        track_positions: false,
         io_concurrency: NonZeroUsize::new(3).unwrap(),
         io_chunk_size: NonZeroUsize::new(4),
     });

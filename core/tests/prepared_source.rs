@@ -86,7 +86,6 @@ impl ScanPlanner for Dataset {
 async fn scan_applies_execution_options_to_the_bound_selection() {
     let dataset = Dataset::new();
     let options = ReadOptions {
-        source_columns: Vec::new(),
         batch_size: NonZeroUsize::new(2).unwrap(),
         projection: Some(vec!["label".into()]),
     };

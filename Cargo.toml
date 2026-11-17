@@ -90,6 +90,7 @@ open-arrow-access-dataset = { path = "dataset", version = "0.3.1", default-featu
 open-arrow-access-service = { path = "service", version = "0.3.1", default-features = false }
 
 [features]
+source-positions = ["open-arrow-access-layers/source-positions"]
 blocking = ["dep:arrow-array", "dep:arrow-schema", "dep:tokio"]
 dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 decompression-bz2 = ["open-arrow-access-decompression/bz2"]

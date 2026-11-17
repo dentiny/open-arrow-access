@@ -51,7 +51,6 @@ fn warehouse_schema() -> XmlSchema {
 
 fn request(name: &str, rows: usize, projection: Option<&[&str]>) -> ReadRequest {
     ReadRequest::new(name).with_options(ReadOptions {
-        source_columns: Vec::new(),
         batch_size: NonZeroUsize::new(rows).unwrap(),
         projection: projection.map(|names| names.iter().map(|name| (*name).to_owned()).collect()),
     })
@@ -523,7 +522,6 @@ async fn native_xml_grouping_respects_batch_byte_limit_and_empty_projection() {
                 NonZeroUsize::MIN,
             ))
             .open(ReadRequest::new("rows.xml").with_options(ReadOptions {
-                source_columns: Vec::new(),
                 batch_size: NonZeroUsize::new(10).unwrap(),
                 projection: projection.clone(),
             }))

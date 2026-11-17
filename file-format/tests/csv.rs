@@ -41,7 +41,6 @@ fn schema() -> SchemaRef {
 
 fn options(batch_size: usize, projection: Option<Vec<&str>>) -> ReadOptions {
     ReadOptions {
-        source_columns: Vec::new(),
         batch_size: NonZeroUsize::new(batch_size).unwrap(),
         projection: projection.map(|names| names.into_iter().map(String::from).collect()),
     }
@@ -121,7 +120,6 @@ async fn fixed_schema_contract_preserves_projection_and_source_failures() {
             request: ReadRequest::new("data.csv")
                 .with_options(options(2, Some(vec!["title", "id"])))
                 .with_byte_options(ByteReadOptions {
-                    track_positions: false,
                     io_concurrency: NonZeroUsize::new(3).unwrap(),
                     io_chunk_size: NonZeroUsize::new(7),
                 }),
@@ -412,7 +410,6 @@ async fn inference_detects_headers_replays_samples_and_supports_parallel_project
         max_bytes: 1024,
     });
     let request = ReadRequest::new("records.csv").with_options(ReadOptions {
-        source_columns: Vec::new(),
         batch_size: NonZeroUsize::new(1).unwrap(),
         projection: Some(vec![
             "score".to_owned(),

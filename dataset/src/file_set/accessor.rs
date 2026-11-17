@@ -163,3 +163,54 @@ where
         }
     }
 }
+
+impl<A> FileSetAccessor<A>
+where
+    A: open_arrow_access_core::SourceColumnPlanner<Request = ReadRequest> + 'static,
+{
+    fn with_source_columns(
+        &self,
+        columns: &[open_arrow_access_core::SourceColumn],
+    ) -> FileSetAccessor<open_arrow_access_core::SourceColumnRequestAccessor<Arc<A>>> {
+        let files = FileSetAccessor::new(open_arrow_access_core::SourceColumnRequestAccessor::new(
+            self.inner.clone(),
+            columns.to_vec(),
+        ));
+        let files = if self.union_by_name {
+            files.with_union_by_name()
+        } else {
+            files
+        };
+        if self.file_planner.is_some() {
+            files.with_file_planning()
+        } else {
+            files
+        }
+    }
+}
+#[async_trait]
+impl<A> open_arrow_access_core::SourceColumnAccessor for FileSetAccessor<A>
+where
+    A: open_arrow_access_core::SourceColumnPlanner<Request = ReadRequest> + 'static,
+{
+    async fn open_source_columns(
+        &self,
+        request: FileSetRequest,
+        columns: &[open_arrow_access_core::SourceColumn],
+    ) -> Result<Box<dyn RecordReader>> {
+        self.with_source_columns(columns).open(request).await
+    }
+}
+#[async_trait]
+impl<A> open_arrow_access_core::SourceColumnPlanner for FileSetAccessor<A>
+where
+    A: open_arrow_access_core::SourceColumnPlanner<Request = ReadRequest> + 'static,
+{
+    async fn plan_source_columns(
+        &self,
+        request: FileSetRequest,
+        columns: &[open_arrow_access_core::SourceColumn],
+    ) -> Result<ScanPlan> {
+        self.with_source_columns(columns).plan_scan(request).await
+    }
+}

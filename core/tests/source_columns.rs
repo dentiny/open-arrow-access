@@ -1,10 +1,14 @@
 use futures::io::{AsyncBufReadExt, AsyncReadExt};
-use open_arrow_access_core::{Accessor, BytePosition, into_positioned_async_read};
+use open_arrow_access_core::{
+    Accessor, AccessorExt, BytePosition, into_positioned_async_read, metrics::MetricsLayer,
+};
 use open_arrow_access_test_support::MemoryAccessor;
 
 #[tokio::test]
 async fn buffered_position_tracks_consumption_and_ranges_do_not_move_storage_cursor() {
-    let input = MemoryAccessor::new(b"abcdefghij", 4).with_ranges();
+    let input = MemoryAccessor::new(b"abcdefghij", 4)
+        .with_ranges()
+        .layer(MetricsLayer::default());
     let mut reader = input.open("object".into()).await.unwrap();
     assert_eq!(reader.position(), Some(BytePosition::Stored(0)));
     assert_eq!(reader.read_range(5..8).await.unwrap().as_ref(), b"fgh");

@@ -70,7 +70,6 @@ async fn plain_objects_keep_ranges_metadata_and_storage_options() {
     assert!(!accessor.capability().read_with_range);
     assert!(accessor.capability().list);
     let options = ByteReadOptions {
-        track_positions: false,
         io_concurrency: NonZeroUsize::new(2).unwrap(),
         io_chunk_size: NonZeroUsize::new(3),
     };

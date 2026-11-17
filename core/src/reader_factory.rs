@@ -21,13 +21,37 @@ pub trait ReaderFactory: Send + Sync {
     /// Required for every factory: record formats must explicitly declare ordering.
     fn capability(&self, input: Capability) -> <Self::Reader as Reader>::Capability;
 
-    /// Declare optional record provenance support without opening bytes.
-    fn supports_source_column(&self, column: crate::SourceColumn) -> bool {
-        column == crate::SourceColumn::Object
-    }
-
     /// Validate configuration before storage opens; return configuration errors here.
     fn prepare(&self, request: &Self::Request) -> Result<Self::Prepared>;
+
+    /// Optional provenance preparation used only by SourceColumnsLayer.
+    /// Object locators need no parser support; offsets require an explicit override.
+    fn prepare_source_columns(
+        &self,
+        request: &Self::Request,
+        columns: &[crate::SourceColumn],
+    ) -> Result<Self::Prepared> {
+        if columns.iter().any(|c| *c != crate::SourceColumn::Object) {
+            return Err(crate::Error::new(
+                crate::ErrorKind::Unsupported,
+                "source_columns",
+                "format does not support source offsets",
+            ));
+        }
+        self.prepare(request)
+    }
+
+    /// Optional provenance-aware parser hook. Ordinary opens use create_reader.
+    async fn create_reader_with_source_columns(
+        &self,
+        token: &FactoryToken,
+        input: Box<dyn ByteReader>,
+        request: Self::Request,
+        prepared: Self::Prepared,
+        _columns: &[crate::SourceColumn],
+    ) -> Result<Box<Self::Reader>> {
+        self.create_reader(token, input, request, prepared).await
+    }
 
     /// Inspect opened bytes and return an owned reader with metadata available.
     /// Preserve source errors and lifecycle; inspection may perform I/O.
@@ -44,6 +68,15 @@ pub trait ReaderFactory: Send + Sync {
 /// Shared opening flow provided by one blanket implementation for all factories.
 #[async_trait]
 pub trait ReaderFactoryExt: ReaderFactory {
+    async fn open_source_reader(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+        columns: &[crate::SourceColumn],
+    ) -> Result<Box<Self::Reader>>
+    where
+        for<'a> ByteReadRequest: From<&'a Self::Request>;
+
     /// Prepare a format and decode an already-open byte reader. Preparation
     /// finishes before the factory can poll the supplied input.
     async fn open_input(
@@ -64,6 +97,33 @@ pub trait ReaderFactoryExt: ReaderFactory {
 
 #[async_trait]
 impl<F: ReaderFactory + ?Sized> ReaderFactoryExt for F {
+    async fn open_source_reader(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+        columns: &[crate::SourceColumn],
+    ) -> Result<Box<Self::Reader>>
+    where
+        for<'a> ByteReadRequest: From<&'a Self::Request>,
+    {
+        let byte_request = ByteReadRequest::from(&request);
+        let object = byte_request.object.clone();
+        let context = |error: crate::Error| error.with_object(Some(&object));
+        let prepared = self
+            .prepare_source_columns(&request, columns)
+            .map_err(context)?;
+        let input = storage.open(byte_request).await.map_err(context)?;
+        self.create_reader_with_source_columns(
+            &FactoryToken { _private: () },
+            input,
+            request,
+            prepared,
+            columns,
+        )
+        .await
+        .map_err(context)
+    }
+
     async fn open_input(
         &self,
         input: Box<dyn ByteReader>,

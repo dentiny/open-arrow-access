@@ -33,36 +33,40 @@ pub(crate) trait FileScanPlanner:
     Accessor<Request = ReadRequest, Reader = dyn RecordReader>
 {
     async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan>;
+    async fn plan_file_scan_with_source_columns(
+        &self,
+        request: ReadRequest,
+        columns: &[open_arrow_access_core::SourceColumn],
+    ) -> Result<ScanPlan> {
+        if columns
+            .iter()
+            .any(|c| *c != open_arrow_access_core::SourceColumn::Object)
+        {
+            return Err(open_arrow_access_core::Error::new(
+                open_arrow_access_core::ErrorKind::Unsupported,
+                "source_columns",
+                "format does not support source offsets",
+            ));
+        }
+        self.plan_file_scan(request).await
+    }
 }
 
 #[async_trait]
 impl<B, F> ScanPlanner for crate::FileAccessor<B, F>
 where
     Self: FileScanPlanner,
-    F: open_arrow_access_core::ReaderFactory<Request = ReadRequest>,
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        use crate::FileRequest;
-        let mut request = request;
-        let columns =
-            request.take_sources(|column| self.binding.factory().supports_source_column(column))?;
-        let source = request.object.clone();
         let object = request.object.clone();
         let context = move |error: open_arrow_access_core::Error| error.with_object(Some(&object));
         let mut plan = self.plan_file_scan(request).await.map_err(&context)?;
-        plan.metadata.schema = crate::source::schema(&plan.metadata.schema, &columns)?;
         plan.partitions = plan
             .partitions
             .map_err(context.clone())
             .map_ok(move |partition| {
                 let context = context.clone();
-                let source = source.clone();
-                let columns = columns.clone();
-                async move {
-                    crate::source::wrap(partition.await.map_err(&context)?, source, columns)
-                        .map_err(context)
-                }
-                .boxed()
+                async move { partition.await.map_err(context) }.boxed()
             })
             .boxed();
         Ok(plan)

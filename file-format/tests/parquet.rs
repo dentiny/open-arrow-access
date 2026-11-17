@@ -334,7 +334,6 @@ async fn local_parquet_preserves_values_nulls_and_order_across_row_groups() {
         );
         let mut reader = accessor
             .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
-                source_columns: Vec::new(),
                 batch_size: NonZeroUsize::new(2).unwrap(),
                 projection: None,
             }))
@@ -569,7 +568,6 @@ async fn parquet_forwards_io_options_and_bulk_ranges_through_third_party_layers(
     let records = ParquetAccessor::new(bytes);
     for concurrency in [1, 3] {
         let options = ByteReadOptions {
-            track_positions: false,
             io_concurrency: NonZeroUsize::new(concurrency).unwrap(),
             io_chunk_size: NonZeroUsize::new(64),
         };
@@ -679,7 +677,6 @@ async fn row_group_plan_reuses_metadata_and_preserves_projection_and_rows() {
     assert_eq!(observations.range_reads.load(Ordering::SeqCst), reads);
     for projection in [None, Some(vec!["title".into(), "id".into()]), Some(vec![])] {
         let request = ReadRequest::new("data.parquet").with_options(ReadOptions {
-            source_columns: Vec::new(),
             batch_size: NonZeroUsize::new(2).unwrap(),
             projection,
         });

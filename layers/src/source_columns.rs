@@ -14,7 +14,20 @@ use std::{collections::HashSet, sync::Arc};
 pub struct SourceColumnsLayer {
     columns: Vec<(SourceColumn, String)>,
 }
+#[cfg(feature = "source-positions")]
+mod bytes;
+#[cfg(feature = "source-positions")]
+pub use bytes::{SourcePositionAccessor, SourcePositionLayer};
+
 impl SourceColumnsLayer {
+    /// Apply to raw byte storage before constructing the format accessor.
+    /// This optional adapter preserves compressed frame boundaries without
+    /// changing the ordinary decompression implementation.
+    #[cfg(feature = "source-positions")]
+    pub fn byte_positions(&self) -> SourcePositionLayer {
+        SourcePositionLayer::default()
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -37,11 +50,6 @@ impl SourceColumnsLayer {
     }
     fn request<R: ReadOptionsProvider>(&self, request: &mut R) -> Option<Vec<String>> {
         let options = request.read_options_mut();
-        for (column, _) in &self.columns {
-            if !options.source_columns.contains(column) {
-                options.source_columns.push(*column);
-            }
-        }
         // Resolve projection after renaming, so callers may select the chosen names.
         options.projection.take()
     }
@@ -124,9 +132,18 @@ pub struct SourceColumnsAccessor<A> {
     inner: A,
     layer: SourceColumnsLayer,
 }
+impl<A> SourceColumnsAccessor<A> {
+    fn columns(&self) -> Vec<SourceColumn> {
+        self.layer
+            .columns
+            .iter()
+            .map(|(column, _)| *column)
+            .collect()
+    }
+}
 impl<A> Layer<A> for SourceColumnsLayer
 where
-    A: Accessor<Reader = dyn RecordReader>,
+    A: open_arrow_access_core::SourceColumnAccessor,
     A::Request: ReadOptionsProvider,
 {
     type Layered = SourceColumnsAccessor<A>;
@@ -140,7 +157,7 @@ where
 #[async_trait]
 impl<A> Accessor for SourceColumnsAccessor<A>
 where
-    A: Accessor<Reader = dyn RecordReader>,
+    A: open_arrow_access_core::SourceColumnAccessor,
     A::Request: ReadOptionsProvider,
 {
     type Request = A::Request;
@@ -150,7 +167,8 @@ where
     }
     async fn open(&self, mut request: Self::Request) -> Result<Box<dyn RecordReader>> {
         let projection = self.layer.request(&mut request);
-        let reader = self.inner.open(request).await?;
+        let columns = self.columns();
+        let reader = self.inner.open_source_columns(request, &columns).await?;
         let transform = self
             .layer
             .transform(&reader.metadata().schema, projection)
@@ -161,12 +179,13 @@ where
 #[async_trait]
 impl<A> ScanPlanner for SourceColumnsAccessor<A>
 where
-    A: ScanPlanner,
+    A: open_arrow_access_core::SourceColumnPlanner,
     A::Request: ReadOptionsProvider,
 {
     async fn plan_scan(&self, mut request: Self::Request) -> Result<ScanPlan> {
         let projection = self.layer.request(&mut request);
-        let mut plan = self.inner.plan_scan(request).await?;
+        let columns = self.columns();
+        let mut plan = self.inner.plan_source_columns(request, &columns).await?;
         let transform = self
             .layer
             .transform(&plan.metadata.schema, projection)

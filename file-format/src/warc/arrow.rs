@@ -117,17 +117,23 @@ impl ReaderFactory for WarcArrowFormat {
         .with_ordering(OrderRequirement::Reorderable)
     }
 
-    fn supports_source_column(&self, _: open_arrow_access_core::SourceColumn) -> bool {
-        true
-    }
-
     fn prepare(&self, request: &ReadRequest) -> Result<SchemaRef> {
+        request
+            .options
+            .resolve_projection(&arrow_schema())
+            .map(|projection| projection.schema)
+    }
+    fn prepare_source_columns(
+        &self,
+        request: &ReadRequest,
+        columns: &[open_arrow_access_core::SourceColumn],
+    ) -> Result<SchemaRef> {
         let schema = request.options.resolve_projection(&arrow_schema())?.schema;
         let mut fields = schema.fields().to_vec();
         let mut seen = std::collections::HashSet::new();
-        for &column in &request.options.source_columns {
+        for &column in columns {
             if !seen.insert(column) || arrow_schema().index_of(column.name()).is_ok() {
-                return Err(crate::source::invalid(
+                return Err(crate::source_columns::invalid(
                     "source column conflicts with data field",
                 ));
             }
@@ -145,10 +151,19 @@ impl ReaderFactory for WarcArrowFormat {
         request: ReadRequest,
         schema: SchemaRef,
     ) -> Result<Box<dyn RecordReader>> {
+        self.create_reader_with_source_columns(token, input, request, schema, &[])
+            .await
+    }
+    async fn create_reader_with_source_columns(
+        &self,
+        token: &FactoryToken,
+        input: Box<dyn ByteReader>,
+        request: ReadRequest,
+        schema: SchemaRef,
+        columns: &[open_arrow_access_core::SourceColumn],
+    ) -> Result<Box<dyn RecordReader>> {
         let source = request.object.clone();
-        let track = request
-            .options
-            .source_columns
+        let track = columns
             .iter()
             .any(|c| *c != open_arrow_access_core::SourceColumn::Object);
         let records: futures::stream::BoxStream<
@@ -156,7 +171,7 @@ impl ReaderFactory for WarcArrowFormat {
             Result<(WarcRecord, Option<open_arrow_access_core::BytePosition>)>,
         > = if track {
             use futures::StreamExt;
-            super::positions::positioned_records(input)?
+            positions::positioned_records(input)?
                 .map_ok(|((headers, body), position)| {
                     warc::Record::<warc::EmptyBody>::try_from(headers)
                         .map_err(super::decode_error)
@@ -255,4 +270,48 @@ pub(super) fn append_record(
         )?;
         row.append("body", record.body())
     })
+}
+
+pub(super) mod positions {
+    use super::super::decode_error;
+    use futures::{
+        StreamExt,
+        stream::{self, BoxStream},
+    };
+    use open_arrow_access_core::{
+        BytePosition, ByteReader, Error, ErrorKind, Result, into_positioned_async_read,
+    };
+    pub(in crate::warc) type RawRecord = (warc::RawRecordHeader, Vec<u8>);
+    pub(in crate::warc) fn positioned_records(
+        input: Box<dyn ByteReader>,
+    ) -> Result<BoxStream<'static, Result<(RawRecord, BytePosition)>>> {
+        if input.position().is_none() {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "read_warc",
+                "byte input does not provide source positions",
+            )
+            .with_object(input.metadata().source.as_ref()));
+        }
+        let input = into_positioned_async_read(input, "read_warc");
+        let observer = input.observer();
+        let records = warc::WarcReader::new(input).iter_raw_records();
+        Ok(
+            stream::try_unfold((records, observer), |(mut records, observer)| async move {
+                observer.mark();
+                let Some(record) = records.next().await.transpose().map_err(decode_error)? else {
+                    return Ok(None);
+                };
+                let position = observer.marked_position().ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::Unsupported,
+                        "read_warc",
+                        "byte input lost source positions",
+                    )
+                })?;
+                Ok(Some(((record, position), (records, observer))))
+            })
+            .boxed(),
+        )
+    }
 }

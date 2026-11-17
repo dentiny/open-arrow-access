@@ -26,3 +26,6 @@ pub use open_arrow_access_core::metrics::{MetricsAccessor, MetricsLayer};
 
 mod source_columns;
 pub use source_columns::{SourceColumnsAccessor, SourceColumnsLayer};
+
+#[cfg(feature = "source-positions")]
+pub use source_columns::{SourcePositionAccessor, SourcePositionLayer};

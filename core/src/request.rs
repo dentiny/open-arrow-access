@@ -75,8 +75,6 @@ pub const DEFAULT_BATCH_SIZE: NonZeroUsize = NonZeroUsize::new(8192).unwrap();
 /// Per-reader storage I/O settings, independent of Arrow batch size and ordering.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ByteReadOptions {
-    /// Preserve frame boundaries and byte coordinates through decompression.
-    pub track_positions: bool,
     /// Maximum in-flight I/O chunks within a read operation; defaults to one.
     pub io_concurrency: NonZeroUsize,
     /// I/O splitting size. None keeps the backend default; concurrency alone
@@ -87,7 +85,6 @@ pub struct ByteReadOptions {
 impl Default for ByteReadOptions {
     fn default() -> Self {
         Self {
-            track_positions: false,
             io_concurrency: NonZeroUsize::MIN,
             io_chunk_size: None,
         }
@@ -129,13 +126,7 @@ impl From<&ByteReadRequest> for ByteReadRequest {
 
 impl From<&ReadRequest> for ByteReadRequest {
     fn from(request: &ReadRequest) -> Self {
-        let mut options = request.byte_options;
-        options.track_positions |= request
-            .options
-            .source_columns
-            .iter()
-            .any(|c| *c != crate::SourceColumn::Object);
-        Self::new(request.object.clone()).with_options(options)
+        Self::new(request.object.clone()).with_options(request.byte_options)
     }
 }
 
@@ -154,8 +145,6 @@ impl From<String> for ByteReadRequest {
 /// Common record-reading settings. Providers can expose their own typed settings.
 #[derive(Clone, Debug)]
 pub struct ReadOptions {
-    /// Provenance columns appended after the projected data columns.
-    pub source_columns: Vec<crate::SourceColumn>,
     /// A row-count target, not a guarantee about the size of an individual record.
     pub batch_size: NonZeroUsize,
     /// Top-level fields in the requested output order. None selects every field.
@@ -173,25 +162,9 @@ pub struct ResolvedProjection {
 
 impl ReadOptions {
     /// Resolve the output schema and selected top-level indices in caller order.
-    /// None retains the original schema; an empty projection retains row counts
-    /// and any requested provenance columns already present in the schema.
+    /// None retains the original schema; an empty projection retains only row counts.
     /// Unknown or duplicate field names return InvalidInput.
     pub fn resolve_projection(&self, schema: &SchemaRef) -> Result<ResolvedProjection> {
-        for column in &self.source_columns {
-            if let Ok(field) = schema.field_with_name(column.name())
-                && field
-                    .metadata()
-                    .get("open_arrow_access:source_column")
-                    .map(String::as_str)
-                    != Some(column.name())
-            {
-                return Err(crate::Error::new(
-                    crate::ErrorKind::InvalidInput,
-                    "source_columns",
-                    format!("source column {} conflicts with data field", column.name()),
-                ));
-            }
-        }
         let Some(columns) = &self.projection else {
             return Ok(ResolvedProjection {
                 schema: schema.clone(),
@@ -211,15 +184,6 @@ impl ReadOptions {
                     .map_err(|error| crate::error::unknown_projection_field(name, error))?,
             );
         }
-        // Provenance is appended even when data projection is empty. Dataset
-        // union planning resolves against schemas that already contain it.
-        for column in &self.source_columns {
-            if !seen.iter().any(|name| name.as_str() == column.name())
-                && let Ok(index) = field_index.index_of(column.name())
-            {
-                indices.push(index);
-            }
-        }
         let projected = schema
             .project(&indices)
             .map_err(crate::error::projection_error)?;
@@ -233,7 +197,6 @@ impl ReadOptions {
 impl Default for ReadOptions {
     fn default() -> Self {
         Self {
-            source_columns: Vec::new(),
             batch_size: DEFAULT_BATCH_SIZE,
             projection: None,
         }

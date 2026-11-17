@@ -40,7 +40,6 @@ async fn dataset_reads_all_segments_in_manifest_order_and_forwards_options() {
     let opens = records.opens.clone();
     let accessor = CommonCrawlWarcAccessor::new(manifests, records);
     let mut selection = request().with_byte_options(ByteReadOptions {
-        track_positions: false,
         io_concurrency: NonZeroUsize::new(3).unwrap(),
         io_chunk_size: NonZeroUsize::new(4),
     });

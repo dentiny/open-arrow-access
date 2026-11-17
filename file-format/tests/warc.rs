@@ -105,7 +105,6 @@ async fn source_errors_keep_categories_and_chains_across_parser_boundaries() {
     let bytes = fixture!("warc", "good_resource.warc").await;
     let body_start = bytes.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
     let options = ByteReadOptions {
-        track_positions: false,
         io_concurrency: NonZeroUsize::new(3).unwrap(),
         io_chunk_size: NonZeroUsize::new(5),
     };
@@ -146,7 +145,6 @@ async fn reads_one_record_on_demand_forwards_io_options_and_stops_on_drop() {
     let input = MemoryAccessor::new(&fixture!("warc", "good_resources.warc").await, 1);
     let observed = input.observations.clone();
     let options = ByteReadOptions {
-        track_positions: false,
         io_concurrency: NonZeroUsize::new(3).unwrap(),
         io_chunk_size: NonZeroUsize::new(5),
     };
@@ -194,7 +192,6 @@ async fn arrow_records_preserve_binary_bodies_source_and_projection() {
     ] {
         let mut reader = WarcArrowAccessor::new(MemoryAccessor::new(&input, 1))
             .open(ReadRequest::new("records.warc").with_options(ReadOptions {
-                source_columns: Vec::new(),
                 batch_size: NonZeroUsize::new(2).unwrap(),
                 projection: projection.clone(),
             }))
@@ -259,7 +256,6 @@ async fn parallel_record_partitions_are_lazy_and_preserve_binary_projection_and_
         target_bytes: NonZeroUsize::MIN,
     });
     let request = ReadRequest::new("physical.warc").with_options(ReadOptions {
-        source_columns: Vec::new(),
         batch_size: NonZeroUsize::new(2).unwrap(),
         projection: Some(vec!["body".into(), "record_id".into(), "date".into()]),
     });

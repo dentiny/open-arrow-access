@@ -1,69 +1,71 @@
-//! Shared provenance handling for file formats.
+use crate::{FileAccessor, scan::FileScanPlanner};
 use arrow_array::{ArrayRef, StringArray};
 use arrow_schema::{Schema, SchemaRef};
-use futures::TryStreamExt;
+use futures::{FutureExt, StreamExt, TryStreamExt};
 use open_arrow_access_core::{
-    Error, ErrorKind, ObjectRef, ReadRequest, Reader, RecordBatch, RecordMetadata, RecordReader,
-    Result, SourceColumn, StreamReader, into_stream,
+    Accessor, ByteReadRequest, ByteReader, Error, ErrorKind, ObjectRef, ReadRequest, ReaderFactory,
+    ReaderFactoryExt, RecordBatch, RecordMetadata, RecordReader, Result, ScanPlan, SourceColumn,
+    SourceColumnAccessor, SourceColumnPlanner, StreamReader, async_trait, into_stream,
 };
 use std::sync::Arc;
 
-/// Request-side provenance support for FileAccessor. Native byte requests pass through.
-pub trait FileRequest<R: Reader + ?Sized + 'static>: Send {
-    fn take_sources(
-        &mut self,
-        supports: impl Fn(SourceColumn) -> bool,
-    ) -> Result<Vec<SourceColumn>>;
-    fn object(&self) -> &ObjectRef;
-    fn wrap(reader: Box<R>, object: ObjectRef, columns: Vec<SourceColumn>) -> Result<Box<R>>;
-}
-impl FileRequest<dyn RecordReader> for ReadRequest {
-    fn take_sources(
-        &mut self,
-        supports: impl Fn(SourceColumn) -> bool,
-    ) -> Result<Vec<SourceColumn>> {
-        let mut seen = std::collections::HashSet::new();
-        for &column in &self.options.source_columns {
-            if !seen.insert(column) {
-                return Err(invalid("duplicate source column"));
-            }
-            if !supports(column) {
-                return Err(Error::new(
-                    ErrorKind::Unsupported,
-                    "prepare_source_columns",
-                    format!("format does not support {}", column.name()),
-                )
-                .with_object(Some(&self.object)));
-            }
-        }
-        let columns = self.options.source_columns.clone();
-        if let Some(projection) = &mut self.options.projection {
-            projection.retain(|name| !columns.iter().any(|c| c.name() == name));
-        }
-        Ok(columns)
-    }
-    fn object(&self) -> &ObjectRef {
-        &self.object
-    }
-    fn wrap(
-        reader: Box<dyn RecordReader>,
-        object: ObjectRef,
-        columns: Vec<SourceColumn>,
+#[async_trait]
+impl<B, F> SourceColumnAccessor for FileAccessor<B, F>
+where
+    B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+    F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader>,
+{
+    async fn open_source_columns(
+        &self,
+        request: ReadRequest,
+        columns: &[SourceColumn],
     ) -> Result<Box<dyn RecordReader>> {
-        wrap(reader, object, columns)
+        let object = request.object.clone();
+        let reader = self
+            .binding
+            .factory()
+            .open_source_reader(self.binding.storage(), request, columns)
+            .await?;
+        wrap(reader, object.clone(), columns.to_vec()).map_err(|e| e.with_object(Some(&object)))
     }
 }
-impl<R: Reader + ?Sized + 'static> FileRequest<R> for open_arrow_access_core::ByteReadRequest {
-    fn take_sources(&mut self, _: impl Fn(SourceColumn) -> bool) -> Result<Vec<SourceColumn>> {
-        Ok(vec![])
-    }
-    fn object(&self) -> &ObjectRef {
-        &self.object
-    }
-    fn wrap(reader: Box<R>, _: ObjectRef, _: Vec<SourceColumn>) -> Result<Box<R>> {
-        Ok(reader)
+#[async_trait]
+impl<B, F> SourceColumnPlanner for FileAccessor<B, F>
+where
+    B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+    F: ReaderFactory<Request = ReadRequest, Reader = dyn RecordReader>,
+    Self: FileScanPlanner,
+{
+    async fn plan_source_columns(
+        &self,
+        request: ReadRequest,
+        columns: &[SourceColumn],
+    ) -> Result<ScanPlan> {
+        let object = request.object.clone();
+        let mut plan = self
+            .plan_file_scan_with_source_columns(request, columns)
+            .await
+            .map_err(|e| e.with_object(Some(&object)))?;
+        plan.metadata.schema = schema(&plan.metadata.schema, columns)?;
+        let columns = columns.to_vec();
+        let discovery_object = object.clone();
+        plan.partitions = plan
+            .partitions
+            .map_err(move |error| error.with_object(Some(&discovery_object)))
+            .map_ok(move |partition| {
+                let object = object.clone();
+                let columns = columns.clone();
+                async move {
+                    let reader = partition.await.map_err(|e| e.with_object(Some(&object)))?;
+                    wrap(reader, object.clone(), columns).map_err(|e| e.with_object(Some(&object)))
+                }
+                .boxed()
+            })
+            .boxed();
+        Ok(plan)
     }
 }
+
 pub(crate) fn invalid(message: impl Into<String>) -> Error {
     Error::new(ErrorKind::InvalidInput, "source_columns", message)
 }

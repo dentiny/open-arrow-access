@@ -146,9 +146,7 @@ Objects must remain stable during a read. Generic storage does not create a
 snapshot. Some providers pin a revision or release, such as Hugging Face's Parquet
 export; others expose mutable catalogues. Record the chosen identity and provider
 metadata in your pipeline's manifest. Reader source metadata is not automatically
-added as Arrow provenance columns. Request them explicitly through
-`ReadOptions::source_columns` or `SourceColumnsLayer`; see
-[source positions](source-positions.md) for locator and frame-offset semantics.
+added as Arrow provenance columns.
 
 ## Shared service HTTP client
 

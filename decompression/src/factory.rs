@@ -58,10 +58,6 @@ impl<C: Codec> ReaderFactory for DecompressionFactory<C> {
         let mut metadata = input.metadata().clone();
         metadata.content_length = None;
         metadata.source = Some(request.object);
-        if request.options.track_positions {
-            return crate::positioned::open(input, metadata, self.codec.clone(), self.chunk_size)
-                .await;
-        }
         let input = into_async_read(input, "decompress_input");
         let decoder = self.codec.decoder(Box::pin(input));
         Ok(decoded_reader(

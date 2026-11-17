@@ -70,7 +70,7 @@ pub struct ByteMetadata {
 pub trait ByteReader:
     Reader<Item = Bytes, Metadata = ByteMetadata, Capability = Capability>
 {
-    /// Position of the next chunk; None means the byte coordinates are unknown.
+    /// Coordinates of the next chunk. Byte transformations default to unknown.
     fn position(&self) -> Option<crate::BytePosition> {
         None
     }

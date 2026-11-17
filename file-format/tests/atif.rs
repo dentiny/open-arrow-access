@@ -26,7 +26,6 @@ async fn fixed_schema_nested_content_and_verbatim_source_across_single_byte_chun
     assert!(capability.read);
     assert!(!capability.read_with_range && !capability.read_parallel && !capability.list);
     let options = ByteReadOptions {
-        track_positions: false,
         io_concurrency: NonZeroUsize::new(3).unwrap(),
         io_chunk_size: NonZeroUsize::new(7),
     };
@@ -81,7 +80,6 @@ async fn jsonl_batching_projection_and_document_indices_preserve_order() {
         );
         let mut reader = accessor
             .open(ReadRequest::new("runs.jsonl").with_options(ReadOptions {
-                source_columns: Vec::new(),
                 batch_size: NonZeroUsize::new(2).unwrap(),
                 projection: Some(vec![
                     "trajectory_id".into(),
@@ -146,7 +144,6 @@ async fn malformed_documents_utf8_and_invalid_atif_are_terminal_with_source_cont
         let observations = bytes.observations.clone();
         let mut reader = AtifAccessor::new(bytes, AtifFormat::JsonLines)
             .open(ReadRequest::new("broken.jsonl").with_options(ReadOptions {
-                source_columns: Vec::new(),
                 // Valid row 1 must be discarded with the invalid row in this batch.
                 batch_size: NonZeroUsize::new(2).unwrap(),
                 projection: Some(vec![]),
@@ -189,7 +186,6 @@ async fn jsonl_pulls_only_the_requested_batch_and_keeps_delivered_rows_on_later_
     let observations = bytes.observations.clone();
     let mut reader = AtifAccessor::new(bytes, AtifFormat::JsonLines)
         .open(ReadRequest::new("runs.jsonl").with_options(ReadOptions {
-            source_columns: Vec::new(),
             batch_size: NonZeroUsize::MIN,
             projection: Some(vec!["trajectory_id".into()]),
         }))
@@ -218,7 +214,6 @@ async fn parallel_gzip_trajectories_keep_global_indices_raw_json_and_projection(
             AtifFormat::JsonLines,
         );
         let request = ReadRequest::new("trajectories.jsonl").with_options(ReadOptions {
-            source_columns: Vec::new(),
             batch_size: NonZeroUsize::new(1).unwrap(),
             projection,
         });
@@ -258,7 +253,6 @@ async fn parallel_byte_targets_keep_lookahead_indices_and_oversized_trajectories
             target_bytes: NonZeroUsize::MIN,
         });
     let request = ReadRequest::new("trajectories.jsonl").with_options(ReadOptions {
-        source_columns: Vec::new(),
         batch_size: NonZeroUsize::new(10).unwrap(),
         projection: Some(vec!["source_record_index".into(), "raw_json".into()]),
     });

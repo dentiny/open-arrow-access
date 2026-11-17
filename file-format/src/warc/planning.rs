@@ -13,7 +13,7 @@ use super::{
 use crate::scan::chunks::RecordChunks;
 
 type RawRecord = (
-    super::positions::RawRecord,
+    super::arrow::positions::RawRecord,
     Option<open_arrow_access_core::BytePosition>,
 );
 
@@ -23,7 +23,17 @@ where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
 {
     async fn plan_file_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        let schema = self.binding.factory().prepare(&request)?;
+        self.plan_file_scan_with_source_columns(request, &[]).await
+    }
+    async fn plan_file_scan_with_source_columns(
+        &self,
+        request: ReadRequest,
+        columns: &[open_arrow_access_core::SourceColumn],
+    ) -> Result<ScanPlan> {
+        let schema = self
+            .binding
+            .factory()
+            .prepare_source_columns(&request, columns)?;
         let metadata = RecordMetadata {
             schema,
             source: Some(request.object.clone()),
@@ -33,13 +43,11 @@ where
             .storage()
             .open(ByteReadRequest::from(&request))
             .await?;
-        let track = request
-            .options
-            .source_columns
+        let track = columns
             .iter()
             .any(|c| *c != open_arrow_access_core::SourceColumn::Object);
         let records = if track {
-            super::positions::positioned_records(input)?
+            super::arrow::positions::positioned_records(input)?
                 .map_ok(|(record, position)| (record, Some(position)))
                 .boxed()
         } else {

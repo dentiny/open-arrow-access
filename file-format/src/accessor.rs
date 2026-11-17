@@ -57,7 +57,6 @@ impl<B, F> Accessor for FileAccessor<B, F>
 where
     B: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
     F: ReaderFactory,
-    F::Request: crate::FileRequest<F::Reader>,
     for<'a> ByteReadRequest: From<&'a F::Request>,
 {
     type Request = F::Request;
@@ -68,12 +67,6 @@ where
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
-        use crate::FileRequest;
-        let mut request = request;
-        let object = request.object().clone();
-        let columns =
-            request.take_sources(|column| self.binding.factory().supports_source_column(column))?;
-        let reader = self.binding.open(request).await?;
-        F::Request::wrap(reader, object.clone(), columns).map_err(|e| e.with_object(Some(&object)))
+        self.binding.open(request).await
     }
 }

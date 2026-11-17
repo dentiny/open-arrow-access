@@ -56,7 +56,6 @@ impl Accessor for Objects {
 impl ByteAccessor for Objects {}
 fn request(p: Option<Vec<&str>>) -> ReadRequest {
     ReadRequest::new(MANIFEST).with_options(ReadOptions {
-        source_columns: Vec::new(),
         batch_size: NonZeroUsize::MIN,
         projection: p.map(|v| v.into_iter().map(String::from).collect()),
     })
@@ -65,7 +64,6 @@ fn request(p: Option<Vec<&str>>) -> ReadRequest {
 async fn streams_shards_in_order_with_original_values_and_byte_options() {
     let source = Objects::fixture().await;
     let options = ByteReadOptions {
-        track_positions: false,
         io_concurrency: NonZeroUsize::new(3).unwrap(),
         io_chunk_size: NonZeroUsize::new(7),
     };
