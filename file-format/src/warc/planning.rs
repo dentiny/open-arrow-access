@@ -6,7 +6,7 @@ use open_arrow_access_core::{
 
 use super::{
     WarcArrowAccessor,
-    arrow::{append_record, evolve_reader, new_batch, raw_projection},
+    arrow::{append_record, evolve_reader, new_batch},
     records::{RawRecord, read_records},
 };
 
@@ -53,7 +53,7 @@ where
                     }
                     let batch = batch.finish()?;
                     let metadata = RecordMetadata {
-                        schema: raw_projection(&metadata.schema)?,
+                        schema: batch.schema(),
                         ..metadata
                     };
                     evolve_reader(Box::new(StreamReader::records(

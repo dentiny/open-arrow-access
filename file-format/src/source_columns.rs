@@ -66,7 +66,7 @@ where
     }
 }
 
-pub(crate) fn schema(input: &SchemaRef, columns: &[SourceColumn]) -> Result<SchemaRef> {
+fn schema(input: &SchemaRef, columns: &[SourceColumn]) -> Result<SchemaRef> {
     if columns.is_empty() {
         return Ok(input.clone());
     }
@@ -87,7 +87,7 @@ pub(crate) fn schema(input: &SchemaRef, columns: &[SourceColumn]) -> Result<Sche
         input.metadata().clone(),
     )))
 }
-pub(crate) fn wrap(
+fn wrap(
     reader: Box<dyn RecordReader>,
     object: ObjectRef,
     columns: Vec<SourceColumn>,
@@ -96,6 +96,7 @@ pub(crate) fn wrap(
         return Ok(reader);
     }
     let output = schema(&reader.metadata().schema, &columns)?;
+    let object = columns.contains(&SourceColumn::Object).then_some(object);
     let capability = RecordCapability::sequential(reader.capability().ordering);
     Ok(Box::new(map_record_reader(
         reader,
@@ -106,8 +107,8 @@ pub(crate) fn wrap(
                 .fields()
                 .iter()
                 .map(|field| -> Result<ArrayRef> {
-                    if field.name() == SourceColumn::Object.name()
-                        && columns.contains(&SourceColumn::Object)
+                    if let Some(object) = &object
+                        && field.name() == SourceColumn::Object.name()
                     {
                         Ok(Arc::new(StringArray::from_iter_values(
                             std::iter::repeat_n(object.locator(), batch.num_rows()),

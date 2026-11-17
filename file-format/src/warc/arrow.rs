@@ -81,18 +81,21 @@ pub(super) fn evolve_reader(reader: Box<dyn RecordReader>) -> Result<Box<dyn Rec
         .wrap_reader(reader)
 }
 
-pub(super) fn raw_projection(output: &SchemaRef) -> Result<SchemaRef> {
-    let names = output
+// Projection is already resolved by prepare; only the parser's date
+// representation differs from the public Arrow schema.
+fn parser_schema(output: &SchemaRef) -> SchemaRef {
+    let fields = output
         .fields()
         .iter()
-        .map(|field| field.name().clone())
-        .collect();
-    open_arrow_access_core::ReadOptions {
-        projection: Some(names),
-        ..Default::default()
-    }
-    .resolve_projection(&raw_schema_for(output))
-    .map(|projection| projection.schema)
+        .map(|field| {
+            if field.name() == "date" {
+                Arc::new(field.as_ref().clone().with_data_type(DataType::Utf8))
+            } else {
+                field.clone()
+            }
+        })
+        .collect::<Vec<_>>();
+    Arc::new(Schema::new_with_metadata(fields, output.metadata().clone()))
 }
 
 #[async_trait]
@@ -154,7 +157,7 @@ impl ReaderFactory for WarcArrowFormat {
         let source = request.object.clone();
         let records = read_records(input, columns)?;
         let batch_size = request.options.batch_size.get();
-        let schema = raw_projection(&schema)?;
+        let schema = parser_schema(&schema);
         let output = schema.clone();
         let source_uri = request.object.locator().to_owned();
         let batches = stream::try_unfold(records, move |mut records| {
