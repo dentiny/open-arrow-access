@@ -31,6 +31,21 @@ pub async fn assert_finished<R, M>(
     }
 }
 
+/// Require an error on the next read, followed by stable EOF on repeated reads.
+/// Unlike a drain-to-error helper, this rejects unexpected successful items.
+/// Callers retain error-specific assertions and any observed poll/drop checks;
+/// use [`assert_terminal_error`] when metadata and upstream polls are observed.
+pub async fn expect_terminal_error<R: Reader + ?Sized>(reader: &mut R) -> Error {
+    let error = match reader.next().await {
+        Err(error) => error,
+        Ok(_) => panic!("reader did not return the expected error"),
+    };
+    for _ in 0..2 {
+        assert!(reader.next().await.unwrap().is_none());
+    }
+    error
+}
+
 /// Require the next call to fail, then verify terminal behavior. This does not
 /// drain successful items; callers can inspect parser-specific errors themselves.
 pub async fn assert_terminal_error<R, M>(

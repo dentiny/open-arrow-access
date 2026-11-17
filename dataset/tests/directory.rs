@@ -22,6 +22,7 @@ use open_arrow_access_core::{
     ScanPlan, ScanPlanner, Schema, SchemaRef, async_trait,
 };
 use open_arrow_access_layers::ParallelReadLayer;
+use open_arrow_access_test_support::reader::expect_terminal_error;
 
 fn schema(label: &str) -> SchemaRef {
     Arc::new(Schema::new_with_metadata(
@@ -238,10 +239,9 @@ async fn later_schema_metadata_mismatch_and_open_failure_are_terminal() {
         .await
         .unwrap();
     assert!(reader.next().await.unwrap().is_some());
-    let error = reader.next().await.unwrap_err();
+    let error = expect_terminal_error(reader.as_mut()).await;
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
     assert_eq!(error.operation(), "read_file_set");
-    assert!(reader.next().await.unwrap().is_none());
     assert_eq!(opens.lock().unwrap().len(), 2);
     let mut reader = accessor
         .open(FileSetRequest::new(["first", "missing", "first"]))
@@ -266,10 +266,9 @@ async fn batch_schema_is_checked_against_the_opened_schema() {
         .open(FileSetRequest::new(["bad"]))
         .await
         .unwrap();
-    let error = reader.next().await.unwrap_err();
+    let error = expect_terminal_error(reader.as_mut()).await;
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
     assert_eq!(error.operation(), "read_file_set");
-    assert!(reader.next().await.unwrap().is_none());
 }
 
 struct Listing {
@@ -324,10 +323,9 @@ async fn union_null_fills_report_run_end_overflow_and_terminate() {
                 .open(FileSetRequest::new(["present", "missing"]))
                 .await
                 .unwrap();
-            let error = reader.next().await.unwrap_err();
+            let error = expect_terminal_error(reader.as_mut()).await;
             assert_eq!(error.kind(), ErrorKind::Unsupported, "{data_type}: {error}");
             assert!(error.to_string().contains("encoded length would overflow"));
-            assert!(reader.next().await.unwrap().is_none());
             assert_eq!(active.load(Ordering::SeqCst), 0);
         }
     }
@@ -788,10 +786,9 @@ async fn union_by_name_still_checks_each_batch_against_its_source_schema() {
     let mut reader = accessor.open(FileSetRequest::new(["a"])).await.unwrap();
     assert_eq!(files.active.load(Ordering::SeqCst), 0);
     assert_eq!(
-        reader.next().await.unwrap_err().operation(),
+        expect_terminal_error(reader.as_mut()).await.operation(),
         "read_file_set"
     );
-    assert!(reader.next().await.unwrap().is_none());
     assert_eq!(files.active.load(Ordering::SeqCst), 0);
 }
 
@@ -825,10 +822,9 @@ async fn union_by_name_rejects_a_schema_that_changes_after_preflight() {
     let accessor = FileSetAccessor::new(Changing(Arc::default())).with_union_by_name();
     let mut reader = accessor.open(FileSetRequest::new(["a"])).await.unwrap();
     assert_eq!(
-        reader.next().await.unwrap_err().operation(),
+        expect_terminal_error(reader.as_mut()).await.operation(),
         "read_file_set"
     );
-    assert!(reader.next().await.unwrap().is_none());
 }
 
 #[tokio::test]

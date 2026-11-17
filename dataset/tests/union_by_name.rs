@@ -95,9 +95,9 @@ async fn union_projection_rejects_invalid_unselected_json_values() {
         ..Default::default()
     });
     let mut reader = files.open(request).await.unwrap();
-    let error = reader.next().await.unwrap_err();
+    let error =
+        open_arrow_access_test_support::reader::expect_terminal_error(reader.as_mut()).await;
     assert_eq!(error.kind(), open_arrow_access_core::ErrorKind::Decode);
-    assert!(reader.next().await.unwrap().is_none());
 }
 
 #[tokio::test]
