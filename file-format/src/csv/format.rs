@@ -252,8 +252,19 @@ impl ReaderFactory for CsvFileFormat {
     async fn metadata(
         &self,
         storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
-        request: ReadRequest,
+        request: Self::Request,
     ) -> Result<RecordMetadata> {
+        Ok(self
+            .inspect_metadata(storage, request.clone())
+            .await?
+            .unwrap_or_else(|| crate::inference::empty_plan(request).metadata))
+    }
+
+    async fn inspect_metadata(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<Option<RecordMetadata>> {
         let format = self.for_request(&request);
         format.prepare_scan(&request)?;
         let format = if format.schema.is_some() && format.header != CsvHeader::Auto {
@@ -261,7 +272,7 @@ impl ReaderFactory for CsvFileFormat {
         } else {
             let input = storage.open(ByteReadRequest::from(&request)).await?;
             let Some(resolved) = format.resolve_schema(input).await? else {
-                return Ok(crate::inference::empty_plan(request).metadata);
+                return Ok(None);
             };
             resolved.format
         };
@@ -269,10 +280,10 @@ impl ReaderFactory for CsvFileFormat {
             .prepare_scan(&request)?
             .expect("resolved CSV schema")
             .schema;
-        Ok(RecordMetadata {
+        Ok(Some(RecordMetadata {
             schema,
             source: Some(request.object),
-        })
+        }))
     }
 
     async fn create_reader(

@@ -32,6 +32,19 @@ pub trait Accessor: Send + Sync {
         Ok(self.open(request).await?.metadata().clone())
     }
 
+    /// Inspect metadata, returning `None` only for a proven empty input with no schema.
+    /// Preserve `Some` for unknown row presence, explicit schemas, and JSON `{}` rows.
+    /// The default wraps `metadata` in `Some` and inherits its fallback.
+    async fn inspect_metadata(
+        &self,
+        request: Self::Request,
+    ) -> Result<Option<<Self::Reader as Reader>::Metadata>>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        Ok(Some(self.metadata(request).await?))
+    }
+
     /// Open the accessor-defined selection and options in `request`.
     /// Opening may perform I/O and schema inspection; metadata is available on return
     /// without requiring all items to be loaded.
@@ -58,6 +71,16 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
         <Self::Reader as Reader>::Metadata: Clone,
     {
         (**self).metadata(request).await
+    }
+
+    async fn inspect_metadata(
+        &self,
+        request: Self::Request,
+    ) -> Result<Option<<Self::Reader as Reader>::Metadata>>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        (**self).inspect_metadata(request).await
     }
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
