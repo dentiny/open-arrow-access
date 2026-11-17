@@ -1,4 +1,7 @@
-use crate::{inference::SchemaInference, preparation::PreparedProjection};
+use crate::{
+    inference::{ResolvedFormat, SchemaInference},
+    preparation::{PreparedProjection, prepare_projection},
+};
 
 use super::{
     inference::{self, JsonInferenceOptions},
@@ -7,8 +10,8 @@ use super::{
 use arrow_json::{ReaderBuilder, reader::Decoder};
 use open_arrow_access_core::{
     ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
-    RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait, into_stream,
-    record_stream_reader,
+    RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result, SchemaRef,
+    async_trait, into_stream, record_stream_reader,
 };
 
 /// Read whitespace-separated JSON objects, including JSONL, with an explicit or inferred fixed schema.
@@ -22,6 +25,12 @@ use open_arrow_access_core::{
 pub struct JsonFormat {
     schema: Option<SchemaRef>,
     inference: JsonInferenceOptions,
+}
+
+/// Validated JSON decoder and its source schema for one open request.
+pub struct PreparedJsonReader {
+    pub schema: SchemaRef,
+    pub decoder: Decoder,
 }
 
 impl JsonFormat {
@@ -51,7 +60,7 @@ impl JsonFormat {
             self.inference.validate()?;
             return Ok(None);
         };
-        PreparedProjection::new(input_schema, &request.options).map(Some)
+        prepare_projection(input_schema, &request.options).map(Some)
     }
 
     pub(super) fn prepare_scan(&self, request: &ReadRequest) -> Result<Option<PreparedProjection>> {
@@ -77,11 +86,11 @@ impl JsonFormat {
         &self,
         prepared: PreparedProjection,
         request: &ReadRequest,
-    ) -> Result<(SchemaRef, Decoder)> {
+    ) -> Result<PreparedJsonReader> {
         // Strict decoding must recognize known fields omitted from the output.
         let schema = self.schema.clone().unwrap_or(prepared.schema);
         let decoder = self.build_decoder(schema.clone(), request)?;
-        Ok((schema, decoder))
+        Ok(PreparedJsonReader { schema, decoder })
     }
 }
 
@@ -90,14 +99,22 @@ impl SchemaInference for JsonFormat {
     async fn resolve_schema(
         &self,
         input: Box<dyn ByteReader>,
-    ) -> Result<Option<(Self, Box<dyn ByteReader>)>> {
+    ) -> Result<Option<ResolvedFormat<Self>>> {
         if self.schema.is_some() {
-            return Ok(Some((self.clone(), input)));
+            return Ok(Some(ResolvedFormat {
+                format: self.clone(),
+                input,
+            }));
         }
-        let Some((schema, input)) = inference::infer(input, self.inference).await? else {
+        let Some(inference::InferredJson { schema, input }) =
+            inference::infer(input, self.inference).await?
+        else {
             return Ok(None);
         };
-        Ok(Some((Self::new(schema), input)))
+        Ok(Some(ResolvedFormat {
+            format: Self::new(schema),
+            input,
+        }))
     }
 }
 
@@ -105,7 +122,7 @@ impl SchemaInference for JsonFormat {
 impl ReaderFactory for JsonFormat {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
-    type Prepared = Option<(SchemaRef, Decoder)>;
+    type Prepared = Option<PreparedJsonReader>;
 
     fn capability(&self, input: Capability) -> RecordCapability {
         Capability {
@@ -131,18 +148,23 @@ impl ReaderFactory for JsonFormat {
         prepared: Self::Prepared,
     ) -> Result<Box<dyn RecordReader>> {
         let (input, schema, decoder) = match prepared {
-            Some((schema, decoder)) => (input, schema, decoder),
+            Some(PreparedJsonReader { schema, decoder }) => (input, schema, decoder),
             None => {
-                let Some((format, input)) = self.resolve_schema(input).await? else {
+                let Some(ResolvedFormat { format, input }) = self.resolve_schema(input).await?
+                else {
                     return Ok(Box::new(
                         crate::inference::empty_plan(request).into_reader(),
                     ));
                 };
-                let (schema, decoder) = format.prepare(&request)?.expect("resolved JSON schema");
+                let PreparedJsonReader { schema, decoder } =
+                    format.prepare(&request)?.expect("resolved JSON schema");
                 (input, schema, decoder)
             }
         };
-        let (output_schema, projection) = request.options.resolve_projection(&schema)?;
+        let ResolvedProjection {
+            schema: output_schema,
+            indices: projection,
+        } = request.options.resolve_projection(&schema)?;
         let metadata = RecordMetadata {
             schema,
             source: Some(request.object),

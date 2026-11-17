@@ -11,6 +11,13 @@ pub struct CsvFormat {
     pub(super) validate_header: bool,
 }
 
+/// Schema inferred from CSV data and the number of sampled records.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CsvSchemaInference {
+    pub schema: Schema,
+    pub records_read: usize,
+}
+
 impl CsvFormat {
     pub fn with_header(mut self, has_header: bool) -> Self {
         self.inner = self.inner.with_header(has_header);
@@ -63,7 +70,12 @@ impl CsvFormat {
         &self,
         reader: R,
         max_records: Option<usize>,
-    ) -> Result<(Schema, usize), ArrowError> {
-        self.inner.infer_schema(reader, max_records)
+    ) -> Result<CsvSchemaInference, ArrowError> {
+        self.inner
+            .infer_schema(reader, max_records)
+            .map(|(schema, records)| CsvSchemaInference {
+                schema,
+                records_read: records,
+            })
     }
 }

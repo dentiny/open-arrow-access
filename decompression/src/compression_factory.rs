@@ -30,6 +30,11 @@ struct Registration {
     builtin: Option<Compression>,
 }
 
+struct RegisteredExtension<'a> {
+    extension: &'a str,
+    registration: &'a Registration,
+}
+
 impl Registration {
     fn new<C: Codec>(codec: C, builtin: Option<Compression>) -> Self {
         Self {
@@ -134,16 +139,20 @@ impl CompressionFactory {
         self
     }
 
-    fn lookup(&self, extension: &str) -> Option<(&String, &Registration)> {
+    fn lookup(&self, extension: &str) -> Option<RegisteredExtension<'_>> {
         self.registrations
             .get_key_value(&extension.to_ascii_lowercase())
+            .map(|(extension, registration)| RegisteredExtension {
+                extension,
+                registration,
+            })
     }
 
     pub(crate) fn builtin_from_path(&self, path: &str) -> Result<Compression> {
         let Some((_, extension)) = path.rsplit_once('.') else {
             return Ok(Compression::Uncompressed);
         };
-        let Some((_, registration)) = self.lookup(extension) else {
+        let Some(RegisteredExtension { registration, .. }) = self.lookup(extension) else {
             return Ok(Compression::Uncompressed);
         };
         registration.codec()?;
@@ -170,11 +179,15 @@ impl ReaderFactory for CompressionFactory {
         let Some((_, extension)) = request.object.locator().rsplit_once('.') else {
             return Ok(None);
         };
-        let Some((extension, registration)) = self.lookup(extension) else {
+        let Some(RegisteredExtension {
+            extension,
+            registration,
+        }) = self.lookup(extension)
+        else {
             return Ok(None);
         };
         registration.codec()?;
-        Ok(Some(extension.clone()))
+        Ok(Some(extension.to_owned()))
     }
 
     async fn create_reader(

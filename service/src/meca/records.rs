@@ -109,7 +109,7 @@ impl Accessor for MecaRecords {
 #[async_trait]
 impl ScanPlanner for MecaRecords {
     async fn plan_scan(&self, request: MecaReadRequest) -> Result<ScanPlan> {
-        let (schema, _) = request.options.resolve_projection(&record_schema())?;
+        let schema = request.options.resolve_projection(&record_schema())?.schema;
         let include_data = FieldNameIndex::new(schema.fields()).get("data").is_some();
         let metadata = RecordMetadata {
             schema: schema.clone(),

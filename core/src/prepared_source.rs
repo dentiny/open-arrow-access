@@ -175,7 +175,7 @@ impl PreparedSource {
     /// source. Both opened metadata and emitted batches must match the projected
     /// bound schema, including schema metadata; drift returns `Decode`.
     pub async fn scan(&self, options: ReadOptions) -> Result<Box<dyn RecordReader>> {
-        let (schema, _) = options.resolve_projection(&self.schema())?;
+        let schema = options.resolve_projection(&self.schema())?.schema;
         let reader = if options.projection.is_none() && options.batch_size == self.batch_size {
             self.bound.reader().await?
         } else {
@@ -197,7 +197,7 @@ impl PreparedSource {
     /// [`Self::scan`] to execute the composed accessor's policies. Accessors
     /// without [`ScanPlanner`] cannot use this planning path.
     pub async fn plan_scan(&self, options: ReadOptions) -> Result<ScanPlan> {
-        let (schema, _) = options.resolve_projection(&self.schema())?;
+        let schema = options.resolve_projection(&self.schema())?.schema;
         let mut plan = self.selection.plan_scan(options).await?;
         validate_prepared_schema(&plan.metadata.schema, &schema)?;
         // Reuse terminal stream cleanup without polling discovery or openers.

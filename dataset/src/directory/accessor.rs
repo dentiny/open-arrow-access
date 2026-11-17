@@ -71,7 +71,10 @@ where
     B: ByteAccessor,
 {
     async fn resolve(&self, request: DirectoryRequest) -> Result<FileSetRequest> {
-        let (prefix, glob) = resolve_glob(request.prefix.locator())?;
+        let super::validation::ResolvedGlob {
+            prefix,
+            pattern: glob,
+        } = resolve_glob(request.prefix.locator())?;
         let match_options = glob::MatchOptions {
             case_sensitive: true,
             require_literal_separator: true,

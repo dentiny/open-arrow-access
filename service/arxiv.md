@@ -32,7 +32,7 @@ Permission, authentication, I/O and malformed-manifest errors are propagated,
 even if the other distribution is available. If both exist, both are included;
 use `Pdf` or `Source` to select only one representation. MD5 and item counts
 are metadata, not verified content.
-`TarStream::next_entry()` returns `(TarEntry, Box<dyn ByteReader>)`; the body
+`TarStream::next_entry()` returns `TarEntryReader { entry, reader }`; the body
 contains original PDF/source-member bytes, not Arrow rows.
 
 ## Usage and results
@@ -52,7 +52,7 @@ async fn read_bulk(operator: opendal::Operator, month: u16) -> Result<()> {
     if let Some(shard) = shards.first() {
         println!("shard: {}, {} bytes", shard.filename, shard.size);
         let mut archive = service.stream(shard, ByteReadOptions::default()).await?;
-        if let Some((entry, mut body)) = archive.next_entry().await? {
+        if let Some(open_arrow_access::decompression::tar::TarEntryReader { entry, reader: mut body }) = archive.next_entry().await? {
             println!("member: {}", String::from_utf8_lossy(&entry.name));
             if let Some(chunk) = body.next().await? {
                 println!("first member chunk: {} bytes", chunk.len());

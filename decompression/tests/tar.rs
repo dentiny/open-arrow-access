@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
 use open_arrow_access_core::{Accessor, ErrorKind};
-use open_arrow_access_decompression::tar::{TarArchive, TarLimits};
+use open_arrow_access_decompression::tar::{TarArchive, TarEntryReader, TarLimits};
 use open_arrow_access_test_support::{
     MemoryAccessor, byte_layer, collect_bytes, fixture, ranged_input,
 };
@@ -180,10 +180,16 @@ async fn streams_first_body_without_scanning_later_headers_or_using_ranges() {
         source.open("archive".into()).await.unwrap(),
         TarLimits::default(),
     );
-    let (directory, mut empty) = archive.next_entry().await.unwrap().unwrap();
+    let TarEntryReader {
+        entry: directory,
+        reader: mut empty,
+    } = archive.next_entry().await.unwrap().unwrap();
     assert!(!directory.is_file);
     assert!(empty.next().await.unwrap().is_none());
-    let (entry, mut first) = archive.next_entry().await.unwrap().unwrap();
+    let TarEntryReader {
+        entry,
+        reader: mut first,
+    } = archive.next_entry().await.unwrap().unwrap();
     assert_eq!(entry.name, b"papers/paper.pdf");
     assert_eq!(first.metadata().source, Some("archive".into()));
     assert_eq!(first.metadata().version.as_deref(), Some("snapshot"));
@@ -196,13 +202,19 @@ async fn streams_first_body_without_scanning_later_headers_or_using_ranges() {
     byte_layer::assert_output(first.as_mut(), b"%PDF-first-paper", 64)
         .await
         .unwrap();
-    let (_, mut second) = archive.next_entry().await.unwrap().unwrap();
+    let TarEntryReader {
+        entry: _,
+        reader: mut second,
+    } = archive.next_entry().await.unwrap().unwrap();
     // A consumed reader never resumes against the next entry's shared source.
     assert!(first.next().await.unwrap().is_none());
     byte_layer::assert_output(second.as_mut(), b"%PDF-second-paper", 64)
         .await
         .unwrap();
-    let (_, mut last) = archive.next_entry().await.unwrap().unwrap();
+    let TarEntryReader {
+        entry: _,
+        reader: mut last,
+    } = archive.next_entry().await.unwrap().unwrap();
     assert!(last.next().await.unwrap().is_none());
     assert!(archive.next_entry().await.unwrap().is_none());
     assert!(archive.next_entry().await.unwrap().is_none());
@@ -221,10 +233,16 @@ async fn drains_dropped_bodies_and_readers_outlive_sequential_archive() {
         TarLimits::default(),
     );
     drop(archive.next_entry().await.unwrap().unwrap());
-    let (_, mut first) = archive.next_entry().await.unwrap().unwrap();
+    let TarEntryReader {
+        entry: _,
+        reader: mut first,
+    } = archive.next_entry().await.unwrap().unwrap();
     assert_eq!(first.next().await.unwrap().unwrap().as_ref(), b"%P");
     drop(first);
-    let (entry, mut second) = archive.next_entry().await.unwrap().unwrap();
+    let TarEntryReader {
+        entry,
+        reader: mut second,
+    } = archive.next_entry().await.unwrap().unwrap();
     assert_eq!(entry.index, 2);
     drop(archive);
     byte_layer::assert_output(second.as_mut(), b"%PDF-second-paper", 3)
@@ -292,7 +310,10 @@ async fn cancelled_sequential_header_and_skip_resume_from_persistent_progress() 
     }
     allowed.store(11, Ordering::SeqCst);
     drop(archive.next_entry().await.unwrap().unwrap());
-    let (_, body) = archive.next_entry().await.unwrap().unwrap();
+    let TarEntryReader {
+        entry: _,
+        reader: body,
+    } = archive.next_entry().await.unwrap().unwrap();
     drop(body);
     // 1,100 bytes were fetched; skipping payload/padding needs more input.
     {
@@ -300,7 +321,10 @@ async fn cancelled_sequential_header_and_skip_resume_from_persistent_progress() 
         assert!(next.as_mut().poll(&mut context).is_pending());
     }
     allowed.store(usize::MAX, Ordering::SeqCst);
-    let (entry, mut body) = archive.next_entry().await.unwrap().unwrap();
+    let TarEntryReader {
+        entry,
+        reader: mut body,
+    } = archive.next_entry().await.unwrap().unwrap();
     assert_eq!(entry.index, 2);
     byte_layer::assert_output(body.as_mut(), b"%PDF-second-paper", 100)
         .await
@@ -337,7 +361,10 @@ async fn sequential_body_source_errors_and_truncation_terminate_archive() {
             TarLimits::default(),
         );
         drop(archive.next_entry().await.unwrap().unwrap());
-        let (_, mut body) = archive.next_entry().await.unwrap().unwrap();
+        let TarEntryReader {
+            entry: _,
+            reader: mut body,
+        } = archive.next_entry().await.unwrap().unwrap();
         assert_eq!(
             collect_bytes(body.as_mut()).await.err().unwrap().kind(),
             kind
@@ -392,7 +419,10 @@ async fn cancelled_live_body_read_rejects_advancement_without_waiting_for_its_lo
     );
     let mut archive = TarStream::new(input, TarLimits::default());
     drop(archive.next_entry().await.unwrap().unwrap());
-    let (_, mut body) = archive.next_entry().await.unwrap().unwrap();
+    let TarEntryReader {
+        entry: _,
+        reader: mut body,
+    } = archive.next_entry().await.unwrap().unwrap();
     {
         let mut next = pin!(body.next());
         assert!(
@@ -413,7 +443,10 @@ async fn cancelled_live_body_read_rejects_advancement_without_waiting_for_its_lo
     );
     drop(body);
     allowed.store(usize::MAX, Ordering::SeqCst);
-    let (entry, mut body) = archive.next_entry().await.unwrap().unwrap();
+    let TarEntryReader {
+        entry,
+        reader: mut body,
+    } = archive.next_entry().await.unwrap().unwrap();
     assert_eq!(entry.index, 2);
     byte_layer::assert_output(body.as_mut(), b"%PDF-second-paper", 512)
         .await
@@ -451,7 +484,11 @@ async fn sequential_completion_and_malformed_headers_release_source_with_archive
                 ErrorKind::Decode
             );
         } else {
-            while let Some((_, mut body)) = archive.next_entry().await.unwrap() {
+            while let Some(TarEntryReader {
+                entry: _,
+                reader: mut body,
+            }) = archive.next_entry().await.unwrap()
+            {
                 collect_bytes(body.as_mut()).await.unwrap();
             }
         }

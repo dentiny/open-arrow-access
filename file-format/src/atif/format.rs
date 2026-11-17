@@ -2,7 +2,7 @@ use super::reader::create_reader;
 use atif_arrow::trajectory_schema;
 use open_arrow_access_core::{
     ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
-    RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, async_trait,
+    RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result, async_trait,
 };
 
 /// ATIF document framing; extensions are not inspected.
@@ -22,7 +22,7 @@ pub enum AtifFormat {
 impl ReaderFactory for AtifFormat {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
-    type Prepared = (SchemaRef, Option<Vec<usize>>);
+    type Prepared = ResolvedProjection;
 
     fn capability(&self, input: Capability) -> RecordCapability {
         Capability {
@@ -44,7 +44,10 @@ impl ReaderFactory for AtifFormat {
         _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
-        (schema, projection): Self::Prepared,
+        ResolvedProjection {
+            schema,
+            indices: projection,
+        }: Self::Prepared,
     ) -> Result<Box<dyn RecordReader>> {
         Ok(Box::new(create_reader(
             input,

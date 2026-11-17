@@ -2,7 +2,7 @@
 
 mod error;
 mod stream;
-pub use stream::TarStream;
+pub use stream::{TarEntryReader, TarStream};
 mod validation;
 
 use std::{num::NonZeroUsize, sync::Arc};

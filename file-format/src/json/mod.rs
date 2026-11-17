@@ -10,5 +10,5 @@ mod reader;
 mod validation;
 
 pub use accessor::JsonAccessor;
-pub use format::JsonFormat;
+pub use format::{JsonFormat, PreparedJsonReader};
 pub use inference::JsonInferenceOptions;

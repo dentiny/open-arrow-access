@@ -12,7 +12,8 @@ use std::{
 use futures::{TryStreamExt, stream};
 use open_arrow_access_core::{
     Accessor, OrderRequirement, ReadRequest, RecordBatch, RecordCapability, RecordMetadata,
-    RecordReader, Result, SchemaRef, async_trait, into_stream, record_stream_reader,
+    RecordReader, ResolvedProjection, Result, SchemaRef, async_trait, into_stream,
+    record_stream_reader,
 };
 
 /// Collect a non-null primitive column in batch order.
@@ -86,7 +87,10 @@ impl Accessor for MemoryRecordAccessor {
             .lock()
             .unwrap()
             .push(request.options.projection.clone());
-        let (schema, projection) = request.options.resolve_projection(&self.schema)?;
+        let ResolvedProjection {
+            schema,
+            indices: projection,
+        } = request.options.resolve_projection(&self.schema)?;
         let mut batches = self.batches.clone().into_iter();
         let polls = self.polls.clone();
         let batches_read = self.batches_read.clone();

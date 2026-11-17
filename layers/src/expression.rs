@@ -19,6 +19,11 @@ use datafusion::{
     },
 };
 
+pub(crate) struct CompiledExpression {
+    pub expression: Arc<dyn PhysicalExpr>,
+    pub output: FieldRef,
+}
+
 pub(crate) struct PlannedExpression {
     pub(crate) expression: Arc<dyn PhysicalExpr>,
     pub(crate) output: FieldRef,
@@ -113,7 +118,7 @@ impl ExpressionPlanner {
         &self,
         logical: Expr,
         input: &DFSchema,
-    ) -> datafusion::error::Result<(Arc<dyn PhysicalExpr>, FieldRef)> {
+    ) -> datafusion::error::Result<CompiledExpression> {
         crate::validation::validate_expression(&logical)?;
         let context = SimplifyContext::builder()
             .with_schema(Arc::new(input.clone()))
@@ -129,7 +134,10 @@ impl ExpressionPlanner {
         let logical = simplifier.simplify(logical)?;
         let physical = self.state.create_physical_expr(logical, input)?;
         let output = physical.return_field(input.as_arrow())?;
-        Ok((physical, output))
+        Ok(CompiledExpression {
+            expression: physical,
+            output,
+        })
     }
 
     /// Bind an Expr to a compact view of the current namespace.
@@ -144,7 +152,7 @@ impl ExpressionPlanner {
             ExpressionInput::for_expression(expression, fields, names, metadata.clone(), |name| {
                 DataFusionError::Plan(format!("unknown field {name:?}"))
             })?;
-        let (expression, output) = self.plan(
+        let CompiledExpression { expression, output } = self.plan(
             expression.clone(),
             &DFSchema::try_from(input.schema().clone())?,
         )?;
@@ -187,7 +195,10 @@ impl ExpressionPlanner {
                     DataFusionError::Plan(format!("No field named {name}"))
                 })?;
         }
-        let (physical, field) = self.plan(logical, &DFSchema::try_from(input.schema().clone())?)?;
+        let CompiledExpression {
+            expression: physical,
+            output: field,
+        } = self.plan(logical, &DFSchema::try_from(input.schema().clone())?)?;
         Ok(PlannedExpression {
             expression: physical,
             output: field,
@@ -293,7 +304,10 @@ mod tests {
             let compact = planner.plan_sql(sql, schema.fields(), &names);
             assert_eq!(original.is_ok(), compact.is_ok(), "{sql}");
             if let (
-                Ok((original, _)),
+                Ok(CompiledExpression {
+                    expression: original,
+                    ..
+                }),
                 Ok(PlannedExpression {
                     expression: compact,
                     input,

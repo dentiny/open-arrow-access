@@ -152,16 +152,24 @@ pub struct ReadOptions {
     pub projection: Option<Vec<String>>,
 }
 
+/// Output schema and source-column indices resolved from read options.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedProjection {
+    pub schema: SchemaRef,
+    /// `None` selects all columns; an empty vector retains only row counts.
+    pub indices: Option<Vec<usize>>,
+}
+
 impl ReadOptions {
     /// Resolve the output schema and selected top-level indices in caller order.
     /// None retains the original schema; an empty projection retains only row counts.
     /// Unknown or duplicate field names return InvalidInput.
-    pub fn resolve_projection(
-        &self,
-        schema: &SchemaRef,
-    ) -> Result<(SchemaRef, Option<Vec<usize>>)> {
+    pub fn resolve_projection(&self, schema: &SchemaRef) -> Result<ResolvedProjection> {
         let Some(columns) = &self.projection else {
-            return Ok((schema.clone(), None));
+            return Ok(ResolvedProjection {
+                schema: schema.clone(),
+                indices: None,
+            });
         };
         let mut seen = HashSet::new();
         let mut indices = Vec::with_capacity(columns.len());
@@ -179,7 +187,10 @@ impl ReadOptions {
         let projected = schema
             .project(&indices)
             .map_err(crate::error::projection_error)?;
-        Ok((Arc::new(projected), Some(indices)))
+        Ok(ResolvedProjection {
+            schema: Arc::new(projected),
+            indices: Some(indices),
+        })
     }
 }
 

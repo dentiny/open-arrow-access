@@ -11,6 +11,11 @@ use super::{
     validation::validate_dataset_request,
 };
 
+struct ResolvedDataset {
+    files: FileSetAccessor<ParquetAccessor<HuggingFaceAccessor>>,
+    request: FileSetRequest,
+}
+
 impl HuggingFaceService {
     /// Open one split as ordered Arrow batches from HF's published Parquet shards.
     /// Pin the export before listing so membership and reads use the same commit.
@@ -19,7 +24,7 @@ impl HuggingFaceService {
         &self,
         request: HuggingFaceDatasetRequest,
     ) -> Result<Box<dyn RecordReader>> {
-        let (files, request) = self.resolve_dataset(request).await?;
+        let ResolvedDataset { files, request } = self.resolve_dataset(request).await?;
         let reader = files.open(request).await?;
         let metadata = reader.metadata().clone();
         Ok(Box::new(StreamReader::records(
@@ -29,13 +34,7 @@ impl HuggingFaceService {
         )))
     }
 
-    async fn resolve_dataset(
-        &self,
-        request: HuggingFaceDatasetRequest,
-    ) -> Result<(
-        FileSetAccessor<ParquetAccessor<HuggingFaceAccessor>>,
-        FileSetRequest,
-    )> {
+    async fn resolve_dataset(&self, request: HuggingFaceDatasetRequest) -> Result<ResolvedDataset> {
         let repository =
             HuggingFaceRepository::new(&request.repository).with_revision(&request.revision);
         validate_dataset_request(&request, &repository)?;
@@ -55,12 +54,12 @@ impl HuggingFaceService {
             }
             Err(error) => return Err(error),
         };
-        Ok((
-            FileSetAccessor::new(ParquetAccessor::new(accessor)).with_file_planning(),
-            FileSetRequest::new(objects)
+        Ok(ResolvedDataset {
+            files: FileSetAccessor::new(ParquetAccessor::new(accessor)).with_file_planning(),
+            request: FileSetRequest::new(objects)
                 .with_options(request.options)
                 .with_byte_options(request.byte_options),
-        ))
+        })
     }
 }
 
@@ -100,7 +99,7 @@ impl HuggingFaceAccessor {
 #[async_trait]
 impl ScanPlanner for HuggingFaceService {
     async fn plan_scan(&self, request: HuggingFaceDatasetRequest) -> Result<ScanPlan> {
-        let (files, request) = self.resolve_dataset(request).await?;
+        let ResolvedDataset { files, request } = self.resolve_dataset(request).await?;
         Ok(files
             .plan_scan(request)
             .await?

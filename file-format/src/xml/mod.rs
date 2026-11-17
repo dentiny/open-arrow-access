@@ -11,7 +11,7 @@ mod validation;
 use error::xml_error;
 
 pub use accessor::XmlAccessor;
-pub use format::{XmlFormat, XmlLimits};
+pub use format::{PreparedXmlReader, XmlFormat, XmlLimits};
 pub use xml_arrow::{
     InferenceOptions as XmlInferenceOptions, NamespaceBinding, XmlField, XmlSchema,
 };

@@ -44,11 +44,12 @@ impl RecordBatchBuilder {
     /// Select top-level fields in caller order; reject unknown or duplicate names.
     pub fn new(schema: SchemaRef, projection: Option<Vec<String>>) -> Result<Self> {
         let fields = schema.fields().clone();
-        let (schema, _) = ReadOptions {
+        let schema = ReadOptions {
             projection,
             ..Default::default()
         }
-        .resolve_projection(&schema)?;
+        .resolve_projection(&schema)?
+        .schema;
         validate_record_batch_fields(&fields)?;
         Self::from_fields(fields, schema)
     }

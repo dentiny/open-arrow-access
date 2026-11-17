@@ -8,6 +8,12 @@ use open_arrow_access_core::{
 };
 use std::{collections::HashMap, sync::Arc};
 
+struct PreparedInventoryScan {
+    transform: InventoryTransform,
+    files: Vec<ObjectRef>,
+    request: ReadRequest,
+}
+
 /// Read the gzip CSV shards listed in an inventory manifest.
 pub struct PmcInventoryAccessor<A> {
     inner: Arc<A>,
@@ -40,7 +46,11 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
         .with_ordering(OrderRequirement::Reorderable)
     }
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
-        let (transform, files, request) = self.prepare_scan(request).await?;
+        let PreparedInventoryScan {
+            transform,
+            files,
+            request,
+        } = self.prepare_scan(request).await?;
         Ok(Box::new(transform.create_reader(
             self.inner.clone(),
             files,
@@ -50,10 +60,7 @@ impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
 }
 
 impl<A: ByteAccessor + 'static> PmcInventoryAccessor<A> {
-    async fn prepare_scan(
-        &self,
-        mut request: ReadRequest,
-    ) -> Result<(InventoryTransform, Vec<ObjectRef>, ReadRequest)> {
+    async fn prepare_scan(&self, mut request: ReadRequest) -> Result<PreparedInventoryScan> {
         let manifest = manifest::read(
             self.inner.as_ref(),
             ByteReadRequest::new(request.object.clone()).with_options(request.byte_options),
@@ -75,7 +82,7 @@ impl<A: ByteAccessor + 'static> PmcInventoryAccessor<A> {
             csv_schema.fields().clone(),
             metadata,
         ));
-        let (output_schema, _) = request.options.resolve_projection(&full_schema)?;
+        let output_schema = request.options.resolve_projection(&full_schema)?.schema;
         let output_projection = request.options.projection.as_mut().map(|csv_columns| {
             let output_indices = (0..csv_columns.len()).collect();
             // Output columns come first; validation-only columns are appended.
@@ -86,7 +93,7 @@ impl<A: ByteAccessor + 'static> PmcInventoryAccessor<A> {
             }
             output_indices
         });
-        let (csv_output_schema, _) = request.options.resolve_projection(&csv_schema)?;
+        let csv_output_schema = request.options.resolve_projection(&csv_schema)?.schema;
         let validation_columns = ["Bucket", "Key"].map(|name| {
             csv_output_schema
                 .index_of(name)
@@ -98,22 +105,26 @@ impl<A: ByteAccessor + 'static> PmcInventoryAccessor<A> {
             output_projection,
             output_schema,
         };
-        Ok((
+        Ok(PreparedInventoryScan {
             transform,
-            manifest
+            files: manifest
                 .files
                 .into_iter()
                 .map(|file| file.key.into())
                 .collect(),
             request,
-        ))
+        })
     }
 }
 
 #[async_trait]
 impl<A: ByteAccessor + 'static> ScanPlanner for PmcInventoryAccessor<A> {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        let (transform, files, request) = self.prepare_scan(request).await?;
+        let PreparedInventoryScan {
+            transform,
+            files,
+            request,
+        } = self.prepare_scan(request).await?;
         let metadata = RecordMetadata {
             schema: transform.output_schema.clone(),
             source: Some(request.object.clone()),

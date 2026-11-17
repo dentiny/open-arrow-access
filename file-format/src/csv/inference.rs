@@ -28,7 +28,7 @@ fn infer_sample(sample: &[u8], has_header: bool, allow_truncated_rows: bool) -> 
         .with_header(has_header)
         .with_truncated_rows(allow_truncated_rows)
         .infer_schema(Cursor::new(sample), None)
-        .map(|(schema, _)| schema)
+        .map(|inference| inference.schema)
         .map_err(inference_error)
 }
 
@@ -68,12 +68,18 @@ fn first_record(sample: &[u8]) -> Result<csv::ByteRecord> {
     Ok(first)
 }
 
+pub(super) struct ResolvedCsvInput {
+    pub schema: SchemaRef,
+    pub has_header: bool,
+    pub input: Box<dyn ByteReader>,
+}
+
 pub(super) async fn resolve(
     input: Box<dyn ByteReader>,
     dialect: CsvDialect,
     options: CsvInferenceOptions,
     explicit_schema: Option<SchemaRef>,
-) -> Result<Option<(SchemaRef, bool, Box<dyn ByteReader>)>> {
+) -> Result<Option<ResolvedCsvInput>> {
     let mut metadata = input.metadata().clone();
     // Frame every row, including the potential header, with the source dialect.
     let mut records = CsvChunks::new(
@@ -138,9 +144,9 @@ pub(super) async fn resolve(
             .map(|bytes| (bytes, records)))
     });
     let replay = stream::iter((!sample.is_empty()).then(|| Ok(sample.into()))).chain(remaining);
-    Ok(Some((
+    Ok(Some(ResolvedCsvInput {
         schema,
         has_header,
-        Box::new(StreamReader::new(replay, metadata)),
-    )))
+        input: Box::new(StreamReader::new(replay, metadata)),
+    }))
 }

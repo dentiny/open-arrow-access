@@ -12,7 +12,12 @@ pub(super) fn validate_token(token: &str, kind: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn validate_request(persistent_id: &str, version: &str) -> Result<(u64, u64)> {
+pub(super) struct DatasetVersion {
+    pub major: u64,
+    pub minor: u64,
+}
+
+pub(super) fn validate_request(persistent_id: &str, version: &str) -> Result<DatasetVersion> {
     let identifier = persistent_id
         .strip_prefix("doi:")
         .or_else(|| persistent_id.strip_prefix("hdl:"));
@@ -41,13 +46,13 @@ pub(super) fn validate_request(persistent_id: &str, version: &str) -> Result<(u6
     if major == 0 {
         return Err(invalid("published major version must be positive"));
     }
-    Ok((major, minor))
+    Ok(DatasetVersion { major, minor })
 }
 
 pub(super) fn validate_dataset(
     response: &Response,
     persistent_id: &str,
-    expected: (u64, u64),
+    expected: DatasetVersion,
     has_credentials: bool,
 ) -> Result<()> {
     let data = &response.data;
@@ -63,7 +68,7 @@ pub(super) fn validate_dataset(
     if !same_id {
         return Err(decode("dataset ID differs from the requested identifier"));
     }
-    if (data.version_number, data.version_minor_number) != expected {
+    if data.version_number != expected.major || data.version_minor_number != expected.minor {
         return Err(decode("dataset version differs from the requested version"));
     }
     if data.version_state != "RELEASED" {

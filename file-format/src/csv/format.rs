@@ -1,4 +1,7 @@
-use crate::{inference::SchemaInference, preparation::PreparedProjection};
+use crate::{
+    inference::{ResolvedFormat, SchemaInference},
+    preparation::{PreparedProjection, prepare_projection},
+};
 
 use super::{
     CsvDialect, CsvFormat, CsvHeader,
@@ -37,6 +40,13 @@ pub struct CsvFileFormat {
 enum CsvOptions {
     Dialect(CsvDialect),
     Custom(CsvFormat),
+}
+
+/// Validated CSV decoders and output schema for one open request.
+pub struct PreparedCsvReader {
+    pub schema: SchemaRef,
+    pub decoder: Decoder,
+    pub header: Option<Decoder>,
 }
 
 impl CsvFileFormat {
@@ -134,16 +144,12 @@ impl CsvFileFormat {
         };
         let options = &request.options;
         validation::validate_input_schema(input_schema)?;
-        let prepared = PreparedProjection::new(input_schema, options)?;
+        let prepared = prepare_projection(input_schema, options)?;
         validation::validate_selected_schema(&prepared.schema)?;
         Ok(Some(prepared))
     }
 
-    fn decoder(
-        &self,
-        prepared: PreparedProjection,
-        request: &ReadRequest,
-    ) -> (SchemaRef, Decoder, Option<Decoder>) {
+    fn decoder(&self, prepared: PreparedProjection, request: &ReadRequest) -> PreparedCsvReader {
         let schema = self.schema.as_ref().expect("resolved CSV schema");
         let format = match &self.options {
             CsvOptions::Dialect(dialect) => dialect.format(),
@@ -177,7 +183,11 @@ impl CsvFileFormat {
         if let Some(indices) = prepared.indices {
             builder = builder.with_projection(indices);
         }
-        (prepared.schema, builder.build_decoder(), header)
+        PreparedCsvReader {
+            schema: prepared.schema,
+            decoder: builder.build_decoder(),
+            header,
+        }
     }
 }
 
@@ -186,13 +196,19 @@ impl SchemaInference for CsvFileFormat {
     async fn resolve_schema(
         &self,
         input: Box<dyn ByteReader>,
-    ) -> Result<Option<(Self, Box<dyn ByteReader>)>> {
+    ) -> Result<Option<ResolvedFormat<Self>>> {
         if self.schema.is_some() && self.header != CsvHeader::Auto {
-            return Ok(Some((self.clone(), input)));
+            return Ok(Some(ResolvedFormat {
+                format: self.clone(),
+                input,
+            }));
         }
         let dialect = validation::require_dialect(self.parallel_dialect())?;
-        let Some((schema, has_header, input)) =
-            inference::resolve(input, dialect, self.inference, self.schema.clone()).await?
+        let Some(inference::ResolvedCsvInput {
+            schema,
+            has_header,
+            input,
+        }) = inference::resolve(input, dialect, self.inference, self.schema.clone()).await?
         else {
             return Ok(None);
         };
@@ -204,7 +220,7 @@ impl SchemaInference for CsvFileFormat {
         });
         // Inference replays canonical CSV, regardless of the source extension.
         format.delimiter_resolved = true;
-        Ok(Some((format, input)))
+        Ok(Some(ResolvedFormat { format, input }))
     }
 }
 
@@ -212,7 +228,7 @@ impl SchemaInference for CsvFileFormat {
 impl ReaderFactory for CsvFileFormat {
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
-    type Prepared = Option<(SchemaRef, Decoder, Option<Decoder>)>;
+    type Prepared = Option<PreparedCsvReader>;
 
     fn capability(&self, input: Capability) -> RecordCapability {
         Capability {
@@ -241,16 +257,24 @@ impl ReaderFactory for CsvFileFormat {
         prepared: Self::Prepared,
     ) -> Result<Box<dyn RecordReader>> {
         let (input, schema, decoder, header) = match prepared {
-            Some((schema, decoder, header)) => (input, schema, decoder, header),
+            Some(PreparedCsvReader {
+                schema,
+                decoder,
+                header,
+            }) => (input, schema, decoder, header),
             None => {
                 let format = self.for_request(&request);
-                let Some((format, input)) = format.resolve_schema(input).await? else {
+                let Some(ResolvedFormat { format, input }) = format.resolve_schema(input).await?
+                else {
                     return Ok(Box::new(
                         crate::inference::empty_plan(request).into_reader(),
                     ));
                 };
-                let (schema, decoder, header) =
-                    format.prepare(&request)?.expect("resolved CSV schema");
+                let PreparedCsvReader {
+                    schema,
+                    decoder,
+                    header,
+                } = format.prepare(&request)?.expect("resolved CSV schema");
                 (input, schema, decoder, header)
             }
         };

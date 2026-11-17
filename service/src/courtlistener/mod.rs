@@ -88,7 +88,8 @@ impl<A: ByteAccessor> CourtListenerBulkAccessor<A> {
         Ok(objects
             .into_iter()
             .filter_map(|object| {
-                let (name, date) = parse_object(object.locator())?;
+                let validation::SnapshotObject { table: name, date } =
+                    parse_object(object.locator())?;
                 (name == table).then(|| CourtListenerSnapshot {
                     table: name.into(),
                     date: date.into(),

@@ -1,3 +1,4 @@
+use open_arrow_access_decompression::tar::TarEntryReader;
 use std::num::NonZeroUsize;
 
 use arrow_array::cast::AsArray;
@@ -181,7 +182,7 @@ async fn bulk_stream_starts_before_other_headers_and_accepts_sequential_storage(
     };
     let mut stream = service.stream(&archives[1], options).await.unwrap();
     drop(stream.next_entry().await.unwrap().unwrap());
-    let (entry, mut reader) = stream.next_entry().await.unwrap().unwrap();
+    let TarEntryReader { entry, mut reader } = stream.next_entry().await.unwrap().unwrap();
     assert_eq!(entry.index, 1);
     assert_eq!(observed.reads.load(Ordering::SeqCst), 16);
     assert_eq!(observed.range_reads.load(Ordering::SeqCst), 0);

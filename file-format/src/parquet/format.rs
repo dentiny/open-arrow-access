@@ -4,8 +4,8 @@ use super::{
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     ByteReader, Capability, FactoryToken, FieldNameIndex, OrderRequirement, ReadRequest,
-    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, Result, async_trait,
-    record_stream_reader,
+    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result,
+    async_trait, record_stream_reader,
 };
 use parquet::arrow::{ProjectionMask, async_reader::ParquetRecordBatchStreamBuilder};
 
@@ -56,7 +56,10 @@ pub(super) fn create_reader(
     // The native projection mask selects fields in file order. Reorder
     // decoded top-level fields separately to honor the caller's order.
     // The native stream drops schema metadata; retain it from inspection.
-    let (schema, projection) = request.options.resolve_projection(builder.schema())?;
+    let ResolvedProjection {
+        schema,
+        indices: projection,
+    } = request.options.resolve_projection(builder.schema())?;
     if let Some(indices) = projection {
         let mask = ProjectionMask::roots(builder.parquet_schema(), indices);
         builder = builder.with_projection(mask);

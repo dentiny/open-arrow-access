@@ -32,7 +32,10 @@ where
         )
         .await
         .map_err(|error| decode_error("inspect_parquet", error))?;
-        let (schema, _) = request.options.resolve_projection(metadata.schema())?;
+        let schema = request
+            .options
+            .resolve_projection(metadata.schema())?
+            .schema;
         let output = RecordMetadata {
             schema,
             source: Some(request.object.clone()),

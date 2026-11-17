@@ -55,7 +55,7 @@ use open_arrow_access::{
     async_trait, read_lines, record_stream_reader,
     ByteReader, Capability, Error, ErrorKind, FactoryToken, OrderRequirement,
     ReadRequest, ReaderFactory, RecordBatch, RecordCapability, RecordMetadata,
-    RecordReader, Result, Schema, SchemaRef,
+    RecordReader, ResolvedProjection, Result, Schema, SchemaRef,
 };
 
 struct LineFormat;
@@ -67,7 +67,7 @@ fn line_schema() -> SchemaRef {
 #[async_trait]
 impl ReaderFactory for LineFormat {
     type Request = ReadRequest;
-    type Prepared = (SchemaRef, Option<Vec<usize>>);
+    type Prepared = ResolvedProjection;
     type Reader = dyn RecordReader;
 
     fn capability(&self, input: Capability) -> RecordCapability {
@@ -89,7 +89,7 @@ impl ReaderFactory for LineFormat {
         _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         _request: ReadRequest,
-        (schema, projection): Self::Prepared,
+        ResolvedProjection { schema, indices: projection }: Self::Prepared,
     ) -> Result<Box<dyn RecordReader>> {
         let metadata = RecordMetadata { schema, source: input.metadata().source.clone() };
         let batches = read_lines(input, Some(1024 * 1024), "read_lines")

@@ -57,14 +57,20 @@ fn is_valid_cast_target(from: &DataType, to: &DataType) -> bool {
     from == to || is_valid_evolution_type(to, true)
 }
 
-fn decimal_params(data_type: &DataType) -> Option<(i16, i16)> {
+struct DecimalParams {
+    precision: i16,
+    scale: i16,
+}
+
+fn decimal_params(data_type: &DataType) -> Option<DecimalParams> {
     match data_type {
         DataType::Decimal32(precision, scale)
         | DataType::Decimal64(precision, scale)
         | DataType::Decimal128(precision, scale)
-        | DataType::Decimal256(precision, scale) => {
-            Some((i16::from(*precision), i16::from(*scale)))
-        }
+        | DataType::Decimal256(precision, scale) => Some(DecimalParams {
+            precision: i16::from(*precision),
+            scale: i16::from(*scale),
+        }),
         _ => None,
     }
 }
@@ -84,14 +90,13 @@ fn is_safe_decimal_cast(from: &DataType, to: &DataType) -> bool {
     if from == to || from.is_null() {
         return true;
     }
-    if let (Some((precision, from_scale)), Some((_, to_scale))) =
-        (decimal_params(from), decimal_params(to))
-    {
+    if let (Some(from), Some(to)) = (decimal_params(from), decimal_params(to)) {
         // Arrow decimal kernels compute both expressions in i8, which can panic or select wrapping multiplication.
-        let delta = to_scale - from_scale;
+        let delta = to.scale - from.scale;
         return delta.abs() <= i16::from(i8::MAX)
-            && (delta < 0 || precision + delta <= i16::from(i8::MAX));
+            && (delta < 0 || from.precision + delta <= i16::from(i8::MAX));
     }
+
     match (from, to) {
         (DataType::RunEndEncoded(_, values), _) => is_safe_decimal_cast(values.data_type(), to),
         (DataType::Union(fields, _), _) => {
