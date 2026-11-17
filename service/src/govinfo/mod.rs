@@ -1,5 +1,5 @@
 //! GovInfo bulk XML directories and API package discovery.
-use crate::common::{ApiDocument, Connection, RemoteFiles, segment};
+use crate::common::{ApiDocument, ApiKey, Connection, RemoteFiles, segment};
 mod error;
 mod resolver;
 mod validation;
@@ -17,7 +17,7 @@ impl GovInfoService {
         Ok(Self {
             bulk: Connection::new("https://www.govinfo.gov")?,
             api: if let Some(key) = api_key {
-                api.with_query("api_key", key)
+                api.with_api_key(ApiKey::Query("api_key"), key)?
             } else {
                 api
             },

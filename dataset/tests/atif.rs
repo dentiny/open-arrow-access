@@ -9,6 +9,7 @@ use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::atif::{AtifAccessor, AtifFormat};
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_storage::OpenDalAccessor;
+use open_arrow_access_test_support::record::assert_same_batches;
 
 #[tokio::test]
 async fn reads_atif_jsonl_and_ordered_file_sets() {
@@ -69,29 +70,15 @@ async fn parallel_atif_matches_sequential_values_and_source_context() {
         .open(request)
         .await
         .unwrap();
-    loop {
-        let expected = sequential.next().await.unwrap();
-        let actual = parallel.next().await.unwrap();
-        assert_eq!(actual, expected);
-        if expected.is_none() {
-            break;
-        }
-    }
+    assert_same_batches(sequential.as_mut(), parallel.as_mut()).await;
 }
 
 #[tokio::test]
 async fn parallel_atif_composes_with_independent_gzip_readers() {
-    let root = tempfile::tempdir().unwrap();
-    for name in ["a.gz", "b.gz"] {
-        tokio::fs::copy(
-            open_arrow_access_test_support::fixture_path!("atif", "trajectories.jsonl.gz"),
-            root.path().join(name),
-        )
-        .await
-        .unwrap();
-    }
-    let bytes = OpenDalAccessor::new(open_arrow_access_test_support::fs_operator(root.path()))
-        .layer(DecompressionLayer::new(Gzip));
+    let contents = open_arrow_access_test_support::fixture!("atif", "trajectories.jsonl.gz").await;
+    let (_root, operator) =
+        open_arrow_access_test_support::temp_fs(&[("a.gz", &contents), ("b.gz", &contents)]);
+    let bytes = OpenDalAccessor::new(operator).layer(DecompressionLayer::new(Gzip));
     let files = FileSetAccessor::new(AtifAccessor::new(bytes, AtifFormat::JsonLines));
     let request = FileSetRequest::new(["b.gz", "a.gz", "b.gz"]);
     let mut sequential = files.open(request.clone()).await.unwrap();
@@ -103,14 +90,7 @@ async fn parallel_atif_composes_with_independent_gzip_readers() {
         .open(request)
         .await
         .unwrap();
-    loop {
-        let expected = sequential.next().await.unwrap();
-        let actual = parallel.next().await.unwrap();
-        assert_eq!(actual, expected);
-        if expected.is_none() {
-            break;
-        }
-    }
+    assert_same_batches(sequential.as_mut(), parallel.as_mut()).await;
 }
 
 #[tokio::test]

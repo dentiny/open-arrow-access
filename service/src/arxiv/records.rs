@@ -9,8 +9,8 @@ use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, FieldNameIndex,
     ObjectRef, OrderRequirement, ReadOptions, ReadOptionsProvider, RecordBatchBuilder,
-    RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner,
-    SchemaRef, StreamReader, async_trait, read_all,
+    RecordCapability, RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, SchemaRef,
+    StreamReader, async_trait, read_all, scan_partition,
 };
 
 use super::{ArxivKind, ArxivService};
@@ -146,7 +146,7 @@ where
             let service = service.clone();
             let request = request.clone();
             let schema = schema.clone();
-            Box::pin(async move {
+            scan_partition(async move {
                 let tar = service.stream(&archive, request.byte_options).await?;
                 let source = archive.filename;
                 let output = RecordMetadata {
@@ -195,16 +195,13 @@ where
                         Ok(Some((builder.finish()?, tar)))
                     }
                 });
-                Ok(Box::new(StreamReader::records(
+                Ok(StreamReader::records(
                     batches,
                     output,
                     OrderRequirement::Reorderable,
-                )) as Box<dyn RecordReader>)
-            }) as ScanPartition
+                ))
+            })
         });
-        Ok(
-            ScanPlan::from_stream(metadata, stream::iter(partitions.map(Ok)))
-                .with_ordering(self.capability().ordering),
-        )
+        Ok(ScanPlan::from_iter(metadata, partitions).with_ordering(self.capability().ordering))
     }
 }

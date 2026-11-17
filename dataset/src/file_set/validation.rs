@@ -69,10 +69,7 @@ pub(super) fn validate_schema(
     actual: &arrow_schema::SchemaRef,
     expected: &arrow_schema::SchemaRef,
 ) -> Result<()> {
-    if actual != expected {
-        return Err(super::error::schema_mismatch());
-    }
-    Ok(())
+    open_arrow_access_core::validate_schema(actual, expected, super::error::schema_mismatch)
 }
 
 pub(super) fn validate_null_array(data_type: &DataType, len: usize) -> Result<()> {

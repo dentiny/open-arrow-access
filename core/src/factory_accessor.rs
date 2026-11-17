@@ -1,6 +1,6 @@
 use crate::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, ReaderFactory, ReaderFactoryExt, Result,
-    async_trait,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Reader, ReaderFactory, ReaderFactoryExt,
+    Result, async_trait,
 };
 
 /// Bind byte storage to a reader factory through the shared opening protocol.
@@ -43,9 +43,20 @@ where
 {
     type Request = F::Request;
     type Reader = F::Reader;
-    fn capability(&self) -> <Self::Reader as crate::Reader>::Capability {
+    fn capability(&self) -> <Self::Reader as Reader>::Capability {
         self.factory.capability(self.storage.capability())
     }
+    async fn metadata(&self, request: Self::Request) -> Result<<Self::Reader as Reader>::Metadata>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        let object = ByteReadRequest::from(&request).object;
+        self.factory
+            .metadata(&self.storage, request)
+            .await
+            .map_err(|error| error.with_object(Some(&object)))
+    }
+
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
         self.factory.open_reader(&self.storage, request).await
     }

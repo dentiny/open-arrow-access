@@ -28,6 +28,7 @@ async fn resolves_once_and_reads_nested_names_lazily_with_independent_readers() 
     );
     let item = InternetArchiveService::with_endpoint(fixture.endpoint())
         .unwrap()
+        .with_context(fixture.context())
         .item(ITEM)
         .await
         .unwrap();
@@ -90,8 +91,9 @@ async fn maps_empty_missing_and_unavailable_item_responses() {
             ("duplicate.json", StatusCode::OK, ErrorKind::Decode),
             ("invalid-size.json", StatusCode::OK, ErrorKind::Decode),
         ],
-        |endpoint| async move {
+        |endpoint, context| async move {
             InternetArchiveService::with_endpoint(&endpoint)?
+                .with_context(context)
                 .item(ITEM)
                 .await
         },
@@ -105,6 +107,7 @@ async fn maps_empty_missing_and_unavailable_item_responses() {
     );
     let item = InternetArchiveService::with_endpoint(fixture.endpoint())
         .unwrap()
+        .with_context(fixture.context())
         .item(ITEM)
         .await
         .unwrap();
@@ -114,7 +117,9 @@ async fn maps_empty_missing_and_unavailable_item_responses() {
 #[tokio::test]
 async fn validates_selection_before_io_and_reads_chunked_metadata() {
     let fixture = HttpFixture::new();
-    let service = InternetArchiveService::with_endpoint(fixture.endpoint()).unwrap();
+    let service = InternetArchiveService::with_endpoint(fixture.endpoint())
+        .unwrap()
+        .with_context(fixture.context());
     for identifier in [
         "",
         "../item",
@@ -152,6 +157,7 @@ async fn preserves_file_names_without_path_validation() {
     );
     let item = InternetArchiveService::with_endpoint(http.endpoint())
         .unwrap()
+        .with_context(http.context())
         .item(ITEM)
         .await
         .unwrap();

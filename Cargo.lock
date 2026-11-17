@@ -2870,7 +2870,6 @@ version = "0.4.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
- "flate2",
  "futures",
  "glob",
  "more-asserts",
@@ -3012,6 +3011,7 @@ dependencies = [
  "more-asserts",
  "open-arrow-access-core",
  "opendal",
+ "tempfile",
  "tokio",
 ]
 

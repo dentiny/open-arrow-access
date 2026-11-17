@@ -3,7 +3,7 @@ use std::sync::Arc;
 use arrow_array::{ArrayRef, StringArray, UInt64Array};
 use arrow_schema::Schema;
 use open_arrow_access_core::{
-    BytePosition, ObjectRef, ReadOptions, RecordBatch, ResolvedProjection, Result, SchemaRef,
+    BytePosition, ObjectRef, RecordBatch, ResolvedProjection, Result, SchemaRef,
     record_batch_with_rows,
 };
 
@@ -32,11 +32,7 @@ impl SourceOutput {
         );
         crate::validation::validate_source_column_names(&fields)?;
         let schema = Arc::new(Schema::new_with_metadata(fields, input.metadata().clone()));
-        let projection = ReadOptions {
-            projection,
-            ..Default::default()
-        }
-        .resolve_projection(&schema)?;
+        let projection = ResolvedProjection::resolve(&schema, projection.as_deref())?;
         Ok(Self {
             input: input.clone(),
             columns: columns.iter().map(|(column, _)| *column).collect(),

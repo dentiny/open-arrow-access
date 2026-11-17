@@ -116,17 +116,10 @@ impl AsyncBufRead for PositionedAsyncRead {
 }
 impl AsyncRead for PositionedAsyncRead {
     fn poll_read(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         output: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        if output.is_empty() {
-            return Poll::Ready(Ok(0));
-        }
-        let bytes = std::task::ready!(self.as_mut().poll_fill_buf(cx))?;
-        let amount = bytes.len().min(output.len());
-        output[..amount].copy_from_slice(&bytes[..amount]);
-        self.consume(amount);
-        Poll::Ready(Ok(amount))
+        crate::async_read::poll_read_from_buf(self, cx, output)
     }
 }

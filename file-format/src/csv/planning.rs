@@ -1,13 +1,9 @@
 use crate::inference::{ResolvedFormat, SchemaInference};
 
-use futures::{
-    TryStreamExt,
-    io::{AsyncReadExt, Cursor},
-    stream,
-};
+use futures::io::{AsyncReadExt, Cursor};
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, ReaderFactoryExt, RecordMetadata,
-    Result, ScanPartition, ScanPlan, async_trait, bytes_reader, into_async_read,
+    Accessor, ByteReadRequest, ByteReader, Bytes, ReadRequest, RecordMetadata, Result, ScanPlan,
+    async_trait, into_async_read,
 };
 
 use super::{CsvAccessor, CsvDialect, CsvHeader, error};
@@ -48,29 +44,13 @@ where
             allow_truncated_rows: dialect.allow_truncated_rows,
             ..CsvDialect::default()
         });
-        let target_bytes = self.partition_options.target_bytes.get();
         // Initialization runs on first poll, keeping partition discovery lazy.
-        let partitions = stream::once(async move {
-            let frames = CsvChunks::new(input, dialect).await?;
-            Ok(stream::try_unfold(frames, move |mut frames| {
-                let format = format.clone();
-                let request = request.clone();
-                async move {
-                    let Some(bytes) = frames
-                        .next_chunk(request.options.batch_size.get(), target_bytes)
-                        .await?
-                    else {
-                        return Ok(None);
-                    };
-                    let partition: ScanPartition = Box::pin(async move {
-                        let input = bytes_reader(bytes, Some(request.object.clone()));
-                        format.open_input(Box::new(input), request).await
-                    });
-                    Ok(Some((partition, frames)))
-                }
-            }))
-        })
-        .try_flatten();
+        let partitions = crate::scan::byte_chunks::byte_chunk_partitions(
+            CsvChunks::new(input, dialect),
+            format,
+            request,
+            self.partition_options.target_bytes.get(),
+        );
         Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))
     }
 }
@@ -122,12 +102,10 @@ impl CsvChunks {
             emitted: false,
         })
     }
+}
 
-    pub(super) async fn next_chunk(
-        &mut self,
-        row_target: usize,
-        byte_target: usize,
-    ) -> Result<Option<Bytes>> {
+impl crate::scan::byte_chunks::ByteChunks for CsvChunks {
+    async fn next_chunk(&mut self, row_target: usize, byte_target: usize) -> Result<Option<Bytes>> {
         let mut output = Vec::new();
         let mut rows = 0;
         {

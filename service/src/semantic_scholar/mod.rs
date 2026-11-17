@@ -1,6 +1,6 @@
 //! Semantic Scholar release-pinned bulk datasets and incremental diff manifests.
 //! Signed download URLs are preserved exactly.
-use crate::common::{ApiDocument, Connection, RemoteFiles, segment, text};
+use crate::common::{ApiDocument, ApiKey, Connection, RemoteFiles, segment, text};
 mod error;
 mod parser;
 mod validation;
@@ -24,8 +24,11 @@ impl SemanticScholarService {
     /// Set or replace the API key while preserving the configured connection.
     /// The key is validated locally and sent as `x-api-key` only within its origin.
     pub fn with_key(mut self, key: &str) -> Result<Self> {
-        validation::validate_key(key)?;
-        self.connection = self.connection.with_header("x-api-key", key)?;
+        self.connection = self.connection.with_api_key_message(
+            ApiKey::Header("x-api-key"),
+            key,
+            "Semantic Scholar requires an API key",
+        )?;
         Ok(self)
     }
 

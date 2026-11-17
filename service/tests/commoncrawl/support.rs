@@ -75,21 +75,5 @@ impl Accessor for Records {
 }
 
 pub(super) async fn paths(reader: Box<dyn RecordReader>) -> Vec<String> {
-    use futures::TryStreamExt;
-    open_arrow_access_core::into_stream(reader)
-        .try_collect::<Vec<_>>()
-        .await
-        .unwrap()
-        .iter()
-        .flat_map(|batch| {
-            batch
-                .column(0)
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap()
-                .iter()
-                .map(|value| value.unwrap().to_owned())
-                .collect::<Vec<_>>()
-        })
-        .collect()
+    open_arrow_access_test_support::record::collect_strings::<i32>(reader, 0).await
 }
