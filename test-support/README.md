@@ -69,6 +69,14 @@ over the dynamic `handle` fallback. `http::response` and `file_response` support
 fragmentation and file HEAD/range behavior. Use `clear_requests()` between phases
 and `CapturedRequest::range()` for range assertions.
 
+Fixtures never install a process-wide transport. Pass `fixture.context()` to
+`Connection::with_context`, a service's `with_context`, or an OpenDAL operator's
+`with_context` before performing I/O. Keep every fixture alive through the last
+request; one injected context can route redirects between live fixture hosts.
+Unknown or expired fixture hosts return an OpenDAL error.
+`assert_resolution_cases` supplies both the endpoint and context to its resolver
+closure, so failure-table cases remain explicitly scoped too.
+
 Provider tests should verify that metadata resolution does not eagerly download
 attachments. Configure only fixture-backed routes, then assert the requests and
 selected file metadata. Keep tests offline.

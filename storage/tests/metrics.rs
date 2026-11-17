@@ -55,6 +55,7 @@ async fn http_transport_observations_are_exported_without_a_global_recorder() {
     let operator =
         opendal::Operator::new(opendal_service_http::Http::default().endpoint(fixture.endpoint()))
             .unwrap()
+            .with_context(fixture.context())
             .layer(opendal_metrics_layer(metrics.exporter().clone()));
     let accessor = OpenDalAccessor::new(operator).layer(metrics.clone());
     let mut reader = accessor.open("data".into()).await.unwrap();

@@ -12,6 +12,13 @@ pub struct HuggingFaceService {
 }
 
 impl HuggingFaceService {
+    /// Override the transport for metadata and lazy file requests.
+    /// Existing HTTP policies and credentials are retained.
+    pub fn with_context(mut self, context: opendal::OperationContext) -> Self {
+        self.client.context = context;
+        self
+    }
+
     /// Resolve connection settings and load cached credentials asynchronously.
     /// Does not contact the Hub until discovery or file reading is requested.
     pub async fn new(mut options: HuggingFaceOptions) -> Result<Self> {
