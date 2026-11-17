@@ -76,7 +76,9 @@ Source: [PMC Open Data distribution](https://pmc-oa-opendata.s3.amazonaws.com/RE
 
 `PmcDatasetAccessor` accepts the existing `ReadRequest`: `metadata/` selects
 all metadata, a subdirectory selects a subset, and an exact `.json` key selects
-one article without listing. It streams recursive discovery in storage order,
+one article without listing. Directory locators must end in `/`; ambiguous
+prefixes such as `metadata` return `InvalidInput` before listing, so they cannot
+also select `metadata_old/`. It streams recursive discovery in storage order,
 selecting lowercase `.json` files. Use metadata-only directories; a live listing
 is not an atomic snapshot. Projection, byte options and scan planning are retained.
 

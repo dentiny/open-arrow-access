@@ -149,6 +149,47 @@ mod discovery {
     use open_arrow_access_storage::OpenDalAccessor;
 
     #[tokio::test]
+    async fn rejects_ambiguous_prefixes_before_storage_access() {
+        // Listing is disabled: invalid paths must fail validation, not storage I/O.
+        let source = PmcDatasetAccessor::new(MemoryAccessor::new(b"", 1));
+        for path in [
+            "",
+            "metadata",
+            "metadata/subset",
+            "metadata/a.JSON",
+            "metadata/a.json.gz",
+        ] {
+            let request = ReadRequest::new(path);
+            let error = source
+                .metadata_paths(&request)
+                .await
+                .err()
+                .expect("invalid path");
+            assert_eq!(error.kind(), ErrorKind::InvalidInput, "{path:?}");
+            assert!(error.to_string().contains("directory ending in '/'"));
+            assert!(error.to_string().contains(path));
+            let error = source.open(request).await.err().expect("invalid path");
+            assert_eq!(error.kind(), ErrorKind::InvalidInput, "{path:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn exact_metadata_paths_do_not_require_listing() {
+        use futures::TryStreamExt;
+
+        let source = PmcDatasetAccessor::new(MemoryAccessor::new(b"", 1));
+        let request = ReadRequest::new("metadata/PMC1.json");
+        let paths = source
+            .metadata_paths(&request)
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+        assert_eq!(paths, vec![request.object]);
+    }
+
+    #[tokio::test]
     async fn reads_only_metadata_from_release_or_subset() {
         let root = tempfile::tempdir().unwrap();
         let operator = open_arrow_access_test_support::fs_operator(root.path());
@@ -156,6 +197,7 @@ mod discovery {
             ("metadata/PMC1.json", r#"{"pmcid":"PMC1"}"#),
             ("metadata/subset/PMC2.json", r#"{"pmcid":"PMC2"}"#),
             ("metadata/article.pdf", "not JSON"),
+            ("metadata_old/PMC3.json", r#"{"pmcid":"PMC3"}"#),
         ] {
             operator.write(path, contents).await.unwrap();
         }
