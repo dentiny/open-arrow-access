@@ -8,7 +8,7 @@ pub use automatic::{AutoDecompressionAccessor, AutoDecompressionLayer, Compressi
 mod archive;
 mod codec;
 mod compression_factory;
-pub use compression_factory::CompressionFactory;
+pub use compression_factory::{CompressionFactory, strip_compression_suffixes};
 mod decoded_reader;
 mod factory;
 mod layer;
