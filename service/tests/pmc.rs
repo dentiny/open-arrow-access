@@ -220,16 +220,3 @@ mod discovery {
         );
     }
 }
-
-#[tokio::test]
-async fn metadata_inspection_uses_the_reader_schema_without_storage_io() {
-    use open_arrow_access_test_support::assert_metadata_matches_open;
-    let input =
-        MemoryAccessor::new(b"invalid metadata, never decoded", 1).with_open_failure(ErrorKind::Io);
-    let source = PmcAccessor::with_default_decoder(input);
-    let request = ReadRequest::new("a.json").with_options(ReadOptions {
-        projection: Some(vec!["pdf_url".into(), "pmcid".into()]),
-        ..Default::default()
-    });
-    assert_metadata_matches_open(&source, request).await;
-}

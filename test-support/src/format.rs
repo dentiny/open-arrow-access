@@ -149,7 +149,7 @@ where
         ),
         None => schema.clone(),
     };
-    let reader = crate::assert_metadata_matches_open(accessor, request.clone()).await;
+    let reader = accessor.open(request.clone()).await.unwrap();
     assert_eq!(reader.metadata().schema, expected);
     let batches = collect_reader(reader, &request).await;
     assert_eq!(

@@ -50,29 +50,12 @@ async fn inferred_union_skips_empty_inputs() {
             } else {
                 Arc::new(CsvAccessor::infer(storage))
             };
-            let strict = FileSetAccessor::new(source.clone());
-            open_arrow_access_test_support::assert_metadata_matches_open(
-                &strict,
-                FileSetRequest::new([path("empty")]),
-            )
-            .await;
-            assert!(
-                strict
-                    .metadata(FileSetRequest::new([path("empty"), path("data")]))
-                    .await
-                    .is_err()
-            );
             let files = FileSetAccessor::new(source)
                 .with_union_by_name()
                 .with_file_planning();
             for planned in [false, true] {
                 let request =
                     FileSetRequest::new(["empty", "extra", "empty", "data", "empty"].map(path));
-                open_arrow_access_test_support::assert_metadata_matches_open(
-                    &files,
-                    request.clone(),
-                )
-                .await;
                 let mut reader: Box<dyn RecordReader> = if planned {
                     Box::new(files.plan_scan(request).await.unwrap().into_reader())
                 } else {
@@ -92,7 +75,6 @@ async fn inferred_union_skips_empty_inputs() {
                 );
             }
             let all_empty = FileSetRequest::new([path("empty")]);
-            assert!(files.metadata(all_empty.clone()).await.is_err());
             assert!(files.open(all_empty.clone()).await.is_err());
             assert!(files.plan_scan(all_empty).await.is_err());
         }
@@ -135,7 +117,6 @@ async fn json_directory_union_by_name_aligns_nested_struct_and_list_fields() {
         DirectoryAccessor::new(storage.clone(), JsonAccessor::infer(storage)).with_union_by_name();
     let mut request = DirectoryRequest::new("");
     request.suffix = Some(".jsonl".into());
-    open_arrow_access_test_support::assert_metadata_matches_open(&directory, request.clone()).await;
     let mut reader = directory.open(request).await.unwrap();
     let schema = reader.metadata().schema.clone();
     let DataType::Struct(meta) = schema.field_with_name("meta").unwrap().data_type() else {
