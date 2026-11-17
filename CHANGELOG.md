@@ -2,6 +2,8 @@
 
 ## 0.4.0 - 2026-11-16
 
+- Add reusable exact-schema validation and a lazy schema-checked record reader.
+
 - Add opt-in source columns and source positions with user-configurable record framing.
 - Preserve PMC metadata tolerance for unknown upstream fields and strict field types independently of generic JSON format settings.
 - Adapt XML metadata parsing to the quick-xml 0.42 string interfaces.

@@ -63,14 +63,16 @@ pub use reader::{
 };
 pub use reader_factory::{FactoryToken, ReaderFactory, ReaderFactoryExt};
 pub use record_batch_builder::{FieldValue, RecordBatchBuilder, RecordBatchRow};
-pub use record_stream::{map_positioned_reader, map_record_reader, record_stream_reader};
+pub use record_stream::{
+    map_positioned_reader, map_record_reader, record_stream_reader, schema_checked_reader,
+};
 pub use request::{
     ByteReadOptions, ByteReadRequest, DEFAULT_BATCH_SIZE, ListRequest, ObjectRef, ReadOptions,
     ReadOptionsProvider, ReadRequest, ResolvedProjection,
 };
 pub use statistics::{ScanStatistics, Statistic, StatisticsProvider};
 pub use stream_reader::{StreamReader, bytes_reader};
-pub use validation::validate_byte_range;
+pub use validation::{validate_byte_range, validate_schema};
 
 pub use arrow_array::RecordBatch;
 pub use arrow_schema::{Schema, SchemaRef};
