@@ -92,7 +92,6 @@ open-arrow-access-service = { path = "service", version = "0.4.0", default-featu
 [features]
 source-positions = ["open-arrow-access-layers/source-positions"]
 blocking = ["dep:arrow-array", "dep:arrow-schema", "dep:tokio"]
-dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 decompression-bz2 = ["open-arrow-access-decompression/bz2"]
 decompression-gzip = ["open-arrow-access-decompression/gzip"]
 decompression-lz4 = ["open-arrow-access-decompression/lz4"]
@@ -142,7 +141,7 @@ arrow-array = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
-open-arrow-access-dataset = { workspace = true, optional = true }
+open-arrow-access-dataset.workspace = true
 open-arrow-access-decompression.workspace = true
 open-arrow-access-file-format.workspace = true
 open-arrow-access-layers.workspace = true

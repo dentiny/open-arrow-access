@@ -320,8 +320,8 @@ storage paths.
   without materializing the input. Top-level arrays/null/scalars are rejected;
   projection selects the decoder schema before opening input. Byte options pass
   through the same `ReadRequest` contract as Parquet.
-- `dataset/` provides sequential `FileSetAccessor` and `DirectoryAccessor` behind
-  the default-off `dataset-directory` feature, without depending on a format.
+- `dataset/` always provides sequential `FileSetAccessor` and `DirectoryAccessor`,
+  without depending on a format.
 - `service/` provides default-off Hugging Face repository access over the shared
   OpenDAL byte adapter. The same service implements the record accessor contract
   for `HuggingFaceDatasetRequest`: pin the Parquet export revision, list/sort shards,
