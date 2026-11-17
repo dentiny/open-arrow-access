@@ -130,13 +130,15 @@ configured on storage with `with_content_lengths`. Discovery does not snapshot d
 
 File-format selection reports `ResolvedKind::Json` for both ordinary JSON and
 ATIF. A separate [`JsonResolver`](../docs/json-resolver.md) identifies the JSON
-content type, rejects mixed kinds before schema union, and binds the native reader.
+content type and binds the native reader. Its optional `EveryFile` policy rejects
+mixed kinds before schema union.
 Enable `format-json` for ordinary JSON and `format-atif` for ATIF.
 
 `AutoFormatAccessor` uses the default resolver; it has no JSON detection or sniff
 configuration fields. To customize probing, use `JsonResolver` directly with
 `SniffConfig`, then compose its selected reader with `FileSetAccessor`.
-The default checks every file with at most 8 concurrent probes and 1 MiB consumed
-per file. Empty files are skipped. `SniffPolicy::FirstFile` is an explicit trust
-option that leaves later inputs unchecked. Explicit schemas are accepted for
-ordinary JSON and rejected for ATIF's fixed schema.
+The default `SniffPolicy::FirstFile` skips empty inputs until the first nonempty
+file, then trusts its content kind for all remaining inputs without probing them.
+Each probe consumes at most 1 MiB. Opt into `EveryFile` to check all files, skip all
+empty inputs, and reject mixed kinds, with at most 8 concurrent probes by default.
+Explicit schemas are accepted for ordinary JSON and rejected for ATIF's fixed schema.

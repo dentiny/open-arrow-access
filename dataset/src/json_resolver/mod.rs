@@ -2,7 +2,7 @@
 //!
 //! Inputs must already be selected as JSON, and storage must supply decoded bytes.
 //! This resolver distinguishes ordinary JSON records from ATIF framings and checks
-//! consistency across files before dataset schema union. It does not detect suffixes
+//! consistency across files when `EveryFile` is selected. It does not detect suffixes
 //! or choose compression codecs. Reader features control decoding, not type identity.
 
 mod error;
@@ -27,7 +27,8 @@ pub enum JsonKind {
     Atif(AtifFormat),
 }
 
-/// Selected nonempty inputs and their common JSON content type.
+/// Selected inputs and their resolved JSON content type.
+/// With `FirstFile`, inputs after the first nonempty file remain unchecked.
 #[derive(Clone, Debug)]
 pub struct ResolvedJsonFormat {
     pub kind: JsonKind,
@@ -53,8 +54,9 @@ impl JsonResolver {
     }
 
     /// Probe decoded bytes without consuming the readers used for record execution.
-    /// Empty files are skipped. `FirstFile` trusts all files after the first nonempty
-    /// input; the default checks every file while preserving order and duplicates.
+    /// By default, skip empty inputs until the first nonempty file and trust its
+    /// kind for all later inputs. `EveryFile` checks all files, skips every empty
+    /// input, and rejects mixed content kinds. Both policies preserve order and duplicates.
     pub async fn resolve(
         &self,
         storage: Arc<dyn ByteAccessor>,

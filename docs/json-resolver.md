@@ -8,7 +8,7 @@ of CSV, Parquet, or WARC in the automatic file-format hierarchy.
 | --- | --- | --- |
 | Discover objects and select a file format | `AutoFormatAccessor` | `ResolvedKind::Json`, `CsvOrTsv`, `Parquet`, or `Warc` |
 | Identify content within JSON | `JsonResolver` | `JsonKind::Records` or `JsonKind::Atif(AtifFormat)` |
-| Check consistency across selected files | `JsonResolver` | Ordered nonempty objects with one content kind |
+| Select JSON inputs and optionally check all content kinds | `JsonResolver` | Ordered objects; `EveryFile` validates all kinds and omits all empty files |
 | Decode and plan records | Native JSON/ATIF reader and `FileSetAccessor` | Arrow batches with dataset schema and ordering policies |
 
 ## Ownership and configuration
@@ -54,13 +54,15 @@ JSON remains ordinary JSON; this resolver does not broaden the native JSON
 reader's supported framing. Malformed or truncated input reports a decode error
 with the original object context. Native readers validate full records later.
 
-The default policy processes bounded concurrent probes as they complete, then
-restores input order by original index, preserving duplicates. It checks every file
-and rejects mixed ordinary JSON, ATIF JSONL, and ATIF document inputs before
-schema union. Whitespace-only files are omitted; an all-empty selection is
-`NotFound`. `FirstFile` uses sequential probes to find the first nonempty file,
-then trusts all later objects without opening them. It is an explicit opt-out
-from cross-file content validation, not automatic behavior.
+The default `FirstFile` policy uses sequential probes to find the first nonempty
+file, then trusts all later objects without opening them. Empty inputs before
+that file are omitted; later inputs remain unchecked, including empty files.
+An all-empty selection is `NotFound`.
+
+Opt into `EveryFile` to process bounded concurrent probes as they complete, then
+restore input order by original index, preserving duplicates. This policy checks
+every file, omits whitespace-only inputs, and rejects mixed ordinary JSON, ATIF
+JSONL, and ATIF document inputs before schema union.
 
 Type identifiers and content classification are available without reader features.
 `open_arrow_access_file_format::AtifFormat` is independent of the feature-gated

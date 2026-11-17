@@ -37,7 +37,7 @@ async fn resolves_content_types_without_reader_features() {
 }
 
 #[tokio::test]
-async fn skips_empty_files_rejects_mixtures_and_allows_explicit_trust() {
+async fn every_file_rejects_mixtures_while_default_trusts_first_nonempty() {
     let root = tempfile::tempdir().unwrap();
     for (name, bytes) in [
         ("empty.jsonl", " \n"),
@@ -48,7 +48,10 @@ async fn skips_empty_files_rejects_mixtures_and_allows_explicit_trust() {
         fs::write(root.path().join(name), bytes).await.unwrap();
     }
     let storage = Arc::new(OpenDalAccessor::new(fs_operator(root.path())));
-    let resolver = JsonResolver::default();
+    let resolver = JsonResolver::default().with_sniff_config(SniffConfig {
+        policy: SniffPolicy::EveryFile,
+        ..Default::default()
+    });
     let request = FileSetRequest::new(["empty.jsonl", "plain.jsonl", "plain.jsonl"]);
     let selected = resolver.resolve(storage.clone(), &request).await.unwrap();
     assert_eq!(selected.kind, JsonKind::Records);
@@ -75,10 +78,7 @@ async fn skips_empty_files_rejects_mixtures_and_allows_explicit_trust() {
             assert!(error.to_string().contains(name));
         }
     }
-    let trusted = resolver.with_sniff_config(SniffConfig {
-        policy: SniffPolicy::FirstFile,
-        ..Default::default()
-    });
+    let trusted = JsonResolver::default();
     let request = FileSetRequest::new(["empty.jsonl", "plain.jsonl", "missing.jsonl"]);
     assert_eq!(
         trusted.resolve(storage, &request).await.unwrap().objects,
@@ -242,6 +242,10 @@ async fn unordered_probes_preserve_input_order_and_duplicates() {
     });
     let request = FileSetRequest::new(["slow.jsonl", "fast.jsonl", "fast.jsonl"]);
     let selected = JsonResolver::default()
+        .with_sniff_config(SniffConfig {
+            policy: SniffPolicy::EveryFile,
+            ..Default::default()
+        })
         .resolve(storage.clone(), &request)
         .await
         .unwrap();

@@ -183,6 +183,6 @@ enable Hugging Face, Zenodo, XML parsing, or other concrete providers.
 
 Automatic file selection and content resolution are separate steps. A JSON file
 remains `ResolvedKind::Json` even when it contains ATIF. The dedicated
-[`JsonResolver`](json-resolver.md) identifies the content kind and validates its
-consistency across files before the native reader and dataset planner run.
+[`JsonResolver`](json-resolver.md) identifies the content kind. It defaults to trusting the first nonempty file;
+`EveryFile` validates consistency across files before dataset schema union.
 Format-specific probe settings belong to that resolver.

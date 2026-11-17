@@ -9,9 +9,9 @@ use std::num::NonZeroUsize;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SniffPolicy {
     /// Inspect every file; reject different content kinds.
-    #[default]
     EveryFile,
     /// Trust the first nonempty file. Later files are not checked for mixed kinds.
+    #[default]
     FirstFile,
 }
 
@@ -29,7 +29,7 @@ pub struct SniffConfig {
 impl Default for SniffConfig {
     fn default() -> Self {
         Self {
-            policy: SniffPolicy::EveryFile,
+            policy: SniffPolicy::default(),
             max_bytes: NonZeroUsize::new(1024 * 1024).unwrap(),
             concurrency: NonZeroUsize::new(8).unwrap(),
         }
