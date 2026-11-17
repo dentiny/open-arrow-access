@@ -4,8 +4,8 @@
 
 PubMed Central (PMC) distributes biomedical article metadata and links to
 article content. This entry point converts one article-version metadata JSON
-object to one Arrow row. The [inventory reader](pmc-inventory.md) discovers
-metadata objects separately.
+object to one Arrow row. `PmcDatasetAccessor` also discovers metadata files
+for a release or subset. See also the [inventory reader](pmc-inventory.md).
 
 Enable facade feature `service-pmc`. See [example setup](README.md#example-setup) for dependencies and the async runtime.
 
@@ -70,3 +70,32 @@ the example obtains one metadata row. A null `pdf_url` is a valid result; this
 call does not download article full text, PDFs or media.
 
 Source: [PMC Open Data distribution](https://pmc-oa-opendata.s3.amazonaws.com/README.txt).
+
+
+## Release discovery and blob storage
+
+`PmcDatasetAccessor` accepts the existing `ReadRequest`: `metadata/` selects
+all metadata, a subdirectory selects a subset, and an exact `.json` key selects
+one article without listing. It streams recursive discovery in storage order,
+selecting lowercase `.json` files. Use metadata-only directories; a live listing
+is not an atomic snapshot. Projection, byte options and scan planning are retained.
+
+```rust,ignore
+use open_arrow_access::{Accessor, ReadRequest, service::pmc, storage::OpenDalAccessor};
+
+let operator = pmc::bucket_operator()?;
+let source = pmc::PmcDatasetAccessor::new(OpenDalAccessor::new(operator.clone()));
+let reader = source.open(ReadRequest::new("metadata/")).await?;
+
+// Register the same bucket with open-arrow-sink's generic blob source API.
+let storage = open_arrow_sink::storage::Storage::new(
+    operator, pmc::BUCKET_URL.parse()?,
+)?;
+let downloader = downloader.with_source_storage(storage);
+```
+
+`bucket_operator()` uses anonymous S3 access in `us-east-1`, disables ambient
+credential/config loading, and is rooted at `BUCKET_URL`. Callers may add their
+own retry/timeout layers. `source.metadata_paths(&request)` exposes the same
+streaming selection for inspectors. Existing `PmcAccessor` and `PmcDecoder`
+remain available for single-document composition.

@@ -142,3 +142,81 @@ async fn duplicate_fields_use_the_final_value_and_preserve_empty_strings() {
     assert_eq!(batch["pmid"].as_string::<i32>().value(0), "00001");
     assert_eq!(batch["doi"].as_string::<i32>().value(0), "");
 }
+
+mod discovery {
+    use super::*;
+    use open_arrow_access_service::pmc::{BUCKET_URL, PmcDatasetAccessor, bucket_operator};
+    use open_arrow_access_storage::OpenDalAccessor;
+
+    #[tokio::test]
+    async fn reads_only_metadata_from_release_or_subset() {
+        let root = tempfile::tempdir().unwrap();
+        let operator = open_arrow_access_test_support::fs_operator(root.path());
+        for (path, contents) in [
+            ("metadata/PMC1.json", r#"{"pmcid":"PMC1"}"#),
+            ("metadata/subset/PMC2.json", r#"{"pmcid":"PMC2"}"#),
+            ("metadata/article.pdf", "not JSON"),
+        ] {
+            operator.write(path, contents).await.unwrap();
+        }
+        let source = PmcDatasetAccessor::new(OpenDalAccessor::new(operator));
+        for (path, expected) in [
+            ("metadata/", vec!["PMC1", "PMC2"]),
+            ("metadata/subset/", vec!["PMC2"]),
+            ("metadata/PMC1.json", vec!["PMC1"]),
+            ("empty/", vec![]),
+        ] {
+            let mut reader = source
+                .open(ReadRequest::new(path).with_options(ReadOptions {
+                    projection: Some(vec!["pmcid".into()]),
+                    ..ReadOptions::default()
+                }))
+                .await
+                .unwrap();
+            let mut ids = Vec::new();
+            while let Some(batch) = reader.next().await.unwrap() {
+                assert_eq!(batch.num_columns(), 1);
+                ids.push(batch["pmcid"].as_string::<i32>().value(0).to_owned());
+            }
+            ids.sort();
+            assert_eq!(ids, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn public_operator_reads_bucket_root_without_signing() {
+        use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext};
+        struct Unsigned;
+        impl HttpTransport for Unsigned {
+            async fn fetch(
+                &self,
+                request: http::Request<Buffer>,
+            ) -> opendal::Result<http::Response<HttpBody>> {
+                assert_eq!(request.uri().host(), Some("s3.us-east-1.amazonaws.com"));
+                assert_eq!(
+                    request.uri().path(),
+                    "/pmc-oa-opendata/PMC123.1/article.pdf"
+                );
+                assert!(!request.headers().contains_key("authorization"));
+                assert!(!request.headers().contains_key("x-amz-security-token"));
+                Ok(open_arrow_access_test_support::http::response(
+                    http::StatusCode::OK,
+                    "PDF",
+                ))
+            }
+        }
+        assert_eq!(BUCKET_URL, "s3://pmc-oa-opendata/");
+        let operator = bucket_operator().unwrap().with_context(
+            OperationContext::new().with_http_transport(HttpTransporter::new(Unsigned)),
+        );
+        assert_eq!(operator.info().root(), "/");
+        assert_eq!(
+            operator
+                .read("PMC123.1/article.pdf")
+                .await
+                .unwrap()
+                .to_bytes(),
+            "PDF"
+        );
+    }
+}

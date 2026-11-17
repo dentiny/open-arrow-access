@@ -40,6 +40,7 @@ meca = [
 oapen = ["oai"]
 openstax = []
 pmc = [
+    "opendal/services-s3",
     "dep:arrow-json",
     "dep:arrow-array",
     "dep:arrow-schema",
