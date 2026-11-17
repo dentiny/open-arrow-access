@@ -4,7 +4,7 @@ use open_arrow_access_core::{
 };
 
 /// Match the inspector convention: a partial first line is an ATIF document.
-fn classify(line: &[u8]) -> Result<ResolvedKind> {
+fn classify(line: &[u8]) -> ResolvedKind {
     let atif = match serde_json::from_slice::<serde_json::Value>(line) {
         Ok(value)
             if value
@@ -18,22 +18,15 @@ fn classify(line: &[u8]) -> Result<ResolvedKind> {
         _ => None,
     };
     match atif {
-        None => Ok(ResolvedKind::Json),
-        #[cfg(feature = "format-atif")]
+        None => ResolvedKind::Json,
         Some(lines) => {
             use open_arrow_access_file_format::atif::AtifFormat;
-            Ok(ResolvedKind::Atif(if lines {
+            ResolvedKind::Atif(if lines {
                 AtifFormat::JsonLines
             } else {
                 AtifFormat::Json
-            }))
+            })
         }
-        #[cfg(not(feature = "format-atif"))]
-        Some(_) => Err(error(
-            ErrorKind::Unsupported,
-            "ATIF reader feature is disabled",
-            None,
-        )),
     }
 }
 
@@ -72,9 +65,7 @@ pub(super) async fn probe(
             consumed += 1;
             if byte == b'\n' {
                 if line.iter().any(|b: &u8| !b.is_ascii_whitespace()) {
-                    return classify(&line)
-                        .map(Some)
-                        .map_err(|error| error.with_object(Some(object)));
+                    return Ok(Some(classify(&line)));
                 }
                 line.clear();
             } else {
@@ -85,7 +76,25 @@ pub(super) async fn probe(
     if line.iter().all(|b| b.is_ascii_whitespace()) {
         return Ok(None);
     }
-    classify(&line)
-        .map(Some)
-        .map_err(|error| error.with_object(Some(object)))
+    Ok(Some(classify(&line)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use open_arrow_access_file_format::atif::AtifFormat;
+
+    #[test]
+    fn classifies_json_and_atif_without_reader_features() {
+        for (line, expected) in [
+            (b"{\"id\":1}".as_slice(), ResolvedKind::Json),
+            (
+                b"{\"schema_version\":\"ATIF-1.0\"}".as_slice(),
+                ResolvedKind::Atif(AtifFormat::JsonLines),
+            ),
+            (b"{".as_slice(), ResolvedKind::Atif(AtifFormat::Json)),
+        ] {
+            assert_eq!(classify(line), expected);
+        }
+    }
 }

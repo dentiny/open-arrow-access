@@ -45,12 +45,12 @@ pub enum JsonDetection {
     FirstFile,
 }
 
+/// Resolved input kind, independent of enabled reader features.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResolvedKind {
     Parquet,
     CsvOrTsv,
     Json,
-    #[cfg(feature = "format-atif")]
     Atif(open_arrow_access_file_format::atif::AtifFormat),
     Warc,
 }
