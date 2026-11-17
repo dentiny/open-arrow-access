@@ -75,7 +75,7 @@ async fn record_rejects_mismatched_identity() {
     f.respond(
         "/v4/dockets/DOC-1",
         StatusCode::OK,
-        Bytes::from_static(b"{\"data\":{\"id\":\"WRONG\",\"type\":\"dockets\",\"attributes\":{}}}"),
+        fixture!("regulations", "bad-record-identity.json").await,
     );
     assert_eq!(
         s.record(RegulationsResource::Dockets, "DOC-1")
