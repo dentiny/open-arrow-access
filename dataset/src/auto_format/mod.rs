@@ -3,6 +3,15 @@
 //! Enable the `format-*` readers you need. Compression features
 //! remain on the decompression crate. Configure storage (including known content
 //! lengths) before passing it here; Parquet retains its original range-capable storage.
+//!
+//! Automatic routing is limited to the built-in [`DetectedFormat`] and
+//! [`ResolvedKind`] variants and their enabled readers. This version reads CSV,
+//! TSV, Parquet, and WARC; detected JSON returns `Unsupported`.
+//! Applications can implement `open_arrow_access_core::ReaderFactory` and use
+//! `open_arrow_access_file_format::FileAccessor::from_format` for custom formats,
+//! including with [`FileSetAccessor`] for multiple files. Custom formats are not
+//! registered with or selected by `AutoFormatAccessor`; runtime registration is
+//! not currently supported.
 
 use crate::{
     directory::DirectoryRequest,

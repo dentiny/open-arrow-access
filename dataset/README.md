@@ -95,6 +95,15 @@ generated columns after parallel execution.
 Automatic format selection is always available. Enable the `format-*` readers and
 `decompression-*` codecs you need on the facade, or `format-*` on this crate.
 
+`AutoFormatAccessor` routes only the built-in `DetectedFormat` / `ResolvedKind`
+variants with an enabled reader. This version reads CSV, TSV, Parquet, and WARC;
+recognizing a suffix does not guarantee an available reader.
+
+Applications can still define their own formats by implementing `ReaderFactory`
+and binding them with `FileAccessor::from_format(storage, format)`. Compose that
+accessor with `FileSetAccessor` to read multiple files. These custom formats are
+not selected by `AutoFormatAccessor`, which currently has no registration API.
+
 ```rust,ignore
 let auto = AutoFormatAccessor::new(storage);
 let request = AutoFormatRequest::Directory(DirectoryRequest::new("data/**/*"));
