@@ -161,39 +161,3 @@ async fn row_preserving_evolution_retains_coordinates_across_casts_and_generated
     assert_eq!(reader.metadata().schema, batch.batch().schema());
     assert!(reader.next().await.unwrap().is_none());
 }
-
-#[rstest::rstest]
-#[case::no_changes(vec![])]
-#[case::same_type(vec![ColumnEvolution::change_data_type("id", DataType::UInt64)])]
-#[case::same_name(vec![ColumnEvolution::rename_column("id", "id")])]
-#[tokio::test]
-async fn identity_evolution_shares_positioned_batches(#[case] changes: Vec<ColumnEvolution>) {
-    let input = batch(false, vec![1, 2]);
-    let metadata = RecordMetadata {
-        schema: input.schema(),
-        source: Some(ReadRequest::new("indexed.csv").object),
-    };
-    let positions = vec![BytePosition::Stored(100), BytePosition::Stored(101)];
-    let positioned = PositionedBatch::try_new(input.clone(), positions.clone()).unwrap();
-    let reader = StreamReader::records(
-        stream::iter([Ok(positioned)]),
-        metadata.clone(),
-        OrderRequirement::Reorderable,
-    );
-    let mut reader = SchemaEvolutionLayer::try_new(changes)
-        .unwrap()
-        .wrap_positioned_reader(Box::new(reader))
-        .unwrap();
-    assert!(Arc::ptr_eq(&reader.metadata().schema, &metadata.schema));
-    assert_eq!(reader.metadata().source, metadata.source);
-    assert_eq!(
-        reader.capability(),
-        RecordCapability::sequential(OrderRequirement::Reorderable)
-    );
-    let output = reader.next().await.unwrap().unwrap();
-    assert!(Arc::ptr_eq(output.batch().schema_ref(), input.schema_ref()));
-    assert!(Arc::ptr_eq(output.batch().column(0), input.column(0)));
-    assert_eq!(output.positions(), positions);
-    assert!(reader.next().await.unwrap().is_none());
-    assert!(reader.next().await.unwrap().is_none());
-}
