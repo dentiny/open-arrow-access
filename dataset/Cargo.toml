@@ -9,6 +9,8 @@ description = "Sequential file-set and directory datasets for Open Arrow Access"
 [features]
 default = []
 format-csv = ["open-arrow-access-file-format/csv"]
+format-json = ["open-arrow-access-file-format/json"]
+format-atif = ["open-arrow-access-file-format/atif"]
 format-parquet = ["open-arrow-access-file-format/parquet"]
 format-warc = ["open-arrow-access-file-format/warc"]
 
@@ -20,6 +22,7 @@ glob.workspace = true
 open-arrow-access-core.workspace = true
 open-arrow-access-file-format.workspace = true
 open-arrow-access-decompression.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 flate2.workspace = true
@@ -38,4 +41,4 @@ workspace = true
 
 [[test]]
 name = "auto_format"
-required-features = ["format-csv", "format-parquet", "format-warc"]
+required-features = ["format-csv", "format-json", "format-atif", "format-parquet", "format-warc"]

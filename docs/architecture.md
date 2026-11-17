@@ -178,3 +178,11 @@ This default-on facade deliberately includes the service crate's HTTP baseline
 (OpenDAL HTTP/reqwest transport, JSON/Serde, URL and supporting utilities).
 Provider features remain empty by default: making common code available does not
 enable Hugging Face, Zenodo, XML parsing, or other concrete providers.
+
+## File format and content type
+
+Automatic file selection and content resolution are separate steps. A JSON file
+remains `ResolvedKind::Json` even when it contains ATIF. The dedicated
+[`JsonResolver`](json-resolver.md) identifies the content kind and validates its
+consistency across files before the native reader and dataset planner run.
+Format-specific probe settings belong to that resolver.

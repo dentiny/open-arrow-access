@@ -5,7 +5,7 @@ use open_arrow_access_core::{
     Accessor, AccessorExt, ErrorKind, ReadOptions, ReadOptionsProvider, ScanPlanner,
 };
 use open_arrow_access_dataset::{
-    auto_format::{AutoFormatAccessor, AutoFormatRequest, DetectedFormat},
+    auto_format::{AutoFormatAccessor, AutoFormatRequest, DetectedFormat, ResolvedKind},
     directory::DirectoryRequest,
     file_set::FileSetRequest,
 };
@@ -125,4 +125,51 @@ async fn automatic_selection_rejects_mixed_csv_tsv_before_opening_files() {
     assert_eq!(error.kind(), ErrorKind::InvalidInput);
     assert!(error.to_string().contains("missing.csv"));
     assert!(error.to_string().contains("missing.tsv"));
+}
+
+#[tokio::test]
+async fn resolves_and_opens_both_atif_framings() {
+    for (name, rows) in [("trajectory.json", 1), ("trajectories.jsonl", 3)] {
+        let auto = AutoFormatAccessor::new(storage(&fixture_path!("atif", "")));
+        assert_eq!(
+            auto.resolve(files(&[name])).await.unwrap().format,
+            ResolvedKind::Json
+        );
+        let mut reader = auto.open(files(&[name])).await.unwrap();
+        let mut count = 0;
+        while let Some(batch) = reader.next().await.unwrap() {
+            count += batch.num_rows();
+        }
+        assert_eq!(count, rows);
+    }
+}
+
+#[tokio::test]
+async fn extensionless_compression_requires_an_explicit_format() {
+    let root = tempfile::tempdir().unwrap();
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gzip.write_all(b"{\"id\":1}\n").unwrap();
+    fs::write(root.path().join("records.gz"), gzip.finish().unwrap())
+        .await
+        .unwrap();
+    let auto = AutoFormatAccessor::new(storage(root.path()));
+    assert_eq!(
+        auto.resolve(files(&["records.gz"]))
+            .await
+            .unwrap_err()
+            .kind(),
+        ErrorKind::NotFound
+    );
+    let explicit = auto.with_format(DetectedFormat::Json);
+    assert_eq!(
+        explicit
+            .resolve(files(&["records.gz"]))
+            .await
+            .unwrap()
+            .format,
+        ResolvedKind::Json
+    );
+    let values =
+        collect_column::<Int64Type>(explicit.open(files(&["records.gz"])).await.unwrap(), 0).await;
+    assert_eq!(values, [1]);
 }

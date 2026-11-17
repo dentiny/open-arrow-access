@@ -6,7 +6,8 @@
 //!
 //! Automatic routing is limited to the built-in [`DetectedFormat`] and
 //! [`ResolvedKind`] variants and their enabled readers. This version reads CSV,
-//! TSV, Parquet, and WARC; detected JSON returns `Unsupported`.
+//! TSV, Parquet, WARC, and JSON. JSON content types are delegated to
+//! [`crate::json_resolver::JsonResolver`] before dataset schema union.
 //! Applications can implement `open_arrow_access_core::ReaderFactory` and use
 //! `open_arrow_access_file_format::FileAccessor::from_format` for custom formats,
 //! including with [`FileSetAccessor`] for multiple files. Custom formats are not
@@ -118,7 +119,7 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
     }
 
     /// Resolve selected files without decoding Arrow records. Explicit file lists
-    /// perform no I/O. JSON support is added separately.
+    /// perform no I/O for non-JSON formats. JSON content resolution uses bounded probes.
     pub async fn resolve(&self, request: AutoFormatRequest) -> Result<ResolvedFormat> {
         self.prepare(request).await.map(|(resolved, _, _)| resolved)
     }
@@ -130,8 +131,30 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
         let context = request.context_object().cloned();
         async {
             let files = self.files(request).await?;
-            let resolved = self.resolve_files(&files).await?;
-            let reader = self.reader(resolved.format, resolved.objects.first())?;
+            let mut resolved = self.resolve_files(&files).await?;
+            let reader = if resolved.format == ResolvedKind::Json {
+                use crate::json_resolver::JsonResolver;
+                use open_arrow_access_core::Layer;
+                use open_arrow_access_decompression::AutoDecompressionLayer;
+
+                let decoded: Arc<dyn ByteAccessor> =
+                    Arc::new(AutoDecompressionLayer::new().layer(self.storage.clone()));
+                let resolver = JsonResolver::default().with_schema_opt(self.schema.clone());
+                let json = resolver
+                    .resolve(
+                        decoded.clone(),
+                        &FileSetRequest {
+                            objects: resolved.objects,
+                            ..files.clone()
+                        },
+                    )
+                    .await?;
+                let reader = resolver.reader(decoded, json.kind, json.objects.first())?;
+                resolved.objects = json.objects;
+                reader
+            } else {
+                self.reader(resolved.format, resolved.objects.first())?
+            };
             Ok((resolved, files, reader))
         }
         .await

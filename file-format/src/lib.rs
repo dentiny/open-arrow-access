@@ -35,7 +35,6 @@ pub mod csv;
 #[cfg(feature = "xml")]
 pub mod xml;
 
-#[cfg(feature = "atif")]
 pub mod atif;
 
 #[cfg(any(feature = "xml", feature = "json", feature = "csv"))]

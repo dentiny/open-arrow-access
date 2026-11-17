@@ -96,7 +96,7 @@ Automatic format selection is always available. Enable the `format-*` readers an
 `decompression-*` codecs you need on the facade, or `format-*` on this crate.
 
 `AutoFormatAccessor` routes only the built-in `DetectedFormat` / `ResolvedKind`
-variants with an enabled reader. This version reads CSV, TSV, Parquet, and WARC;
+variants with an enabled reader. This version reads CSV, TSV, Parquet, WARC, ordinary JSON, and ATIF;
 recognizing a suffix does not guarantee an available reader.
 
 Applications can still define their own formats by implementing `ReaderFactory`
@@ -118,7 +118,7 @@ and requires one format; CSV and TSV are distinct formats. No format takes prior
 Use `.with_format(DetectedFormat::Json)` (or another format) to read every supplied
 object as that format, including files without a recognized suffix. Explicit CSV
 uses commas; explicit TSV uses tabs, regardless of filename. `resolve` also lists directories,
-but does not decode Arrow records. Mixed formats return
+and delegates JSON content probing, but does not decode Arrow records. Mixed formats return
 `InvalidInput` with examples; no recognized files returns `NotFound`.
 
 Explicit CSV schemas are accessor settings; custom CSV dialects use `CsvAccessor` directly. Projection,
@@ -126,5 +126,17 @@ batch size, and byte options remain on the request. Native file planning and uni
 by name support record layers. Parquet keeps raw range reads and size hints already
 configured on storage with `with_content_lengths`. Discovery does not snapshot data.
 
-JSON and ATIF auto-detection are added in the next PR; JSON selections currently
-return `Unsupported`. Existing typed JSON/ATIF readers are unchanged.
+### Resolve content within JSON
+
+File-format selection reports `ResolvedKind::Json` for both ordinary JSON and
+ATIF. A separate [`JsonResolver`](../docs/json-resolver.md) identifies the JSON
+content type, rejects mixed kinds before schema union, and binds the native reader.
+Enable `format-json` for ordinary JSON and `format-atif` for ATIF.
+
+`AutoFormatAccessor` uses the default resolver; it has no JSON detection or sniff
+configuration fields. To customize probing, use `JsonResolver` directly with
+`SniffConfig`, then compose its selected reader with `FileSetAccessor`.
+The default checks every file with at most 8 concurrent probes and 1 MiB consumed
+per file. Empty files are skipped. `SniffPolicy::FirstFile` is an explicit trust
+option that leaves later inputs unchecked. Explicit schemas are accepted for
+ordinary JSON and rejected for ATIF's fixed schema.

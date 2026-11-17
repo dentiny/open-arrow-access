@@ -2881,6 +2881,7 @@ dependencies = [
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
  "parquet",
+ "serde_json",
  "tempfile",
  "tokio",
 ]

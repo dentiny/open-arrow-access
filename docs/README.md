@@ -32,6 +32,7 @@ flowchart LR
 | Goal | Guide |
 | --- | --- |
 | Understand boundaries, resource ownership, and execution | [Architecture](architecture.md) |
+| Resolve ordinary JSON and ATIF content types independently | [JSON resolver](json-resolver.md) |
 | Add a format, service, byte backend, codec, or layer | [Extension guide](extending.md) |
 | Implement request, reader, capability, and planning contracts | [API contracts](contracts.md) |
 
