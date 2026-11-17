@@ -46,6 +46,16 @@ fn segment_urls_preserve_source_identity_and_reject_aliases() {
             "{value}"
         );
     }
+    assert_eq!(
+        CommonCrawlSegmentRequest::from_manifest_url(
+            "CC-MAIN-2022-40",
+            "../1.2",
+            "https://host/warc.paths",
+        )
+        .unwrap_err()
+        .kind(),
+        ErrorKind::InvalidInput,
+    );
     for (crawl, segment) in [
         ("../CC-MAIN-2022-40", "1.2"),
         ("CC-MAIN-2022-40", "../1.2"),
@@ -67,10 +77,17 @@ async fn segment_selects_exact_membership_in_order_with_forwarded_options() {
     let records = Records::default();
     let opens = records.opens.clone();
     let accessor = CommonCrawlSegmentAccessor::new(manifests, records);
-    let mut selection = request().with_byte_options(ByteReadOptions {
+    let mut selection = CommonCrawlSegmentRequest::from_manifest_url(
+        "CC-MAIN-2022-40",
+        SEGMENT,
+        "https://inventory.example/custom/warc.paths",
+    )
+    .unwrap()
+    .with_byte_options(ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
         io_chunk_size: NonZeroUsize::new(4),
     });
+    assert_eq!(selection.origin(), "https://inventory.example");
     selection.read_options_mut().batch_size = NonZeroUsize::new(2).unwrap();
     selection.read_options_mut().projection = Some(vec!["path".into()]);
     let reader = accessor.open(selection).await.unwrap();
@@ -81,7 +98,7 @@ async fn segment_selects_exact_membership_in_order_with_forwarded_options() {
         [entry(SEGMENT, "z"), entry(SEGMENT, "a")]
     );
     let manifest_opens = manifest_opens.requests.lock().unwrap();
-    assert_eq!(manifest_opens[0].object, request().manifest());
+    assert_eq!(manifest_opens[0].object.locator(), "custom/warc.paths");
     assert_eq!(manifest_opens[0].options.io_concurrency.get(), 3);
     let opens = opens.lock().unwrap();
     assert_eq!(opens.len(), 2);
