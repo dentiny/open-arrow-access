@@ -37,7 +37,7 @@ impl Default for SniffConfig {
 }
 
 fn classify(value: &serde_json::Value, multiline: bool) -> JsonKind {
-    use open_arrow_access_file_format::atif::AtifFormat;
+    use open_arrow_access_file_format::AtifFormat;
     if value
         .get("schema_version")
         .and_then(|value| value.as_str())

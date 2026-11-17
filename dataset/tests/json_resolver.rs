@@ -3,7 +3,7 @@ use open_arrow_access_dataset::{
     file_set::FileSetRequest,
     json_resolver::{JsonKind, JsonResolver, SniffConfig, SniffPolicy},
 };
-use open_arrow_access_file_format::atif::AtifFormat;
+use open_arrow_access_file_format::AtifFormat;
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::{MemoryAccessor, fs_operator};
 use std::{num::NonZeroUsize, sync::Arc};

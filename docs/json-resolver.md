@@ -62,6 +62,9 @@ then trusts all later objects without opening them. It is an explicit opt-out
 from cross-file content validation, not automatic behavior.
 
 Type identifiers and content classification are available without reader features.
+`open_arrow_access_file_format::AtifFormat` is independent of the feature-gated
+`atif` reader module; the existing `atif::AtifFormat` path remains available when
+that reader feature is enabled.
 Creating a decoder requires the corresponding `format-json` or `format-atif`
 feature and otherwise reports `Unsupported`. ATIF uses its fixed schema and
 rejects explicit schema overrides.

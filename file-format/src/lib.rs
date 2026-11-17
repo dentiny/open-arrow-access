@@ -1,6 +1,7 @@
 //! File-format adapters consume a ByteReader, never a storage-specific handle.
 
 mod accessor;
+mod atif_format;
 #[cfg(any(feature = "csv", feature = "json"))]
 mod inference;
 #[cfg(any(feature = "csv", feature = "json"))]
@@ -17,6 +18,7 @@ pub use scan::DecodePartitionOptions;
 mod error;
 
 pub use accessor::FileAccessor;
+pub use atif_format::AtifFormat;
 /// Previous name for the generalized reader factory protocol.
 pub use open_arrow_access_core::ReaderFactory as FileFormat;
 
@@ -35,6 +37,7 @@ pub mod csv;
 #[cfg(feature = "xml")]
 pub mod xml;
 
+#[cfg(feature = "atif")]
 pub mod atif;
 
 #[cfg(any(feature = "xml", feature = "json", feature = "csv"))]

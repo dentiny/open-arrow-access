@@ -14,7 +14,7 @@ use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
     ByteAccessor, Error, ObjectRef, RecordScanAccessor, Result, SchemaRef,
 };
-use open_arrow_access_file_format::atif::AtifFormat;
+use open_arrow_access_file_format::AtifFormat;
 use std::sync::Arc;
 
 pub use sniff::{SniffConfig, SniffPolicy};
