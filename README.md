@@ -161,6 +161,7 @@ Enabling a feature compiles an API; construct the accessor/layer to use it.
 | Compressed byte streams | `decompression-gzip`, `decompression-bz2`, `decompression-lz4`, `decompression-zstd` |
 | Archive members | `decompression-zip`, `decompression-tar` |
 | Directory or explicit file-set reads | Always available; enable the selected `format-*` reader |
+| Automatic dataset format selection | Always available; enable the selected `format-*` readers |
 | A provider | `service-<name>`; see the [complete service table](service/README.md#choose-a-service) |
 | Core contracts, storage, shared service HTTP utilities, record layers | Always available; no extra facade feature |
 | Fs, S3, or another storage backend | Enable `services-fs`, `services-s3`, etc. on your **OpenDAL** dependency |

@@ -59,7 +59,8 @@ record formats, or opening archive members.
 the built-in suffixes above; `register` adds or replaces a suffix with any
 application-defined `Codec`. `extensions()` lists registered suffixes, including
 built-in codecs whose features are disabled. `strip_suffix()` uses that same
-registry without decoding. Clones share immutable registrations; changing one
+registry without decoding, preserving the inner format of combined suffixes
+(`archive.tgz` becomes `archive.tar`). Clones share immutable registrations; changing one
 clone does not change previously configured readers.
 
 `strip_compression_suffixes(path)` removes all trailing built-in compression

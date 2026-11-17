@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt, num::NonZeroUsize, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, fmt, num::NonZeroUsize, sync::Arc};
 
 use open_arrow_access_core::{
     ByteReadRequest, ByteReader, Capability, Error, ErrorKind, FactoryToken, ReaderFactory,
@@ -28,6 +28,7 @@ struct Registration {
     name: &'static str,
     codec: Option<RegisteredCodec>,
     builtin: Option<Compression>,
+    decoded_extension: Option<&'static str>,
 }
 
 struct RegisteredExtension<'a> {
@@ -44,6 +45,7 @@ impl Registration {
                 decoder: Arc::new(move |input| codec.decoder(input)),
             }),
             builtin,
+            decoded_extension: None,
         }
     }
 
@@ -85,11 +87,14 @@ impl Default for CompressionFactory {
                 #[cfg(feature = $feature)]
                 let registration = Registration::new($codec, Some(Compression::$variant));
                 #[cfg(not(feature = $feature))]
-                let registration = Registration { name: $feature, codec: None, builtin: None };
+                let registration = Registration { name: $feature, codec: None, builtin: None, decoded_extension: None };
                 $(Arc::make_mut(&mut factory.registrations).insert($suffix.into(), registration.clone());)+
             }};
         }
-        builtin!("gzip", Gzip, crate::gzip::Gzip, ["gz", "tgz"]);
+        builtin!("gzip", Gzip, crate::gzip::Gzip, ["gz"]);
+        let mut tar_gzip = factory.registrations["gz"].clone();
+        tar_gzip.decoded_extension = Some("tar");
+        Arc::make_mut(&mut factory.registrations).insert("tgz".into(), tar_gzip);
         builtin!("bz2", Bzip2, crate::bz2::Bzip2, ["bz2"]);
         builtin!("lz4", Lz4, crate::lz4::Lz4, ["lz4"]);
         builtin!("zstd", Zstd, crate::zstd::Zstd, ["zst", "zstd"]);
@@ -127,10 +132,19 @@ impl CompressionFactory {
 
     /// Remove one registered suffix without decoding or interpreting the locator as a URL.
     /// Recognition is independent of whether a built-in codec feature is enabled.
-    pub fn strip_suffix<'a>(&self, path: &'a str) -> &'a str {
+    /// Combined suffixes retain the decoded format: `.tgz` becomes `.tar`.
+    pub fn strip_suffix<'a>(&self, path: &'a str) -> Cow<'a, str> {
         match path.rsplit_once('.') {
-            Some((stem, extension)) if self.lookup(extension).is_some() => stem,
-            _ => path,
+            Some((stem, extension)) => match self.lookup(extension) {
+                Some(RegisteredExtension { registration, .. }) => {
+                    match registration.decoded_extension {
+                        Some(extension) => Cow::Owned(format!("{stem}.{extension}")),
+                        None => Cow::Borrowed(stem),
+                    }
+                }
+                None => Cow::Borrowed(path),
+            },
+            None => Cow::Borrowed(path),
         }
     }
 
@@ -217,14 +231,17 @@ impl ReaderFactory for CompressionFactory {
 /// Strip all trailing built-in compression suffixes, case-insensitively.
 /// Recognition does not require enabled codecs. This only processes a path;
 /// it performs no I/O, decompression, or URL query/fragment parsing.
-pub fn strip_compression_suffixes(mut path: &str) -> &str {
+/// Combined suffixes preserve the archive format: `.tgz` becomes `.tar`.
+pub fn strip_compression_suffixes(mut path: &str) -> Cow<'_, str> {
     let factory = CompressionFactory::default();
     loop {
-        let stripped = factory.strip_suffix(path);
-        if stripped == path {
-            return path;
+        match factory.strip_suffix(path) {
+            Cow::Borrowed(stripped) if stripped == path => return Cow::Borrowed(path),
+            Cow::Borrowed(stripped) => path = stripped,
+            // Combined suffixes resolve to the inner archive format, not another
+            // compression suffix, so no further stripping is needed.
+            Cow::Owned(archive) => return Cow::Owned(archive),
         }
-        path = stripped;
     }
 }
 
@@ -235,6 +252,8 @@ mod tests {
     #[test]
     fn strips_nested_suffixes_until_an_unknown_extension() {
         for (path, expected) in [
+            ("archive.tgz.gz", "archive.tar"),
+            ("records.csv.TGZ", "records.csv.tar"),
             ("a.warc", "a.warc"),
             ("a.warc.gz.gz", "a.warc"),
             ("a.WARC.GZ.ZST", "a.WARC"),
