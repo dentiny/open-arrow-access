@@ -13,14 +13,6 @@ pub(super) fn decode_error(error: ArrowError) -> Error {
     Error::new(ErrorKind::Decode, "decode_json", error.to_string()).with_source(error)
 }
 
-pub(super) fn invalid_inference_limits() -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "infer_json",
-        "inference record and byte limits must be positive",
-    )
-}
-
 pub(super) fn non_object_inference_record() -> Error {
     Error::new(ErrorKind::Decode, "infer_json", "expected a JSON object")
 }

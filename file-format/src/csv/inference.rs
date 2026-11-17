@@ -4,6 +4,8 @@ use arrow_schema::{DataType, Schema};
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{ByteReader, Result, SchemaRef, StreamReader};
 
+use crate::sample_limits::{DEFAULT_MAX_BYTES, DEFAULT_MAX_RECORDS};
+
 use super::{CsvDialect, CsvFormat, CsvHeader, error::inference_error, planning::CsvChunks};
 
 /// Per-input schema sampling targets. Byte targets measure canonical
@@ -17,8 +19,8 @@ pub struct CsvInferenceOptions {
 impl Default for CsvInferenceOptions {
     fn default() -> Self {
         Self {
-            max_records: 1000,
-            max_bytes: 64 * 1024 * 1024,
+            max_records: DEFAULT_MAX_RECORDS,
+            max_bytes: DEFAULT_MAX_BYTES,
         }
     }
 }

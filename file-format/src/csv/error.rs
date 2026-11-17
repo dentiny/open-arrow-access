@@ -25,14 +25,6 @@ pub(super) fn inference_error(source: arrow_schema::ArrowError) -> Error {
     Error::new(ErrorKind::Decode, "infer_csv", source.to_string()).with_source(source)
 }
 
-pub(super) fn invalid_inference_limits() -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "infer_csv",
-        "inference record and byte limits must be positive",
-    )
-}
-
 pub(super) fn invalid_inferred_headers() -> Error {
     Error::new(
         ErrorKind::InvalidInput,

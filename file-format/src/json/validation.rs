@@ -3,10 +3,7 @@ use open_arrow_access_core::Result;
 use super::inference::JsonInferenceOptions;
 impl JsonInferenceOptions {
     pub(super) fn validate(self) -> Result<()> {
-        if self.max_records == 0 || self.max_bytes == 0 {
-            return Err(super::error::invalid_inference_limits());
-        }
-        Ok(())
+        crate::sample_limits::validate_sample_limits(self.max_records, self.max_bytes, "infer_json")
     }
 }
 

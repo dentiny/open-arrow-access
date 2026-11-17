@@ -5,8 +5,7 @@ use futures::{StreamExt, stream};
 use open_arrow_access_core::{ByteReader, Result, SchemaRef, StreamReader, into_stream};
 use serde_json::{Deserializer, Value};
 
-const DEFAULT_MAX_RECORDS: usize = 1000;
-const DEFAULT_MAX_BYTES: usize = 64 * 1024 * 1024;
+use crate::sample_limits::{DEFAULT_MAX_BYTES, DEFAULT_MAX_RECORDS};
 
 /// Sampling limits for JSON schema inference. Limits are checked between complete
 /// objects; one object and an upstream byte chunk can exceed the byte target.
