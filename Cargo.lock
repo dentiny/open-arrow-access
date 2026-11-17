@@ -3011,6 +3011,7 @@ dependencies = [
  "more-asserts",
  "open-arrow-access-core",
  "opendal",
+ "tempfile",
  "tokio",
 ]
 
