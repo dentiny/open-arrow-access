@@ -10,30 +10,16 @@ pub enum DetectedFormat {
     Warc,
 }
 
-impl DetectedFormat {
-    fn family(self) -> Self {
-        if self == Self::Tsv { Self::Csv } else { self }
-    }
-}
-
 /// Detect suffixes without I/O, independently of enabled readers and codecs.
 /// Queries/fragments affect routing only; storage retains the original locator.
 pub fn detect_format(locator: &str) -> Option<DetectedFormat> {
     let path = locator.split(['?', '#']).next()?;
+    // .tgz is a tar archive, not a compressed record file.
     if path.to_ascii_lowercase().ends_with(".tgz") {
         return None;
     }
     let factory = CompressionFactory::default();
-    let inner = match path.rsplit_once('.') {
-        Some((stem, extension))
-            if factory
-                .extensions()
-                .any(|suffix| extension.eq_ignore_ascii_case(suffix)) =>
-        {
-            stem
-        }
-        _ => path,
-    };
+    let inner = factory.strip_suffix(path);
     let name = inner.rsplit('/').next()?;
     match name
         .rsplit_once('.')
@@ -50,13 +36,15 @@ pub fn detect_format(locator: &str) -> Option<DetectedFormat> {
     }
 }
 
-/// Exclusive formats win in configured order after filtering by `allowed`.
-/// Compatibility groups must cover the whole selection; they are not transitive.
-/// Only CSV/TSV share a reader; unrelated reader families cannot be combined.
+/// Filter allowed formats, apply exclusive preferences, then reject mixed formats.
+/// CSV and TSV may be mixed because both use the CSV reader.
 #[derive(Clone, Debug)]
 pub struct FormatPolicy {
+    /// If present, the first format in this list wins; discard all other formats.
     pub exclusive: Vec<DetectedFormat>,
-    pub compatible: Vec<Vec<DetectedFormat>>,
+    /// Accept CSV and TSV in the same selection. Defaults to true.
+    pub allow_mixed_csv_tsv: bool,
+    /// Ignore detected formats outside this list, before applying preferences.
     pub allowed: Vec<DetectedFormat>,
 }
 impl Default for FormatPolicy {
@@ -64,7 +52,7 @@ impl Default for FormatPolicy {
         use DetectedFormat::*;
         Self {
             exclusive: vec![Parquet],
-            compatible: vec![vec![Csv, Tsv]],
+            allow_mixed_csv_tsv: true,
             allowed: vec![Parquet, Csv, Tsv, Json, Warc],
         }
     }
@@ -94,15 +82,13 @@ impl FormatPolicy {
             )
             .with_object(objects.first()));
         };
-        let compatible = self
-            .compatible
-            .iter()
-            .any(|group| selected.iter().all(|(format, _)| group.contains(format)));
-        let conflict = selected
-            .iter()
-            .find(|(f, _)| f.family() != first.family())
-            .or_else(|| selected.iter().find(|(f, _)| !compatible && *f != first));
-        if let Some((other, object)) = conflict {
+        for &(other, object) in &selected {
+            let csv_tsv = self.allow_mixed_csv_tsv
+                && matches!(first, DetectedFormat::Csv | DetectedFormat::Tsv)
+                && matches!(other, DetectedFormat::Csv | DetectedFormat::Tsv);
+            if other == first || csv_tsv {
+                continue;
+            }
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "select_format",

@@ -33,7 +33,10 @@ fn policy_selects_exclusive_and_compatible_files_or_reports_examples() {
         policy.select(&selected).unwrap(),
         (Parquet, selected[1..].to_vec())
     );
-    assert_eq!(policy.select(&objects(&["a.csv", "b.tsv"])).unwrap().0, Csv);
+    for (names, format) in [(["a.csv", "b.tsv"], Csv), (["b.tsv", "a.csv"], Tsv)] {
+        let input = objects(&names);
+        assert_eq!(policy.select(&input).unwrap(), (format, input));
+    }
     for names in [&["a.csv", "b.tsv", "c.jsonl"][..], &["a.warc", "c.jsonl"]] {
         let error = policy.select(&objects(names)).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
@@ -45,7 +48,7 @@ fn policy_selects_exclusive_and_compatible_files_or_reports_examples() {
     );
     let strict = FormatPolicy {
         exclusive: vec![],
-        compatible: vec![],
+        allow_mixed_csv_tsv: false,
         ..Default::default()
     };
     for names in [["a.csv", "b.parquet"], ["a.csv", "b.tsv"]] {
@@ -64,5 +67,23 @@ fn policy_selects_exclusive_and_compatible_files_or_reports_examples() {
             .unwrap()
             .1,
         objects(&["a.csv"])
+    );
+}
+
+#[test]
+fn preferences_follow_policy_order_after_allowed_filtering() {
+    let input = objects(&["a.parquet", "b.json", "c.csv", "d.json"]);
+    let mut policy = FormatPolicy {
+        exclusive: vec![Json, Parquet],
+        ..Default::default()
+    };
+    assert_eq!(
+        policy.select(&input).unwrap(),
+        (Json, objects(&["b.json", "d.json"]))
+    );
+    policy.allowed = vec![Parquet, Csv];
+    assert_eq!(
+        policy.select(&input).unwrap(),
+        (Parquet, objects(&["a.parquet"]))
     );
 }
