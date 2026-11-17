@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use open_arrow_access_core::Result;
-use opendal::{Operator, layers::TimeoutLayer};
+use opendal::{
+    Operator,
+    layers::{RetryLayer, TimeoutLayer},
+};
 
 /// Optional OpenDAL policies. Defaults leave the supplied operator unchanged.
 #[derive(Clone, Debug, Default)]
@@ -66,7 +69,19 @@ impl StorageConfig {
             );
         }
         if let Some(retry) = &self.retry {
-            operator = operator.layer(crate::retry::HttpRetryLayer::new(retry));
+            let mut layer = RetryLayer::new()
+                .with_max_times(retry.max_retries)
+                .with_min_delay(retry.min_delay)
+                .with_max_delay(retry.max_delay)
+                .with_factor(retry.factor);
+            if retry.jitter {
+                layer = layer.with_jitter();
+            }
+            operator = operator
+                .layer(crate::retry::HttpRetryAfterLayer)
+                .layer(layer.with_notify(crate::retry::RetryAfter {
+                    max_delay: retry.max_delay,
+                }));
         }
         Ok(operator)
     }
