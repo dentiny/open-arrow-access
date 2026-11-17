@@ -6,11 +6,11 @@ pub(crate) fn invalid_frame(operation: &'static str, message: &'static str) -> E
 }
 
 pub(crate) fn json_frame(source: serde_json::Error) -> Error {
-    Error::new(ErrorKind::Decode, "frame_json", source.to_string()).with_source(source)
+    Error::from_source(ErrorKind::Decode, "frame_json", source)
 }
 
 pub(super) fn decode_error(error: ArrowError) -> Error {
-    Error::new(ErrorKind::Decode, "decode_json", error.to_string()).with_source(error)
+    Error::from_source(ErrorKind::Decode, "decode_json", error)
 }
 
 pub(super) fn invalid_inference_limits() -> Error {
@@ -34,7 +34,7 @@ pub(super) fn empty_inference_chunk() -> Error {
 }
 
 pub(super) fn inference_error(source: impl std::error::Error + Send + Sync + 'static) -> Error {
-    Error::new(ErrorKind::Decode, "infer_json", source.to_string()).with_source(source)
+    Error::from_source(ErrorKind::Decode, "infer_json", source)
 }
 
 pub(super) fn empty_read_chunk() -> Error {
@@ -50,5 +50,5 @@ pub(super) fn open_error(error: arrow_schema::ArrowError) -> Error {
         arrow_schema::ArrowError::NotYetImplemented(_) => ErrorKind::Unsupported,
         _ => ErrorKind::InvalidInput,
     };
-    Error::new(kind, "open_json", error.to_string()).with_source(error)
+    Error::from_source(kind, "open_json", error)
 }

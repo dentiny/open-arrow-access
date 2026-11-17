@@ -24,6 +24,11 @@ async fn context_preserves_error_identity_and_metadata() {
 
 #[tokio::test]
 async fn missing_object_keeps_original_display() {
-    let error = Error::new(ErrorKind::Decode, "decode", "invalid data").with_object(None);
+    let error = Error::from_source(
+        ErrorKind::Decode,
+        "decode",
+        io::Error::new(io::ErrorKind::InvalidData, "invalid data"),
+    )
+    .with_object(None);
     assert_eq!(error.to_string(), "decode: invalid data");
 }

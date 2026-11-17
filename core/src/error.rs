@@ -114,6 +114,17 @@ impl Error {
         }
     }
 
+    /// Retain an original error and use its display text as this error's message.
+    ///
+    /// The supplied category and operation are retained exactly. Callers that
+    /// preserve nested categories should classify the source before wrapping it.
+    pub fn from_source<E>(kind: ErrorKind, operation: &'static str, source: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::new(kind, operation, source.to_string()).with_source(source)
+    }
+
     /// Add the exact object locator without changing classification or the source chain.
     /// The first object wins, so outer dataset readers retain the failing child object.
     pub fn with_object(mut self, object: Option<&ObjectRef>) -> Self {
@@ -249,7 +260,7 @@ pub(crate) fn unknown_projection_field(
 }
 
 pub(crate) fn projection_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
-    Error::new(ErrorKind::InvalidInput, "project", error.to_string()).with_source(error)
+    Error::from_source(ErrorKind::InvalidInput, "project", error)
 }
 
 pub(crate) fn decoder_empty_chunk(operation: &'static str, message: &'static str) -> Error {
@@ -321,11 +332,11 @@ pub(crate) fn invalid_document_batch() -> Error {
 }
 
 pub(crate) fn document_batch_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
-    Error::new(ErrorKind::Decode, "decode_document", error.to_string()).with_source(error)
+    Error::from_source(ErrorKind::Decode, "decode_document", error)
 }
 
 pub(crate) fn project_batch_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
-    Error::new(ErrorKind::Decode, "project_batch", error.to_string()).with_source(error)
+    Error::from_source(ErrorKind::Decode, "project_batch", error)
 }
 
 pub(crate) fn seek_requires_ranges(operation: &'static str) -> Error {

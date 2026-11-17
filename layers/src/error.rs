@@ -91,7 +91,7 @@ pub(crate) fn cannot_cast(
 }
 
 pub(crate) fn sample_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
-    Error::new(ErrorKind::Decode, "sample", error.to_string()).with_source(error)
+    Error::from_source(ErrorKind::Decode, "sample", error)
 }
 
 pub(crate) fn cast_error(
@@ -129,12 +129,7 @@ pub(crate) fn invalid_evolution(message: &str) -> Error {
 }
 pub(crate) fn evolution_source(name: &str) -> Error {
     let error = ArrowError::SchemaError(format!("unknown field {name:?}"));
-    Error::new(
-        ErrorKind::InvalidInput,
-        "plan_schema_evolution",
-        error.to_string(),
-    )
-    .with_source(error)
+    Error::from_source(ErrorKind::InvalidInput, "plan_schema_evolution", error)
 }
 pub(crate) fn evolution_output_collision() -> Error {
     Error::new(
@@ -186,7 +181,7 @@ pub(crate) fn evolution_expression_type(
     )
 }
 pub(crate) fn evolution_batch(source: ArrowError) -> Error {
-    Error::new(ErrorKind::Decode, "evolve_schema", source.to_string()).with_source(source)
+    Error::from_source(ErrorKind::Decode, "evolve_schema", source)
 }
 
 pub(crate) fn source_column_name_conflict(name: &str) -> Error {
@@ -218,7 +213,7 @@ pub(crate) fn source_schema_mismatch() -> Error {
     )
 }
 pub(crate) fn source_column_batch_error(error: ArrowError) -> Error {
-    Error::new(ErrorKind::Decode, "source_columns", error.to_string()).with_source(error)
+    Error::from_source(ErrorKind::Decode, "source_columns", error)
 }
 #[cfg(feature = "source-positions")]
 pub(crate) fn raw_source_bytes_required(object: &open_arrow_access_core::ObjectRef) -> Error {

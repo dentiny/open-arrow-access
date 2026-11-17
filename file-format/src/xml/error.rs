@@ -30,5 +30,5 @@ pub(super) fn invalid_inference_limits() -> Error {
 }
 
 pub(super) fn configuration_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
-    Error::new(ErrorKind::InvalidInput, "read_xml", error.to_string()).with_source(error)
+    Error::from_source(ErrorKind::InvalidInput, "read_xml", error)
 }
