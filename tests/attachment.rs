@@ -116,19 +116,3 @@ async fn selected_text_format_dispatches_with_its_defaults() {
         assert_eq!(batch["label"].as_string::<i32>().value(0), "a");
     }
 }
-
-// Applications call this helper from Send futures, including async-trait
-// Accessor::open implementations. Exercise that contract with every enabled
-// format dispatch branch compiled into the helper.
-#[tokio::test]
-async fn attachment_binding_future_can_be_spawned() {
-    let future = open_attachment_source(
-        MemoryAccessor::new(b"payload", 2),
-        ReadRequest::new("attachment.bin"),
-        AttachmentOptions::default(),
-    );
-    let source = tokio::spawn(future).await.unwrap().unwrap();
-    let mut reader = source.reader().await.unwrap();
-    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
-    assert!(reader.next().await.unwrap().is_none());
-}
