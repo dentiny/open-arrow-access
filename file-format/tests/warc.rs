@@ -1,3 +1,4 @@
+use open_arrow_access_test_support::record::field_names;
 use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
 use arrow_array::{cast::AsArray, types::TimestampMillisecondType};
@@ -351,15 +352,7 @@ async fn five_metadata_columns_preserve_order_and_optional_header_nulls_without_
             .as_ref(),
         &[1_594_176_775_000; 3],
     );
-    assert_eq!(
-        batch
-            .schema()
-            .fields()
-            .iter()
-            .map(|field| field.name().as_str())
-            .collect::<Vec<_>>(),
-        fields,
-    );
+    assert_eq!(field_names(batch.schema_ref()), fields);
     assert_eq!(
         batch["target_uri"]
             .as_string::<i64>()

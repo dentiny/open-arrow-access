@@ -72,3 +72,12 @@ selected file metadata. Keep tests offline.
 See [testing guidance](../docs/testing.md) and the suites in
 [`file-format/tests`](../file-format/tests/), [`decompression/tests`](../decompression/tests/),
 and [`service/tests`](../service/tests/) for complete examples.
+
+## Inspect record values
+
+`record::column::<T>(&batch, name)` borrows a named array with a checked concrete
+Arrow type. `field_names(&schema)` returns names in schema order.
+`collect_strings::<i32>(reader, index)` drains a reader and rejects nulls;
+`collect_nullable_strings::<i32>(&batches, index)` preserves nulls and empty
+strings. Use `i64` for LargeUtf8 instead of Utf8; neither helper coerces layouts.
+Primitive columns use `collect_values` or the draining `collect_column`.
