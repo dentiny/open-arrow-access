@@ -258,7 +258,7 @@ pub(crate) fn prefetch_runtime_error(error: tokio::runtime::TryCurrentError) -> 
 
 pub(crate) fn prefetch_task_error(error: tokio::task::JoinError) -> Error {
     Error::new(
-        ErrorKind::Decode,
+        ErrorKind::Internal,
         "prefetch",
         format!("prefetch task failed: {error}"),
     )

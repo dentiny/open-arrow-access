@@ -111,9 +111,12 @@ async fn uneven_batches_wait_for_admission_without_further_reads() {
     assert!(reader.next().await.unwrap().is_none());
 }
 
+#[rstest::rstest]
+#[case(ErrorKind::Io)]
+#[case(ErrorKind::Decode)]
 #[tokio::test]
-async fn source_errors_keep_order_context_and_source_and_are_terminal() {
-    let error = Error::new(ErrorKind::Io, "upstream", "read failed")
+async fn source_errors_keep_order_context_and_source_and_are_terminal(#[case] kind: ErrorKind) {
+    let error = Error::new(kind, "upstream", "read failed")
         .with_source(std::io::Error::other("original failure"));
     let stream = stream::iter([Ok(batch(1)), Ok(batch(2)), Err(error), Ok(batch(3))]);
     let mut reader = Source
@@ -125,9 +128,36 @@ async fn source_errors_keep_order_context_and_source_and_are_terminal() {
         assert_eq!(reader.next().await.unwrap().unwrap(), batch(rows));
     }
     let error = reader.next().await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::Io);
+    assert_eq!(error.kind(), kind);
     assert_eq!(error.operation(), "upstream");
     assert_eq!(error.source().unwrap().to_string(), "original failure");
+    assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn worker_panic_is_internal_after_queued_batches_and_is_terminal() {
+    let panic = stream::poll_fn(|_| -> std::task::Poll<Option<Result<RecordBatch>>> {
+        panic!("prefetch worker panic");
+    });
+    let stream = stream::iter([Ok(batch(1)), Ok(batch(2))]).chain(panic);
+    let mut reader = Source
+        .layer(PrefetchLayer::rows(n(100)))
+        .open(input(stream))
+        .await
+        .unwrap();
+    for rows in [1, 2] {
+        assert_eq!(reader.next().await.unwrap().unwrap(), batch(rows));
+    }
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Internal);
+    assert_eq!(error.operation(), "prefetch");
+    let joined = error
+        .source()
+        .unwrap()
+        .downcast_ref::<tokio::task::JoinError>()
+        .unwrap();
+    assert!(joined.is_panic());
+    assert!(joined.to_string().contains("prefetch worker panic"));
     assert!(reader.next().await.unwrap().is_none());
 }
 
