@@ -2,30 +2,20 @@ use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, Capability, Error, ErrorKind, ListRequest, ObjectStream,
-    OrderRequirement, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result,
-    ScanPartition, ScanPlan, ScanPlanner, async_trait,
+    Accessor, ByteAccessor, ListRequest, ObjectStream, ReadRequest, RecordCapability,
+    RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
-use open_arrow_access_storage::OpenDalAccessor;
 
-use super::{PmcAccessor, PmcRequest, request::Selection, schema};
+use super::{PmcAccessor, schema};
 
-/// Discover and read PMC article metadata, leaving content URLs for downstream sinks.
-/// Clones share storage; each reader/partition owns its decoder state.
+/// Read a metadata directory recursively, or one `.json` object.
+/// Paths are relative to the supplied bucket-root storage. Discovery streams in
+/// storage order; a live directory listing is not an atomic release snapshot.
 pub struct PmcDatasetAccessor<A> {
     storage: Arc<A>,
 }
 
-impl<A> Clone for PmcDatasetAccessor<A> {
-    fn clone(&self) -> Self {
-        Self {
-            storage: self.storage.clone(),
-        }
-    }
-}
-
 impl<A> PmcDatasetAccessor<A> {
-    /// Use a bucket-root byte accessor, including a local mirror for offline use.
     pub fn new(storage: A) -> Self {
         Self {
             storage: Arc::new(storage),
@@ -33,73 +23,39 @@ impl<A> PmcDatasetAccessor<A> {
     }
 }
 
-impl PmcDatasetAccessor<OpenDalAccessor> {
-    /// Use the anonymous public PMC bucket.
-    pub fn public() -> Result<Self> {
-        Ok(Self::new(OpenDalAccessor::new(super::bucket_operator()?)))
-    }
-}
-
 impl<A: ByteAccessor + 'static> PmcDatasetAccessor<A> {
-    /// Stream selected metadata keys for inspection or custom composition.
-    /// Explicit files require no listing; prefixes use recursive storage order.
-    /// Errors from listing propagate without collecting the release into memory.
-    pub async fn metadata_paths(&self, request: &PmcRequest) -> Result<ObjectStream> {
-        request.validate()?;
-        match &request.selection {
-            Selection::Files(files) => Ok(stream::iter(files.clone().into_iter().map(Ok)).boxed()),
-            Selection::Prefix(prefix) => {
-                if !self.storage.capability().list {
-                    return Err(Error::new(
-                        ErrorKind::Unsupported,
-                        "discover_pmc",
-                        "storage does not support listing",
-                    ));
-                }
-                let prefix = prefix.clone();
-                let objects = self.storage.list(ListRequest::new(prefix.clone())).await?;
-                Ok(objects
-                    .and_then(move |object| {
-                        let valid = object.locator().starts_with(&prefix);
-                        futures::future::ready(if valid {
-                            Ok(object)
-                        } else {
-                            Err(super::error::invalid_selection())
-                        })
-                    })
-                    .try_filter(|object| {
-                        futures::future::ready(object.locator().ends_with(".json"))
-                    })
-                    .boxed())
-            }
+    /// Stream metadata keys without collecting the directory into memory.
+    /// An exact `.json` object requires no listing.
+    pub async fn metadata_paths(&self, request: &ReadRequest) -> Result<ObjectStream> {
+        if request.object.locator().ends_with(".json") {
+            return Ok(stream::once(futures::future::ready(Ok(request.object.clone()))).boxed());
         }
+        Ok(self
+            .storage
+            .list(ListRequest::new(request.object.clone()))
+            .await?
+            .try_filter(|object| futures::future::ready(object.locator().ends_with(".json")))
+            .boxed())
     }
 }
 
 #[async_trait]
 impl<A: ByteAccessor + 'static> Accessor for PmcDatasetAccessor<A> {
-    type Request = PmcRequest;
+    type Request = ReadRequest;
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> RecordCapability {
-        Capability {
-            read: self.storage.capability().read,
-            read_with_range: false,
-            read_parallel: false,
-            list: false,
-        }
-        .with_ordering(OrderRequirement::Reorderable)
+        PmcAccessor::with_default_decoder(self.storage.clone()).capability()
     }
 
-    async fn open(&self, request: PmcRequest) -> Result<Box<dyn RecordReader>> {
+    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         Ok(Box::new(self.plan_scan(request).await?.into_reader()))
     }
 }
 
 #[async_trait]
 impl<A: ByteAccessor + 'static> ScanPlanner for PmcDatasetAccessor<A> {
-    async fn plan_scan(&self, request: PmcRequest) -> Result<ScanPlan> {
-        // Validate projection before initiating any discovery I/O.
+    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let metadata = RecordMetadata {
             schema: request.options.resolve_projection(&schema())?.schema,
             source: None,
@@ -108,9 +64,8 @@ impl<A: ByteAccessor + 'static> ScanPlanner for PmcDatasetAccessor<A> {
         let articles = PmcAccessor::with_default_decoder(self.storage.clone());
         let partitions = objects.map_ok(move |object| {
             let articles = articles.clone();
-            let request = ReadRequest::new(object)
-                .with_options(request.options.clone())
-                .with_byte_options(request.byte_options);
+            let mut request = request.clone();
+            request.object = object;
             Box::pin(async move { articles.open(request).await }) as ScanPartition
         });
         Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))

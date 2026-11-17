@@ -18,7 +18,7 @@ directly, remove the `service-` prefix. Common Crawl shares `service-warc`.
 | Dataverse | `service-dataverse` | Original files of an explicit released research dataset version | [Dataverse](dataverse.md) |
 | Internet Archive | `service-internet-archive` | Public item file membership and original files | [Internet Archive](internet-archive.md) |
 | Figshare | `service-figshare` | Versioned research article files and collection pages | [Figshare](figshare.md) |
-| PMC | `service-pmc` | Discover a release/subset and read article metadata as Arrow rows | [Article metadata](pmc.md) |
+| PMC | `service-pmc` | One article-version metadata JSON as one Arrow row | [Article metadata](pmc.md) |
 | PMC inventory | `service-pmc` | Manifest-selected inventory CSV shards as Arrow rows | [Inventory](pmc-inventory.md) |
 | arXiv bulk | `service-arxiv` | PDF/source TAR manifests and archive member bytes | [Bulk archives](arxiv.md) |
 | arXiv metadata | `service-arxiv` | Raw OAI-PMH article metadata XML pages | [Metadata](arxiv-metadata.md) |
@@ -101,7 +101,7 @@ flowchart TD
 
 | Access pattern | Examples | Your configuration |
 | --- | --- | --- |
-| Caller supplies storage | PMC mirrors (or use `PmcDatasetAccessor::public()`), Gutenberg, CourtListener, arXiv bulk | Operator root, endpoint, region, credentials, requester-pays settings |
+| Caller supplies storage | PMC, Gutenberg, CourtListener, arXiv bulk | Operator root, endpoint, region, credentials, requester-pays settings |
 | Provider constructs storage | Hugging Face, Zenodo, Dataverse, Internet Archive | Provider ID/version/revision and supported endpoint/token options |
 | API metadata plus advertised download URLs | Figshare, BHL, GovInfo, bioRxiv, LoC, OpenStax, Semantic Scholar, USPTO, Regulations.gov | Provider configuration and optional custom `Connection` |
 | Already-open archive input | MECA | Ranged byte reader with known length |
