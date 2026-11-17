@@ -2,7 +2,7 @@
 name = "open-arrow-access-storage"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "MIT AND Apache-2.0"
 repository.workspace = true
 description = "Storage adapters for Open Arrow Access"
 
@@ -10,8 +10,10 @@ description = "Storage adapters for Open Arrow Access"
 default = []
 
 [dependencies]
+backon = "1.6"
 futures.workspace = true
 http.workspace = true
+httpdate = "1"
 indexmap.workspace = true
 open-arrow-access-core.workspace = true
 opendal = { workspace = true, features = ["executors-tokio", "layers-retry", "layers-timeout"] }
@@ -22,9 +24,10 @@ tokio = { workspace = true, features = ["sync"] }
 more-asserts.workspace = true
 open-arrow-access-test-support.workspace = true
 opendal-service-http.workspace = true
+httpdate = "1"
 rstest.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["fs"] }
+tokio = { workspace = true, features = ["fs", "test-util"] }
 
 [lints]
 workspace = true

@@ -2987,8 +2987,10 @@ dependencies = [
 name = "open-arrow-access-storage"
 version = "0.5.0"
 dependencies = [
+ "backon",
  "futures",
  "http",
+ "httpdate",
  "indexmap",
  "more-asserts",
  "open-arrow-access-core",

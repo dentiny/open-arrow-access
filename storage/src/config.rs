@@ -1,10 +1,7 @@
 use std::time::Duration;
 
 use open_arrow_access_core::Result;
-use opendal::{
-    Operator,
-    layers::{RetryLayer, TimeoutLayer},
-};
+use opendal::{Operator, layers::TimeoutLayer};
 
 /// Optional OpenDAL policies. Defaults leave the supplied operator unchanged.
 #[derive(Clone, Debug, Default)]
@@ -18,6 +15,8 @@ pub struct RetryConfig {
     /// Retries after the initial attempt; zero disables retries.
     pub max_retries: usize,
     pub min_delay: Duration,
+    /// Exponential backoff cap and maximum accepted server delay.
+    /// A larger Retry-After stops retries instead of retrying early.
     pub max_delay: Duration,
     pub factor: f32,
     pub jitter: bool,
@@ -55,7 +54,8 @@ impl Default for TimeoutConfig {
 impl StorageConfig {
     /// Validate and apply policies without performing I/O. Timeout wraps the
     /// backend inside retry, so each attempt gets its own timeout. Retryability
-    /// and backoff behavior are delegated to OpenDAL.
+    /// uses OpenDAL temporary errors; 429/503 also honor Retry-After.
+    /// Server delays above max_delay stop retries instead of retrying early.
     pub fn apply(&self, mut operator: Operator) -> Result<Operator> {
         self.validate()?;
         if let Some(timeout) = &self.timeout {
@@ -66,15 +66,7 @@ impl StorageConfig {
             );
         }
         if let Some(retry) = &self.retry {
-            let mut layer = RetryLayer::new()
-                .with_max_times(retry.max_retries)
-                .with_min_delay(retry.min_delay)
-                .with_max_delay(retry.max_delay)
-                .with_factor(retry.factor);
-            if retry.jitter {
-                layer = layer.with_jitter();
-            }
-            operator = operator.layer(layer);
+            operator = operator.layer(crate::retry::Policy::new(retry));
         }
         Ok(operator)
     }
