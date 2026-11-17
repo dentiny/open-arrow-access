@@ -47,8 +47,11 @@ readers, so input bytes remain available to native decoders.
 ## Detection and validation
 
 Probe the first complete nonblank JSON value within a consumed-byte budget.
-A top-level `schema_version` beginning with `ATIF-` selects ATIF; multiline
+ATIF versus ordinary JSON is decided heuristically: a top-level `schema_version`
+beginning with `ATIF-` selects ATIF; multiline
 objects select document framing, while one-line objects select JSONL framing.
+This routing heuristic does not validate the ATIF schema or supported version;
+ordinary JSON carrying the same marker can also be routed to the ATIF reader.
 Incomplete first lines alone are not evidence of ATIF. Ordinary pretty-printed
 JSON remains ordinary JSON; this resolver does not broaden the native JSON
 reader's supported framing. Malformed or truncated input reports a decode error

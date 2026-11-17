@@ -39,6 +39,10 @@ impl Default for SniffConfig {
     }
 }
 
+// Heuristically distinguish ATIF from ordinary JSON using the top-level
+// schema_version prefix, then infer ATIF framing from line breaks. This only
+// selects a reader; it does not validate the ATIF schema or supported version.
+// Ordinary JSON carrying the same marker can also be routed to the ATIF reader.
 fn classify(value: &serde_json::Value, multiline: bool) -> JsonKind {
     use open_arrow_access_file_format::AtifFormat;
     if value
