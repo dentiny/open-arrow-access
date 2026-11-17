@@ -25,7 +25,7 @@ pub use detection::{DetectedFormat, detect_format, select_format};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResolvedKind {
     Parquet,
-    Delimited,
+    CsvOrTsv,
     Json,
     Warc,
 }
@@ -72,8 +72,6 @@ pub struct AutoFormatAccessor<B> {
     storage: Arc<B>,
     format: Option<DetectedFormat>,
     schema: Option<SchemaRef>,
-    #[cfg(feature = "format-csv")]
-    dialect: open_arrow_access_file_format::csv::CsvDialect,
 }
 impl<B> AutoFormatAccessor<B> {
     pub fn new(storage: B) -> Self {
@@ -81,13 +79,11 @@ impl<B> AutoFormatAccessor<B> {
             storage: Arc::new(storage),
             format: None,
             schema: None,
-            #[cfg(feature = "format-csv")]
-            dialect: Default::default(),
         }
     }
     /// Read every selected object as this format, without suffix filtering.
-    /// By default, detect suffixes and require one format. Explicit CSV uses the
-    /// configured dialect delimiter; explicit TSV uses tabs, regardless of suffix.
+    /// By default, detect suffixes and require one format. Explicit CSV uses commas;
+    /// explicit TSV uses tabs, regardless of suffix.
     pub fn with_format(mut self, format: DetectedFormat) -> Self {
         self.format = Some(format);
         self
@@ -98,14 +94,6 @@ impl<B> AutoFormatAccessor<B> {
     }
     pub fn with_schema_opt(mut self, schema: Option<SchemaRef>) -> Self {
         self.schema = schema;
-        self
-    }
-    #[cfg(feature = "format-csv")]
-    pub fn with_csv_dialect(
-        mut self,
-        dialect: open_arrow_access_file_format::csv::CsvDialect,
-    ) -> Self {
-        self.dialect = dialect;
         self
     }
 }
@@ -160,7 +148,7 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
         };
         let format = match detected {
             DetectedFormat::Parquet => ResolvedKind::Parquet,
-            DetectedFormat::Csv | DetectedFormat::Tsv => ResolvedKind::Delimited,
+            DetectedFormat::Csv | DetectedFormat::Tsv => ResolvedKind::CsvOrTsv,
             DetectedFormat::Json => ResolvedKind::Json,
             DetectedFormat::Warc => ResolvedKind::Warc,
         };
@@ -172,7 +160,7 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
         kind: ResolvedKind,
         object: Option<&ObjectRef>,
     ) -> Result<Arc<dyn RecordScanAccessor>> {
-        if self.schema.is_some() && !matches!(kind, ResolvedKind::Delimited | ResolvedKind::Json) {
+        if self.schema.is_some() && !matches!(kind, ResolvedKind::CsvOrTsv | ResolvedKind::Json) {
             return Err(error(
                 ErrorKind::InvalidInput,
                 "explicit schema is supported only for CSV and ordinary JSON",
@@ -185,15 +173,14 @@ impl<B: ByteAccessor + 'static> AutoFormatAccessor<B> {
                 open_arrow_access_file_format::parquet::ParquetAccessor::new(self.storage.clone()),
             )),
             #[cfg(feature = "format-csv")]
-            ResolvedKind::Delimited => {
+            ResolvedKind::CsvOrTsv => {
                 use open_arrow_access_file_format::csv::CsvAccessor;
                 let reader = match &self.schema {
                     Some(schema) => CsvAccessor::new(self.decoded(), schema.clone()),
                     None => CsvAccessor::infer(self.decoded()),
                 };
-                let reader = reader.with_dialect(self.dialect);
                 let reader = match self.format {
-                    Some(DetectedFormat::Csv) => reader.with_delimiter(self.dialect.delimiter),
+                    Some(DetectedFormat::Csv) => reader.with_delimiter(b','),
                     Some(DetectedFormat::Tsv) => reader.with_delimiter(b'\t'),
                     _ => reader,
                 };

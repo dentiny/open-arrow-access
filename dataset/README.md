@@ -106,11 +106,11 @@ Suffix detection performs no I/O. Automatic selection ignores unknown suffixes
 and requires one format; CSV and TSV are distinct formats. No format takes priority.
 Use `.with_format(DetectedFormat::Json)` (or another format) to read every supplied
 object as that format, including files without a recognized suffix. Explicit CSV
-uses the configured dialect delimiter; explicit TSV uses tabs, regardless of filename. `resolve` also lists directories,
+uses commas; explicit TSV uses tabs, regardless of filename. `resolve` also lists directories,
 but does not decode Arrow records. Mixed formats return
 `InvalidInput` with examples; no recognized files returns `NotFound`.
 
-CSV dialect and explicit CSV schemas are accessor settings; projection,
+Explicit CSV schemas are accessor settings; custom CSV dialects use `CsvAccessor` directly. Projection,
 batch size, and byte options remain on the request. Native file planning and union
 by name support record layers. Parquet keeps raw range reads and size hints already
 configured on storage with `with_content_lengths`. Discovery does not snapshot data.

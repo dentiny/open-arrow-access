@@ -9,7 +9,6 @@ use open_arrow_access_dataset::{
     directory::DirectoryRequest,
     file_set::FileSetRequest,
 };
-use open_arrow_access_file_format::csv::{CsvDialect, CsvHeader};
 use open_arrow_access_layers::{ColumnEvolution, ParallelReadLayer, SchemaEvolutionLayer};
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::{fixture_path, fs_operator, record::collect_column};
@@ -25,7 +24,7 @@ fn storage(root: &std::path::Path) -> OpenDalAccessor {
 #[tokio::test]
 async fn directory_routes_csv_and_forwards_options_through_layers() {
     let root = tempfile::tempdir().unwrap();
-    std::fs::write(root.path().join("a.csv"), "id,name\n1,'first, item'\n").unwrap();
+    std::fs::write(root.path().join("a.csv"), "id,name\n1,\"first, item\"\n").unwrap();
     let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     gzip.write_all(b"id,name\n2,second\n").unwrap();
     std::fs::write(root.path().join("b.CSV.GZ"), gzip.finish().unwrap()).unwrap();
@@ -34,13 +33,7 @@ async fn directory_routes_csv_and_forwards_options_through_layers() {
         Field::new("id", DataType::Int64, true),
         Field::new("name", DataType::Utf8, true),
     ]));
-    let auto = AutoFormatAccessor::new(storage(root.path()))
-        .with_schema(schema)
-        .with_csv_dialect(CsvDialect {
-            header: CsvHeader::Present,
-            quote: b'\'',
-            ..Default::default()
-        });
+    let auto = AutoFormatAccessor::new(storage(root.path())).with_schema(schema);
     let mut request = AutoFormatRequest::Directory(DirectoryRequest::new("*"));
     *request.read_options_mut() = ReadOptions {
         batch_size: NonZeroUsize::MIN,
