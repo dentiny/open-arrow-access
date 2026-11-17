@@ -357,9 +357,9 @@ checksum = "5d2050892d4691cf110586070786712b504985a4d37ed64a9cd8a402718e1706"
 
 [[package]]
 name = "atif-arrow"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "765aec015af335f6b8bcc936a27eada7bb5743591ea28c3afa8e62f7e45c9883"
+checksum = "5ab06c675f25b07426666fc1214bdfe4c73ebb41bca39c3dbe17b87f08b1eedf"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -645,7 +645,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1593,7 +1593,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2757,7 +2757,7 @@ checksum = "269bca4c2591a28585d6bf10d9ed0332b7d76900a1b02bec41bdc3a2cdcda107"
 
 [[package]]
 name = "open-arrow-access"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -2776,7 +2776,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-core"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -2793,7 +2793,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-dataset"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -2814,7 +2814,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-decompression"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "async-compression",
  "async_zip",
@@ -2829,7 +2829,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-file-format"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "arrow-array",
  "arrow-csv",
@@ -2860,7 +2860,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-layers"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "arrow-array",
  "arrow-cast",
@@ -2878,9 +2878,10 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-service"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "arrow-array",
+ "arrow-json",
  "arrow-schema",
  "backon",
  "chrono",
@@ -2911,7 +2912,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-storage"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "futures",
  "http",
@@ -2929,7 +2930,7 @@ dependencies = [
 
 [[package]]
 name = "open-arrow-access-test-support"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "arrow-array",
  "futures",
@@ -3373,7 +3374,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3646,7 +3647,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3703,7 +3704,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4112,7 +4113,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4596,9 +4597,9 @@ dependencies = [
 
 [[package]]
 name = "warc-rs"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e8a57afd189fa090e65f1b42117aa04a4597b381341e3a9187230ac3bc83412"
+checksum = "5226de0c1956dac7c3ee47484905c0321331ea2f3b7453810726277a42a41fd1"
 dependencies = [
  "chrono",
  "futures-util",
@@ -4772,7 +4773,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5160,9 +5161,9 @@ dependencies = [
 
 [[package]]
 name = "xml-arrow"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81bf7d5c3debcb7e57ed0b59b874b279e437edc5aea9d1f2392e06d33e684f84"
+checksum = "527e65da26d90803d624cc2c65d1b793d57f27517137042e6e442e7d3bb060de"
 dependencies = [
  "arrow-array",
  "arrow-schema",

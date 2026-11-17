@@ -1,8 +1,7 @@
 use super::{schema, validation};
 use arrow_array::RecordBatchOptions;
 use arrow_schema::Schema;
-use open_arrow_access_core::{Bytes, FieldNameIndex, ReadRequest, RecordBatch, Result, SchemaRef};
-use open_arrow_access_file_format::{json::JsonFormat, read_document};
+use open_arrow_access_core::{FieldNameIndex, RecordBatch, Result, SchemaRef};
 use std::sync::{Arc, OnceLock};
 
 /// Preserve the upstream JSON field name while exposing the URL as Arrow `text`.
@@ -34,12 +33,27 @@ pub(super) async fn decode_batch(
 ) -> Result<RecordBatch> {
     // Read and validate the complete metadata before applying output projection.
     let source_schema = source_metadata_schema();
-    let batch = read_document(
-        Bytes::copy_from_slice(raw),
-        JsonFormat::new(source_schema.clone()),
-        ReadRequest::new(path),
-    )
-    .await?;
+    // Provider metadata permits extra upstream fields, but keeps its own field
+    // types strict. Generic JsonFormat intentionally has different semantics.
+    let decode_error = |source: arrow_schema::ArrowError| {
+        super::error::decode(format!("{path}: {source}")).with_source(source)
+    };
+    let mut reader = arrow_json::ReaderBuilder::new(source_schema.clone())
+        .with_strict_mode(false)
+        .with_coerce_primitive(false)
+        .with_batch_size(2)
+        .build(raw)
+        .map_err(decode_error)?;
+    let batch = reader
+        .next()
+        .transpose()
+        .map_err(decode_error)?
+        .ok_or_else(|| super::error::decode(format!("{path}: expected one metadata object")))?;
+    if batch.num_rows() != 1 || reader.next().transpose().map_err(decode_error)?.is_some() {
+        return Err(super::error::decode(format!(
+            "{path}: expected one metadata object"
+        )));
+    }
     static FIELD_INDEX: OnceLock<FieldNameIndex> = OnceLock::new();
     let field_index = FIELD_INDEX.get_or_init(|| FieldNameIndex::new(source_schema.fields()));
     validation::validate_metadata(&batch, path, field_index)?;
