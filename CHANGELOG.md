@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Include the archive object locator when indexed TAR entry selection fails.
+
 ## 0.4.0 - 2026-11-16
 
 - Add opt-in source columns and source positions with user-configurable record framing.

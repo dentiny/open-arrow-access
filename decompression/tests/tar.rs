@@ -36,22 +36,31 @@ async fn inspects_headers_once_and_streams_independent_selected_entries() {
             .all(|range| range.end - range.start == 512)
     );
     assert_eq!(source.observations.requests.lock().unwrap().len(), 1);
-    assert_eq!(
-        archive
-            .open_entry(0, NonZeroUsize::new(3).unwrap())
+    for (index, kind, operation, message) in [
+        (
+            0,
+            ErrorKind::Unsupported,
+            "read_tar",
+            "TAR directory entries have no file reader",
+        ),
+        (
+            9,
+            ErrorKind::NotFound,
+            "open_tar_entry",
+            "TAR entry index is out of bounds",
+        ),
+    ] {
+        let error = archive
+            .open_entry(index, NonZeroUsize::new(3).unwrap())
             .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Unsupported
-    );
-    assert_eq!(
-        archive
-            .open_entry(9, NonZeroUsize::new(3).unwrap())
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::NotFound
-    );
+            .unwrap();
+        assert_eq!(error.kind(), kind);
+        assert_eq!(error.operation(), operation);
+        assert_eq!(
+            error.to_string(),
+            format!("{operation}: object \"archive\": {message}")
+        );
+    }
     let mut first = archive
         .open_entry(1, NonZeroUsize::new(3).unwrap())
         .unwrap();

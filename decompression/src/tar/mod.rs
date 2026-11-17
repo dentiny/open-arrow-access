@@ -103,9 +103,15 @@ impl TarArchive {
         index: usize,
         chunk_size: NonZeroUsize,
     ) -> Result<Box<dyn ByteReader>> {
-        let (entry, start) = self.entries.get(index).ok_or_else(missing_entry)?;
+        let object = self.source.metadata.source.as_ref();
+        let (entry, start) = self
+            .entries
+            .get(index)
+            .ok_or_else(|| missing_entry().with_object(object))?;
         if !entry.is_file {
-            return Err(unsupported("TAR directory entries have no file reader"));
+            return Err(
+                unsupported("TAR directory entries have no file reader").with_object(object)
+            );
         }
         let mut metadata = self.source.metadata.clone();
         metadata.content_length = Some(entry.size);
