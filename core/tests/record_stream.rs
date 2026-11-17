@@ -72,3 +72,60 @@ async fn restores_schema_and_field_metadata_for_full_reordered_and_empty_project
     }
     assert!(reader.next().await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn mapped_stream_preserves_contract_without_eager_reads_and_releases_input_on_error() {
+    use std::{
+        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+        task::Poll,
+    };
+
+    use open_arrow_access_core::{
+        Error, ErrorKind, RecordCapability, StreamReader, into_stream, map_record_stream,
+    };
+    use open_arrow_access_test_support::DropProbe;
+
+    let batch = batch();
+    let schema = batch.schema();
+    let polls = Arc::new(AtomicUsize::new(0));
+    let dropped = Arc::new(AtomicBool::new(false));
+    let probe = DropProbe::new(dropped.clone());
+    let input_polls = polls.clone();
+    let stream = stream::poll_fn(move |_| {
+        let _probe = &probe;
+        Poll::Ready(match input_polls.fetch_add(1, Ordering::SeqCst) {
+            0 => Some(Ok(batch.clone())),
+            1 => Some(Err(Error::new(ErrorKind::Timeout, "input", "timed out"))),
+            _ => panic!("polled after terminal error"),
+        })
+    });
+    let capability = RecordCapability::sequential(OrderRequirement::PreserveGlobal);
+    let input = StreamReader::records(
+        stream,
+        RecordMetadata {
+            schema: schema.clone(),
+            source: Some("mapped.arrow".into()),
+        },
+        capability.ordering,
+    );
+    let mut reader = map_record_stream(Box::new(input), |reader| {
+        into_stream(reader).map(|result| result.map(|batch| batch.slice(0, 1)))
+    });
+    assert_eq!(polls.load(Ordering::SeqCst), 0);
+    assert!(!dropped.load(Ordering::SeqCst));
+    assert_eq!(reader.capability(), capability);
+    assert_eq!(reader.metadata().schema, schema);
+    assert_eq!(
+        reader.metadata().source.as_ref().unwrap().locator(),
+        "mapped.arrow"
+    );
+    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Timeout);
+    assert_eq!(error.operation(), "input");
+    assert!(error.to_string().contains("mapped.arrow"));
+    assert!(dropped.load(Ordering::SeqCst));
+    assert!(reader.next().await.unwrap().is_none());
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(polls.load(Ordering::SeqCst), 2);
+}

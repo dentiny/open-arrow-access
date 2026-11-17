@@ -2,7 +2,8 @@ use arrow_array::BooleanArray;
 use arrow_select::filter::filter_record_batch;
 use futures::{TryStreamExt, future, stream};
 use open_arrow_access_core::{
-    Accessor, Layer, RecordCapability, RecordReader, Result, StreamReader, async_trait, into_stream,
+    Accessor, Layer, RecordCapability, RecordReader, Result, async_trait, into_stream,
+    map_record_stream,
 };
 
 /// Seeded Bernoulli sampling: independently retain each row with `probability`.
@@ -77,32 +78,28 @@ impl<A: Accessor<Reader = dyn RecordReader>> Accessor for SamplingAccessor<A> {
         if self.settings.threshold == SCALE {
             return Ok(inner);
         }
-        let metadata = inner.metadata().clone();
-        let capability = inner.capability();
         if self.settings.threshold == 0 {
             // Drop the source immediately without polling any batches.
-            return Ok(Box::new(
-                StreamReader::records(stream::empty(), metadata, capability.ordering)
-                    .with_capability(capability),
-            ));
+            return Ok(Box::new(map_record_stream(inner, move |inner| {
+                drop(inner);
+                stream::empty()
+            })));
         }
         let threshold = self.settings.threshold;
         let mut random = SplitMix64(self.settings.seed);
-        let batches = into_stream(inner).try_filter_map(move |batch| {
-            // Exactly one draw per input row, including null and duplicate rows.
-            let mask: BooleanArray = (0..batch.num_rows())
-                .map(|_| random.next() >> (64 - RANDOM_BITS) < threshold)
-                .collect();
-            future::ready(
-                filter_record_batch(&batch, &mask)
-                    .map(|sampled| (sampled.num_rows() != 0).then_some(sampled))
-                    .map_err(crate::error::sample_error),
-            )
-        });
-        Ok(Box::new(
-            StreamReader::records(batches, metadata, capability.ordering)
-                .with_capability(capability),
-        ))
+        Ok(Box::new(map_record_stream(inner, move |inner| {
+            into_stream(inner).try_filter_map(move |batch| {
+                // Exactly one draw per input row, including null and duplicate rows.
+                let mask: BooleanArray = (0..batch.num_rows())
+                    .map(|_| random.next() >> (64 - RANDOM_BITS) < threshold)
+                    .collect();
+                future::ready(
+                    filter_record_batch(&batch, &mask)
+                        .map(|sampled| (sampled.num_rows() != 0).then_some(sampled))
+                        .map_err(crate::error::sample_error),
+                )
+            })
+        })))
     }
 }
 

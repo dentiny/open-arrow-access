@@ -25,6 +25,24 @@ where
     StreamReader::records(stream, metadata, ordering)
 }
 
+/// Transform an owned record reader into a stream, retaining its metadata and capabilities.
+///
+/// The transform runs immediately, but construction does not poll the reader or
+/// stream. It can retain the reader in custom stream state or call [`into_stream`]
+/// to use stream combinators. It must preserve the schema and declared operations
+/// and ordering. EOF, errors and dropping the output release the transformed stream.
+/// Use [`map_record_reader`] when the output schema or capabilities change.
+pub fn map_record_stream<F, S>(reader: Box<dyn RecordReader>, transform: F) -> impl RecordReader
+where
+    F: FnOnce(Box<dyn RecordReader>) -> S,
+    S: Stream<Item = Result<RecordBatch>> + Send,
+{
+    let metadata = reader.metadata().clone();
+    let capability = reader.capability();
+    StreamReader::records(transform(reader), metadata, capability.ordering)
+        .with_capability(capability)
+}
+
 /// Map each input batch to exactly one output batch, retaining the input source.
 /// The caller supplies the output schema and capabilities and must ensure the
 /// transform produces matching batches and exposes only supported operations.
