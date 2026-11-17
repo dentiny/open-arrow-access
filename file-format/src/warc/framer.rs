@@ -1,14 +1,17 @@
 use futures::{
     StreamExt,
-    io::{AsyncBufReadExt, AsyncReadExt},
+    io::AsyncBufReadExt,
     stream::{self, BoxStream},
 };
 use open_arrow_access_core::{
-    ByteReader, Error, ErrorKind, PositionedAsyncRead, Result, into_positioned_async_read,
+    BytePosition, ByteReader, Error, ErrorKind, PositionedAsyncRead, Result,
+    into_positioned_async_read,
 };
 use open_arrow_access_layers::{SourceFramer, SourceUnit};
 
-/// Groups physical WARC records into bounded, independently decodable units.
+const UNIT_BYTES: usize = 64 << 20;
+
+/// Groups physical WARC records into independently decodable units.
 ///
 /// Use with `SourceColumnsLayer` and positioned input (for compressed storage,
 /// install `SourcePositionLayer` before this framer). Headers are parsed and
@@ -20,73 +23,49 @@ use open_arrow_access_layers::{SourceFramer, SourceUnit};
 /// use open_arrow_access_layers::SourceColumnsLayer;
 ///
 /// let columns = SourceColumnsLayer::new()
-///     .with_framer(WarcFramer::default().with_unit_bytes(64 << 20))
+///     .with_framer(WarcFramer)
 ///     .with_offset("record_offset");
 /// ```
-#[derive(Clone, Copy, Debug)]
-pub struct WarcFramer {
-    unit_bytes: usize,
-}
-
-impl Default for WarcFramer {
-    fn default() -> Self {
-        Self {
-            unit_bytes: 64 << 20,
-        }
-    }
-}
-
-impl WarcFramer {
-    /// Set the maximum serialized bytes per unit (default: 64 MiB).
-    ///
-    /// Records are never split. A record whose input or reserialized size exceeds
-    /// this limit fails with `Decode`; zero fails with `InvalidInput` when polled.
-    /// Several records are packed into each unit up to this limit, amortizing
-    /// format-reader creation. Framing also holds at most one bounded lookahead
-    /// record and parser scratch space. Account separately for decoded batches
-    /// and concurrently executing units in the source layer.
-    pub fn with_unit_bytes(mut self, unit_bytes: usize) -> Self {
-        self.unit_bytes = unit_bytes;
-        self
-    }
-}
+/// Units group complete records until they reach an internal 64 MiB target.
+/// This is a batching target, not a size limit: the final record may take a unit
+/// past it, and individual records are never rejected because of their size.
+/// Units and decoded batches are buffered in memory; account for record size
+/// and concurrently executing units when budgeting memory.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WarcFramer;
 
 impl SourceFramer for WarcFramer {
     fn frame(&self, input: Box<dyn ByteReader>) -> BoxStream<'static, Result<SourceUnit>> {
-        let limit = self.unit_bytes;
         let input = into_positioned_async_read(input, "frame_warc");
-        stream::try_unfold((input, None), move |(mut input, pending)| async move {
-            if limit == 0 {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "frame_warc",
-                    "WARC unit byte limit must be positive",
-                ));
-            }
-            let mut unit = pending.unwrap_or(SourceUnit {
-                bytes: Default::default(),
-                positions: Vec::new(),
-            });
-            let mut bytes = unit.bytes.to_vec();
-            while bytes.len() < limit {
-                let Some(record) = read_record(&mut input, limit).await? else {
+        stream::try_unfold(input, |mut input| async move {
+            let mut writer = warc::WarcWriter::new(Vec::new());
+            let mut positions = Vec::new();
+            let mut bytes = 0;
+            while bytes < UNIT_BYTES {
+                let Some((position, written)) = read_record(&mut input, &mut writer).await? else {
                     break;
                 };
-                if record.bytes.len() > limit - bytes.len() {
-                    unit.bytes = bytes.into();
-                    return Ok(Some((unit, (input, Some(record)))));
-                }
-                bytes.extend_from_slice(&record.bytes);
-                unit.positions.extend(record.positions);
+                positions.push(position);
+                bytes += written;
             }
-            unit.bytes = bytes.into();
-            Ok((!unit.positions.is_empty()).then_some((unit, (input, None))))
+            Ok((!positions.is_empty()).then(|| {
+                (
+                    SourceUnit {
+                        bytes: writer.into_inner().into(),
+                        positions,
+                    },
+                    input,
+                )
+            }))
         })
         .boxed()
     }
 }
 
-async fn read_record(input: &mut PositionedAsyncRead, limit: usize) -> Result<Option<SourceUnit>> {
+async fn read_record(
+    input: &mut PositionedAsyncRead,
+    writer: &mut warc::WarcWriter<Vec<u8>>,
+) -> Result<Option<(BytePosition, usize)>> {
     // Ignore inter-record whitespace without buffering it or assigning it to a
     // record's coordinate. Do not wrap in BufReader: read-ahead would move marks.
     loop {
@@ -105,9 +84,7 @@ async fn read_record(input: &mut PositionedAsyncRead, limit: usize) -> Result<Op
     }
     let observer = input.observer();
     observer.mark();
-    // Limit parser consumption before it can buffer an arbitrarily large body.
-    // A fresh borrowed iterator also resets this budget at each record boundary.
-    let record = warc::WarcReader::new(input.take(limit as u64))
+    let record = warc::WarcReader::new(input)
         .iter_raw_records()
         .next()
         .await
@@ -116,7 +93,7 @@ async fn read_record(input: &mut PositionedAsyncRead, limit: usize) -> Result<Op
             Error::new(
                 ErrorKind::from_source(&error).unwrap_or(ErrorKind::Decode),
                 "frame_warc",
-                format!("invalid WARC record or record exceeds {limit} byte unit limit"),
+                "invalid WARC record",
             )
             .with_source(error)
         })?;
@@ -127,20 +104,9 @@ async fn read_record(input: &mut PositionedAsyncRead, limit: usize) -> Result<Op
             "WARC input has no byte positions",
         )
     })?;
-    let mut writer = warc::WarcWriter::new(Vec::new());
     let written = writer
         .write_raw(record.0, &record.1)
         .await
         .map_err(super::decode_error)?;
-    if written > limit {
-        return Err(Error::new(
-            ErrorKind::Decode,
-            "frame_warc",
-            format!("reserialized WARC record exceeds {limit} byte unit limit"),
-        ));
-    }
-    Ok(Some(SourceUnit {
-        bytes: writer.into_inner().into(),
-        positions: vec![position],
-    }))
+    Ok(Some((position, written)))
 }

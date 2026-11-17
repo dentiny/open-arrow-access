@@ -5,7 +5,6 @@ use open_arrow_access_core::{Accessor, BytePosition, ErrorKind, bytes_reader};
 use open_arrow_access_file_format::warc::WarcFramer;
 use open_arrow_access_layers::{SourceFramer, SourceUnit};
 use open_arrow_access_test_support::MemoryAccessor;
-use std::sync::atomic::Ordering;
 
 fn record(body: &[u8]) -> Vec<u8> {
     let mut record = format!(
@@ -19,9 +18,8 @@ fn record(body: &[u8]) -> Vec<u8> {
     record
 }
 
-async fn frame(input: &[u8], limit: usize, chunk: usize) -> Vec<SourceUnit> {
-    WarcFramer::default()
-        .with_unit_bytes(limit)
+async fn frame(input: &[u8], chunk: usize) -> Vec<SourceUnit> {
+    WarcFramer
         .frame(
             MemoryAccessor::new(input, chunk)
                 .open("data.warc".into())
@@ -34,7 +32,7 @@ async fn frame(input: &[u8], limit: usize, chunk: usize) -> Vec<SourceUnit> {
 }
 
 #[tokio::test]
-async fn bounded_units_preserve_binary_bodies_case_insensitive_headers_and_coordinates() {
+async fn units_preserve_binary_bodies_case_insensitive_headers_and_coordinates() {
     let body = b"\0\xff\r\nWARC/1.1\r\n";
     let record = record(body);
     let padding = b" \t\r\n";
@@ -46,34 +44,26 @@ async fn bounded_units_preserve_binary_bodies_case_insensitive_headers_and_coord
         input.extend_from_slice(padding);
     }
     for chunk in [1, 7, input.len()] {
-        for (limit, expected_counts) in [
-            (record.len(), vec![1, 1, 1, 1, 1]),
-            (record.len() * 2, vec![2, 2, 1]),
-            (record.len() * 2 - 1, vec![1, 1, 1, 1, 1]),
-            (record.len() * 5, vec![5]),
-        ] {
-            let units = frame(&input, limit, chunk).await;
-            assert_eq!(
-                units.iter().map(|u| u.positions.len()).collect::<Vec<_>>(),
-                expected_counts
-            );
-            assert_eq!(
-                units
-                    .iter()
-                    .flat_map(|u| u.positions.iter().copied())
-                    .collect::<Vec<_>>(),
-                positions
-            );
-            for unit in units {
-                assert!(unit.bytes.len() <= limit);
-                let mut parsed = warc::WarcReader::new(Cursor::new(unit.bytes)).iter_records();
-                for _ in &unit.positions {
-                    let decoded = parsed.next().await.unwrap().unwrap();
-                    assert_eq!(decoded.body(), body);
-                    assert_eq!(decoded.warc_id(), "<urn:test:0>");
-                }
-                assert!(parsed.next().await.is_none());
+        let units = frame(&input, chunk).await;
+        assert_eq!(
+            units.iter().map(|u| u.positions.len()).collect::<Vec<_>>(),
+            [5]
+        );
+        assert_eq!(
+            units
+                .iter()
+                .flat_map(|u| u.positions.iter().copied())
+                .collect::<Vec<_>>(),
+            positions
+        );
+        for unit in units {
+            let mut parsed = warc::WarcReader::new(Cursor::new(unit.bytes)).iter_records();
+            for _ in &unit.positions {
+                let decoded = parsed.next().await.unwrap().unwrap();
+                assert_eq!(decoded.body(), body);
+                assert_eq!(decoded.warc_id(), "<urn:test:0>");
             }
+            assert!(parsed.next().await.is_none());
         }
     }
 }
@@ -81,7 +71,7 @@ async fn bounded_units_preserve_binary_bodies_case_insensitive_headers_and_coord
 #[tokio::test]
 async fn empty_and_whitespace_only_inputs_emit_no_units() {
     for input in [b"".as_slice(), b" \t\r\n\r\n"] {
-        assert!(frame(input, 1024, 1).await.is_empty());
+        assert!(frame(input, 1).await.is_empty());
     }
 }
 
@@ -104,7 +94,7 @@ async fn malformed_records_and_header_limit_fail_terminally_with_decode() {
             .open("bad.warc".into())
             .await
             .unwrap();
-        let mut units = WarcFramer::default().frame(reader);
+        let mut units = WarcFramer.frame(reader);
         let error = units.next().await.unwrap().err().unwrap();
         assert_eq!(error.kind(), ErrorKind::Decode);
         assert!(units.next().await.is_none());
@@ -112,74 +102,34 @@ async fn malformed_records_and_header_limit_fail_terminally_with_decode() {
 }
 
 #[tokio::test]
-async fn oversized_records_stop_before_buffering_the_entire_body() {
-    let input = record(&vec![b'x'; 128 * 1024]);
-    let accessor = MemoryAccessor::new(&input, 128);
-    let observations = accessor.observations.clone();
-    let reader = accessor.open("large.warc".into()).await.unwrap();
-    let mut units = WarcFramer::default().with_unit_bytes(1024).frame(reader);
+async fn unpositioned_input_returns_unsupported() {
+    let reader = Box::new(bytes_reader(record(b"body").into(), None));
+    let error = WarcFramer
+        .frame(reader)
+        .next()
+        .await
+        .unwrap()
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+}
+
+#[tokio::test]
+async fn records_larger_than_the_batching_target_are_accepted() {
+    let body = vec![b'x'; (64 << 20) + 1];
+    let large = record(&body);
+    let small = record(b"tail");
+    let input = [large.as_slice(), small.as_slice()].concat();
+    let units = frame(&input, 1024 * 1024).await;
+    assert_eq!(units.len(), 2);
+    assert_eq!(units[0].positions, [BytePosition::Stored(0)]);
     assert_eq!(
-        units.next().await.unwrap().err().unwrap().kind(),
-        ErrorKind::Decode
+        units[1].positions,
+        [BytePosition::Stored(large.len() as u64)]
     );
-    assert!(observations.reads.load(Ordering::SeqCst) <= 8);
-    assert!(units.next().await.is_none());
-
-    let input = record(b"body");
-    let reader = MemoryAccessor::new(&input, 1)
-        .open("large.warc".into())
-        .await
-        .unwrap();
-    let error = WarcFramer::default()
-        .with_unit_bytes(input.len() - 1)
-        .frame(reader)
-        .next()
-        .await
-        .unwrap()
-        .err()
-        .unwrap();
-    assert_eq!(error.kind(), ErrorKind::Decode);
-}
-
-#[tokio::test]
-async fn zero_limit_and_unpositioned_input_return_errors() {
-    let input = record(b"body");
-    for (limit, expected) in [(0, ErrorKind::InvalidInput), (1024, ErrorKind::Unsupported)] {
-        let reader = Box::new(bytes_reader(input.clone().into(), None));
-        let error = WarcFramer::default()
-            .with_unit_bytes(limit)
-            .frame(reader)
-            .next()
-            .await
-            .unwrap()
-            .err()
-            .unwrap();
-        assert_eq!(error.kind(), expected);
-    }
-}
-
-#[tokio::test]
-async fn reserialized_size_is_also_capped() {
-    // warc-rs accepts no space after ':', but writes ': '. Normalization must
-    // not allow serialized units to grow beyond the configured cap.
-    let input = String::from_utf8(record(b"body"))
-        .unwrap()
-        .replace(": ", ":")
-        .into_bytes();
-    let reader = MemoryAccessor::new(&input, 7)
-        .open("data.warc".into())
-        .await
-        .unwrap();
-    let error = WarcFramer::default()
-        .with_unit_bytes(input.len())
-        .frame(reader)
-        .next()
-        .await
-        .unwrap()
-        .err()
-        .unwrap();
-    assert_eq!(error.kind(), ErrorKind::Decode);
-    assert!(error.to_string().contains("reserialized"));
+    let mut records = warc::WarcReader::new(Cursor::new(units[0].bytes.clone())).iter_records();
+    assert_eq!(records.next().await.unwrap().unwrap().body(), body);
+    assert!(records.next().await.is_none());
 }
 
 #[tokio::test]
@@ -191,7 +141,7 @@ async fn storage_failures_retain_their_category() {
             .open("data.warc".into())
             .await
             .unwrap();
-        let mut units = WarcFramer::default().frame(reader);
+        let mut units = WarcFramer.frame(reader);
         assert_eq!(
             units.next().await.unwrap().err().unwrap().kind(),
             ErrorKind::RateLimited

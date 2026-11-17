@@ -9,7 +9,7 @@ column hooks. The caller chooses the framer and the source column names. The
 use open_arrow_access::file_format::warc::WarcFramer;
 
 let columns = SourceColumnsLayer::new()
-    .with_framer(WarcFramer::default().with_unit_bytes(64 << 20))
+    .with_framer(WarcFramer)
     .with_object("source_path")
     .with_offset("record_offset")
     .with_offset_in_frame("record_offset_in_frame");
@@ -62,19 +62,17 @@ whitespace is skipped before marking the next record's coordinate. Header casing
 and order may change; bodies and source coordinates are preserved. It accepts
 positioned uncompressed or frame-decoded input; it does not decompress by itself.
 
-`with_unit_bytes` sets a hard cap on serialized unit size, defaulting to 64 MiB.
-Complete records are packed up to the cap; any single record exceeding it on
-input or after reserialization returns `Decode`. Parser input is bounded before
-buffering bodies. Zero is rejected with `InvalidInput`. Framing can also hold one
-bounded lookahead record and parser scratch space, so the cap is not a total
-process memory budget. Include decoded batches and parallel units when budgeting
-memory. Malformed or truncated WARC returns `Decode`, and missing byte coordinates
-returns `Unsupported`.
+`WarcFramer` has no configuration fields. It groups complete records until a
+unit reaches an internal 64 MiB batching target, then starts the next unit.
+Individual records can exceed that target and are accepted without splitting.
+Memory usage depends on record size, parser buffers, decoded batches, and the
+number of parallel units. Malformed or truncated WARC returns `Decode`, and
+missing byte coordinates returns `Unsupported`.
 
-The WARC integration test uses the built-in framer with a small byte cap to
-exercise multiple units across compression members and Arrow batches. A separate
-CSV test supplies indexed coordinates through the same interface, without
-compression or positioned input.
+The WARC integration test uses the built-in framer to exercise compression
+members, Arrow batches, and layer composition. A separate CSV test supplies
+indexed coordinates through the same interface, without compression or
+positioned input.
 
 ## Columns and coordinates
 

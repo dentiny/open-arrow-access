@@ -68,7 +68,7 @@ async fn rows(mut reader: Box<dyn RecordReader>) -> Vec<Row> {
 }
 fn columns() -> SourceColumnsLayer {
     SourceColumnsLayer::new()
-        .with_framer(WarcFramer::default().with_unit_bytes(records()[0].len() * 2))
+        .with_framer(WarcFramer)
         .with_object("path")
         .with_offset("offset")
         .with_offset_in_frame("decoded")
@@ -312,7 +312,7 @@ async fn collisions_fail_and_empty_streams_keep_their_schema() {
     let source = FactoryAccessor::new(MemoryAccessor::new(&records().concat(), 3), WarcArrowFormat)
         .layer(
             SourceColumnsLayer::new()
-                .with_framer(WarcFramer::default())
+                .with_framer(WarcFramer)
                 .with_offset("record_id"),
         );
     assert_eq!(
