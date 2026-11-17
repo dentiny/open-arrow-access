@@ -44,13 +44,11 @@ impl<D: BatchDecoder> DecodeState<D> {
                 if self.input_eof {
                     return self.decoder.finish();
                 }
-                match self.input.next().await? {
-                    Some(bytes) if bytes.is_empty() => {
-                        return Err(crate::error::decoder_empty_chunk(
-                            D::INPUT_OPERATION,
-                            D::EMPTY_CHUNK_MESSAGE,
-                        ));
-                    }
+                match crate::next_nonempty(self.input.as_mut(), || {
+                    crate::error::decoder_empty_chunk(D::INPUT_OPERATION, D::EMPTY_CHUNK_MESSAGE)
+                })
+                .await?
+                {
                     Some(bytes) => self.pending = bytes,
                     None => {
                         self.input_eof = true;

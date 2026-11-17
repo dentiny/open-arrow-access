@@ -37,12 +37,12 @@ where
     R: ByteReader + ?Sized + 'static,
 {
     let stream = futures::stream::try_unfold(reader, move |mut reader| async move {
-        let Some(bytes) = reader.next().await.map_err(io::Error::other)? else {
+        let Some(bytes) = crate::next_nonempty(reader.as_mut(), || crate::empty_chunk(operation))
+            .await
+            .map_err(io::Error::other)?
+        else {
             return Ok(None);
         };
-        if bytes.is_empty() {
-            return Err(io::Error::other(crate::error::empty_chunk(operation)));
-        }
         Ok(Some((bytes, reader)))
     });
     Box::pin(stream).into_async_read()

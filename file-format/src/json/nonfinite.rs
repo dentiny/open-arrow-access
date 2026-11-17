@@ -1,5 +1,5 @@
 use futures::stream;
-use open_arrow_access_core::{ByteReader, Bytes, StreamReader};
+use open_arrow_access_core::{ByteReader, Bytes, StreamReader, empty_chunk, next_nonempty};
 
 /// Adapt nonfinite value tokens before either serde_json framing or Arrow decoding.
 /// Keep only a partial token between chunks; the downstream parser validates JSON.
@@ -10,14 +10,12 @@ pub(super) fn normalize_input(input: Box<dyn ByteReader>) -> Box<dyn ByteReader>
         (input, Normalizer::default()),
         |(mut input, mut state)| async move {
             loop {
-                let output = match input.next().await? {
-                    Some(bytes) if bytes.is_empty() => {
-                        return Err(super::error::empty_read_chunk());
-                    }
-                    Some(bytes) => state.decode(&bytes),
-                    None if state.token.is_empty() => return Ok(None),
-                    None => state.take_token(),
-                };
+                let output =
+                    match next_nonempty(input.as_mut(), || empty_chunk("read_json")).await? {
+                        Some(bytes) => state.decode(&bytes),
+                        None if state.token.is_empty() => return Ok(None),
+                        None => state.take_token(),
+                    };
                 if !output.is_empty() {
                     return Ok(Some((Bytes::from(output), (input, state))));
                 }

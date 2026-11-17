@@ -76,8 +76,12 @@ impl AsyncBufRead for PositionedAsyncRead {
             let mut pending = match std::mem::replace(&mut this.input, InputState::Finished) {
                 InputState::Ready(mut reader) => {
                     this.observer.0.lock().unwrap().current = reader.position();
+                    let operation = this.operation;
                     Box::pin(async move {
-                        let result = reader.next().await.map_err(crate::error::byte_input_error);
+                        let result =
+                            crate::next_nonempty(reader.as_mut(), || crate::empty_chunk(operation))
+                                .await
+                                .map_err(crate::error::byte_input_error);
                         (reader, result)
                     }) as Fetch
                 }
@@ -94,7 +98,6 @@ impl AsyncBufRead for PositionedAsyncRead {
             let Some(bytes) = result? else {
                 return Poll::Ready(Ok(&this.bytes));
             };
-            crate::validation::validate_positioned_chunk(&bytes, this.operation)?;
             this.bytes = bytes;
             this.input = InputState::Ready(reader);
         }
