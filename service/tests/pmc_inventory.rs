@@ -1,12 +1,14 @@
-use arrow_array::cast::AsArray;
+use arrow_array::{StringArray, cast::AsArray};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability,
     Error, ErrorKind, ReadOptions, ReadRequest, Result, ScanPlanner, async_trait,
 };
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::pmc_inventory::PmcInventoryAccessor;
-use open_arrow_access_test_support::record::assert_same_batches;
-use open_arrow_access_test_support::{MemoryAccessor, fixture};
+use open_arrow_access_test_support::{
+    MemoryAccessor, fixture,
+    record::{assert_same_batches, column, field_names},
+};
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
@@ -74,20 +76,14 @@ async fn streams_shards_in_order_with_original_values_and_byte_options() {
         .unwrap();
     assert_eq!(source.opened.lock().unwrap().len(), 1);
     assert_eq!(
-        reader
-            .metadata()
-            .schema
-            .fields()
-            .iter()
-            .map(|field| field.name().as_str())
-            .collect::<Vec<_>>(),
+        field_names(&reader.metadata().schema),
         ["ETag", "Key", "Bucket", "LastModifiedDate", "FutureField"]
     );
     let mut keys = Vec::new();
     while let Some(batch) = reader.next().await.unwrap() {
         assert!(Arc::ptr_eq(&batch.schema(), &reader.metadata().schema));
         assert_eq!(batch["FutureField"].as_string::<i32>().value(0), "extra");
-        let column = batch["Key"].as_string::<i32>();
+        let column = column::<StringArray>(&batch, "Key");
         keys.extend((0..batch.num_rows()).map(|row| column.value(row).to_owned()));
     }
     assert_eq!(
@@ -124,15 +120,7 @@ async fn projection_preserves_output_order_and_zero_column_rows() {
             .unwrap();
         let mut rows = 0;
         while let Some(batch) = reader.next().await.unwrap() {
-            assert_eq!(
-                batch
-                    .schema()
-                    .fields()
-                    .iter()
-                    .map(|field| field.name().as_str())
-                    .collect::<Vec<_>>(),
-                names
-            );
+            assert_eq!(field_names(batch.schema_ref()), names);
             rows += batch.num_rows();
         }
         assert_eq!(rows, 3);
