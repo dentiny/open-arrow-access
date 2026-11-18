@@ -1,5 +1,8 @@
 # Common Crawl fixtures
 
+For the real dataset hierarchy and formats, see the
+[Common Crawl data guide](../../service/src/commoncrawl/README.md).
+
 Deterministic manifest examples for crawl `CC-MAIN-2022-40`, segment
 `1664030338280.51`; these are synthetic membership samples, not crawl downloads.
 
