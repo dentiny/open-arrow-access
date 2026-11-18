@@ -78,3 +78,15 @@ The example prints the declared schema and first inventory batch's Key column.
 Keys identify source objects for a later selection step; no article URLs are opened.
 
 Sources: [PMC data](https://pmc-oa-opendata.s3.amazonaws.com/README.txt), [S3 inventory manifests](https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-inventory-location.html).
+
+## Shard discovery and selection
+
+`shards(ByteReadRequest::new(manifest))` returns the manifest's shard keys without
+opening CSV files. `with_shard(shard_key)` restricts inventory reading to one
+exact member, rejecting keys outside the manifest. Ordinary inventory output
+still preserves encoded `Key` values and additional CSV columns.
+
+For article metadata rather than inventory rows, use
+[`PmcInventoryShardAccessor` and `PmcInventoryShardRequest`](pmc.md#one-task-per-inventory-shard).
+The inventory accessor also exposes `metadata_paths(ReadRequest)` to stream
+validated, URL-decoded metadata object keys, without fetching JSON or content.
