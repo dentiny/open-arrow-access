@@ -39,4 +39,9 @@ impl<B> FileAccessor<B, CsvFileFormat> {
     pub fn with_dialect(self, dialect: CsvDialect) -> Self {
         self.map_format(|factory| factory.with_dialect(dialect))
     }
+
+    /// Set the delimiter explicitly, disabling `.csv`/`.tsv` extension detection.
+    pub fn with_delimiter(self, delimiter: u8) -> Self {
+        self.map_format(|format| format.with_delimiter(delimiter))
+    }
 }

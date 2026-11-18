@@ -700,3 +700,60 @@ async fn explicit_auto_preserves_source_failures_during_inspection_and_replay() 
         assert_eq!(error.kind(), ErrorKind::PermissionDenied);
     }
 }
+
+#[rstest::rstest]
+#[tokio::test]
+async fn explicit_delimiter_overrides_extensions_in_inference_and_parallel_reads(
+    #[values("records.csv", "records.tsv")] locator: &str,
+    #[values(false, true)] parallel: bool,
+) {
+    let accessor = CsvAccessor::infer(MemoryAccessor::new(
+        b"id;title\n1;\"alpha;one\"\n2;beta\n",
+        1,
+    ))
+    .with_header(CsvHeader::Present)
+    .with_delimiter(b';')
+    .with_partition_options(DecodePartitionOptions {
+        target_bytes: NonZeroUsize::MIN,
+    });
+    let request = ReadRequest::new(locator).with_options(options(1, None));
+    let batches = if parallel {
+        collect(
+            &accessor.layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::MIN,
+            )),
+            request,
+        )
+        .await
+    } else {
+        collect(&accessor, request).await
+    };
+    assert_eq!(collect_values::<Int64Type>(&batches, 0), [1, 2]);
+    let titles: Vec<_> = batches
+        .iter()
+        .flat_map(|batch| column::<StringArray>(batch, "title").iter())
+        .collect();
+    assert_eq!(titles, [Some("alpha;one"), Some("beta")]);
+}
+
+#[tokio::test]
+async fn explicit_delimiter_preserves_opaque_format_header_validation() {
+    let accessor = CsvAccessor::new(
+        MemoryAccessor::new(b"id;title\n1;\"alpha;one\"\n", 1),
+        schema(),
+    )
+    .with_format(
+        CsvFormat::default()
+            .with_header(true)
+            .with_header_validation(true),
+    )
+    .with_delimiter(b';');
+    let batches = collect(&accessor, ReadRequest::new("records.csv")).await;
+    assert_eq!(batches[0].schema(), schema());
+    assert_eq!(collect_values::<Int64Type>(&batches, 0), [1]);
+    assert_eq!(
+        column::<StringArray>(&batches[0], "title").value(0),
+        "alpha;one"
+    );
+}

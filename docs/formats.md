@@ -101,6 +101,10 @@ configured factory to `AutoDecompressionLayer::with_factory` and
 See [codec registration](../decompression/README.md#register-a-custom-codec).
 Decompression remains separate; query/fragment characters are not stripped.
 
+Use `.with_delimiter(b';')` on `CsvAccessor` or `CsvFileFormat` to explicitly
+override extension detection, for example for semicolon-delimited `.csv` files.
+This applies to schema inference, sequential decoding and parallel framing.
+
 Header policy is resolved once before parallel partitioning and shared by all workers.
 `CsvFormat` is this crate's options wrapper around Arrow 58's CSV format, with
 the existing builder methods and `.with_header_validation(true)` preserved.
