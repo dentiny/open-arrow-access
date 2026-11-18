@@ -74,6 +74,16 @@ where
         self.binding.metadata(request).await
     }
 
+    async fn inspect_metadata(
+        &self,
+        request: Self::Request,
+    ) -> Result<Option<<Self::Reader as Reader>::Metadata>>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        self.binding.inspect_metadata(request).await
+    }
+
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
         self.binding.open(request).await
     }

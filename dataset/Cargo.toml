@@ -8,7 +8,6 @@ description = "Sequential file-set and directory datasets for Open Arrow Access"
 
 [features]
 default = []
-directory = ["dep:glob"]
 manifest = ["dep:url", "dep:percent-encoding", "dep:open-arrow-access-decompression", "dep:open-arrow-access-file-format"]
 
 [dependencies]
@@ -19,7 +18,7 @@ open-arrow-access-file-format = { workspace = true, optional = true }
 arrow-array.workspace = true
 arrow-schema.workspace = true
 futures.workspace = true
-glob = { workspace = true, optional = true }
+glob.workspace = true
 open-arrow-access-core.workspace = true
 
 [dev-dependencies]
@@ -34,24 +33,8 @@ parquet.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 
-[[test]]
-name = "directory"
-required-features = ["directory"]
-
 [lints]
 workspace = true
-
-[[test]]
-name = "directory_parquet"
-required-features = ["directory"]
-
-[[test]]
-name = "atif"
-required-features = ["directory"]
-
-[[test]]
-name = "union_by_name"
-required-features = ["directory"]
 
 [[test]]
 name = "manifest"

@@ -33,7 +33,7 @@ async fn missing_membership_fields_fail() {
     f.respond(
         "/files/hathifiles/hathi_file_list.json",
         StatusCode::OK,
-        Bytes::from_static(b"{}"),
+        fixture!("hathifiles", "bad-missing-membership.json").await,
     );
     let error = s.catalog().await.unwrap_err();
     assert!(matches!(

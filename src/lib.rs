@@ -27,7 +27,6 @@ pub use open_arrow_access_decompression as decompression;
 
 pub use open_arrow_access_file_format as file_format;
 
-#[cfg(any(feature = "dataset-directory", feature = "dataset-manifest"))]
 pub use open_arrow_access_dataset as dataset;
 
 pub use open_arrow_access_storage as storage;

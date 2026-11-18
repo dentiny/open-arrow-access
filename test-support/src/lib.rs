@@ -33,10 +33,48 @@ where
 mod drop_probe;
 pub use drop_probe::DropProbe;
 
+/// Require an error of the expected category and return it for context assertions.
+/// Unlike `unwrap_err`, this does not require the successful value to implement
+/// `Debug`, so it also accepts results containing trait-object readers.
+pub fn expect_err_kind<T>(result: Result<T>, kind: ErrorKind) -> Error {
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("expected {kind:?} error, but the operation succeeded"),
+    };
+    assert_eq!(error.kind(), kind, "unexpected error category: {error}");
+    error
+}
+
 /// Configure the filesystem SDK backend for test fixtures.
 pub fn fs_operator(root: impl AsRef<Path>) -> opendal::Operator {
     opendal::Operator::new(opendal::services::Fs::default().root(root.as_ref().to_str().unwrap()))
         .unwrap()
+}
+
+/// Populate an isolated filesystem with fixture bytes and return its SDK backend.
+///
+/// Paths must be relative to the temporary root and cannot contain `..`.
+/// Parent directories are created as needed. Keep the returned `TempDir` alive
+/// until all operators, accessors, and readers using its files have been dropped.
+/// Panics if a path is invalid or filesystem setup fails.
+pub fn temp_fs(files: &[(&str, &[u8])]) -> (tempfile::TempDir, opendal::Operator) {
+    let root = tempfile::tempdir().unwrap();
+    for (name, contents) in files {
+        let relative = Path::new(name);
+        assert!(
+            !name.is_empty()
+                && relative.components().all(|component| matches!(
+                    component,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
+                )),
+            "temporary fixture path must stay within the root: {name}"
+        );
+        let path = root.path().join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+    let operator = fs_operator(root.path());
+    (root, operator)
 }
 
 /// Calls observed across accessor clones and all readers opened from them.
@@ -61,8 +99,7 @@ enum Fault {
 pub struct MemoryAccessor {
     data: Bytes,
     chunk_size: usize,
-    ranged: bool,
-    listing: bool,
+    capability: Capability,
     version: Option<String>,
     fault: Option<Fault>,
     open_failure: Option<ErrorKind>,
@@ -78,8 +115,12 @@ impl MemoryAccessor {
         Self {
             data: Bytes::copy_from_slice(data),
             chunk_size,
-            ranged: false,
-            listing: false,
+            capability: Capability {
+                read: true,
+                read_with_range: false,
+                read_parallel: false,
+                list: false,
+            },
             version: None,
             fault: None,
             open_failure: None,
@@ -91,7 +132,7 @@ impl MemoryAccessor {
     }
 
     pub fn with_ranges(mut self) -> Self {
-        self.ranged = true;
+        self.capability.read_with_range = true;
         self
     }
 
@@ -114,7 +155,7 @@ impl MemoryAccessor {
 
     /// Enable a minimal listing that returns the requested prefix as its only object.
     pub fn with_listing(mut self) -> Self {
-        self.listing = true;
+        self.capability.list = true;
         self
     }
 
@@ -150,12 +191,7 @@ impl Accessor for MemoryAccessor {
     type Reader = dyn ByteReader;
 
     fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: self.ranged,
-            read_parallel: false,
-            list: self.listing,
-        }
+        self.capability
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
@@ -167,10 +203,13 @@ impl Accessor for MemoryAccessor {
         if let Some(kind) = self.open_failure {
             return Err(crate::error::injected_open(kind));
         }
+        let mut capability = self.capability;
+        // Listing belongs to the accessor, not to an opened byte reader.
+        capability.list = false;
         Ok(Box::new(MemoryReader {
             data: self.data.clone(),
             chunk_size: self.chunk_size,
-            ranged: self.ranged,
+            capability,
             offset: 0,
             finished: false,
             fault: self.fault,
@@ -190,7 +229,7 @@ impl Accessor for MemoryAccessor {
 #[async_trait]
 impl ByteAccessor for MemoryAccessor {
     async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        crate::validation::validate_listing(self.listing)?;
+        crate::validation::validate_listing(self.capability.list)?;
         Ok(Box::pin(futures::stream::iter([Ok(request.prefix)])))
     }
 }
@@ -198,7 +237,7 @@ impl ByteAccessor for MemoryAccessor {
 struct MemoryReader {
     data: Bytes,
     chunk_size: usize,
-    ranged: bool,
+    capability: Capability,
     offset: usize,
     finished: bool,
     fault: Option<Fault>,
@@ -216,12 +255,7 @@ impl Reader for MemoryReader {
     type Capability = Capability;
 
     fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: self.ranged,
-            read_parallel: false,
-            list: false,
-        }
+        self.capability
     }
 
     fn metadata(&self) -> &ByteMetadata {
@@ -268,7 +302,11 @@ impl ByteReader for MemoryReader {
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
         self.observations.range_reads.fetch_add(1, Ordering::SeqCst);
         self.observations.ranges.lock().unwrap().push(range.clone());
-        crate::validation::validate_range(self.ranged, &range, self.data.len() as u64)?;
+        crate::validation::validate_range(
+            self.capability.read_with_range,
+            &range,
+            self.data.len() as u64,
+        )?;
         let call = self.range_calls;
         self.range_calls += 1;
         if let Some((after, kind)) = self.range_failure

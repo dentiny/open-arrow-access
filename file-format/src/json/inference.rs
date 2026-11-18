@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use arrow_json::reader::infer_json_schema_from_iterator;
 use futures::{StreamExt, stream};
-use open_arrow_access_core::{ByteReader, Result, SchemaRef, StreamReader, into_stream};
+use open_arrow_access_core::{
+    ByteReader, Result, SchemaRef, StreamReader, empty_chunk, into_stream, next_nonempty,
+};
 use serde_json::{Deserializer, Value};
 
 const DEFAULT_MAX_RECORDS: usize = 1000;
@@ -64,10 +66,7 @@ pub(super) async fn infer(
         if eof {
             break;
         }
-        match input.next().await? {
-            Some(bytes) if bytes.is_empty() => {
-                return Err(super::error::empty_inference_chunk());
-            }
+        match next_nonempty(input.as_mut(), || empty_chunk("infer_json")).await? {
             Some(bytes) => buffered.extend_from_slice(&bytes),
             None => eof = true,
         }

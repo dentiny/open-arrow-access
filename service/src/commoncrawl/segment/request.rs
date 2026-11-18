@@ -46,6 +46,19 @@ impl CommonCrawlSegmentRequest {
     pub fn segment(&self) -> &str {
         &self.segment
     }
+    /// Select one exact segment from a custom HTTP(S) inventory.
+    pub fn from_manifest_url(
+        crawl: impl Into<String>,
+        segment: impl Into<String>,
+        manifest_url: &str,
+    ) -> Result<Self> {
+        let segment = segment.into();
+        validate_segment(&segment)?;
+        Ok(Self {
+            dataset: CommonCrawlWarcRequest::from_manifest_url(crawl, manifest_url)?,
+            segment,
+        })
+    }
     pub fn manifest(&self) -> ObjectRef {
         self.dataset.manifest()
     }

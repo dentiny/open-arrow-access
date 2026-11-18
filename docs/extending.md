@@ -271,7 +271,12 @@ This wrapper does not expose `ScanPlanner`. Place it outside an already composed
 parallel accessor to observe logical opens. To observe individual partition
 opens, implement planning delegation and wrap each partition too.
 
-For per-item transformations, return your own `Reader` wrapping the inner
+For stream transformations that preserve the schema and capabilities, use
+`map_record_stream(inner, |inner| ...)` to retain metadata and capabilities while
+constructing a stream from the owned reader. The closure can call `into_stream`
+for stream combinators or retain the reader in custom state; it must not poll
+input eagerly. `StreamReader` provides terminal cleanup for the output stream.
+For other per-item transformations, return your own `Reader` wrapping the inner
 reader. Set final metadata before the first item; preserve source identity,
 row/order semantics unless the layer explicitly changes them, and terminal
 EOF/error behavior. Byte wrappers must forward range/listing operations or

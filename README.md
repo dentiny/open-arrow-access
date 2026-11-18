@@ -14,7 +14,7 @@ the default feature set is empty. Add the published crate to your application:
 
 ```toml
 [dependencies]
-open-arrow-access = { version = "0.3.0", default-features = false, features = ["format-parquet"] }
+open-arrow-access = { version = "0.5.0", default-features = false, features = ["format-parquet"] }
 opendal = { version = "=0.59.2", default-features = false, features = ["services-fs"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
@@ -144,10 +144,9 @@ storage operator separately.
 Set features on the dependency used by your application:
 
 ```toml
-open-arrow-access = { version = "0.3.0", default-features = false, features = [
+open-arrow-access = { version = "0.5.0", default-features = false, features = [
     "format-json",
     "decompression-gzip",
-    "dataset-directory",
     "service-huggingface",
 ] }
 ```
@@ -161,7 +160,7 @@ Enabling a feature compiles an API; construct the accessor/layer to use it.
 | Additional Parquet page codecs | `format-parquet-zstd`, `format-parquet-lz4`, `format-parquet-gzip`, `format-parquet-brotli` (each also enables Parquet; Snappy is included in `format-parquet`) |
 | Compressed byte streams | `decompression-gzip`, `decompression-bz2`, `decompression-lz4`, `decompression-zstd` |
 | Archive members | `decompression-zip`, `decompression-tar` |
-| Directory or explicit file-set reads | `dataset-directory` |
+| Directory or explicit file-set reads | Always available; enable the selected `format-*` reader |
 | A provider | `service-<name>`; see the [complete service table](service/README.md#choose-a-service) |
 | Core contracts, storage, shared service HTTP utilities, record layers | Always available; no extra facade feature |
 | Fs, S3, or another storage backend | Enable `services-fs`, `services-s3`, etc. on your **OpenDAL** dependency |

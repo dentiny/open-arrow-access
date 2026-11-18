@@ -1,10 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use arrow_array::{
-    Array, ArrayRef, RecordBatch, RecordBatchOptions, StructArray, make_array, new_null_array,
-};
+use arrow_array::{Array, ArrayRef, RecordBatch, StructArray, make_array, new_null_array};
 use arrow_schema::{DataType, Fields};
-use open_arrow_access_core::{Result, SchemaRef};
+use open_arrow_access_core::{Result, SchemaRef, record_batch_with_rows};
 
 use super::{
     error,
@@ -38,12 +36,8 @@ impl AlignmentPlan {
             return Ok(batch);
         };
         let columns = align_fields(fields, batch.columns(), batch.num_rows())?;
-        RecordBatch::try_new_with_options(
-            self.target.clone(),
-            columns,
-            &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
-        )
-        .map_err(error::arrow_error)
+        record_batch_with_rows(self.target.clone(), columns, batch.num_rows())
+            .map_err(error::arrow_error)
     }
 }
 

@@ -107,15 +107,6 @@ pub(crate) fn validate_range_length(
     Ok(())
 }
 
-pub(crate) fn validate_positioned_chunk(
-    bytes: &crate::Bytes,
-    operation: &'static str,
-) -> std::io::Result<()> {
-    if bytes.is_empty() {
-        return Err(crate::error::empty_chunk_io(operation));
-    }
-    Ok(())
-}
 pub(crate) fn validate_buffer_consumption(amount: usize, available: usize) {
     assert!(amount <= available);
 }

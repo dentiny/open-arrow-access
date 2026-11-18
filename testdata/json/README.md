@@ -18,6 +18,13 @@ syntax/types. Syntax is validated even with zero output columns.
 | `bad-trailing.json` | A valid object followed by invalid trailing text. |
 | `bad-type.json` | A string where the schema requires an integer. |
 | `bad-utf8.json` | Literal invalid UTF-8 byte `0xff` in the title string. |
+| `pretty-objects.json.gz` | Three whitespace-separated objects, including pretty printing, an escaped quote/brace in a title, and a null title, for projected parallel gzip reading. |
+| `union-id.json`, `union-id.json.gz` | One `{"id":1}` object, uncompressed and gzip-compressed, for inferred file-set union. |
+| `union-empty-object.json`, `union-empty-object.json.gz` | One empty object, uncompressed and gzip-compressed; it contributes a row without declaring a field. |
+
+These project-authored gzip inputs were prepared offline using Python
+`gzip.compress(data, mtime=0)` (default compression level 9). Tests read the
+committed bytes rather than encoding or corrupting inputs at runtime.
 
 ## Use these inputs
 

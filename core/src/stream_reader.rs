@@ -11,8 +11,8 @@ use crate::{
 /// Pins without polling; EOF or errors drop the stream and make later reads return
 /// EOF. Items must match the metadata; byte chunks must be nonempty. Use
 /// [`StreamReader::records`] with an explicit ordering contract for Arrow records.
-/// [`StreamReader::new`] uses byte/generic capabilities; bytes with [`ByteMetadata`]
-/// implement [`ByteReader`].
+/// [`StreamReader::bytes`] retains byte metadata and attaches its source to lazy
+/// errors. [`StreamReader::new`] supports generic item and metadata types.
 ///
 /// ```
 /// use futures::stream;
@@ -49,6 +49,15 @@ impl<S, M> StreamReader<S, M> {
             stream: Some(Box::pin(stream)),
             metadata,
         }
+    }
+}
+
+impl<S> StreamReader<S, ByteMetadata> {
+    /// Construct a sequential byte stream, attaching its source to lazy errors.
+    /// Construction does not poll the stream; metadata is retained after EOF or errors.
+    pub fn bytes(stream: S, metadata: ByteMetadata) -> Self {
+        let object = metadata.source.clone();
+        Self::new(stream, metadata).with_object(object)
     }
 }
 
@@ -135,7 +144,7 @@ pub fn bytes_reader(bytes: Bytes, source: Option<ObjectRef>) -> impl ByteReader 
         content_length: Some(bytes.len() as u64),
         version: None,
     };
-    StreamReader::new(
+    StreamReader::bytes(
         futures::stream::iter((!bytes.is_empty()).then_some(Ok(bytes))),
         metadata,
     )

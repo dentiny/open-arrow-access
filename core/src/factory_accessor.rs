@@ -57,6 +57,20 @@ where
             .map_err(|error| error.with_object(Some(&object)))
     }
 
+    async fn inspect_metadata(
+        &self,
+        request: Self::Request,
+    ) -> Result<Option<<Self::Reader as Reader>::Metadata>>
+    where
+        <Self::Reader as Reader>::Metadata: Clone,
+    {
+        let object = ByteReadRequest::from(&request).object;
+        self.factory
+            .inspect_metadata(&self.storage, request)
+            .await
+            .map_err(|error| error.with_object(Some(&object)))
+    }
+
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
         self.factory.open_reader(&self.storage, request).await
     }

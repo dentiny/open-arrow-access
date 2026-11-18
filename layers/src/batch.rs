@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
-use arrow_array::{ArrayRef, RecordBatch, RecordBatchOptions};
+use arrow_array::{ArrayRef, RecordBatch};
 use arrow_schema::{ArrowError, SchemaRef};
+use open_arrow_access_core::record_batch_with_rows;
 
 pub(crate) fn assemble_batch(
     schema: &SchemaRef,
@@ -20,9 +21,5 @@ pub(crate) fn assemble_batch(
                 .clone()
         })
         .collect();
-    RecordBatch::try_new_with_options(
-        schema.clone(),
-        columns,
-        &RecordBatchOptions::new().with_row_count(Some(source.num_rows())),
-    )
+    record_batch_with_rows(schema.clone(), columns, source.num_rows())
 }
