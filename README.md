@@ -111,6 +111,10 @@ The core reader contracts remain runtime-independent.
 
 ## How the pieces compose
 
+New to the types? Start with the [architecture walkthrough](docs/architecture.md).
+It explains accessors, readers, factories, layers, reusable sources, and scan plans
+with diagrams of one read and one parallel scan.
+
 ```mermaid
 flowchart LR
     Source["Filesystem / S3 / HTTP / other OpenDAL backend"] --> Storage["OpenDalAccessor: bytes"]

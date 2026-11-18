@@ -31,7 +31,7 @@ flowchart LR
 
 | Goal | Guide |
 | --- | --- |
-| Understand boundaries, resource ownership, and execution | [Architecture](architecture.md) |
+| Understand accessors, readers, factories, sources, and scan plans | [Architecture walkthrough](architecture.md) |
 | Add a format, service, byte backend, codec, or layer | [Extension guide](extending.md) |
 | Implement request, reader, capability, and planning contracts | [API contracts](contracts.md) |
 

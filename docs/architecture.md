@@ -1,20 +1,20 @@
 # Architecture
 
-open-arrow-access is the source-access and decoding library in a pretraining data
-preparation pipeline. It turns heterogeneous corpus inputs into Arrow batches for
-downstream preprocessing jobs.
+open-arrow-access reads source data and turns it into Arrow batches. Its types
+separate four questions: where are the bytes, how are they decoded, which files
+are selected, and how is the work executed?
 
-The architecture separates where bytes live, how they are decoded, and how files
-are selected. A corpus ingestion job can reuse the same decoder for local files,
-object stores, or provider downloads, and replace storage without rewriting its
-record-reading path.
+Start with storage and one format. Add the other components when you need them.
+The same format can read local files, object stores, or provider downloads because
+it receives a byte reader rather than a storage backend.
 
 ## From source to Arrow
 
 ```mermaid
 flowchart TD
-    Provider["service/: provider discovery and source identity"] --> Objects["Selected objects / shards / archive members"]
-    Objects --> Storage["storage/: caller-configured OpenDAL or custom ByteAccessor"]
+    Provider["service/: provider discovery and source identity"] -. "selects inputs" .-> Storage
+    Provider -. "may compose a dataset" .-> Dataset
+    Storage["storage/: OpenDAL or custom ByteAccessor"]
     Storage --> Bytes["ByteReader: sequential bytes + optional exact ranges"]
     Bytes --> Transform["decompression/: codec or archive entry"]
     Transform --> Decoded["ByteReader: decoded or selected-entry bytes"]
@@ -22,15 +22,17 @@ flowchart TD
     Decoded --> Format
     Format --> Records["RecordReader: stable schema + ordered batches"]
     Records --> Dataset["dataset/: ordered multi-file composition"]
-    Dataset --> Output["Arrow RecordBatch stream"]
-    Records --> Output
+    Dataset --> Layers["Optional record layers: execution and transformations"]
+    Records --> Layers
+    Layers --> Output["Application pulls Arrow RecordBatch values"]
     Core["core/: Accessor, Reader, Layer, requests, capabilities"] -. contracts .-> Storage
     Core -. contracts .-> Format
     Core -. contracts .-> Dataset
 ```
 
-The diagram shows data flow. In code, an accessor is a factory: `open(request)`
-returns an owned reader, and the consumer pulls items with `next().await`.
+Solid arrows show data flow. Dashed arrows show selection, composition, or shared
+contracts. `core/` supplies those contracts; it is not another processing stage.
+An accessor opens an owned reader, and the consumer pulls items with `next().await`.
 Providers may return bytes or metadata rather than Arrow. WARC uses the same
 factory contract, exposing native `WarcRecord` values through `WarcAccessor`
 or projected Arrow batches through `WarcArrowAccessor`.
@@ -46,7 +48,7 @@ or projected Arrow batches through `WarcArrowAccessor`.
 | `file-format/` | Parser configuration, schemas, projection, and decoding | Byte readers and format libraries |
 | `dataset/` | Directory discovery and explicit ordered file sets | Supplied single-file record accessor |
 | `service/` | Provider discovery, identities, metadata, and source-specific composition | Storage, formats, archives, and datasets |
-| `layers/` | Arrow output type conversion; future record and execution enhancements | Core layer contract and Arrow kernels |
+| `layers/` | Schema changes, sampling, limits, prefetch, parallel execution, and emission policy | Core contracts, Arrow kernels, and DataFusion expressions |
 | `test-support/` | Unpublished shared test fixtures and contract assertions | Component test suites |
 
 A format receives a `ByteReader`, not an OpenDAL operator. Storage knows object
@@ -55,6 +57,19 @@ and schema compatibility, not how Parquet or XML works. Providers resolve their
 own APIs and source conventions while reusing these components.
 
 ## The public contracts
+
+An **accessor** is a reusable way to open a selection. A **reader** is one opened
+read, with its own cursor and decoder state. Opening the same accessor again
+creates an independent reader.
+
+| Type | Question it answers |
+| --- | --- |
+| `Accessor` | How do I open this typed request? |
+| `Reader` | What metadata and next item does this open read expose? |
+| `ReaderFactory` | How do I build a reader from an opened byte input? |
+| `FactoryAccessor<B, F>` | How do I connect byte accessor `B` to factory `F`? |
+| `FileAccessor<B, F>` | How do I use that binding as a file format, with format-specific partition planning where supported? |
+| `Layer<A>` | How do I wrap an accessor and the readers it creates? |
 
 ```text
 Accessor::open(request).await -> owned Reader
@@ -74,9 +89,92 @@ Layer::layer(accessor)        -> wrapped accessor with the same request/reader t
 
 `ReadRequest` carries Arrow options and separate byte I/O options. Storage ignores
 Arrow projection; a format applies it and forwards byte settings to its input.
-`ReaderFactory` centralizes per-open preparation and decoder creation.
-`FileAccessor<B, F>` binds a byte accessor to a factory; familiar constructors such
-as `ParquetAccessor::new(bytes)` are convenience aliases over that composition.
+`ObjectRef` is a locator interpreted by the byte accessor. It is not a universal
+URI resolver. A provider can use a different request type to carry a dataset ID,
+revision, or split along with common read options.
+
+### Follow one open
+
+`ReaderFactory` separates decoder creation from storage access. Its shared opening
+protocol validates configuration before opening storage:
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant A as FileAccessor / FactoryAccessor
+    participant F as ReaderFactory
+    participant S as Byte accessor
+    participant R as Returned record reader
+    App->>A: open(ReadRequest)
+    A->>F: prepare(request)
+    Note over F: Validate configuration without I/O
+    A->>S: open(ByteReadRequest)
+    S-->>A: ByteReader
+    A->>F: create_reader(input, request, prepared)
+    Note over F: May inspect metadata or inference samples
+    F-->>A: RecordReader with fixed schema
+    A-->>App: Owned RecordReader
+    loop Consumer requests data
+        App->>R: next().await
+        R-->>App: Batch, EOF, or error
+    end
+```
+
+Constructing the accessor does no reading. Opening it may perform I/O to establish
+metadata. Calling `next()` consumes its output. These are separate steps.
+
+`FactoryAccessor` implements the shared binding. `FileAccessor` contains that
+binding and adds partition configuration and format-specific `ScanPlanner`
+implementations. For example, `JsonAccessor<B>` is a type alias for
+`FileAccessor<B, JsonFormat>`, not a separate reader system.
+
+A factory can also decode an already-open `ByteReader` through `open_input`.
+Use that path for an archive member; it does not reopen the request's locator.
+
+### Add behavior with layers
+
+A layer wraps an accessor while keeping its Rust request and reader interfaces.
+It may wrap `open`, the returned reader, or both. Byte layers remain byte
+interfaces; record layers remain record interfaces. A record layer can change
+Arrow fields and values as long as its metadata describes the final schema.
+Converting bytes into Arrow records is a format adapter, not a layer.
+
+For `source.layer(a).layer(b)`, `b` is outermost. Opening calls `b`, then `a`, then
+the source. Output flows back through `a`, then `b`:
+
+```mermaid
+flowchart LR
+    Source["Format or dataset"] --> Parallel["ParallelReadLayer"]
+    Parallel --> Evolve["SchemaEvolutionLayer"]
+    Evolve --> Sample["SamplingLayer"]
+    Sample --> Limit["LimitLayer"]
+    Limit --> App["Application"]
+```
+
+This placement gives transformations one merged scan. Schema evolution, sampling,
+limits, and prefetch do not expose `ScanPlanner`; install planning/execution layers
+inside them. See [layer composition](../layers/README.md#compose-layers).
+
+### Bind a source for later reads
+
+Source helpers save an accessor and request behind one non-generic type. They are
+useful when an integration needs a schema before it starts reading.
+
+| Helper | What is fixed | How to read |
+| --- | --- | --- |
+| `BoundSource` | Complete request and initial output schema | `reader()` takes the retained first reader, then reopens independent readers and checks their schemas |
+| `PreparedSource` | Selection and complete unprojected schema | `scan(ReadOptions)` chooses projection and batch size for each scan |
+| `FileSource` | File selection through the same binding lifecycle | Wraps `BoundSource`; `into_bound_source()` removes the file-specific wrapper |
+
+Binding opens a reader without polling output rows. `PreparedSource` clears the
+initial projection to establish the complete schema. It reuses that reader only
+for a scan with matching preparation options; other scans reopen the selection.
+These helpers do not cache the dataset or create a snapshot. Source contents and
+file membership must remain stable when the application needs reproducible reads.
+
+Use `PreparedSource::prepare_plannable` to retain an accessor's optional planner.
+`scan()` still uses the accessor's `open` path; `plan_scan()` explicitly asks for
+partitions.
 
 See [API contracts](contracts.md) for factory hooks, byte adapters, and lifecycle
 details, or [extending](extending.md) to implement a component.
@@ -91,7 +189,11 @@ the operations a configured accessor or opened reader exposes.
 | `read` | Consume this interface's item type |
 | `read_with_range` | Read exact byte ranges without moving the sequential cursor |
 | `list` | Discover objects through a byte accessor; never a reader operation |
-| `read_parallel` | File/partition parallelism; currently false in concrete implementations |
+| `read_parallel` | This interface executes files/partitions concurrently; advertised by `ParallelReadLayer` |
+
+Byte interfaces report `Capability`. Record interfaces report `RecordCapability`,
+which also declares an `OrderRequirement`: `PreserveGlobal` or `Reorderable`.
+This is permission to relax ordering, not a request to emit out of order.
 
 A wrapper must forward or clear flags to match its output. Decompression, for
 example, accepts sequential bytes and removes range access. Parquet requires
@@ -117,17 +219,56 @@ OpenDAL can prefetch using the per-reader I/O settings.
 | `ByteReadOptions::io_chunk_size` | Storage I/O splitting | Backend default when unset |
 | `OpenDalAccessor::with_chunk_size` | Emitted byte chunks | Independent of I/O splitting and Arrow batch size |
 
-File sets open files sequentially in caller order; directory scans sort selected
-paths. Later files must match the first file's projected schema, including
-metadata. No schema merging occurs. Discovery may collect a file list; decoders
-may buffer a document, record, or row group. Batch/chunk targets do not bound
-total memory or an individual value's size.
+Ordinary file-set reads open files sequentially in caller order; directory scans
+sort selected paths. By default, later files must match the first file's projected
+schema, including metadata. Optional `with_union_by_name()` inspects full schemas
+before execution and aligns missing fields. See
+[schema policies](../dataset/README.md#union-by-name). Discovery may collect a file
+list; decoders may buffer a document, record, or row group. Batch/chunk targets do
+not bound total memory or an individual value's size.
 
 Storage I/O concurrency preserves byte and record order. It does not parallelize
 files or partitions. Multiple application-owned readers each have their own I/O
 budget. `ParallelReadLayer` and `UnorderedEmissionLayer` are separate policies;
-source ordering requirements constrain admission to unordered emission. Both
-collect settings before one bounded executor starts.
+source ordering requirements constrain admission to unordered emission.
+
+### Separate planning from execution
+
+`ScanPlanner` is an optional accessor extension. It returns a `ScanPlan` with a
+fixed schema, an ordering requirement, and lazily discovered partition openers.
+Each opener creates an owned reader. Exposing partitions does not execute them
+concurrently or advertise `read_parallel`.
+
+```mermaid
+flowchart TD
+    Source["Accessor implementing ScanPlanner"] -->|"plan_scan(request)"| Plan["ScanPlan: schema, ordering, lazy partitions"]
+    Plan --> Sequential["into_reader(): sequential primitive"]
+    Plan --> Parallel["ParallelReadLayer: concurrent execution"]
+    Sequential --> Output["RecordBatch values"]
+    Parallel --> Ordered["Default: emit in logical order"]
+    Parallel --> Unordered["Opt-in: emit ready batches"]
+    Ordered --> Output
+    Unordered --> Output
+```
+
+The diagram shows two ways to consume partitions. In normal application code,
+install `ParallelReadLayer` on the planner-capable accessor and call `open`.
+That path collects and executes the composed policies. Calling a returned plan's
+`into_reader()` directly is only sequential consumption; it does not execute
+collected parallel or emission policies.
+
+`UnorderedEmissionLayer` opts into ready-batch emission only for a `Reorderable`
+source. Parallel execution alone preserves order. Unordered emission alone does
+not start workers. These policies are separate from per-reader byte I/O concurrency.
+
+For example, Hugging Face dataset access pins an export revision and composes a
+file set with Parquet readers. It exposes scan planning but retains global order;
+an outer parallel layer can read partitions concurrently while emitting in order.
+
+The executor limits resident partitions. This is not a total memory limit:
+streaming-file scans currently use unbounded output queues for each resident
+file, while independent native partitions use bounded batch queues. See
+[parallel reads](parallel-read.md) for scheduling, ordering, and memory details.
 
 ## Schema, errors, and source identity
 
