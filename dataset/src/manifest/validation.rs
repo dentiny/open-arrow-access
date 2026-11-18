@@ -19,17 +19,13 @@ pub(super) struct Context {
 }
 impl Context {
     pub fn new(spec: &PathsManifest) -> PathResult<Self> {
-        let manifest_key = if spec.manifest.locator().contains(':') {
-            validate_raw(spec.manifest.locator())?;
-            let url = http_url(spec.manifest.locator())?;
+        validate_raw(spec.manifest.locator())?;
+        let manifest_key = if let Some(url) = parse_http_url(spec.manifest.locator())? {
             if url.query().is_some() || url.fragment().is_some() {
                 return Err("manifest URL cannot contain query or fragment");
             }
             key_path(url.path())?
         } else {
-            if spec.manifest.locator().contains(['?', '#']) {
-                return Err("manifest key cannot contain query or fragment");
-            }
             key_path(spec.manifest.locator())?
         };
         let base = match &spec.base {
@@ -52,37 +48,36 @@ impl Context {
         if value.starts_with("//") {
             return Err("network-path references are forbidden");
         }
-        let is_absolute = value.split(['?', '#']).next().unwrap().contains(':');
-        let (key, suffix, absolute_url) = if is_absolute {
-            let url = http_url(value)?;
+        let (key, locator) = if let Some(mut url) = parse_http_url(value)? {
             let key = key_path(url.path())?;
-            let suffix = &url[url::Position::AfterPath..];
-            (key, suffix.to_owned(), Some(url))
+            url.set_path(&format!("/{key}"));
+            (key, url.into())
         } else {
             let split = value.find(['?', '#']).unwrap_or(value.len());
-            let path = &value[..split];
+            let (path, suffix) = value.split_at(split);
             let key = key_path(path)?;
             let key = if path.starts_with('/') {
                 key
             } else {
                 format!("{}{key}", self.base)
             };
-            (key, value[split..].to_owned(), None)
+            let locator = format!("{key}{suffix}");
+            (key, locator)
         };
         if !key.starts_with(&self.base) {
             return Err("path escapes the configured base");
         }
-        let locator = if let Some(mut url) = absolute_url {
-            url.set_path(&format!("/{key}"));
-            url.into()
-        } else {
-            format!("{key}{suffix}")
-        };
         Ok(Resolved { locator, path: key })
     }
 }
-fn http_url(value: &str) -> PathResult<Url> {
-    let url = Url::parse(value).map_err(|_| "invalid URL")?;
+// Only relative references fall back to storage keys; malformed or unsupported
+// absolute URLs remain errors. The caller validates raw input before parsing.
+fn parse_http_url(value: &str) -> PathResult<Option<Url>> {
+    let url = match Url::parse(value) {
+        Ok(url) => url,
+        Err(url::ParseError::RelativeUrlWithoutBase) => return Ok(None),
+        Err(_) => return Err("invalid URL"),
+    };
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || !url.username().is_empty()
@@ -90,7 +85,7 @@ fn http_url(value: &str) -> PathResult<Url> {
     {
         return Err("expected an HTTP(S) URL without credentials");
     }
-    Ok(url)
+    Ok(Some(url))
 }
 // Validate before URL parsing: WHATWG URL parsing removes dot segments and
 // normalizes backslashes. Reject dot segments conservatively, even if contained.

@@ -89,6 +89,9 @@ async fn unsafe_entries_report_the_manifest_and_line() {
         "//example.test:443/a.warc",
         "https://u:p@example.test/a.warc",
         "file:///a.warc",
+        "mailto:user@example.test",
+        "https://",
+        "https://[bad]/a.warc",
         "https://example.test/x/../a.warc",
         " a.warc",
         "a\\b.warc",
@@ -270,5 +273,18 @@ async fn entry_query_and_fragment_components_are_always_preserved() {
             [expected],
             "{entry}"
         );
+    }
+}
+
+#[tokio::test]
+async fn colons_in_paths_and_url_suffixes_do_not_imply_an_absolute_url() {
+    for entry in [
+        "data/a:b.warc",
+        "data/a.warc?next=https://example.test/a:b",
+        "data/a.warc#urn:part",
+    ] {
+        for spec in [manifest(), PathsManifest::new("lists/warc:2026.paths")] {
+            assert_eq!(resolve(spec, entry.as_bytes()).await.unwrap(), [entry]);
+        }
     }
 }
