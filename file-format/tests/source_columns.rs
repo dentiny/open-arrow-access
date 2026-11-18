@@ -118,6 +118,7 @@ async fn record_coordinates_survive_projection_parallelism_and_resume() {
                 "decoded".into(),
                 "path".into(),
             ]),
+            ..ReadOptions::default()
         });
         assert_eq!(
             rows(source.open(request.clone()).await.unwrap()).await,

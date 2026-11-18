@@ -191,6 +191,7 @@ async fn arrow_records_preserve_binary_bodies_source_and_projection() {
             .open(ReadRequest::new("records.warc").with_options(ReadOptions {
                 batch_size: NonZeroUsize::new(2).unwrap(),
                 projection: projection.clone(),
+                ..ReadOptions::default()
             }))
             .await
             .unwrap();
@@ -255,6 +256,7 @@ async fn parallel_record_partitions_are_lazy_and_preserve_binary_projection_and_
     let request = ReadRequest::new("physical.warc").with_options(ReadOptions {
         batch_size: NonZeroUsize::new(2).unwrap(),
         projection: Some(vec!["body".into(), "id".into(), "date".into()]),
+        ..ReadOptions::default()
     });
     let mut plan = accessor.plan_scan(request.clone()).await.unwrap();
     assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
@@ -464,6 +466,7 @@ async fn standard_headers_survive_sequential_parallel_and_positioned_projection(
         let request = ReadRequest::new("headers.warc").with_options(ReadOptions {
             batch_size: NonZeroUsize::MIN,
             projection: projection.clone(),
+            ..ReadOptions::default()
         });
         let sequential = WarcArrowAccessor::new(MemoryAccessor::new(input.as_bytes(), 7))
             .open(request.clone())

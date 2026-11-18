@@ -55,6 +55,35 @@ cargo run --locked --example read_parquet --features format-parquet -- testdata/
 Readers own their resources. Drop a reader to stop consuming it; after cancelling
 a pending read, drop that reader too.
 
+### Parquet predicate pruning
+
+`ReadOptions.pruning_predicate` is an optional conservative hint, independent of
+projection. Parquet uses row-group statistics to avoid reading groups that cannot
+match; callers must still evaluate their original row filter. Other readers may
+ignore the hint. Missing, legacy, inexact or unsupported statistics retain data.
+
+```rust
+use open_arrow_access::{CompareOp, PredicateValue, PruningPredicate, ReadOptions};
+
+let options = ReadOptions {
+    pruning_predicate: Some(PruningPredicate::Compare {
+        column: "id".into(),
+        op: CompareOp::GtEq,
+        value: PredicateValue::Int64(100),
+    }),
+    ..ReadOptions::default()
+};
+```
+
+Both direct Parquet reads and partition planning support AND/OR trees, null
+checks, signed/unsigned integers, booleans and binary-ordered UTF-8 strings.
+Floating point, decimal, temporal and nested comparisons remain residual.
+Prepared scans forward hints at execution time without reusing their unpruned
+binding reader. Schema-evolution layers discard hints when transforming fields;
+they do not guess how to rewrite predicates over renamed or computed columns.
+Existing complete `ReadOptions` struct literals must add `pruning_predicate: None`
+or use `..ReadOptions::default()`.
+
 ## Reusable file sources
 
 For an explicitly selected provider attachment, use the typed

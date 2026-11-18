@@ -44,6 +44,7 @@ fn options(batch_size: usize, projection: Option<Vec<&str>>) -> ReadOptions {
     ReadOptions {
         batch_size: NonZeroUsize::new(batch_size).unwrap(),
         projection: projection.map(|names| names.into_iter().map(String::from).collect()),
+        ..ReadOptions::default()
     }
 }
 
@@ -401,6 +402,7 @@ async fn inference_detects_headers_replays_samples_and_supports_parallel_project
             "id".to_owned(),
             "title".to_owned(),
         ]),
+        ..ReadOptions::default()
     });
     let mut reader = if parallel {
         accessor

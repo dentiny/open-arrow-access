@@ -108,6 +108,7 @@ async fn zero_column_projection_retains_positions_and_validation_without_read_ah
     let request = ReadRequest::new("data.warc").with_options(ReadOptions {
         batch_size: NonZeroUsize::MIN,
         projection: Some(Vec::new()),
+        ..ReadOptions::default()
     });
     let mut reader = WarcArrowFormat
         .with_source_positions()
@@ -147,6 +148,7 @@ async fn positioned_decoding_matches_ordinary_batches_and_tracks_record_starts()
             let request = ReadRequest::new("data.warc").with_options(ReadOptions {
                 batch_size: NonZeroUsize::new(2).unwrap(),
                 projection,
+                ..ReadOptions::default()
             });
             let storage = MemoryAccessor::new(&input, chunk);
             // The ordinary reader requires records without inter-record padding.

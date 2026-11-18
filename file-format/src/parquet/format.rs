@@ -62,14 +62,32 @@ impl ReaderFactory for ParquetFormat {
             .await
             .map_err(|e| decode_error("inspect_parquet", e))?;
 
-        create_reader(builder, request)
+        create_reader(builder, request, None)
     }
 }
 
 pub(super) fn create_reader(
     mut builder: ParquetRecordBatchStreamBuilder<ParquetInput>,
     request: ReadRequest,
+    row_groups: Option<Vec<usize>>,
 ) -> Result<Box<dyn RecordReader>> {
+    if let Some(predicate) = &request.options.pruning_predicate {
+        let groups =
+            row_groups.unwrap_or_else(|| (0..builder.metadata().num_row_groups()).collect());
+        let groups = groups
+            .into_iter()
+            .filter(|index| {
+                super::pruning::may_match(
+                    predicate,
+                    builder.schema(),
+                    builder.metadata().row_group(*index),
+                )
+            })
+            .collect();
+        builder = builder.with_row_groups(groups);
+    } else if let Some(groups) = row_groups {
+        builder = builder.with_row_groups(groups);
+    }
     // The native projection mask selects fields in file order. Reorder
     // decoded top-level fields separately to honor the caller's order.
     // The native stream drops schema metadata; retain it from inspection.

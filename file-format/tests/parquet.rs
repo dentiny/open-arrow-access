@@ -70,6 +70,7 @@ struct Observations {
     batch_reads: AtomicUsize,
     max_batch_ranges: AtomicUsize,
     range_reads: AtomicUsize,
+    range_bytes: AtomicUsize,
     fail_reads: AtomicBool,
     failure_kind: Mutex<Option<ErrorKind>>,
     drops: AtomicUsize,
@@ -78,6 +79,7 @@ struct Observations {
 /// A test-only layer validating range delegation and failure/cancellation behavior.
 struct ByteObserverLayer(Arc<Observations>);
 
+#[derive(Clone)]
 struct ByteObserverAccessor<A> {
     inner: A,
     observations: Arc<Observations>,
@@ -166,6 +168,13 @@ impl Reader for ByteObserverReader {
 #[async_trait]
 impl ByteReader for ByteObserverReader {
     async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+        self.observations.range_bytes.fetch_add(
+            ranges
+                .iter()
+                .map(|r| (r.end - r.start) as usize)
+                .sum::<usize>(),
+            Ordering::SeqCst,
+        );
         self.observations.batch_reads.fetch_add(1, Ordering::SeqCst);
         self.observations
             .max_batch_ranges
@@ -189,6 +198,9 @@ impl ByteReader for ByteObserverReader {
     }
 
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
+        self.observations
+            .range_bytes
+            .fetch_add((range.end - range.start) as usize, Ordering::SeqCst);
         self.observations.range_reads.fetch_add(1, Ordering::SeqCst);
         if self.observations.fail_reads.load(Ordering::SeqCst) {
             return Err(Error::new(
@@ -336,6 +348,7 @@ async fn local_parquet_preserves_values_nulls_and_order_across_row_groups() {
             .open(ReadRequest::new("data.parquet").with_options(ReadOptions {
                 batch_size: NonZeroUsize::new(2).unwrap(),
                 projection: None,
+                ..ReadOptions::default()
             }))
             .await
             .unwrap();
@@ -679,6 +692,7 @@ async fn row_group_plan_reuses_metadata_and_preserves_projection_and_rows() {
         let request = ReadRequest::new("data.parquet").with_options(ReadOptions {
             batch_size: NonZeroUsize::new(2).unwrap(),
             projection,
+            ..ReadOptions::default()
         });
         let expected = rows(accessor.open(request.clone()).await.unwrap()).await;
         let parallel = accessor.clone().layer(ParallelReadLayer::new(
@@ -723,3 +737,6 @@ async fn open_and_planning_reject_unusable_inputs_with_their_own_error_context()
         assert_eq!(observations.range_reads.load(Ordering::SeqCst), 0);
     }
 }
+
+#[path = "parquet/pruning.rs"]
+mod pruning;

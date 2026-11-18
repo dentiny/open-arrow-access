@@ -88,6 +88,7 @@ async fn scan_applies_execution_options_to_the_bound_selection() {
     let options = ReadOptions {
         batch_size: NonZeroUsize::new(2).unwrap(),
         projection: Some(vec!["label".into()]),
+        ..ReadOptions::default()
     };
     let prepared = PreparedSource::prepare(
         dataset.clone(),

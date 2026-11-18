@@ -148,6 +148,7 @@ async fn reusable_binary_accessor_keeps_independent_readers_and_byte_options() {
                 .with_options(ReadOptions {
                     projection: Some(vec![]),
                     batch_size: NonZeroUsize::MIN,
+                    ..ReadOptions::default()
                 })
                 .with_byte_options(byte_options),
         )
@@ -190,6 +191,7 @@ async fn reusable_csv_accessor_preserves_projection_batch_size_and_cursor_indepe
     let request = ReadRequest::new("rows.csv").with_options(ReadOptions {
         projection: Some(vec!["label".into()]),
         batch_size: NonZeroUsize::MIN,
+        ..ReadOptions::default()
     });
     let mut first = records.open(request.clone()).await.unwrap();
     let mut second = records.clone().open(request).await.unwrap();

@@ -150,6 +150,9 @@ pub struct ReadOptions {
     /// Top-level fields in the requested output order. None selects every field.
     /// An empty projection preserves row counts with zero columns.
     pub projection: Option<Vec<String>>,
+    /// Optional partition-pruning hint. Whole partitions may still be returned;
+    /// the caller must apply its original row filter. Other formats may ignore it.
+    pub pruning_predicate: Option<crate::PruningPredicate>,
 }
 
 /// Output schema and source-column indices resolved from read options.
@@ -226,6 +229,7 @@ impl Default for ReadOptions {
         Self {
             batch_size: DEFAULT_BATCH_SIZE,
             projection: None,
+            pruning_predicate: None,
         }
     }
 }

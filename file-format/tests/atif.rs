@@ -87,6 +87,7 @@ async fn jsonl_batching_projection_and_document_indices_preserve_order() {
                     "source_record_index".into(),
                     "raw_json".into(),
                 ]),
+                ..ReadOptions::default()
             }))
             .await
             .unwrap();
@@ -148,6 +149,7 @@ async fn malformed_documents_utf8_and_invalid_atif_are_terminal_with_source_cont
                 // Valid row 1 must be discarded with the invalid row in this batch.
                 batch_size: NonZeroUsize::new(2).unwrap(),
                 projection: Some(vec![]),
+                ..ReadOptions::default()
             }))
             .await
             .unwrap();
@@ -189,6 +191,7 @@ async fn jsonl_pulls_only_the_requested_batch_and_keeps_delivered_rows_on_later_
         .open(ReadRequest::new("runs.jsonl").with_options(ReadOptions {
             batch_size: NonZeroUsize::MIN,
             projection: Some(vec!["trajectory_id".into()]),
+            ..ReadOptions::default()
         }))
         .await
         .unwrap();
@@ -217,6 +220,7 @@ async fn parallel_gzip_trajectories_keep_global_indices_raw_json_and_projection(
         let request = ReadRequest::new("trajectories.jsonl").with_options(ReadOptions {
             batch_size: NonZeroUsize::new(1).unwrap(),
             projection,
+            ..ReadOptions::default()
         });
         let plan = accessor.plan_scan(request.clone()).await.unwrap();
         assert_eq!(
@@ -250,6 +254,7 @@ async fn parallel_byte_targets_keep_lookahead_indices_and_oversized_trajectories
     let request = ReadRequest::new("trajectories.jsonl").with_options(ReadOptions {
         batch_size: NonZeroUsize::new(10).unwrap(),
         projection: Some(vec!["source_record_index".into(), "raw_json".into()]),
+        ..ReadOptions::default()
     });
     let mut partitions = accessor.plan_scan(request).await.unwrap().partitions;
     for index in 1..=3 {

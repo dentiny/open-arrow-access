@@ -42,6 +42,7 @@ fn request(batch_size: usize, projection: Option<Vec<&str>>) -> ReadRequest {
     ReadRequest::new("records.json").with_options(ReadOptions {
         batch_size: NonZeroUsize::new(batch_size).unwrap(),
         projection: projection.map(|names| names.into_iter().map(str::to_owned).collect()),
+        ..ReadOptions::default()
     })
 }
 

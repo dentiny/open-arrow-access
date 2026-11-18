@@ -255,6 +255,11 @@ where
             source_schema,
         } = &self.config;
         let output_options = request.read_options().clone();
+        // These hints name output fields. Renames, casts or expressions can
+        // change their meaning; do not forward them without rewriting.
+        if !changes.is_empty() {
+            request.read_options_mut().pruning_predicate = None;
+        }
         let planned = source_schema
             .as_ref()
             .map(|source| SchemaEvolutionPlan::new(changes, source, &output_options, true))

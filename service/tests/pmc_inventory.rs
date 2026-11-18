@@ -61,6 +61,7 @@ fn request(p: Option<Vec<&str>>) -> ReadRequest {
     ReadRequest::new(MANIFEST).with_options(ReadOptions {
         batch_size: NonZeroUsize::MIN,
         projection: p.map(|v| v.into_iter().map(String::from).collect()),
+        ..ReadOptions::default()
     })
 }
 #[tokio::test]

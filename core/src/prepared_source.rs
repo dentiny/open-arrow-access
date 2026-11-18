@@ -146,6 +146,7 @@ impl PreparedSource {
         A::Request: Clone + Sync + ReadOptionsProvider + 'static,
     {
         request.read_options_mut().projection = None;
+        request.read_options_mut().pruning_predicate = None;
         let batch_size = request.read_options().batch_size;
         let accessor = Arc::new(accessor);
         let bound = BoundSource::bind(accessor.clone(), request.clone()).await?;
@@ -176,7 +177,10 @@ impl PreparedSource {
     /// bound schema, including schema metadata; drift returns `Decode`.
     pub async fn scan(&self, options: ReadOptions) -> Result<Box<dyn RecordReader>> {
         let schema = options.resolve_projection(&self.schema())?.schema;
-        let reader = if options.projection.is_none() && options.batch_size == self.batch_size {
+        let reader = if options.projection.is_none()
+            && options.pruning_predicate.is_none()
+            && options.batch_size == self.batch_size
+        {
             self.bound.reader().await?
         } else {
             self.selection.open(options).await?

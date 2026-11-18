@@ -27,6 +27,7 @@ async fn dataset_pins_export_sorts_paginated_shards_and_reads_lazily_with_option
                 .with_options(ReadOptions {
                     batch_size: NonZeroUsize::MIN,
                     projection: Some(vec!["id".into()]),
+                    ..ReadOptions::default()
                 })
                 .with_byte_options(ByteReadOptions {
                     io_concurrency: NonZeroUsize::new(2).unwrap(),
@@ -163,6 +164,7 @@ async fn parallel_dataset_preserves_pinned_shard_order_and_partial_admission() {
         .open(request().with_options(ReadOptions {
             batch_size: NonZeroUsize::MIN,
             projection: Some(vec!["id".into()]),
+            ..ReadOptions::default()
         }))
         .await
         .unwrap();

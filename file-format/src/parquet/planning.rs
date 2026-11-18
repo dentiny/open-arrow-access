@@ -40,7 +40,22 @@ where
             schema,
             source: Some(request.object.clone()),
         };
-        let partitions = (0..metadata.metadata().num_row_groups()).map(move |index| {
+        let groups: Vec<_> = (0..metadata.metadata().num_row_groups())
+            .filter(|index| {
+                request
+                    .options
+                    .pruning_predicate
+                    .as_ref()
+                    .is_none_or(|predicate| {
+                        super::pruning::may_match(
+                            predicate,
+                            metadata.schema(),
+                            metadata.metadata().row_group(*index),
+                        )
+                    })
+            })
+            .collect();
+        let partitions = groups.into_iter().map(move |index| {
             let storage = storage.clone();
             let metadata = metadata.clone();
             let request = request.clone();
@@ -51,9 +66,8 @@ where
                 let builder = ParquetRecordBatchStreamBuilder::new_with_metadata(
                     ParquetInput::new(input),
                     metadata,
-                )
-                .with_row_groups(vec![index]);
-                create_reader(builder, request)
+                );
+                create_reader(builder, request, Some(vec![index]))
             }) as ScanPartition
         });
         Ok(

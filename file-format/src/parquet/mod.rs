@@ -5,6 +5,7 @@ mod error;
 mod format;
 mod input;
 mod planning;
+mod pruning;
 mod statistics;
 mod validation;
 

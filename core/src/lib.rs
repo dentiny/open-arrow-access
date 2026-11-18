@@ -18,6 +18,7 @@ pub mod metrics;
 mod next_nonempty;
 mod positioned_async_read;
 mod positioned_batch;
+mod predicate;
 mod prepared_source;
 mod project_batch;
 mod read_all;
@@ -54,6 +55,7 @@ pub use positioned_async_read::{
     PositionObserver, PositionedAsyncRead, into_positioned_async_read,
 };
 pub use positioned_batch::{PositionedBatch, PositionedRecordReader};
+pub use predicate::{CompareOp, PredicateValue, PruningPredicate};
 pub use prepared_source::PreparedSource;
 pub use project_batch::project_batch;
 pub use read_all::read_all;
