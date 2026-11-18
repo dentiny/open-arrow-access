@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use open_arrow_access_core::{OrderRequirement, Schema};
 
 use super::*;
@@ -26,19 +28,15 @@ async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
             prefetch: NonZeroUsize::MIN,
         },
     );
-    let (sender, ready) = mpsc::channel(1);
-    assert!(
-        sender
-            .try_send(PartitionOutput::Batch(batch.clone()))
-            .is_ok()
-    );
+    let (sender, ready) = partition_channel(1, false);
+    let crate::ordered_buffer::PartitionSender::Bounded(sender) = sender else {
+        unreachable!()
+    };
+    sender.try_send(batch.clone()).unwrap();
     drop(sender);
-    let (sender, closed) = mpsc::channel(1);
+    let (sender, closed) = partition_channel(1, false);
     drop(sender);
-    reader.partition_receivers.extend(
-        [closed, ready]
-            .map(|receiver| PartitionReceiver::new(receiver, Arc::new(AtomicBool::new(false)))),
-    );
+    reader.partition_receivers.extend([closed, ready]);
 
     // Discovery replaces the closed queue before polling output again.
     // The existing ready queue must retain the next turn.

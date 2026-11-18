@@ -61,34 +61,25 @@ reject mismatches, including empty partitions with different schemas. Partition
 source identifiers may differ. Format-specific discovery may retain an input
 reader, framing state and buffers separately from partition workers.
 
-With P resident partitions and Q queue slots per partition, at most P partition
-readers are active and P * Q in-memory output slots are queued. Ordinary workers
-reserve queue capacity before calling `next`. A finished worker retains its
-partition slot until its output has drained; a slow first file cannot cause
-unlimited later files to accumulate. The consumer can hold additional batches.
-Decoder allocations, individual batch sizes and compressed input buffers are not
-bounded by these queue limits.
-
-Ordered multi-file scans additionally allow a later streaming file to continue
-reading when its Q-batch queue is full. Additional batches enter an in-memory
-read-ahead queue with no byte or batch limit. The head file continues streaming
-through its ordinary Q-batch queue. This path uses no temporary files or IPC
-serialization.
+For native independent partitions and unordered reads, P bounds resident
+partitions and each worker uses a Q-batch queue. These workers reserve queue
+capacity before decoding. Ordered streaming-file scans instead give every
+resident file one unbounded in-memory output queue, independent of its position.
+Workers continue downloading and decoding without waiting for earlier files to
+finish. The consumer drains file queues in their original order. This path uses
+no temporary files or IPC serialization.
 
 Concurrency is the admission limit: at most P streaming files are resident,
 including files that have finished downloading but still have buffered output.
 A finished file does not free its slot until all of its output has drained, so a
 blocked first file cannot cause the entire selection to accumulate in memory.
-The consumer drains ordinary and read-ahead batches in original order. When a
-file becomes the head, its worker returns to ordinary bounded delivery after its
-already-buffered output. Cancellation and errors drop buffered batches.
+Cancellation and errors drop buffered batches and cancel owned workers.
 
 There is currently no memory upper bound for these resident files: read-ahead
 may retain complete decoded files, and memory consumption grows with their size.
-Q bounds ordinary output slots, but does not limit the extra read-ahead queue.
-Input/decoder buffers and caller-held batches add further allocations. Native
-independent partitions, unordered execution and ordinary sequential `open` retain
-their existing queue behavior without this extra read-ahead.
+Q does not cap ordered streaming-file queues. Input/decoder buffers and
+caller-held batches add further allocations. Ordinary sequential `open` retains
+its existing lazy behavior without this read-ahead.
 
 Storage's per-reader I/O limit remains separate: P readers may each use their
 configured I/O concurrency. This version does not impose a backend-global cap.

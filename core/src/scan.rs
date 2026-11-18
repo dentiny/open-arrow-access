@@ -24,8 +24,8 @@ pub enum EmissionPolicy {
 pub struct ParallelReadOptions {
     /// Maximum resident partitions, including completed queues awaiting consumption.
     pub partitions: NonZeroUsize,
-    /// Capacity of each ordinary batch queue. Ordered streaming-file read-ahead
-    /// may retain additional batches outside these queues; this is not a byte cap.
+    /// Capacity of bounded partition queues. Ordered streaming-file scans use
+    /// unbounded in-memory queues; this is not a byte cap.
     pub prefetch: NonZeroUsize,
 }
 
