@@ -1,12 +1,8 @@
 # PMC metadata fixtures
 
-For the source hierarchy and PDF/XML/TXT differences, see the
-[PMC data model README](../../service/src/pmc/README.md).
-
 Synthetic article-version documents and inventory manifests; no article
-content or live downloads. `metadata.json` includes content URL fields, a numeric
-PMID, Unicode, and `mid`. Unknown upstream metadata fields are rejected; duplicate
-key cases have dedicated fixtures.
+content or live downloads. `metadata.json` includes content URL fields, a string
+PMID, Unicode, unknown large numbers, and duplicate keys.
 `metadata.json.gz` is the same document compressed with a zero gzip timestamp.
 
 | Fixture | Purpose |
