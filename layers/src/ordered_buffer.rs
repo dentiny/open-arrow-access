@@ -7,8 +7,13 @@ use futures::{
 use open_arrow_access_core::{RecordBatch, RecordReader, Result, SchemaRef};
 use tokio::sync::mpsc;
 
+/// Delivers a partition worker's decoded batches using its queue policy.
 pub(crate) enum PartitionSender {
+    /// For independent native partitions: reserve one of the configured prefetch
+    /// slots before decoding, so a full queue pauses further reads.
     Bounded(mpsc::Sender<RecordBatch>),
+    /// For whole streaming files: queue batches in memory without waiting for
+    /// consumption. Concurrency limits resident files; queued bytes are unbounded.
     ReadAhead(mpsc::UnboundedSender<RecordBatch>),
 }
 
