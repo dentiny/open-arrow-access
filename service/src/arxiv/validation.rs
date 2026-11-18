@@ -1,29 +1,14 @@
-use arrow_array::{Array, ArrayRef, LargeBinaryArray, RecordBatch, cast::AsArray};
+use arrow_array::Array;
 use arrow_schema::DataType;
 use open_arrow_access_core::Result;
 
 use super::{ArxivArchive, ArxivKind, error};
-
-pub(super) fn metadata_id_column<'a>(batch: &'a RecordBatch, name: &str) -> Result<&'a ArrayRef> {
-    let column = batch
-        .column_by_name(name)
-        .ok_or_else(error::missing_metadata_id_column)?;
-    validate_metadata_id_column(column.as_ref())?;
-    Ok(column)
-}
 
 pub(super) fn validate_unique_metadata_id(previous: Option<u64>) -> Result<()> {
     if previous.is_some() {
         return Err(error::duplicate_metadata_id());
     }
     Ok(())
-}
-
-pub(super) fn pdf_entry_names(batch: &RecordBatch) -> Result<&LargeBinaryArray> {
-    Ok(batch
-        .column_by_name("entry_name")
-        .ok_or_else(error::missing_pdf_entry_column)?
-        .as_binary::<i64>())
 }
 
 pub(super) fn validate_pdf_kind(kind: ArxivKind) -> Result<()> {
@@ -33,7 +18,7 @@ pub(super) fn validate_pdf_kind(kind: ArxivKind) -> Result<()> {
     Ok(())
 }
 
-fn validate_metadata_id_column(column: &dyn Array) -> Result<()> {
+pub(super) fn validate_metadata_id_column(column: &dyn Array) -> Result<()> {
     if !matches!(
         column.data_type(),
         DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
@@ -44,10 +29,6 @@ fn validate_metadata_id_column(column: &dyn Array) -> Result<()> {
         return Err(error::null_metadata_id());
     }
     Ok(())
-}
-
-pub(super) fn manifest_root(kind: ArxivKind) -> Result<&'static str> {
-    kind.root().ok_or_else(error::invalid_manifest_kind)
 }
 
 pub(super) fn validate_unique_archive(inserted: bool) -> Result<()> {

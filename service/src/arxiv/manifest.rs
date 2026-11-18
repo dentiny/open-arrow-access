@@ -1,7 +1,7 @@
 use super::{
     ArxivArchive, ArxivKind,
-    error::xml_error,
-    validation::{manifest_root, validate_archive, validate_unique_archive},
+    error::{invalid_manifest_kind, xml_error},
+    validation::{validate_archive, validate_unique_archive},
 };
 use crate::xml_metadata::XmlDocument;
 use arrow_array::{Array, cast::AsArray};
@@ -15,7 +15,7 @@ pub(super) async fn parse_manifest(
     kind: ArxivKind,
     month: Option<u16>,
 ) -> Result<Vec<ArxivArchive>> {
-    let root = manifest_root(kind)?;
+    let root = kind.root().ok_or_else(invalid_manifest_kind)?;
     let document = XmlDocument::new(bytes, root)?;
     let fields = ["filename", "yymm", "seq_num", "size", "num_items", "md5sum"]
         .map(|name| XmlField::new(name, document.element(name), Utf8, false));

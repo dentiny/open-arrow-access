@@ -29,7 +29,10 @@ pub struct ArxivMetadataIndex {
 
 impl ArxivMetadataIndex {
     pub fn try_new(batch: RecordBatch, id_column: &str) -> Result<Self> {
-        let column = validation::metadata_id_column(&batch, id_column)?;
+        let column = batch
+            .column_by_name(id_column)
+            .ok_or_else(error::missing_metadata_id_column)?;
+        validation::validate_metadata_id_column(column.as_ref())?;
         let mut ids = HashMap::with_capacity(batch.num_rows());
         for row in 0..batch.num_rows() {
             let id = match column.data_type() {
@@ -47,7 +50,10 @@ impl ArxivMetadataIndex {
     }
 
     fn attach(&self, batch: RecordBatch) -> Result<RecordBatch> {
-        let names = validation::pdf_entry_names(&batch)?;
+        let names = batch
+            .column_by_name("entry_name")
+            .ok_or_else(error::missing_pdf_entry_column)?
+            .as_binary::<i64>();
         let indices = names
             .iter()
             .map(|name| pdf_metadata_row(name, &self.ids))
