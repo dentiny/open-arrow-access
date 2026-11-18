@@ -24,11 +24,7 @@ figshare = []
 govinfo = []
 gutenberg = ["format-xml", "dep:chrono"]
 hathifiles = []
-huggingface = [
-    "opendal/services-hf",
-    "tokio/fs",
-    "open-arrow-access-file-format/parquet",
-]
+huggingface = ["opendal/services-hf", "tokio/fs", "open-arrow-access-file-format/parquet"]
 internet-archive = []
 library-of-congress = []
 meca = [
@@ -64,8 +60,8 @@ format-xml = [
 oai = ["format-xml"]
 
 [dependencies]
-arrow-json = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
+arrow-json = { workspace = true, optional = true }
 backon = { version = "1.6", default-features = false, features = ["std", "tokio-sleep"] }
 chrono = { workspace = true, optional = true }
 futures.workspace = true
@@ -91,7 +87,11 @@ arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
 more-asserts.workspace = true
-open-arrow-access-file-format = { path = "../file-format", default-features = false, features = ["csv", "json", "parquet"] }
+open-arrow-access-file-format = { path = "../file-format", default-features = false, features = [
+    "csv",
+    "json",
+    "parquet",
+] }
 open-arrow-access-layers.workspace = true
 
 arrow-array.workspace = true
@@ -99,7 +99,10 @@ arrow-schema.workspace = true
 futures.workspace = true
 open-arrow-access-test-support.workspace = true
 
-open-arrow-access-decompression = { path = "../decompression", default-features = false, features = ["gzip", "zip"] }
+open-arrow-access-decompression = { path = "../decompression", default-features = false, features = [
+    "gzip",
+    "zip",
+] }
 rstest.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }

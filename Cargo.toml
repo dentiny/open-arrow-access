@@ -34,21 +34,6 @@ lance = "14.0.1"
 iceberg = "0.11.0"
 
 [workspace.dependencies]
-async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
-async_zip = { version = "0.0.19", default-features = false, features = ["deflate"] }
-http = "1"
-indexmap = "2"
-opendal-http-transport-reqwest = { version = "0.59.5", default-features = false }
-opendal-service-http = "0.59.5"
-percent-encoding = "2"
-quick-xml = { version = "0.42", features = ["serialize"] }
-reqwest = { version = "0.13.5", default-features = false }
-regex = "1"
-rstest = "0.28"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
-tar = { version = "0.4.46", default-features = false }
-url = "2"
 arrow-array = "58"
 arrow-buffer = "58"
 arrow-cast = "58"
@@ -56,9 +41,24 @@ arrow-csv = "58"
 arrow-json = "58"
 arrow-schema = "58"
 arrow-select = "58"
+async-compression = { version = "0.4.50", default-features = false, features = ["futures-io"] }
 async-trait = "0.1.91"
+async_zip = { version = "0.0.19", default-features = false, features = ["deflate"] }
 atif-arrow = "0.5.2"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+http = "1"
+indexmap = "2"
+opendal-http-transport-reqwest = { version = "0.59.5", default-features = false }
+opendal-service-http = "0.59.5"
+percent-encoding = "2"
+quick-xml = { version = "0.42", features = ["serialize"] }
+regex = "1"
+reqwest = { version = "0.13.5", default-features = false }
+rstest = "0.28"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+tar = { version = "0.4.46", default-features = false }
+url = "2"
 warc = { package = "warc-rs", version = "0.3.5", default-features = false }
 xml-arrow = "0.3.2"
 
@@ -90,7 +90,6 @@ open-arrow-access-dataset = { path = "dataset", version = "0.5.0", default-featu
 open-arrow-access-service = { path = "service", version = "0.5.0", default-features = false }
 
 [features]
-source-positions = ["open-arrow-access-layers/source-positions"]
 blocking = ["dep:arrow-array", "dep:arrow-schema", "dep:tokio"]
 decompression-bz2 = ["open-arrow-access-decompression/bz2"]
 decompression-gzip = ["open-arrow-access-decompression/gzip"]
@@ -103,15 +102,12 @@ format-atif = ["open-arrow-access-file-format/atif"]
 format-csv = ["open-arrow-access-file-format/csv"]
 format-json = ["open-arrow-access-file-format/json"]
 format-parquet = ["open-arrow-access-file-format/parquet"]
-format-parquet-zstd = ["format-parquet", "open-arrow-access-file-format/parquet-zstd"]
-format-parquet-lz4 = ["format-parquet", "open-arrow-access-file-format/parquet-lz4"]
-format-parquet-gzip = ["format-parquet", "open-arrow-access-file-format/parquet-gzip"]
 format-parquet-brotli = ["format-parquet", "open-arrow-access-file-format/parquet-brotli"]
+format-parquet-gzip = ["format-parquet", "open-arrow-access-file-format/parquet-gzip"]
+format-parquet-lz4 = ["format-parquet", "open-arrow-access-file-format/parquet-lz4"]
+format-parquet-zstd = ["format-parquet", "open-arrow-access-file-format/parquet-zstd"]
 format-warc = ["open-arrow-access-file-format/warc"]
-format-xml = [
-    "open-arrow-access-file-format/xml",
-    "open-arrow-access-service/format-xml",
-]
+format-xml = ["open-arrow-access-file-format/xml", "open-arrow-access-service/format-xml"]
 service-arxiv = ["open-arrow-access-service/arxiv"]
 service-bhl = ["open-arrow-access-service/bhl"]
 service-biorxiv = ["open-arrow-access-service/biorxiv"]
@@ -135,11 +131,11 @@ service-semantic-scholar = ["open-arrow-access-service/semantic-scholar"]
 service-uspto = ["open-arrow-access-service/uspto"]
 service-warc = ["open-arrow-access-service/warc"]
 service-zenodo = ["open-arrow-access-service/zenodo"]
+source-positions = ["open-arrow-access-layers/source-positions"]
 
 [dependencies]
 arrow-array = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 open-arrow-access-dataset.workspace = true
 open-arrow-access-decompression.workspace = true
@@ -147,6 +143,7 @@ open-arrow-access-file-format.workspace = true
 open-arrow-access-layers.workspace = true
 open-arrow-access-service.workspace = true
 open-arrow-access-storage.workspace = true
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 arrow-array.workspace = true
