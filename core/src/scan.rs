@@ -24,7 +24,8 @@ pub enum EmissionPolicy {
 pub struct ParallelReadOptions {
     /// Maximum resident partitions, including completed queues awaiting consumption.
     pub partitions: NonZeroUsize,
-    /// Maximum queued batches per partition; does not bound total bytes.
+    /// Capacity of bounded partition queues. Streaming-file scans use unbounded
+    /// in-memory queues under either emission policy; this is not a byte cap.
     pub prefetch: NonZeroUsize,
 }
 
@@ -55,6 +56,16 @@ pub struct ScanPlan {
     /// requirement. Unordered emission is allowed only for a reorderable source;
     /// a reorderable source may still be read with ordered emission.
     pub emission: EmissionPolicy,
+    /// Discovery consumes a shared sequential input (for example, compressed records).
+    /// Multi-file planners may keep this stream inside one file partition so the
+    /// executor can overlap input discovery across files under its worker budget.
+    pub streaming_discovery: bool,
+    /// Partitions own complete streaming files. Executors may buffer their output
+    /// to overlap input reads; emission still follows the selected policy.
+    pub file_streams: bool,
+    /// Lazy partition discovery in logical input order.
+    /// Polling may perform input I/O. Each item is an owned reader opener;
+    /// stream errors report discovery failures.
     pub partitions: BoxStream<'static, Result<ScanPartition>>,
 }
 
@@ -123,8 +134,24 @@ impl ScanPlan {
             ordering: OrderRequirement::PreserveGlobal,
             parallel_read: None,
             emission: EmissionPolicy::Ordered,
+            streaming_discovery: false,
+            file_streams: false,
             partitions: partitions.boxed(),
         }
+    }
+
+    /// Mark partition discovery as reading one sequential input stream.
+    /// This preserves native chunk parallelism for standalone scans while allowing
+    /// enclosing multi-file scans to schedule independent input streams instead.
+    pub fn with_streaming_discovery(mut self) -> Self {
+        self.streaming_discovery = true;
+        self
+    }
+
+    /// Identify whole streaming-file partitions for in-memory read-ahead.
+    pub fn with_file_streams(mut self) -> Self {
+        self.file_streams = true;
+        self
     }
 
     /// Declare the resolved source contract. Only a provider that has established

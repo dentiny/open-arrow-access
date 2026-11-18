@@ -8,11 +8,11 @@ use open_arrow_access_core::{
 
 use super::{
     FileSetRequest,
-    accessor::{FilePlanner, METADATA_CONCURRENCY},
+    accessor::{FilePlanner, METADATA_CONCURRENCY, open_plan},
     alignment::AlignmentPlan,
     error::empty_selection,
     schema,
-    validation::{validate_fields, validate_file_policy},
+    validation::validate_fields,
 };
 
 pub(super) async fn plan<A>(
@@ -38,7 +38,6 @@ where
             let inner = inner.clone();
             async move {
                 let plan = open_plan(inner.clone(), file_planner, request.clone()).await?;
-                validate_file_policy(&plan)?;
                 let empty = plan.metadata.schema.fields().is_empty()
                     && inner.inspect_metadata(request).await?.is_none();
                 Ok::<_, open_arrow_access_core::Error>((plan, empty))
@@ -50,9 +49,8 @@ where
         if empty {
             continue;
         }
-        let file_ordering = plan.ordering;
         let source = plan.metadata.schema.clone();
-        ordering = ordering.combine(file_ordering);
+        ordering = ordering.combine(plan.ordering);
         validate_fields(source.fields())?;
         union_schema.merge(source.as_ref())?;
         files.push(plan);
@@ -70,15 +68,26 @@ where
         schema: target.clone(),
         source: None,
     };
+    // Keep whole streaming-file discovery inside executor workers. Retained
+    // plans replay their inference samples through the same per-file execution
+    // path without reopening or re-inferring any selected file.
+    let can_flatten_native_partitions =
+        file_planner.is_some() && files.iter().all(|plan| !plan.streaming_discovery);
+    let file_streams = files.len() > 1 && !can_flatten_native_partitions;
     let partitions = stream::iter(files)
         .map(move |plan| {
-            // The retained reader was opened with the full source schema.
-            // Alignment also projects columns and preserves zero-column rows.
+            // Alignment projects the retained full source schema and preserves
+            // zero-column rows, for both whole files and native partitions.
             let alignment = Arc::new(AlignmentPlan::new(
                 plan.metadata.schema.clone(),
                 target.clone(),
             )?);
-            Ok(plan.partitions.map(move |partition| {
+            let partitions = if file_streams {
+                ScanPlan::whole_input(Box::new(plan.into_reader())).partitions
+            } else {
+                plan.partitions
+            };
+            Ok(partitions.map(move |partition| {
                 let partition = partition?;
                 let alignment = alignment.clone();
                 let aligned: ScanPartition =
@@ -87,21 +96,9 @@ where
             }))
         })
         .try_flatten();
-    Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(ordering))
-}
-
-async fn open_plan<A>(
-    inner: Arc<A>,
-    file_planner: Option<FilePlanner<A>>,
-    request: ReadRequest,
-) -> Result<ScanPlan>
-where
-    A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
-{
-    match file_planner {
-        Some(plan) => plan(inner, request).await,
-        None => Ok(ScanPlan::whole_input(inner.open(request).await?)),
-    }
+    let mut plan = ScanPlan::from_stream(metadata, partitions).with_ordering(ordering);
+    plan.file_streams = file_streams;
+    Ok(plan)
 }
 
 fn align_reader(

@@ -1,10 +1,14 @@
-use std::sync::Arc;
+use std::{pin::Pin, sync::Arc};
 
-use futures::{StreamExt, TryStreamExt, future::BoxFuture, stream};
+use futures::{
+    FutureExt, StreamExt, TryStreamExt,
+    future::{BoxFuture, try_maybe_done},
+    stream,
+};
 
 use open_arrow_access_core::{
     Accessor, Capability, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result,
-    ScanPartition, ScanPlan, ScanPlanner, async_trait,
+    ScanPlan, ScanPlanner, async_trait, scan_partition,
 };
 
 use super::{
@@ -19,9 +23,8 @@ pub(super) type FilePlanner<A> = fn(Arc<A>, ReadRequest) -> BoxFuture<'static, R
 
 /// Read files sequentially through one supplied format accessor.
 ///
-/// The first file determines the fixed output schema. Later files must have
-/// exactly the same projected schema, including metadata, unless union by name
-/// is explicitly enabled. An empty selection is invalid; an empty file with a
+/// Every file must match one fixed projected schema, including metadata, unless
+/// union by name is explicitly enabled. An empty selection is invalid; an empty file with a
 /// known schema is supported.
 #[derive(Debug)]
 pub struct FileSetAccessor<A> {
@@ -62,7 +65,9 @@ impl<A> FileSetAccessor<A> {
     }
 
     /// Flatten native file partitions into one ordered scan and executor budget.
-    /// Later files are planned lazily; ordinary `open` remains sequential.
+    /// Streaming formats use one worker per file in multi-file scans, so framing
+    /// and downloading can overlap. Single-file and independent native partitions
+    /// retain chunk parallelism. Ordinary `open` remains sequential.
     pub fn with_file_planning(mut self) -> Self
     where
         A: ScanPlanner<Request = ReadRequest> + 'static,
@@ -127,14 +132,12 @@ where
         let mut inspected = stream::iter(request.into_requests())
             .map(|request| self.inner.metadata(request))
             .buffered(METADATA_CONCURRENCY);
-        let first = inspected
-            .next()
-            .await
-            .ok_or_else(|| empty_selection("metadata_file_set"))??;
-        let schema = first.schema;
-        while let Some(file) = inspected.next().await {
-            super::validation::validate_schema(&file?.schema, &schema)?;
+        let mut schema = None;
+        while let Some(file) = inspected.try_next().await? {
+            let expected = schema.get_or_insert_with(|| file.schema.clone());
+            super::validation::validate_schema(&file.schema, expected)?;
         }
+        let schema = schema.ok_or_else(|| empty_selection("metadata_file_set"))?;
         Ok(RecordMetadata {
             schema,
             source: None,
@@ -142,19 +145,16 @@ where
     }
 
     async fn union_metadata(&self, mut request: FileSetRequest) -> Result<RecordMetadata> {
+        if request.objects.is_empty() {
+            return Err(empty_selection("metadata_file_set"));
+        }
         let options = request.options.clone();
         request.options.projection = None;
         let mut inspected = stream::iter(request.into_requests())
             .map(|request| self.inner.inspect_metadata(request))
             .buffered(METADATA_CONCURRENCY);
-        let first = inspected
-            .next()
-            .await
-            .ok_or_else(|| empty_selection("metadata_file_set"))??;
         let mut union = super::schema::SchemaUnion::default();
         let mut selected = false;
-        let inspected = stream::once(async { Ok(first) }).chain(inspected);
-        futures::pin_mut!(inspected);
         while let Some(file) = inspected.next().await {
             let Some(file) = file? else {
                 continue;
@@ -183,46 +183,79 @@ where
         if self.union_by_name {
             return super::union_by_name::plan(self.inner.clone(), file_planner, request).await;
         }
-        let mut requests = request.into_requests();
-        let first = requests.next().ok_or_else(|| empty_selection(operation))?;
-        let first = match file_planner {
-            Some(plan_file) => plan_file(self.inner.clone(), first).await?,
-            None => ScanPlan::whole_input(self.inner.open(first).await?),
-        };
-        validate_file_policy(&first)?;
-        let ordering = self.capability().ordering.combine(first.ordering);
+        let multiple_files = request.objects.len() > 1;
+        let inner = self.inner.clone();
+        let mut files = request
+            .into_requests()
+            .map(move |request| {
+                try_maybe_done(open_plan(inner.clone(), file_planner, request).boxed())
+            })
+            .peekable();
+        // Establish the schema from a cached plan without removing that file
+        // from the common planning, validation and execution pipeline.
+        let preview = files.peek_mut().ok_or_else(|| empty_selection(operation))?;
+        (&mut *preview).await?;
+        let preview = Pin::new(preview).output_mut().expect("completed file plan");
+        let ordering = self.capability().ordering.combine(preview.ordering);
         let metadata = RecordMetadata {
-            schema: first.metadata.schema,
+            schema: preview.metadata.schema.clone(),
             source: None,
         };
-        let inner = self.inner.clone();
-        if let Some(plan_file) = file_planner {
-            let schema = metadata.schema.clone();
-            let later = stream::iter(requests).then(move |request| {
-                let inner = inner.clone();
-                let schema = schema.clone();
-                async move {
-                    let plan = plan_file(inner, request).await?;
-                    validate_file_policy(&plan)?;
-                    validate_file_ordering(ordering, plan.ordering)?;
-                    super::validation::validate_schema(&plan.metadata.schema, &schema)?;
-                    Ok(plan.partitions)
-                }
+        let file_streams = file_planner.is_none() || multiple_files && preview.streaming_discovery;
+        let schema = metadata.schema.clone();
+        let plans = files.map(move |mut file| {
+            let schema = schema.clone();
+            async move {
+                (&mut file).await?;
+                let plan = Pin::new(&mut file)
+                    .take_output()
+                    .expect("completed file plan");
+                validate_file_ordering(ordering, plan.ordering)?;
+                super::validation::validate_schema(&plan.metadata.schema, &schema)?;
+                Ok(plan)
+            }
+        });
+        if file_streams {
+            let partitions = plans.map(|plan| {
+                scan_partition(async move {
+                    Ok(plan
+                        .await?
+                        .into_reader_with_schema_error(super::error::schema_mismatch))
+                })
             });
-            Ok(
-                ScanPlan::from_stream(metadata, first.partitions.chain(later.try_flatten()))
-                    .with_ordering(ordering),
-            )
-        } else {
-            let later = requests.map(move |request| {
-                let inner = inner.clone();
-                let partition: ScanPartition = Box::pin(async move { inner.open(request).await });
-                Ok(partition)
-            });
-            Ok(
-                ScanPlan::from_stream(metadata, first.partitions.chain(stream::iter(later)))
-                    .with_ordering(ordering),
-            )
+            return Ok(ScanPlan::from_iter(metadata, partitions)
+                .with_file_streams()
+                .with_ordering(ordering));
         }
+        let partitions = stream::iter(plans)
+            .then(|plan| plan)
+            .map_ok(move |plan| {
+                if multiple_files && plan.streaming_discovery {
+                    ScanPlan::whole_input(Box::new(
+                        plan.into_reader_with_schema_error(super::error::schema_mismatch),
+                    ))
+                    .partitions
+                } else {
+                    plan.partitions
+                }
+            })
+            .try_flatten();
+        Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(ordering))
     }
+}
+
+pub(super) async fn open_plan<A>(
+    inner: Arc<A>,
+    file_planner: Option<FilePlanner<A>>,
+    request: ReadRequest,
+) -> Result<ScanPlan>
+where
+    A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
+{
+    let plan = match file_planner {
+        Some(plan) => plan(inner, request).await?,
+        None => ScanPlan::whole_input(inner.open(request).await?),
+    };
+    validate_file_policy(&plan)?;
+    Ok(plan)
 }

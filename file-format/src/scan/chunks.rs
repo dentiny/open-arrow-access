@@ -66,6 +66,6 @@ impl<T: Send + 'static> RecordChunks<T> {
                 .map(|records| (records, (chunks, size))))
         })
         .map_ok(move |records| partition(records, output.clone()));
-        ScanPlan::from_stream(metadata, partitions)
+        ScanPlan::from_stream(metadata, partitions).with_streaming_discovery()
     }
 }

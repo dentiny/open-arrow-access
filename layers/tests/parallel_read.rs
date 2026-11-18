@@ -337,3 +337,60 @@ async fn emission_and_parallel_layers_collect_one_budget_in_either_order() {
         ErrorKind::InvalidInput
     );
 }
+
+#[rstest::rstest]
+#[case::ordered(EmissionPolicy::Ordered)]
+#[case::unordered(EmissionPolicy::Unordered)]
+#[tokio::test]
+async fn file_read_ahead_is_independent_of_emission_policy(#[case] emission: EmissionPolicy) {
+    const ROWS: i32 = 32;
+    let opened = Arc::new(AtomicUsize::new(0));
+    let completed = Arc::new(Semaphore::new(0));
+    let parts = (0..3)
+        .map(|file| {
+            let opened = opened.clone();
+            let completed = completed.clone();
+            Box::pin(async move {
+                opened.fetch_add(1, Ordering::SeqCst);
+                let input = stream::unfold(0, move |row| {
+                    let completed = completed.clone();
+                    async move {
+                        if row == ROWS {
+                            completed.add_permits(1);
+                            None
+                        } else {
+                            Some((Ok(batch(file * ROWS + row)), row + 1))
+                        }
+                    }
+                });
+                Ok(Box::new(StreamReader::records(
+                    input,
+                    metadata(),
+                    OrderRequirement::Reorderable,
+                )) as Box<dyn RecordReader>)
+            }) as ScanPartition
+        })
+        .collect();
+    let mut plan = ScanPlan::new(metadata(), parts)
+        .with_file_streams()
+        .with_ordering(OrderRequirement::Reorderable);
+    plan.emission = emission;
+    let mut reader = open_plan(plan, 2, 1).await;
+    let mut values = vec![value(&reader.next().await.unwrap().unwrap())];
+    // Stop consuming after one batch. Both resident files must read all 32
+    // batches despite Q=1, and their completed queues must keep both slots.
+    tokio::time::timeout(std::time::Duration::from_secs(5), completed.acquire_many(2))
+        .await
+        .expect("both emission policies must read ahead without output consumption")
+        .unwrap()
+        .forget();
+    assert_eq!(opened.load(Ordering::SeqCst), 2);
+    while let Some(batch) = reader.next().await.unwrap() {
+        values.push(value(&batch));
+    }
+    if emission == EmissionPolicy::Unordered {
+        values.sort_unstable();
+    }
+    assert_eq!(values, (0..3 * ROWS).collect::<Vec<_>>());
+    assert_eq!(opened.load(Ordering::SeqCst), 3);
+}

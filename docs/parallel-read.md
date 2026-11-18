@@ -36,9 +36,20 @@ promise a speedup, unordered output, or parallel byte I/O within each reader.
 Call `with_file_planning()` on `FileSetAccessor` or `DirectoryAccessor` when the
 inner format implements `ScanPlanner`. Native partitions (for example, Parquet
 row groups) are flattened in file and record order under the same executor
-budget. Only the first file is planned initially; later files are planned when
-partition discovery reaches them. Later plan schemas, including empty plans,
-must match the first schema. No nested executor or second worker budget is used.
+budget. Plans whose discovery reads a sequential input declare
+`with_streaming_discovery()` (CSV, JSON, WARC and other record-chunked formats).
+For multiple streaming files, each worker plans and drains one file, including
+its native chunks. This overlaps downloading, framing and decoding across at
+most P resident files, with Q queued batches per file. Single-file scans retain
+native chunk parallelism; independent partitions such as Parquet row groups
+continue to share the partition budget. Strict mode previews and caches one
+plan to establish the schema, then all files use the same lazy planning and
+validation pipeline. Streaming-file plans are resolved inside worker slots.
+Union-by-name infers schemas with bounded concurrency before execution and
+retains plans and inference samples for reuse. Its file workers drain those
+retained streams instead of reopening them. Preflight may retain inputs for
+all selected files, separately from the P-file execution limit.
+Strict-mode file plans, including empty plans, must match the fixed schema. No nested executor or second worker budget is used.
 Hugging Face dataset scans enable this mode automatically. Resolved provider
 files can opt in with `files.records(format).with_file_planning()`. Common Crawl
 WARC and segment accessors expose the same builder when their supplied format
@@ -50,12 +61,27 @@ reject mismatches, including empty partitions with different schemas. Partition
 source identifiers may differ. Format-specific discovery may retain an input
 reader, framing state and buffers separately from partition workers.
 
-With P resident partitions and Q queue slots per partition, at most P partition
-readers are active and P * Q batches are queued. A worker reserves queue capacity before
-calling `next`. A finished worker retains its partition slot until its queue has
-drained; a slow first file cannot cause unlimited later files to accumulate.
-The consumer can hold additional batches. Decoder allocations, individual batch
-sizes and compressed input buffers are not bounded by these queue limits.
+For native independent partitions, P bounds resident partitions and each worker
+uses a Q-batch queue, reserving capacity before decoding. Streaming-file scans
+instead give every resident file one unbounded in-memory output queue under both
+ordered and unordered emission.
+Workers continue downloading and decoding without waiting for earlier files to
+finish. Ordered emission drains file queues in their original order; unordered
+emission polls all resident queues for ready batches. The producer/read-ahead path
+is the same, and uses no temporary files or IPC serialization.
+
+Concurrency is the admission limit: at most P streaming files are resident,
+including files that have finished downloading but still have buffered output.
+A finished file does not free its slot until all of its output has drained, so a
+blocked first file cannot cause the entire selection to accumulate in memory.
+Cancellation and errors drop buffered batches and cancel owned workers.
+
+There is currently no memory upper bound for these resident files: read-ahead
+may retain complete decoded files, and memory consumption grows with their size.
+Q does not cap streaming-file queues. Input/decoder buffers and
+caller-held batches add further allocations. Ordinary sequential `open` retains
+its existing lazy behavior without this read-ahead.
+
 Storage's per-reader I/O limit remains separate: P readers may each use their
 configured I/O concurrency. This version does not impose a backend-global cap.
 
@@ -128,8 +154,9 @@ waiting for an earlier partition. FIFO order within each partition is retained;
 there is no guarantee of partition contiguity or a reproducible interleaving.
 Polling rotates among ready receivers to avoid starving a partition. Completed
 partitions retain their slots until their queues drain. Both policies share the
-same worker, reservation-before-decode backpressure, schema checks, fail-fast
-errors and drop cancellation. Queues bound batch counts, not total memory bytes.
+same read-ahead selection, schema checks, fail-fast errors and drop cancellation.
+Independent native partitions reserve queue capacity before decoding; streaming
+files use unbounded memory queues under either emission policy.
 
 ## Opting into unordered emission
 

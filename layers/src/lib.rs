@@ -10,6 +10,7 @@ mod value_lifetime;
 mod prefetch;
 pub use prefetch::{PrefetchAccessor, PrefetchLayer};
 
+mod ordered_buffer;
 mod parallel_read;
 pub use parallel_read::{ParallelReadAccessor, ParallelReadLayer};
 

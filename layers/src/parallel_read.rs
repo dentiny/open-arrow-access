@@ -11,10 +11,11 @@ use open_arrow_access_core::{
     RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan,
     ScanPlanner, async_trait,
 };
-use tokio::{sync::mpsc, task::JoinSet};
+use tokio::task::JoinSet;
 
 use crate::{
     error::partition_task_error,
+    ordered_buffer::{PartitionChannel, partition_channel},
     scan_policy::{ScanPolicy, ScanPolicyAccessor},
     validation::{validate_emission_policy, validate_parallel_read_settings},
 };
@@ -25,9 +26,8 @@ use crate::{
 pub struct ParallelReadLayer {
     /// Maximum resident partitions, including completed partitions with queued batches.
     partitions: NonZeroUsize,
-    /// Maximum queued batches per partition; callers may hold additional delivered batches.
-    /// Bounds queue counts, not decoder allocations or total bytes; configure format
-    /// batch sizes separately.
+    /// Queue capacity for independent native partitions. Streaming files use
+    /// unbounded in-memory queues under either emission policy.
     prefetch: NonZeroUsize,
 }
 
@@ -110,7 +110,8 @@ struct ParallelReader {
     ordering: OrderRequirement,
     metadata: RecordMetadata,
     remaining: Fuse<BoxStream<'static, Result<ScanPartition>>>,
-    partition_receivers: VecDeque<mpsc::Receiver<RecordBatch>>,
+    partition_receivers: VecDeque<BoxStream<'static, RecordBatch>>,
+    read_ahead: bool,
     tasks: JoinSet<Result<()>>,
     settings: ParallelReadOptions,
     emission: EmissionPolicy,
@@ -120,6 +121,7 @@ impl ParallelReader {
     fn new(plan: ScanPlan, settings: ParallelReadOptions) -> Self {
         Self {
             ordering: plan.ordering,
+            read_ahead: plan.file_streams,
             metadata: plan.metadata,
             remaining: plan.partitions.fuse(),
             partition_receivers: VecDeque::new(),
@@ -130,24 +132,15 @@ impl ParallelReader {
     }
 
     fn spawn_partition(&mut self, open: ScanPartition) {
-        let (sender, receiver) = mpsc::channel(self.settings.prefetch.get());
+        let PartitionChannel { sender, batches } =
+            partition_channel(self.settings.prefetch.get(), self.read_ahead);
         let schema = self.metadata.schema.clone();
         self.tasks.spawn(async move {
             let mut reader = open.await?;
             crate::validation::validate_partition_schema(&reader.metadata().schema, &schema)?;
-            loop {
-                // Reserve before decoding so a full queue cannot hide an extra batch.
-                let Ok(permit) = sender.reserve().await else {
-                    return Ok(());
-                };
-                let Some(batch) = reader.next().await? else {
-                    return Ok(());
-                };
-                crate::validation::validate_partition_schema(&batch.schema(), &schema)?;
-                permit.send(batch);
-            }
+            sender.read(reader.as_mut(), &schema).await
         });
-        self.partition_receivers.push_back(receiver);
+        self.partition_receivers.push_back(batches);
     }
 
     fn stop(&mut self) {
@@ -178,10 +171,10 @@ impl ParallelReader {
                 }
                 (index, batch) = poll_fn(|cx| {
                     if emission == EmissionPolicy::Ordered {
-                        return receivers[0].poll_recv(cx).map(|batch| (0, batch));
+                        return receivers[0].poll_next_unpin(cx).map(|batch| (0, batch));
                     }
                     for (index, receiver) in receivers.iter_mut().enumerate() {
-                        if let Poll::Ready(batch) = receiver.poll_recv(cx) {
+                        if let Poll::Ready(batch) = receiver.poll_next_unpin(cx) {
                             return Poll::Ready((index, batch));
                         }
                     }

@@ -33,6 +33,7 @@ open-arrow-access-file-format = { path = "../file-format", default-features = fa
 ] }
 open-arrow-access-test-support.workspace = true
 rstest.workspace = true
+tokio = { workspace = true, features = ["time"] }
 
 [lints]
 workspace = true
