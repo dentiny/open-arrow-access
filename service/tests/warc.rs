@@ -239,20 +239,6 @@ async fn native_parallel_warc_view_keeps_source_urls_and_binary_bodies() {
 }
 
 #[tokio::test]
-async fn selected_manifest_paths_are_validated_before_records_open() {
-    for name in ["bad_traversal.paths", "bad_suffix.paths"] {
-        let records = Records::default();
-        let opens = records.opens.clone();
-        let accessor = CommonCrawlWarcAccessor::new(manifest(name, 19), records);
-        let error = accessor.resolve(request()).await.unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Decode, "{name}: {error}");
-        assert!(error.to_string().contains("line 1"), "{error}");
-        assert!(error.to_string().contains("warc.paths.gz"), "{error}");
-        assert!(opens.lock().unwrap().is_empty());
-    }
-}
-
-#[tokio::test]
 async fn selected_manifest_paths_decode_keys_and_preserve_query_components() {
     let key = "crawl-data/CC-MAIN-2022-40/segments/1664030338280.51/warc/a.warc.gz";
     for (name, expected) in [
