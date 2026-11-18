@@ -11,3 +11,7 @@ pub(super) fn decode(message: &str) -> Error {
 pub(super) fn xml_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
     decode("invalid arXiv bulk manifest XML").with_source(error)
 }
+
+pub(super) fn arrow_error(error: arrow_schema::ArrowError) -> Error {
+    decode("invalid arXiv metadata batch").with_source(error)
+}

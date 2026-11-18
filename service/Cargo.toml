@@ -10,6 +10,7 @@ description = "Dataset source providers for Open Arrow Access"
 arxiv = [
     "oai",
     "format-xml",
+    "dep:arrow-select",
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/tar",
 ]
@@ -60,6 +61,7 @@ format-xml = [
 oai = ["format-xml"]
 
 [dependencies]
+arrow-select = { workspace = true, optional = true }
 arrow-array = { workspace = true, optional = true }
 arrow-json = { workspace = true, optional = true }
 backon = { version = "1.6", default-features = false, features = ["std", "tokio-sleep"] }

@@ -2,6 +2,8 @@
 
 mod error;
 mod manifest;
+mod metadata;
+pub use metadata::{ArxivMetadataIndex, ArxivPdfRecords};
 mod records;
 pub use records::{ArxivReadRequest, ArxivRecords, record_schema};
 mod validation;
