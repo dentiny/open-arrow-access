@@ -135,7 +135,7 @@ Enable the upstream backend and transport features alongside your chosen format:
 ```toml
 [dependencies]
 open-arrow-access = { version = "0.7.0", features = ["format-parquet"] }
-opendal = { version = "0.59.2", default-features = false, features = ["services-s3", "http-transport-reqwest"] }
+opendal = { version = "0.59.5", default-features = false, features = ["services-s3", "http-transport-reqwest"] }
 ```
 
 Configure the operator in your application, then wrap it using the same accessor:

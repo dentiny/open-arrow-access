@@ -15,7 +15,7 @@ the default feature set is empty. Add the published crate to your application:
 ```toml
 [dependencies]
 open-arrow-access = { version = "0.7.0", default-features = false, features = ["format-parquet"] }
-opendal = { version = "=0.59.2", default-features = false, features = ["services-fs"] }
+opendal = { version = "=0.59.5", default-features = false, features = ["services-fs"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
