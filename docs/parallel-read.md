@@ -47,7 +47,7 @@ planned initially; later streaming files are planned inside their worker slots.
 Union-by-name infers schemas with bounded concurrency before execution and
 retains plans and inference samples for reuse. Its file workers drain those
 retained streams instead of reopening them. Preflight may retain inputs for
-all selected files, separately from the P-file execution and read-ahead budgets.
+all selected files, separately from the P-file execution limit.
 Strict-mode later plan schemas, including empty plans, must match the first
 schema. No nested executor or second worker budget is used.
 Hugging Face dataset scans enable this mode automatically. Resolved provider
@@ -71,33 +71,24 @@ bounded by these queue limits.
 
 Ordered multi-file scans additionally allow a later streaming file to continue
 reading when its Q-batch queue is full. Additional batches enter an in-memory
-read-ahead queue, sharing a default **64 MiB budget for the entire scan**. The
-head file continues streaming through its ordinary queue. There are no temporary
-files, IPC serialization or filesystem operations in this read-ahead path.
+read-ahead queue with no byte or batch limit. The head file continues streaming
+through its ordinary Q-batch queue. This path uses no temporary files or IPC
+serialization.
 
-Each queued batch holds memory credits based on `get_array_memory_size()`, with
-a minimum charge of 1 KiB to bound bookkeeping for empty/zero-column batches.
-Shared Arrow buffers may be counted more than once. Credits are released when a
-batch is delivered or dropped. This is an additional queued-Arrow-memory budget,
-not a total RSS cap: P * Q ordinary output slots, input/decoder buffers, one
-in-flight batch per worker, and caller-held batches are separate allocations.
+Concurrency is the admission limit: at most P streaming files are resident,
+including files that have finished downloading but still have buffered output.
+A finished file does not free its slot until all of its output has drained, so a
+blocked first file cannot cause the entire selection to accumulate in memory.
+The consumer drains ordinary and read-ahead batches in original order. When a
+file becomes the head, its worker returns to ordinary bounded delivery after its
+already-buffered output. Cancellation and errors drop buffered batches.
 
-A full budget pauses further read-ahead. A batch exceeding the budget (or the
-semaphore's single-admission limit) waits until its file becomes the head and is
-then delivered through the ordinary queue. Head promotion bypasses read-ahead
-admission so a farther file holding memory credits cannot deadlock an earlier
-file. The consumer drains ordinary and read-ahead batches in original order.
-Finished files retain their resident slot until all queued output is drained;
-cancellation and errors release buffered batches and credits.
-
-Configure the shared budget with `ParallelReadLayer::new(partitions, prefetch)
-.with_ordered_file_buffer(NonZeroUsize::new(256 * 1024 * 1024))`, or use
-`.with_ordered_file_buffer(None)` to keep only the Q-batch queues. The option
-participates in execution-policy conflict checks. Native independent partitions,
-unordered execution and ordinary sequential `open` do not use extra read-ahead.
-With ordered output and finite memory, sustained downloads can proceed only as
-far as this window allows; a larger window or unordered emission is needed to
-avoid backpressure beyond it.
+There is currently no memory upper bound for these resident files: read-ahead
+may retain complete decoded files, and memory consumption grows with their size.
+Q bounds ordinary output slots, but does not limit the extra read-ahead queue.
+Input/decoder buffers and caller-held batches add further allocations. Native
+independent partitions, unordered execution and ordinary sequential `open` retain
+their existing queue behavior without this extra read-ahead.
 
 Storage's per-reader I/O limit remains separate: P readers may each use their
 configured I/O concurrency. This version does not impose a backend-global cap.

@@ -1,61 +1,15 @@
-//! Byte-budgeted in-memory read-ahead for ordered streaming files.
-
-use std::sync::Arc;
+//! In-memory read-ahead for concurrency-limited ordered streaming files.
 
 use futures::{
     StreamExt,
     stream::{self, BoxStream},
 };
 use open_arrow_access_core::{RecordBatch, RecordReader, Result, SchemaRef};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
-
-// Bound queue bookkeeping even for zero-column or empty batches.
-const MIN_BATCH_CHARGE: usize = 1024;
-
-#[derive(Clone)]
-pub(crate) struct ReadAheadBudget {
-    permits: Arc<Semaphore>,
-    limit: usize,
-}
-
-impl ReadAheadBudget {
-    pub(crate) fn new(limit: usize) -> Self {
-        Self {
-            permits: Arc::new(Semaphore::new(limit)),
-            limit,
-        }
-    }
-
-    async fn reserve(
-        &self,
-        batch: &RecordBatch,
-        head: &mut watch::Receiver<bool>,
-    ) -> Option<OwnedSemaphorePermit> {
-        let bytes = batch.get_array_memory_size().max(MIN_BATCH_CHARGE);
-        if bytes > self.limit || u32::try_from(bytes).is_err() {
-            // An oversized batch cannot enter read-ahead. Wait until this file
-            // becomes the head, then deliver through its ordinary bounded queue.
-            let _ = head.wait_for(|head| *head).await;
-            return None;
-        }
-        tokio::select! {
-            biased;
-            // Promotion must bypass byte admission: a later file may own the
-            // entire budget, and its output cannot drain before this file.
-            _ = head.wait_for(|head| *head) => None,
-            permit = self.permits.clone().acquire_many_owned(bytes as u32) => permit.ok(),
-        }
-    }
-}
-
-pub(crate) struct BufferedBatch {
-    batch: RecordBatch,
-    _permit: OwnedSemaphorePermit,
-}
+use tokio::sync::{mpsc, watch};
 
 pub(crate) enum PartitionOutput {
     Batch(RecordBatch),
-    ReadAhead(mpsc::Receiver<BufferedBatch>),
+    ReadAhead(mpsc::UnboundedReceiver<RecordBatch>),
 }
 
 pub(crate) struct PartitionReceiver {
@@ -69,14 +23,11 @@ impl PartitionReceiver {
         head: watch::Sender<bool>,
     ) -> Self {
         let batches = stream::try_unfold(
-            (receiver, None::<mpsc::Receiver<BufferedBatch>>),
+            (receiver, None::<mpsc::UnboundedReceiver<RecordBatch>>),
             |(mut receiver, mut buffered)| async move {
                 loop {
                     if let Some(input) = &mut buffered {
-                        if let Some(BufferedBatch { batch, _permit }) = input.recv().await {
-                            // Delivered batches belong to the caller, rather than
-                            // the executor's queued-output memory budget.
-                            drop(_permit);
+                        if let Some(batch) = input.recv().await {
                             return Ok(Some((batch, (receiver, buffered))));
                         }
                         buffered = None;
@@ -100,17 +51,17 @@ impl PartitionReceiver {
     }
 }
 
-/// Read a non-head file beyond its full Q-batch queue while shared memory permits.
+/// Read a non-head file beyond its full Q-batch queue into memory.
+/// The executor bounds resident files; this queue has no byte or batch limit.
 /// False means EOF/cancellation; true resumes ordinary bounded delivery on head
 /// promotion. The queue token keeps earlier, buffered and later batches ordered.
 pub(crate) async fn buffer_file(
     reader: &mut dyn RecordReader,
     sender: &mpsc::Sender<PartitionOutput>,
-    head: &mut watch::Receiver<bool>,
+    head: &watch::Receiver<bool>,
     schema: &SchemaRef,
-    budget: &ReadAheadBudget,
 ) -> Result<bool> {
-    let (buffered, input) = mpsc::channel((budget.limit / MIN_BATCH_CHARGE).max(1));
+    let (buffered, input) = mpsc::unbounded_channel();
     let mut pending = Some(input);
     loop {
         if sender.is_closed() {
@@ -142,33 +93,12 @@ pub(crate) async fn buffer_file(
             return Ok(false);
         };
         crate::validation::validate_partition_schema(&batch.schema(), schema)?;
-        let permit = tokio::select! {
-            _ = sender.closed() => return Ok(false),
-            permit = budget.reserve(&batch, head) => permit,
-        };
-        if let Some(permit) = permit {
-            if buffered
-                .send(BufferedBatch {
-                    batch,
-                    _permit: permit,
-                })
-                .await
-                .is_err()
-            {
-                return Ok(false);
-            }
-        } else {
-            drop(buffered);
-            if let Some(input) = pending
-                && sender
-                    .send(PartitionOutput::ReadAhead(input))
-                    .await
-                    .is_err()
-            {
-                return Ok(false);
-            }
-            return Ok(sender.send(PartitionOutput::Batch(batch)).await.is_ok());
+        if buffered.send(batch).is_err() {
+            return Ok(false);
         }
+        // Ready in-memory sources need a cancellation/fairness point now that
+        // read-ahead no longer waits for queue capacity or memory admission.
+        tokio::task::yield_now().await;
     }
 }
 

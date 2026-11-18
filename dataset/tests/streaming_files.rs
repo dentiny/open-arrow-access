@@ -350,7 +350,9 @@ async fn later_files_finish_multi_chunk_downloads_while_first_file_is_blocked() 
                     .expect("later file must download to EOF before the first is released")
                     .unwrap()
                     .forget();
-                assert!(storage.progress[file].load(Ordering::SeqCst) >= STREAM_ROWS);
+                // The duplicate fourth selection must not start reading just
+                // because an earlier worker finished and buffered its output.
+                assert_eq!(storage.progress[file].load(Ordering::SeqCst), STREAM_ROWS);
             }
             assert_eq!(storage.progress[0].load(Ordering::SeqCst), 0);
             assert!(!task.is_finished());
@@ -362,48 +364,6 @@ async fn later_files_finish_multi_chunk_downloads_while_first_file_is_blocked() 
                 .unwrap();
             assert_eq!(actual, expected, "{format}, union={union}");
             assert_eq!(storage.active.load(Ordering::SeqCst), 0);
-        }
-    }
-}
-
-#[tokio::test]
-async fn exhausted_or_disabled_memory_budget_restores_backpressure_without_losing_rows() {
-    for limit in [None, NonZeroUsize::new(1), NonZeroUsize::new(16 * 1024)] {
-        for union in [false, true] {
-            let storage = sustained_source("json");
-            let files = sustained_files(storage.clone(), "json", union);
-            let mut request = FileSetRequest::new(["0", "1"]);
-            request.options.batch_size = NonZeroUsize::MIN;
-            let expected = collect(files.open(request.clone()).await.unwrap()).await;
-            let reader = files
-                .layer(
-                    ParallelReadLayer::new(NonZeroUsize::new(2).unwrap(), NonZeroUsize::MIN)
-                        .with_ordered_file_buffer(limit),
-                )
-                .open(request)
-                .await
-                .unwrap();
-            storage.enabled.store(true, Ordering::SeqCst);
-            let task = tokio::spawn(collect(reader));
-            tokio::time::timeout(Duration::from_secs(5), storage.started.acquire())
-                .await
-                .unwrap()
-                .unwrap()
-                .forget();
-            assert!(
-                tokio::time::timeout(Duration::from_millis(100), storage.finished[1].acquire())
-                    .await
-                    .is_err()
-            );
-            assert!(storage.progress[1].load(Ordering::SeqCst) < STREAM_ROWS);
-            storage.release.add_permits(1);
-            assert_eq!(
-                tokio::time::timeout(Duration::from_secs(10), task)
-                    .await
-                    .unwrap()
-                    .unwrap(),
-                expected
-            );
         }
     }
 }

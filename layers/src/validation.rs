@@ -30,16 +30,8 @@ pub(crate) fn validate_parallel_read_settings(
     previous: Option<ParallelReadOptions>,
     settings: ParallelReadOptions,
 ) -> Result<()> {
-    validate_ordered_file_buffer(settings.ordered_file_buffer)?;
     if previous.is_some_and(|previous| previous != settings) {
         return Err(crate::error::conflicting_parallel_settings());
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_ordered_file_buffer(bytes: Option<std::num::NonZeroUsize>) -> Result<()> {
-    if bytes.is_some_and(|bytes| bytes.get() > tokio::sync::Semaphore::MAX_PERMITS) {
-        return Err(crate::error::invalid_ordered_file_buffer());
     }
     Ok(())
 }

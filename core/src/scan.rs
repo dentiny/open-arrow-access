@@ -24,12 +24,9 @@ pub enum EmissionPolicy {
 pub struct ParallelReadOptions {
     /// Maximum resident partitions, including completed queues awaiting consumption.
     pub partitions: NonZeroUsize,
-    /// Maximum queued batches per partition; does not bound total bytes.
+    /// Capacity of each ordinary batch queue. Ordered streaming-file read-ahead
+    /// may retain additional batches outside these queues; this is not a byte cap.
     pub prefetch: NonZeroUsize,
-    /// Shared extra Arrow-memory budget across ordered streaming-file queues.
-    /// None disables read-ahead beyond the ordinary Q-batch queues. Input/decoder
-    /// buffers, in-flight batches and delivered batches are separate allocations.
-    pub ordered_file_buffer: Option<NonZeroUsize>,
 }
 
 /// A lazy, independently owned partition opener. Partition stream order defines logical order.
@@ -148,7 +145,7 @@ impl ScanPlan {
         self
     }
 
-    /// Identify whole streaming-file partitions for bounded ordered in-memory prefetch.
+    /// Identify whole streaming-file partitions for ordered in-memory prefetch.
     pub fn with_file_streams(mut self) -> Self {
         self.file_streams = true;
         self

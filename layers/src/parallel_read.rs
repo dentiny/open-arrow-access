@@ -18,7 +18,7 @@ use tokio::{
 
 use crate::{
     error::partition_task_error,
-    ordered_buffer::{PartitionOutput, PartitionReceiver, ReadAheadBudget, buffer_file},
+    ordered_buffer::{PartitionOutput, PartitionReceiver, buffer_file},
     scan_policy::{ScanPolicy, ScanPolicyAccessor},
     validation::{validate_emission_policy, validate_parallel_read_settings},
 };
@@ -29,11 +29,10 @@ use crate::{
 pub struct ParallelReadLayer {
     /// Maximum resident partitions, including completed partitions with queued batches.
     partitions: NonZeroUsize,
-    /// Maximum queued batches per partition; callers may hold additional delivered batches.
-    /// Bounds queue counts, not decoder allocations or total bytes; configure format
-    /// batch sizes separately.
+    /// Capacity of each ordinary worker queue. Ordered streaming-file read-ahead
+    /// may retain additional batches outside these queues. Decoder allocations and
+    /// caller-held batches are also separate; this is not a total memory bound.
     prefetch: NonZeroUsize,
-    ordered_file_buffer: Option<NonZeroUsize>,
 }
 
 impl ParallelReadLayer {
@@ -41,18 +40,7 @@ impl ParallelReadLayer {
         Self {
             partitions,
             prefetch,
-            ordered_file_buffer: NonZeroUsize::new(64 * 1024 * 1024),
         }
-    }
-
-    /// Shared extra Arrow-memory budget for ordered streaming-file read-ahead.
-    /// Defaults to 64 MiB per scan, in addition to the Q-batch output queues.
-    /// None disables extra read-ahead. A full budget applies backpressure;
-    /// decoder/input buffers, one in-flight batch per worker and delivered batches
-    /// are separate. Native partitions and unordered scans use only their queues.
-    pub fn with_ordered_file_buffer(mut self, bytes: Option<NonZeroUsize>) -> Self {
-        self.ordered_file_buffer = bytes;
-        self
     }
 }
 
@@ -107,7 +95,6 @@ impl ScanPolicy for ParallelReadLayer {
         let settings = ParallelReadOptions {
             partitions: self.partitions,
             prefetch: self.prefetch,
-            ordered_file_buffer: self.ordered_file_buffer,
         };
         validate_parallel_read_settings(plan.parallel_read, settings)?;
         plan.parallel_read = Some(settings);
@@ -117,9 +104,7 @@ impl ScanPolicy for ParallelReadLayer {
 
 pub(crate) fn open_plan(plan: ScanPlan) -> Result<Box<dyn RecordReader>> {
     validate_emission_policy(plan.emission, plan.ordering)?;
-    if let Some(settings) = plan.parallel_read {
-        crate::validation::validate_ordered_file_buffer(settings.ordered_file_buffer)?;
-    }
+
     match plan.parallel_read {
         Some(settings) => Ok(Box::new(ParallelReader::new(plan, settings))),
         None => Ok(Box::new(plan.into_reader())),
@@ -131,7 +116,7 @@ struct ParallelReader {
     metadata: RecordMetadata,
     remaining: Fuse<BoxStream<'static, Result<ScanPartition>>>,
     partition_receivers: VecDeque<PartitionReceiver>,
-    read_ahead: Option<ReadAheadBudget>,
+    read_ahead: bool,
     tasks: JoinSet<Result<()>>,
     settings: ParallelReadOptions,
     emission: EmissionPolicy,
@@ -141,10 +126,7 @@ impl ParallelReader {
     fn new(plan: ScanPlan, settings: ParallelReadOptions) -> Self {
         Self {
             ordering: plan.ordering,
-            read_ahead: (plan.file_streams && plan.emission == EmissionPolicy::Ordered)
-                .then_some(settings.ordered_file_buffer)
-                .flatten()
-                .map(|bytes| ReadAheadBudget::new(bytes.get())),
+            read_ahead: plan.file_streams && plan.emission == EmissionPolicy::Ordered,
             metadata: plan.metadata,
             remaining: plan.partitions.fuse(),
             partition_receivers: VecDeque::new(),
@@ -157,15 +139,15 @@ impl ParallelReader {
     fn spawn_partition(&mut self, open: ScanPartition) {
         let (sender, receiver) = mpsc::channel(self.settings.prefetch.get());
         let schema = self.metadata.schema.clone();
-        let (head, mut worker_head) = watch::channel(self.partition_receivers.is_empty());
-        let read_ahead = self.read_ahead.clone();
+        let (head, worker_head) = watch::channel(self.partition_receivers.is_empty());
+        let read_ahead = self.read_ahead;
         self.tasks.spawn(async move {
             let mut reader = open.await?;
             crate::validation::validate_partition_schema(&reader.metadata().schema, &schema)?;
             let mut read_ahead = read_ahead;
             loop {
                 let is_head = *worker_head.borrow();
-                if !is_head && let Some(budget) = &read_ahead {
+                if !is_head && read_ahead {
                     match sender.try_reserve() {
                         Ok(permit) => {
                             let Some(batch) = reader.next().await? else {
@@ -178,14 +160,12 @@ impl ParallelReader {
                         Err(mpsc::error::TrySendError::Closed(_)) => return Ok(()),
                         Err(mpsc::error::TrySendError::Full(_)) => {}
                     }
-                    // Extra read-ahead is shared across the scan, with byte
-                    // admission before enqueueing each additional batch.
-                    if !buffer_file(reader.as_mut(), &sender, &mut worker_head, &schema, budget)
-                        .await?
-                    {
+                    // Later files keep reading into memory; completed files
+                    // retain their resident slot until output has drained.
+                    if !buffer_file(reader.as_mut(), &sender, &worker_head, &schema).await? {
                         return Ok(());
                     }
-                    read_ahead = None;
+                    read_ahead = false;
                 }
                 // The head file and memory-only paths reserve before decoding.
                 let Ok(permit) = sender.reserve().await else {

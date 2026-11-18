@@ -26,7 +26,6 @@ async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
         ParallelReadOptions {
             partitions: NonZeroUsize::new(2).unwrap(),
             prefetch: NonZeroUsize::MIN,
-            ordered_file_buffer: None,
         },
     );
     let (sender, ready) = mpsc::channel(1);
