@@ -26,7 +26,7 @@ pub fn schema() -> SchemaRef {
                 vec![
                     Field::new("pmcid", DataType::Utf8, false),
                     Field::new("version", DataType::UInt32, true),
-                    Field::new("pmid", DataType::Utf8, true),
+                    Field::new("pmid", DataType::UInt64, true),
                     Field::new("doi", DataType::Utf8, true),
                     Field::new("title", DataType::LargeUtf8, true),
                     Field::new("citation", DataType::LargeUtf8, true),
