@@ -100,7 +100,6 @@ impl ScanPolicy for ParallelReadLayer {
 
 pub(crate) fn open_plan(plan: ScanPlan) -> Result<Box<dyn RecordReader>> {
     validate_emission_policy(plan.emission, plan.ordering)?;
-
     match plan.parallel_read {
         Some(settings) => Ok(Box::new(ParallelReader::new(plan, settings))),
         None => Ok(Box::new(plan.into_reader())),
@@ -190,7 +189,6 @@ impl ParallelReader {
                     }
                     // EOF only frees a resident slot after that receiver is drained.
                     self.partition_receivers.remove(index);
-
                 }
                 else => return Ok(None),
             }

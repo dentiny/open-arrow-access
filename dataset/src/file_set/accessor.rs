@@ -194,7 +194,7 @@ where
         // Establish the schema from a cached plan without removing that file
         // from the common planning, validation and execution pipeline.
         let preview = files.peek_mut().ok_or_else(|| empty_selection(operation))?;
-        Pin::new(&mut *preview).await?;
+        (&mut *preview).await?;
         let preview = Pin::new(preview).output_mut().expect("completed file plan");
         let ordering = self.capability().ordering.combine(preview.ordering);
         let metadata = RecordMetadata {
@@ -206,7 +206,7 @@ where
         let plans = files.map(move |mut file| {
             let schema = schema.clone();
             async move {
-                Pin::new(&mut file).await?;
+                (&mut file).await?;
                 let plan = Pin::new(&mut file)
                     .take_output()
                     .expect("completed file plan");

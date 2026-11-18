@@ -49,9 +49,8 @@ where
         if empty {
             continue;
         }
-        let file_ordering = plan.ordering;
         let source = plan.metadata.schema.clone();
-        ordering = ordering.combine(file_ordering);
+        ordering = ordering.combine(plan.ordering);
         validate_fields(source.fields())?;
         union_schema.merge(source.as_ref())?;
         files.push(plan);
@@ -74,29 +73,21 @@ where
     // path without reopening or re-inferring any selected file.
     let can_flatten_native_partitions =
         file_planner.is_some() && files.iter().all(|plan| !plan.streaming_discovery);
-    if files.len() > 1 && !can_flatten_native_partitions {
-        let partitions = files.into_iter().map(move |plan| {
-            let alignment = Arc::new(AlignmentPlan::new(
-                plan.metadata.schema.clone(),
-                target.clone(),
-            )?);
-            let partition: ScanPartition =
-                Box::pin(async move { align_reader(Box::new(plan.into_reader()), alignment) });
-            Ok(partition)
-        });
-        return Ok(ScanPlan::from_stream(metadata, stream::iter(partitions))
-            .with_file_streams()
-            .with_ordering(ordering));
-    }
+    let file_streams = files.len() > 1 && !can_flatten_native_partitions;
     let partitions = stream::iter(files)
         .map(move |plan| {
-            // The retained reader was opened with the full source schema.
-            // Alignment also projects columns and preserves zero-column rows.
+            // Alignment projects the retained full source schema and preserves
+            // zero-column rows, for both whole files and native partitions.
             let alignment = Arc::new(AlignmentPlan::new(
                 plan.metadata.schema.clone(),
                 target.clone(),
             )?);
-            Ok(plan.partitions.map(move |partition| {
+            let partitions = if file_streams {
+                ScanPlan::whole_input(Box::new(plan.into_reader())).partitions
+            } else {
+                plan.partitions
+            };
+            Ok(partitions.map(move |partition| {
                 let partition = partition?;
                 let alignment = alignment.clone();
                 let aligned: ScanPartition =
@@ -105,7 +96,9 @@ where
             }))
         })
         .try_flatten();
-    Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(ordering))
+    let mut plan = ScanPlan::from_stream(metadata, partitions).with_ordering(ordering);
+    plan.file_streams = file_streams;
+    Ok(plan)
 }
 
 fn align_reader(
