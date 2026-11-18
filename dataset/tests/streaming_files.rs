@@ -224,7 +224,12 @@ async fn compressed_file_discovery_overlaps_within_budget_and_keeps_order() {
                 .expect("resident files must read concurrently")
                 .unwrap()
                 .forget();
-                assert_eq!(storage.active.load(Ordering::SeqCst), concurrency);
+                // Union inference retains one input plan per selection; only P
+                // workers may poll those streams during execution.
+                assert_eq!(
+                    storage.active.load(Ordering::SeqCst),
+                    if union { 4 } else { concurrency }
+                );
                 assert_eq!(storage.started.available_permits(), 0);
                 storage.release.add_permits(4);
                 let actual = tokio::time::timeout(Duration::from_secs(5), task)
@@ -235,7 +240,7 @@ async fn compressed_file_discovery_overlaps_within_budget_and_keeps_order() {
                     actual, expected,
                     "{format}, union={union}, concurrency={concurrency}"
                 );
-                assert!(storage.peak.load(Ordering::SeqCst) <= concurrency);
+                assert!(storage.peak.load(Ordering::SeqCst) <= if union { 4 } else { concurrency });
                 assert_eq!(storage.active.load(Ordering::SeqCst), 0);
             }
         }
@@ -347,7 +352,7 @@ async fn later_files_finish_multi_chunk_downloads_while_first_file_is_blocked() 
             }
             assert_eq!(storage.progress[0].load(Ordering::SeqCst), 0);
             assert!(!task.is_finished());
-            assert!(storage.peak.load(Ordering::SeqCst) <= 3);
+            assert!(storage.peak.load(Ordering::SeqCst) <= if union { 4 } else { 3 });
             storage.release.add_permits(1);
             let actual = tokio::time::timeout(Duration::from_secs(10), task)
                 .await

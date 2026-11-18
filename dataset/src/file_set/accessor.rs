@@ -13,7 +13,7 @@ use super::{
     validation::{validate_file_ordering, validate_file_policy},
 };
 
-const METADATA_CONCURRENCY: usize = 16;
+pub(super) const METADATA_CONCURRENCY: usize = 16;
 
 pub(super) type FilePlanner<A> = fn(Arc<A>, ReadRequest) -> BoxFuture<'static, Result<ScanPlan>>;
 
@@ -51,8 +51,9 @@ impl<A> FileSetAccessor<A> {
 
     /// Union compatible schemas by name, recursively aligning Struct/List fields
     /// and filling missing fields with null. Inspect all files before emitting rows;
-    /// readers are then reopened lazily with only selected source columns.
-    /// Their projected schema must match the corresponding inspected fields.
+    /// files are opened with bounded concurrency and their plans are retained
+    /// for execution, including inference samples. Projection is applied during
+    /// alignment; retained readers decode the full source schema.
     /// Zero-column inputs with no rows are skipped; an all-empty inferred set fails.
     /// The default remains exact projected-schema matching.
     pub fn with_union_by_name(mut self) -> Self {
