@@ -90,8 +90,8 @@ and the [TAR example](../examples/read_tar.rs).
 | `FileSetAccessor` | Always available | Caller order; repeated objects retained | Same strict/union-by-name policies; empty selection is invalid |
 | Hugging Face Parquet split | `service-huggingface` | Sorted shards from the selected config/split and pinned export commit | Reuses Parquet and FileSet |
 
-With union by name enabled, each file is inspected in sequence before data is
-emitted, then reopened lazily. Missing fields receive nulls; conflicting types or
+With union by name enabled, files are inspected with bounded concurrency before
+data is emitted, and the resulting plans are reused for reading. Missing fields receive nulls; conflicting types or
 metadata fail. See the [union-by-name contract](../dataset/README.md#union-by-name).
 
 Multi-file contents are read lazily and sequentially. Directory discovery collects

@@ -774,7 +774,7 @@ async fn union_by_name_preflight_rejects_type_and_metadata_conflicts_and_drops_r
             .err()
             .unwrap();
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
-        assert_eq!(files.max_active.load(Ordering::SeqCst), 1);
+        assert_eq!(files.max_active.load(Ordering::SeqCst), 2);
         assert_eq!(files.active.load(Ordering::SeqCst), 0);
     }
 }
@@ -786,7 +786,7 @@ async fn union_by_name_still_checks_each_batch_against_its_source_schema() {
     let files = Files::new([("a", FileData::new(declared, vec![batch(other, &[1])]))]);
     let accessor = FileSetAccessor::new(files.clone()).with_union_by_name();
     let mut reader = accessor.open(FileSetRequest::new(["a"])).await.unwrap();
-    assert_eq!(files.active.load(Ordering::SeqCst), 0);
+    assert_eq!(files.active.load(Ordering::SeqCst), 1);
     assert_eq!(
         reader.next().await.unwrap_err().operation(),
         "read_file_set"
@@ -796,7 +796,7 @@ async fn union_by_name_still_checks_each_batch_against_its_source_schema() {
 }
 
 #[tokio::test]
-async fn union_by_name_rejects_a_schema_that_changes_after_preflight() {
+async fn union_by_name_reuses_the_preflight_reader() {
     #[derive(Clone)]
     struct Changing(Arc<AtomicUsize>);
     #[async_trait]
@@ -822,13 +822,11 @@ async fn union_by_name_rejects_a_schema_that_changes_after_preflight() {
             )))
         }
     }
-    let accessor = FileSetAccessor::new(Changing(Arc::default())).with_union_by_name();
+    let opens = Arc::default();
+    let accessor = FileSetAccessor::new(Changing(Arc::clone(&opens))).with_union_by_name();
     let mut reader = accessor.open(FileSetRequest::new(["a"])).await.unwrap();
-    assert_eq!(
-        reader.next().await.unwrap_err().operation(),
-        "read_file_set"
-    );
     assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(opens.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
