@@ -1,4 +1,12 @@
-use std::{collections::VecDeque, num::NonZeroUsize, task::Poll};
+use std::{
+    collections::VecDeque,
+    num::NonZeroUsize,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    task::Poll,
+};
 
 use futures::{
     StreamExt,
@@ -11,10 +19,7 @@ use open_arrow_access_core::{
     RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan,
     ScanPlanner, async_trait,
 };
-use tokio::{
-    sync::{mpsc, watch},
-    task::JoinSet,
-};
+use tokio::{sync::mpsc, task::JoinSet};
 
 use crate::{
     error::partition_task_error,
@@ -139,14 +144,15 @@ impl ParallelReader {
     fn spawn_partition(&mut self, open: ScanPartition) {
         let (sender, receiver) = mpsc::channel(self.settings.prefetch.get());
         let schema = self.metadata.schema.clone();
-        let (head, worker_head) = watch::channel(self.partition_receivers.is_empty());
+        let is_head = Arc::new(AtomicBool::new(self.partition_receivers.is_empty()));
+        let worker_head = is_head.clone();
         let read_ahead = self.read_ahead;
         self.tasks.spawn(async move {
             let mut reader = open.await?;
             crate::validation::validate_partition_schema(&reader.metadata().schema, &schema)?;
             let mut read_ahead = read_ahead;
             loop {
-                let is_head = *worker_head.borrow();
+                let is_head = worker_head.load(Ordering::Acquire);
                 if !is_head && read_ahead {
                     match sender.try_reserve() {
                         Ok(permit) => {
@@ -179,7 +185,7 @@ impl ParallelReader {
             }
         });
         self.partition_receivers
-            .push_back(PartitionReceiver::new(receiver, head));
+            .push_back(PartitionReceiver::new(receiver, is_head));
     }
 
     fn stop(&mut self) {

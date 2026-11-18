@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use open_arrow_access_core::{OrderRequirement, Schema};
 
 use super::*;
@@ -38,7 +36,8 @@ async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
     let (sender, closed) = mpsc::channel(1);
     drop(sender);
     reader.partition_receivers.extend(
-        [closed, ready].map(|receiver| PartitionReceiver::new(receiver, watch::channel(false).0)),
+        [closed, ready]
+            .map(|receiver| PartitionReceiver::new(receiver, Arc::new(AtomicBool::new(false)))),
     );
 
     // Discovery replaces the closed queue before polling output again.

@@ -1,11 +1,16 @@
 //! In-memory read-ahead for concurrency-limited ordered streaming files.
 
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 use futures::{
     StreamExt,
     stream::{self, BoxStream},
 };
 use open_arrow_access_core::{RecordBatch, RecordReader, Result, SchemaRef};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
 
 pub(crate) enum PartitionOutput {
     Batch(RecordBatch),
@@ -14,14 +19,11 @@ pub(crate) enum PartitionOutput {
 
 pub(crate) struct PartitionReceiver {
     pub(crate) batches: BoxStream<'static, Result<RecordBatch>>,
-    head: watch::Sender<bool>,
+    is_head: Arc<AtomicBool>,
 }
 
 impl PartitionReceiver {
-    pub(crate) fn new(
-        receiver: mpsc::Receiver<PartitionOutput>,
-        head: watch::Sender<bool>,
-    ) -> Self {
+    pub(crate) fn new(receiver: mpsc::Receiver<PartitionOutput>, is_head: Arc<AtomicBool>) -> Self {
         let batches = stream::try_unfold(
             (receiver, None::<mpsc::UnboundedReceiver<RecordBatch>>),
             |(mut receiver, mut buffered)| async move {
@@ -43,11 +45,11 @@ impl PartitionReceiver {
             },
         )
         .boxed();
-        Self { batches, head }
+        Self { batches, is_head }
     }
 
     pub(crate) fn promote(&self) {
-        self.head.send_replace(true);
+        self.is_head.store(true, Ordering::Release);
     }
 }
 
@@ -58,7 +60,7 @@ impl PartitionReceiver {
 pub(crate) async fn buffer_file(
     reader: &mut dyn RecordReader,
     sender: &mpsc::Sender<PartitionOutput>,
-    head: &watch::Receiver<bool>,
+    is_head: &AtomicBool,
     schema: &SchemaRef,
 ) -> Result<bool> {
     let (buffered, input) = mpsc::unbounded_channel();
@@ -72,8 +74,7 @@ pub(crate) async fn buffer_file(
         {
             permit.send(PartitionOutput::ReadAhead(pending.take().unwrap()));
         }
-        let is_head = *head.borrow();
-        if is_head {
+        if is_head.load(Ordering::Acquire) {
             drop(buffered);
             if let Some(input) = pending
                 && sender
