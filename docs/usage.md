@@ -122,8 +122,10 @@ Storage retry and timeout policies are opt-in through `StorageConfig`. With
 or HTTP-date form. The wait is the larger of the server delay and exponential
 backoff; missing or invalid headers use normal backoff. A server delay above
 `max_delay` returns the error immediately instead of retrying before the server
-allows it. `max_retries` still limits retries after the initial attempt.
-`TimeoutConfig` applies to each attempt and body read, excluding backoff.
+allows it. A server delay pauses every new attempt through the same operator.
+`max_retries` still limits retries after the initial attempt.
+`TimeoutConfig` applies to each attempt and body read, excluding backoff and
+server delays.
 Cancelled operations stop waiting and issue no further requests.
 
 ## Use S3 or another OpenDAL backend

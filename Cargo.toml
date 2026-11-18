@@ -161,8 +161,3 @@ unsafe_code = "forbid"
 
 [lints]
 workspace = true
-
-# Temporary until OpenDAL publishes RetryInterceptor::retry_delay.
-[patch.crates-io]
-opendal-core = { git = "https://github.com/dentiny/opendal.git", rev = "2bf4c9cd289f8881289910afcdc239a4192c4421" }
-opendal-layer-retry = { git = "https://github.com/dentiny/opendal.git", rev = "2bf4c9cd289f8881289910afcdc239a4192c4421" }

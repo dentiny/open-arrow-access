@@ -78,10 +78,8 @@ impl StorageConfig {
                 layer = layer.with_jitter();
             }
             operator = operator
-                .layer(crate::retry::HttpRetryAfterLayer)
-                .layer(layer.with_notify(crate::retry::RetryAfter {
-                    max_delay: retry.max_delay,
-                }));
+                .layer(crate::retry::RetryAfterLayer::new(retry.max_delay))
+                .layer(layer);
         }
         Ok(operator)
     }
