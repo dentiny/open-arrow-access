@@ -1,5 +1,8 @@
 # Common Crawl WARC data
 
+See the [data hierarchy and format guide](src/commoncrawl/README.md) for crawl,
+segment, file and record boundaries, plus WARC/WAT/WET differences.
+
 ## Service and data
 
 Common Crawl publishes web crawl data, including WARC files containing crawl
