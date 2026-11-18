@@ -4,7 +4,7 @@ use percent_encoding::percent_decode_str;
 use url::Url;
 
 pub(super) struct Resolved {
-    /// Canonical output key or foreign URL, including permitted query/fragment.
+    /// Canonical output key or foreign URL, including query/fragment.
     pub locator: String,
     /// Decoded storage key used for prefix and format selection.
     pub path: String,
@@ -60,7 +60,7 @@ impl Context {
             base,
         })
     }
-    pub fn resolve(&self, spec: &PathsManifest, value: &str) -> PathResult<Resolved> {
+    pub fn resolve(&self, value: &str) -> PathResult<Resolved> {
         validate_raw(value)?;
         if value.starts_with("//") {
             return Err("network-path references are forbidden");
@@ -86,9 +86,6 @@ impl Context {
             };
             (key, value[split..].to_owned(), None)
         };
-        if !spec.allow_query_fragment && !suffix.is_empty() {
-            return Err("query and fragment are forbidden");
-        }
         if !key.starts_with(&self.base) {
             return Err("path escapes the configured base");
         }
@@ -176,7 +173,7 @@ impl PathsManifest {
             return Ok(None);
         }
         let resolved = context
-            .resolve(self, value)
+            .resolve(value)
             .map_err(|e| self.error(ErrorKind::Decode, number, e))?;
         if self
             .prefix

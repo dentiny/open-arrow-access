@@ -111,9 +111,10 @@ other absolute entries remain full URLs and require an accessor that supports th
 
 Security checks run before prefix filtering: dot segments (even contained ones),
 credentials, network-path references, malformed encoding, encoded delimiters,
-backslashes and controls are rejected. Query/fragment requires explicit opt-in
-through `with_query_fragment(true)`. Transport and redirect policy remain the
-caller's responsibility.
+backslashes and controls are rejected. Entry query/fragment components are always
+preserved; the accessor must support these semantics. Fragments are never sent by
+HTTP itself. Manifest locations remain storage keys without query/fragment.
+Transport and redirect policy remain the caller's responsibility.
 
 Blank lines are ignored. Format mismatches and selected duplicates error by
 default; `Mismatch::Skip` and `Duplicates::Dedupe` retain the other entries in

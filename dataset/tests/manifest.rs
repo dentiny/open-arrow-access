@@ -92,10 +92,6 @@ async fn unsafe_entries_report_the_manifest_and_line() {
         "https://example.test/x/../a.warc",
         " a.warc",
         "a\\b.warc",
-        "a.warc?x=1",
-        "a.warc#x",
-        "https://example.test/a.warc?x=1",
-        "https://example.test/a.warc#x",
     ] {
         let error = resolve(manifest(), format!("\n{value}").as_bytes())
             .await
@@ -239,7 +235,6 @@ async fn gzip_and_decoded_inputs_share_validation() {
 async fn foreign_urls_support_filtering_deduplication_and_query_fragments() {
     let spec = manifest()
         .with_prefix("data/")
-        .with_query_fragment(true)
         .with_duplicates(Duplicates::Dedupe);
     let entries =
         b"https://mirror.test/data/%61.warc\nhttps://mirror.test/data/a.warc\ndata/b.warc?q=1#f";
@@ -259,6 +254,31 @@ async fn foreign_http_origins_are_accepted_without_configuration() {
         assert_eq!(
             resolve(manifest(), entry.as_bytes()).await.unwrap(),
             [entry]
+        );
+    }
+}
+
+#[tokio::test]
+async fn entry_query_and_fragment_components_are_always_preserved() {
+    for (entry, expected) in [
+        ("data/a.warc?x=1", "data/a.warc?x=1"),
+        ("/data/a.warc#part", "data/a.warc#part"),
+        (
+            "https://example.test/data/a.warc?x=1#part",
+            "data/a.warc?x=1#part",
+        ),
+        (
+            "https://mirror.test/data/a.warc?x=1#part",
+            "https://mirror.test/data/a.warc?x=1#part",
+        ),
+    ] {
+        let spec = manifest()
+            .with_prefix("data/")
+            .with_formats(&[DetectedFormat::Warc], Mismatch::Error);
+        assert_eq!(
+            resolve(spec, entry.as_bytes()).await.unwrap(),
+            [expected],
+            "{entry}"
         );
     }
 }

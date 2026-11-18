@@ -41,8 +41,10 @@ pub enum Duplicates {
 }
 
 /// Resolve a manifest into ordered object locators. Defaults reject duplicates,
-/// URL query/fragment, credentials and traversal. HTTP(S) URLs from any origin
-/// are accepted; same-origin URLs become storage keys and other URLs remain absolute.
+/// credentials and traversal. HTTP(S) URLs from any origin are accepted;
+/// same-origin URLs become storage keys and other URLs remain absolute.
+/// Entry query/fragment components are preserved; the accessor must support their
+/// semantics. Fragments are never sent by HTTP itself.
 /// Memory holds selected keys and the duplicate set, never the whole manifest.
 #[derive(Clone, Debug)]
 pub struct PathsManifest {
@@ -52,7 +54,6 @@ pub struct PathsManifest {
     formats: Option<(Vec<DetectedFormat>, Mismatch)>,
     duplicates: Duplicates,
     origin: Option<String>,
-    allow_query_fragment: bool,
     byte_options: ByteReadOptions,
 }
 impl PathsManifest {
@@ -64,7 +65,6 @@ impl PathsManifest {
             formats: None,
             duplicates: Duplicates::Error,
             origin: None,
-            allow_query_fragment: false,
             byte_options: ByteReadOptions::default(),
         }
     }
@@ -88,12 +88,6 @@ impl PathsManifest {
     /// HTTP(S) origin of a relative manifest key. Validated before any I/O.
     pub fn with_origin(mut self, origin: impl Into<String>) -> Self {
         self.origin = Some(origin.into());
-        self
-    }
-    /// Preserve query/fragment in output locators; the caller's accessor must
-    /// support these semantics. Fragments are never sent by HTTP itself.
-    pub fn with_query_fragment(mut self, allow: bool) -> Self {
-        self.allow_query_fragment = allow;
         self
     }
     pub fn with_byte_options(mut self, options: ByteReadOptions) -> Self {
