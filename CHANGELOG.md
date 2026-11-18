@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1 - 2026-11-18
+
+- Forward native scan planning through SelectionAccessor so arXiv TAR shards retain their independent partitions in downstream parallel readers.
+- Preserve fixed selections, per-read options, schema and ordering when forwarding scan plans.
+- Release all eight public workspace crates at 0.8.1 with matching internal dependency requirements.
+
 ## 0.8.0 - 2026-11-18
 
 - Add a reusable attachment record accessor and a fixed-selection accessor for composing provider requests with per-read options.
