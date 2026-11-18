@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0 - 2026-11-18
+
+- Add a reusable attachment record accessor and a fixed-selection accessor for composing provider requests with per-read options.
+- Join arXiv bulk PDFs with cached metadata in one Arrow record stream, preserving typed metadata fields and original PDF bytes.
+- Normalize modern, legacy, and OAI arXiv identifiers and reject missing matches, duplicate IDs, and malformed identifiers.
+- Release all eight public workspace crates at 0.8.0 with matching internal dependency requirements.
+
 ## 0.7.0 - 2026-11-17
 
 - Read streaming files concurrently in file-set and directory scans, including compressed WARC, JSONL, and CSV.
