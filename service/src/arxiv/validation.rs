@@ -79,12 +79,12 @@ pub(super) fn validate_archive_length(archive: &ArxivArchive, length: Option<u64
     Ok(())
 }
 
-pub(super) fn validate_metadata_id(id: &str, key: &str) -> Result<()> {
+pub(super) fn validate_metadata_id(id: &str) -> Result<()> {
     if !id.is_ascii() {
         return Err(error::non_ascii_metadata_id());
     }
-    let valid = if key.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-        let Some((month, number)) = key.split_once('.') else {
+    let valid = if id.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+        let Some((month, number)) = id.split_once('.') else {
             return Err(error::invalid_metadata_id());
         };
         month.len() == 4
@@ -92,15 +92,19 @@ pub(super) fn validate_metadata_id(id: &str, key: &str) -> Result<()> {
             && matches!(number.len(), 4 | 5)
             && number.bytes().all(|b| b.is_ascii_digit())
     } else {
-        key.len() > 7 && {
-            let (category, number) = key.split_at(key.len().saturating_sub(7));
-            category
+        let (category, number) = match id.split_once('/') {
+            Some(parts) => parts,
+            None if id.len() > 7 => id.split_at(id.len() - 7),
+            None => return Err(error::invalid_unversioned_metadata_id()),
+        };
+        !category.is_empty()
+            && category
                 .bytes()
                 .all(|b| b.is_ascii_alphabetic() || b == b'-' || b == b'.')
-                && number.bytes().all(|b| b.is_ascii_digit())
-        }
+            && number.len() == 7
+            && number.bytes().all(|b| b.is_ascii_digit())
     };
-    if !valid || id.matches('/').count() > 1 {
+    if !valid {
         return Err(error::invalid_unversioned_metadata_id());
     }
     Ok(())

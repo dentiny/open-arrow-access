@@ -6,9 +6,8 @@ use super::{error, validation};
 /// Use the bulk archive spelling as the join key (legacy IDs omit the slash).
 pub(super) fn metadata_id(id: &str) -> Result<String> {
     let id = id.strip_prefix("oai:arXiv.org:").unwrap_or(id);
-    let key = id.replace('/', "");
-    validation::validate_metadata_id(id, &key)?;
-    Ok(key)
+    validation::validate_metadata_id(id)?;
+    Ok(id.replace('/', ""))
 }
 
 pub(super) fn pdf_id(name: &[u8]) -> Result<String> {

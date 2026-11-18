@@ -239,7 +239,16 @@ mod tests {
             )
             .is_err()
         );
-        for id in ["", "2410.01234v2", "ééééé", "not-an-id"] {
+        for id in [
+            "",
+            "2410.01234v2",
+            "ééééé",
+            "not-an-id",
+            "24/10.01234",
+            "2410.01/234",
+            "hep-/th9901001",
+            "hep-th99/01001",
+        ] {
             assert!(ArxivMetadataIndex::try_new(snapshot(vec![id]), "identifier").is_err());
         }
         assert_eq!(id::pdf_id(b"hep-th/9901001.pdf").unwrap(), "hep-th9901001");
