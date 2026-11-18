@@ -63,6 +63,9 @@ pub struct ScanPlan {
     /// Partitions own complete streaming files. Ordered executors may buffer
     /// additional output to overlap input reads without relaxing file order.
     pub file_streams: bool,
+    /// Lazy partition discovery in logical input order.
+    /// Polling may perform input I/O. Each item is an owned reader opener;
+    /// stream errors report discovery failures.
     pub partitions: BoxStream<'static, Result<ScanPartition>>,
 }
 
