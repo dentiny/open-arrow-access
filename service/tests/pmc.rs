@@ -1,4 +1,4 @@
-use arrow_array::{Array, cast::AsArray};
+use arrow_array::{Array, cast::AsArray, types::UInt64Type};
 use open_arrow_access_core::{
     Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, RecordBatch, Result,
 };
@@ -32,19 +32,20 @@ async fn maps_metadata_without_fetching_content() {
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch.schema(), schema());
     assert_eq!(batch.num_rows(), 1);
-    for (field, expected) in [
-        ("pmcid", " pmc00123 "),
-        ("pmid", "36537061"),
-        ("license_code", "CC BY"),
-    ] {
+    for (field, expected) in [("pmcid", " pmc00123 "), ("license_code", "CC BY")] {
         assert_eq!(batch[field].as_string::<i32>().value(0), expected);
     }
+    assert_eq!(
+        batch["pmid"].as_primitive::<UInt64Type>().value(0),
+        36537061
+    );
     assert!(batch["is_pmc_openaccess"].as_boolean().value(0));
     assert_eq!(observed.requests.lock().unwrap().len(), 1);
     let batch = read(&fixture!("pmc", "metadata_only.json").await, None)
         .await
         .unwrap();
     assert!(batch["pdf_url"].is_null(0));
+    assert!(batch["pmid"].is_null(0));
     assert!(batch["text"].is_null(0));
     let batch = read(
         br#"{"pmcid":"PMC1","text_url":"s3://pmc-oa-opendata/PMC1.1/article%20name.txt?md5=opaque","text":"ignored"}"#,
@@ -139,7 +140,7 @@ async fn duplicate_fields_use_the_final_value_and_preserve_empty_strings() {
     let batch = read(&fixture!("pmc", "duplicate_fields.json").await, None)
         .await
         .unwrap();
-    assert_eq!(batch["pmid"].as_string::<i32>().value(0), "00001");
+    assert_eq!(batch["pmid"].as_primitive::<UInt64Type>().value(0), 1);
     assert_eq!(batch["doi"].as_string::<i32>().value(0), "");
 }
 

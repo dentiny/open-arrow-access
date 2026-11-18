@@ -25,7 +25,8 @@ The result is a `RecordReader` with exactly one row for a valid object. Full sch
 | --- | --- | --- |
 | `pmcid` | Utf8 | No |
 | `version` | UInt32, positive when supplied | Yes |
-| `pmid`, `doi`, `license_code`, `xml_url`, `pdf_url`, `text` | Utf8 | Yes |
+| `pmid` | UInt64 | Yes |
+| `doi`, `license_code`, `xml_url`, `pdf_url`, `text` | Utf8 | Yes |
 | `title`, `citation` | LargeUtf8 | Yes |
 | `is_pmc_openaccess`, `is_manuscript`, `is_historical_ocr`, `is_retracted` | Boolean | Yes |
 | `media_urls` | List of nullable Utf8 items; JSON items must be strings | Yes |
