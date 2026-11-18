@@ -19,16 +19,22 @@ pub enum ManifestBase {
     /// A directory, relative to the storage root (trailing slash optional).
     Explicit(ObjectRef),
 }
+/// How to handle entries that do not match the selected file formats.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Mismatch {
+    /// Stop with an error on the first format mismatch.
     #[default]
     Error,
+    /// Skip entries whose formats do not match.
     Skip,
 }
+/// How to handle duplicate selected files.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Duplicates {
+    /// Stop with an error on the first duplicate.
     #[default]
     Error,
+    /// Keep only the first occurrence, preserving manifest order.
     Dedupe,
 }
 
