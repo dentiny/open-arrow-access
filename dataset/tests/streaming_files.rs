@@ -1,6 +1,6 @@
 use std::{
     io::Write,
-    num::NonZeroUsize,
+    num::{NonZeroU64, NonZeroUsize},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -12,8 +12,8 @@ use arrow_schema::{DataType, Field, Schema};
 use futures::TryStreamExt;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes,
-    Capability, ReadRequest, Reader, RecordBatch, RecordReader, Result, ScanPlanner, async_trait,
-    bytes_reader, into_stream,
+    Capability, ReadRequest, Reader, RecordBatch, RecordReader, Result, ScanPlanner, StreamReader,
+    async_trait, into_stream,
 };
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
@@ -25,7 +25,10 @@ use tokio::sync::Semaphore;
 
 #[derive(Clone)]
 struct GatedStorage {
-    data: Arc<Vec<Bytes>>,
+    data: Arc<Vec<Vec<Bytes>>>,
+    first_only: bool,
+    progress: Arc<Vec<AtomicUsize>>,
+    finished: Arc<Vec<Semaphore>>,
     enabled: Arc<AtomicBool>,
     started: Arc<Semaphore>,
     release: Arc<Semaphore>,
@@ -37,6 +40,8 @@ struct GatedReader {
     inner: Box<dyn ByteReader>,
     state: GatedStorage,
     gated: bool,
+    index: usize,
+    eof_reported: bool,
 }
 
 impl Drop for GatedReader {
@@ -58,12 +63,24 @@ impl Reader for GatedReader {
         self.inner.metadata()
     }
     async fn next(&mut self) -> Result<Option<Bytes>> {
-        if !self.gated && self.state.enabled.load(Ordering::SeqCst) {
+        if !self.gated
+            && self.state.enabled.load(Ordering::SeqCst)
+            && (!self.state.first_only || self.index == 0)
+        {
             self.gated = true;
             self.state.started.add_permits(1);
             self.state.release.acquire().await.unwrap().forget();
         }
-        self.inner.next().await
+        let bytes = self.inner.next().await?;
+        if self.state.enabled.load(Ordering::SeqCst) {
+            if bytes.is_some() {
+                self.state.progress[self.index].fetch_add(1, Ordering::SeqCst);
+            } else if !self.eof_reported {
+                self.eof_reported = true;
+                self.state.finished[self.index].add_permits(1);
+            }
+        }
+        Ok(bytes)
     }
 }
 impl ByteReader for GatedReader {}
@@ -86,9 +103,17 @@ impl Accessor for GatedStorage {
         let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.peak.fetch_max(active, Ordering::SeqCst);
         Ok(Box::new(GatedReader {
-            inner: Box::new(bytes_reader(self.data[index].clone(), Some(request.object))),
+            inner: Box::new(StreamReader::bytes(
+                futures::stream::iter(self.data[index].clone().into_iter().map(Ok)),
+                ByteMetadata {
+                    source: Some(request.object),
+                    ..ByteMetadata::default()
+                },
+            )),
             state: self.clone(),
             gated: false,
+            index,
+            eof_reported: false,
         }))
     }
 }
@@ -112,10 +137,13 @@ fn source(format: &str) -> GatedStorage {
         };
         let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         gzip.write_all(text.as_bytes()).unwrap();
-        Bytes::from(gzip.finish().unwrap())
+        vec![Bytes::from(gzip.finish().unwrap())]
     }).collect();
     GatedStorage {
         data: Arc::new(data),
+        first_only: false,
+        progress: Arc::new((0..3).map(|_| AtomicUsize::new(0)).collect()),
+        finished: Arc::new((0..3).map(|_| Semaphore::new(0)).collect()),
         enabled: Arc::new(AtomicBool::new(false)),
         started: Arc::new(Semaphore::new(0)),
         release: Arc::new(Semaphore::new(0)),
@@ -130,7 +158,17 @@ fn files(
     union: bool,
 ) -> FileSetAccessor<Arc<dyn ScanPlanner<Request = ReadRequest>>> {
     let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
-    let input = storage.layer(DecompressionLayer::new(Gzip));
+    files_with_schema(storage, format, union, schema)
+}
+
+fn files_with_schema(
+    storage: GatedStorage,
+    format: &str,
+    union: bool,
+    schema: Arc<Schema>,
+) -> FileSetAccessor<Arc<dyn ScanPlanner<Request = ReadRequest>>> {
+    let input = storage
+        .layer(DecompressionLayer::new(Gzip).with_chunk_size(NonZeroUsize::new(64).unwrap()));
     let format: Arc<dyn ScanPlanner<Request = ReadRequest>> = match format {
         "json" => Arc::new(JsonAccessor::new(input, schema)),
         "csv" => Arc::new(CsvAccessor::new(input, schema)),
@@ -233,5 +271,205 @@ async fn dropping_blocked_file_workers_releases_all_inputs() {
         .await
         .unwrap();
         assert_eq!(storage.started.available_permits(), 0);
+    }
+}
+
+const STREAM_ROWS: usize = 64;
+
+fn sustained_source(format: &str) -> GatedStorage {
+    let mut storage = source(format);
+    storage.first_only = true;
+    let padding = "payload".repeat(300);
+    storage.data = Arc::new((0..3).map(|file| {
+        (0..STREAM_ROWS).map(|row| {
+            let id = file * STREAM_ROWS + row;
+            let text = match format {
+                "json" => format!("{{\"id\":{id},\"padding\":\"{padding}\"}}\n"),
+                "csv" => format!("{}{id},{padding}\n", if row == 0 { "id,padding\n" } else { "" }),
+                "warc" => format!("WARC/1.1\r\nWARC-Type: resource\r\nWARC-Record-ID: <urn:test:{id}>\r\nWARC-Date: 2020-07-08T02:52:55Z\r\nContent-Length: {}\r\n\r\n{padding}\r\n\r\n", padding.len()),
+                _ => unreachable!(),
+            };
+            // Each record is an independently delivered gzip member. The small
+            // decoder chunk size prevents one network read from hiding the file.
+            let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            gzip.write_all(text.as_bytes()).unwrap();
+            Bytes::from(gzip.finish().unwrap())
+        }).collect()
+    }).collect());
+    storage
+}
+
+fn sustained_files(
+    storage: GatedStorage,
+    format: &str,
+    union: bool,
+) -> FileSetAccessor<Arc<dyn ScanPlanner<Request = ReadRequest>>> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, true),
+        Field::new("padding", DataType::Utf8, true),
+    ]));
+    files_with_schema(storage, format, union, schema)
+}
+
+#[tokio::test]
+async fn later_files_finish_multi_chunk_downloads_while_first_file_is_blocked() {
+    for format in ["json", "csv", "warc"] {
+        for union in [false, true] {
+            let storage = sustained_source(format);
+            let files = sustained_files(storage.clone(), format, union);
+            let mut request = FileSetRequest::new(["0", "1", "2", "1"]);
+            request.options.batch_size = NonZeroUsize::MIN;
+            let expected = collect(files.open(request.clone()).await.unwrap()).await;
+            assert_eq!(storage.active.load(Ordering::SeqCst), 0);
+            storage.peak.store(0, Ordering::SeqCst);
+            let reader = files
+                .layer(ParallelReadLayer::new(
+                    NonZeroUsize::new(3).unwrap(),
+                    NonZeroUsize::MIN,
+                ))
+                .open(request)
+                .await
+                .unwrap();
+            storage.enabled.store(true, Ordering::SeqCst);
+            let task = tokio::spawn(collect(reader));
+            tokio::time::timeout(Duration::from_secs(5), storage.started.acquire())
+                .await
+                .unwrap()
+                .unwrap()
+                .forget();
+            for file in [1, 2] {
+                tokio::time::timeout(Duration::from_secs(5), storage.finished[file].acquire())
+                    .await
+                    .expect("later file must download to EOF before the first is released")
+                    .unwrap()
+                    .forget();
+                assert!(storage.progress[file].load(Ordering::SeqCst) >= STREAM_ROWS);
+            }
+            assert_eq!(storage.progress[0].load(Ordering::SeqCst), 0);
+            assert!(!task.is_finished());
+            assert!(storage.peak.load(Ordering::SeqCst) <= 3);
+            storage.release.add_permits(1);
+            let actual = tokio::time::timeout(Duration::from_secs(10), task)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(actual, expected, "{format}, union={union}");
+            assert_eq!(storage.active.load(Ordering::SeqCst), 0);
+        }
+    }
+}
+
+#[tokio::test]
+async fn exhausted_or_disabled_spill_restores_backpressure_without_losing_rows() {
+    for limit in [None, NonZeroU64::new(1), NonZeroU64::new(16 * 1024)] {
+        for union in [false, true] {
+            let storage = sustained_source("json");
+            let files = sustained_files(storage.clone(), "json", union);
+            let mut request = FileSetRequest::new(["0", "1"]);
+            request.options.batch_size = NonZeroUsize::MIN;
+            let expected = collect(files.open(request.clone()).await.unwrap()).await;
+            let reader = files
+                .layer(
+                    ParallelReadLayer::new(NonZeroUsize::new(2).unwrap(), NonZeroUsize::MIN)
+                        .with_ordered_file_spill(limit),
+                )
+                .open(request)
+                .await
+                .unwrap();
+            storage.enabled.store(true, Ordering::SeqCst);
+            let task = tokio::spawn(collect(reader));
+            tokio::time::timeout(Duration::from_secs(5), storage.started.acquire())
+                .await
+                .unwrap()
+                .unwrap()
+                .forget();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), storage.finished[1].acquire())
+                    .await
+                    .is_err()
+            );
+            assert!(storage.progress[1].load(Ordering::SeqCst) < STREAM_ROWS);
+            storage.release.add_permits(1);
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(10), task)
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                expected
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn cancellation_releases_files_blocked_on_ordered_spill_delivery() {
+    let storage = sustained_source("json");
+    let files = sustained_files(storage.clone(), "json", true);
+    let mut request = FileSetRequest::new(["0", "1", "2"]);
+    request.options.batch_size = NonZeroUsize::MIN;
+    let reader = files
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(3).unwrap(),
+            NonZeroUsize::MIN,
+        ))
+        .open(request)
+        .await
+        .unwrap();
+    storage.enabled.store(true, Ordering::SeqCst);
+    let task = tokio::spawn(collect(reader));
+    for file in [1, 2] {
+        tokio::time::timeout(Duration::from_secs(5), storage.finished[file].acquire())
+            .await
+            .unwrap()
+            .unwrap()
+            .forget();
+    }
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while storage.active.load(Ordering::SeqCst) != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn later_file_decode_errors_remain_fail_fast_behind_a_blocked_head() {
+    for union in [false, true] {
+        let mut storage = sustained_source("json");
+        let mut data = storage.data.as_ref().clone();
+        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gzip.write_all(b"{invalid json}\n").unwrap();
+        *data[1].last_mut().unwrap() = Bytes::from(gzip.finish().unwrap());
+        storage.data = Arc::new(data);
+        let mut request = FileSetRequest::new(["0", "1"]);
+        request.options.batch_size = NonZeroUsize::MIN;
+        let reader = sustained_files(storage.clone(), "json", union)
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::MIN,
+            ))
+            .open(request)
+            .await
+            .unwrap();
+        storage.enabled.store(true, Ordering::SeqCst);
+        let task = tokio::spawn(into_stream(reader).try_collect::<Vec<_>>());
+        let error = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("a later decoding error must bypass the blocked head")
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.kind(), open_arrow_access_core::ErrorKind::Decode);
+        assert!(error.to_string().contains("object \"1\""));
+        assert_eq!(storage.progress[0].load(Ordering::SeqCst), 0);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while storage.active.load(Ordering::SeqCst) != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
     }
 }

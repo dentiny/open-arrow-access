@@ -2939,6 +2939,7 @@ version = "0.6.0"
 dependencies = [
  "arrow-array",
  "arrow-cast",
+ "arrow-ipc",
  "arrow-schema",
  "arrow-select",
  "async-compression",
@@ -2949,6 +2950,7 @@ dependencies = [
  "open-arrow-access-file-format",
  "open-arrow-access-test-support",
  "rstest",
+ "tempfile",
  "tokio",
 ]
 

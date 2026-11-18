@@ -26,14 +26,22 @@ async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
         ParallelReadOptions {
             partitions: NonZeroUsize::new(2).unwrap(),
             prefetch: NonZeroUsize::MIN,
+            ordered_file_spill: None,
         },
     );
     let (sender, ready) = mpsc::channel(1);
-    sender.try_send(batch.clone()).unwrap();
+    assert!(
+        sender
+            .try_send(PartitionOutput::Batch(batch.clone()))
+            .is_ok()
+    );
     drop(sender);
     let (sender, closed) = mpsc::channel(1);
     drop(sender);
-    reader.partition_receivers.extend([closed, ready]);
+    reader.partition_receivers.extend(
+        [closed, ready]
+            .map(|receiver| PartitionReceiver::new(receiver, Arc::new(AtomicBool::new(false)))),
+    );
 
     // Discovery replaces the closed queue before polling output again.
     // The existing ready queue must retain the next turn.

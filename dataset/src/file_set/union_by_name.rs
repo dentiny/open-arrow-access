@@ -92,7 +92,7 @@ where
             ))
         })
         .collect::<Result<Vec<_>>>()?;
-    if streaming_files && files.len() > 1 && file_planner.is_some() {
+    if files.len() > 1 && (streaming_files || file_planner.is_none()) {
         let partitions = files.into_iter().map(move |(request, alignment)| {
             let inner = inner.clone();
             let partition: ScanPartition = Box::pin(async move {
@@ -104,7 +104,9 @@ where
             });
             partition
         });
-        return Ok(ScanPlan::from_iter(metadata, partitions).with_ordering(ordering));
+        return Ok(ScanPlan::from_iter(metadata, partitions)
+            .with_file_streams()
+            .with_ordering(ordering));
     }
     let partitions = stream::iter(files)
         .then(move |(request, alignment)| {

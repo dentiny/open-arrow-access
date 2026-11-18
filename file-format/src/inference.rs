@@ -37,5 +37,6 @@ pub(crate) fn empty_plan(
         },
         vec![],
     )
+    .with_streaming_discovery()
     .with_ordering(OrderRequirement::Reorderable)
 }

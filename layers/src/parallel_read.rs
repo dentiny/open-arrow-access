@@ -1,4 +1,12 @@
-use std::{collections::VecDeque, num::NonZeroUsize, task::Poll};
+use std::{
+    collections::VecDeque,
+    num::{NonZeroU64, NonZeroUsize},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    task::Poll,
+};
 
 use futures::{
     StreamExt,
@@ -15,6 +23,7 @@ use tokio::{sync::mpsc, task::JoinSet};
 
 use crate::{
     error::partition_task_error,
+    ordered_spill::{SpillReader, SpillWriter},
     scan_policy::{ScanPolicy, ScanPolicyAccessor},
     validation::{validate_emission_policy, validate_parallel_read_settings},
 };
@@ -29,6 +38,7 @@ pub struct ParallelReadLayer {
     /// Bounds queue counts, not decoder allocations or total bytes; configure format
     /// batch sizes separately.
     prefetch: NonZeroUsize,
+    ordered_file_spill: Option<NonZeroU64>,
 }
 
 impl ParallelReadLayer {
@@ -36,7 +46,17 @@ impl ParallelReadLayer {
         Self {
             partitions,
             prefetch,
+            ordered_file_spill: NonZeroU64::new(1024 * 1024 * 1024),
         }
+    }
+
+    /// Bound temporary IPC bytes per resident streaming file for ordered output.
+    /// Defaults to 1 GiB. None disables disk prefetch. At the limit, delivery
+    /// returns to the bounded batch queue. Native partitions and unordered scans
+    /// do not spill. Temporary files are removed on consumption or cancellation.
+    pub fn with_ordered_file_spill(mut self, limit: Option<NonZeroU64>) -> Self {
+        self.ordered_file_spill = limit;
+        self
     }
 }
 
@@ -91,6 +111,7 @@ impl ScanPolicy for ParallelReadLayer {
         let settings = ParallelReadOptions {
             partitions: self.partitions,
             prefetch: self.prefetch,
+            ordered_file_spill: self.ordered_file_spill,
         };
         validate_parallel_read_settings(plan.parallel_read, settings)?;
         plan.parallel_read = Some(settings);
@@ -106,11 +127,101 @@ pub(crate) fn open_plan(plan: ScanPlan) -> Result<Box<dyn RecordReader>> {
     }
 }
 
+enum PartitionOutput {
+    Batch(RecordBatch),
+    Spill(SpillReader),
+}
+
+struct PartitionReceiver {
+    batches: BoxStream<'static, Result<RecordBatch>>,
+    head: Arc<AtomicBool>,
+}
+
+impl PartitionReceiver {
+    fn new(receiver: mpsc::Receiver<PartitionOutput>, head: Arc<AtomicBool>) -> Self {
+        // try_unfold owns the pending spill read, so discovery/task completions
+        // cannot cancel a partially read IPC frame and lose its file position.
+        let batches = stream::try_unfold(
+            (receiver, None::<SpillReader>),
+            |(mut receiver, mut spill)| async move {
+                loop {
+                    if let Some(input) = &mut spill {
+                        if let Some(batch) = input.next().await? {
+                            return Ok(Some((batch, (receiver, spill))));
+                        }
+                        spill = None;
+                    }
+                    match receiver.recv().await {
+                        Some(PartitionOutput::Batch(batch)) => {
+                            return Ok(Some((batch, (receiver, spill))));
+                        }
+                        Some(PartitionOutput::Spill(input)) => spill = Some(input),
+                        None => return Ok(None),
+                    }
+                }
+            },
+        )
+        .boxed();
+        Self { batches, head }
+    }
+}
+
+/// Keep downloading a later file while its ordered output waits for the head.
+/// Returns false on EOF/cancellation, true when head promotion or the disk quota
+/// requires resuming normal bounded in-memory delivery.
+async fn spill_file(
+    reader: &mut dyn RecordReader,
+    sender: &mpsc::Sender<PartitionOutput>,
+    head: &AtomicBool,
+    schema: &open_arrow_access_core::SchemaRef,
+    limit: NonZeroU64,
+) -> Result<bool> {
+    let (mut writer, input) = SpillWriter::new(limit).await?;
+    let mut pending = Some(input);
+    loop {
+        if sender.is_closed() {
+            return Ok(false);
+        }
+        if pending.is_some() {
+            if let Ok(permit) = sender.try_reserve() {
+                permit.send(PartitionOutput::Spill(pending.take().unwrap()));
+            }
+        }
+        if head.load(Ordering::Acquire) {
+            writer.finish();
+            if let Some(input) = pending {
+                if sender.send(PartitionOutput::Spill(input)).await.is_err() {
+                    return Ok(false);
+                }
+            }
+            return Ok(true);
+        }
+        let Some(batch) = reader.next().await? else {
+            writer.finish();
+            if let Some(input) = pending {
+                let _ = sender.send(PartitionOutput::Spill(input)).await;
+            }
+            return Ok(false);
+        };
+        crate::validation::validate_partition_schema(&batch.schema(), schema)?;
+        if !writer.append(&batch).await? {
+            writer.finish();
+            if let Some(input) = pending {
+                if sender.send(PartitionOutput::Spill(input)).await.is_err() {
+                    return Ok(false);
+                }
+            }
+            return Ok(sender.send(PartitionOutput::Batch(batch)).await.is_ok());
+        }
+    }
+}
+
 struct ParallelReader {
     ordering: OrderRequirement,
     metadata: RecordMetadata,
     remaining: Fuse<BoxStream<'static, Result<ScanPartition>>>,
-    partition_receivers: VecDeque<mpsc::Receiver<RecordBatch>>,
+    partition_receivers: VecDeque<PartitionReceiver>,
+    file_streams: bool,
     tasks: JoinSet<Result<()>>,
     settings: ParallelReadOptions,
     emission: EmissionPolicy,
@@ -120,6 +231,7 @@ impl ParallelReader {
     fn new(plan: ScanPlan, settings: ParallelReadOptions) -> Self {
         Self {
             ordering: plan.ordering,
+            file_streams: plan.file_streams,
             metadata: plan.metadata,
             remaining: plan.partitions.fuse(),
             partition_receivers: VecDeque::new(),
@@ -132,11 +244,44 @@ impl ParallelReader {
     fn spawn_partition(&mut self, open: ScanPartition) {
         let (sender, receiver) = mpsc::channel(self.settings.prefetch.get());
         let schema = self.metadata.schema.clone();
+        let head = Arc::new(AtomicBool::new(self.partition_receivers.is_empty()));
+        let worker_head = head.clone();
+        let spill_limit = (self.file_streams && self.emission == EmissionPolicy::Ordered)
+            .then_some(self.settings.ordered_file_spill)
+            .flatten();
         self.tasks.spawn(async move {
             let mut reader = open.await?;
             crate::validation::validate_partition_schema(&reader.metadata().schema, &schema)?;
+            let mut can_spill = spill_limit;
             loop {
-                // Reserve before decoding so a full queue cannot hide an extra batch.
+                if !worker_head.load(Ordering::Acquire) {
+                    if let Some(limit) = can_spill {
+                        match sender.try_reserve() {
+                            Ok(permit) => {
+                                let Some(batch) = reader.next().await? else {
+                                    return Ok(());
+                                };
+                                crate::validation::validate_partition_schema(
+                                    &batch.schema(),
+                                    &schema,
+                                )?;
+                                permit.send(PartitionOutput::Batch(batch));
+                                continue;
+                            }
+                            Err(mpsc::error::TrySendError::Closed(_)) => return Ok(()),
+                            Err(mpsc::error::TrySendError::Full(_)) => {}
+                        }
+                        // Only non-head file workers bypass a full memory queue.
+                        // One capped spool is allowed for this resident file.
+                        if !spill_file(reader.as_mut(), &sender, &worker_head, &schema, limit)
+                            .await?
+                        {
+                            return Ok(());
+                        }
+                        can_spill = None;
+                    }
+                }
+                // The head file and memory-only paths reserve before decoding.
                 let Ok(permit) = sender.reserve().await else {
                     return Ok(());
                 };
@@ -144,10 +289,11 @@ impl ParallelReader {
                     return Ok(());
                 };
                 crate::validation::validate_partition_schema(&batch.schema(), &schema)?;
-                permit.send(batch);
+                permit.send(PartitionOutput::Batch(batch));
             }
         });
-        self.partition_receivers.push_back(receiver);
+        self.partition_receivers
+            .push_back(PartitionReceiver::new(receiver, head));
     }
 
     fn stop(&mut self) {
@@ -178,15 +324,16 @@ impl ParallelReader {
                 }
                 (index, batch) = poll_fn(|cx| {
                     if emission == EmissionPolicy::Ordered {
-                        return receivers[0].poll_recv(cx).map(|batch| (0, batch));
+                        return receivers[0].batches.poll_next_unpin(cx).map(|batch| (0, batch));
                     }
                     for (index, receiver) in receivers.iter_mut().enumerate() {
-                        if let Poll::Ready(batch) = receiver.poll_recv(cx) {
+                        if let Poll::Ready(batch) = receiver.batches.poll_next_unpin(cx) {
                             return Poll::Ready((index, batch));
                         }
                     }
                     Poll::Pending
                 }), if has_receivers => {
+                    let batch = batch.transpose()?;
                     if batch.is_some() {
                         // Give the other resident partitions the next turn.
                         if emission == EmissionPolicy::Unordered {
@@ -196,6 +343,11 @@ impl ParallelReader {
                     }
                     // EOF only frees a resident slot after that receiver is drained.
                     self.partition_receivers.remove(index);
+                    if emission == EmissionPolicy::Ordered {
+                        if let Some(front) = self.partition_receivers.front() {
+                            front.head.store(true, Ordering::Release);
+                        }
+                    }
                 }
                 else => return Ok(None),
             }

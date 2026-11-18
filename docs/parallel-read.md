@@ -60,11 +60,38 @@ source identifiers may differ. Format-specific discovery may retain an input
 reader, framing state and buffers separately from partition workers.
 
 With P resident partitions and Q queue slots per partition, at most P partition
-readers are active and P * Q batches are queued. A worker reserves queue capacity before
-calling `next`. A finished worker retains its partition slot until its queue has
-drained; a slow first file cannot cause unlimited later files to accumulate.
-The consumer can hold additional batches. Decoder allocations, individual batch
-sizes and compressed input buffers are not bounded by these queue limits.
+readers are active and P * Q in-memory output slots are queued. Ordinary workers
+reserve queue capacity before calling `next`. A finished worker retains its
+partition slot until its output has drained; a slow first file cannot cause
+unlimited later files to accumulate. The consumer can hold additional batches.
+Decoder allocations, individual batch sizes and compressed input buffers are not
+bounded by these queue limits.
+
+Ordered multi-file scans additionally allow a later streaming file to continue
+reading when its memory queue is full. Its worker writes Arrow IPC frames into
+one temporary file, while the head file continues streaming through its memory
+queue. The default disk limit is 1 GiB per resident file, including IPC framing
+and schema/dictionary data; this measures decoded Arrow output, not compressed
+input bytes. There is at most one spool per resident file, so total spool data
+is bounded by P times that limit and file descriptors do not grow with batch
+count. Spooling uses one additional in-flight batch and its encoded IPC buffer
+per producer; replay also temporarily holds an IPC frame. It does not buffer an
+entire file in memory or start another executor.
+
+The consumer drains memory batches and the spool in their original order. A
+file stops spooling when it becomes the head, reaches EOF, or the next IPC frame
+would exceed the disk limit. At the limit, the worker returns to bounded memory
+queues and backpressure; sustained downloads beyond that window require a larger
+disk budget or permission for unordered output. Temporary files are unlinked
+when drained or dropped, including cancellation and errors. Temporary-file or
+IPC failures terminate the scan. Native independent partitions and unordered
+scans keep their memory-only queues. Ordinary sequential `open` does not spool.
+
+Configure the limit with `ParallelReadLayer::new(partitions, prefetch)
+.with_ordered_file_spill(NonZeroU64::new(4 * 1024 * 1024 * 1024))`, or use
+`.with_ordered_file_spill(None)` to disable disk prefetch. This option participates
+in the same execution-policy conflict checks as the partition and prefetch
+budgets.
 Storage's per-reader I/O limit remains separate: P readers may each use their
 configured I/O concurrency. This version does not impose a backend-global cap.
 

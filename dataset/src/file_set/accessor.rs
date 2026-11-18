@@ -220,6 +220,7 @@ where
                 });
                 return Ok(
                     ScanPlan::from_iter(metadata, std::iter::once(first).chain(later))
+                        .with_file_streams()
                         .with_ordering(ordering),
                 );
             }
@@ -250,6 +251,7 @@ where
             });
             Ok(
                 ScanPlan::from_stream(metadata, first.partitions.chain(stream::iter(later)))
+                    .with_file_streams()
                     .with_ordering(ordering),
             )
         }
