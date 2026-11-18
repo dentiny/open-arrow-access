@@ -1,28 +1,25 @@
 use super::{schema, validation};
-use arrow_schema::Schema;
+use arrow_array::{ArrayRef, StructArray};
+use arrow_schema::{DataType, Schema};
 use open_arrow_access_core::{
     FieldNameIndex, RecordBatch, Result, SchemaRef, record_batch_with_rows,
 };
 use std::sync::{Arc, OnceLock};
 
-/// Preserve the upstream JSON field name while exposing the URL as Arrow `text`.
+/// Input fields use the original names retained by the metadata struct.
 fn source_metadata_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
             let output = schema();
-            let fields = output
-                .fields()
-                .iter()
-                .map(|field| {
-                    if field.name() == "text" {
-                        Arc::new(field.as_ref().clone().with_name("text_url"))
-                    } else {
-                        field.clone()
-                    }
-                })
-                .collect::<Vec<_>>();
-            Arc::new(Schema::new_with_metadata(fields, output.metadata().clone()))
+            let DataType::Struct(fields) = output
+                .field_with_name("metadata")
+                .expect("PMC metadata field")
+                .data_type()
+            else {
+                unreachable!("PMC metadata is a struct");
+            };
+            Arc::new(Schema::new(fields.clone()))
         })
         .clone()
 }
@@ -34,13 +31,12 @@ pub(super) async fn decode_batch(
 ) -> Result<RecordBatch> {
     // Read and validate the complete metadata before applying output projection.
     let source_schema = source_metadata_schema();
-    // Provider metadata permits extra upstream fields, but keeps its own field
-    // types strict. Generic JsonFormat intentionally has different semantics.
+    // Reject unrecognized fields instead of silently dropping upstream metadata.
     let decode_error = |source: arrow_schema::ArrowError| {
         super::error::decode(format!("{path}: {source}")).with_source(source)
     };
     let mut reader = arrow_json::ReaderBuilder::new(source_schema.clone())
-        .with_strict_mode(false)
+        .with_strict_mode(true)
         .with_coerce_primitive(false)
         .with_batch_size(2)
         .build(raw)
@@ -62,6 +58,9 @@ pub(super) async fn decode_batch(
         .fields()
         .iter()
         .map(|field| {
+            if field.name() == "metadata" {
+                return Arc::new(StructArray::from(batch.clone())) as ArrayRef;
+            }
             let source_name = match field.name().as_str() {
                 "text" => "text_url",
                 name => name,

@@ -32,6 +32,29 @@ async fn maps_metadata_without_fetching_content() {
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch.schema(), schema());
     assert_eq!(batch.num_rows(), 1);
+    let metadata = batch["metadata"].as_struct();
+    assert_eq!(metadata.num_columns(), 16);
+    assert_eq!(
+        metadata
+            .column_by_name("mid")
+            .unwrap()
+            .as_string::<i32>()
+            .value(0),
+        "NIHMS123"
+    );
+    assert_eq!(
+        metadata
+            .column_by_name("pmid")
+            .unwrap()
+            .as_primitive::<UInt64Type>()
+            .value(0),
+        36537061
+    );
+    assert_eq!(
+        metadata.column_by_name("pdf_url").unwrap(),
+        &batch["pdf_url"]
+    );
+    assert!(batch.schema().field_with_name("metadata_json").is_err());
     for (field, expected) in [("pmcid", " pmc00123 "), ("license_code", "CC BY")] {
         assert_eq!(batch[field].as_string::<i32>().value(0), expected);
     }
@@ -48,7 +71,7 @@ async fn maps_metadata_without_fetching_content() {
     assert!(batch["pmid"].is_null(0));
     assert!(batch["text"].is_null(0));
     let batch = read(
-        br#"{"pmcid":"PMC1","text_url":"s3://pmc-oa-opendata/PMC1.1/article%20name.txt?md5=opaque","text":"ignored"}"#,
+        br#"{"pmcid":"PMC1","text_url":"s3://pmc-oa-opendata/PMC1.1/article%20name.txt?md5=opaque"}"#,
         Some(vec!["text".into()]),
     ).await.unwrap();
     assert_eq!(batch.schema().field(0).name(), "text");
@@ -71,6 +94,17 @@ async fn projection_preserves_order_and_zero_column_rows() {
                 .map(|field| field.name().clone())
                 .collect::<Vec<_>>(),
             names,
+        );
+    }
+}
+
+#[tokio::test]
+async fn unknown_metadata_fields_fail_instead_of_being_dropped() {
+    let raw = br#"{"pmcid":"PMC1","future_field":{"a":1}}"#;
+    for projection in [None, Some(vec!["metadata".into()]), Some(vec![])] {
+        assert_eq!(
+            read(raw, projection).await.unwrap_err().kind(),
+            ErrorKind::Decode
         );
     }
 }
