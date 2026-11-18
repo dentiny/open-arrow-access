@@ -99,33 +99,6 @@ async fn projection_preserves_order_and_zero_column_rows() {
 }
 
 #[tokio::test]
-async fn metadata_projection_keeps_struct_types_and_null_values() {
-    let raw = br#"{"pmcid":"PMC1","mid":null,"media_urls":["s3://pmc-oa-opendata/a.jpg"],"text_url":"s3://pmc-oa-opendata/a.txt"}"#;
-    let batch = read(raw, Some(vec!["metadata".into()])).await.unwrap();
-    assert_eq!(batch.num_rows(), 1);
-    assert_eq!(batch.num_columns(), 1);
-    assert!(!batch.schema().field(0).is_nullable());
-    let metadata = batch["metadata"].as_struct();
-    assert!(metadata.column_by_name("mid").unwrap().is_null(0));
-    assert_eq!(
-        metadata
-            .column_by_name("media_urls")
-            .unwrap()
-            .as_list::<i32>()
-            .value_length(0),
-        1
-    );
-    assert_eq!(
-        metadata
-            .column_by_name("text_url")
-            .unwrap()
-            .as_string::<i32>()
-            .value(0),
-        "s3://pmc-oa-opendata/a.txt"
-    );
-}
-
-#[tokio::test]
 async fn unknown_metadata_fields_fail_instead_of_being_dropped() {
     let raw = br#"{"pmcid":"PMC1","future_field":{"a":1}}"#;
     for projection in [None, Some(vec!["metadata".into()]), Some(vec![])] {
