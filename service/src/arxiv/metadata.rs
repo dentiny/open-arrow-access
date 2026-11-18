@@ -19,7 +19,11 @@ use super::{ArxivKind, ArxivReadRequest, ArxivRecords, error, record_schema, val
 /// separately under a single rate-limited coordinator, then share this index
 /// between shard readers. For large snapshots, load a month at a time.
 pub struct ArxivMetadataIndex {
+    // Metadata records; each struct row retains all columns from the snapshot.
     rows: StructArray,
+    // Maps from normalized, unversioned arXiv article IDs (e.g. "2410.01234"
+    // or "hep-th9901001", without the OAI prefix or legacy slash) to
+    // zero-based row indices in `rows`.
     ids: HashMap<String, u64>,
 }
 
