@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 - 2026-11-17
+
+- Read streaming files concurrently in file-set and directory scans, including compressed WARC, JSONL, and CSV.
+- Use one in-memory queue per resident file for both ordered and unordered emission; concurrency limits resident files, with no byte limit on buffered output.
+- Preserve native partition parallelism and unify file planning, validation, and alignment without reopening inspected inputs.
+- Infer union-by-name schemas concurrently and reuse retained scan plans and inference samples.
+- Make JSON schema inference linear for large records split across many input chunks.
+- Release all eight public workspace crates at 0.7.0 with matching internal dependency requirements.
+
 ## 0.6.0 - 2026-11-17
 
 - Support custom Common Crawl HTTP inventory URLs and reuse the paths manifest resolver.
