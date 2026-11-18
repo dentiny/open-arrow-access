@@ -32,6 +32,7 @@ async fn maps_metadata_without_fetching_content() {
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch.schema(), schema());
     assert_eq!(batch.num_rows(), 1);
+    assert_eq!(batch["metadata_json"].as_string::<i64>().value(0), RAW);
     for (field, expected) in [("pmcid", " pmc00123 "), ("license_code", "CC BY")] {
         assert_eq!(batch[field].as_string::<i32>().value(0), expected);
     }
@@ -73,6 +74,22 @@ async fn projection_preserves_order_and_zero_column_rows() {
             names,
         );
     }
+}
+
+#[tokio::test]
+async fn preserves_complete_json_when_only_metadata_is_selected() {
+    let raw = br#" {"pmcid":"PMC1","mid":null,"future_field":{"values":[true,1e9999]},"metadata_json":{"original":true}} "#;
+    let batch = read(raw, Some(vec!["metadata_json".into()])).await.unwrap();
+    assert_eq!(batch.num_rows(), 1);
+    assert_eq!(batch.num_columns(), 1);
+    assert!(!batch.schema().field(0).is_nullable());
+    assert_eq!(
+        batch["metadata_json"]
+            .as_string::<i64>()
+            .value(0)
+            .as_bytes(),
+        raw
+    );
 }
 
 #[tokio::test]

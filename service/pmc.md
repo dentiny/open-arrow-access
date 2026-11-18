@@ -30,13 +30,17 @@ The result is a `RecordReader` with exactly one row for a valid object. Full sch
 | `title`, `citation` | LargeUtf8 | Yes |
 | `is_pmc_openaccess`, `is_manuscript`, `is_historical_ocr`, `is_retracted` | Boolean | Yes |
 | `media_urls` | List of nullable Utf8 items; JSON items must be strings | Yes |
+| `metadata_json` | LargeUtf8; complete original metadata JSON | No |
 
 The Arrow `text` column contains the URL from the input JSON's `text_url` field,
 not inline article text. URL encoding and query parameters are preserved. The
 input JSON field remains `text_url`; use `text` in Arrow projections.
 
-Optional missing/null fields become null; unknown keys are ignored and duplicate
-keys use their final value. Known fields are validated even when projected away.
+Optional missing/null mapped fields become null; duplicate mapped keys use their
+final value. `metadata_json` retains the complete input object, including unknown
+fields such as `mid`, nested values, nulls, original content URLs, duplicate keys,
+and numeric representations. It is not limited to the mapped schema and is not
+reparsed or reserialized. Known fields are validated even when projected away.
 `ReadOptions` controls top-level projection/order; zero columns still yield one
 row. Record metadata has `source = Some(request.object)`; schema metadata contains
 `pmc.row_kind = article_metadata`. Content URLs remain strings and are not fetched.

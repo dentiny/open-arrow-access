@@ -43,6 +43,7 @@ pub fn schema() -> SchemaRef {
                         true,
                     ),
                     Field::new("text", DataType::Utf8, true),
+                    Field::new("metadata_json", DataType::LargeUtf8, false),
                 ],
                 HashMap::from([("pmc.row_kind".into(), "article_metadata".into())]),
             ))

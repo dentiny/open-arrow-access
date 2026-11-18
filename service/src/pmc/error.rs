@@ -4,6 +4,10 @@ pub(super) fn decode(message: impl Into<String>) -> Error {
     Error::new(ErrorKind::Decode, "read_pmc", message)
 }
 
+pub(super) fn metadata_utf8(error: std::str::Utf8Error) -> Error {
+    decode("PMC metadata is not UTF-8").with_source(error)
+}
+
 pub(super) fn invalid_metadata_path() -> Error {
     Error::new(
         ErrorKind::InvalidInput,

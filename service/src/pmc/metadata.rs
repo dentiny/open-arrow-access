@@ -1,4 +1,5 @@
 use super::{schema, validation};
+use arrow_array::{ArrayRef, LargeStringArray};
 use arrow_schema::Schema;
 use open_arrow_access_core::{
     FieldNameIndex, RecordBatch, Result, SchemaRef, record_batch_with_rows,
@@ -14,6 +15,7 @@ fn source_metadata_schema() -> SchemaRef {
             let fields = output
                 .fields()
                 .iter()
+                .filter(|field| field.name() != "metadata_json")
                 .map(|field| {
                     if field.name() == "text" {
                         Arc::new(field.as_ref().clone().with_name("text_url"))
@@ -58,10 +60,14 @@ pub(super) async fn decode_batch(
     static FIELD_INDEX: OnceLock<FieldNameIndex> = OnceLock::new();
     let field_index = FIELD_INDEX.get_or_init(|| FieldNameIndex::new(source_schema.fields()));
     validation::validate_metadata(&batch, path, field_index)?;
+    let metadata_json = std::str::from_utf8(raw).map_err(super::error::metadata_utf8)?;
     let columns = output_schema
         .fields()
         .iter()
         .map(|field| {
+            if field.name() == "metadata_json" {
+                return Arc::new(LargeStringArray::from(vec![metadata_json])) as ArrayRef;
+            }
             let source_name = match field.name().as_str() {
                 "text" => "text_url",
                 name => name,
