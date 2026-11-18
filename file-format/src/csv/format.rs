@@ -25,7 +25,8 @@ use std::sync::Arc;
 /// Extension matching is case-insensitive and strips one suffix registered with
 /// the compression factory; configure byte decompression separately.
 /// Recognized extensions override the configured delimiter, preserving all other
-/// dialect options. Locators are opaque: query/fragment characters are not stripped.
+/// dialect options. Use [`Self::with_delimiter`] to override extension detection.
+/// Locators are opaque: query/fragment characters are not stripped.
 #[derive(Clone, Debug)]
 pub struct CsvFileFormat {
     schema: Option<SchemaRef>,
@@ -124,6 +125,18 @@ impl CsvFileFormat {
     pub fn with_dialect(mut self, dialect: CsvDialect) -> Self {
         self.header = dialect.header;
         self.options = CsvOptions::Dialect(dialect);
+        self
+    }
+
+    /// Set the delimiter explicitly, disabling `.csv`/`.tsv` extension detection.
+    pub fn with_delimiter(mut self, delimiter: u8) -> Self {
+        match &mut self.options {
+            CsvOptions::Dialect(dialect) => dialect.delimiter = delimiter,
+            CsvOptions::Custom(format) => {
+                *format = format.clone().with_delimiter(delimiter);
+            }
+        }
+        self.delimiter_resolved = true;
         self
     }
 
