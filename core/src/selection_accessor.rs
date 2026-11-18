@@ -1,6 +1,6 @@
 use crate::{
     Accessor, ReadOptions, ReadOptionsProvider, ReadRequest, RecordCapability, RecordMetadata,
-    RecordReader, Result, ScanPlan, ScanPlanner, async_trait,
+    RecordReader, Result, ScanPlan, ScanPlanner, ScanStatistics, StatisticsProvider, async_trait,
 };
 
 /// Expose a fixed record selection through the common [`ReadRequest`] interface.
@@ -86,5 +86,16 @@ where
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         self.inner.plan_scan(self.selected(request.options)).await
+    }
+}
+
+#[async_trait]
+impl<A> StatisticsProvider for SelectionAccessor<A>
+where
+    A: StatisticsProvider,
+    A::Request: ReadOptionsProvider + Clone + Sync,
+{
+    async fn statistics(&self, request: ReadRequest) -> Result<ScanStatistics> {
+        self.inner.statistics(self.selected(request.options)).await
     }
 }

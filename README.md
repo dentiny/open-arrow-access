@@ -248,3 +248,40 @@ Use `layers::MetricsLayer` for instance-scoped byte/row counters and call timing
 The default exporter only accumulates in memory. Share it with
 `storage::opendal_metrics_layer` to observe OpenDAL I/O separately from delivered
 output. See [metrics](docs/metrics.md) and [the example](examples/read_metrics.rs).
+
+### Inspect ingestion statistics before reading records
+
+For accessors implementing `StatisticsProvider`, retain that interface through
+preparation with `PreparedSource::prepare_with_statistics`, or retain native
+partition planning as well with `prepare_plannable_with_statistics`:
+
+```rust,ignore
+let source = PreparedSource::prepare_with_statistics(accessor, request).await?;
+let stats = source.statistics(read_options.clone()).await?;
+// Hand stats.source_bytes to the application's sink concurrency planner here.
+let mut reader = source.scan(read_options).await?;
+while let Some(batch) = reader.next().await? { /* stream into the sink */ }
+```
+
+Statistics are explicit metadata inspection, available before record consumption;
+there is no scan-to-EOF, final-metrics dependency, or statistics sampling pass.
+Inspection preserves the cached initial reader and forwards the saved selection,
+provider/byte options, and effective read options. It may perform metadata I/O;
+results are not cached and do not provide a source snapshot. Provider errors are
+returned. Ordinary preparation remains supported and reports unknown statistics
+without invoking an optional provider.
+
+`SelectionAccessor` forwards statistics using the bound provider selection and
+byte options, replacing only execution-time read options.
+
+Parquet exposes encoded input length and footer row count. File-set and directory
+accessors propagate this optional interface when their supplied format supports
+it, aggregate metadata with bounded concurrency, and count explicit duplicates.
+Unknown values or arithmetic overflow yield unknown totals; an estimated operand
+makes a known sum estimated. Directory statistics use the same glob, suffix, and
+recursion rules as reading, but listing can change between calls.
+
+Encoded source size is not projected Arrow memory or destination file size. It
+can be used as an explicitly labeled planning proxy, or converted by the
+application when output-size information is available. If later processing
+filters records or materializes external blobs, update or discard the estimate.

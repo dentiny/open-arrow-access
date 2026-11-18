@@ -4,8 +4,9 @@ use futures::StreamExt;
 
 use crate::{
     Accessor, BoundSource, Error, ErrorKind, ReadOptions, ReadOptionsProvider, RecordMetadata,
-    RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader,
-    async_trait, into_stream, schema_checked_reader, validate_schema,
+    RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, ScanStatistics, SchemaRef,
+    StatisticsProvider, StreamReader, async_trait, into_stream, schema_checked_reader,
+    validate_schema,
 };
 
 /// A typed selection with a complete bound schema and execution-time read options.
@@ -19,6 +20,7 @@ pub struct PreparedSource {
     selection: Box<dyn PreparedSelection>,
     bound: BoundSource,
     batch_size: NonZeroUsize,
+    statistics: Option<Box<dyn PreparedStatistics>>,
 }
 
 /// Erased access to a saved selection and its optional partition planner.
@@ -56,6 +58,25 @@ where
         let mut request = self.request.clone();
         *request.read_options_mut() = options;
         self.accessor.open(request).await
+    }
+}
+
+/// Optional metadata inspection retained independently of the reader cursor.
+#[async_trait]
+trait PreparedStatistics: Send + Sync {
+    async fn statistics(&self, options: ReadOptions) -> Result<ScanStatistics>;
+}
+
+#[async_trait]
+impl<A> PreparedStatistics for Selection<A>
+where
+    A: StatisticsProvider,
+    A::Request: Clone + Sync + ReadOptionsProvider,
+{
+    async fn statistics(&self, options: ReadOptions) -> Result<ScanStatistics> {
+        let mut request = self.request.clone();
+        *request.read_options_mut() = options;
+        self.accessor.statistics(request).await
     }
 }
 
@@ -136,6 +157,53 @@ impl PreparedSource {
         .await
     }
 
+    /// Prepare a source while retaining its optional metadata statistics interface.
+    ///
+    /// Preparation does not collect statistics. Call [`Self::statistics`] before
+    /// consumption to inspect the same selection with execution-time projection.
+    pub async fn prepare_with_statistics<A>(accessor: A, request: A::Request) -> Result<Self>
+    where
+        A: StatisticsProvider + 'static,
+        A::Request: Clone + Sync + ReadOptionsProvider + 'static,
+    {
+        let accessor = Arc::new(accessor);
+        let mut source = Self::prepare(accessor.clone(), request.clone()).await?;
+        source.statistics = Some(Box::new(Selection { accessor, request }));
+        Ok(source)
+    }
+
+    /// Retain both independent partition planning and metadata statistics.
+    /// Neither partition discovery nor statistics collection runs eagerly.
+    pub async fn prepare_plannable_with_statistics<A>(
+        accessor: A,
+        request: A::Request,
+    ) -> Result<Self>
+    where
+        A: ScanPlanner + StatisticsProvider + 'static,
+        A::Request: Clone + Sync + ReadOptionsProvider + 'static,
+    {
+        let accessor = Arc::new(accessor);
+        let mut source = Self::prepare_plannable(accessor.clone(), request.clone()).await?;
+        source.statistics = Some(Box::new(Selection { accessor, request }));
+        Ok(source)
+    }
+
+    /// Inspect the saved selection without polling or taking the retained reader.
+    ///
+    /// The projection is validated against the bound schema before provider I/O;
+    /// selection and byte/provider options are the same as for [`Self::scan`].
+    /// Providers may read metadata but must not consume selected records merely
+    /// to collect statistics. Calls are not cached and add no snapshot guarantee.
+    /// Returns unknown values unless prepared with a statistics-preserving
+    /// constructor. Provider errors propagate rather than becoming unknown sizes.
+    pub async fn statistics(&self, options: ReadOptions) -> Result<ScanStatistics> {
+        options.resolve_projection(&self.schema())?;
+        match &self.statistics {
+            Some(selection) => selection.statistics(options).await,
+            None => Ok(ScanStatistics::default()),
+        }
+    }
+
     async fn prepare_with<A>(
         accessor: A,
         mut request: A::Request,
@@ -153,6 +221,7 @@ impl PreparedSource {
             selection: selection(accessor, request),
             bound,
             batch_size,
+            statistics: None,
         })
     }
 
