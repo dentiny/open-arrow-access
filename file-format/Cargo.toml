@@ -50,7 +50,7 @@ arrow-array.workspace = true
 arrow-schema.workspace = true
 flate2.workspace = true
 more-asserts.workspace = true
-open-arrow-access-dataset.workspace = true
+open-arrow-access-dataset = { path = "../dataset" }
 open-arrow-access-decompression = { path = "../decompression", default-features = false, features = [
     "gzip",
 ] }
