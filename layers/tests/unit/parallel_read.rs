@@ -28,13 +28,19 @@ async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
             prefetch: NonZeroUsize::MIN,
         },
     );
-    let (sender, ready) = partition_channel(1, false);
+    let PartitionChannel {
+        sender,
+        batches: ready,
+    } = partition_channel(1, false);
     let crate::ordered_buffer::PartitionSender::Bounded(sender) = sender else {
         unreachable!()
     };
     sender.try_send(batch.clone()).unwrap();
     drop(sender);
-    let (sender, closed) = partition_channel(1, false);
+    let PartitionChannel {
+        sender,
+        batches: closed,
+    } = partition_channel(1, false);
     drop(sender);
     reader.partition_receivers.extend([closed, ready]);
 

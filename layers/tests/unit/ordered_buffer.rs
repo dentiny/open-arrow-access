@@ -16,7 +16,10 @@ async fn queued_batches_are_released_on_delivery_or_cancellation() {
         for consume in [false, true] {
             let expected = batch(1);
             let column = Arc::downgrade(expected.column(0));
-            let (sender, mut batches) = partition_channel(1, read_ahead);
+            let PartitionChannel {
+                sender,
+                mut batches,
+            } = partition_channel(1, read_ahead);
             match sender {
                 PartitionSender::Bounded(sender) => sender.send(expected).await.unwrap(),
                 PartitionSender::ReadAhead(sender) => sender.send(expected).unwrap(),
@@ -47,7 +50,10 @@ async fn file_read_ahead_finishes_without_polling_output_and_keeps_batch_order()
         metadata,
         OrderRequirement::PreserveGlobal,
     );
-    let (sender, mut batches) = partition_channel(1, true);
+    let PartitionChannel {
+        sender,
+        mut batches,
+    } = partition_channel(1, true);
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         sender.read(&mut reader, &schema),

@@ -15,7 +15,7 @@ use tokio::task::JoinSet;
 
 use crate::{
     error::partition_task_error,
-    ordered_buffer::partition_channel,
+    ordered_buffer::{PartitionChannel, partition_channel},
     scan_policy::{ScanPolicy, ScanPolicyAccessor},
     validation::{validate_emission_policy, validate_parallel_read_settings},
 };
@@ -133,7 +133,8 @@ impl ParallelReader {
     }
 
     fn spawn_partition(&mut self, open: ScanPartition) {
-        let (sender, batches) = partition_channel(self.settings.prefetch.get(), self.read_ahead);
+        let PartitionChannel { sender, batches } =
+            partition_channel(self.settings.prefetch.get(), self.read_ahead);
         let schema = self.metadata.schema.clone();
         self.tasks.spawn(async move {
             let mut reader = open.await?;

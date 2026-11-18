@@ -17,22 +17,33 @@ pub(crate) enum PartitionSender {
     ReadAhead(mpsc::UnboundedSender<RecordBatch>),
 }
 
-pub(crate) fn partition_channel(
-    prefetch: usize,
-    read_ahead: bool,
-) -> (PartitionSender, BoxStream<'static, RecordBatch>) {
+/// A partition worker's output sender and matching batch stream.
+pub(crate) struct PartitionChannel {
+    /// Producer endpoint using the selected buffering policy.
+    pub(crate) sender: PartitionSender,
+    /// Receiver stream preserving batch order within this partition.
+    pub(crate) batches: BoxStream<'static, RecordBatch>,
+}
+
+pub(crate) fn partition_channel(prefetch: usize, read_ahead: bool) -> PartitionChannel {
     if read_ahead {
         let (sender, receiver) = mpsc::unbounded_channel();
         let batches = stream::unfold(receiver, |mut receiver| async move {
             receiver.recv().await.map(|batch| (batch, receiver))
         });
-        (PartitionSender::ReadAhead(sender), batches.boxed())
+        PartitionChannel {
+            sender: PartitionSender::ReadAhead(sender),
+            batches: batches.boxed(),
+        }
     } else {
         let (sender, receiver) = mpsc::channel(prefetch);
         let batches = stream::unfold(receiver, |mut receiver| async move {
             receiver.recv().await.map(|batch| (batch, receiver))
         });
-        (PartitionSender::Bounded(sender), batches.boxed())
+        PartitionChannel {
+            sender: PartitionSender::Bounded(sender),
+            batches: batches.boxed(),
+        }
     }
 }
 
