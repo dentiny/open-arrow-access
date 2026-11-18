@@ -1,11 +1,11 @@
 use std::{num::NonZeroUsize, sync::Mutex};
 
 use arrow_array::record_batch;
-use futures::stream;
+use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, OrderRequirement, ReadOptions, ReadOptionsProvider, ReadRequest, RecordCapability,
-    RecordMetadata, RecordReader, Result, SelectionAccessor, StreamReader, async_trait,
-    project_batch,
+    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, SelectionAccessor, StreamReader,
+    async_trait, project_batch, scan_partition,
 };
 
 #[derive(Clone)]
@@ -186,5 +186,58 @@ async fn preserves_proven_empty_inspection() {
     let calls = pages.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].0, "inspect");
+    assert_selected(&calls[0].1, true);
+}
+
+#[async_trait]
+impl ScanPlanner for Pages {
+    async fn plan_scan(&self, request: PageRequest) -> Result<ScanPlan> {
+        let output = metadata(&request);
+        self.calls.lock().unwrap().push(("plan", request.clone()));
+        let partitions = (0..2)
+            .map(|_| {
+                let request = request.clone();
+                let output = output.clone();
+                scan_partition(async move {
+                    let batch =
+                        record_batch!(("id", Int32, [1, 2]), ("label", Utf8, ["a", "b"])).unwrap();
+                    let projection = request.read.options.resolve_projection(&batch.schema())?;
+                    let batch =
+                        project_batch(batch, projection.indices.as_deref(), projection.schema)?;
+                    Ok(StreamReader::records(
+                        stream::iter([Ok(batch)]),
+                        output,
+                        OrderRequirement::PreserveGlobal,
+                    ))
+                })
+            })
+            .collect();
+        Ok(ScanPlan::new(output, partitions))
+    }
+}
+
+#[tokio::test]
+async fn preserves_native_partitions_and_replaces_only_read_options() {
+    let pages = std::sync::Arc::new(Pages::default());
+    let selected = SelectionAccessor::new(pages.clone(), bound());
+    let plan = selected.plan_scan(incoming()).await.unwrap();
+    assert_eq!(plan.ordering, OrderRequirement::PreserveGlobal);
+    assert_eq!(plan.metadata.schema.field(0).name(), "label");
+    let mut partitions = plan.partitions;
+    let mut partition_count = 0;
+    let mut rows = 0;
+    while let Some(partition) = partitions.next().await {
+        partition_count += 1;
+        let mut reader = partition.unwrap().await.unwrap();
+        while let Some(batch) = reader.next().await.unwrap() {
+            assert_eq!(batch.num_columns(), 1);
+            rows += batch.num_rows();
+        }
+    }
+    assert_eq!(partition_count, 2);
+    assert_eq!(rows, 4);
+    let calls = pages.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1, "planning must not call sequential open");
+    assert_eq!(calls[0].0, "plan");
     assert_selected(&calls[0].1, true);
 }

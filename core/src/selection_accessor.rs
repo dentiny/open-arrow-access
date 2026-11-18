@@ -1,6 +1,6 @@
 use crate::{
     Accessor, ReadOptions, ReadOptionsProvider, ReadRequest, RecordCapability, RecordMetadata,
-    RecordReader, Result, async_trait,
+    RecordReader, Result, ScanPlan, ScanPlanner, async_trait,
 };
 
 /// Expose a fixed record selection through the common [`ReadRequest`] interface.
@@ -11,8 +11,8 @@ use crate::{
 /// remain those of the bound request. Construction performs no I/O.
 ///
 /// Metadata operations delegate to the inner accessor, preserving specialized
-/// inspection paths and proven-empty results. This adapter does not add scan
-/// planning or discovery interfaces.
+/// inspection paths and proven-empty results. When the inner accessor implements
+/// [`ScanPlanner`], native partitions are forwarded without opening readers.
 ///
 /// ```
 /// use open_arrow_access_core::{
@@ -75,5 +75,16 @@ where
 
     async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         self.inner.open(self.selected(request.options)).await
+    }
+}
+
+#[async_trait]
+impl<A> ScanPlanner for SelectionAccessor<A>
+where
+    A: ScanPlanner,
+    A::Request: ReadOptionsProvider + Clone + Sync,
+{
+    async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
+        self.inner.plan_scan(self.selected(request.options)).await
     }
 }
