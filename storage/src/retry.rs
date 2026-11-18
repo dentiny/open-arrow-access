@@ -11,12 +11,12 @@ use std::{
 };
 
 use opendal::{
-    Buffer, Capability, Error, ErrorKind, HttpBody, HttpTransport, HttpTransporter, Metadata,
-    OperationContext, Result,
+    Buffer, BytesRange, Capability, Error, ErrorKind, HttpBody, HttpTransport, HttpTransporter,
+    Metadata, OperationContext, Result,
     raw::{
-        BytesRange, Layer, OpCompose, OpCopy, OpCreateDir, OpDelete, OpList, OpPresign, OpRead,
-        OpRename, OpRestore, OpStat, OpWrite, RpCreateDir, RpPresign, RpRead, RpRename, RpRestore,
-        RpStat, Service, ServiceInfo, Servicer, oio,
+        Layer, OpCompose, OpCopy, OpCreateDir, OpDelete, OpList, OpPresign, OpRead, OpRename,
+        OpRestore, OpStat, OpWrite, RpCreateDir, RpPresign, RpRead, RpRename, RpRestore, RpStat,
+        Service, ServiceInfo, Servicer, oio,
     },
 };
 use tokio::time::Instant;
