@@ -1,7 +1,10 @@
 //! arXiv bulk-manifest discovery over caller-configured byte storage.
 
 mod error;
+mod id;
 mod manifest;
+mod metadata;
+pub use metadata::{ArxivMetadataIndex, ArxivPdfRecords};
 mod records;
 pub use records::{ArxivReadRequest, ArxivRecords, record_schema};
 mod validation;

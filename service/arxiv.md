@@ -78,3 +78,49 @@ API note: `ArxivKind::manifest_key()` now returns `Option<&str>` because `Auto`
 has no single manifest key. Existing direct callers should handle `None` (or
 unwrap only when the kind is known to be `Pdf` or `Source`). Exhaustive matches
 on `ArxivKind` must also handle the new `Auto` variant.
+
+## PDF and metadata in one table
+
+`records().with_metadata(Arc<ArxivMetadataIndex>)` joins a cached metadata
+snapshot to each PDF before emitting Arrow batches. Pass
+`ArxivReadRequest::new(ArxivKind::Pdf)`; source/automatic requests are rejected.
+The output retains the four bulk columns above and adds a non-null `metadata`
+struct containing **every column** of the snapshot with its original Arrow type.
+Write these batches to one Lance dataset, selecting `data` as the PDF blob column.
+No second metadata table or metadata fetch per PDF is required.
+
+```rust
+use std::sync::Arc;
+use open_arrow_access::{Accessor, Result, RecordBatch};
+use open_arrow_access::service::arxiv::{ArxivKind, ArxivMetadataIndex, ArxivReadRequest, ArxivService};
+use open_arrow_access::storage::OpenDalAccessor;
+
+async fn convert_rows(storage: OpenDalAccessor, metadata: RecordBatch) -> Result<()> {
+    // metadata is a complete cached snapshot for the selected PDF month.
+    // Its identifier column may use canonical IDs or oai:arXiv.org:<id>.
+    let index = Arc::new(ArxivMetadataIndex::try_new(metadata, "identifier")?);
+    let source = ArxivService::new(storage).records().with_metadata(index);
+    let mut reader = source.open(ArxivReadRequest::new(ArxivKind::Pdf).with_month(2410)).await?;
+    while let Some(batch) = reader.next().await? {
+        // Send this batch directly to the same Lance writer.
+        assert!(batch.column_by_name("metadata").is_some());
+        assert!(batch.column_by_name("data").is_some());
+    }
+    Ok(())
+}
+```
+
+Snapshot acquisition is separate: harvest OAI-PMH through one coordinator,
+respect its rate limit, and persist/reuse the result. The caller must select a
+stable mapping retaining all required upstream fields; the default OAI header
+mapping alone is insufficient. The index makes no network requests. It retains
+metadata in memory, not PDFs; monthly snapshots bound worker memory usage.
+
+Joining is by **article ID**. A PDF filename's version suffix is retained in
+`entry_name`, while its unversioned ID matches the snapshot. Metadata describes
+the snapshot and may include version history; this does not assert that current
+metadata describes an individual historical PDF version. Invalid filenames,
+null/duplicate metadata IDs and PDFs without metadata fail rather than silently
+producing incomplete rows. Metadata-only records (for example deleted articles
+without a PDF) do not generate PDF rows. Projection applies after matching;
+shards remain independent scan partitions and share the immutable index.
