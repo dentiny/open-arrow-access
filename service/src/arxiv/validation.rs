@@ -1,3 +1,4 @@
+use arrow_array::Array;
 use arrow_schema::DataType;
 use open_arrow_access_core::Result;
 
@@ -6,12 +7,15 @@ use super::{
     error::{decode, invalid},
 };
 
-pub(super) fn validate_metadata_id_type(data_type: &DataType) -> Result<()> {
+pub(super) fn validate_metadata_id_column(column: &dyn Array) -> Result<()> {
     if !matches!(
-        data_type,
+        column.data_type(),
         DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
     ) {
         return Err(invalid("metadata IDs must be strings"));
+    }
+    if column.null_count() != 0 {
+        return Err(invalid("metadata ID cannot be null"));
     }
     Ok(())
 }
