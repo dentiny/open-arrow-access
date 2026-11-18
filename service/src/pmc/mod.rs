@@ -22,29 +22,45 @@ pub fn schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
+            let mut fields = vec![
+                Field::new("pmcid", DataType::Utf8, false),
+                Field::new("version", DataType::UInt32, true),
+                Field::new("pmid", DataType::UInt64, true),
+                Field::new("doi", DataType::Utf8, true),
+                Field::new("title", DataType::LargeUtf8, true),
+                Field::new("citation", DataType::LargeUtf8, true),
+                Field::new("is_pmc_openaccess", DataType::Boolean, true),
+                Field::new("is_manuscript", DataType::Boolean, true),
+                Field::new("is_historical_ocr", DataType::Boolean, true),
+                Field::new("is_retracted", DataType::Boolean, true),
+                Field::new("license_code", DataType::Utf8, true),
+                Field::new("xml_url", DataType::Utf8, true),
+                Field::new("pdf_url", DataType::Utf8, true),
+                Field::new(
+                    "media_urls",
+                    DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+                    true,
+                ),
+                Field::new("text", DataType::Utf8, true),
+                Field::new("mid", DataType::Utf8, true),
+            ];
+            let metadata_fields = fields
+                .iter()
+                .map(|field| {
+                    if field.name() == "text" {
+                        field.clone().with_name("text_url")
+                    } else {
+                        field.clone()
+                    }
+                })
+                .collect::<Vec<_>>();
+            fields.push(Field::new(
+                "metadata",
+                DataType::Struct(metadata_fields.into()),
+                false,
+            ));
             Arc::new(Schema::new_with_metadata(
-                vec![
-                    Field::new("pmcid", DataType::Utf8, false),
-                    Field::new("version", DataType::UInt32, true),
-                    Field::new("pmid", DataType::UInt64, true),
-                    Field::new("doi", DataType::Utf8, true),
-                    Field::new("title", DataType::LargeUtf8, true),
-                    Field::new("citation", DataType::LargeUtf8, true),
-                    Field::new("is_pmc_openaccess", DataType::Boolean, true),
-                    Field::new("is_manuscript", DataType::Boolean, true),
-                    Field::new("is_historical_ocr", DataType::Boolean, true),
-                    Field::new("is_retracted", DataType::Boolean, true),
-                    Field::new("license_code", DataType::Utf8, true),
-                    Field::new("xml_url", DataType::Utf8, true),
-                    Field::new("pdf_url", DataType::Utf8, true),
-                    Field::new(
-                        "media_urls",
-                        DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
-                        true,
-                    ),
-                    Field::new("text", DataType::Utf8, true),
-                    Field::new("metadata_json", DataType::LargeUtf8, false),
-                ],
+                fields,
                 HashMap::from([("pmc.row_kind".into(), "article_metadata".into())]),
             ))
         })
