@@ -31,13 +31,14 @@ open-arrow-access-file-format = { path = "../file-format", default-features = fa
     "csv",
     "json",
     "parquet",
+    "warc",
 ] }
 open-arrow-access-layers.workspace = true
 open-arrow-access-storage.workspace = true
 open-arrow-access-test-support.workspace = true
 parquet.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["fs"] }
+tokio = { workspace = true, features = ["fs", "time"] }
 
 [lints]
 workspace = true

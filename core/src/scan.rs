@@ -55,6 +55,10 @@ pub struct ScanPlan {
     /// requirement. Unordered emission is allowed only for a reorderable source;
     /// a reorderable source may still be read with ordered emission.
     pub emission: EmissionPolicy,
+    /// Discovery consumes a shared sequential input (for example, compressed records).
+    /// Multi-file planners may keep this stream inside one file partition so the
+    /// executor can overlap input discovery across files under its worker budget.
+    pub streaming_discovery: bool,
     pub partitions: BoxStream<'static, Result<ScanPartition>>,
 }
 
@@ -123,8 +127,17 @@ impl ScanPlan {
             ordering: OrderRequirement::PreserveGlobal,
             parallel_read: None,
             emission: EmissionPolicy::Ordered,
+            streaming_discovery: false,
             partitions: partitions.boxed(),
         }
+    }
+
+    /// Mark partition discovery as reading one sequential input stream.
+    /// This preserves native chunk parallelism for standalone scans while allowing
+    /// enclosing multi-file scans to schedule independent input streams instead.
+    pub fn with_streaming_discovery(mut self) -> Self {
+        self.streaming_discovery = true;
+        self
     }
 
     /// Declare the resolved source contract. Only a provider that has established

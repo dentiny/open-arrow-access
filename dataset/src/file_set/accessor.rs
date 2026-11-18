@@ -61,7 +61,9 @@ impl<A> FileSetAccessor<A> {
     }
 
     /// Flatten native file partitions into one ordered scan and executor budget.
-    /// Later files are planned lazily; ordinary `open` remains sequential.
+    /// Streaming formats use one worker per file in multi-file scans, so framing
+    /// and downloading can overlap. Single-file and independent native partitions
+    /// retain chunk parallelism. Ordinary `open` remains sequential.
     pub fn with_file_planning(mut self) -> Self
     where
         A: ScanPlanner<Request = ReadRequest> + 'static,
@@ -182,6 +184,7 @@ where
         if self.union_by_name {
             return super::union_by_name::plan(self.inner.clone(), file_planner, request).await;
         }
+        let multiple_files = request.objects.len() > 1;
         let mut requests = request.into_requests();
         let first = requests.next().ok_or_else(|| empty_selection(operation))?;
         let first = match file_planner {
@@ -191,12 +194,35 @@ where
         validate_file_policy(&first)?;
         let ordering = self.capability().ordering.combine(first.ordering);
         let metadata = RecordMetadata {
-            schema: first.metadata.schema,
+            schema: first.metadata.schema.clone(),
             source: None,
         };
+        let streaming_files = multiple_files && first.streaming_discovery;
         let inner = self.inner.clone();
         if let Some(plan_file) = file_planner {
             let schema = metadata.schema.clone();
+            if streaming_files {
+                let first: ScanPartition =
+                    Box::pin(
+                        async move { Ok(Box::new(first.into_reader()) as Box<dyn RecordReader>) },
+                    );
+                let later = requests.map(move |request| {
+                    let inner = inner.clone();
+                    let schema = schema.clone();
+                    let partition: ScanPartition = Box::pin(async move {
+                        let plan = plan_file(inner, request).await?;
+                        validate_file_policy(&plan)?;
+                        validate_file_ordering(ordering, plan.ordering)?;
+                        super::validation::validate_schema(&plan.metadata.schema, &schema)?;
+                        Ok(Box::new(plan.into_reader()) as Box<dyn RecordReader>)
+                    });
+                    partition
+                });
+                return Ok(
+                    ScanPlan::from_iter(metadata, std::iter::once(first).chain(later))
+                        .with_ordering(ordering),
+                );
+            }
             let later = stream::iter(requests).then(move |request| {
                 let inner = inner.clone();
                 let schema = schema.clone();
@@ -205,7 +231,11 @@ where
                     validate_file_policy(&plan)?;
                     validate_file_ordering(ordering, plan.ordering)?;
                     super::validation::validate_schema(&plan.metadata.schema, &schema)?;
-                    Ok(plan.partitions)
+                    if multiple_files && plan.streaming_discovery {
+                        Ok(ScanPlan::whole_input(Box::new(plan.into_reader())).partitions)
+                    } else {
+                        Ok(plan.partitions)
+                    }
                 }
             });
             Ok(

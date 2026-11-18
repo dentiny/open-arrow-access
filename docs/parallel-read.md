@@ -36,9 +36,18 @@ promise a speedup, unordered output, or parallel byte I/O within each reader.
 Call `with_file_planning()` on `FileSetAccessor` or `DirectoryAccessor` when the
 inner format implements `ScanPlanner`. Native partitions (for example, Parquet
 row groups) are flattened in file and record order under the same executor
-budget. Only the first file is planned initially; later files are planned when
-partition discovery reaches them. Later plan schemas, including empty plans,
-must match the first schema. No nested executor or second worker budget is used.
+budget. Plans whose discovery reads a sequential input declare
+`with_streaming_discovery()` (CSV, JSON, WARC and other record-chunked formats).
+For multiple streaming files, each worker plans and drains one file, including
+its native chunks. This overlaps downloading, framing and decoding across at
+most P resident files, with Q queued batches per file. Single-file scans retain
+native chunk parallelism; independent partitions such as Parquet row groups
+continue to share the partition budget. Only the first strict-mode file is
+planned initially; later streaming files are planned inside their worker slots.
+Union-by-name still inspects schemas sequentially before execution, then uses
+the same file workers when reopening streaming inputs. Later plan schemas,
+including empty plans, must match the inspected schema. No nested executor or
+second worker budget is used.
 Hugging Face dataset scans enable this mode automatically. Resolved provider
 files can opt in with `files.records(format).with_file_planning()`. Common Crawl
 WARC and segment accessors expose the same builder when their supplied format

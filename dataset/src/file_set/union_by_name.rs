@@ -30,12 +30,14 @@ where
     let mut selected = false;
     let mut union_schema = schema::SchemaUnion::default();
     let mut ordering = inner.capability().ordering;
+    let mut streaming_files = false;
     // Drop each inspected reader/plan before opening the next file, so JSON
     // samples and native partitions are not retained across the entire dataset.
     for request in request.into_requests() {
         selected = true;
         let inspected = open_plan(inner.clone(), file_planner, request.clone()).await?;
         validate_file_policy(&inspected)?;
+        streaming_files |= inspected.streaming_discovery;
         let file_ordering = inspected.ordering;
         let source = inspected.metadata.schema.clone();
         // A zero-field JSON object still has a row. Only skip an input when
@@ -90,6 +92,20 @@ where
             ))
         })
         .collect::<Result<Vec<_>>>()?;
+    if streaming_files && files.len() > 1 && file_planner.is_some() {
+        let partitions = files.into_iter().map(move |(request, alignment)| {
+            let inner = inner.clone();
+            let partition: ScanPartition = Box::pin(async move {
+                let plan = open_plan(inner, file_planner, request).await?;
+                validate_file_policy(&plan)?;
+                validate_file_ordering(ordering, plan.ordering)?;
+                super::validation::validate_schema(&plan.metadata.schema, &alignment.source)?;
+                align_reader(Box::new(plan.into_reader()), alignment)
+            });
+            partition
+        });
+        return Ok(ScanPlan::from_iter(metadata, partitions).with_ordering(ordering));
+    }
     let partitions = stream::iter(files)
         .then(move |(request, alignment)| {
             let inner = inner.clone();

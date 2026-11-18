@@ -51,7 +51,9 @@ where
             request,
             self.partition_options.target_bytes.get(),
         );
-        Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))
+        Ok(ScanPlan::from_stream(metadata, partitions)
+            .with_streaming_discovery()
+            .with_ordering(self.capability().ordering))
     }
 }
 
