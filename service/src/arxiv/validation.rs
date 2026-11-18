@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use arrow_array::{Array, ArrayRef, LargeBinaryArray, RecordBatch, cast::AsArray};
 use arrow_schema::DataType;
 use open_arrow_access_core::Result;
@@ -26,13 +24,6 @@ pub(super) fn pdf_entry_names(batch: &RecordBatch) -> Result<&LargeBinaryArray> 
         .column_by_name("entry_name")
         .ok_or_else(error::missing_pdf_entry_column)?
         .as_binary::<i64>())
-}
-
-pub(super) fn pdf_metadata_row(name: Option<&[u8]>, ids: &HashMap<String, u64>) -> Result<u64> {
-    let id = pdf_id(name.ok_or_else(error::null_pdf_entry_name)?)?;
-    ids.get(&id)
-        .copied()
-        .ok_or_else(error::missing_pdf_metadata)
 }
 
 pub(super) fn validate_pdf_kind(kind: ArxivKind) -> Result<()> {
@@ -107,13 +98,10 @@ pub(super) fn validate_archive_length(archive: &ArxivArchive, length: Option<u64
     Ok(())
 }
 
-/// Use the bulk archive spelling as the join key (legacy IDs omit the slash).
-pub(super) fn metadata_id(id: &str) -> Result<String> {
-    let id = id.strip_prefix("oai:arXiv.org:").unwrap_or(id);
+pub(super) fn validate_metadata_id(id: &str, key: &str) -> Result<()> {
     if !id.is_ascii() {
         return Err(error::non_ascii_metadata_id());
     }
-    let key = id.replace('/', "");
     let valid = if key.as_bytes().first().is_some_and(u8::is_ascii_digit) {
         let Some((month, number)) = key.split_once('.') else {
             return Err(error::invalid_metadata_id());
@@ -134,31 +122,5 @@ pub(super) fn metadata_id(id: &str) -> Result<String> {
     if !valid || id.matches('/').count() > 1 {
         return Err(error::invalid_unversioned_metadata_id());
     }
-    Ok(key)
-}
-
-pub(super) fn pdf_id(name: &[u8]) -> Result<String> {
-    let path = std::str::from_utf8(name).map_err(|_| error::invalid_pdf_entry_encoding())?;
-    let name = path.rsplit('/').next().unwrap_or(path);
-    let stem = name
-        .strip_suffix(".pdf")
-        .ok_or_else(|| error::invalid_pdf_extension())?;
-    let stem = match stem.rsplit_once('v') {
-        Some((id, version))
-            if !version.is_empty() && version.bytes().all(|b| b.is_ascii_digit()) =>
-        {
-            id
-        }
-        _ => stem,
-    };
-    // Some mirrors retain the legacy category directory instead of flattening it.
-    let legacy;
-    let stem = if stem.len() == 7 && stem.bytes().all(|b| b.is_ascii_digit()) {
-        let category = path.rsplit('/').nth(1).unwrap_or("");
-        legacy = format!("{category}/{stem}");
-        legacy.as_str()
-    } else {
-        stem
-    };
-    metadata_id(stem).map_err(|_| error::invalid_pdf_id())
+    Ok(())
 }

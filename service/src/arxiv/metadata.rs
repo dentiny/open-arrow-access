@@ -9,7 +9,7 @@ use open_arrow_access_core::{
     ScanPlanner, async_trait, map_record_reader, project_batch, scan_partition,
 };
 
-use super::{ArxivReadRequest, ArxivRecords, error, record_schema, validation};
+use super::{ArxivReadRequest, ArxivRecords, error, id, record_schema, validation};
 
 /// Reusable in-memory metadata snapshot, indexed by the article ID column.
 ///
@@ -38,9 +38,7 @@ impl ArxivMetadataIndex {
                 DataType::Utf8View => column.as_string_view().value(row),
                 _ => unreachable!(),
             };
-            validation::validate_unique_metadata_id(
-                ids.insert(validation::metadata_id(id)?, row as u64),
-            )?;
+            validation::validate_unique_metadata_id(ids.insert(id::metadata_id(id)?, row as u64))?;
         }
         Ok(Self {
             rows: StructArray::from(batch),
@@ -52,7 +50,7 @@ impl ArxivMetadataIndex {
         let names = validation::pdf_entry_names(&batch)?;
         let indices = names
             .iter()
-            .map(|name| validation::pdf_metadata_row(name, &self.ids))
+            .map(|name| pdf_metadata_row(name, &self.ids))
             .collect::<Result<Vec<_>>>()?;
         let metadata = arrow_select::take::take(&self.rows, &UInt64Array::from(indices), None)
             .map_err(error::arrow_error)?;
@@ -152,6 +150,13 @@ where
     }
 }
 
+fn pdf_metadata_row(name: Option<&[u8]>, ids: &HashMap<String, u64>) -> Result<u64> {
+    let id = id::pdf_id(name.ok_or_else(error::null_pdf_entry_name)?)?;
+    ids.get(&id)
+        .copied()
+        .ok_or_else(error::missing_pdf_metadata)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,12 +236,9 @@ mod tests {
         for id in ["", "2410.01234v2", "ééééé", "not-an-id"] {
             assert!(ArxivMetadataIndex::try_new(snapshot(vec![id]), "identifier").is_err());
         }
+        assert_eq!(id::pdf_id(b"hep-th/9901001.pdf").unwrap(), "hep-th9901001");
         assert_eq!(
-            validation::pdf_id(b"hep-th/9901001.pdf").unwrap(),
-            "hep-th9901001"
-        );
-        assert_eq!(
-            validation::pdf_id(b"0001/math.GT0001001v1.pdf").unwrap(),
+            id::pdf_id(b"0001/math.GT0001001v1.pdf").unwrap(),
             "math.GT0001001"
         );
     }
