@@ -49,8 +49,7 @@ retains plans and inference samples for reuse. Its file workers drain those
 retained streams instead of reopening them. Preflight may retain inputs for
 all selected files, separately from the P-file execution and spill budgets.
 Strict-mode later plan schemas, including empty plans, must match the first
-schema. No nested executor or
-second worker budget is used.
+schema. No nested executor or second worker budget is used.
 Hugging Face dataset scans enable this mode automatically. Resolved provider
 files can opt in with `files.records(format).with_file_planning()`. Common Crawl
 WARC and segment accessors expose the same builder when their supplied format

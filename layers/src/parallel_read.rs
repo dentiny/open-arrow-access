@@ -182,17 +182,17 @@ async fn spill_file(
         if sender.is_closed() {
             return Ok(false);
         }
-        if pending.is_some() {
-            if let Ok(permit) = sender.try_reserve() {
-                permit.send(PartitionOutput::Spill(pending.take().unwrap()));
-            }
+        if pending.is_some()
+            && let Ok(permit) = sender.try_reserve()
+        {
+            permit.send(PartitionOutput::Spill(pending.take().unwrap()));
         }
         if head.load(Ordering::Acquire) {
             writer.finish();
-            if let Some(input) = pending {
-                if sender.send(PartitionOutput::Spill(input)).await.is_err() {
-                    return Ok(false);
-                }
+            if let Some(input) = pending
+                && sender.send(PartitionOutput::Spill(input)).await.is_err()
+            {
+                return Ok(false);
             }
             return Ok(true);
         }
@@ -206,10 +206,10 @@ async fn spill_file(
         crate::validation::validate_partition_schema(&batch.schema(), schema)?;
         if !writer.append(&batch).await? {
             writer.finish();
-            if let Some(input) = pending {
-                if sender.send(PartitionOutput::Spill(input)).await.is_err() {
-                    return Ok(false);
-                }
+            if let Some(input) = pending
+                && sender.send(PartitionOutput::Spill(input)).await.is_err()
+            {
+                return Ok(false);
             }
             return Ok(sender.send(PartitionOutput::Batch(batch)).await.is_ok());
         }
@@ -254,32 +254,27 @@ impl ParallelReader {
             crate::validation::validate_partition_schema(&reader.metadata().schema, &schema)?;
             let mut can_spill = spill_limit;
             loop {
-                if !worker_head.load(Ordering::Acquire) {
-                    if let Some(limit) = can_spill {
-                        match sender.try_reserve() {
-                            Ok(permit) => {
-                                let Some(batch) = reader.next().await? else {
-                                    return Ok(());
-                                };
-                                crate::validation::validate_partition_schema(
-                                    &batch.schema(),
-                                    &schema,
-                                )?;
-                                permit.send(PartitionOutput::Batch(batch));
-                                continue;
-                            }
-                            Err(mpsc::error::TrySendError::Closed(_)) => return Ok(()),
-                            Err(mpsc::error::TrySendError::Full(_)) => {}
+                if !worker_head.load(Ordering::Acquire)
+                    && let Some(limit) = can_spill
+                {
+                    match sender.try_reserve() {
+                        Ok(permit) => {
+                            let Some(batch) = reader.next().await? else {
+                                return Ok(());
+                            };
+                            crate::validation::validate_partition_schema(&batch.schema(), &schema)?;
+                            permit.send(PartitionOutput::Batch(batch));
+                            continue;
                         }
-                        // Only non-head file workers bypass a full memory queue.
-                        // One capped spool is allowed for this resident file.
-                        if !spill_file(reader.as_mut(), &sender, &worker_head, &schema, limit)
-                            .await?
-                        {
-                            return Ok(());
-                        }
-                        can_spill = None;
+                        Err(mpsc::error::TrySendError::Closed(_)) => return Ok(()),
+                        Err(mpsc::error::TrySendError::Full(_)) => {}
                     }
+                    // Only non-head file workers bypass a full memory queue.
+                    // One capped spool is allowed for this resident file.
+                    if !spill_file(reader.as_mut(), &sender, &worker_head, &schema, limit).await? {
+                        return Ok(());
+                    }
+                    can_spill = None;
                 }
                 // The head file and memory-only paths reserve before decoding.
                 let Ok(permit) = sender.reserve().await else {
@@ -343,10 +338,10 @@ impl ParallelReader {
                     }
                     // EOF only frees a resident slot after that receiver is drained.
                     self.partition_receivers.remove(index);
-                    if emission == EmissionPolicy::Ordered {
-                        if let Some(front) = self.partition_receivers.front() {
-                            front.head.store(true, Ordering::Release);
-                        }
+                    if emission == EmissionPolicy::Ordered
+                        && let Some(front) = self.partition_receivers.front()
+                    {
+                        front.head.store(true, Ordering::Release);
                     }
                 }
                 else => return Ok(None),

@@ -18,7 +18,9 @@ use open_arrow_access_core::{
 use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::{
-    csv::CsvAccessor, json::JsonAccessor, warc::WarcArrowAccessor,
+    csv::{CsvAccessor, CsvHeader},
+    json::JsonAccessor,
+    warc::WarcArrowAccessor,
 };
 use open_arrow_access_layers::ParallelReadLayer;
 use tokio::sync::Semaphore;
@@ -171,7 +173,7 @@ fn files_with_schema(
         .layer(DecompressionLayer::new(Gzip).with_chunk_size(NonZeroUsize::new(64).unwrap()));
     let format: Arc<dyn ScanPlanner<Request = ReadRequest>> = match format {
         "json" => Arc::new(JsonAccessor::new(input, schema)),
-        "csv" => Arc::new(CsvAccessor::new(input, schema)),
+        "csv" => Arc::new(CsvAccessor::new(input, schema).with_header(CsvHeader::Present)),
         "warc" => Arc::new(WarcArrowAccessor::new(input)),
         _ => unreachable!(),
     };
