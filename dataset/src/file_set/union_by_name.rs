@@ -2,17 +2,17 @@ use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, FieldNameIndex, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result,
-    ScanPartition, ScanPlan, map_record_reader,
+    Accessor, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition,
+    ScanPlan, map_record_reader,
 };
 
 use super::{
     FileSetRequest,
-    accessor::FilePlanner,
+    accessor::{FilePlanner, METADATA_CONCURRENCY},
     alignment::AlignmentPlan,
     error::empty_selection,
     schema,
-    validation::{validate_fields, validate_file_ordering, validate_file_policy},
+    validation::{validate_fields, validate_file_policy},
 };
 
 pub(super) async fn plan<A>(
@@ -30,23 +30,32 @@ where
     let mut selected = false;
     let mut union_schema = schema::SchemaUnion::default();
     let mut ordering = inner.capability().ordering;
-    // Drop each inspected reader/plan before opening the next file, so JSON
-    // samples and native partitions are not retained across the entire dataset.
-    for request in request.into_requests() {
+    // Buffer opening/inference, but merge in input order so field order and
+    // output ordering do not depend on which file finishes first. Keep each
+    // plan: inferred readers own the sample that must be replayed during reads.
+    let mut inspected = stream::iter(request.into_requests())
+        .map(|request| {
+            let inner = inner.clone();
+            async move {
+                let plan = open_plan(inner.clone(), file_planner, request.clone()).await?;
+                validate_file_policy(&plan)?;
+                let empty = plan.metadata.schema.fields().is_empty()
+                    && inner.inspect_metadata(request).await?.is_none();
+                Ok::<_, open_arrow_access_core::Error>((plan, empty))
+            }
+        })
+        .buffered(METADATA_CONCURRENCY);
+    while let Some((plan, empty)) = inspected.try_next().await? {
         selected = true;
-        let inspected = open_plan(inner.clone(), file_planner, request.clone()).await?;
-        validate_file_policy(&inspected)?;
-        let file_ordering = inspected.ordering;
-        let source = inspected.metadata.schema.clone();
-        // A zero-field JSON object still has a row. Only skip an input when
-        // inference proves it empty, without polling an output decoder.
-        if source.fields().is_empty() && inner.inspect_metadata(request.clone()).await?.is_none() {
+        if empty {
             continue;
         }
+        let file_ordering = plan.ordering;
+        let source = plan.metadata.schema.clone();
         ordering = ordering.combine(file_ordering);
         validate_fields(source.fields())?;
         union_schema.merge(source.as_ref())?;
-        files.push((request, source));
+        files.push(plan);
     }
     if files.is_empty() {
         return Err(if selected {
@@ -61,51 +70,21 @@ where
         schema: target.clone(),
         source: None,
     };
-    let selected = options
-        .projection
-        .as_ref()
-        .map(|_| FieldNameIndex::new(target.fields()));
-    let files = files
-        .into_iter()
-        .map(|(mut request, source)| {
-            // Preflight checks every field, but execution reads only selected
-            // fields present in this file. Alignment supplies missing columns
-            // and restores the requested output order.
-            let source = if let Some(selected) = &selected {
-                request.options.projection = Some(
-                    source
-                        .fields()
-                        .iter()
-                        .filter(|field| selected.get(field.name()).is_some())
-                        .map(|field| field.name().clone())
-                        .collect(),
-                );
-                request.options.resolve_projection(&source)?.schema
-            } else {
-                source
-            };
-            Ok((
-                request,
-                Arc::new(AlignmentPlan::new(source, target.clone())?),
-            ))
-        })
-        .collect::<Result<Vec<_>>>()?;
     let partitions = stream::iter(files)
-        .then(move |(request, alignment)| {
-            let inner = inner.clone();
-            async move {
-                let plan = open_plan(inner, file_planner, request).await?;
-                validate_file_policy(&plan)?;
-                validate_file_ordering(ordering, plan.ordering)?;
-                super::validation::validate_schema(&plan.metadata.schema, &alignment.source)?;
-                Ok(plan.partitions.map(move |partition| {
-                    let partition = partition?;
-                    let alignment = alignment.clone();
-                    let aligned: ScanPartition =
-                        Box::pin(async move { align_reader(partition.await?, alignment) });
-                    Ok(aligned)
-                }))
-            }
+        .map(move |plan| {
+            // The retained reader was opened with the full source schema.
+            // Alignment also projects columns and preserves zero-column rows.
+            let alignment = Arc::new(AlignmentPlan::new(
+                plan.metadata.schema.clone(),
+                target.clone(),
+            )?);
+            Ok(plan.partitions.map(move |partition| {
+                let partition = partition?;
+                let alignment = alignment.clone();
+                let aligned: ScanPartition =
+                    Box::pin(async move { align_reader(partition.await?, alignment) });
+                Ok(aligned)
+            }))
         })
         .try_flatten();
     Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(ordering))

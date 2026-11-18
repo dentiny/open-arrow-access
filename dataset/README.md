@@ -65,21 +65,23 @@ accessor when fields may be missing:
 let files = FileSetAccessor::new(JsonAccessor::infer(storage)).with_union_by_name();
 ```
 
-Union mode inspects every full schema before emitting rows, then reopens files
-lazily. Missing fields receive nulls; fields follow first-seen order. Structs and
+Union mode opens files with bounded concurrency (at most 16 opens in flight)
+and inspects every full schema before emitting rows. It retains those plans for
+execution, so inferred JSON/CSV readers replay their samples without reopening.
+Missing fields receive nulls; fields follow first-seen order. Structs and
 supported lists combine recursively; other differing types or conflicting
 metadata fail. There is no implicit numeric/string cast. Projection is resolved
-after union, and conflicts in unselected fields still fail preflight. Execution
-requests only selected columns present in each file, then fills missing columns
-and restores output order. JSON readers still validate and decode the full input
-schema before projection, including when the output has zero columns.
+after union, and conflicts in unselected fields still fail preflight. Retained
+readers decode the full source schema; alignment selects output columns, fills
+missing columns, and preserves row counts even for zero-column output.
 
-Keep source files stable between inspection and reading; schema drift in reopened
-selected fields fails the reader. JSON also checks unselected fields and rejects
-unknown keys, including keys outside each file's inference sample. Other formats
-may skip changes to unselected fields after preflight.
-Union may sample a file twice and stores selected requests/schemas, while keeping
-preflight readers/plans one at a time.
+Keep source files stable during a scan. JSON checks unselected fields and rejects
+unknown keys, including keys outside each file's inference sample.
+Retaining plans also retains readers, open resources, and inference samples for
+all selected files until their partitions are consumed or the scan is dropped.
+The concurrency limit bounds in-flight opens, not total retained sample bytes.
+Zero-field inputs still require a separate metadata inspection to distinguish
+empty inferred files from JSON `{}` rows without polling an output decoder.
 
 ## Execute in parallel
 

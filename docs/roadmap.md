@@ -51,8 +51,8 @@ schemas into one dataset schema before any rows are emitted.
 Cross-file union and batch alignment are available through the opt-in
 `with_union_by_name()` setting. Fields retain first-seen order, missing fields
 become nullable, and nested Struct/List fields are combined recursively.
-Preflight checks all file schemas; actual reads reopen files lazily and reject
-schema drift. Type and metadata conflicts fail without implicit casts. See the
+Preflight checks all file schemas with bounded concurrency and retains the plans
+and inference samples for execution. Type and metadata conflicts fail without implicit casts. See the
 [dataset union-by-name contract](../dataset/README.md#union-by-name).
 
 ## Generated columns and observation

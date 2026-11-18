@@ -285,8 +285,9 @@ listing capability; file sets can work without it.
 
 To union missing/reordered columns by name instead of requiring identical schemas,
 add `.with_union_by_name()` to the FileSet or Directory accessor. Union by name also
-handles nested Struct/List fields and nullability. It performs a sequential schema
-preflight, then reopens files lazily; sources must remain stable. Projection is
+handles nested Struct/List fields and nullability. It performs schema
+preflight with bounded concurrency and retains the plans and inference samples
+for execution; sources must remain stable. Projection is
 applied against the union rather than each file. See the [union-by-name contract](../dataset/README.md#union-by-name)
 for type/metadata conflict rules and resource behavior.
 
