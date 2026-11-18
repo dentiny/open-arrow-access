@@ -8,11 +8,11 @@ use open_arrow_access_core::{
 
 use super::{
     FileSetRequest,
-    accessor::{FilePlanner, METADATA_CONCURRENCY},
+    accessor::{FilePlanner, METADATA_CONCURRENCY, open_plan},
     alignment::AlignmentPlan,
     error::empty_selection,
     schema,
-    validation::{validate_fields, validate_file_policy},
+    validation::validate_fields,
 };
 
 pub(super) async fn plan<A>(
@@ -38,7 +38,6 @@ where
             let inner = inner.clone();
             async move {
                 let plan = open_plan(inner.clone(), file_planner, request.clone()).await?;
-                validate_file_policy(&plan)?;
                 let empty = plan.metadata.schema.fields().is_empty()
                     && inner.inspect_metadata(request).await?.is_none();
                 Ok::<_, open_arrow_access_core::Error>((plan, empty))
@@ -71,8 +70,8 @@ where
         source: None,
     };
     // Keep whole streaming-file discovery inside executor workers. Retained
-    // plans still replay their inference samples; ordered output may buffer behind
-    // the head without reopening or re-inferring any selected file.
+    // plans replay their inference samples through the same per-file execution
+    // path without reopening or re-inferring any selected file.
     let can_flatten_native_partitions =
         file_planner.is_some() && files.iter().all(|plan| !plan.streaming_discovery);
     if files.len() > 1 && !can_flatten_native_partitions {
@@ -107,20 +106,6 @@ where
         })
         .try_flatten();
     Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(ordering))
-}
-
-async fn open_plan<A>(
-    inner: Arc<A>,
-    file_planner: Option<FilePlanner<A>>,
-    request: ReadRequest,
-) -> Result<ScanPlan>
-where
-    A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
-{
-    match file_planner {
-        Some(plan) => plan(inner, request).await,
-        None => Ok(ScanPlan::whole_input(inner.open(request).await?)),
-    }
 }
 
 fn align_reader(

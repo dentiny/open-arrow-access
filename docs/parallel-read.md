@@ -42,14 +42,14 @@ For multiple streaming files, each worker plans and drains one file, including
 its native chunks. This overlaps downloading, framing and decoding across at
 most P resident files, with Q queued batches per file. Single-file scans retain
 native chunk parallelism; independent partitions such as Parquet row groups
-continue to share the partition budget. Only the first strict-mode file is
-planned initially; later streaming files are planned inside their worker slots.
+continue to share the partition budget. Strict mode previews and caches one
+plan to establish the schema, then all files use the same lazy planning and
+validation pipeline. Streaming-file plans are resolved inside worker slots.
 Union-by-name infers schemas with bounded concurrency before execution and
 retains plans and inference samples for reuse. Its file workers drain those
 retained streams instead of reopening them. Preflight may retain inputs for
 all selected files, separately from the P-file execution limit.
-Strict-mode later plan schemas, including empty plans, must match the first
-schema. No nested executor or second worker budget is used.
+Strict-mode file plans, including empty plans, must match the fixed schema. No nested executor or second worker budget is used.
 Hugging Face dataset scans enable this mode automatically. Resolved provider
 files can opt in with `files.records(format).with_file_planning()`. Common Crawl
 WARC and segment accessors expose the same builder when their supplied format
