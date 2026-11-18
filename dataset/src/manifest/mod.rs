@@ -1,5 +1,6 @@
 //! Streaming paths manifests over caller-bound storage. No network clients or
-//! credentials are created here. The storage root must correspond to the origin.
+//! credentials are created here. Object keys use caller-bound storage;
+//! absolute HTTP(S) entries require an accessor that supports URLs.
 mod error;
 mod validation;
 use crate::file_set::FileSetRequest;
@@ -39,9 +40,11 @@ pub enum Duplicates {
     Dedupe,
 }
 
-/// Resolve a manifest into ordered object keys. Defaults reject duplicates,
-/// URL query/fragment, credentials, traversal and cross-origin URLs.
-/// Relative manifest keys require `with_origin` to accept absolute URL entries.
+/// Resolve a manifest into ordered object locators. Defaults reject duplicates,
+/// credentials and traversal. Absolute HTTP(S) entries retain their full URLs;
+/// relative entries resolve to storage keys using the configured base.
+/// Entry query/fragment components are preserved; the accessor must support their
+/// semantics. Fragments are never sent by HTTP itself.
 /// Memory holds selected keys and the duplicate set, never the whole manifest.
 #[derive(Clone, Debug)]
 pub struct PathsManifest {
@@ -50,7 +53,6 @@ pub struct PathsManifest {
     prefix: Option<String>,
     formats: Option<(Vec<DetectedFormat>, Mismatch)>,
     duplicates: Duplicates,
-    origin: Option<String>,
     byte_options: ByteReadOptions,
 }
 impl PathsManifest {
@@ -61,7 +63,6 @@ impl PathsManifest {
             prefix: None,
             formats: None,
             duplicates: Duplicates::Error,
-            origin: None,
             byte_options: ByteReadOptions::default(),
         }
     }
@@ -69,7 +70,7 @@ impl PathsManifest {
         self.base = base;
         self
     }
-    /// Filter resolved origin-relative keys, before format and duplicate checks.
+    /// Filter resolved storage paths, before format and duplicate checks.
     pub fn with_prefix(mut self, prefix: impl Into<String>) -> Self {
         self.prefix = Some(prefix.into());
         self
@@ -80,11 +81,6 @@ impl PathsManifest {
     }
     pub fn with_duplicates(mut self, duplicates: Duplicates) -> Self {
         self.duplicates = duplicates;
-        self
-    }
-    /// HTTP(S) origin of a relative manifest key. Validated before any I/O.
-    pub fn with_origin(mut self, origin: impl Into<String>) -> Self {
-        self.origin = Some(origin.into());
         self
     }
     pub fn with_byte_options(mut self, options: ByteReadOptions) -> Self {

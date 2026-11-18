@@ -64,7 +64,7 @@ async fn bases_produce_keys_for_the_same_storage() {
 }
 
 #[tokio::test]
-async fn same_origin_entries_resolve_to_decoded_storage_keys() {
+async fn absolute_urls_are_canonicalized_and_relative_keys_are_decoded() {
     assert_eq!(
         resolve(
             manifest(),
@@ -72,7 +72,7 @@ async fn same_origin_entries_resolve_to_decoded_storage_keys() {
         )
         .await
         .unwrap(),
-        ["a.warc", "b.warc", "c d.warc"]
+        ["https://example.test/a.warc", "b.warc", "c d.warc"]
     );
 }
 
@@ -87,18 +87,14 @@ async fn unsafe_entries_report_the_manifest_and_line() {
         "a%00.warc",
         "//other.test/a.warc",
         "//example.test:443/a.warc",
-        "https://other.test/a.warc",
-        "http://example.test/a.warc",
-        "https://example.test:123/a.warc",
         "https://u:p@example.test/a.warc",
         "file:///a.warc",
+        "mailto:user@example.test",
+        "https://",
+        "https://[bad]/a.warc",
         "https://example.test/x/../a.warc",
         " a.warc",
         "a\\b.warc",
-        "a.warc?x=1",
-        "a.warc#x",
-        "https://example.test/a.warc?x=1",
-        "https://example.test/a.warc#x",
     ] {
         let error = resolve(manifest(), format!("\n{value}").as_bytes())
             .await
@@ -108,20 +104,14 @@ async fn unsafe_entries_report_the_manifest_and_line() {
 }
 
 #[tokio::test]
-async fn absolute_entries_require_an_inferred_or_configured_origin() {
-    let entry = b"https://example.test/a.warc";
-    let spec = PathsManifest::new("warc.paths");
-    assert_error(
-        resolve(spec.clone(), entry).await.unwrap_err(),
-        ErrorKind::Decode,
-        &["line 1", "origin"],
-    );
-    assert_eq!(
-        resolve(spec.with_origin("https://example.test"), entry)
-            .await
-            .unwrap(),
-        ["a.warc"]
-    );
+async fn absolute_entries_are_independent_of_the_manifest_location() {
+    let entries = b"https://example.test/a.warc\na.warc";
+    for spec in [manifest(), PathsManifest::new("warc.paths")] {
+        assert_eq!(
+            resolve(spec, entries).await.unwrap(),
+            ["https://example.test/a.warc", "a.warc"]
+        );
+    }
 }
 
 #[tokio::test]
@@ -135,8 +125,7 @@ async fn resolved_entries_must_remain_within_the_selected_base() {
 
 #[tokio::test]
 async fn selection_policies_preserve_order_and_detect_aliases() {
-    let bytes =
-        b"other/no.txt\nseg/z.WARC.GZ\nseg/no.txt\nseg/a.warc\nhttps://example.test/seg/z.WARC.GZ";
+    let bytes = b"other/no.txt\nseg/z.WARC.GZ\nseg/no.txt\nseg/a.warc\nseg/%7a.WARC.GZ";
     let selection = |policy| {
         manifest()
             .with_prefix("seg/")
@@ -186,10 +175,6 @@ async fn invalid_configuration_fails_before_io() {
         PathsManifest::new("https://u:p@example.test/warc.paths"),
         PathsManifest::new("https://example.test/warc.paths?x=1"),
         PathsManifest::new("https://example.test/warc.paths#x"),
-        manifest().with_origin("https://other"),
-        PathsManifest::new("warc.paths").with_origin("https://host/a/.."),
-        PathsManifest::new("warc.paths").with_origin("https://host?x=1"),
-        PathsManifest::new("warc.paths").with_origin("https://host#x"),
         manifest().with_base(ManifestBase::Explicit("../data".into())),
     ] {
         let storage = MemoryAccessor::new(b"a.warc", 1);
@@ -237,4 +222,69 @@ async fn gzip_and_decoded_inputs_share_validation() {
         spec.resolve_reader(input).await.unwrap().objects[0].locator(),
         "a.warc"
     );
+}
+
+#[tokio::test]
+async fn foreign_urls_support_filtering_deduplication_and_query_fragments() {
+    let spec = manifest()
+        .with_prefix("data/")
+        .with_duplicates(Duplicates::Dedupe);
+    let entries =
+        b"https://mirror.test/data/%61.warc\nhttps://mirror.test/data/a.warc\ndata/b.warc?q=1#f";
+    assert_eq!(
+        resolve(spec, entries).await.unwrap(),
+        ["https://mirror.test/data/a.warc", "data/b.warc?q=1#f"]
+    );
+}
+
+#[tokio::test]
+async fn foreign_http_origins_are_accepted_without_configuration() {
+    for entry in [
+        "https://other.test/a.warc",
+        "http://example.test/a.warc",
+        "https://example.test:123/a.warc",
+    ] {
+        assert_eq!(
+            resolve(manifest(), entry.as_bytes()).await.unwrap(),
+            [entry]
+        );
+    }
+}
+
+#[tokio::test]
+async fn entry_query_and_fragment_components_are_always_preserved() {
+    for (entry, expected) in [
+        ("data/a.warc?x=1", "data/a.warc?x=1"),
+        ("/data/a.warc#part", "data/a.warc#part"),
+        (
+            "https://example.test/data/a.warc?x=1#part",
+            "https://example.test/data/a.warc?x=1#part",
+        ),
+        (
+            "https://mirror.test/data/a.warc?x=1#part",
+            "https://mirror.test/data/a.warc?x=1#part",
+        ),
+    ] {
+        let spec = manifest()
+            .with_prefix("data/")
+            .with_formats(&[DetectedFormat::Warc], Mismatch::Error);
+        assert_eq!(
+            resolve(spec, entry.as_bytes()).await.unwrap(),
+            [expected],
+            "{entry}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn colons_in_paths_and_url_suffixes_do_not_imply_an_absolute_url() {
+    for entry in [
+        "data/a:b.warc",
+        "data/a.warc?next=https://example.test/a:b",
+        "data/a.warc#urn:part",
+    ] {
+        for spec in [manifest(), PathsManifest::new("lists/warc:2026.paths")] {
+            assert_eq!(resolve(spec, entry.as_bytes()).await.unwrap(), [entry]);
+        }
+    }
 }
