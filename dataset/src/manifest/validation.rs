@@ -1,8 +1,7 @@
-use super::{ManifestBase, PathsManifest};
+use super::{ManifestBase, Mismatch, PathsManifest, detect_format, error::PathResult};
+use open_arrow_access_core::{ErrorKind, Result};
 use percent_encoding::percent_decode_str;
 use url::{Origin, Url};
-
-type PathResult<T> = Result<T, &'static str>;
 
 pub(super) struct Context {
     pub manifest_key: String,
@@ -121,4 +120,38 @@ fn key_path(value: &str) -> PathResult<String> {
         .decode_utf8()
         .map_err(|_| "path is not UTF-8")?
         .into_owned())
+}
+
+impl PathsManifest {
+    pub(super) fn context(&self) -> Result<Context> {
+        Context::new(self).map_err(|e| self.error(ErrorKind::InvalidInput, 1, e))
+    }
+    pub(super) fn selected_path(
+        &self,
+        line: &[u8],
+        number: usize,
+        context: &Context,
+    ) -> Result<Option<String>> {
+        let value = std::str::from_utf8(line).map_err(|e| self.invalid_utf8(number, e))?;
+        let value = value.strip_suffix('\n').unwrap_or(value);
+        let value = value.strip_suffix('\r').unwrap_or(value);
+        if value.is_empty() {
+            return Ok(None);
+        }
+        let path = context
+            .resolve(value)
+            .map_err(|e| self.error(ErrorKind::Decode, number, e))?;
+        if self.prefix.as_ref().is_some_and(|p| !path.starts_with(p)) {
+            return Ok(None);
+        }
+        if let Some((formats, on_mismatch)) = &self.formats
+            && detect_format(&path).is_none_or(|f| !formats.contains(&f))
+        {
+            if *on_mismatch == Mismatch::Skip {
+                return Ok(None);
+            }
+            return Err(self.format_mismatch(number));
+        }
+        Ok(Some(path))
+    }
 }
