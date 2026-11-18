@@ -92,8 +92,8 @@ generated columns after parallel execution.
 
 ## Resolve a paths manifest
 
-Enable `dataset-manifest` (`manifest` on this crate) and the required
-`decompression-*` codecs. Bind storage to the origin root:
+Paths manifests are always available. Enable the required `decompression-*`
+codecs for compressed manifests and bind storage to the origin root:
 
 ```rust,ignore
 let files = PathsManifest::new("crawl-data/CC-MAIN-2022-40/warc.paths.gz")

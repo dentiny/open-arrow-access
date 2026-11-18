@@ -8,13 +8,12 @@ description = "Sequential file-set and directory datasets for Open Arrow Access"
 
 [features]
 default = []
-manifest = ["dep:url", "dep:percent-encoding", "dep:open-arrow-access-decompression", "dep:open-arrow-access-file-format"]
 
 [dependencies]
-url = { workspace = true, optional = true }
-percent-encoding = { workspace = true, optional = true }
-open-arrow-access-decompression = { workspace = true, optional = true }
-open-arrow-access-file-format = { workspace = true, optional = true }
+url.workspace = true
+percent-encoding.workspace = true
+open-arrow-access-decompression.workspace = true
+open-arrow-access-file-format.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
 futures.workspace = true
@@ -35,7 +34,3 @@ tokio = { workspace = true, features = ["fs"] }
 
 [lints]
 workspace = true
-
-[[test]]
-name = "manifest"
-required-features = ["manifest"]
