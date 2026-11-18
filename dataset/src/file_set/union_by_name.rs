@@ -73,9 +73,9 @@ where
     // Keep whole streaming-file discovery inside executor workers. Retained
     // plans still replay their inference samples; ordered output may spill behind
     // the head without reopening or re-inferring any selected file.
-    let file_streams = files.len() > 1
-        && (file_planner.is_none() || files.iter().any(|plan| plan.streaming_discovery));
-    if file_streams {
+    let can_flatten_native_partitions =
+        file_planner.is_some() && files.iter().all(|plan| !plan.streaming_discovery);
+    if files.len() > 1 && !can_flatten_native_partitions {
         let partitions = files.into_iter().map(move |plan| {
             let alignment = Arc::new(AlignmentPlan::new(
                 plan.metadata.schema.clone(),
