@@ -97,6 +97,14 @@ Use `CommonCrawlWarcAccessor::new(manifests, format)` for a custom record schema
 `resolve(request)` can instead return selected paths without opening record files.
 Use `CommonCrawlSegmentAccessor` and `CommonCrawlSegmentRequest` for one segment.
 
+Crawl and segment membership uses the dataset `PathsManifest` resolver. It
+validates paths before prefix filtering, rejects unsafe paths and non-WARC
+selected files, and reports duplicates with manifest/line context. Absolute
+HTTP(S) entries retain full URLs; query/fragment components are preserved.
+Caller-configured manifest decompression is preserved. For arbitrary plain or
+compressed paths files, use `dataset::manifest::PathsManifest` directly; see the
+[dataset guide](../dataset/README.md#resolve-a-paths-manifest).
+
 ## Custom inventories and single segments
 
 Single-segment reads are supported by `CommonCrawlSegmentRequest::from_url` or
@@ -109,10 +117,12 @@ standard crawl or an explicit inventory. `request.origin()` is that source's
 origin; configure origin-rooted accessors with it. Request URLs do not
 reconfigure injected accessors. If record files live elsewhere, supply a record
 accessor configured for that site explicitly.
-Inventory entries must still be origin-rooted `crawl-data/...` keys for the
-selected crawl/segment. The inventory URL's directory is not a base for entries.
-URLs follow the Common Crawl canonical URL rules (no credentials, query,
-fragment, percent encoding, or traversal). File names need not be `warc.paths`.
+Inventory entry paths must still use the `crawl-data/...` layout for the selected
+crawl/segment. Relative entries are rooted at the storage root; absolute HTTP(S)
+entries retain their URLs and require a URL-capable record accessor. The inventory
+URL's directory is not a base for entries. Request URLs follow the Common Crawl
+canonical URL rules (no credentials, query, fragment, percent encoding, or
+traversal). File names need not be `warc.paths`.
 
 ```rust
 use open_arrow_access::{

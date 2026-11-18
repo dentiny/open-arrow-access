@@ -1,6 +1,5 @@
 mod accessor;
 mod error;
-mod manifest;
 mod request;
 mod validation;
 
