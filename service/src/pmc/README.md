@@ -48,6 +48,13 @@ record sort order. Do not infer a PMCID interval from the first/last record,
 construct shard names, or assume a shard's membership is stable across daily
 reports. Select `(manifest key, shard key)` as one task input.
 
+Each daily report lists the metadata objects covered by that inventory, not just
+that day's newly added articles. A new daily report does **not** mean shard
+boundaries must change every day: file count, shard keys and record distribution
+may change or remain similar. There is no cross-day stability guarantee. In
+particular, "shard 0" is only a position in one manifest, not a permanent group
+of articles. Pin the dated manifest and the exact member key for each task.
+
 These are listing-file boundaries, unlike a Common Crawl crawl segment's own
 identity. They are still useful independent work units: read just the selected
 CSV, then fetch the metadata objects named by its rows.
