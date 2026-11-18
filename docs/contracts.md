@@ -320,8 +320,8 @@ storage paths.
   without materializing the input. Top-level arrays/null/scalars are rejected;
   projection selects the decoder schema before opening input. Byte options pass
   through the same `ReadRequest` contract as Parquet.
-- `dataset/` provides sequential `FileSetAccessor` and `DirectoryAccessor` behind
-  the default-off `dataset-directory` feature, without depending on a format.
+- `dataset/` always provides sequential `FileSetAccessor` and `DirectoryAccessor`,
+  without depending on a format.
 - `service/` provides default-off Hugging Face repository access over the shared
   OpenDAL byte adapter. The same service implements the record accessor contract
   for `HuggingFaceDatasetRequest`: pin the Parquet export revision, list/sort shards,
@@ -355,3 +355,25 @@ are opaque and retained exactly as supplied (including relative paths); callers
 that need an absolute path or URI must supply that locator. Outer readers do not
 replace an already identified child object. Readers without a known source cannot
 supply object context.
+
+## Metadata inspection
+
+`Accessor::metadata(request)` returns the metadata of `open(request)` for the
+same unchanged input and configuration, including projection and source identity.
+The compatibility default opens and drops a reader; custom implementations must
+override it to avoid opening side effects. `ReaderFactory::metadata` provides the
+corresponding hook for factory-backed accessors. Only these methods require
+cloneable metadata; existing reader metadata types need not implement `Clone`.
+
+Built-in record formats reuse bounded inference or footer reads. Fixed schemas
+and record layers derive metadata without starting record execution. Inspection
+is not a snapshot and does not validate rows beyond the inference sample.
+
+`inspect_metadata` returns `Option<Metadata>`. `None` denotes a proven empty
+input for which no schema could be inferred. Explicit schemas, JSON `{}` rows,
+and unknown row presence retain `Some(metadata)`. Union-by-name skips `None`
+without polling output batches; ordinary `metadata` still returns the empty
+schema exposed by `open` for empty inferred inputs.
+
+Tests use `open_arrow_access_test_support::assert_metadata_matches_open` plus
+I/O counters to check metadata equality and execution boundaries.

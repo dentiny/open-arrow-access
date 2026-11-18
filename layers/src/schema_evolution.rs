@@ -202,14 +202,58 @@ where
         self.inner.capability()
     }
 
+    async fn metadata(
+        &self,
+        mut request: A::Request,
+    ) -> Result<open_arrow_access_core::RecordMetadata> {
+        let changes = &self.config.changes;
+        if changes.is_empty() {
+            return self.inner.metadata(request).await;
+        }
+        let (output_options, planned) = self.prepare_request(&mut request)?;
+        let mut metadata = self.inner.metadata(request).await?;
+        let source = &metadata.schema;
+        let plan = match planned {
+            Some(plan) => plan,
+            None => SchemaEvolutionPlan::new(changes, source, &output_options, false)?,
+        };
+        crate::validation::validate_evolution_input_schema(source, &plan.source_schema)?;
+        metadata.schema = plan.target_schema;
+        Ok(metadata)
+    }
+
     async fn open(&self, mut request: A::Request) -> Result<Box<dyn RecordReader>> {
+        let changes = &self.config.changes;
+        if changes.is_empty() {
+            return self.inner.open(request).await;
+        }
+        let (output_options, planned) = self.prepare_request(&mut request)?;
+        let inner = self.inner.open(request).await?;
+        let source = &inner.metadata().schema;
+        let plan = match planned {
+            Some(plan) => plan,
+            None => SchemaEvolutionPlan::new(changes, source, &output_options, false)?,
+        };
+        plan.into_reader(inner)
+    }
+}
+
+impl<A> SchemaEvolutionAccessor<A>
+where
+    A: Accessor<Reader = dyn RecordReader>,
+    A::Request: ReadOptionsProvider,
+{
+    fn prepare_request(
+        &self,
+        request: &mut A::Request,
+    ) -> Result<(
+        open_arrow_access_core::ReadOptions,
+        Option<SchemaEvolutionPlan>,
+    )> {
         let SchemaEvolutionLayer {
             changes,
             source_schema,
         } = &self.config;
-        if changes.is_empty() {
-            return self.inner.open(request).await;
-        }
         let output_options = request.read_options().clone();
         let planned = source_schema
             .as_ref()
@@ -236,12 +280,6 @@ where
                 }
             }
         }
-        let inner = self.inner.open(request).await?;
-        let source = &inner.metadata().schema;
-        let plan = match planned {
-            Some(plan) => plan,
-            None => SchemaEvolutionPlan::new(changes, source, &output_options, false)?,
-        };
-        plan.into_reader(inner)
+        Ok((output_options, planned))
     }
 }

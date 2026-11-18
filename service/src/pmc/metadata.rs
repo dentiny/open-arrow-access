@@ -1,7 +1,8 @@
 use super::{schema, validation};
-use arrow_array::RecordBatchOptions;
 use arrow_schema::Schema;
-use open_arrow_access_core::{FieldNameIndex, RecordBatch, Result, SchemaRef};
+use open_arrow_access_core::{
+    FieldNameIndex, RecordBatch, Result, SchemaRef, record_batch_with_rows,
+};
 use std::sync::{Arc, OnceLock};
 
 /// Preserve the upstream JSON field name while exposing the URL as Arrow `text`.
@@ -71,10 +72,6 @@ pub(super) async fn decode_batch(
             batch.column(index).clone()
         })
         .collect();
-    RecordBatch::try_new_with_options(
-        output_schema,
-        columns,
-        &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
-    )
-    .map_err(|error| super::error::decode(error.to_string()).with_source(error))
+    record_batch_with_rows(output_schema, columns, batch.num_rows())
+        .map_err(|error| super::error::decode(error.to_string()).with_source(error))
 }

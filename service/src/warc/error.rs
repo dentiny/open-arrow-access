@@ -19,3 +19,11 @@ pub(super) fn empty_manifest_selection(prefix: &str) -> Error {
 pub(super) fn manifest_utf8(number: usize, source: std::str::Utf8Error) -> Error {
     invalid_line(number, "manifest is not UTF-8").with_source(source)
 }
+
+pub(super) fn invalid_manifest_url() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "configure_commoncrawl_manifest",
+        "expected an HTTP(S) manifest file URL",
+    )
+}

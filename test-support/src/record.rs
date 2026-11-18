@@ -1,6 +1,8 @@
 //! In-memory record sources and helpers for comparing reader output.
 
-use arrow_array::{Array, cast::AsArray, types::ArrowPrimitiveType};
+use arrow_array::{
+    Array, GenericStringArray, OffsetSizeTrait, cast::AsArray, types::ArrowPrimitiveType,
+};
 use std::{
     sync::{
         Arc, Mutex,
@@ -12,9 +14,79 @@ use std::{
 use futures::{TryStreamExt, stream};
 use open_arrow_access_core::{
     Accessor, OrderRequirement, ReadRequest, RecordBatch, RecordCapability, RecordMetadata,
-    RecordReader, ResolvedProjection, Result, SchemaRef, async_trait, into_stream,
+    RecordReader, ResolvedProjection, Result, Schema, SchemaRef, async_trait, into_stream,
     record_stream_reader,
 };
+
+/// Borrow a named column, requiring its concrete Arrow array type.
+/// Missing columns and mismatched types panic.
+pub fn column<'a, T: Array + 'static>(batch: &'a RecordBatch, name: &str) -> &'a T {
+    batch[name]
+        .as_any()
+        .downcast_ref::<T>()
+        .expect("column has unexpected array type")
+}
+
+/// Return field names in schema order, including duplicates.
+pub fn field_names(schema: &Schema) -> Vec<&str> {
+    schema
+        .fields()
+        .iter()
+        .map(|field| field.name().as_str())
+        .collect()
+}
+
+/// Collect nullable strings in batch order, preserving nulls and empty strings.
+/// Choose `i32` for Utf8 or `i64` for LargeUtf8; other layouts panic.
+pub fn collect_nullable_strings<O: OffsetSizeTrait>(
+    batches: &[RecordBatch],
+    column: usize,
+) -> Vec<Option<String>> {
+    batches
+        .iter()
+        .flat_map(|batch| {
+            batch
+                .column(column)
+                .as_string::<O>()
+                .iter()
+                .map(|value| value.map(str::to_owned))
+        })
+        .collect()
+}
+
+/// Read all batches and collect non-null strings in batch order.
+/// Choose `i32` for Utf8 or `i64` for LargeUtf8; nulls and other layouts panic.
+pub async fn collect_strings<O: OffsetSizeTrait>(
+    mut reader: Box<dyn RecordReader>,
+    column: usize,
+) -> Vec<String> {
+    let mut values = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        let array: &GenericStringArray<O> = batch.column(column).as_string::<O>();
+        values.extend(array.iter().map(|value| {
+            value
+                .expect("collect_strings requires non-null values")
+                .to_owned()
+        }));
+    }
+    values
+}
+
+/// Assert exact schema and batch equality, including batch boundaries and both EOFs.
+///
+/// Panics if either reader fails or one reader ends before the other. Readers are
+/// consumed through their first EOF; metadata other than the schema is ignored.
+pub async fn assert_same_batches(expected: &mut dyn RecordReader, actual: &mut dyn RecordReader) {
+    assert_eq!(actual.metadata().schema, expected.metadata().schema);
+    loop {
+        let expected_batch = expected.next().await.unwrap();
+        let actual_batch = actual.next().await.unwrap();
+        assert_eq!(actual_batch, expected_batch);
+        if expected_batch.is_none() {
+            break;
+        }
+    }
+}
 
 /// Collect a non-null primitive column in batch order.
 pub fn collect_values<T: ArrowPrimitiveType>(

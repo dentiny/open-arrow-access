@@ -1,12 +1,9 @@
 //! Per-object suffix routing. Container selection remains explicit.
 use std::num::NonZeroUsize;
 
-use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, FactoryAccessor, Layer,
-    ListRequest, ObjectStream, Result, async_trait,
-};
+use open_arrow_access_core::{ByteAccessor, Layer, Result};
 
-use crate::CompressionFactory;
+use crate::{CompressionFactory, DecodedAccessor};
 
 /// Compression of one complete object. This is independent of its decoded file format.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,37 +65,9 @@ impl<A: ByteAccessor> Layer<A> for AutoDecompressionLayer {
     type Layered = AutoDecompressionAccessor<A>;
 
     fn layer(&self, inner: A) -> Self::Layered {
-        AutoDecompressionAccessor {
-            binding: FactoryAccessor::new(inner, self.factory.clone()),
-        }
+        AutoDecompressionAccessor::new(inner, self.factory.clone())
     }
 }
 
 /// A byte accessor that may decompress each object independently.
-#[derive(Clone, Debug)]
-pub struct AutoDecompressionAccessor<A> {
-    binding: FactoryAccessor<A, CompressionFactory>,
-}
-
-#[async_trait]
-impl<A: ByteAccessor> Accessor for AutoDecompressionAccessor<A> {
-    type Request = ByteReadRequest;
-    type Reader = dyn ByteReader;
-
-    fn capability(&self) -> Capability {
-        let mut output = self.binding.capability();
-        output.list = self.binding.storage().capability().list;
-        output
-    }
-
-    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        self.binding.open(request).await
-    }
-}
-
-#[async_trait]
-impl<A: ByteAccessor> ByteAccessor for AutoDecompressionAccessor<A> {
-    async fn list(&self, request: ListRequest) -> Result<ObjectStream> {
-        self.binding.storage().list(request).await
-    }
-}
+pub type AutoDecompressionAccessor<A> = DecodedAccessor<A, CompressionFactory>;

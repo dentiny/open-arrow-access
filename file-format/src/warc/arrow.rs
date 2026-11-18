@@ -3,7 +3,7 @@ use std::sync::{Arc, OnceLock};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use futures::stream;
 use open_arrow_access_core::{
-    ByteReadRequest, ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest,
+    Accessor, ByteReadRequest, ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest,
     ReaderFactory, RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, Result,
     SchemaRef, StreamReader, async_trait,
 };
@@ -28,34 +28,93 @@ impl<B> FileAccessor<B, WarcArrowFormat> {
     }
 }
 
+// Header mapping shared by the physical schema and row population.
+const HEADER_COLUMNS: &[(&str, WarcHeader, DataType, bool)] = &[
+    (
+        "target_uri",
+        WarcHeader::TargetURI,
+        DataType::LargeUtf8,
+        true,
+    ),
+    (
+        "content_type",
+        WarcHeader::ContentType,
+        DataType::Utf8,
+        true,
+    ),
+    (
+        "content_length",
+        WarcHeader::ContentLength,
+        DataType::Utf8,
+        false,
+    ),
+    (
+        "block_digest",
+        WarcHeader::BlockDigest,
+        DataType::Utf8,
+        true,
+    ),
+    (
+        "payload_digest",
+        WarcHeader::PayloadDigest,
+        DataType::Utf8,
+        true,
+    ),
+    (
+        "concurrent_to",
+        WarcHeader::ConcurrentTo,
+        DataType::Utf8,
+        true,
+    ),
+    ("filename", WarcHeader::Filename, DataType::Utf8, true),
+    (
+        "identified_payload_type",
+        WarcHeader::IdentifiedPayloadType,
+        DataType::Utf8,
+        true,
+    ),
+    ("ip_address", WarcHeader::IPAddress, DataType::Utf8, true),
+    ("profile", WarcHeader::Profile, DataType::Utf8, true),
+    ("refers_to", WarcHeader::RefersTo, DataType::Utf8, true),
+    (
+        "segment_number",
+        WarcHeader::SegmentNumber,
+        DataType::Utf8,
+        true,
+    ),
+    (
+        "segment_origin_id",
+        WarcHeader::SegmentOriginID,
+        DataType::Utf8,
+        true,
+    ),
+    (
+        "segment_total_length",
+        WarcHeader::SegmentTotalLength,
+        DataType::Utf8,
+        true,
+    ),
+    ("truncated", WarcHeader::Truncated, DataType::Utf8, true),
+    ("warc_info_id", WarcHeader::WarcInfoID, DataType::Utf8, true),
+];
+
 fn raw_arrow_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
-            Arc::new(Schema::new(vec![
-                Field::new("record_id", DataType::Utf8, false),
-                Field::new("record_type", DataType::Utf8, false),
+            let mut fields = vec![
+                Field::new("id", DataType::Utf8, false),
+                Field::new("type", DataType::Utf8, false),
                 Field::new("warc_version", DataType::Utf8, false),
                 Field::new("date", DataType::Utf8, false),
                 Field::new("source_uri", DataType::LargeUtf8, false),
-                Field::new("target_uri", DataType::LargeUtf8, true),
-                Field::new("content_type", DataType::Utf8, true),
-                Field::new("body", DataType::LargeBinary, false),
-                Field::new("content_length", DataType::Utf8, false),
-                Field::new("block_digest", DataType::Utf8, true),
-                Field::new("payload_digest", DataType::Utf8, true),
-                Field::new("concurrent_to", DataType::Utf8, true),
-                Field::new("filename", DataType::Utf8, true),
-                Field::new("identified_payload_type", DataType::Utf8, true),
-                Field::new("ip_address", DataType::Utf8, true),
-                Field::new("profile", DataType::Utf8, true),
-                Field::new("refers_to", DataType::Utf8, true),
-                Field::new("segment_number", DataType::Utf8, true),
-                Field::new("segment_origin_id", DataType::Utf8, true),
-                Field::new("segment_total_length", DataType::Utf8, true),
-                Field::new("truncated", DataType::Utf8, true),
-                Field::new("warcinfo_id", DataType::Utf8, true),
-            ]))
+            ];
+            fields.extend(HEADER_COLUMNS.iter().map(|(name, _, data_type, nullable)| {
+                Field::new(*name, data_type.clone(), *nullable)
+            }));
+            // Keep the public schema's body position, before content_length.
+            fields.insert(7, Field::new("body", DataType::LargeBinary, false));
+            Arc::new(Schema::new(fields))
         })
         .clone()
 }
@@ -98,13 +157,9 @@ pub(super) fn raw_projection(output: &SchemaRef) -> Result<SchemaRef> {
         .fields()
         .iter()
         .map(|field| field.name().clone())
-        .collect();
-    open_arrow_access_core::ReadOptions {
-        projection: Some(names),
-        ..Default::default()
-    }
-    .resolve_projection(&raw_arrow_schema())
-    .map(|projection| projection.schema)
+        .collect::<Vec<_>>();
+    open_arrow_access_core::ResolvedProjection::resolve(&raw_arrow_schema(), Some(&names))
+        .map(|projection| projection.schema)
 }
 
 #[async_trait]
@@ -128,6 +183,17 @@ impl ReaderFactory for WarcArrowFormat {
             .options
             .resolve_projection(&arrow_schema())
             .map(|projection| projection.schema)
+    }
+
+    async fn metadata(
+        &self,
+        _storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<RecordMetadata> {
+        Ok(RecordMetadata {
+            schema: self.prepare(&request)?,
+            source: Some(request.object),
+        })
     }
 
     async fn create_reader(
@@ -192,63 +258,14 @@ pub(super) fn append_record(
     source_uri: &str,
 ) -> Result<()> {
     batch.push(|row| {
-        row.append("record_id", record.warc_id())?;
-        row.append("record_type", record.warc_type().as_str())?;
+        row.append("id", record.warc_id())?;
+        row.append("type", record.warc_type().as_str())?;
         row.append("warc_version", record.warc_version())?;
         row.append("date", record.date().to_rfc3339().as_str())?;
         row.append("source_uri", source_uri)?;
-        row.append(
-            "target_uri",
-            record.header(WarcHeader::TargetURI).as_deref(),
-        )?;
-        row.append(
-            "content_type",
-            record.header(WarcHeader::ContentType).as_deref(),
-        )?;
-        row.append(
-            "content_length",
-            record.header(WarcHeader::ContentLength).as_deref(),
-        )?;
-        row.append(
-            "block_digest",
-            record.header(WarcHeader::BlockDigest).as_deref(),
-        )?;
-        row.append(
-            "payload_digest",
-            record.header(WarcHeader::PayloadDigest).as_deref(),
-        )?;
-        row.append(
-            "concurrent_to",
-            record.header(WarcHeader::ConcurrentTo).as_deref(),
-        )?;
-        row.append("filename", record.header(WarcHeader::Filename).as_deref())?;
-        row.append(
-            "identified_payload_type",
-            record.header(WarcHeader::IdentifiedPayloadType).as_deref(),
-        )?;
-        row.append(
-            "ip_address",
-            record.header(WarcHeader::IPAddress).as_deref(),
-        )?;
-        row.append("profile", record.header(WarcHeader::Profile).as_deref())?;
-        row.append("refers_to", record.header(WarcHeader::RefersTo).as_deref())?;
-        row.append(
-            "segment_number",
-            record.header(WarcHeader::SegmentNumber).as_deref(),
-        )?;
-        row.append(
-            "segment_origin_id",
-            record.header(WarcHeader::SegmentOriginID).as_deref(),
-        )?;
-        row.append(
-            "segment_total_length",
-            record.header(WarcHeader::SegmentTotalLength).as_deref(),
-        )?;
-        row.append("truncated", record.header(WarcHeader::Truncated).as_deref())?;
-        row.append(
-            "warcinfo_id",
-            record.header(WarcHeader::WarcInfoID).as_deref(),
-        )?;
+        for (name, header, _, _) in HEADER_COLUMNS {
+            row.append(name, record.header(header.clone()).as_deref())?;
+        }
         row.append("body", record.body())
     })
 }

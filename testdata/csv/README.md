@@ -17,6 +17,14 @@ fragmentation, projections, and strict conversion failures.
 | `bad_integer.csv` | Non-integer value in the `id` column. |
 | `bad_utf8.csv` | Literal invalid UTF-8 byte `0xff` in the title. |
 | `bad_header.csv` | Header name does not match the schema. |
+| `bom-single-quote.tsv.gz` | Gzip-compressed UTF-8 BOM, CRLF records, tab delimiter and single-quoted fields (including an embedded tab), for dialect inference and zero-column row counts. |
+| `union-id.csv`, `union-id.csv.gz` | Header `id` and one row `1`, uncompressed and gzip-compressed, for inferred file-set union. |
+| `union-blank.csv`, `union-blank.csv.gz` | A single LF, uncompressed and gzip-compressed, for skipping inputs with no inferred fields. |
+| `union-second.tsv.gz` | Gzip-compressed `id`/`title` TSV with row `2`/`second`, for mixed-suffix file-set inference alongside an explicit custom codec. |
+
+These project-authored gzip inputs were prepared offline using Python
+`gzip.compress(data, mtime=0)` (default compression level 9). Tests read the
+committed bytes rather than encoding or corrupting inputs at runtime.
 
 ## Use these inputs
 

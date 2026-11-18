@@ -117,13 +117,22 @@ To use a standard futures stream, pass an owned record reader to
 `open_arrow_access::into_stream(reader)`. It yields `Result<RecordBatch>` and
 terminates after EOF or the first error.
 
+Storage retry and timeout policies are opt-in through `StorageConfig`. With
+`RetryConfig` enabled, HTTP 429 and 503 responses honor `Retry-After` in seconds
+or HTTP-date form. The wait is the larger of the server delay and exponential
+backoff; missing or invalid headers use normal backoff. A server delay above
+`max_delay` returns the error immediately instead of retrying before the server
+allows it. `max_retries` still limits retries after the initial attempt.
+`TimeoutConfig` applies to each attempt and body read, excluding backoff.
+Cancelled operations stop waiting and issue no further requests.
+
 ## Use S3 or another OpenDAL backend
 
 Enable the upstream backend and transport features alongside your chosen format:
 
 ```toml
 [dependencies]
-open-arrow-access = { version = "0.3.0", features = ["format-parquet"] }
+open-arrow-access = { version = "0.5.0", features = ["format-parquet"] }
 opendal = { version = "0.59.2", default-features = false, features = ["services-s3", "http-transport-reqwest"] }
 ```
 
@@ -223,7 +232,7 @@ External gzip cannot directly feed Parquet because it removes range access.
 
 ## Read multiple shards
 
-Enable `dataset-directory` and the format feature. Use `FileSetAccessor` for a
+Enable the format feature. Use `FileSetAccessor` for a
 manifest's declared order:
 
 ```rust,no_run
@@ -368,3 +377,23 @@ content or supplies a text-extraction pipeline.
 
 See [architecture](architecture.md) for ownership and concurrency semantics and
 [API contracts](contracts.md) for custom stream and reader adapters.
+
+## Inspect a source before reading
+
+Use the same configured accessor and request for inspection and execution:
+
+```rust,no_run
+use open_arrow_access::{Accessor, ReadRequest, RecordReader, Result, SchemaRef};
+
+async fn inspect(
+    source: &impl Accessor<Request = ReadRequest, Reader = dyn RecordReader>,
+    request: ReadRequest,
+) -> Result<SchemaRef> {
+    Ok(source.metadata(request).await?.schema)
+}
+```
+
+This includes projection and schema-changing layers. It shares inference and
+schema merging with readers, so clients do not need separate format inspectors.
+See [metadata contracts](contracts.md#metadata-inspection) for I/O and fallback
+semantics.

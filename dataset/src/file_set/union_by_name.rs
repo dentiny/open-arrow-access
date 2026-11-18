@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, FieldNameIndex, ReadRequest, Reader, RecordCapability, RecordMetadata, RecordReader,
-    Result, ScanPartition, ScanPlan, map_record_reader,
+    Accessor, FieldNameIndex, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result,
+    ScanPartition, ScanPlan, map_record_reader,
 };
 
 use super::{
@@ -38,9 +38,9 @@ where
         validate_file_policy(&inspected)?;
         let file_ordering = inspected.ordering;
         let source = inspected.metadata.schema.clone();
-        // A zero-field JSON object still has a row; only skip zero-column inputs
-        // after confirming they have no rows. Inspected readers are not reused.
-        if source.fields().is_empty() && !has_rows(inspected).await? {
+        // A zero-field JSON object still has a row. Only skip an input when
+        // inference proves it empty, without polling an output decoder.
+        if source.fields().is_empty() && inner.inspect_metadata(request.clone()).await?.is_none() {
             continue;
         }
         ordering = ordering.combine(file_ordering);
@@ -123,16 +123,6 @@ where
         Some(plan) => plan(inner, request).await,
         None => Ok(ScanPlan::whole_input(inner.open(request).await?)),
     }
-}
-
-async fn has_rows(plan: ScanPlan) -> Result<bool> {
-    let mut reader = plan.into_reader();
-    while let Some(batch) = reader.next().await? {
-        if batch.num_rows() > 0 {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 fn align_reader(

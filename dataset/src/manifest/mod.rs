@@ -1,11 +1,12 @@
 //! Streaming paths manifests over caller-bound storage. No network clients or
 //! credentials are created here. The storage root must correspond to the origin.
-mod paths;
+mod error;
+mod validation;
 use crate::file_set::FileSetRequest;
 use futures::StreamExt;
 use open_arrow_access_core::{
-    ByteAccessor, ByteReadOptions, ByteReadRequest, ByteReader, Error, ErrorKind, ObjectRef,
-    ReaderFactoryExt, Result, read_lines,
+    ByteAccessor, ByteReadOptions, ByteReadRequest, ByteReader, ObjectRef, ReaderFactoryExt,
+    Result, read_lines,
 };
 use open_arrow_access_decompression::CompressionFactory;
 pub use open_arrow_access_file_format::{DetectedFormat, detect_format};
@@ -19,16 +20,22 @@ pub enum ManifestBase {
     /// A directory, relative to the storage root (trailing slash optional).
     Explicit(ObjectRef),
 }
+/// How to handle entries that do not match the selected file formats.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Mismatch {
+    /// Stop with an error on the first format mismatch.
     #[default]
     Error,
+    /// Skip entries whose formats do not match.
     Skip,
 }
+/// How to handle duplicate selected files.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Duplicates {
+    /// Stop with an error on the first duplicate.
     #[default]
     Error,
+    /// Keep only the first occurrence, preserving manifest order.
     Dedupe,
 }
 
@@ -41,8 +48,7 @@ pub struct PathsManifest {
     manifest: ObjectRef,
     base: ManifestBase,
     prefix: Option<String>,
-    formats: Option<Vec<DetectedFormat>>,
-    on_mismatch: Mismatch,
+    formats: Option<(Vec<DetectedFormat>, Mismatch)>,
     duplicates: Duplicates,
     origin: Option<String>,
     allowed_origins: Vec<String>,
@@ -56,7 +62,6 @@ impl PathsManifest {
             base: ManifestBase::Origin,
             prefix: None,
             formats: None,
-            on_mismatch: Mismatch::Error,
             duplicates: Duplicates::Error,
             origin: None,
             allowed_origins: Vec::new(),
@@ -74,8 +79,7 @@ impl PathsManifest {
         self
     }
     pub fn with_formats(mut self, formats: &[DetectedFormat], on_mismatch: Mismatch) -> Self {
-        self.formats = Some(formats.to_vec());
-        self.on_mismatch = on_mismatch;
+        self.formats = Some((formats.to_vec(), on_mismatch));
         self
     }
     pub fn with_duplicates(mut self, duplicates: Duplicates) -> Self {
@@ -117,7 +121,7 @@ impl PathsManifest {
         let input = CompressionFactory::default()
             .open_reader(storage, request)
             .await
-            .map_err(|e| e.with_object(Some(&self.manifest)))?;
+            .map_err(|e| self.open_error(e))?;
         self.collect(input, context).await
     }
     /// Resolve already-decoded bytes, for existing compositions that own the
@@ -125,13 +129,10 @@ impl PathsManifest {
     pub async fn resolve_reader(&self, input: Box<dyn ByteReader>) -> Result<FileSetRequest> {
         self.collect(input, self.context()?).await
     }
-    fn context(&self) -> Result<paths::Context> {
-        paths::Context::new(self).map_err(|e| self.error(ErrorKind::InvalidInput, 1, e))
-    }
     async fn collect(
         &self,
         input: Box<dyn ByteReader>,
-        context: paths::Context,
+        context: validation::Context,
     ) -> Result<FileSetRequest> {
         let lines = read_lines(input, None, "read_paths_manifest").enumerate();
         futures::pin_mut!(lines);
@@ -140,62 +141,21 @@ impl PathsManifest {
         let mut number = 1;
         while let Some((index, line)) = lines.next().await {
             number = index + 1;
-            let line =
-                line.map_err(|e| self.error(e.kind(), number, e.to_string()).with_source(e))?;
-            let value = std::str::from_utf8(&line).map_err(|e| {
-                self.error(ErrorKind::Decode, number, "manifest is not UTF-8")
-                    .with_source(e)
-            })?;
-            let value = value.strip_suffix('\n').unwrap_or(value);
-            let value = value.strip_suffix('\r').unwrap_or(value);
-            if value.is_empty() {
+            let line = line.map_err(|e| self.read_error(number, e))?;
+            let Some(path) = self.selected_path(&line, number, &context)? else {
                 continue;
-            }
-            let resolved = context
-                .resolve(self, value)
-                .map_err(|e| self.error(ErrorKind::Decode, number, e))?;
-            if self
-                .prefix
-                .as_ref()
-                .is_some_and(|p| !resolved.path.starts_with(p))
-            {
-                continue;
-            }
-            if self.formats.as_ref().is_some_and(|formats| {
-                detect_format(&resolved.path).is_none_or(|f| !formats.contains(&f))
-            }) {
-                if self.on_mismatch == Mismatch::Skip {
-                    continue;
-                }
-                return Err(self.error(
-                    ErrorKind::Decode,
-                    number,
-                    "file format does not match selection",
-                ));
-            }
-            if !seen.insert(resolved.locator.clone()) {
+            };
+            if !seen.insert(path.clone()) {
                 if self.duplicates == Duplicates::Dedupe {
                     continue;
                 }
-                return Err(self.error(ErrorKind::Decode, number, "duplicate selected file"));
+                return Err(self.duplicate_file(number));
             }
-            objects.push(ObjectRef::new(resolved.locator));
+            objects.push(ObjectRef::new(path));
         }
         if objects.is_empty() {
-            return Err(self.error(
-                ErrorKind::InvalidInput,
-                number,
-                "manifest contains no selected files",
-            ));
+            return Err(self.empty_selection(number));
         }
         Ok(FileSetRequest::new(objects).with_byte_options(self.byte_options))
-    }
-    fn error(&self, kind: ErrorKind, number: usize, message: impl std::fmt::Display) -> Error {
-        Error::new(
-            kind,
-            "read_paths_manifest",
-            format!("line {number}: {message}"),
-        )
-        .with_object(Some(&self.manifest))
     }
 }

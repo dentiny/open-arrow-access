@@ -1,3 +1,4 @@
+use open_arrow_access_test_support::record::field_names;
 use std::{error::Error as _, num::NonZeroUsize, sync::atomic::Ordering};
 
 use arrow_array::{cast::AsArray, types::TimestampMillisecondType};
@@ -185,11 +186,7 @@ async fn empty_input_and_independent_opens_have_terminal_eof() {
 #[tokio::test]
 async fn arrow_records_preserve_binary_bodies_source_and_projection() {
     let input = fixture!("warc", "good_physical_records.warc").await;
-    for projection in [
-        None,
-        Some(vec!["body".into(), "record_id".into()]),
-        Some(vec![]),
-    ] {
+    for projection in [None, Some(vec!["body".into(), "id".into()]), Some(vec![])] {
         let mut reader = WarcArrowAccessor::new(MemoryAccessor::new(&input, 1))
             .open(ReadRequest::new("records.warc").with_options(ReadOptions {
                 batch_size: NonZeroUsize::new(2).unwrap(),
@@ -210,7 +207,7 @@ async fn arrow_records_preserve_binary_bodies_source_and_projection() {
                         .map(|value| value.unwrap().to_vec()),
                 );
                 ids.extend(
-                    batch["record_id"]
+                    batch["id"]
                         .as_string::<i32>()
                         .iter()
                         .map(|value| value.unwrap().to_owned()),
@@ -257,7 +254,7 @@ async fn parallel_record_partitions_are_lazy_and_preserve_binary_projection_and_
     });
     let request = ReadRequest::new("physical.warc").with_options(ReadOptions {
         batch_size: NonZeroUsize::new(2).unwrap(),
-        projection: Some(vec!["body".into(), "record_id".into(), "date".into()]),
+        projection: Some(vec!["body".into(), "id".into(), "date".into()]),
     });
     let mut plan = accessor.plan_scan(request.clone()).await.unwrap();
     assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
@@ -291,7 +288,7 @@ async fn parallel_record_partitions_are_lazy_and_preserve_binary_projection_and_
             1_594_176_775_000,
         );
         assert_eq!(batch.schema().field(0).name(), "body");
-        ids.push(batch["record_id"].as_string::<i32>().value(0).to_owned());
+        ids.push(batch["id"].as_string::<i32>().value(0).to_owned());
         bodies.push(batch["body"].as_binary::<i64>().value(0).to_vec());
     }
     assert_eq!(
@@ -328,13 +325,7 @@ async fn invalid_arrow_projections_fail_before_opening_or_planning_input() {
 #[tokio::test]
 async fn five_metadata_columns_preserve_order_and_optional_header_nulls_without_body() {
     let input = fixture!("warc", "good_physical_records.warc").await;
-    let fields = [
-        "target_uri",
-        "record_type",
-        "content_type",
-        "record_id",
-        "date",
-    ];
+    let fields = ["target_uri", "type", "content_type", "id", "date"];
     let mut reader = WarcArrowAccessor::new(MemoryAccessor::new(&input, 1))
         .open(ReadRequest::new("records.warc").with_options(ReadOptions {
             projection: Some(fields.iter().map(|name| (*name).into()).collect()),
@@ -351,15 +342,7 @@ async fn five_metadata_columns_preserve_order_and_optional_header_nulls_without_
             .as_ref(),
         &[1_594_176_775_000; 3],
     );
-    assert_eq!(
-        batch
-            .schema()
-            .fields()
-            .iter()
-            .map(|field| field.name().as_str())
-            .collect::<Vec<_>>(),
-        fields,
-    );
+    assert_eq!(field_names(batch.schema_ref()), fields);
     assert_eq!(
         batch["target_uri"]
             .as_string::<i64>()
@@ -375,10 +358,7 @@ async fn five_metadata_columns_preserve_order_and_optional_header_nulls_without_
         [None, Some("application/octet-stream"), None]
     );
     assert_eq!(
-        batch["record_type"]
-            .as_string::<i32>()
-            .iter()
-            .collect::<Vec<_>>(),
+        batch["type"].as_string::<i32>().iter().collect::<Vec<_>>(),
         [Some("warcinfo"), Some("resource"), Some("continuation")]
     );
     assert!(reader.next().await.unwrap().is_none());
@@ -468,7 +448,7 @@ async fn standard_headers_survive_sequential_parallel_and_positioned_projection(
         ("segment_origin_id", "<urn:test:origin>"),
         ("segment_total_length", "12345"),
         ("truncated", "length"),
-        ("warcinfo_id", "<urn:test:info>"),
+        ("warc_info_id", "<urn:test:info>"),
     ];
     for projection in [
         None,
@@ -520,6 +500,42 @@ async fn standard_headers_survive_sequential_parallel_and_positioned_projection(
                     schema.fields().iter().map(|f| f.name()).collect::<Vec<_>>(),
                     names.iter().collect::<Vec<_>>()
                 );
+            }
+            if projection.is_none() {
+                assert_eq!(
+                    schema
+                        .fields()
+                        .iter()
+                        .map(|f| f.name().as_str())
+                        .collect::<Vec<_>>(),
+                    [
+                        "id",
+                        "type",
+                        "warc_version",
+                        "date",
+                        "source_uri",
+                        "target_uri",
+                        "content_type",
+                        "body",
+                        "content_length",
+                        "block_digest",
+                        "payload_digest",
+                        "concurrent_to",
+                        "filename",
+                        "identified_payload_type",
+                        "ip_address",
+                        "profile",
+                        "refers_to",
+                        "segment_number",
+                        "segment_origin_id",
+                        "segment_total_length",
+                        "truncated",
+                        "warc_info_id",
+                    ]
+                );
+                let target = schema.field_with_name("target_uri").unwrap();
+                assert_eq!(target.data_type(), &arrow_schema::DataType::LargeUtf8);
+                assert!(target.is_nullable());
             }
             let mut rows = 0;
             while let Some(batch) = reader.next().await.unwrap() {

@@ -76,8 +76,12 @@ impl AsyncBufRead for PositionedAsyncRead {
             let mut pending = match std::mem::replace(&mut this.input, InputState::Finished) {
                 InputState::Ready(mut reader) => {
                     this.observer.0.lock().unwrap().current = reader.position();
+                    let operation = this.operation;
                     Box::pin(async move {
-                        let result = reader.next().await.map_err(crate::error::byte_input_error);
+                        let result =
+                            crate::next_nonempty(reader.as_mut(), || crate::empty_chunk(operation))
+                                .await
+                                .map_err(crate::error::byte_input_error);
                         (reader, result)
                     }) as Fetch
                 }
@@ -94,7 +98,6 @@ impl AsyncBufRead for PositionedAsyncRead {
             let Some(bytes) = result? else {
                 return Poll::Ready(Ok(&this.bytes));
             };
-            crate::validation::validate_positioned_chunk(&bytes, this.operation)?;
             this.bytes = bytes;
             this.input = InputState::Ready(reader);
         }
@@ -116,17 +119,10 @@ impl AsyncBufRead for PositionedAsyncRead {
 }
 impl AsyncRead for PositionedAsyncRead {
     fn poll_read(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         output: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        if output.is_empty() {
-            return Poll::Ready(Ok(0));
-        }
-        let bytes = std::task::ready!(self.as_mut().poll_fill_buf(cx))?;
-        let amount = bytes.len().min(output.len());
-        output[..amount].copy_from_slice(&bytes[..amount]);
-        self.consume(amount);
-        Poll::Ready(Ok(amount))
+        crate::async_read::poll_read_from_buf(self, cx, output)
     }
 }

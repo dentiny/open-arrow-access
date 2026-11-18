@@ -13,7 +13,7 @@ mod decoded_reader;
 mod factory;
 mod layer;
 
-pub use accessor::DecompressionAccessor;
+pub use accessor::{DecodedAccessor, DecompressionAccessor};
 pub use codec::{Codec, CompressedInput, DecodedInput};
 pub use decoded_reader::decoded_reader;
 pub use factory::DecompressionFactory;

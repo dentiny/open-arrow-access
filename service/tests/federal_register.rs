@@ -16,7 +16,7 @@ async fn search_preserves_cursor_links_and_document_content_is_lazy() {
     api.respond(
         "/api/v1/documents?format=json&search_after_cursor=a%2Bb",
         StatusCode::OK,
-        Bytes::from_static(b"{\"results\":[],\"next_page_url\":null}"),
+        fixture!("federal-register", "empty-page.json").await,
     );
     let raw = String::from_utf8(fixture!("federal-register", "document.json").await)
         .unwrap()
@@ -57,7 +57,7 @@ async fn metadata_only_documents_survive_and_wrong_identity_fails() {
     f.respond(
         "/api/v1/documents/1.json",
         StatusCode::OK,
-        Bytes::from_static(b"{\"document_number\":\"1\",\"pdf_url\":null}"),
+        fixture!("federal-register", "metadata-only-document.json").await,
     );
     assert_eq!(
         s.document("1").await.unwrap().metadata().value()["document_number"],
@@ -66,7 +66,7 @@ async fn metadata_only_documents_survive_and_wrong_identity_fails() {
     f.respond(
         "/api/v1/documents/1.json",
         StatusCode::OK,
-        Bytes::from_static(b"{\"document_number\":\"wrong\"}"),
+        fixture!("federal-register", "bad-document-identity.json").await,
     );
     assert_eq!(s.document("1").await.unwrap_err().kind(), ErrorKind::Decode);
 }

@@ -5,7 +5,7 @@ use futures::StreamExt;
 use crate::{
     Accessor, BoundSource, Error, ErrorKind, ReadOptions, ReadOptionsProvider, RecordMetadata,
     RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader,
-    async_trait, into_stream, map_record_reader, validation::validate_prepared_schema,
+    async_trait, into_stream, schema_checked_reader, validate_schema,
 };
 
 /// A typed selection with a complete bound schema and execution-time read options.
@@ -181,7 +181,7 @@ impl PreparedSource {
         } else {
             self.selection.open(options).await?
         };
-        checked_reader(reader, schema)
+        schema_checked_reader(reader, schema, crate::error::prepared_schema_mismatch)
     }
 
     /// Plan independent partitions with execution-time projection and batch size.
@@ -199,35 +199,27 @@ impl PreparedSource {
     pub async fn plan_scan(&self, options: ReadOptions) -> Result<ScanPlan> {
         let schema = options.resolve_projection(&self.schema())?.schema;
         let mut plan = self.selection.plan_scan(options).await?;
-        validate_prepared_schema(&plan.metadata.schema, &schema)?;
+        validate_schema(
+            &plan.metadata.schema,
+            &schema,
+            crate::error::prepared_schema_mismatch,
+        )?;
         // Reuse terminal stream cleanup without polling discovery or openers.
         let partitions = into_stream(Box::new(StreamReader::new(plan.partitions, ())));
         plan.partitions = partitions
             .map(move |partition| {
                 let schema = schema.clone();
                 partition.map(|partition| {
-                    Box::pin(async move { checked_reader(partition.await?, schema) })
-                        as ScanPartition
+                    Box::pin(async move {
+                        schema_checked_reader(
+                            partition.await?,
+                            schema,
+                            crate::error::prepared_schema_mismatch,
+                        )
+                    }) as ScanPartition
                 })
             })
             .boxed();
         Ok(plan)
     }
-}
-
-fn checked_reader(
-    reader: Box<dyn RecordReader>,
-    schema: SchemaRef,
-) -> Result<Box<dyn RecordReader>> {
-    validate_prepared_schema(&reader.metadata().schema, &schema)?;
-    let capability = reader.capability();
-    Ok(Box::new(map_record_reader(
-        reader,
-        schema.clone(),
-        capability,
-        move |batch| {
-            validate_prepared_schema(&batch.schema(), &schema)?;
-            Ok(batch)
-        },
-    )))
 }

@@ -1,4 +1,4 @@
-use open_arrow_access_core::{Accessor, ByteReadRequest, ErrorKind, Result};
+use open_arrow_access_core::{Accessor, ByteReadRequest, Error, ErrorKind, Result};
 use open_arrow_access_dataset::manifest::{
     DetectedFormat, Duplicates, ManifestBase, Mismatch, PathsManifest,
 };
@@ -13,8 +13,24 @@ async fn resolve(spec: PathsManifest, bytes: &[u8]) -> Result<Vec<String>> {
         .map(|o| o.locator().to_owned())
         .collect())
 }
+
 fn manifest() -> PathsManifest {
     PathsManifest::new("https://example.test/lists/warc.paths")
+}
+
+fn assert_error(error: Error, kind: ErrorKind, context: &[&str]) {
+    assert_eq!(error.kind(), kind, "{error}");
+    assert_eq!(error.operation(), "read_paths_manifest", "{error}");
+    let message = error.to_string();
+    for expected in ["object \"", "warc.paths"]
+        .into_iter()
+        .chain(context.iter().copied())
+    {
+        assert!(
+            message.contains(expected),
+            "missing {expected:?} in {message}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -45,6 +61,10 @@ async fn bases_produce_keys_for_the_same_storage() {
             expected.as_bytes()
         );
     }
+}
+
+#[tokio::test]
+async fn same_origin_entries_resolve_to_decoded_storage_keys() {
     assert_eq!(
         resolve(
             manifest(),
@@ -66,6 +86,7 @@ async fn unsafe_entries_report_the_manifest_and_line() {
         "a%GG.warc",
         "a%00.warc",
         "//other.test/a.warc",
+        "//example.test:443/a.warc",
         "https://other.test/a.warc",
         "http://example.test/a.warc",
         "https://example.test:123/a.warc",
@@ -76,40 +97,39 @@ async fn unsafe_entries_report_the_manifest_and_line() {
         "a\\b.warc",
         "a.warc?x=1",
         "a.warc#x",
+        "https://example.test/a.warc?x=1",
+        "https://example.test/a.warc#x",
     ] {
         let error = resolve(manifest(), format!("\n{value}").as_bytes())
             .await
-            .unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Decode, "{value}: {error}");
-        assert!(error.to_string().contains("line 2"), "{error}");
-        assert!(error.to_string().contains("lists/warc.paths"), "{error}");
+            .expect_err(value);
+        assert_error(error, ErrorKind::Decode, &["line 2"]);
     }
-    assert!(
-        resolve(
-            PathsManifest::new("warc.paths"),
-            b"https://example.test/a.warc"
-        )
-        .await
-        .is_err()
+}
+
+#[tokio::test]
+async fn absolute_entries_require_an_inferred_or_configured_origin() {
+    let entry = b"https://example.test/a.warc";
+    let spec = PathsManifest::new("warc.paths");
+    assert_error(
+        resolve(spec.clone(), entry).await.unwrap_err(),
+        ErrorKind::Decode,
+        &["line 1", "origin"],
     );
     assert_eq!(
-        resolve(
-            PathsManifest::new("warc.paths").with_origin("https://example.test"),
-            b"https://example.test/a.warc"
-        )
-        .await
-        .unwrap(),
+        resolve(spec.with_origin("https://example.test"), entry)
+            .await
+            .unwrap(),
         ["a.warc"]
     );
-    for value in ["/a.warc", "https://example.test/a.warc"] {
-        assert!(
-            resolve(
-                manifest().with_base(ManifestBase::ManifestDirectory),
-                value.as_bytes()
-            )
-            .await
-            .is_err()
-        );
+}
+
+#[tokio::test]
+async fn resolved_entries_must_remain_within_the_selected_base() {
+    for entry in ["/a.warc", "https://example.test/a.warc"] {
+        let spec = manifest().with_base(ManifestBase::ManifestDirectory);
+        let error = resolve(spec, entry.as_bytes()).await.expect_err(entry);
+        assert_error(error, ErrorKind::Decode, &["line 1", "configured base"]);
     }
 }
 
@@ -122,20 +142,17 @@ async fn selection_policies_preserve_order_and_detect_aliases() {
             .with_prefix("seg/")
             .with_formats(&[DetectedFormat::Warc], policy)
     };
-    assert!(
-        resolve(selection(Mismatch::Error), bytes)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("line 3")
-    );
-    assert!(
-        resolve(selection(Mismatch::Skip), bytes)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("duplicate")
-    );
+    for (policy, line, message) in [
+        (
+            Mismatch::Error,
+            "line 3",
+            "file format does not match selection",
+        ),
+        (Mismatch::Skip, "line 5", "duplicate selected file"),
+    ] {
+        let error = resolve(selection(policy), bytes).await.unwrap_err();
+        assert_error(error, ErrorKind::Decode, &[line, message]);
+    }
     assert_eq!(
         resolve(
             selection(Mismatch::Skip).with_duplicates(Duplicates::Dedupe),
@@ -145,52 +162,62 @@ async fn selection_policies_preserve_order_and_detect_aliases() {
         .unwrap(),
         ["seg/z.WARC.GZ", "seg/a.warc"]
     );
-    assert_eq!(
-        resolve(manifest().with_prefix("absent/"), bytes)
-            .await
-            .unwrap_err()
-            .kind(),
-        ErrorKind::InvalidInput
-    );
+}
+
+#[tokio::test]
+async fn empty_selections_are_invalid() {
+    for (spec, bytes) in [
+        (manifest(), b"\n\r\n".as_slice()),
+        (manifest().with_prefix("absent/"), b"a.warc".as_slice()),
+    ] {
+        let error = resolve(spec, bytes).await.unwrap_err();
+        assert_error(error, ErrorKind::InvalidInput, &["no selected files"]);
+    }
 }
 
 #[tokio::test]
 async fn invalid_configuration_fails_before_io() {
     for spec in [
         PathsManifest::new("../warc.paths"),
+        PathsManifest::new("warc.paths?x=1"),
+        PathsManifest::new("warc.paths#x"),
+        PathsManifest::new("//example.test/warc.paths"),
+        PathsManifest::new("https://example.test/x/../warc.paths"),
+        PathsManifest::new("https://u:p@example.test/warc.paths"),
+        PathsManifest::new("https://example.test/warc.paths?x=1"),
+        PathsManifest::new("https://example.test/warc.paths#x"),
         manifest().with_origin("https://other"),
         manifest().with_allowed_origins(["https://host/path"]),
         PathsManifest::new("warc.paths").with_origin("https://host/a/.."),
+        PathsManifest::new("warc.paths").with_origin("https://host?x=1"),
+        PathsManifest::new("warc.paths").with_origin("https://host#x"),
         manifest().with_base(ManifestBase::Explicit("../data".into())),
     ] {
         let storage = MemoryAccessor::new(b"a.warc", 1);
-        assert_eq!(
-            spec.resolve(&storage).await.unwrap_err().kind(),
-            ErrorKind::InvalidInput
+        let error = spec
+            .resolve(&storage)
+            .await
+            .expect_err(&format!("{spec:?}"));
+        assert_error(error, ErrorKind::InvalidInput, &["line 1"]);
+        assert!(
+            storage.observations.requests.lock().unwrap().is_empty(),
+            "{spec:?}"
         );
-        assert!(storage.observations.requests.lock().unwrap().is_empty());
     }
 }
 
 #[tokio::test]
-async fn empty_invalid_utf8_and_read_errors_have_context() {
-    assert_eq!(
-        resolve(manifest(), b"\n\r\n").await.unwrap_err().kind(),
-        ErrorKind::InvalidInput
-    );
-    assert!(
-        resolve(manifest(), b"a.warc\n\xff")
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("line 2")
-    );
+async fn invalid_utf8_reports_the_manifest_and_line() {
+    let error = resolve(manifest(), b"a.warc\n\xff").await.unwrap_err();
+    assert_error(error, ErrorKind::Decode, &["line 2", "not UTF-8"]);
+}
+
+#[tokio::test]
+async fn read_errors_preserve_their_kind_and_add_context() {
     let storage =
         MemoryAccessor::new(b"a.warc\nb.warc", 1).with_failure(8, ErrorKind::PermissionDenied);
     let error = manifest().resolve(&storage).await.unwrap_err();
-    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
-    assert!(error.to_string().contains("line 2"), "{error}");
-    assert!(error.to_string().contains("lists/warc.paths"), "{error}");
+    assert_error(error, ErrorKind::PermissionDenied, &["line 2"]);
 }
 
 #[tokio::test]

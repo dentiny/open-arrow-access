@@ -24,7 +24,9 @@ async fn fixture_service(name: &str) -> (HttpFixture, ZenodoService) {
         "/api/records/3551612/files/paper%20%231%25.pdf/content",
         Bytes::from(fixture!("zenodo", "attachment.bin").await),
     );
-    let service = ZenodoService::with_endpoint(fixture.endpoint()).unwrap();
+    let service = ZenodoService::with_endpoint(fixture.endpoint())
+        .unwrap()
+        .with_context(fixture.context());
     (fixture, service)
 }
 
@@ -93,7 +95,12 @@ async fn rejects_invalid_metadata_and_maps_http_errors() {
                 ErrorKind::RateLimited,
             ),
         ],
-        |endpoint| async move { ZenodoService::with_endpoint(&endpoint)?.record(ID).await },
+        |endpoint, context| async move {
+            ZenodoService::with_endpoint(&endpoint)?
+                .with_context(context)
+                .record(ID)
+                .await
+        },
     )
     .await;
     let (_fixture, service) = fixture_service("empty").await;

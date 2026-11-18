@@ -1,19 +1,14 @@
 use std::sync::Arc;
 
-use arrow_array::RecordBatchOptions;
 use futures::stream;
 use open_arrow_access_core::{
     BytePosition, ErrorKind, OrderRequirement, PositionedBatch, PositionedRecordReader,
     RecordBatch, RecordMetadata, Schema, StreamReader, map_positioned_reader,
+    record_batch_with_rows,
 };
 
 fn empty_columns(rows: usize) -> RecordBatch {
-    RecordBatch::try_new_with_options(
-        Arc::new(Schema::empty()),
-        Vec::new(),
-        &RecordBatchOptions::new().with_row_count(Some(rows)),
-    )
-    .unwrap()
+    record_batch_with_rows(Arc::new(Schema::empty()), Vec::new(), rows).unwrap()
 }
 
 #[test]

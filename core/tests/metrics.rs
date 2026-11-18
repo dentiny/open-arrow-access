@@ -8,9 +8,7 @@ use open_arrow_access_core::{
     OrderRequirement, Reader, RecordBatch, RecordCapability, RecordMetadata, RecordReader, Result,
     ScanPlan, ScanPlanner, ScanStatistics, Statistic, StatisticsProvider, StreamReader,
     async_trait,
-    metrics::{
-        InMemoryExporter, MetricAggregate, MetricEvent, MetricValue, MetricsExporter, MetricsLayer,
-    },
+    metrics::{InMemoryExporter, MetricAggregate, MetricsExporter, MetricsLayer},
 };
 use open_arrow_access_test_support::{MemoryAccessor, collect_bytes};
 
@@ -302,11 +300,7 @@ async fn record_output_statistics_and_lazy_scan_planning_are_preserved() {
 fn exporter_aggregates_observations_without_retaining_samples() {
     let exporter = InMemoryExporter::default();
     for value in [0.5, 1.5] {
-        exporter.record(MetricEvent {
-            name: "duration",
-            operation: "read",
-            value: MetricValue::Observation(value),
-        });
+        exporter.record_observation("duration", "read", value);
     }
     let snapshot = exporter.snapshot();
     assert_eq!(snapshot.len(), 1);

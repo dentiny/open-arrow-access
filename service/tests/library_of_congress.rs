@@ -32,7 +32,7 @@ async fn legacy_item_urls_and_original_ocr_json_are_supported() {
     api.respond(
         "/item/book1/?fo=json",
         StatusCode::OK,
-        Bytes::from_static(b"{\"item\":{\"title\":[\"book\"]},\"resources\":[]}"),
+        fixture!("library-of-congress", "legacy-item.json").await,
     );
     text.respond("/text-services/word-coordinates-service?segment=%2Fservice%2Fbook%2Fpage.xml&format=alto_xml&full_text=1",StatusCode::OK,fixture!("library-of-congress","ocr.json").await);
     let s = LibraryOfCongressService::with_connections(
@@ -57,7 +57,7 @@ async fn legacy_item_urls_and_original_ocr_json_are_supported() {
     api.respond(
         "/resource/r2/?fo=json",
         StatusCode::OK,
-        Bytes::from_static(b"{\"resource\":{\"files\":5}}"),
+        fixture!("library-of-congress", "bad-resource-files.json").await,
     );
     assert_eq!(
         s.resource("r2").await.unwrap_err().kind(),
