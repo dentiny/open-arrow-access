@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.2 - 2026-11-18
+
+- Preserve pre-consumption source statistics through prepared sources and file selections for ingestion planning.
+- Decode numeric PMC PMID values and expose complete PMC metadata as a typed Arrow struct.
+- Release all 8 public workspace crates at 0.8.2 with matching internal dependency requirements.
+
 ## 0.8.1 - 2026-11-18
 
 - Forward native scan planning through SelectionAccessor so arXiv TAR shards retain their independent partitions in downstream parallel readers.
