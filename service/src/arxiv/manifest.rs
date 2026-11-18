@@ -1,7 +1,7 @@
 use super::{
     ArxivArchive, ArxivKind,
-    error::{decode, xml_error},
-    validation::validate_archive,
+    error::xml_error,
+    validation::{manifest_root, validate_archive, validate_unique_archive},
 };
 use crate::xml_metadata::XmlDocument;
 use arrow_array::{Array, cast::AsArray};
@@ -15,9 +15,7 @@ pub(super) async fn parse_manifest(
     kind: ArxivKind,
     month: Option<u16>,
 ) -> Result<Vec<ArxivArchive>> {
-    let root = kind
-        .root()
-        .ok_or_else(|| decode("manifest kind must be Pdf or Source"))?;
+    let root = manifest_root(kind)?;
     let document = XmlDocument::new(bytes, root)?;
     let fields = ["filename", "yymm", "seq_num", "size", "num_items", "md5sum"]
         .map(|name| XmlField::new(name, document.element(name), Utf8, false));
@@ -51,9 +49,7 @@ pub(super) async fn parse_manifest(
             checksum: checksum.value(index).into(),
         };
         validate_archive(&archive)?;
-        if !names.insert(archive.filename.clone()) {
-            return Err(decode("duplicate archive in arXiv manifest"));
-        }
+        validate_unique_archive(names.insert(archive.filename.clone()))?;
         if month.is_none_or(|month| archive.month == month) {
             selected.push(archive);
         }

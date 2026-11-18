@@ -9,7 +9,7 @@ use open_arrow_access_core::{
     ScanPlanner, async_trait, map_record_reader, project_batch, scan_partition,
 };
 
-use super::{ArxivKind, ArxivReadRequest, ArxivRecords, error, record_schema, validation};
+use super::{ArxivReadRequest, ArxivRecords, error, record_schema, validation};
 
 /// Reusable in-memory metadata snapshot, indexed by the article ID column.
 ///
@@ -29,10 +29,7 @@ pub struct ArxivMetadataIndex {
 
 impl ArxivMetadataIndex {
     pub fn try_new(batch: RecordBatch, id_column: &str) -> Result<Self> {
-        let column = batch
-            .column_by_name(id_column)
-            .ok_or_else(|| error::invalid("metadata ID column is missing"))?;
-        validation::validate_metadata_id_column(column.as_ref())?;
+        let column = validation::metadata_id_column(&batch, id_column)?;
         let mut ids = HashMap::with_capacity(batch.num_rows());
         for row in 0..batch.num_rows() {
             let id = match column.data_type() {
@@ -41,12 +38,9 @@ impl ArxivMetadataIndex {
                 DataType::Utf8View => column.as_string_view().value(row),
                 _ => unreachable!(),
             };
-            if ids
-                .insert(validation::metadata_id(id)?, row as u64)
-                .is_some()
-            {
-                return Err(error::invalid("duplicate arXiv metadata ID"));
-            }
+            validation::validate_unique_metadata_id(
+                ids.insert(validation::metadata_id(id)?, row as u64),
+            )?;
         }
         Ok(Self {
             rows: StructArray::from(batch),
@@ -55,20 +49,10 @@ impl ArxivMetadataIndex {
     }
 
     fn attach(&self, batch: RecordBatch) -> Result<RecordBatch> {
-        let names = batch
-            .column_by_name("entry_name")
-            .ok_or_else(|| error::decode("PDF entry_name column is missing"))?
-            .as_binary::<i64>();
+        let names = validation::pdf_entry_names(&batch)?;
         let indices = names
             .iter()
-            .map(|name| {
-                let id =
-                    validation::pdf_id(name.ok_or_else(|| error::decode("null PDF entry name"))?)?;
-                self.ids
-                    .get(&id)
-                    .copied()
-                    .ok_or_else(|| error::decode("PDF has no matching metadata in the snapshot"))
-            })
+            .map(|name| validation::pdf_metadata_row(name, &self.ids))
             .collect::<Result<Vec<_>>>()?;
         let metadata = arrow_select::take::take(&self.rows, &UInt64Array::from(indices), None)
             .map_err(error::arrow_error)?;
@@ -128,9 +112,7 @@ where
     A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,
 {
     async fn plan_scan(&self, mut request: ArxivReadRequest) -> Result<ScanPlan> {
-        if request.kind != ArxivKind::Pdf {
-            return Err(error::invalid("metadata enrichment requires kind=Pdf"));
-        }
+        validation::validate_pdf_kind(request.kind)?;
         let projection = request
             .options
             .resolve_projection(&self.metadata.schema())?;
