@@ -71,7 +71,7 @@ where
         source: None,
     };
     // Keep whole streaming-file discovery inside executor workers. Retained
-    // plans still replay their inference samples; ordered output may spill behind
+    // plans still replay their inference samples; ordered output may buffer behind
     // the head without reopening or re-inferring any selected file.
     let can_flatten_native_partitions =
         file_planner.is_some() && files.iter().all(|plan| !plan.streaming_discovery);

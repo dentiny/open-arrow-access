@@ -47,7 +47,7 @@ planned initially; later streaming files are planned inside their worker slots.
 Union-by-name infers schemas with bounded concurrency before execution and
 retains plans and inference samples for reuse. Its file workers drain those
 retained streams instead of reopening them. Preflight may retain inputs for
-all selected files, separately from the P-file execution and spill budgets.
+all selected files, separately from the P-file execution and read-ahead budgets.
 Strict-mode later plan schemas, including empty plans, must match the first
 schema. No nested executor or second worker budget is used.
 Hugging Face dataset scans enable this mode automatically. Resolved provider
@@ -70,30 +70,35 @@ Decoder allocations, individual batch sizes and compressed input buffers are not
 bounded by these queue limits.
 
 Ordered multi-file scans additionally allow a later streaming file to continue
-reading when its memory queue is full. Its worker writes Arrow IPC frames into
-one temporary file, while the head file continues streaming through its memory
-queue. The default disk limit is 1 GiB per resident file, including IPC framing
-and schema/dictionary data; this measures decoded Arrow output, not compressed
-input bytes. There is at most one spool per resident file, so total spool data
-is bounded by P times that limit and file descriptors do not grow with batch
-count. Spooling uses one additional in-flight batch and its encoded IPC buffer
-per producer; replay also temporarily holds an IPC frame. It does not buffer an
-entire file in memory or start another executor.
+reading when its Q-batch queue is full. Additional batches enter an in-memory
+read-ahead queue, sharing a default **64 MiB budget for the entire scan**. The
+head file continues streaming through its ordinary queue. There are no temporary
+files, IPC serialization or filesystem operations in this read-ahead path.
 
-The consumer drains memory batches and the spool in their original order. A
-file stops spooling when it becomes the head, reaches EOF, or the next IPC frame
-would exceed the disk limit. At the limit, the worker returns to bounded memory
-queues and backpressure; sustained downloads beyond that window require a larger
-disk budget or permission for unordered output. Temporary files are unlinked
-when drained or dropped, including cancellation and errors. Temporary-file or
-IPC failures terminate the scan. Native independent partitions and unordered
-scans keep their memory-only queues. Ordinary sequential `open` does not spool.
+Each queued batch holds memory credits based on `get_array_memory_size()`, with
+a minimum charge of 1 KiB to bound bookkeeping for empty/zero-column batches.
+Shared Arrow buffers may be counted more than once. Credits are released when a
+batch is delivered or dropped. This is an additional queued-Arrow-memory budget,
+not a total RSS cap: P * Q ordinary output slots, input/decoder buffers, one
+in-flight batch per worker, and caller-held batches are separate allocations.
 
-Configure the limit with `ParallelReadLayer::new(partitions, prefetch)
-.with_ordered_file_spill(NonZeroU64::new(4 * 1024 * 1024 * 1024))`, or use
-`.with_ordered_file_spill(None)` to disable disk prefetch. This option participates
-in the same execution-policy conflict checks as the partition and prefetch
-budgets.
+A full budget pauses further read-ahead. A batch exceeding the budget (or the
+semaphore's single-admission limit) waits until its file becomes the head and is
+then delivered through the ordinary queue. Head promotion bypasses read-ahead
+admission so a farther file holding memory credits cannot deadlock an earlier
+file. The consumer drains ordinary and read-ahead batches in original order.
+Finished files retain their resident slot until all queued output is drained;
+cancellation and errors release buffered batches and credits.
+
+Configure the shared budget with `ParallelReadLayer::new(partitions, prefetch)
+.with_ordered_file_buffer(NonZeroUsize::new(256 * 1024 * 1024))`, or use
+`.with_ordered_file_buffer(None)` to keep only the Q-batch queues. The option
+participates in execution-policy conflict checks. Native independent partitions,
+unordered execution and ordinary sequential `open` do not use extra read-ahead.
+With ordered output and finite memory, sustained downloads can proceed only as
+far as this window allows; a larger window or unordered emission is needed to
+avoid backpressure beyond it.
+
 Storage's per-reader I/O limit remains separate: P readers may each use their
 configured I/O concurrency. This version does not impose a backend-global cap.
 

@@ -1,6 +1,6 @@
 use std::{
     io::Write,
-    num::{NonZeroU64, NonZeroUsize},
+    num::NonZeroUsize,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -367,8 +367,8 @@ async fn later_files_finish_multi_chunk_downloads_while_first_file_is_blocked() 
 }
 
 #[tokio::test]
-async fn exhausted_or_disabled_spill_restores_backpressure_without_losing_rows() {
-    for limit in [None, NonZeroU64::new(1), NonZeroU64::new(16 * 1024)] {
+async fn exhausted_or_disabled_memory_budget_restores_backpressure_without_losing_rows() {
+    for limit in [None, NonZeroUsize::new(1), NonZeroUsize::new(16 * 1024)] {
         for union in [false, true] {
             let storage = sustained_source("json");
             let files = sustained_files(storage.clone(), "json", union);
@@ -378,7 +378,7 @@ async fn exhausted_or_disabled_spill_restores_backpressure_without_losing_rows()
             let reader = files
                 .layer(
                     ParallelReadLayer::new(NonZeroUsize::new(2).unwrap(), NonZeroUsize::MIN)
-                        .with_ordered_file_spill(limit),
+                        .with_ordered_file_buffer(limit),
                 )
                 .open(request)
                 .await
@@ -409,7 +409,7 @@ async fn exhausted_or_disabled_spill_restores_backpressure_without_losing_rows()
 }
 
 #[tokio::test]
-async fn cancellation_releases_files_blocked_on_ordered_spill_delivery() {
+async fn cancellation_releases_files_waiting_on_ordered_memory_delivery() {
     let storage = sustained_source("json");
     let files = sustained_files(storage.clone(), "json", true);
     let mut request = FileSetRequest::new(["0", "1", "2"]);

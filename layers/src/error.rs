@@ -51,6 +51,14 @@ pub(crate) fn invalid_emission() -> Error {
     )
 }
 
+pub(crate) fn invalid_ordered_file_buffer() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "parallel_read",
+        "ordered file buffer exceeds the supported memory budget",
+    )
+}
+
 pub(crate) fn conflicting_parallel_settings() -> Error {
     Error::new(
         ErrorKind::InvalidInput,

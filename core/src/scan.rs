@@ -1,8 +1,4 @@
-use std::{
-    future::Future,
-    num::{NonZeroU64, NonZeroUsize},
-    sync::Arc,
-};
+use std::{future::Future, num::NonZeroUsize, sync::Arc};
 
 use futures::{
     StreamExt, TryStreamExt,
@@ -30,10 +26,10 @@ pub struct ParallelReadOptions {
     pub partitions: NonZeroUsize,
     /// Maximum queued batches per partition; does not bound total bytes.
     pub prefetch: NonZeroUsize,
-    /// Maximum temporary Arrow IPC bytes per resident streaming file when ordered
-    /// output blocks its batch queue. None disables spilling. Independent native
-    /// partitions and unordered execution retain memory-only queues.
-    pub ordered_file_spill: Option<NonZeroU64>,
+    /// Shared extra Arrow-memory budget across ordered streaming-file queues.
+    /// None disables read-ahead beyond the ordinary Q-batch queues. Input/decoder
+    /// buffers, in-flight batches and delivered batches are separate allocations.
+    pub ordered_file_buffer: Option<NonZeroUsize>,
 }
 
 /// A lazy, independently owned partition opener. Partition stream order defines logical order.
@@ -67,8 +63,8 @@ pub struct ScanPlan {
     /// Multi-file planners may keep this stream inside one file partition so the
     /// executor can overlap input discovery across files under its worker budget.
     pub streaming_discovery: bool,
-    /// Partitions own complete streaming files. Ordered executors may spill their
-    /// queued output to overlap input reads without relaxing file order.
+    /// Partitions own complete streaming files. Ordered executors may buffer
+    /// additional output to overlap input reads without relaxing file order.
     pub file_streams: bool,
     pub partitions: BoxStream<'static, Result<ScanPartition>>,
 }
@@ -152,7 +148,7 @@ impl ScanPlan {
         self
     }
 
-    /// Identify whole streaming-file partitions for bounded ordered disk prefetch.
+    /// Identify whole streaming-file partitions for bounded ordered in-memory prefetch.
     pub fn with_file_streams(mut self) -> Self {
         self.file_streams = true;
         self

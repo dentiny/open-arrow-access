@@ -13,7 +13,6 @@ source-positions = ["dep:async-compression"]
 [dependencies]
 arrow-array = { workspace = true, features = ["chrono-tz"] }
 arrow-cast.workspace = true
-arrow-ipc.workspace = true
 arrow-schema.workspace = true
 arrow-select.workspace = true
 async-compression = { workspace = true, optional = true, features = [
@@ -25,9 +24,8 @@ async-compression = { workspace = true, optional = true, features = [
 datafusion = { workspace = true, features = ["sql"] }
 futures.workspace = true
 indexmap.workspace = true
-tempfile.workspace = true
 open-arrow-access-core.workspace = true
-tokio = { workspace = true, features = ["sync", "fs", "io-util"] }
+tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = [
@@ -35,6 +33,7 @@ open-arrow-access-file-format = { path = "../file-format", default-features = fa
 ] }
 open-arrow-access-test-support.workspace = true
 rstest.workspace = true
+tokio = { workspace = true, features = ["time"] }
 
 [lints]
 workspace = true
