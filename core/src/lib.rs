@@ -84,6 +84,9 @@ pub use arrow_schema::{Schema, SchemaRef};
 pub use async_trait::async_trait;
 pub use bytes::Bytes;
 
+mod selection_accessor;
+pub use selection_accessor::SelectionAccessor;
+
 mod scan;
 pub use scan::{
     EmissionPolicy, ParallelReadOptions, ScanPartition, ScanPlan, ScanPlanner, scan_partition,
