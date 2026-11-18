@@ -356,12 +356,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d2050892d4691cf110586070786712b504985a4d37ed64a9cd8a402718e1706"
 
 [[package]]
-name = "asyncband"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e53c31fb18f42e765610b2146531390e56966f601d8ffca530d292a34fe4218"
-
-[[package]]
 name = "atif-arrow"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3044,10 +3038,11 @@ dependencies = [
 [[package]]
 name = "opendal-core"
 version = "0.59.5"
-source = "git+https://github.com/dentiny/opendal.git?rev=2bf4c9cd289f8881289910afcdc239a4192c4421#2bf4c9cd289f8881289910afcdc239a4192c4421"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33d5a635dfea36a7a0c3bbb2ca34c97af17f98dd69b0cdf31a1d436a346e0a12"
 dependencies = [
  "anyhow",
- "asyncband 0.8.0",
+ "asyncband",
  "base64 0.23.1",
  "bytes",
  "futures",
@@ -3094,7 +3089,8 @@ dependencies = [
 [[package]]
 name = "opendal-layer-retry"
 version = "0.59.5"
-source = "git+https://github.com/dentiny/opendal.git?rev=2bf4c9cd289f8881289910afcdc239a4192c4421#2bf4c9cd289f8881289910afcdc239a4192c4421"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a02c59479b047878f4a0f269f23c847f24d67d1ff19f2b20fdd5a3bceefd451"
 dependencies = [
  "backon",
  "log",
@@ -3131,7 +3127,7 @@ version = "0.59.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32c1a4076d933180b66b57a0f305e48f2de1a72b50648114cb9943a8bc9e28b8"
 dependencies = [
- "asyncband 0.7.4",
+ "asyncband",
  "bytes",
  "hf-xet",
  "http",
@@ -3674,7 +3670,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85fed85c436b6b920e4b36310f699a77771a91e38ae483df48447bd7d162671c"
 dependencies = [
  "anyhow",
- "asyncband 0.7.4",
+ "asyncband",
  "base64 0.23.1",
  "bytes",
  "hex",
