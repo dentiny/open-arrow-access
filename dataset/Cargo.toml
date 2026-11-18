@@ -10,6 +10,10 @@ description = "Sequential file-set and directory datasets for Open Arrow Access"
 default = []
 
 [dependencies]
+url.workspace = true
+percent-encoding.workspace = true
+open-arrow-access-decompression.workspace = true
+open-arrow-access-file-format.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
 futures.workspace = true
@@ -17,6 +21,7 @@ glob.workspace = true
 open-arrow-access-core.workspace = true
 
 [dev-dependencies]
+flate2.workspace = true
 more-asserts.workspace = true
 open-arrow-access-decompression = { path = "../decompression", default-features = false, features = ["gzip"] }
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = ["atif", "csv", "json", "parquet"] }

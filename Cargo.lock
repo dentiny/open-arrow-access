@@ -2876,6 +2876,7 @@ version = "0.5.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
+ "flate2",
  "futures",
  "glob",
  "more-asserts",
@@ -2886,8 +2887,10 @@ dependencies = [
  "open-arrow-access-storage",
  "open-arrow-access-test-support",
  "parquet",
+ "percent-encoding",
  "tempfile",
  "tokio",
+ "url",
 ]
 
 [[package]]
