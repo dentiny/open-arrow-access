@@ -14,7 +14,9 @@ mod blocking;
 pub use blocking::BlockingRecordBatchReader;
 
 mod attachment;
-pub use attachment::{AttachmentFormat, AttachmentOptions, open_attachment_source};
+pub use attachment::{
+    AttachmentAccessor, AttachmentFormat, AttachmentOptions, open_attachment_source,
+};
 
 mod file_source;
 pub use file_source::{

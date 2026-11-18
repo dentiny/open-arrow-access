@@ -32,6 +32,41 @@ The full `ReadRequest`, including projection, batch size and byte options, is
 preserved. The request's locator is interpreted by the supplied accessor; it is
 not an arbitrary URL to resolve or a format to infer from the filename.
 
+## Reuse an attachment accessor
+
+`AttachmentAccessor::new(files, options)?` validates the format configuration
+without I/O and returns an `Accessor<Request = ReadRequest, Reader = dyn RecordReader>`.
+Each `open` independently decodes the selected logical name. Clones share the
+provider byte accessor through `Arc`; they do not require that provider to be
+`Clone` and do not share reader cursors. The full request, including projection,
+batch size and byte options, reaches the existing attachment binder.
+The adapter conservatively advertises sequential, globally ordered reads; it
+does not infer record partitions from byte ranges or promise a stable schema
+across different selected attachments. Use a bound/prepared source to fix one
+request's schema.
+
+This replaces the application-owned attachment adapters in DuckPort's
+`rust/src/service_files.rs` and the conversion service's
+`inspector/src/provider/services/mod.rs`. Previously each consumer needed its own
+`Accessor` implementation to share a byte accessor and call
+`open_attachment_source(...).await?.reader().await`. The consumer can instead
+pass the public adapter directly to its existing pipeline:
+
+```rust,no_run
+use open_arrow_access::{
+    AttachmentAccessor, AttachmentOptions, BoundSource, ByteAccessor, ReadRequest, Result,
+};
+
+async fn bind_selected<A: ByteAccessor + 'static>(files: A) -> Result<BoundSource> {
+    let records = AttachmentAccessor::new(files, AttachmentOptions::default())?;
+    BoundSource::bind(records, ReadRequest::new("selected.bin")).await
+}
+```
+
+The provider still owns attachment membership, authentication and transport.
+Construction rejects invalid configuration and disabled formats before touching
+provider storage; request-specific schema and projection errors occur on open.
+
 ## Typed configuration
 
 | `AttachmentFormat` | Cargo feature | Schema/interpretation | Default outer compression |
