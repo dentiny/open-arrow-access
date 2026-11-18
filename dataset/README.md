@@ -97,17 +97,16 @@ codecs for compressed manifests and bind storage to the origin root:
 
 ```rust,ignore
 let files = PathsManifest::new("crawl-data/CC-MAIN-2022-40/warc.paths.gz")
-    .with_origin("https://data.commoncrawl.org")
     .with_prefix("crawl-data/CC-MAIN-2022-40/segments/1664030338280.51/")
     .with_formats(&[DetectedFormat::Warc], Mismatch::Error)
     .resolve(&storage).await?;
 ```
 
 The default base is the origin root; `ManifestDirectory` and `Explicit(ObjectRef)`
-select a directory instead. Same-origin URLs become decoded storage keys.
-HTTP(S) URLs from any origin are accepted. For a relative manifest key,
-`with_origin` identifies which absolute entries should become storage keys;
-other absolute entries remain full URLs and require an accessor that supports them.
+select a directory instead. Relative entries become decoded storage keys.
+Absolute HTTP(S) entries always remain full URLs, regardless of the manifest's
+origin, and require an accessor that supports URLs. Absolute URLs and relative
+keys are distinct locators for duplicate detection.
 
 Security checks run before prefix filtering: dot segments (even contained ones),
 credentials, network-path references, malformed encoding, encoded delimiters,

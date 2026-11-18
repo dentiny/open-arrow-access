@@ -64,7 +64,7 @@ async fn bases_produce_keys_for_the_same_storage() {
 }
 
 #[tokio::test]
-async fn same_origin_entries_resolve_to_decoded_storage_keys() {
+async fn absolute_urls_are_canonicalized_and_relative_keys_are_decoded() {
     assert_eq!(
         resolve(
             manifest(),
@@ -72,7 +72,7 @@ async fn same_origin_entries_resolve_to_decoded_storage_keys() {
         )
         .await
         .unwrap(),
-        ["a.warc", "b.warc", "c d.warc"]
+        ["https://example.test/a.warc", "b.warc", "c d.warc"]
     );
 }
 
@@ -101,19 +101,14 @@ async fn unsafe_entries_report_the_manifest_and_line() {
 }
 
 #[tokio::test]
-async fn origin_configuration_controls_whether_absolute_entries_become_keys() {
-    let entry = b"https://example.test/a.warc";
-    let spec = PathsManifest::new("warc.paths");
-    assert_eq!(
-        resolve(spec.clone(), entry).await.unwrap(),
-        ["https://example.test/a.warc"]
-    );
-    assert_eq!(
-        resolve(spec.with_origin("https://example.test"), entry)
-            .await
-            .unwrap(),
-        ["a.warc"]
-    );
+async fn absolute_entries_are_independent_of_the_manifest_location() {
+    let entries = b"https://example.test/a.warc\na.warc";
+    for spec in [manifest(), PathsManifest::new("warc.paths")] {
+        assert_eq!(
+            resolve(spec, entries).await.unwrap(),
+            ["https://example.test/a.warc", "a.warc"]
+        );
+    }
 }
 
 #[tokio::test]
@@ -127,8 +122,7 @@ async fn resolved_entries_must_remain_within_the_selected_base() {
 
 #[tokio::test]
 async fn selection_policies_preserve_order_and_detect_aliases() {
-    let bytes =
-        b"other/no.txt\nseg/z.WARC.GZ\nseg/no.txt\nseg/a.warc\nhttps://example.test/seg/z.WARC.GZ";
+    let bytes = b"other/no.txt\nseg/z.WARC.GZ\nseg/no.txt\nseg/a.warc\nseg/%7a.WARC.GZ";
     let selection = |policy| {
         manifest()
             .with_prefix("seg/")
@@ -178,10 +172,6 @@ async fn invalid_configuration_fails_before_io() {
         PathsManifest::new("https://u:p@example.test/warc.paths"),
         PathsManifest::new("https://example.test/warc.paths?x=1"),
         PathsManifest::new("https://example.test/warc.paths#x"),
-        manifest().with_origin("https://other"),
-        PathsManifest::new("warc.paths").with_origin("https://host/a/.."),
-        PathsManifest::new("warc.paths").with_origin("https://host?x=1"),
-        PathsManifest::new("warc.paths").with_origin("https://host#x"),
         manifest().with_base(ManifestBase::Explicit("../data".into())),
     ] {
         let storage = MemoryAccessor::new(b"a.warc", 1);
@@ -265,7 +255,7 @@ async fn entry_query_and_fragment_components_are_always_preserved() {
         ("/data/a.warc#part", "data/a.warc#part"),
         (
             "https://example.test/data/a.warc?x=1#part",
-            "data/a.warc?x=1#part",
+            "https://example.test/data/a.warc?x=1#part",
         ),
         (
             "https://mirror.test/data/a.warc?x=1#part",
