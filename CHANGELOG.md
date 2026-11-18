@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 - 2026-11-17
+
+- Support custom Common Crawl HTTP inventory URLs and reuse the paths manifest resolver.
+- Resolve same-origin paths manifests, preserve absolute manifest URLs, and retain URL suffixes.
+- Restore WARC `id`, `type`, and `warc_info_id` column names.
+- Fix `Send` attachment-binding futures for asynchronous accessors.
+- Honor HTTP `Retry-After` using released OpenDAL APIs, removing the Git dependency patches.
+- Release all eight public workspace crates at 0.6.0 with matching internal dependency requirements.
+
 ## 0.5.0 - 2026-11-17
 
 - Make directory and file-set dataset APIs unconditional; remove the `directory` and `dataset-directory` Cargo features.
