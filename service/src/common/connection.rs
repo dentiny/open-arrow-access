@@ -17,6 +17,15 @@ use url::Url;
 
 use crate::file_manifest::FileSpec;
 
+/// Where an origin-scoped API credential is sent.
+#[derive(Clone, Copy, Debug)]
+pub enum ApiKey<'a> {
+    /// Send a sensitive HTTP header with this name.
+    Header(&'a str),
+    /// Send a URL query parameter with this name.
+    Query(&'a str),
+}
+
 /// HTTP settings. Debug output never includes keys or signed URLs.
 #[derive(Clone)]
 pub struct Connection {
@@ -90,6 +99,28 @@ impl Connection {
         self.headers.insert(name, value);
         Ok(self)
     }
+    /// Set or replace an origin-scoped API key, rejecting an empty key before I/O.
+    /// Header values are sensitive and credentials are omitted from Debug output.
+    /// Keys are copied verbatim: whitespace is neither trimmed nor rejected.
+    pub fn with_api_key(self, place: ApiKey<'_>, key: &str) -> Result<Self> {
+        self.with_api_key_message(place, key, "API key must not be empty")
+    }
+
+    pub(crate) fn with_api_key_message(
+        self,
+        place: ApiKey<'_>,
+        key: &str,
+        empty_message: &str,
+    ) -> Result<Self> {
+        if key.is_empty() {
+            return Err(error::invalid(empty_message));
+        }
+        match place {
+            ApiKey::Header(name) => self.with_header(name, key),
+            ApiKey::Query(name) => Ok(self.with_query(name, key)),
+        }
+    }
+
     /// Scoped query authentication, e.g. GovInfo's `api_key`.
     /// Replaces any previously configured value for the same parameter.
     pub fn with_query(mut self, name: &str, value: &str) -> Self {

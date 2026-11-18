@@ -274,8 +274,8 @@ use open_arrow_access::file_format::warc::WarcArrowAccessor;
 let warc = WarcArrowAccessor::new(bytes);
 let request = ReadRequest::new("part.warc").with_options(ReadOptions {
     projection: Some(vec![
-        "record_id".into(),
-        "record_type".into(),
+        "id".into(),
+        "type".into(),
         "date".into(),
         "target_uri".into(),
         "content_type".into(),
@@ -292,8 +292,8 @@ The fixed schema has 22 top-level fields:
 
 | Field | Arrow type | Nullable |
 | --- | --- | --- |
-| `record_id` | Utf8 | No |
-| `record_type` | Utf8 | No |
+| `id` | Utf8 | No |
+| `type` | Utf8 | No |
 | `warc_version` | Utf8 | No |
 | `date` | Timestamp(Millisecond, None) | No |
 | `source_uri` | LargeUtf8 (input locator) | No |
@@ -313,7 +313,7 @@ The fixed schema has 22 top-level fields:
 | `segment_origin_id` | Utf8 | Yes |
 | `segment_total_length` | Utf8 | Yes |
 | `truncated` | Utf8 | Yes |
-| `warcinfo_id` | Utf8 | Yes |
+| `warc_info_id` | Utf8 | Yes |
 
 The default Arrow reader applies `SchemaEvolutionLayer` to convert parsed RFC 3339
 dates to UTC epoch milliseconds, stored without timezone metadata. Sequential and

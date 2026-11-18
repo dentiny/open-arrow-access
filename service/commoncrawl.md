@@ -15,6 +15,7 @@ Enable facade feature `service-warc`. See [example setup](README.md#example-setu
 | `CommonCrawl::new("CC-MAIN-YYYY-NN")` / `from_url(crawl_url)` | Validated crawl ID/origin |
 | `CommonCrawlWarcRequest::new(crawl)` | Crawl-wide selector; inventory is `crawl-data/{crawl}/warc.paths.gz` |
 | `CommonCrawlSegmentRequest::new(crawl, segment)` | Exact segment selector over the same inventory |
+| `CommonCrawlWarcRequest::from_manifest_url(crawl, url)` / `CommonCrawlSegmentRequest::from_manifest_url(crawl, segment, url)` | Custom inventory source |
 | WARC/segment accessor `resolve(request)` | `FileSetRequest { objects, options, byte_options }` in inventory order |
 | WARC/segment accessor `open(request)` | Arrow reader from the native WARC view or a caller-supplied record accessor |
 
@@ -78,7 +79,7 @@ async fn read_crawl(crawl: &str) -> Result<()> {
         create_http_accessor("https://data.commoncrawl.org")?.layer(DecompressionLayer::new(Gzip));
     let dataset = CommonCrawlWarcAccessor::from_warc_bytes(manifests, bytes);
     let request = CommonCrawlWarcRequest::new(crawl)?.with_options(ReadOptions {
-        projection: Some(vec!["record_id".into(), "target_uri".into()]),
+        projection: Some(vec!["id".into(), "target_uri".into()]),
         ..Default::default()
     });
     let mut reader = dataset.open(request).await?;
@@ -96,10 +97,61 @@ Use `CommonCrawlWarcAccessor::new(manifests, format)` for a custom record schema
 `resolve(request)` can instead return selected paths without opening record files.
 Use `CommonCrawlSegmentAccessor` and `CommonCrawlSegmentRequest` for one segment.
 
-Crawl and segment membership now uses the dataset `PathsManifest` resolver. It
-validates paths before prefix filtering, resolves same-origin URLs to storage
-keys, rejects unsafe paths and non-WARC selected files, and reports duplicates
-with manifest/line context. Existing caller-configured manifest decompression is
-preserved. For arbitrary plain or compressed paths files, enable
-`dataset-manifest` and use `dataset::manifest::PathsManifest` directly; see the
+Crawl and segment membership uses the dataset `PathsManifest` resolver. It
+validates paths before prefix filtering, rejects unsafe paths and non-WARC
+selected files, and reports duplicates with manifest/line context. Absolute
+HTTP(S) entries retain full URLs; query/fragment components are preserved.
+Caller-configured manifest decompression is preserved. For arbitrary plain or
+compressed paths files, use `dataset::manifest::PathsManifest` directly; see the
 [dataset guide](../dataset/README.md#resolve-a-paths-manifest).
+
+## Custom inventories and single segments
+
+Single-segment reads are supported by `CommonCrawlSegmentRequest::from_url` or
+`new(crawl, segment)`. They filter the crawl inventory by the exact
+`crawl-data/<crawl>/segments/<segment>/warc/` prefix, preserving inventory order.
+
+Both crawl and segment requests accept `from_manifest_url` for an inventory
+at an arbitrary HTTP(S) file location. A request has one source: either a
+standard crawl or an explicit inventory. `request.origin()` is that source's
+origin; configure origin-rooted accessors with it. Request URLs do not
+reconfigure injected accessors. If record files live elsewhere, supply a record
+accessor configured for that site explicitly.
+Inventory entry paths must still use the `crawl-data/...` layout for the selected
+crawl/segment. Relative entries are rooted at the storage root; absolute HTTP(S)
+entries retain their URLs and require a URL-capable record accessor. The inventory
+URL's directory is not a base for entries. Request URLs follow the Common Crawl
+canonical URL rules (no credentials, query, fragment, percent encoding, or
+traversal). File names need not be `warc.paths`.
+
+```rust
+use open_arrow_access::{
+    Accessor, AccessorExt, Result,
+    decompression::{DecompressionLayer, gzip::Gzip},
+    service::commoncrawl::{
+        CommonCrawlSegmentAccessor, CommonCrawlSegmentRequest, create_http_accessor,
+    },
+};
+
+async fn read_segment() -> Result<()> {
+    let request = CommonCrawlSegmentRequest::from_manifest_url(
+        "CC-MAIN-2022-40", "1664030338280.51",
+        "https://mirror.example/inventories/warc.paths.gz",
+    )?;
+    let manifests = create_http_accessor(request.origin())?
+        .layer(DecompressionLayer::new(Gzip));
+    let bytes = create_http_accessor(request.origin())?
+        .layer(DecompressionLayer::new(Gzip));
+    let dataset = CommonCrawlSegmentAccessor::from_warc_bytes(manifests, bytes);
+    let mut reader = dataset.open(request).await?;
+    if let Some(batch) = reader.next().await? {
+        println!("segment batch: {} rows", batch.num_rows());
+    }
+    Ok(())
+}
+```
+
+For a plain `warc.paths` inventory, supply an HTTP manifest accessor without the
+Gzip layer; WARC decompression remains independently configured. For inventories
+whose entries use a different layout, resolve their membership separately and
+pass it to `FileSetAccessor` instead of the Common Crawl selector.

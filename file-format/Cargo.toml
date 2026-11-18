@@ -39,7 +39,7 @@ warc = { workspace = true, optional = true }
 xml-arrow = { workspace = true, optional = true }
 
 [dev-dependencies]
-open-arrow-access-dataset = { workspace = true, features = ["directory"] }
+open-arrow-access-dataset.workspace = true
 open-arrow-access-layers = { workspace = true, features = ["source-positions"] }
 flate2.workspace = true
 open-arrow-access-decompression = { path = "../decompression", default-features = false, features = ["gzip"] }

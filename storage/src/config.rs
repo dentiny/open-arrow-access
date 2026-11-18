@@ -18,6 +18,8 @@ pub struct RetryConfig {
     /// Retries after the initial attempt; zero disables retries.
     pub max_retries: usize,
     pub min_delay: Duration,
+    /// Exponential backoff cap and maximum accepted server delay.
+    /// A larger Retry-After stops retries instead of retrying early.
     pub max_delay: Duration,
     pub factor: f32,
     pub jitter: bool,
@@ -55,7 +57,8 @@ impl Default for TimeoutConfig {
 impl StorageConfig {
     /// Validate and apply policies without performing I/O. Timeout wraps the
     /// backend inside retry, so each attempt gets its own timeout. Retryability
-    /// and backoff behavior are delegated to OpenDAL.
+    /// uses OpenDAL temporary errors; 429/503 also honor Retry-After.
+    /// Server delays above max_delay stop retries instead of retrying early.
     pub fn apply(&self, mut operator: Operator) -> Result<Operator> {
         self.validate()?;
         if let Some(timeout) = &self.timeout {
@@ -74,7 +77,9 @@ impl StorageConfig {
             if retry.jitter {
                 layer = layer.with_jitter();
             }
-            operator = operator.layer(layer);
+            operator = operator
+                .layer(crate::retry::RetryAfterLayer::new(retry.max_delay))
+                .layer(layer);
         }
         Ok(operator)
     }

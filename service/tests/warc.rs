@@ -39,7 +39,12 @@ async fn dataset_reads_all_segments_in_manifest_order_and_forwards_options() {
     let records = Records::default();
     let opens = records.opens.clone();
     let accessor = CommonCrawlWarcAccessor::new(manifests, records);
-    let mut selection = request().with_byte_options(ByteReadOptions {
+    let mut selection = CommonCrawlWarcRequest::from_manifest_url(
+        "CC-MAIN-2022-40",
+        "https://inventory.example/custom/warc.paths",
+    )
+    .unwrap()
+    .with_byte_options(ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
         io_chunk_size: NonZeroUsize::new(4),
     });
@@ -58,7 +63,7 @@ async fn dataset_reads_all_segments_in_manifest_order_and_forwards_options() {
         ]
     );
     let manifest_opens = manifest_opens.requests.lock().unwrap();
-    assert_eq!(manifest_opens[0].object, request().manifest());
+    assert_eq!(manifest_opens[0].object.locator(), "custom/warc.paths");
     assert_eq!(manifest_opens[0].options.io_concurrency.get(), 3);
     assert!(
         opens
@@ -235,7 +240,7 @@ async fn native_parallel_warc_view_keeps_source_urls_and_binary_bodies() {
 
 #[tokio::test]
 async fn selected_manifest_paths_are_validated_before_records_open() {
-    for name in ["bad_traversal.paths", "bad_query.paths", "bad_suffix.paths"] {
+    for name in ["bad_traversal.paths", "bad_suffix.paths"] {
         let records = Records::default();
         let opens = records.opens.clone();
         let accessor = CommonCrawlWarcAccessor::new(manifest(name, 19), records);
@@ -244,5 +249,19 @@ async fn selected_manifest_paths_are_validated_before_records_open() {
         assert!(error.to_string().contains("line 1"), "{error}");
         assert!(error.to_string().contains("warc.paths.gz"), "{error}");
         assert!(opens.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn selected_manifest_paths_decode_keys_and_preserve_query_components() {
+    let key = "crawl-data/CC-MAIN-2022-40/segments/1664030338280.51/warc/a.warc.gz";
+    for (name, expected) in [
+        ("bad_encoding.paths", key.to_owned()),
+        ("bad_query.paths", format!("{key}?query=1")),
+    ] {
+        let accessor = CommonCrawlWarcAccessor::new(manifest(name, 19), Records::default());
+        let files = accessor.resolve(request()).await.unwrap();
+        assert_eq!(files.objects.len(), 1, "{name}");
+        assert_eq!(files.objects[0].locator(), expected, "{name}");
     }
 }

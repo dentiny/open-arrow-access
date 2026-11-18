@@ -1,7 +1,7 @@
 # Multi-file datasets
 
-Enable `dataset-directory` on `open-arrow-access` (`directory` on this component
-crate) to combine a single-file Arrow accessor across multiple objects.
+Combine a single-file Arrow accessor across multiple objects. Directory and
+file-set APIs are always available; enable the format readers you use.
 
 | Accessor | Selection | Output order |
 | --- | --- | --- |
@@ -10,7 +10,7 @@ crate) to combine a single-file Arrow accessor across multiple objects.
 
 ## Read selected shards
 
-Enable `format-json` and `dataset-directory`. This function reads two files with
+Enable `format-json`. This function reads two files with
 the same inferred schema from a caller-configured storage operator:
 
 ```rust,no_run
@@ -92,26 +92,28 @@ generated columns after parallel execution.
 
 ## Resolve a paths manifest
 
-Enable `dataset-manifest` (`manifest` on this crate) and the required
-`decompression-*` codecs. Bind storage to the origin root:
+Paths manifests are always available. Enable the required `decompression-*`
+codecs for compressed manifests and bind storage to the origin root:
 
 ```rust,ignore
 let files = PathsManifest::new("crawl-data/CC-MAIN-2022-40/warc.paths.gz")
-    .with_origin("https://data.commoncrawl.org")
     .with_prefix("crawl-data/CC-MAIN-2022-40/segments/1664030338280.51/")
     .with_formats(&[DetectedFormat::Warc], Mismatch::Error)
     .resolve(&storage).await?;
 ```
 
 The default base is the origin root; `ManifestDirectory` and `Explicit(ObjectRef)`
-select a directory instead. Same-origin URLs become decoded storage keys.
-Relative manifest keys need `with_origin` to accept absolute entries.
+select a directory instead. Relative entries become decoded storage keys.
+Absolute HTTP(S) entries always remain full URLs, regardless of the manifest's
+origin, and require an accessor that supports URLs. Absolute URLs and relative
+keys are distinct locators for duplicate detection.
 
 Security checks run before prefix filtering: dot segments (even contained ones),
 credentials, network-path references, malformed encoding, encoded delimiters,
-backslashes and controls are rejected. Query/fragment and foreign origins require
-explicit opt-in. Allowlisted foreign entries remain URLs and need a multi-origin
-accessor; transport and redirect policy remain the caller's responsibility.
+backslashes and controls are rejected. Entry query/fragment components are always
+preserved; the accessor must support these semantics. Fragments are never sent by
+HTTP itself. Manifest locations remain storage keys without query/fragment.
+Transport and redirect policy remain the caller's responsibility.
 
 Blank lines are ignored. Format mismatches and selected duplicates error by
 default; `Mismatch::Skip` and `Duplicates::Dedupe` retain the other entries in

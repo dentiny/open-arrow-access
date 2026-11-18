@@ -27,6 +27,9 @@ impl Default for DecodePartitionOptions {
 #[allow(dead_code)] // Some builds enable no formats that use record chunking.
 pub(crate) mod chunks;
 
+#[cfg(any(feature = "csv", feature = "json"))]
+pub(crate) mod byte_chunks;
+
 /// File formats implement planning; the shared accessor attaches input context.
 #[async_trait]
 pub(crate) trait FileScanPlanner:

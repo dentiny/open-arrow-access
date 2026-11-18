@@ -3,9 +3,9 @@ use super::{
 };
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    ByteReader, Capability, FactoryToken, FieldNameIndex, OrderRequirement, ReadRequest,
-    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result,
-    async_trait, record_stream_reader,
+    Accessor, ByteReadRequest, ByteReader, Capability, FactoryToken, FieldNameIndex,
+    OrderRequirement, ReadRequest, ReaderFactory, RecordCapability, RecordMetadata, RecordReader,
+    ResolvedProjection, Result, async_trait, record_stream_reader,
 };
 use parquet::arrow::{ProjectionMask, async_reader::ParquetRecordBatchStreamBuilder};
 
@@ -31,6 +31,23 @@ impl ReaderFactory for ParquetFormat {
 
     fn prepare(&self, _request: &ReadRequest) -> Result<()> {
         Ok(())
+    }
+
+    async fn metadata(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: ReadRequest,
+    ) -> Result<RecordMetadata> {
+        let input = storage.open(ByteReadRequest::from(&request)).await?;
+        validate_input(input.as_ref(), parquet_input_error)?;
+        let builder = ParquetRecordBatchStreamBuilder::new(ParquetInput::new(input))
+            .await
+            .map_err(|e| decode_error("inspect_parquet", e))?;
+        let schema = request.options.resolve_projection(builder.schema())?.schema;
+        Ok(RecordMetadata {
+            schema,
+            source: Some(request.object),
+        })
     }
 
     async fn create_reader(

@@ -20,7 +20,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/dentiny/open-arrow-access"
@@ -73,11 +73,11 @@ futures = { version = "0.3", default-features = false, features = ["std", "async
 glob = "0.3.4"
 memchr = "2"
 more-asserts = "0.3.1"
-open-arrow-access-core = { path = "core", version = "0.4.0" }
-open-arrow-access-decompression = { path = "decompression", version = "0.4.0", default-features = false }
-open-arrow-access-file-format = { path = "file-format", version = "0.4.0", default-features = false }
-open-arrow-access-layers = { path = "layers", version = "0.4.0" }
-open-arrow-access-storage = { path = "storage", version = "0.4.0", default-features = false }
+open-arrow-access-core = { path = "core", version = "0.5.0" }
+open-arrow-access-decompression = { path = "decompression", version = "0.5.0", default-features = false }
+open-arrow-access-file-format = { path = "file-format", version = "0.5.0", default-features = false }
+open-arrow-access-layers = { path = "layers", version = "0.5.0" }
+open-arrow-access-storage = { path = "storage", version = "0.5.0", default-features = false }
 open-arrow-access-test-support = { path = "test-support" }
 opendal = { version = "0.59.5", default-features = false }
 parquet = { version = "58", default-features = false, features = ["arrow", "async", "snap"] }
@@ -85,15 +85,13 @@ tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
-open-arrow-access-dataset = { path = "dataset", version = "0.4.0", default-features = false }
+open-arrow-access-dataset = { path = "dataset", version = "0.5.0", default-features = false }
 
-open-arrow-access-service = { path = "service", version = "0.4.0", default-features = false }
+open-arrow-access-service = { path = "service", version = "0.5.0", default-features = false }
 
 [features]
 source-positions = ["open-arrow-access-layers/source-positions"]
 blocking = ["dep:arrow-array", "dep:arrow-schema", "dep:tokio"]
-dataset-manifest = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/manifest"]
-dataset-directory = ["dep:open-arrow-access-dataset", "open-arrow-access-dataset/directory"]
 decompression-bz2 = ["open-arrow-access-decompression/bz2"]
 decompression-gzip = ["open-arrow-access-decompression/gzip"]
 decompression-lz4 = ["open-arrow-access-decompression/lz4"]
@@ -143,7 +141,7 @@ arrow-array = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
-open-arrow-access-dataset = { workspace = true, optional = true }
+open-arrow-access-dataset.workspace = true
 open-arrow-access-decompression.workspace = true
 open-arrow-access-file-format.workspace = true
 open-arrow-access-layers.workspace = true
@@ -158,76 +156,8 @@ open-arrow-access-test-support.workspace = true
 opendal = { workspace = true, features = ["services-fs"] }
 tokio.workspace = true
 
-[[example]]
-name = "read_huggingface"
-required-features = ["service-huggingface"]
-
-[[example]]
-name = "read_gutenberg"
-required-features = ["service-gutenberg"]
-
-[[example]]
-name = "read_pmc"
-required-features = ["service-pmc"]
-
-[[example]]
-name = "read_parquet"
-required-features = ["format-parquet"]
-
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
 [lints]
 workspace = true
-
-[[example]]
-name = "read_xml"
-required-features = ["format-xml"]
-
-[[example]]
-name = "read_atif"
-required-features = ["format-atif"]
-
-[[example]]
-name = "read_pmc_inventory"
-required-features = ["service-pmc"]
-
-[[example]]
-name = "read_courtlistener"
-required-features = ["service-courtlistener"]
-
-[[example]]
-name = "read_zip"
-required-features = ["decompression-zip"]
-
-[[example]]
-name = "read_zenodo"
-required-features = ["service-zenodo"]
-
-[[example]]
-name = "read_dataverse"
-required-features = ["service-dataverse"]
-
-[[example]]
-name = "read_tar"
-required-features = ["decompression-tar"]
-
-[[example]]
-name = "read_arxiv"
-required-features = ["service-arxiv"]
-
-[[example]]
-name = "read_internet_archive"
-required-features = ["service-internet-archive"]
-
-[[example]]
-name = "schema_evolution"
-required-features = ["format-json"]
-
-[[example]]
-name = "generated_columns"
-required-features = ["format-json"]
-
-[[example]]
-name = "parallel_sampling"
-required-features = ["format-json"]

@@ -13,6 +13,8 @@ use super::{
     validation::{validate_file_ordering, validate_file_policy},
 };
 
+const METADATA_CONCURRENCY: usize = 16;
+
 pub(super) type FilePlanner<A> = fn(Arc<A>, ReadRequest) -> BoxFuture<'static, Result<ScanPlan>>;
 
 /// Read files sequentially through one supplied format accessor.
@@ -88,6 +90,14 @@ where
         .with_ordering(self.inner.capability().ordering)
     }
 
+    async fn metadata(&self, request: FileSetRequest) -> Result<RecordMetadata> {
+        if self.union_by_name {
+            self.union_metadata(request).await
+        } else {
+            self.strict_metadata(request).await
+        }
+    }
+
     async fn open(&self, request: FileSetRequest) -> Result<Box<dyn RecordReader>> {
         let plan = self.plan_files(request, None, "open_file_set").await?;
         Ok(Box::new(plan.into_reader_with_schema_error(
@@ -111,6 +121,58 @@ impl<A> FileSetAccessor<A>
 where
     A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static,
 {
+    async fn strict_metadata(&self, request: FileSetRequest) -> Result<RecordMetadata> {
+        // Strict mode retains empty schemas and validates every selected file.
+        let mut inspected = stream::iter(request.into_requests())
+            .map(|request| self.inner.metadata(request))
+            .buffered(METADATA_CONCURRENCY);
+        let first = inspected
+            .next()
+            .await
+            .ok_or_else(|| empty_selection("metadata_file_set"))??;
+        let schema = first.schema;
+        while let Some(file) = inspected.next().await {
+            super::validation::validate_schema(&file?.schema, &schema)?;
+        }
+        Ok(RecordMetadata {
+            schema,
+            source: None,
+        })
+    }
+
+    async fn union_metadata(&self, mut request: FileSetRequest) -> Result<RecordMetadata> {
+        let options = request.options.clone();
+        request.options.projection = None;
+        let mut inspected = stream::iter(request.into_requests())
+            .map(|request| self.inner.inspect_metadata(request))
+            .buffered(METADATA_CONCURRENCY);
+        let first = inspected
+            .next()
+            .await
+            .ok_or_else(|| empty_selection("metadata_file_set"))??;
+        let mut union = super::schema::SchemaUnion::default();
+        let mut selected = false;
+        let inspected = stream::once(async { Ok(first) }).chain(inspected);
+        futures::pin_mut!(inspected);
+        while let Some(file) = inspected.next().await {
+            let Some(file) = file? else {
+                continue;
+            };
+            super::validation::validate_fields(file.schema.fields())?;
+            union.merge(&file.schema)?;
+            selected = true;
+        }
+        if !selected {
+            return Err(super::error::no_inferred_schema("union_by_name"));
+        }
+        Ok(RecordMetadata {
+            schema: options
+                .resolve_projection(&Arc::new(union.finish()))?
+                .schema,
+            source: None,
+        })
+    }
+
     async fn plan_files(
         &self,
         request: FileSetRequest,

@@ -12,11 +12,12 @@ default = []
 [dependencies]
 futures.workspace = true
 http.workspace = true
+httpdate = "1"
 indexmap.workspace = true
 open-arrow-access-core.workspace = true
 opendal = { workspace = true, features = ["executors-tokio", "layers-retry", "layers-timeout"] }
 opendal-layer-observe-metrics-common = "0.59.5"
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 
 [dev-dependencies]
 more-asserts.workspace = true

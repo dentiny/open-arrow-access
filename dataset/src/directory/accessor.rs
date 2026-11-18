@@ -61,6 +61,13 @@ where
         .with_ordering(self.files.capability().ordering)
     }
 
+    async fn metadata(
+        &self,
+        request: DirectoryRequest,
+    ) -> Result<open_arrow_access_core::RecordMetadata> {
+        self.files.metadata(self.resolve(request).await?).await
+    }
+
     async fn open(&self, request: DirectoryRequest) -> Result<Box<dyn RecordReader>> {
         self.files.open(self.resolve(request).await?).await
     }

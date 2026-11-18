@@ -52,7 +52,7 @@ pmc = [
 regulations = []
 semantic-scholar = []
 uspto = []
-warc = ["open-arrow-access-file-format/warc", "open-arrow-access-dataset/manifest"]
+warc = ["open-arrow-access-file-format/warc"]
 zenodo = []
 
 format-xml = [
@@ -72,7 +72,7 @@ futures.workspace = true
 http.workspace = true
 httpdate = "1"
 open-arrow-access-core.workspace = true
-open-arrow-access-dataset = { workspace = true, features = ["directory"] }
+open-arrow-access-dataset.workspace = true
 open-arrow-access-decompression = { workspace = true, optional = true }
 open-arrow-access-file-format.workspace = true
 open-arrow-access-storage.workspace = true

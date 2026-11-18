@@ -5,6 +5,8 @@ use open_arrow_access_core::{
     Accessor, Error, ErrorKind, ReadRequest, RecordReader, ScanPlanner, into_stream,
 };
 use open_arrow_access_test_support::MemoryAccessor;
+#[cfg(feature = "warc")]
+use open_arrow_access_test_support::fixture;
 
 fn assert_object(error: &Error, locator: &str) {
     assert_eq!(error.kind(), ErrorKind::Decode, "{error}");
@@ -24,12 +26,7 @@ async fn truncated_warc_gzip_names_object_in_sequential_and_planned_reads() {
     use open_arrow_access_core::AccessorExt;
     use open_arrow_access_decompression::AutoDecompressionLayer;
     use open_arrow_access_file_format::warc::{WarcAccessor, WarcArrowAccessor};
-    use std::io::Write;
-
-    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    gzip.write_all(b"WARC/1.0\r\n").unwrap();
-    let mut bytes = gzip.finish().unwrap();
-    bytes.truncate(bytes.len() - 4);
+    let bytes = fixture!("warc", "bad-truncated-header.warc.gz").await;
     for locator in [
         "b.warc.gz",
         "/tmp/b.warc.gz",

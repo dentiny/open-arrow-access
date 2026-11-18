@@ -51,7 +51,6 @@ impl<M: ByteAccessor, F> CommonCrawlWarcAccessor<M, F> {
             .await
             .map_err(|error| error.with_object(Some(&request.manifest())))?;
         let files = PathsManifest::new(request.manifest())
-            .with_origin(request.origin())
             .with_prefix(prefix)
             .with_formats(&[DetectedFormat::Warc], Mismatch::Error)
             .resolve_reader(input)

@@ -9,9 +9,9 @@ use super::{
 };
 use arrow_json::{ReaderBuilder, reader::Decoder};
 use open_arrow_access_core::{
-    ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest, ReaderFactory,
-    RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result, SchemaRef,
-    async_trait, into_stream, record_stream_reader,
+    Accessor, ByteReadRequest, ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest,
+    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result,
+    SchemaRef, async_trait, into_stream, record_stream_reader,
 };
 
 /// Read whitespace-separated JSON objects, including JSONL, with an explicit or inferred fixed schema.
@@ -138,6 +138,42 @@ impl ReaderFactory for JsonFormat {
         self.prepare_projection(request)?
             .map(|prepared| self.decoder(prepared, request))
             .transpose()
+    }
+
+    async fn metadata(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<RecordMetadata> {
+        Ok(self
+            .inspect_metadata(storage, request.clone())
+            .await?
+            .unwrap_or_else(|| crate::inference::empty_plan(request).metadata))
+    }
+
+    async fn inspect_metadata(
+        &self,
+        storage: &dyn Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>,
+        request: Self::Request,
+    ) -> Result<Option<RecordMetadata>> {
+        let prepared = self.prepare_projection(&request)?;
+        let schema = if let Some(prepared) = prepared {
+            prepared.schema
+        } else {
+            let input = storage.open(ByteReadRequest::from(&request)).await?;
+            let Some(resolved) = self.resolve_schema(input).await? else {
+                return Ok(None);
+            };
+            resolved
+                .format
+                .prepare_projection(&request)?
+                .expect("resolved JSON schema")
+                .schema
+        };
+        Ok(Some(RecordMetadata {
+            schema,
+            source: Some(request.object),
+        }))
     }
 
     async fn create_reader(
