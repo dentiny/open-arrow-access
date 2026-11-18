@@ -4,7 +4,7 @@ use percent_encoding::percent_decode_str;
 use url::Url;
 
 pub(super) struct Resolved {
-    /// Canonical output key or allowlisted foreign URL, including permitted query/fragment.
+    /// Canonical output key or foreign URL, including permitted query/fragment.
     pub locator: String,
     /// Decoded storage key used for prefix and format selection.
     pub path: String,
@@ -15,8 +15,6 @@ pub(super) struct Context {
     pub manifest_key: String,
     /// Manifest or configured URL whose origin identifies same-origin entries.
     origin: Option<Url>,
-    /// Validated additional origins whose entries may retain full URLs.
-    allowed: Vec<Url>,
     /// Decoded directory prefix prepended to relative entries and required for all resolved keys.
     /// Empty for the storage root; otherwise ends with `/` (for example, `lists/`).
     base: String,
@@ -43,11 +41,6 @@ impl Context {
             }
             (configured, key_path(spec.manifest.locator())?)
         };
-        let allowed = spec
-            .allowed_origins
-            .iter()
-            .map(|o| origin(o))
-            .collect::<PathResult<Vec<_>>>()?;
         let base = match &spec.base {
             ManifestBase::Origin => String::new(),
             ManifestBase::ManifestDirectory => manifest_key
@@ -64,7 +57,6 @@ impl Context {
         Ok(Self {
             manifest_key,
             origin: manifest_origin,
-            allowed,
             base,
         })
     }
@@ -80,9 +72,6 @@ impl Context {
                 .origin
                 .as_ref()
                 .is_some_and(|o| o.origin() == url.origin());
-            if !same && !self.allowed.iter().any(|o| o.origin() == url.origin()) {
-                return Err("absolute URL origin is not allowed");
-            }
             let key = key_path(url.path())?;
             let suffix = &url[url::Position::AfterPath..];
             (key, suffix.to_owned(), (!same).then_some(url))

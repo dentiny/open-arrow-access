@@ -87,9 +87,6 @@ async fn unsafe_entries_report_the_manifest_and_line() {
         "a%00.warc",
         "//other.test/a.warc",
         "//example.test:443/a.warc",
-        "https://other.test/a.warc",
-        "http://example.test/a.warc",
-        "https://example.test:123/a.warc",
         "https://u:p@example.test/a.warc",
         "file:///a.warc",
         "https://example.test/x/../a.warc",
@@ -108,13 +105,12 @@ async fn unsafe_entries_report_the_manifest_and_line() {
 }
 
 #[tokio::test]
-async fn absolute_entries_require_an_inferred_or_configured_origin() {
+async fn origin_configuration_controls_whether_absolute_entries_become_keys() {
     let entry = b"https://example.test/a.warc";
     let spec = PathsManifest::new("warc.paths");
-    assert_error(
-        resolve(spec.clone(), entry).await.unwrap_err(),
-        ErrorKind::Decode,
-        &["line 1", "origin"],
+    assert_eq!(
+        resolve(spec.clone(), entry).await.unwrap(),
+        ["https://example.test/a.warc"]
     );
     assert_eq!(
         resolve(spec.with_origin("https://example.test"), entry)
@@ -187,7 +183,6 @@ async fn invalid_configuration_fails_before_io() {
         PathsManifest::new("https://example.test/warc.paths?x=1"),
         PathsManifest::new("https://example.test/warc.paths#x"),
         manifest().with_origin("https://other"),
-        manifest().with_allowed_origins(["https://host/path"]),
         PathsManifest::new("warc.paths").with_origin("https://host/a/.."),
         PathsManifest::new("warc.paths").with_origin("https://host?x=1"),
         PathsManifest::new("warc.paths").with_origin("https://host#x"),
@@ -241,9 +236,8 @@ async fn gzip_and_decoded_inputs_share_validation() {
 }
 
 #[tokio::test]
-async fn explicit_url_policies_filter_and_deduplicate_foreign_paths() {
+async fn foreign_urls_support_filtering_deduplication_and_query_fragments() {
     let spec = manifest()
-        .with_allowed_origins(["https://mirror.test"])
         .with_prefix("data/")
         .with_query_fragment(true)
         .with_duplicates(Duplicates::Dedupe);
@@ -253,4 +247,18 @@ async fn explicit_url_policies_filter_and_deduplicate_foreign_paths() {
         resolve(spec, entries).await.unwrap(),
         ["https://mirror.test/data/a.warc", "data/b.warc?q=1#f"]
     );
+}
+
+#[tokio::test]
+async fn foreign_http_origins_are_accepted_without_configuration() {
+    for entry in [
+        "https://other.test/a.warc",
+        "http://example.test/a.warc",
+        "https://example.test:123/a.warc",
+    ] {
+        assert_eq!(
+            resolve(manifest(), entry.as_bytes()).await.unwrap(),
+            [entry]
+        );
+    }
 }

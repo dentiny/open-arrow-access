@@ -105,13 +105,15 @@ let files = PathsManifest::new("crawl-data/CC-MAIN-2022-40/warc.paths.gz")
 
 The default base is the origin root; `ManifestDirectory` and `Explicit(ObjectRef)`
 select a directory instead. Same-origin URLs become decoded storage keys.
-Relative manifest keys need `with_origin` to accept absolute entries.
+HTTP(S) URLs from any origin are accepted. For a relative manifest key,
+`with_origin` identifies which absolute entries should become storage keys;
+other absolute entries remain full URLs and require an accessor that supports them.
 
 Security checks run before prefix filtering: dot segments (even contained ones),
 credentials, network-path references, malformed encoding, encoded delimiters,
-backslashes and controls are rejected. Query/fragment and foreign origins require
-explicit opt-in. Allowlisted foreign entries remain URLs and need a multi-origin
-accessor; transport and redirect policy remain the caller's responsibility.
+backslashes and controls are rejected. Query/fragment requires explicit opt-in
+through `with_query_fragment(true)`. Transport and redirect policy remain the
+caller's responsibility.
 
 Blank lines are ignored. Format mismatches and selected duplicates error by
 default; `Mismatch::Skip` and `Duplicates::Dedupe` retain the other entries in

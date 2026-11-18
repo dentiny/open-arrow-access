@@ -1,5 +1,6 @@
 //! Streaming paths manifests over caller-bound storage. No network clients or
-//! credentials are created here. The storage root must correspond to the origin.
+//! credentials are created here. Same-origin keys use caller-bound storage;
+//! cross-origin URLs require an accessor that supports absolute URLs.
 mod error;
 mod validation;
 use crate::file_set::FileSetRequest;
@@ -39,9 +40,9 @@ pub enum Duplicates {
     Dedupe,
 }
 
-/// Resolve a manifest into ordered object keys. Defaults reject duplicates,
-/// URL query/fragment, credentials, traversal and cross-origin URLs.
-/// Relative manifest keys require `with_origin` to accept absolute URL entries.
+/// Resolve a manifest into ordered object locators. Defaults reject duplicates,
+/// URL query/fragment, credentials and traversal. HTTP(S) URLs from any origin
+/// are accepted; same-origin URLs become storage keys and other URLs remain absolute.
 /// Memory holds selected keys and the duplicate set, never the whole manifest.
 #[derive(Clone, Debug)]
 pub struct PathsManifest {
@@ -51,7 +52,6 @@ pub struct PathsManifest {
     formats: Option<(Vec<DetectedFormat>, Mismatch)>,
     duplicates: Duplicates,
     origin: Option<String>,
-    allowed_origins: Vec<String>,
     allow_query_fragment: bool,
     byte_options: ByteReadOptions,
 }
@@ -64,7 +64,6 @@ impl PathsManifest {
             formats: None,
             duplicates: Duplicates::Error,
             origin: None,
-            allowed_origins: Vec::new(),
             allow_query_fragment: false,
             byte_options: ByteReadOptions::default(),
         }
@@ -89,15 +88,6 @@ impl PathsManifest {
     /// HTTP(S) origin of a relative manifest key. Validated before any I/O.
     pub fn with_origin(mut self, origin: impl Into<String>) -> Self {
         self.origin = Some(origin.into());
-        self
-    }
-    /// Additional HTTP(S) origins. Cross-origin results retain full URLs and
-    /// require a multi-origin accessor; a single origin-bound storage cannot open them.
-    pub fn with_allowed_origins(
-        mut self,
-        origins: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        self.allowed_origins = origins.into_iter().map(Into::into).collect();
         self
     }
     /// Preserve query/fragment in output locators; the caller's accessor must
