@@ -61,6 +61,11 @@ For an explicitly selected provider attachment, use the typed
 [`open_attachment_source` entry point](docs/attachments.md) to choose binary,
 CSV/TSV, JSON(L), Parquet or XML decoding and outer compression.
 
+For reusable attachment scans, `AttachmentAccessor::new(files, options)?` exposes
+the same decoding as a record accessor, so applications can pass it directly to
+their existing bound/prepared source pipeline. Clones share provider configuration
+and open independent reader cursors. See [attachment accessors](docs/attachments.md#reuse-an-attachment-accessor).
+
 `open_file_source` is always available in the facade. Enable the desired format
 and pass a configured OpenDAL operator, the complete read request, a typed format
 and an explicit outer-compression policy:

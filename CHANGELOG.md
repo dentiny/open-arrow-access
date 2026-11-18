@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Expose `AttachmentAccessor` for reusable, independently opened provider attachment record scans.
+
 ## 0.7.0 - 2026-11-17
 
 - Read streaming files concurrently in file-set and directory scans, including compressed WARC, JSONL, and CSV.

@@ -1,10 +1,12 @@
 //! Explicit decoding of one selected provider attachment.
 
+mod accessor;
 mod error;
 mod options;
 mod source;
 mod validation;
 
+pub use accessor::AttachmentAccessor;
 pub use options::AttachmentOptions;
 pub use source::open_attachment_source;
 
