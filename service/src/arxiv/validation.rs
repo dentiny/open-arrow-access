@@ -1,9 +1,20 @@
+use arrow_schema::DataType;
 use open_arrow_access_core::Result;
 
 use super::{
     ArxivArchive,
     error::{decode, invalid},
 };
+
+pub(super) fn validate_metadata_id_type(data_type: &DataType) -> Result<()> {
+    if !matches!(
+        data_type,
+        DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
+    ) {
+        return Err(invalid("metadata IDs must be strings"));
+    }
+    Ok(())
+}
 
 pub(super) fn validate_month(month: u16) -> Result<()> {
     if month > 9999 {

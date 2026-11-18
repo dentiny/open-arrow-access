@@ -32,12 +32,7 @@ impl ArxivMetadataIndex {
         let column = batch
             .column_by_name(id_column)
             .ok_or_else(|| error::invalid("metadata ID column is missing"))?;
-        if !matches!(
-            column.data_type(),
-            DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
-        ) {
-            return Err(error::invalid("metadata IDs must be strings"));
-        }
+        validation::validate_metadata_id_type(column.data_type())?;
         let mut ids = HashMap::with_capacity(batch.num_rows());
         for row in 0..batch.num_rows() {
             if column.is_null(row) {
