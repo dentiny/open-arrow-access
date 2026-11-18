@@ -30,6 +30,7 @@ The result is a `RecordReader` with exactly one row for a valid object. Full sch
 | `title`, `citation` | LargeUtf8 | Yes |
 | `is_pmc_openaccess`, `is_manuscript`, `is_historical_ocr`, `is_retracted` | Boolean | Yes |
 | `media_urls` | List of nullable Utf8 items; JSON items must be strings | Yes |
+| `content_url` | Utf8; selected PDF/XML/TXT URL, default PDF | Yes |
 | `metadata` | Struct containing all 16 PMC metadata fields with their original names and Arrow types | No |
 
 The Arrow `text` column contains the URL from the input JSON's `text_url` field,
@@ -111,3 +112,33 @@ credential/config loading, and is rooted at `BUCKET_URL`. Callers may add their
 own retry/timeout layers. `source.metadata_paths(&request)` exposes the same
 streaming selection for inspectors. Existing `PmcAccessor` and `PmcDecoder`
 remain available for single-document composition.
+
+## Select one content format
+
+`PmcFormat` accepts `pdf`, `xml` and `txt` (`FromStr`/`Display`); PDF is the default.
+The nullable `content_url` output column selects the chosen upstream URL:
+
+| Option | `content_url` comes from |
+| --- | --- |
+| `PmcFormat::Pdf` / `pdf` (default) | `pdf_url` |
+| `PmcFormat::Xml` / `xml` | `xml_url` |
+| `PmcFormat::Txt` / `txt` | `text_url` (also exposed as top-level `text`) |
+
+For a directory or exact JSON object:
+
+```rust,ignore
+let source = PmcDatasetAccessor::new(storage).with_format(PmcFormat::Xml);
+let rows = source.open(ReadRequest::new("metadata/")).await?;
+```
+
+A single-document accessor can use
+`PmcAccessor::new(storage, PmcDecoder::new(PmcFormat::Xml))`; the default decoder
+selects PDF. The full schema is the same across formats and supports projection,
+including selecting only `content_url` or zero columns.
+
+Selection does not fetch or parse the content. A downstream sink should ingest
+**`content_url`** to obtain just the chosen representation. Original URL columns
+and the complete typed `metadata` struct remain available, including all three
+content URLs when supplied. A missing selected URL stays null; no other format
+is substituted. Format selection does not create additional article rows or
+automatically download multiple representations.

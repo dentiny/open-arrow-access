@@ -4,12 +4,14 @@ mod accessor;
 mod bucket;
 mod dataset;
 mod error;
+mod format;
 mod metadata;
 mod validation;
 
 pub use accessor::{PmcAccessor, PmcDecoder};
 pub use bucket::{BUCKET_URL, bucket_operator};
 pub use dataset::PmcDatasetAccessor;
+pub use format::PmcFormat;
 
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use std::{
@@ -59,6 +61,8 @@ pub fn schema() -> SchemaRef {
                 DataType::Struct(metadata_fields.into()),
                 false,
             ));
+            // A selected URL is an output convenience, not an upstream metadata field.
+            fields.push(Field::new("content_url", DataType::Utf8, true));
             Arc::new(Schema::new_with_metadata(
                 fields,
                 HashMap::from([("pmc.row_kind".into(), "article_metadata".into())]),

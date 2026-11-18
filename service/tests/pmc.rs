@@ -32,6 +32,7 @@ async fn maps_metadata_without_fetching_content() {
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch.schema(), schema());
     assert_eq!(batch.num_rows(), 1);
+    assert_eq!(batch["content_url"], batch["pdf_url"]);
     let metadata = batch["metadata"].as_struct();
     assert_eq!(metadata.num_columns(), 16);
     assert_eq!(
@@ -254,4 +255,45 @@ mod discovery {
             "PDF"
         );
     }
+}
+
+#[tokio::test]
+async fn content_format_selects_one_url_without_fetching_or_falling_back() {
+    use open_arrow_access_service::pmc::{PmcDatasetAccessor, PmcDecoder, PmcFormat};
+    let raw = br#"{"pmcid":"PMC1","pdf_url":"s3://bucket/paper.pdf?md5=pdf","xml_url":"s3://bucket/paper.xml?md5=xml","text_url":"s3://bucket/paper.txt?md5=txt"}"#;
+    for (format, expected) in [
+        (PmcFormat::Pdf, "s3://bucket/paper.pdf?md5=pdf"),
+        (PmcFormat::Xml, "s3://bucket/paper.xml?md5=xml"),
+        (PmcFormat::Txt, "s3://bucket/paper.txt?md5=txt"),
+    ] {
+        assert_eq!(format.to_string().parse::<PmcFormat>().unwrap(), format);
+        let storage = MemoryAccessor::new(raw, 1);
+        let observed = storage.observations.clone();
+        let mut direct = PmcAccessor::new(storage.clone(), PmcDecoder::new(format))
+            .open(ReadRequest::new("metadata/a.json"))
+            .await
+            .unwrap();
+        let batch = direct.next().await.unwrap().unwrap();
+        assert_eq!(batch["content_url"].as_string::<i32>().value(0), expected);
+        assert_eq!(batch["metadata"].as_struct().num_columns(), 16);
+        let mut dataset = PmcDatasetAccessor::new(storage)
+            .with_format(format)
+            .open(
+                ReadRequest::new("metadata/a.json")
+                    .with_options(ReadOptions::default().with_projection(["content_url"])),
+            )
+            .await
+            .unwrap();
+        let batch = dataset.next().await.unwrap().unwrap();
+        assert_eq!(batch["content_url"].as_string::<i32>().value(0), expected);
+        assert_eq!(observed.requests.lock().unwrap().len(), 2);
+    }
+    let batch = read(
+        br#"{"pmcid":"PMC1","xml_url":"s3://bucket/paper.xml"}"#,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(batch["content_url"].is_null(0)); // Default PDF never falls back to XML.
+    assert!("html".parse::<PmcFormat>().is_err());
 }

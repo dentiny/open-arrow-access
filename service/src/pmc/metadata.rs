@@ -1,4 +1,4 @@
-use super::{schema, validation};
+use super::{PmcFormat, schema, validation};
 use arrow_array::{ArrayRef, StructArray};
 use arrow_schema::{DataType, Schema};
 use open_arrow_access_core::{
@@ -28,6 +28,7 @@ pub(super) async fn decode_batch(
     raw: &[u8],
     path: &str,
     output_schema: SchemaRef,
+    format: PmcFormat,
 ) -> Result<RecordBatch> {
     // Read and validate the complete metadata before applying output projection.
     let source_schema = source_metadata_schema();
@@ -62,6 +63,7 @@ pub(super) async fn decode_batch(
                 return Arc::new(StructArray::from(batch.clone())) as ArrayRef;
             }
             let source_name = match field.name().as_str() {
+                "content_url" => format.metadata_field(),
                 "text" => "text_url",
                 name => name,
             };
