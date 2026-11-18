@@ -26,8 +26,8 @@ use crate::{
 pub struct ParallelReadLayer {
     /// Maximum resident partitions, including completed partitions with queued batches.
     partitions: NonZeroUsize,
-    /// Queue capacity for native partitions and unordered reads. Ordered streaming
-    /// files use unbounded in-memory queues; this is not a total memory bound.
+    /// Queue capacity for independent native partitions. Streaming files use
+    /// unbounded in-memory queues under either emission policy.
     prefetch: NonZeroUsize,
 }
 
@@ -122,7 +122,7 @@ impl ParallelReader {
     fn new(plan: ScanPlan, settings: ParallelReadOptions) -> Self {
         Self {
             ordering: plan.ordering,
-            read_ahead: plan.file_streams && plan.emission == EmissionPolicy::Ordered,
+            read_ahead: plan.file_streams,
             metadata: plan.metadata,
             remaining: plan.partitions.fuse(),
             partition_receivers: VecDeque::new(),

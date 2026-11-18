@@ -24,8 +24,8 @@ pub enum EmissionPolicy {
 pub struct ParallelReadOptions {
     /// Maximum resident partitions, including completed queues awaiting consumption.
     pub partitions: NonZeroUsize,
-    /// Capacity of bounded partition queues. Ordered streaming-file scans use
-    /// unbounded in-memory queues; this is not a byte cap.
+    /// Capacity of bounded partition queues. Streaming-file scans use unbounded
+    /// in-memory queues under either emission policy; this is not a byte cap.
     pub prefetch: NonZeroUsize,
 }
 
@@ -60,8 +60,8 @@ pub struct ScanPlan {
     /// Multi-file planners may keep this stream inside one file partition so the
     /// executor can overlap input discovery across files under its worker budget.
     pub streaming_discovery: bool,
-    /// Partitions own complete streaming files. Ordered executors may buffer
-    /// additional output to overlap input reads without relaxing file order.
+    /// Partitions own complete streaming files. Executors may buffer their output
+    /// to overlap input reads; emission still follows the selected policy.
     pub file_streams: bool,
     /// Lazy partition discovery in logical input order.
     /// Polling may perform input I/O. Each item is an owned reader opener;
@@ -148,7 +148,7 @@ impl ScanPlan {
         self
     }
 
-    /// Identify whole streaming-file partitions for ordered in-memory prefetch.
+    /// Identify whole streaming-file partitions for in-memory read-ahead.
     pub fn with_file_streams(mut self) -> Self {
         self.file_streams = true;
         self
