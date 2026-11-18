@@ -4,8 +4,13 @@ use percent_encoding::percent_decode_str;
 use url::{Origin, Url};
 
 pub(super) struct Context {
+    /// Validated, percent-decoded key used to open the manifest from the storage root.
     pub manifest_key: String,
+    /// Allowed HTTP(S) origin, inferred from the manifest URL or explicitly configured.
+    /// None rejects all absolute URL entries.
     origin: Option<Origin>,
+    /// Decoded directory prefix prepended to relative entries and required for all resolved keys.
+    /// Empty for the storage root; otherwise ends with `/` (for example, `lists/`).
     base: String,
 }
 impl Context {
