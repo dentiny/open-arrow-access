@@ -1,6 +1,6 @@
 use open_arrow_access_core::{
     Accessor, ByteAccessor, Capability, ListRequest, ReadRequest, RecordCapability, RecordReader,
-    Result, ScanPlan, ScanPlanner, async_trait, list_files,
+    Result, ScanPlan, ScanPlanner, ScanStatistics, StatisticsProvider, async_trait, list_files,
 };
 
 use super::{DirectoryRequest, validation::resolve_glob};
@@ -119,5 +119,18 @@ where
 {
     async fn plan_scan(&self, request: DirectoryRequest) -> Result<ScanPlan> {
         self.files.plan_scan(self.resolve(request).await?).await
+    }
+}
+
+#[async_trait]
+impl<B, A> StatisticsProvider for DirectoryAccessor<B, A>
+where
+    B: ByteAccessor,
+    A: StatisticsProvider<Request = ReadRequest> + 'static,
+{
+    /// Resolve the same glob/suffix selection and inspect file metadata only.
+    /// Listing and inspection are not a snapshot of the later scan.
+    async fn statistics(&self, request: DirectoryRequest) -> Result<ScanStatistics> {
+        self.files.statistics(self.resolve(request).await?).await
     }
 }

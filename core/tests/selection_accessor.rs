@@ -4,8 +4,8 @@ use arrow_array::record_batch;
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, OrderRequirement, ReadOptions, ReadOptionsProvider, ReadRequest, RecordCapability,
-    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, SelectionAccessor, StreamReader,
-    async_trait, project_batch, scan_partition,
+    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, ScanStatistics, SelectionAccessor,
+    Statistic, StatisticsProvider, StreamReader, async_trait, project_batch, scan_partition,
 };
 
 #[derive(Clone)]
@@ -239,5 +239,30 @@ async fn preserves_native_partitions_and_replaces_only_read_options() {
     let calls = pages.calls.lock().unwrap();
     assert_eq!(calls.len(), 1, "planning must not call sequential open");
     assert_eq!(calls[0].0, "plan");
+    assert_selected(&calls[0].1, true);
+}
+
+#[async_trait]
+impl StatisticsProvider for Pages {
+    async fn statistics(&self, request: PageRequest) -> Result<ScanStatistics> {
+        self.calls.lock().unwrap().push(("statistics", request));
+        Ok(ScanStatistics {
+            row_count: Statistic::Estimated(2),
+            source_bytes: Statistic::Exact(100),
+        })
+    }
+}
+
+#[tokio::test]
+async fn statistics_use_bound_identity_and_byte_options_without_opening_records() {
+    let pages = std::sync::Arc::new(Pages::default());
+    let selected = SelectionAccessor::new(pages.clone(), bound());
+    assert_eq!(
+        selected.statistics(incoming()).await.unwrap().source_bytes,
+        Statistic::Exact(100)
+    );
+    let calls = pages.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, "statistics");
     assert_selected(&calls[0].1, true);
 }

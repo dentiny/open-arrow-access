@@ -8,7 +8,8 @@ use futures::{
 
 use open_arrow_access_core::{
     Accessor, Capability, ReadRequest, RecordCapability, RecordMetadata, RecordReader, Result,
-    ScanPlan, ScanPlanner, async_trait, scan_partition,
+    ScanPlan, ScanPlanner, ScanStatistics, Statistic, StatisticsProvider, async_trait,
+    scan_partition,
 };
 
 use super::{
@@ -258,4 +259,49 @@ where
     };
     validate_file_policy(&plan)?;
     Ok(plan)
+}
+
+#[async_trait]
+impl<A> StatisticsProvider for FileSetAccessor<A>
+where
+    A: StatisticsProvider<Request = ReadRequest> + 'static,
+{
+    /// Inspect file metadata with bounded concurrency; never poll record readers.
+    /// Duplicate selections count separately. No file-membership snapshot is added.
+    async fn statistics(&self, mut request: FileSetRequest) -> Result<ScanStatistics> {
+        if request.objects.is_empty() {
+            return Err(empty_selection("statistics_file_set"));
+        }
+        // These statistics are independent of column projection. In union mode,
+        // a selected column need not exist in every child file.
+        if self.union_by_name {
+            request.options.projection = None;
+        }
+        let mut files = stream::iter(request.into_requests())
+            .map(|request| self.inner.statistics(request))
+            .buffered(METADATA_CONCURRENCY);
+        let mut total = ScanStatistics {
+            row_count: Statistic::Exact(0),
+            source_bytes: Statistic::Exact(0),
+        };
+        while let Some(file) = files.try_next().await? {
+            total.row_count = sum_statistic(total.row_count, file.row_count);
+            total.source_bytes = sum_statistic(total.source_bytes, file.source_bytes);
+        }
+        Ok(total)
+    }
+}
+
+fn sum_statistic(left: Statistic<u64>, right: Statistic<u64>) -> Statistic<u64> {
+    use Statistic::{Estimated, Exact, Unknown};
+    let (left, right, exact) = match (left, right) {
+        (Exact(left), Exact(right)) => (left, right, true),
+        (Exact(left) | Estimated(left), Exact(right) | Estimated(right)) => (left, right, false),
+        _ => return Unknown,
+    };
+    match left.checked_add(right) {
+        Some(value) if exact => Exact(value),
+        Some(value) => Estimated(value),
+        None => Unknown,
+    }
 }
