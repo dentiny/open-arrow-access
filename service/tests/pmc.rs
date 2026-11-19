@@ -82,6 +82,67 @@ async fn projection_preserves_order_and_zero_column_rows() {
 }
 
 #[tokio::test]
+async fn decoder_reuse_recovers_after_errors_and_preserves_previous_batches() {
+    let expected = read(RAW.as_bytes(), None).await.unwrap();
+    for invalid in [
+        br#"{"pmcid":"PMC1","title":"unfinished"#.as_slice(),
+        br#"{"pmcid":"PMC1","future_field":true}"#,
+        br#"{"pmcid":"PMC1"} {"pmcid":"PMC2"}"#,
+        br#"{"pmcid":"PMC1"} {"pmcid":"PMC2"} {"pmcid":"PMC3"}"#,
+        br#"{"pmcid":"PMC1"} trailing"#,
+        br#"{"pmcid":"PMC1","media_urls":[null]}"#,
+        br#"{"pmcid":"PMC1","version":0}"#,
+    ] {
+        for projection in [None, Some(vec![])] {
+            assert_eq!(
+                read(invalid, projection).await.unwrap_err().kind(),
+                ErrorKind::Decode
+            );
+            let actual = read(RAW.as_bytes(), None).await.unwrap();
+            for (left, right) in actual.columns().iter().zip(expected.columns()) {
+                assert_eq!(left.to_data(), right.to_data());
+            }
+        }
+    }
+    // A clean parser must also handle different document shapes and nulls.
+    let other = read(br#"{"pmcid":"PMC2","media_urls":[],"pdf_url":null}"#, None)
+        .await
+        .unwrap();
+    assert_eq!(other["pmcid"].as_string::<i32>().value(0), "PMC2");
+    assert!(other["pdf_url"].is_null(0));
+    assert_eq!(expected["pmcid"].as_string::<i32>().value(0), " pmc00123 ");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reused_decoders_keep_concurrent_formats_and_projections_independent() {
+    use open_arrow_access_service::pmc::{PmcDecoder, PmcFormat};
+    let mut tasks = tokio::task::JoinSet::new();
+    for id in 1..=32 {
+        tasks.spawn(async move {
+            let (format, prefix) = match id % 3 {
+                0 => (PmcFormat::Pdf, "pdf"),
+                1 => (PmcFormat::Xml, "xml"),
+                _ => (PmcFormat::Txt, "txt"),
+            };
+            let raw = format!(r#"{{"pmcid":"PMC{id}","pdf_url":"pdf-{id}","xml_url":"xml-{id}","text_url":"txt-{id}"}}"#);
+            for _ in 0..8 {
+                let source = PmcAccessor::new(MemoryAccessor::new(raw.as_bytes(), 1), PmcDecoder::new(format));
+                let mut reader = source.open(ReadRequest::new("article.json").with_options(
+                    ReadOptions::default().with_projection(["content_url", "pmcid"]),
+                )).await.unwrap();
+                let batch = reader.next().await.unwrap().unwrap();
+                assert_eq!(batch["pmcid"].as_string::<i32>().value(0), format!("PMC{id}"));
+                assert_eq!(batch["content_url"].as_string::<i32>().value(0), format!("{prefix}-{id}"));
+                tokio::task::yield_now().await;
+            }
+        });
+    }
+    while let Some(result) = tasks.join_next().await {
+        result.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn unknown_metadata_fields_fail_instead_of_being_dropped() {
     let raw = br#"{"pmcid":"PMC1","future_field":{"a":1}}"#;
     for projection in [None, Some(vec!["pmcid".into()]), Some(vec![])] {
