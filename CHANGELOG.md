@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0 - 2026-11-19
+
+- Add a typed S2ORC v2 reader with a fixed Arrow schema, native scan planning, and validation before output projection.
+- Reject numeric and boolean values in JSON string fields instead of coercing them (breaking behavior change).
+- Use owned BinaryView bodies by default for WARC Arrow output, replacing LargeBinary bodies while retaining parser allocations (breaking schema change).
+- Bound streaming-file read-ahead by estimated Arrow bytes, with an 8 MiB default soft budget per resident file.
+- Read positioned byte sources sequentially by default and reserve range reads for explicit stored-offset access.
+- Add shared HTTP read pacing and Retry-After cooldowns across cloned operators.
+- Release all 8 public workspace crates at 0.11.0 with matching internal dependency requirements.
+
 ## 0.10.3 - 2026-11-19
 
 - Build WARC dates directly as millisecond timestamps, avoiding string formatting and reparsing.
