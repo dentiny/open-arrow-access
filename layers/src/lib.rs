@@ -39,3 +39,6 @@ pub use source_columns::{SourceColumnBatch, SourceColumns, SourceColumnsAccessor
 
 #[cfg(feature = "source-positions")]
 pub use source_columns::{SourcePositionAccessor, SourcePositionLayer};
+
+mod missing_object;
+pub use missing_object::{MissingObjectAccessor, MissingObjectLayer, MissingObjectPolicy};

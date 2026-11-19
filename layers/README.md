@@ -259,3 +259,31 @@ See [adding a layer](../docs/extending.md#add-a-layer) and the
 `MetricsLayer` observes byte or record accessors with a default in-memory exporter.
 See [read metrics](../docs/metrics.md) for OpenDAL I/O integration, snapshots,
 byte-count semantics and custom exporters.
+
+## Missing source objects
+
+`MissingObjectLayer::default()` fails on errors. Opt into skipping missing data
+objects at native scan-partition boundaries, before coalescing/transforms:
+
+```rust,ignore
+let missing = MissingObjectLayer::new(MissingObjectPolicy::Skip, |error| {
+    record_failure(error.object().unwrap().locator(), &error.to_string())?;
+    Ok(())
+});
+let source = source.layer(missing).layer(ParallelReadLayer::new(partitions, prefetch));
+```
+
+A recoverable error must have typed `NotFound` classification and an exact object
+locator; explicit HTTP status metadata, when present, must be 404. Native missing
+filesystem objects use the same category. 403, 410, timeouts, decode errors and
+unknown-object errors remain fatal. No error-message strings are parsed.
+The reporter must succeed before a partition is skipped; it may run concurrently
+and should not block. Reporter failures fail the scan, and no unbounded list is
+retained in the library. `Error::object()` exposes the missing child locator.
+
+The layer handles partition open/first-read errors, including lazy PMC metadata
+reads from an inventory. Planning/discovery errors (such as a missing inventory
+manifest) remain fatal. A partition that already emitted rows also fails rather
+than silently returning a truncated file. Schema must be known from the underlying
+plan; a missing input required for schema inference cannot be skipped by this
+layer. Surviving partition order and configured executor budgets are preserved.
