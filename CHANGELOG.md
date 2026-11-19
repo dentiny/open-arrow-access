@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.2 - 2026-11-19
+
+- Defer positioned source opens until scan execution so a slow first file does not block later parallel reads.
+- Preserve schema validation during planning, ordered output guarantees, and cancellation of lazy file opens.
+- Release all 8 public workspace crates at 0.10.2 with matching internal dependency requirements.
+
 ## 0.10.1 - 2026-11-19
 
 - Add an opt-in layer to skip missing source objects with explicit reporting.
