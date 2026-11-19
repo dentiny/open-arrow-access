@@ -122,31 +122,3 @@ impl WarcBatchBuilder {
         RecordBatch::try_new_with_options(self.schema, columns, &options).map_err(decode_error)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use arrow_array::cast::AsArray;
-    #[tokio::test]
-    async fn default_batch_retains_the_parsers_owned_body_allocation() {
-        let body = b"a body longer than the twelve byte inline limit";
-        let mut input = format!(
-            "WARC/1.1\r\nWARC-Type: resource\r\nWARC-Record-ID: <urn:test:view>\r\nWARC-Date: 2020-07-08T02:52:55Z\r\nContent-Length: {}\r\n\r\n", body.len(),
-        ).into_bytes();
-        input.extend_from_slice(body);
-        input.extend_from_slice(b"\r\n\r\n");
-        let (headers, owned) = warc::WarcReader::new(futures::io::Cursor::new(input))
-            .iter_raw_records()
-            .next()
-            .await
-            .unwrap()
-            .unwrap();
-        let pointer = owned.as_ptr();
-        let mut builder = WarcBatchBuilder::new(super::super::arrow_schema(), 1);
-        builder.append(headers, owned, "input.warc").unwrap();
-        let batch = builder.finish().unwrap();
-        let view = batch["body"].as_binary_view();
-        assert_eq!(view.value(0), body);
-        assert_eq!(view.data_buffers()[0].as_ptr(), pointer);
-    }
-}

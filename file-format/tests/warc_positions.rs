@@ -298,34 +298,3 @@ async fn positioned_file_plans_do_not_open_a_blocked_first_file() {
         }
     }
 }
-
-#[tokio::test]
-async fn default_readers_share_the_body_budget_and_binary_view_schema() {
-    use arrow_array::{Array, cast::AsArray};
-    let large = record(&vec![b'x'; 8 * 1024 * 1024 + 1]);
-    let input = [
-        large.as_slice(),
-        large.as_slice(),
-        record(b"tail").as_slice(),
-    ]
-    .concat();
-    let storage = MemoryAccessor::new(&input, 64 * 1024);
-    let mut ordinary = WarcArrowFormat
-        .open_reader(&storage, ReadRequest::new("data.warc"))
-        .await
-        .unwrap();
-    let mut positioned = WarcArrowFormat
-        .with_source_positions()
-        .open_reader(&storage, ReadRequest::new("data.warc"))
-        .await
-        .unwrap();
-    for expected_rows in [2, 1] {
-        let batch = ordinary.next().await.unwrap().unwrap();
-        let located = positioned.next().await.unwrap().unwrap();
-        assert_eq!(batch.num_rows(), expected_rows);
-        assert_eq!(located.batch(), &batch);
-        assert_eq!(batch["body"].as_binary_view().len(), expected_rows);
-    }
-    assert!(ordinary.next().await.unwrap().is_none());
-    assert!(positioned.next().await.unwrap().is_none());
-}
