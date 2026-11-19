@@ -32,22 +32,18 @@ pub(super) fn span() -> Fields {
     .into()
 }
 fn section(kinds: &[&str], typed: bool) -> DataType {
+    let annotation_type = if typed {
+        DataType::List(Arc::new(Field::new(
+            "item",
+            DataType::Struct(span()),
+            false,
+        )))
+    } else {
+        DataType::Utf8
+    };
     let annotations: Fields = kinds
         .iter()
-        .map(|name| {
-            field(
-                name,
-                if typed {
-                    DataType::List(Arc::new(Field::new(
-                        "item",
-                        DataType::Struct(span()),
-                        false,
-                    )))
-                } else {
-                    DataType::Utf8
-                },
-            )
-        })
+        .map(|name| field(name, annotation_type.clone()))
         .collect();
     DataType::Struct(
         vec![

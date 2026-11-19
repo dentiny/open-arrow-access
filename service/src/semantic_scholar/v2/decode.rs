@@ -3,7 +3,7 @@ use super::{
     schema, validation,
 };
 use arrow_array::builder::{ListBuilder, StringBuilder, StructBuilder, UInt64Builder};
-use arrow_array::{Array, ArrayRef, RecordBatch, StringArray, StructArray};
+use arrow_array::{Array, ArrayRef, RecordBatch, StringArray, StructArray, cast::AsArray};
 use arrow_schema::{DataType, Field};
 use open_arrow_access_core::Result;
 use std::sync::Arc;
@@ -58,21 +58,19 @@ fn section(input: &StructArray, output: &DataType) -> Result<ArrayRef> {
     let DataType::Struct(fields) = output else {
         unreachable!()
     };
-    let annotations = input
-        .column(1)
-        .as_any()
-        .downcast_ref::<StructArray>()
-        .unwrap();
-    let DataType::Struct(annotation_fields) = fields[1].data_type() else {
+    let annotations = input["annotations"].as_struct();
+    let (_, annotation_field) = fields
+        .find("annotations")
+        .expect("section annotations field");
+    let DataType::Struct(annotation_fields) = annotation_field.data_type() else {
         unreachable!()
     };
     let arrays = annotations
-        .columns()
+        .fields()
         .iter()
-        .enumerate()
-        .map(|(index, column)| {
-            spans(column.as_any().downcast_ref::<StringArray>().unwrap())
-                .map_err(|e| annotation_error(annotation_fields[index].name(), e))
+        .zip(annotations.columns())
+        .map(|(field, column)| {
+            spans(column.as_string::<i32>()).map_err(|e| annotation_error(field.name(), e))
         })
         .collect::<Result<Vec<_>>>()?;
     let annotations: ArrayRef = Arc::new(
@@ -86,7 +84,7 @@ fn section(input: &StructArray, output: &DataType) -> Result<ArrayRef> {
     Ok(Arc::new(
         StructArray::try_new(
             fields.clone(),
-            vec![input.column(0).clone(), annotations],
+            vec![input["text"].clone(), annotations],
             input.nulls().cloned(),
         )
         .map_err(arrow_error)?,
@@ -98,14 +96,7 @@ pub(super) fn batch(input: RecordBatch) -> Result<RecordBatch> {
     let mut columns = input.columns().to_vec();
     for name in ["body", "bibliography"] {
         let index = schema.index_of(name).map_err(arrow_error)?;
-        columns[index] = section(
-            input
-                .column(index)
-                .as_any()
-                .downcast_ref::<StructArray>()
-                .unwrap(),
-            schema.field(index).data_type(),
-        )?;
+        columns[index] = section(input[name].as_struct(), schema.field(index).data_type())?;
     }
     RecordBatch::try_new(schema, columns).map_err(arrow_error)
 }
