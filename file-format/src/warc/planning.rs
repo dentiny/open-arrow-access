@@ -4,11 +4,7 @@ use open_arrow_access_core::{
     RecordMetadata, Result, ScanPlan, StreamReader, async_trait, into_async_read,
 };
 
-use super::{
-    WarcArrowAccessor,
-    arrow::{append_record, evolve_reader, new_batch, raw_projection},
-    decode_error,
-};
+use super::{WarcArrowAccessor, batch::WarcBatchBuilder, decode_error};
 
 use crate::scan::chunks::RecordChunks;
 
@@ -47,24 +43,18 @@ where
             record_size,
             move |records, metadata| {
                 Box::pin(async move {
-                    let mut batch = new_batch(&metadata.schema)?;
+                    let mut batch = WarcBatchBuilder::new(metadata.schema.clone(), records.len());
                     let source = metadata.source.as_ref().unwrap().locator();
                     for (headers, body) in records {
-                        let record = warc::Record::<warc::EmptyBody>::try_from(headers)
-                            .map_err(decode_error)?
-                            .add_body(body);
-                        append_record(&mut batch, &record, source)?;
+                        batch.append(headers, body, source)?;
                     }
                     let batch = batch.finish()?;
-                    let metadata = RecordMetadata {
-                        schema: raw_projection(&metadata.schema)?,
-                        ..metadata
-                    };
-                    evolve_reader(Box::new(StreamReader::records(
+                    Ok(Box::new(StreamReader::records(
                         stream::iter([Ok(batch)]),
                         metadata,
                         OrderRequirement::Reorderable,
-                    )))
+                    ))
+                        as Box<dyn open_arrow_access_core::RecordReader>)
                 })
             },
         );
