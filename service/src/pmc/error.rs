@@ -11,3 +11,11 @@ pub(super) fn invalid_metadata_path() -> Error {
         "expected an exact .json metadata object or a directory ending in '/'",
     )
 }
+
+pub(super) fn invalid_format() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "parse_pmc_format",
+        "PMC format must be pdf, xml or txt",
+    )
+}

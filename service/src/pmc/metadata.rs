@@ -1,25 +1,22 @@
-use super::{schema, validation};
-use arrow_array::{ArrayRef, StructArray};
-use arrow_schema::{DataType, Schema};
+use super::{PmcFormat, schema, validation};
+use arrow_schema::Schema;
 use open_arrow_access_core::{
     FieldNameIndex, RecordBatch, Result, SchemaRef, record_batch_with_rows,
 };
 use std::sync::{Arc, OnceLock};
 
-/// Input fields use the original names retained by the metadata struct.
+/// Input contains the 16 upstream fields, excluding the derived content_url.
 fn source_metadata_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
-            let output = schema();
-            let DataType::Struct(fields) = output
-                .field_with_name("metadata")
-                .expect("PMC metadata field")
-                .data_type()
-            else {
-                unreachable!("PMC metadata is a struct");
-            };
-            Arc::new(Schema::new(fields.clone()))
+            let fields = schema()
+                .fields()
+                .iter()
+                .filter(|field| field.name() != "content_url")
+                .cloned()
+                .collect::<Vec<_>>();
+            Arc::new(Schema::new(fields))
         })
         .clone()
 }
@@ -28,6 +25,7 @@ pub(super) async fn decode_batch(
     raw: &[u8],
     path: &str,
     output_schema: SchemaRef,
+    format: PmcFormat,
 ) -> Result<RecordBatch> {
     // Read and validate the complete metadata before applying output projection.
     let source_schema = source_metadata_schema();
@@ -58,11 +56,8 @@ pub(super) async fn decode_batch(
         .fields()
         .iter()
         .map(|field| {
-            if field.name() == "metadata" {
-                return Arc::new(StructArray::from(batch.clone())) as ArrayRef;
-            }
             let source_name = match field.name().as_str() {
-                "text" => "text_url",
+                "content_url" => format.metadata_field(),
                 name => name,
             };
             let index = field_index

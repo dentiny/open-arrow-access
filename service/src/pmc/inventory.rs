@@ -100,6 +100,7 @@ impl<A: ByteAccessor + 'static> ScanPlanner for PmcInventoryShardAccessor<A> {
                 .with_options(request.options)
                 .with_byte_options(request.byte_options),
             paths,
+            super::PmcFormat::default(),
         )
     }
 }

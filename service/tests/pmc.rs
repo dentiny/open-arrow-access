@@ -32,29 +32,12 @@ async fn maps_metadata_without_fetching_content() {
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch.schema(), schema());
     assert_eq!(batch.num_rows(), 1);
-    let metadata = batch["metadata"].as_struct();
-    assert_eq!(metadata.num_columns(), 16);
-    assert_eq!(
-        metadata
-            .column_by_name("mid")
-            .unwrap()
-            .as_string::<i32>()
-            .value(0),
-        "NIHMS123"
-    );
-    assert_eq!(
-        metadata
-            .column_by_name("pmid")
-            .unwrap()
-            .as_primitive::<UInt64Type>()
-            .value(0),
-        36537061
-    );
-    assert_eq!(
-        metadata.column_by_name("pdf_url").unwrap(),
-        &batch["pdf_url"]
-    );
+    assert_eq!(batch["content_url"], batch["pdf_url"]);
+    assert_eq!(batch.schema().fields().len(), 17);
+    assert!(batch.schema().field_with_name("metadata").is_err());
     assert!(batch.schema().field_with_name("metadata_json").is_err());
+    assert!(batch.schema().field_with_name("text").is_err());
+    assert_eq!(batch["mid"].as_string::<i32>().value(0), "NIHMS123");
     for (field, expected) in [("pmcid", " pmc00123 "), ("license_code", "CC BY")] {
         assert_eq!(batch[field].as_string::<i32>().value(0), expected);
     }
@@ -69,14 +52,14 @@ async fn maps_metadata_without_fetching_content() {
         .unwrap();
     assert!(batch["pdf_url"].is_null(0));
     assert!(batch["pmid"].is_null(0));
-    assert!(batch["text"].is_null(0));
+    assert!(batch["text_url"].is_null(0));
     let batch = read(
         br#"{"pmcid":"PMC1","text_url":"s3://pmc-oa-opendata/PMC1.1/article%20name.txt?md5=opaque"}"#,
-        Some(vec!["text".into()]),
+        Some(vec!["text_url".into()]),
     ).await.unwrap();
-    assert_eq!(batch.schema().field(0).name(), "text");
+    assert_eq!(batch.schema().field(0).name(), "text_url");
     assert_eq!(
-        batch["text"].as_string::<i32>().value(0),
+        batch["text_url"].as_string::<i32>().value(0),
         "s3://pmc-oa-opendata/PMC1.1/article%20name.txt?md5=opaque"
     );
 }
@@ -101,7 +84,7 @@ async fn projection_preserves_order_and_zero_column_rows() {
 #[tokio::test]
 async fn unknown_metadata_fields_fail_instead_of_being_dropped() {
     let raw = br#"{"pmcid":"PMC1","future_field":{"a":1}}"#;
-    for projection in [None, Some(vec!["metadata".into()]), Some(vec![])] {
+    for projection in [None, Some(vec!["pmcid".into()]), Some(vec![])] {
         assert_eq!(
             read(raw, projection).await.unwrap_err().kind(),
             ErrorKind::Decode
@@ -254,4 +237,45 @@ mod discovery {
             "PDF"
         );
     }
+}
+
+#[tokio::test]
+async fn content_format_selects_one_url_without_fetching_or_falling_back() {
+    use open_arrow_access_service::pmc::{PmcDatasetAccessor, PmcDecoder, PmcFormat};
+    let raw = br#"{"pmcid":"PMC1","pdf_url":"s3://bucket/paper.pdf?md5=pdf","xml_url":"s3://bucket/paper.xml?md5=xml","text_url":"s3://bucket/paper.txt?md5=txt"}"#;
+    for (format, expected) in [
+        (PmcFormat::Pdf, "s3://bucket/paper.pdf?md5=pdf"),
+        (PmcFormat::Xml, "s3://bucket/paper.xml?md5=xml"),
+        (PmcFormat::Txt, "s3://bucket/paper.txt?md5=txt"),
+    ] {
+        assert_eq!(format.to_string().parse::<PmcFormat>().unwrap(), format);
+        let storage = MemoryAccessor::new(raw, 1);
+        let observed = storage.observations.clone();
+        let mut direct = PmcAccessor::new(storage.clone(), PmcDecoder::new(format))
+            .open(ReadRequest::new("metadata/a.json"))
+            .await
+            .unwrap();
+        let batch = direct.next().await.unwrap().unwrap();
+        assert_eq!(batch["content_url"].as_string::<i32>().value(0), expected);
+        assert!(batch.schema().field_with_name("metadata").is_err());
+        let mut dataset = PmcDatasetAccessor::new(storage)
+            .with_format(format)
+            .open(
+                ReadRequest::new("metadata/a.json")
+                    .with_options(ReadOptions::default().with_projection(["content_url"])),
+            )
+            .await
+            .unwrap();
+        let batch = dataset.next().await.unwrap().unwrap();
+        assert_eq!(batch["content_url"].as_string::<i32>().value(0), expected);
+        assert_eq!(observed.requests.lock().unwrap().len(), 2);
+    }
+    let batch = read(
+        br#"{"pmcid":"PMC1","xml_url":"s3://bucket/paper.xml"}"#,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(batch["content_url"].is_null(0)); // Default PDF never falls back to XML.
+    assert!("html".parse::<PmcFormat>().is_err());
 }

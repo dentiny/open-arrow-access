@@ -298,7 +298,7 @@ async fn real_inventory_shard_reads_only_its_referenced_article_metadata() {
     assert_eq!(source.opened.lock().unwrap().len(), 1);
     for projection in [
         None,
-        Some(vec!["metadata".into(), "pmcid".into(), "pdf_url".into()]),
+        Some(vec!["pmcid".into(), "pmid".into(), "pdf_url".into()]),
         Some(vec![]),
     ] {
         source.opened.lock().unwrap().clear();
@@ -330,15 +330,8 @@ async fn real_inventory_shard_reads_only_its_referenced_article_metadata() {
                 .is_none_or(|columns| !columns.is_empty())
             {
                 assert_eq!(batch["pmcid"].as_string::<i32>().value(0), ids[rows]);
-                let metadata = batch["metadata"].as_struct();
-                assert_eq!(
-                    metadata.column_by_name("pmid").unwrap().data_type(),
-                    &arrow_schema::DataType::UInt64
-                );
-                assert_eq!(
-                    metadata.column_by_name("pdf_url").unwrap(),
-                    &batch["pdf_url"]
-                );
+                assert_eq!(batch["pmid"].data_type(), &arrow_schema::DataType::UInt64);
+                assert!(batch.schema().field_with_name("metadata").is_err());
             }
             rows += batch.num_rows();
         }

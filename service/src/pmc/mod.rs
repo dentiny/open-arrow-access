@@ -4,6 +4,8 @@ mod accessor;
 mod bucket;
 mod dataset;
 mod error;
+mod format;
+
 mod inventory;
 mod metadata;
 mod validation;
@@ -11,6 +13,8 @@ mod validation;
 pub use accessor::{PmcAccessor, PmcDecoder};
 pub use bucket::{BUCKET_URL, bucket_operator};
 pub use dataset::PmcDatasetAccessor;
+pub use format::PmcFormat;
+
 pub use inventory::{PmcInventoryShardAccessor, PmcInventoryShardRequest};
 
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
@@ -43,24 +47,11 @@ pub fn schema() -> SchemaRef {
                     DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
                     true,
                 ),
-                Field::new("text", DataType::Utf8, true),
+                Field::new("text_url", DataType::Utf8, true),
                 Field::new("mid", DataType::Utf8, true),
             ];
-            let metadata_fields = fields
-                .iter()
-                .map(|field| {
-                    if field.name() == "text" {
-                        field.clone().with_name("text_url")
-                    } else {
-                        field.clone()
-                    }
-                })
-                .collect::<Vec<_>>();
-            fields.push(Field::new(
-                "metadata",
-                DataType::Struct(metadata_fields.into()),
-                false,
-            ));
+            // A selected URL is an output convenience, not an upstream metadata field.
+            fields.push(Field::new("content_url", DataType::Utf8, true));
             Arc::new(Schema::new_with_metadata(
                 fields,
                 HashMap::from([("pmc.row_kind".into(), "article_metadata".into())]),

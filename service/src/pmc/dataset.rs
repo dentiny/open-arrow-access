@@ -6,20 +6,30 @@ use open_arrow_access_core::{
     RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 
-use super::{PmcAccessor, schema, validation::validate_metadata_path};
+use super::{PmcAccessor, PmcDecoder, PmcFormat, schema, validation::validate_metadata_path};
 
 /// Read a metadata directory ending in `/` recursively, or one `.json` object.
 /// Paths are relative to the supplied bucket-root storage. Discovery streams in
 /// storage order; a live directory listing is not an atomic release snapshot.
 pub struct PmcDatasetAccessor<A> {
     storage: Arc<A>,
+    format: PmcFormat,
 }
 
 impl<A> PmcDatasetAccessor<A> {
     pub fn new(storage: A) -> Self {
         Self {
             storage: Arc::new(storage),
+            format: PmcFormat::default(),
         }
+    }
+}
+
+impl<A> PmcDatasetAccessor<A> {
+    /// Select the content_url representation; defaults to PDF with no fallback.
+    pub fn with_format(mut self, format: PmcFormat) -> Self {
+        self.format = format;
+        self
     }
 }
 
@@ -68,7 +78,7 @@ impl<A: ByteAccessor + 'static> ScanPlanner for PmcDatasetAccessor<A> {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         self.metadata(request.clone()).await?;
         let objects = self.metadata_paths(&request).await?;
-        article_plan(self.storage.clone(), request, objects)
+        article_plan(self.storage.clone(), request, objects, self.format)
     }
 }
 
@@ -76,12 +86,13 @@ pub(super) fn article_plan<A: ByteAccessor + 'static>(
     storage: Arc<A>,
     request: ReadRequest,
     objects: ObjectStream,
+    format: PmcFormat,
 ) -> Result<ScanPlan> {
     let metadata = RecordMetadata {
         schema: request.options.resolve_projection(&schema())?.schema,
         source: None,
     };
-    let articles = PmcAccessor::with_default_decoder(storage);
+    let articles = PmcAccessor::new(storage, PmcDecoder::new(format));
     let ordering = articles.capability().ordering;
     let partitions = objects.map_ok(move |object| {
         let articles = articles.clone();

@@ -3,7 +3,7 @@ use open_arrow_access_core::{
     RecordCapability, Result, SchemaRef, async_trait,
 };
 
-use super::{metadata, schema};
+use super::{PmcFormat, metadata, schema};
 
 /// Read one article-version JSON object; content URLs remain metadata.
 pub type PmcAccessor<A> = DocumentAccessor<A, PmcDecoder>;
@@ -11,7 +11,14 @@ pub type PmcAccessor<A> = DocumentAccessor<A, PmcDecoder>;
 /// Convert one PMC metadata JSON document into its projected article row.
 /// Use with [`open_arrow_access_core::DocumentAccessor`] for explicit composition.
 #[derive(Default)]
-pub struct PmcDecoder;
+pub struct PmcDecoder {
+    format: PmcFormat,
+}
+impl PmcDecoder {
+    pub fn new(format: PmcFormat) -> Self {
+        Self { format }
+    }
+}
 
 #[async_trait]
 impl DocumentDecoder for PmcDecoder {
@@ -37,6 +44,6 @@ impl DocumentDecoder for PmcDecoder {
         request: ReadRequest,
         schema: SchemaRef,
     ) -> Result<RecordBatch> {
-        metadata::decode_batch(bytes, request.object.locator(), schema).await
+        metadata::decode_batch(bytes, request.object.locator(), schema, self.format).await
     }
 }
