@@ -7,6 +7,7 @@ mod error;
 mod metadata;
 mod options;
 mod request;
+mod uri;
 mod validation;
 
 pub use accessor::HuggingFaceAccessor;

@@ -68,3 +68,24 @@ all Hub datasets have a `text` column. For raw files, use `repository` then
 `open(ByteReadRequest::new("path/inside/repository"))` instead.
 
 Source: [Hugging Face dataset repositories](https://huggingface.co/docs/hub/datasets).
+
+## Parse a split URI
+
+For integrations that receive a locator, use the pure parser instead of
+reimplementing the provider's revision and path rules:
+
+```rust
+use open_arrow_access_service::huggingface::HuggingFaceDatasetRequest;
+
+let request = HuggingFaceDatasetRequest::try_from_uri(
+    "hf://datasets/owner/example@~parquet/default/train/",
+)?;
+# Ok::<(), open_arrow_access_core::Error>(())
+```
+
+The URI must select `owner/repository@revision/config/split`. `~parquet` maps to
+`refs/convert/parquet`; encode a revision containing slashes as
+`refs%2Fconvert%2Fparquet`. Components are percent-decoded exactly once. A trailing
+slash is optional. File paths, query strings, fragments, credentials, malformed
+escapes, and dot segments are rejected before any I/O. The parser retains the
+normal request defaults; partial exports still need `with_partial_exports()`.

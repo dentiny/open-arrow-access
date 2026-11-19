@@ -193,3 +193,83 @@ async fn parallel_dataset_preserves_pinned_shard_order_and_partial_admission() {
         .await
         .unwrap();
 }
+
+#[test]
+fn dataset_uri_parsing_preserves_selection_and_requires_explicit_revision() {
+    for (uri, revision, config) in [
+        (
+            "hf://datasets/owner/example@~parquet/default/train/",
+            "refs/convert/parquet",
+            "default",
+        ),
+        (
+            "hf://datasets/owner/example@refs%2Fconvert%2Fparquet/my%20config/train",
+            "refs/convert/parquet",
+            "my config",
+        ),
+        (
+            "hf://datasets/owner/example@abc123/default/train",
+            "abc123",
+            "default",
+        ),
+    ] {
+        let parsed = HuggingFaceDatasetRequest::try_from_uri(uri).unwrap();
+        assert_eq!(parsed.repository, "owner/example");
+        assert_eq!(parsed.revision, revision);
+        assert_eq!(parsed.config, config);
+        assert_eq!(parsed.split, "train");
+        assert!(!parsed.allow_partial);
+    }
+    let partial = HuggingFaceDatasetRequest::try_from_uri(
+        "hf://datasets/owner/example@~parquet/default/partial-train",
+    )
+    .unwrap()
+    .with_partial_exports();
+    assert!(partial.allow_partial);
+}
+
+#[test]
+fn malformed_or_ambiguous_dataset_uris_are_rejected_without_io() {
+    for uri in [
+        "https://datasets/owner/example@main/default/train",
+        "hf://models/owner/example@main/default/train",
+        "hf://token@datasets/owner/example@main/default/train",
+        "hf://datasets:443/owner/example@main/default/train",
+        "hf://datasets/owner/example/default/train",
+        "hf://datasets/owner/example@/default/train",
+        "hf://datasets/owner/example@main/default/train/file.parquet",
+        "hf://datasets/owner/example@main/default/train?token=secret",
+        "hf://datasets/owner/example@main/default/train#fragment",
+        "hf://datasets/owner/example@main/default/train//",
+        "hf://datasets/owner/example@main//train",
+        "hf://datasets/owner/example@main/../train",
+        "hf://datasets/owner/example@main/%2e%2e/train",
+        "hf://datasets/owner/example@main/default%2Fother/train",
+        "hf://datasets/owner/example@main/default/%00",
+        "hf://datasets/owner/example@main/default/%FF",
+        "hf://datasets/owner/example@main/default/%zz",
+        "hf://datasets/owner/example@main/default/%",
+        "hf://datasets/owner/example@main/default/ train",
+        "hf://datasets/owner/example@main/my config/train",
+        "hf://datasets/owner/example@main/default/train\\extra",
+        "hf://datasets/owner/example@refs%2F..%2Fmain/default/train",
+    ] {
+        assert_eq!(
+            HuggingFaceDatasetRequest::try_from_uri(uri)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidInput,
+            "{uri}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn parsed_dataset_uri_opens_the_selected_export() {
+    let hub = ExportHub::new("train.json").await;
+    let selection = HuggingFaceDatasetRequest::try_from_uri(
+        "hf://datasets/owner/example@~parquet/default/train",
+    )
+    .unwrap();
+    assert_eq!(hub.read_ids(selection).await, [1, 2]);
+}
