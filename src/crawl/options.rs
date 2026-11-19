@@ -7,6 +7,8 @@ use crate::{
 /// Byte I/O, HTTP limits, retries and codecs belong to the supplied source/client.
 #[derive(Clone, Debug)]
 pub struct CrawlOptions {
+    /// Resident partition/file concurrency, native batch prefetch and per-file
+    /// read-ahead byte budget, shared by the crawl's single executor.
     pub parallel_read: ParallelReadLayer,
     /// Defaults to unordered; sources requiring global order reject it.
     pub emission: EmissionPolicy,
