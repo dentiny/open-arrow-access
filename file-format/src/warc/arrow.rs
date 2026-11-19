@@ -98,7 +98,8 @@ pub(super) const HEADER_COLUMNS: &[(&str, WarcHeader, DataType, bool)] = &[
     ("warc_info_id", WarcHeader::WarcInfoID, DataType::Utf8, true),
 ];
 
-fn base_arrow_schema() -> SchemaRef {
+/// Default WARC Arrow schema, including a non-null millisecond timestamp date.
+pub fn arrow_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
@@ -117,11 +118,6 @@ fn base_arrow_schema() -> SchemaRef {
             Arc::new(Schema::new(fields))
         })
         .clone()
-}
-
-/// Default WARC Arrow schema, including a non-null millisecond timestamp date.
-pub fn arrow_schema() -> SchemaRef {
-    base_arrow_schema()
 }
 
 pub(super) fn body_view_schema() -> SchemaRef {
@@ -184,7 +180,7 @@ impl ReaderFactory for WarcArrowFormat {
 
     async fn create_reader(
         &self,
-        token: &FactoryToken,
+        _token: &FactoryToken,
         input: Box<dyn ByteReader>,
         request: ReadRequest,
         schema: SchemaRef,
@@ -199,7 +195,7 @@ impl ReaderFactory for WarcArrowFormat {
             let output = output.clone();
             let source_uri = source_uri.clone();
             async move {
-                let mut batch = WarcBatchBuilder::new(output, batch_size)?;
+                let mut batch = WarcBatchBuilder::new(output, batch_size);
                 while batch.len() < batch_size {
                     let Some(record) = records.next().await else {
                         break;
@@ -213,7 +209,6 @@ impl ReaderFactory for WarcArrowFormat {
                 Ok(Some((batch.finish()?, records)))
             }
         });
-        let _ = token;
         Ok(Box::new(StreamReader::records(
             batches,
             RecordMetadata {

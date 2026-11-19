@@ -134,16 +134,16 @@ async fn create_reader(
         let output = output.clone();
         let source_uri = source_uri.clone();
         async move {
-            let mut batch = WarcBatchBuilder::new(output, batch_size)?;
+            let mut batch = WarcBatchBuilder::new(output, batch_size);
             let mut positions = Vec::new();
             while batch.len() < batch_size
                 && max_body_bytes.is_none_or(|limit| batch.body_bytes() < limit)
             {
-                let Some((headers, body, position)) = read_record(&mut input).await? else {
+                let Some(record) = read_record(&mut input).await? else {
                     break;
                 };
-                batch.append(headers, body, &source_uri)?;
-                positions.push(position);
+                batch.append(record.headers, record.body, &source_uri)?;
+                positions.push(record.position);
             }
             if batch.is_empty() {
                 return Ok(None);
@@ -165,9 +165,13 @@ async fn create_reader(
     Ok(reader)
 }
 
-async fn read_record(
-    input: &mut PositionedAsyncRead,
-) -> Result<Option<(warc::RawRecordHeader, Vec<u8>, BytePosition)>> {
+struct PositionedWarcRecord {
+    headers: warc::RawRecordHeader,
+    body: Vec<u8>,
+    position: BytePosition,
+}
+
+async fn read_record(input: &mut PositionedAsyncRead) -> Result<Option<PositionedWarcRecord>> {
     // Consume inter-record whitespace before marking, so coordinates identify the
     // record itself. No buffering adapter may read ahead of the position observer.
     loop {
@@ -199,5 +203,9 @@ async fn read_record(
             "WARC input has no byte positions",
         )
     })?;
-    Ok(Some((headers, body, position)))
+    Ok(Some(PositionedWarcRecord {
+        headers,
+        body,
+        position,
+    }))
 }

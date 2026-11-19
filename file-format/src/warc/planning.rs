@@ -43,7 +43,7 @@ where
             record_size,
             move |records, metadata| {
                 Box::pin(async move {
-                    let mut batch = WarcBatchBuilder::new(metadata.schema.clone(), records.len())?;
+                    let mut batch = WarcBatchBuilder::new(metadata.schema.clone(), records.len());
                     let source = metadata.source.as_ref().unwrap().locator();
                     for (headers, body) in records {
                         batch.append(headers, body, source)?;
