@@ -63,12 +63,24 @@ reader, framing state and buffers separately from partition workers.
 
 For native independent partitions, P bounds resident partitions and each worker
 uses a Q-batch queue, reserving capacity before decoding. Streaming-file scans
-instead give every resident file an 8 MiB estimated-byte output budget under
+instead give every resident file a configurable estimated-byte output budget (default 8 MiB) under
 both ordered and unordered emission. Budgets are independent: a later file cannot
 use capacity needed by the first ordered file. Workers download and decode until
 their own queue fills, then resume as their output is consumed. Ordered emission drains file queues in their original order; unordered
 emission polls all resident queues for ready batches. The producer/read-ahead path
 is the same, and uses no temporary files or IPC serialization.
+
+Configure the budget in bytes on the layer; it applies separately to each resident
+file and is independent of the constructor's native-partition batch prefetch:
+
+```rust,ignore
+let parallel = ParallelReadLayer::new(partitions, prefetch)
+    .with_read_ahead_bytes(NonZeroUsize::new(32 * 1024 * 1024).unwrap());
+```
+
+The positive budget must fit `min(u32::MAX, tokio::sync::Semaphore::MAX_PERMITS)`;
+invalid settings return `InvalidInput` during scan planning/opening. Custom scan
+planners can set `ParallelReadOptions::read_ahead_bytes` directly.
 
 Concurrency is the admission limit: at most P streaming files are resident,
 including files that have finished downloading but still have buffered output.
@@ -157,7 +169,7 @@ Polling rotates among ready receivers to avoid starving a partition. Completed
 partitions retain their slots until their queues drain. Both policies share the
 same read-ahead selection, schema checks, fail-fast errors and drop cancellation.
 Independent native partitions reserve queue capacity before decoding; streaming
-files use independent 8 MiB estimated-byte queues under either emission policy.
+files use independent byte-budgeted queues under either emission policy (default 8 MiB).
 
 ## Opting into unordered emission
 

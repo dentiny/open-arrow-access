@@ -9,8 +9,6 @@ use futures::{
 use open_arrow_access_core::{RecordBatch, RecordReader, Result, SchemaRef};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 
-const READ_AHEAD_BYTES: usize = 8 * 1024 * 1024;
-
 /// Delivers a partition worker's decoded batches using its queue policy.
 pub(crate) enum PartitionSender {
     /// For independent native partitions: reserve one of the configured prefetch
@@ -37,13 +35,14 @@ struct BufferedBatch {
 pub(crate) struct ReadAheadSender {
     sender: mpsc::UnboundedSender<BufferedBatch>,
     budget: Arc<Semaphore>,
+    capacity: usize,
 }
 
 impl ReadAheadSender {
     async fn send(&self, batch: RecordBatch) -> bool {
         // One oversized batch may occupy a partition's whole budget. A producer
         // can additionally hold one decoded batch while waiting for admission.
-        let bytes = batch.get_array_memory_size().clamp(1, READ_AHEAD_BYTES) as u32;
+        let bytes = batch.get_array_memory_size().clamp(1, self.capacity) as u32;
         let permit = self
             .budget
             .clone()
@@ -63,7 +62,11 @@ impl ReadAheadSender {
     }
 }
 
-pub(crate) fn partition_channel(prefetch: usize, read_ahead: bool) -> PartitionChannel {
+pub(crate) fn partition_channel(
+    prefetch: usize,
+    read_ahead: bool,
+    read_ahead_bytes: usize,
+) -> PartitionChannel {
     if read_ahead {
         let (sender, receiver) = mpsc::unbounded_channel::<BufferedBatch>();
         let batches = stream::unfold(receiver, |mut receiver| async move {
@@ -75,7 +78,8 @@ pub(crate) fn partition_channel(prefetch: usize, read_ahead: bool) -> PartitionC
         PartitionChannel {
             sender: PartitionSender::ReadAhead(ReadAheadSender {
                 sender,
-                budget: Arc::new(Semaphore::new(READ_AHEAD_BYTES)),
+                budget: Arc::new(Semaphore::new(read_ahead_bytes)),
+                capacity: read_ahead_bytes,
             }),
             batches: batches.boxed(),
         }

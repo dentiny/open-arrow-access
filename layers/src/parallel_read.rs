@@ -27,10 +27,11 @@ pub struct ParallelReadLayer {
     /// Maximum resident partitions, including completed partitions with queued batches.
     partitions: NonZeroUsize,
     /// Queue capacity for independent native partitions. Streaming files use
-    /// an 8 MiB queued-byte budget per resident partition under either emission
+    /// a configurable queued-byte budget per resident partition under either emission
     /// policy; oversized batches occupy the whole budget. One further decoded
     /// batch per partition can wait for admission.
     prefetch: NonZeroUsize,
+    read_ahead_bytes: NonZeroUsize,
 }
 
 impl ParallelReadLayer {
@@ -38,7 +39,19 @@ impl ParallelReadLayer {
         Self {
             partitions,
             prefetch,
+            read_ahead_bytes: ParallelReadOptions::DEFAULT_READ_AHEAD_BYTES,
         }
+    }
+
+    /// Set the queued Arrow memory budget for each resident streaming file.
+    /// Defaults to 8 MiB; applies to ordered and unordered emission. Native
+    /// partitions continue using the constructor's batch-count prefetch.
+    /// This is a soft budget: oversized batches are admitted alone, and one
+    /// decoded batch can wait outside the queue. Invalid semaphore-sized values
+    /// are rejected when planning/opening a scan rather than panicking.
+    pub fn with_read_ahead_bytes(mut self, bytes: NonZeroUsize) -> Self {
+        self.read_ahead_bytes = bytes;
+        self
     }
 }
 
@@ -93,6 +106,7 @@ impl ScanPolicy for ParallelReadLayer {
         let settings = ParallelReadOptions {
             partitions: self.partitions,
             prefetch: self.prefetch,
+            read_ahead_bytes: self.read_ahead_bytes,
         };
         validate_parallel_read_settings(plan.parallel_read, settings)?;
         plan.parallel_read = Some(settings);
@@ -103,7 +117,10 @@ impl ScanPolicy for ParallelReadLayer {
 pub(crate) fn open_plan(plan: ScanPlan) -> Result<Box<dyn RecordReader>> {
     validate_emission_policy(plan.emission, plan.ordering)?;
     match plan.parallel_read {
-        Some(settings) => Ok(Box::new(ParallelReader::new(plan, settings))),
+        Some(settings) => {
+            validate_parallel_read_settings(None, settings)?;
+            Ok(Box::new(ParallelReader::new(plan, settings)))
+        }
         None => Ok(Box::new(plan.into_reader())),
     }
 }
@@ -134,8 +151,11 @@ impl ParallelReader {
     }
 
     fn spawn_partition(&mut self, open: ScanPartition) {
-        let PartitionChannel { sender, batches } =
-            partition_channel(self.settings.prefetch.get(), self.read_ahead);
+        let PartitionChannel { sender, batches } = partition_channel(
+            self.settings.prefetch.get(),
+            self.read_ahead,
+            self.settings.read_ahead_bytes.get(),
+        );
         let schema = self.metadata.schema.clone();
         self.tasks.spawn(async move {
             let mut reader = open.await?;

@@ -30,6 +30,14 @@ pub(crate) fn validate_parallel_read_settings(
     previous: Option<ParallelReadOptions>,
     settings: ParallelReadOptions,
 ) -> Result<()> {
+    let max = (u32::MAX as usize).min(tokio::sync::Semaphore::MAX_PERMITS);
+    if settings.read_ahead_bytes.get() > max {
+        return Err(open_arrow_access_core::Error::new(
+            open_arrow_access_core::ErrorKind::InvalidInput,
+            "parallel_read",
+            format!("read_ahead_bytes must be at most {max}"),
+        ));
+    }
     if previous.is_some_and(|previous| previous != settings) {
         return Err(crate::error::conflicting_parallel_settings());
     }

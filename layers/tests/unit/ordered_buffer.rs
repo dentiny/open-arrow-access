@@ -6,6 +6,9 @@ use open_arrow_access_core::{OrderRequirement, RecordMetadata, StreamReader};
 
 use super::*;
 
+const READ_AHEAD_BYTES: usize =
+    open_arrow_access_core::ParallelReadOptions::DEFAULT_READ_AHEAD_BYTES.get();
+
 fn batch(value: i64) -> RecordBatch {
     RecordBatch::try_from_iter([("id", Arc::new(Int64Array::from(vec![value])) as _)]).unwrap()
 }
@@ -19,7 +22,7 @@ async fn queued_batches_are_released_on_delivery_or_cancellation() {
             let PartitionChannel {
                 sender,
                 mut batches,
-            } = partition_channel(1, read_ahead);
+            } = partition_channel(1, read_ahead, READ_AHEAD_BYTES);
             match sender {
                 PartitionSender::Bounded(sender) => sender.send(expected).await.unwrap(),
                 PartitionSender::ReadAhead(sender) => assert!(sender.send(expected).await),
@@ -53,7 +56,7 @@ async fn file_read_ahead_finishes_without_polling_output_and_keeps_batch_order()
     let PartitionChannel {
         sender,
         mut batches,
-    } = partition_channel(1, true);
+    } = partition_channel(1, true, READ_AHEAD_BYTES);
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         sender.read(&mut reader, &schema),
@@ -81,7 +84,7 @@ async fn streaming_byte_budget_waits_for_consumption_and_releases_on_drop() {
         let PartitionChannel {
             sender,
             mut batches,
-        } = partition_channel(1, true);
+        } = partition_channel(1, true, READ_AHEAD_BYTES);
         let PartitionSender::ReadAhead(sender) = sender else {
             unreachable!()
         };
@@ -101,5 +104,31 @@ async fn streaming_byte_budget_waits_for_consumption_and_releases_on_drop() {
                 "cancellation must release the waiting producer"
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn configured_byte_budget_controls_queue_capacity() {
+    for capacity in [1, 2, 4] {
+        let item = batch(1);
+        let bytes = item.get_array_memory_size();
+        let PartitionChannel {
+            sender,
+            mut batches,
+        } = partition_channel(1, true, bytes * capacity);
+        let PartitionSender::ReadAhead(sender) = sender else {
+            unreachable!()
+        };
+        for _ in 0..capacity {
+            assert!(sender.send(item.clone()).await);
+        }
+        let pending = sender.send(item);
+        tokio::pin!(pending);
+        assert!(futures::poll!(&mut pending).is_pending());
+        let _delivered = batches.next().await.unwrap();
+        assert!(
+            pending.await,
+            "delivery must release bytes even while consumer owns the batch"
+        );
     }
 }

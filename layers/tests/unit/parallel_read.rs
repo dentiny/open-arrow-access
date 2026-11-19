@@ -4,6 +4,9 @@ use open_arrow_access_core::{OrderRequirement, Schema};
 
 use super::*;
 
+const READ_AHEAD_BYTES: usize =
+    open_arrow_access_core::ParallelReadOptions::DEFAULT_READ_AHEAD_BYTES.get();
+
 #[tokio::test]
 async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
     let metadata = RecordMetadata {
@@ -26,12 +29,13 @@ async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
         ParallelReadOptions {
             partitions: NonZeroUsize::new(2).unwrap(),
             prefetch: NonZeroUsize::MIN,
+            read_ahead_bytes: ParallelReadOptions::DEFAULT_READ_AHEAD_BYTES,
         },
     );
     let PartitionChannel {
         sender,
         batches: ready,
-    } = partition_channel(1, false);
+    } = partition_channel(1, false, READ_AHEAD_BYTES);
     let crate::ordered_buffer::PartitionSender::Bounded(sender) = sender else {
         unreachable!()
     };
@@ -40,7 +44,7 @@ async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
     let PartitionChannel {
         sender,
         batches: closed,
-    } = partition_channel(1, false);
+    } = partition_channel(1, false, READ_AHEAD_BYTES);
     drop(sender);
     reader.partition_receivers.extend([closed, ready]);
 

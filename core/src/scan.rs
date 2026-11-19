@@ -25,9 +25,17 @@ pub struct ParallelReadOptions {
     /// Maximum resident partitions, including completed queues awaiting consumption.
     pub partitions: NonZeroUsize,
     /// Capacity of native partition queues. Streaming-file scans instead use
-    /// an 8 MiB estimated-byte budget per resident partition. A batch larger
-    /// than that budget is admitted alone; decoder allocations are separate.
+    /// the estimated-byte budget in `read_ahead_bytes` per resident partition.
     pub prefetch: NonZeroUsize,
+    /// Queued Arrow memory estimate per resident streaming-file partition.
+    /// Defaults to 8 MiB via `ParallelReadLayer`; an oversized batch is admitted
+    /// alone. One decoded batch may also wait for admission; decoder memory is
+    /// separate. The executor rejects values above min(u32::MAX, semaphore limit).
+    pub read_ahead_bytes: NonZeroUsize,
+}
+
+impl ParallelReadOptions {
+    pub const DEFAULT_READ_AHEAD_BYTES: NonZeroUsize = NonZeroUsize::new(8 * 1024 * 1024).unwrap();
 }
 
 /// A lazy, independently owned partition opener. Partition stream order defines logical order.
