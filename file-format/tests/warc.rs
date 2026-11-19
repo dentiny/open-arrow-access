@@ -202,7 +202,7 @@ async fn arrow_records_preserve_binary_bodies_source_and_projection() {
             rows += batch.num_rows();
             if let Some(body) = batch.column_by_name("body") {
                 bodies.extend(
-                    body.as_binary::<i64>()
+                    body.as_binary_view()
                         .iter()
                         .map(|value| value.unwrap().to_vec()),
                 );
@@ -289,7 +289,7 @@ async fn parallel_record_partitions_are_lazy_and_preserve_binary_projection_and_
         );
         assert_eq!(batch.schema().field(0).name(), "body");
         ids.push(batch["id"].as_string::<i32>().value(0).to_owned());
-        bodies.push(batch["body"].as_binary::<i64>().value(0).to_vec());
+        bodies.push(batch["body"].as_binary_view().value(0).to_vec());
     }
     assert_eq!(
         ids,

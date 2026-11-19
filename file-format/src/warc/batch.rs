@@ -4,13 +4,15 @@ use std::borrow::Cow;
 use arrow_array::{
     RecordBatch, RecordBatchOptions,
     builder::{
-        ArrayBuilder, BinaryViewBuilder, LargeBinaryBuilder, LargeStringBuilder, StringBuilder,
-        StructBuilder, TimestampMillisecondBuilder,
+        ArrayBuilder, BinaryViewBuilder, LargeStringBuilder, StringBuilder, StructBuilder,
+        TimestampMillisecondBuilder,
     },
 };
 use open_arrow_access_core::{Result, SchemaRef};
 
 use super::{arrow::HEADER_COLUMNS, decode_error};
+
+pub(super) const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
 pub(super) struct WarcBatchBuilder {
     schema: SchemaRef,
@@ -96,21 +98,18 @@ impl WarcBatchBuilder {
         }
         self.body_bytes = self.body_bytes.saturating_add(body.len());
         if let Ok(index) = self.schema.index_of("body") {
-            if let Some(builder) = self.builder.field_builder::<BinaryViewBuilder>(index) {
-                if body.len() <= 12 {
-                    builder.append_value(&body);
-                } else {
-                    let length = u32::try_from(body.len()).map_err(decode_error)?;
-                    let block = builder.append_block(body.into());
-                    builder
-                        .try_append_view(block, 0, length)
-                        .map_err(decode_error)?;
-                }
+            let builder = self
+                .builder
+                .field_builder::<BinaryViewBuilder>(index)
+                .unwrap();
+            if body.len() <= 12 {
+                builder.append_value(&body);
             } else {
-                self.builder
-                    .field_builder::<LargeBinaryBuilder>(index)
-                    .unwrap()
-                    .append_value(&body);
+                let length = u32::try_from(body.len()).map_err(decode_error)?;
+                let block = builder.append_block(body.into());
+                builder
+                    .try_append_view(block, 0, length)
+                    .map_err(decode_error)?;
             }
         }
         self.builder.append(true);
