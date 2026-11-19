@@ -259,8 +259,15 @@ impl ByteReader for SequentialReader {
     fn position(&self) -> Option<BytePosition> {
         Some(BytePosition::Stored(self.offset))
     }
-    // The default range methods fail immediately without acquiring a second
-    // HTTP permit while the sequential response may hold the only one.
+    // Reject even empty bulk requests, preserving the streaming reader's
+    // contract without acquiring a second permit while its response is unread.
+    async fn read_range(&mut self, _range: Range<u64>) -> Result<Bytes> {
+        Err(crate::error::sequential_range_unsupported())
+    }
+
+    async fn read_ranges(&mut self, _ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+        Err(crate::error::sequential_range_unsupported())
+    }
 }
 
 /// Transport buffers can exceed emitted chunks. Keep unread bytes together with

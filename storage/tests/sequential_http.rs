@@ -148,6 +148,10 @@ async fn sequential_readers_reject_ranges_without_waiting_for_another_http_permi
     let mut output = reader.next().await.unwrap().unwrap().to_vec();
     assert!(!reader.capability().read_with_range);
     assert_eq!(
+        reader.read_ranges(Vec::new()).await.unwrap_err().kind(),
+        open_arrow_access_core::ErrorKind::Unsupported
+    );
+    assert_eq!(
         reader.read_range(12..17).await.unwrap_err().kind(),
         open_arrow_access_core::ErrorKind::Unsupported
     );
