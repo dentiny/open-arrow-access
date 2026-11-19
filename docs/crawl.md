@@ -421,6 +421,71 @@ sequential inside each independent continuation chain.
   checkpoint or commit semantics; restarting a failed crawl does not imply that
   its previous output can safely be skipped.
 
+## Attachment providers share the same execution path
+
+Providers such as Semantic Scholar, Zenodo, Dataverse and Figshare already resolve
+metadata into a byte-accessible file namespace. Once that step has selected file
+membership and retained the provider's transport context, attachment decoding and
+execution need no provider-specific worker or format switch in the application.
+
+```mermaid
+flowchart LR
+    Providers["Provider API: release/record/dataset metadata"] --> Namespace["Resolved byte namespace: logical names to exact objects/URLs"]
+    Namespace --> Attachment["AttachmentAccessor: bind format + outer compression once"]
+    Attachment --> Native["ScanPlanner: native partitions with fixed schema"]
+    Native --> Crawl["CrawlAccessor: shared worker budget and ordered merge"]
+    Crawl --> Output["Arrow batches"]
+```
+
+```rust,ignore
+use open_arrow_access::{
+    Accessor, AttachmentFormat, AttachmentOptions, EmissionPolicy,
+    crawl::{CrawlAccessor, CrawlOptions},
+    dataset::file_set::FileSetRequest,
+};
+
+// resolved_files is the provider-bound byte accessor; keep its authentication,
+// snapshot identity, signed URLs and transport policy.
+let crawl = CrawlAccessor::attachments(
+    resolved_files,
+    AttachmentOptions::new(AttachmentFormat::Parquet),
+    CrawlOptions::default().with_emission(EmissionPolicy::Ordered),
+)?;
+let mut reader = crawl.open(FileSetRequest::new([
+    "part-00000.parquet", "part-00001.parquet",
+])).await?;
+while let Some(batch) = reader.next().await? { /* consume batch */ }
+```
+
+`CrawlAccessor::attachments` is the integrated entry point: it binds
+`AttachmentAccessor`, constructs a native-planning `FileSetAccessor`, then
+installs the crawl execution layers. Select one logical name for a single
+attachment, or several names to read files and their native partitions under
+one executor budget. Provider adapters only resolve metadata and supply the
+bound namespace and selection; they need no per-provider executor or format switch.
+
+| Attachment format | Work exposed by its planner |
+| --- | --- |
+| Parquet | Native independently readable partitions, retaining range access where the bound storage supports it. |
+| CSV/TSV, JSON/JSONL and XML | The format's streaming/chunk plan; discovery/framing may remain sequential while decode chunks run in workers. |
+| Binary | One whole-document partition; a single object remains one unchanged binary row. |
+
+`AttachmentAccessor` retains `PreserveGlobal` ordering for provider-independent
+selections. Configure ordered emission; adding native planning does not grant
+permission to reorder unknown provider data. An attachment's own `metadata` and
+`inspect_metadata` operations delegate to the selected format rather than opening
+and discarding a bound reader. Planning does not perform a separate metadata call
+and does not collect all partition openers. Input samples/readers retained by the
+format remain part of its plan.
+
+The provider still owns file membership; this API does not discover arbitrary
+links or follow record-level `content_url` fields. Advanced format/schema/partition
+settings can use the typed format accessors with `CrawlAccessor::files` directly.
+Applications retaining a `PreparedSource` can use
+`PreparedSource::prepare_plannable(AttachmentAccessor::new(...), request)` and
+wrap its execution-time plan with `CrawlAccessor::new`; that preserves late
+projection/batch/concurrency settings rather than fixing execution during bind.
+
 ## Differing schemas across files
 
 A scan must have one fixed output schema. `options.evolution` runs after the

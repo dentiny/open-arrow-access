@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use crate::{
-    Accessor, AccessorExt, EmissionPolicy, ReadOptionsProvider, RecordCapability, RecordMetadata,
-    RecordReader, Result, ScanPlanner, async_trait, layers::UnorderedEmissionLayer,
+    Accessor, AccessorExt, AttachmentAccessor, AttachmentOptions, ByteAccessor, EmissionPolicy,
+    ReadOptionsProvider, RecordCapability, RecordMetadata, RecordReader, Result, ScanPlanner,
+    async_trait, layers::UnorderedEmissionLayer,
 };
 
 use super::{CrawlOptions, CrawlResolver, discovery::ResolvingAccessor};
@@ -84,6 +85,41 @@ impl<Q: Send + 'static> Accessor for CrawlAccessor<Q> {
 }
 
 impl CrawlAccessor<crate::dataset::file_set::FileSetRequest> {
+    /// Crawl selected logical names from a provider-bound attachment namespace.
+    /// Format/compression binding, native file planning and execution share the
+    /// same path for every provider. Construction performs no discovery or I/O;
+    /// select one or more logical names with `FileSetRequest` when opening.
+    /// Generic attachments require ordered emission; configure it in `options`.
+    ///
+    /// ```no_run
+    /// use open_arrow_access::{
+    ///     Accessor, AttachmentFormat, AttachmentOptions, ByteAccessor, EmissionPolicy,
+    ///     Result, crawl::{CrawlAccessor, CrawlOptions},
+    ///     dataset::file_set::FileSetRequest,
+    /// };
+    ///
+    /// async fn read(files: impl ByteAccessor + 'static) -> Result<()> {
+    ///     let crawl = CrawlAccessor::attachments(
+    ///         files,
+    ///         AttachmentOptions::new(AttachmentFormat::Parquet),
+    ///         CrawlOptions::default().with_emission(EmissionPolicy::Ordered),
+    ///     )?;
+    ///     let mut reader = crawl.open(FileSetRequest::new(["part-00000.parquet"])).await?;
+    ///     while let Some(batch) = reader.next().await? { /* consume batch */ }
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn attachments<A: ByteAccessor + 'static>(
+        source: A,
+        attachment: AttachmentOptions,
+        options: CrawlOptions,
+    ) -> Result<Self> {
+        Ok(Self::files(
+            AttachmentAccessor::new(source, attachment)?,
+            options,
+        ))
+    }
+
     /// Scan explicitly selected files, retaining the format's native partitions.
     /// For union-by-name or per-file normalization, configure a `FileSetAccessor`
     /// explicitly and pass it to `new` instead.

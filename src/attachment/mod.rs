@@ -2,6 +2,7 @@
 
 mod accessor;
 mod error;
+mod format;
 mod options;
 mod source;
 mod validation;
