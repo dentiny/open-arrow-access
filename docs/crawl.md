@@ -4,12 +4,270 @@
 and dataset planners and a discovery-only interface for new services. It is always
 available; enable the formats, services and codecs your source uses.
 
+For a quick path, see [existing sources and configuration](#existing-sources-and-layer-configuration).
+For implementation details, follow the [overall lifecycle](#overall-lifecycle),
+[discovery](#discovery-metadata-and-manifests-become-file-selections),
+[parallel reading](#parallel-reading-files-and-native-partitions), and
+[emission](#emission-execution-order-and-delivery-order). The
+[tuning guide](#tuning-parameters-by-pipeline-stage) maps each parameter to its stage.
+
+## Abstraction boundaries
+
+The service selects the input; the planner describes independent work; layers
+configure execution and transform batches. `CrawlAccessor` composes these contracts
+without implementing a second scheduler or a provider protocol.
+
+| Abstraction | Input → output | Responsibility |
+| --- | --- | --- |
+| `CrawlResolver` (optional) | Typed service request → `ResolvedCrawl` | Pin a release/revision, inspect shard metadata and manifests, bind the selected source to its storage/client. |
+| `ResolvedCrawl` | Bound accessor + its selected request | Carry file membership, logical-name mappings, signed URLs and snapshot context into planning. It contains no downloaded dataset. |
+| Dataset/service accessor | Selected request → `ScanPlan` | Expose lazy partition openers and a fixed Arrow schema. A planner may inspect a preview or format metadata. |
+| Byte accessor + codecs + format | Object reference → bytes → Arrow batches | Interpret locators, enforce transport policy, decompress and parse. Each reader owns its cursor/codec state. |
+| `CrawlAccessor` | Planner + `CrawlOptions` → `RecordReader` | Compose transformation, execution, emission and optional output buffering. |
+| Consumer | Arrow batches → application/sink | Apply scan-wide sampling/limits, consume/write output and own commit/recovery policy. |
+
+The layer composition constructed by `CrawlAccessor::new` is equivalent to:
+
 ```text
-request → service discovery / manifest / streaming listing → native ScanPlan
-        → partition workers: read + decode + row-local evolution
-        → bounded queues → ordered/unordered merge → optional coalesce/prefetch
-        → RecordReader
+source
+  .layer(evolution)
+  .layer(parallel_read)
+  .layer(UnorderedEmissionLayer)  // only for unordered emission
+  .layer(coalesce)                // only when configured
+  .layer(prefetch)                // only when configured
 ```
+
+The last layer is outermost. Opening travels inward to discover/plan the source;
+batches travel outward. Parallel/emission layers collect policies into one plan
+before execution; they do not create separate worker pools.
+
+| Layer | Where it works | Default and effect | Main tuning control |
+| --- | --- | --- | --- |
+| `SchemaEvolutionLayer` | Inside each partition worker, after decode | Identity by default. Rename, cast and compute columns using a plan compiled once per scan and shared across workers. | `with_evolution`; optional complete source schema for projection pushdown. |
+| `ParallelReadLayer` | Around the complete scan | 4 resident partitions. Overlap independent readers and decoder work; queue capacity applies backpressure. | `with_parallel_read(ParallelReadLayer::new(P, Q).with_read_ahead_bytes(B))`. |
+| `UnorderedEmissionLayer` | Merge of resident partition queues | Installed by default. Emit ready batches when the entire source permits reordering. | `with_emission`; ordered mode omits this layer. |
+| `CoalesceBatchesLayer` | One stream after merge | Disabled. Combine tiny batches before the consumer, retaining a fixed schema and row order. | `with_coalesce`; row target and/or estimated-byte target. |
+| `PrefetchLayer` | One stream after optional coalescing | Disabled. Drive upstream while the consumer handles its current batch. | `with_prefetch`; queued row and/or estimated-byte budgets. |
+
+Transport layers (HTTP concurrency, rate/backoff, retry), decompression and native
+format settings remain on the supplied source. `MissingObjectLayer` can be
+installed on the source before constructing the crawl. Sampling/limit layers
+belong outside the crawl so their budgets cover the whole scan.
+
+## Overall lifecycle
+
+```mermaid
+flowchart TD
+    Request["1. Typed request: selection, projection, batch size, byte options"]
+    Entry{"Existing planner or custom resolver?"}
+    Resolve["2. Resolve release/shards and metadata/manifest"]
+    Bound["Bound source + selected file/request identities"]
+    Plan["3. plan_scan: fixed schema + lazy partition openers"]
+    Evolution["4. Bind row-local evolution once; retain native partitions"]
+    Policy["5. Collect concurrency/emission policy; validate ordering"]
+    Reader["open returns a RecordReader; workers have not started"]
+    Next["6. First next starts bounded partition execution"]
+    Worker["7. Read, decompress, parse, transform; enqueue batches"]
+    Merge["8. Merge ordered or ready batches"]
+    Output["9. Optional coalesce, then optional merged prefetch"]
+    Consumer["10. Consumer / sink"]
+    Request --> Entry
+    Entry -->|"from_resolver"| Resolve --> Bound --> Plan
+    Entry -->|"new / files / directory"| Plan
+    Plan --> Evolution --> Policy --> Reader --> Next --> Worker --> Merge --> Output --> Consumer
+    Consumer -. "slow consumption fills queues and pauses producers" .-> Worker
+```
+
+`open` can perform discovery, read Parquet metadata or consume a bounded inference
+sample. It does not require decoding the whole dataset. Strict file-set planning
+retains the first preview plan for execution. Union-by-name is a different policy:
+it preflights selected file schemas and can retain samples/readers for all files.
+There is no second inference pass added by the crawl wrapper.
+
+```mermaid
+sequenceDiagram
+    participant User as Consumer
+    participant Crawl as CrawlAccessor
+    participant Source as Resolver / source planner
+    participant Exec as Parallel executor
+    participant Workers as Partition workers
+    User->>Crawl: open(request)
+    Crawl->>Source: resolve if configured, then plan_scan
+    Source-->>Crawl: fixed schema and lazy openers
+    Note over Crawl: Share evolution plan; collect execution/emission policies
+    Crawl->>Exec: construct reader, validate policies
+    Exec-->>User: reader with output metadata
+    User->>Exec: next()
+    Exec->>Workers: admit work up to P resident partitions
+    Workers-->>Exec: transformed batches through bounded queues
+    Exec-->>User: merged batch, optionally coalesced/prefetched
+    User->>Exec: drop reader
+    Note over Exec,Workers: Cancel owned workers; release queues and readers
+```
+
+## Discovery: metadata and manifests become file selections
+
+Discovery chooses membership and identities before data execution. The crawl does
+not infer which JSON keys in an arbitrary service response represent download
+links: the service resolver parses and validates its own response format.
+
+```mermaid
+flowchart LR
+    Selector["Dataset/release/config/split/shard selection"] --> Pin["Resolve latest or branch to immutable ID, where supported"]
+    Pin --> Metadata["Fetch shard metadata / manifest using bound client"]
+    Metadata --> Kind{"Discovery representation"}
+    Kind -->|"Paths manifest"| Paths["PathsManifest: base, prefix, format, duplicate validation"]
+    Kind -->|"API metadata"| API["Provider parser: logical file names and exact download locators"]
+    Kind -->|"Object listing"| List["Directory selection or streaming service listing"]
+    Paths --> Selected["ObjectRef values / FileSetRequest / service request"]
+    API --> Selected
+    List --> Selected
+    Selected --> Bind["Bind storage, URL mapping, decoder and selected request"]
+    Bind --> Scan["FileSet / Directory / service ScanPlanner"]
+```
+
+| Discovery form | How files are obtained | Startup and memory behavior |
+| --- | --- | --- |
+| Explicit file set | Caller supplies `FileSetRequest` object references. | No listing; preserve caller order and duplicates. |
+| Paths manifest | `PathsManifest` reads lines, validates/resolves locators and returns `FileSetRequest`. | Collect selected keys and duplicate state, not file contents; not a streaming file-name API. |
+| Provider metadata | Provider parser produces file membership and mappings, such as logical name → signed download URL. | Provider-specific metadata fetches; preserve exact URLs and use the same bound authentication/transport context for reads. |
+| Directory/glob | `DirectoryAccessor` lists, filters, deduplicates and sorts selected names. | Collect names before planning to establish lexicographic order. |
+| Streaming service discovery | A service planner yields lazy partition openers as listing/inventory advances. | Keep that stream; `CrawlAccessor::new` does not convert it into a full file vector. |
+
+An object reference is interpreted by its bound byte accessor. For example:
+
+```text
+metadata says logical name "part-00000" maps to "https://host/data?signature=..."
+→ selected request names "part-00000"
+→ provider's bound namespace resolves that name to the exact URL
+→ file reader opens bytes with that accessor's transport policy
+→ codec/format parses those bytes into Arrow batches
+```
+
+For direct storage, the selected reference may instead be a bucket-relative key.
+Do not replace the bound accessor with a fresh generic HTTP client: that can lose
+authentication scope, snapshot binding, shared limits or URL semantics. Resolving
+membership does not automatically download attachments named inside each record;
+following `content_url` values remains a consumer/sink operation.
+
+## Parallel reading: files and native partitions
+
+`ScanPlan` contains independently owned, lazy reader openers. `P` is the maximum
+number of resident partitions, not necessarily the number of files or requests.
+The source planner determines the unit of independent work:
+
+| Input shape | Work scheduled under the shared P budget |
+| --- | --- |
+| Multiple streaming JSON/CSV/WARC files with native file planning | Each worker plans and drains one file, overlapping download, framing and parsing across files. |
+| Independently readable native partitions, such as Parquet row groups | Flatten native partitions across files under the same executor; do not build a file pool containing another partition pool. |
+| Single streaming file with native planning | Retain its native chunk planning. Framing/decompression may still require a sequential byte stream. |
+| Document service, such as PMC metadata | Service-defined independent documents/partitions. Metadata can be known before document data is fetched. |
+| Cursor-dependent API pages | The continuation chain stays indivisible; only independent chains can overlap. |
+
+```mermaid
+flowchart LR
+    Plan["Lazy partition openers"] --> Admit["Admission: at most P resident partitions"]
+    Admit --> W1["Worker 1: own reader + codec + decoder + evolution"]
+    Admit --> W2["Worker 2: own reader + codec + decoder + evolution"]
+    Admit --> WN["Worker P: own reader + codec + decoder + evolution"]
+    W1 --> Q1["Bounded queue 1"]
+    W2 --> Q2["Bounded queue 2"]
+    WN --> QN["Bounded queue P"]
+    Q1 --> Merge["Ordered or unordered merge"]
+    Q2 --> Merge
+    QN --> Merge
+    Merge --> Output["Optional coalesce / prefetch → consumer"]
+    Q1 -. "full: pause worker 1" .-> W1
+    Q2 -. "full: pause worker 2" .-> W2
+    QN -. "full: pause worker P" .-> WN
+```
+
+Native partition queues reserve one of `Q` slots before decoding. Whole streaming
+file queues instead charge estimated Arrow bytes against their per-file `B`
+budget after decoding; `Q` does not also cap these queues. One oversized batch is
+admitted alone, and a producer can hold a further decoded batch awaiting admission.
+A completed worker's queue keeps its resident slot until drained, preventing
+later files from accumulating unbounded output behind a blocked consumer.
+
+Each reader also has its own byte-I/O settings, and the bound client may have a
+shared HTTP request limit/rate policy. Increasing `P` cannot bypass that limit.
+Increasing both `P` and per-reader I/O concurrency can multiply request pressure;
+a streaming source should retain its sequential download path where appropriate.
+
+## Emission: execution order and delivery order
+
+Emission changes which ready batch the merge delivers; it does not add workers
+or change the selected file membership. The default crawl requests unordered
+emission. The combined resolver, accessor and plan contract must allow reordering,
+otherwise opening fails before execution.
+
+```mermaid
+flowchart TD
+    Queues["Resident queues: A is slow; B already has a batch"] --> Mode{"Emission policy"}
+    Mode -->|"Ordered"| Wait["Drain A before B; B waits in its bounded queue"]
+    Mode -->|"Unordered and source permits"| Ready["Emit B now; emit A when ready"]
+    Mode -->|"Unordered but source requires global order"| Error["Reject at open"]
+    Wait --> Output["One fixed-schema output stream"]
+    Ready --> Output
+```
+
+Within a partition, FIFO order is retained. Unordered output can interleave
+partitions and is not reproducible; it neither sorts nor shuffles records. Use
+ordered mode for global-order sources and repeatable seeded sampling/prefix
+limits. Coalescing preserves whichever row order the merge produced.
+
+## Tuning parameters by pipeline stage
+
+| Stage / parameter | Configure with | Increasing it helps when… | Cost or limitation |
+| --- | --- | --- | --- |
+| Resident work `P` (default 4) | `with_parallel_read(ParallelReadLayer::new(P, Q))` | Independent reads are waiting on latency and transport/downstream still have capacity. | More open readers, codec state and queues; may amplify HTTP traffic and throttling. |
+| Native queue slots `Q` (default 2) | Second argument to `ParallelReadLayer::new` | Native partition decoding benefits from limited read-ahead across consumer stalls. | More queued batches per partition; does not tune whole streaming-file byte queues. |
+| Streaming file read-ahead `B` (default 8 MiB/file) | `ParallelReadLayer::with_read_ahead_bytes(B)` | File producers repeatedly run out of queue capacity during short downstream stalls. | Larger queues do not cure a persistently slower sink; memory scales with resident files. |
+| Decoder batch rows (default 8192 in `ReadOptions`) | Request `ReadOptions::with_batch_size` or provider-specific decoder settings | The decoder produces many small batches and can actually honor a larger row target. | Higher latency/memory per batch; document decoders may still produce one row per object. |
+| Output coalescing | `with_coalesce(CoalesceBatchesLayer::rows(R).with_max_estimated_bytes(C))` | Tiny document batches leave downstream download/write capacity underfed. | Combines after decode, so it does not remove per-document Arrow allocations; no flush timer. |
+| Merged prefetch | `with_prefetch(PrefetchLayer::estimated_bytes(F).with_max_rows(R))` | Consumer work would otherwise stop polling an upstream scan that has spare capacity. | Adds a separate task/queue and memory budget; disabled by default. |
+| Emission | `with_emission(EmissionPolicy::Ordered/Unordered)` | Ready results wait behind a slow earlier partition and reordering is allowed. | Unordered arrival changes sampling/prefix selections; source permission is mandatory. |
+| Projection and evolution | Request projection plus `with_evolution`; optional `with_source_schema` | Unused columns consume decode/transport work or casts/computation should overlap across workers. | Pushdown depends on format support; casts allocate; incompatible shard schemas need earlier normalization. |
+| Byte-I/O chunks/concurrency | Request `ByteReadOptions` | A range-capable backend/format benefits from splitting large reads. | Separate from `P`; inherited chunk settings can turn a sequential download into many requests. |
+| HTTP in-flight/rate/backoff | Bound storage operator/client layers | The source permits more requests, or needs coordinated pacing/cooldowns. | Not a `CrawlOptions` field; retain the same shared client/policy across readers. |
+
+For whole streaming files, `P × B` estimates only the configured partition queue
+budgets. For native partitions, `P × Q × average batch bytes` is a rough queue
+estimate. Neither is a process memory limit: add decoder/input buffers, oversized
+and pending batches, optional merged prefetch/coalescing, inference samples and
+consumer-held output. Union-by-name preflight can retain resources for every
+selected file, independently of `P`.
+
+### A workflow for choosing settings
+
+1. Identify the scheduled unit (file, document or row group), required ordering,
+   and whether discovery collects names or streams them. Start from
+   `CrawlOptions::default()` and retain the source's existing HTTP/I/O policy.
+2. Observe discovery/open latency, time to first batch, rows/bytes per batch,
+   sustained **completed** output throughput, RSS, HTTP requests/retries and sink
+   utilization. Distinguish processing an attempt from successfully committing it.
+3. For small metadata documents, try coalescing before increasing source
+   concurrency. A nominally large blob-download pool cannot use its slots if the
+   source/sink feeds it only one tiny batch at a time; writer admission matters too.
+4. If independent reads remain latency-bound and the source permits it, raise
+   `P` gradually while watching request rate, retry tail latency and RSS. For large
+   streaming files, preserve sequential reads and tune the per-file byte budget
+   separately. Do not inherit small-object concurrency targets blindly.
+5. If memory grows while output throughput stays flat, inspect which queues are
+   full. Reduce the relevant queue budget or `P`, or address downstream saturation.
+   Increase a queue only when buffering a short stall improves useful overlap.
+6. If requests fail or retry tails dominate, inspect status/error details and the
+   shared HTTP policy first. Raising concurrency is not a fix for rejected
+   requests; failure recovery and final sink commit remain outside this accessor.
+
+| Observed symptom | First place to inspect |
+| --- | --- |
+| Long startup before any worker starts | Resolver metadata/manifest latency, directory collection, schema inference or union preflight. |
+| Later partitions are ready but no output arrives | Ordered merge waiting on an earlier partition, or coalescing waiting for its target. |
+| Tiny batches and idle downstream download/write slots | Document output shape, coalesce settings, sink batch admission and writer count. |
+| Low CPU and few active HTTP requests despite large `P` | Shared HTTP limits, sequential discovery, too few independent partitions or downstream backpressure. |
+| More workers but more 403/429/retries and fewer completed jobs | Request amplification and source throttling/rejection; verify the service-specific policy and request shape. |
+| RSS grows as concurrency increases | Per-file queues, decoder buffers, inference retention, prefetch and consumer-held batches. |
 
 ## Existing sources and layer configuration
 

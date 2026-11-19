@@ -7,6 +7,8 @@ use crate::{
 
 /// Scan-wide execution settings. Layer configurations retain their complete public APIs.
 /// Byte I/O, HTTP limits, retries and codecs belong to the supplied source/client.
+/// See the [tuning workflow](https://github.com/dentiny/open-arrow-access/blob/main/docs/crawl.md#tuning-parameters-by-pipeline-stage)
+/// for the stage controlled by each parameter and its throughput/memory tradeoffs.
 #[derive(Clone, Debug)]
 pub struct CrawlOptions {
     /// Resident partition/file concurrency, native batch prefetch and per-file
