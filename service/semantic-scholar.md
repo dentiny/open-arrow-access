@@ -439,6 +439,22 @@ a single complete record may exceed it. Use `ParallelReadLayer` to execute
 planned chunks concurrently with bounded read-ahead; opening the reader directly
 remains sequential. No whole shard is buffered or reserialized to JSON.
 
+### Schema validation
+
+The typed reader uses a fixed schema even when early records contain only nulls.
+Like the generic JSON reader, it rejects numeric/boolean values in string fields.
+Unknown fields at every nested object level and unknown span or
+attribute fields fail decoding before output projection. Corpus IDs must be
+positive UInt64 values. Span offsets accept unsigned integers or digit-only
+strings, reject overflow/reversed ranges, and require text for populated lists.
+Offsets are preserved without guessing a byte/character coordinate conversion.
+
+The same explicit span/attribute schema is used for every annotation kind,
+including fields that were all-null in the public sample. Synthetic tests exercise
+non-null values in every declared field; this is not evidence that every future
+upstream payload has that shape. Unknown shapes fail closed and need an explicit
+typed schema update, never a JSON-string fallback.
+
 ## Decoding and current limitations
 
 `SemanticScholarService::dataset` returns a byte accessor. Its synthetic

@@ -73,6 +73,7 @@ fn section(input: &StructArray, output: &DataType) -> Result<ArrayRef> {
             spans(column.as_string::<i32>()).map_err(|e| annotation_error(field.name(), e))
         })
         .collect::<Result<Vec<_>>>()?;
+    validation::validate_section(input, &arrays)?;
     let annotations: ArrayRef = Arc::new(
         StructArray::try_new(
             annotation_fields.clone(),
@@ -92,6 +93,7 @@ fn section(input: &StructArray, output: &DataType) -> Result<ArrayRef> {
 }
 
 pub(super) fn batch(input: RecordBatch) -> Result<RecordBatch> {
+    validation::validate_ids(input["corpusid"].as_primitive())?;
     let schema = schema::s2orc_v2_schema();
     let mut columns = input.columns().to_vec();
     for name in ["body", "bibliography"] {

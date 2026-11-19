@@ -4,6 +4,7 @@ use open_arrow_access_core::{Accessor, ReadOptions, ReadRequest, ScanPlanner, in
 use open_arrow_access_file_format::DecodePartitionOptions;
 use open_arrow_access_service::semantic_scholar::{S2orcV2Accessor, s2orc_v2_schema};
 use open_arrow_access_test_support::{MemoryAccessor, fixture};
+use serde_json::{Value, json};
 use std::num::NonZeroUsize;
 
 async fn batches(
@@ -143,4 +144,98 @@ async fn decodes_official_public_sample() {
             assert_eq!(batch.num_columns(), columns.len());
         }
     }
+}
+
+async fn valid_record() -> Value {
+    serde_json::from_slice(&fixture!("semantic-scholar", "s2orc_v2-synthetic.json").await).unwrap()
+}
+
+// Empty projection still validates the complete input record.
+async fn assert_rejected(row: Value) {
+    assert!(
+        batches(row.to_string().as_bytes(), Some(vec![]))
+            .await
+            .is_err(),
+        "accepted {row}"
+    );
+}
+
+#[tokio::test]
+async fn rejects_unknown_fields_even_when_projected_out() {
+    let base = valid_record().await;
+    for path in [
+        "",
+        "/openaccessinfo",
+        "/openaccessinfo/externalids",
+        "/body",
+        "/body/annotations",
+        "/bibliography",
+        "/bibliography/annotations",
+    ] {
+        let mut row = base.clone();
+        row.pointer_mut(path).unwrap()["unexpected"] = json!(true);
+        assert_rejected(row).await;
+    }
+}
+
+#[tokio::test]
+async fn rejects_invalid_values_even_when_projected_out() {
+    let base = valid_record().await;
+    for (path, value) in [
+        ("/corpusid", json!(null)),
+        ("/corpusid", json!(0)),
+        ("/corpusid", json!(-1)),
+        ("/title", json!(123)),
+        ("/authors", json!([true])),
+        ("/authors", json!([null])),
+        ("/openaccessinfo/license", json!(true)),
+        ("/openaccessinfo/externalids/DOI", json!(123)),
+        ("/body/text", json!({"not":"text"})),
+        ("/body/text", json!(null)),
+        ("/body/annotations/sentence", json!([])),
+    ] {
+        let mut row = base.clone();
+        *row.pointer_mut(path).unwrap() = value;
+        assert_rejected(row).await;
+    }
+    for payload in [
+        "null",
+        "{}",
+        "[null]",
+        r#"[{"start":2,"end":1}]"#,
+        r#"[{"start":"-1","end":1}]"#,
+        r#"[{"start":"18446744073709551616","end":1}]"#,
+        r#"[{"start":0.5,"end":1}]"#,
+        r#"[{"end":1}]"#,
+        r#"[{"start":0,"end":1,"future":true}]"#,
+        r#"[{"start":0,"end":1,"attributes":{"future":true}}]"#,
+    ] {
+        let mut row = base.clone();
+        row["body"]["annotations"]["sentence"] = json!(payload);
+        assert_rejected(row).await;
+    }
+}
+
+#[tokio::test]
+async fn all_annotation_kinds_and_external_ids_have_fixed_types_after_null_rows() {
+    let mut row = valid_record().await;
+    row["openaccessinfo"]["externalids"] = json!({"Medline":"123v1", "MAG":"123", "ACL":"P00-0001", "DOI":"10.example/x", "MedRxiv":"identifier", "PubMedCentral":"123", "ArXiv":"1234.56789"});
+    let span = json!([{"start":0,"end":1,"attributes":{"n":"1","id":"b0","ref_id":"b0","matched_paper_id":42}}]).to_string();
+    for (section, kinds) in [
+        ("body", "sentence paragraph section_header bib_ref"),
+        (
+            "bibliography",
+            "bib_entry bib_id bib_title bib_venue bib_author_first_name bib_author_last_name",
+        ),
+    ] {
+        for kind in kinds.split_whitespace() {
+            row[section]["annotations"][kind] = json!(span);
+        }
+    }
+    let raw = format!("{}\n{}", json!({"corpusid":2}), row);
+    let out = batches(raw.as_bytes(), None).await.unwrap();
+    assert_eq!(out[0].schema(), s2orc_v2_schema());
+    assert_eq!(out[0].num_rows(), 2);
+    assert!(out[0]["body"].is_null(0));
+    assert!(out[0]["body"].is_valid(1));
 }

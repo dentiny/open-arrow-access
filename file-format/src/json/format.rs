@@ -20,7 +20,7 @@ use open_arrow_access_core::{
 /// unselected columns also undergo type and nullability checks. Top-level
 /// arrays and scalar records are rejected. Bare `NaN`, `Infinity`, and `-Infinity`
 /// values are accepted and decoded by Arrow as floating-point values.
-/// String fields also accept numbers and booleans; numeric text is preserved.
+/// String fields reject numeric and boolean values without coercion.
 #[derive(Clone, Debug)]
 pub struct JsonFormat {
     schema: Option<SchemaRef>,
@@ -76,7 +76,7 @@ impl JsonFormat {
     fn build_decoder(&self, schema: SchemaRef, request: &ReadRequest) -> Result<Decoder> {
         ReaderBuilder::new(schema)
             .with_strict_mode(true)
-            .with_coerce_primitive(true)
+            .with_coerce_primitive(false)
             .with_batch_size(request.options.batch_size.get())
             .build_decoder()
             .map_err(super::error::open_error)
