@@ -25,6 +25,7 @@ mod http_limit;
 mod retry;
 pub use config::{RetryConfig, StorageConfig, TimeoutConfig};
 pub use http_limit::HttpConcurrencyLimitLayer;
+pub use retry::HttpReadRateLimitLayer;
 mod validation;
 
 pub use backend::OpenDalAccessor;

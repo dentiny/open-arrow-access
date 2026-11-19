@@ -220,7 +220,7 @@ async fn native_parallel_warc_view_keeps_source_urls_and_binary_bodies() {
         );
         bodies.extend(
             batch["body"]
-                .as_binary::<i64>()
+                .as_binary_view()
                 .iter()
                 .map(|value| value.unwrap().to_vec()),
         );

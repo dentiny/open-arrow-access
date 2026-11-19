@@ -21,16 +21,13 @@ let records = SourceColumns::new()
 
 Enable `format-warc` in the facade (file-format crate: `warc`). Enable
 `source-positions` for the optional frame-aware byte adapter. The positioned WARC
-default format uses the usual `ReadRequest` and `ReadOptions.batch_size` without
-a separate unit size or byte threshold. Dates are appended directly as millisecond timestamps,
-without formatting and reparsing strings. Bodies remain unchanged binary data.
-The default body type remains `LargeBinary`. For owned body buffers without an
-additional payload copy, select
-`WarcArrowFormat.with_source_positions().with_body_view()`. This opt-in changes
-only `body` to `BinaryView`: long bodies retain the parser allocation, while
-values up to 12 bytes are stored inline. Projection and source coordinates are
-unchanged. Body-view batches additionally use a soft 16 MiB body-byte budget,
-configurable with `with_max_body_bytes`; one oversized record is emitted alone.
+default format uses the usual `ReadRequest` and `ReadOptions.batch_size`, plus a
+soft 16 MiB body-byte batch budget. Dates are appended directly as millisecond
+timestamps without formatting and reparsing strings. Both ordinary and positioned
+WARC readers expose unchanged body bytes as `BinaryView` by default: long bodies
+retain the parser allocation, while values up to 12 bytes are stored inline.
+Projection and source coordinates are unchanged. One oversized record is emitted
+alone; there is no separate body-view option or decoder type.
 warc-rs owns header parsing,
 its header-length bound, required-field validation, body lengths and terminators.
 Inter-record whitespace is skipped before marking the first record byte.

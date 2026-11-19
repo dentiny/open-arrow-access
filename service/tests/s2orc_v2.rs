@@ -1,20 +1,12 @@
 use arrow_array::{Array, RecordBatch, cast::AsArray, types::UInt64Type};
-use open_arrow_access_core::{Accessor, ReadOptions, ReadRequest, Reader, ScanPlanner};
+use futures::TryStreamExt;
+use open_arrow_access_core::{Accessor, ReadOptions, ReadRequest, ScanPlanner, into_stream};
 use open_arrow_access_file_format::DecodePartitionOptions;
 use open_arrow_access_service::semantic_scholar::{S2orcV2Accessor, s2orc_v2_schema};
-use open_arrow_access_test_support::MemoryAccessor;
+use open_arrow_access_test_support::{MemoryAccessor, fixture};
 use serde_json::{Value, json};
 use std::num::NonZeroUsize;
 
-fn record(id: u64) -> Value {
-    json!({"corpusid": id, "title": "A paper", "authors": ["Author A"],
-      "openaccessinfo": {"externalids": {"DOI": "10.example/test", "ArXiv": null}, "license": "CCBY"},
-      "body": {"text": "Hello world", "annotations": {
-        "sentence": "[{\"start\":\"0\",\"end\":\"11\",\"attributes\":null}]",
-        "paragraph": "[]", "section_header": null,
-        "bib_ref": "[{\"start\":0,\"end\":5,\"attributes\":{\"ref_id\":\"b0\",\"matched_paper_id\":42}}]"}},
-      "bibliography": {"text": "Reference", "annotations": {"bib_entry": "[]"}}})
-}
 async fn batches(
     raw: &[u8],
     projection: Option<Vec<String>>,
@@ -23,66 +15,38 @@ async fn batches(
         projection,
         batch_size: NonZeroUsize::new(2).unwrap(),
     });
-    let mut reader = S2orcV2Accessor::new(MemoryAccessor::new(raw, 1))
+    let reader = S2orcV2Accessor::new(MemoryAccessor::new(raw, 4096))
         .open(request)
         .await?;
-    let mut out = vec![];
-    while let Some(batch) = reader.next().await? {
-        out.push(batch);
-    }
-    assert!(reader.next().await?.is_none());
-    Ok(out)
+    into_stream(reader).try_collect().await
+}
+
+fn rows(batches: &[RecordBatch]) -> Vec<RecordBatch> {
+    batches
+        .iter()
+        .flat_map(|batch| (0..batch.num_rows()).map(|row| batch.slice(row, 1)))
+        .collect()
 }
 
 #[tokio::test]
 async fn normalizes_nested_payloads_without_json_string_columns() {
-    let out = batches(record(1).to_string().as_bytes(), None)
-        .await
-        .unwrap();
+    let raw = fixture!("semantic-scholar", "s2orc_v2-synthetic.json").await;
+    let out = batches(&raw, None).await.unwrap();
     let b = &out[0];
     assert_eq!(b.schema(), s2orc_v2_schema());
     assert_eq!(b["corpusid"].as_primitive::<UInt64Type>().value(0), 1);
-    let annotations = b["body"]
-        .as_struct()
-        .column_by_name("annotations")
-        .unwrap()
-        .as_struct();
-    let sentence = annotations
-        .column_by_name("sentence")
-        .unwrap()
-        .as_list::<i32>();
+    let annotations = b["body"].as_struct()["annotations"].as_struct();
+    let sentence = annotations["sentence"].as_list::<i32>();
     let value = sentence.value(0);
     assert_eq!(
-        value
-            .as_struct()
-            .column_by_name("end")
-            .unwrap()
+        value.as_struct()["end"]
             .as_primitive::<UInt64Type>()
             .value(0),
         11
     );
-    assert_eq!(
-        value
-            .as_struct()
-            .column_by_name("attributes")
-            .unwrap()
-            .null_count(),
-        1
-    );
-    assert_eq!(
-        annotations
-            .column_by_name("paragraph")
-            .unwrap()
-            .as_list::<i32>()
-            .value_length(0),
-        0
-    );
-    assert!(
-        annotations
-            .column_by_name("section_header")
-            .unwrap()
-            .is_null(0)
-    );
+    assert_eq!(value.as_struct()["attributes"].null_count(), 1);
+    assert_eq!(annotations["paragraph"].as_list::<i32>().value_length(0), 0);
+    assert!(annotations["section_header"].is_null(0));
     assert_eq!(
         b["authors"]
             .as_list::<i32>()
@@ -94,54 +58,99 @@ async fn normalizes_nested_payloads_without_json_string_columns() {
 }
 
 #[tokio::test]
-async fn projection_preserves_rows_and_validates_unselected_annotations() {
-    for columns in [vec!["title".into(), "corpusid".into()], vec![]] {
-        let out = batches(record(1).to_string().as_bytes(), Some(columns.clone()))
-            .await
-            .unwrap();
-        assert_eq!(out[0].num_rows(), 1);
-        assert_eq!(out[0].num_columns(), columns.len());
-    }
-    let mut row = record(1);
-    row["body"]["annotations"]["sentence"] = json!("not JSON");
-    assert!(
-        batches(row.to_string().as_bytes(), Some(vec!["title".into()]))
-            .await
-            .is_err()
-    );
+async fn validates_unselected_annotations() {
+    let invalid = fixture!("semantic-scholar", "s2orc_v2-invalid-annotation.json").await;
+    assert!(batches(&invalid, Some(vec!["title".into()])).await.is_err());
 }
 
 #[tokio::test]
 async fn scan_chunks_cover_rows_once_and_match_sequential_schema() {
-    let raw = (1..=5)
-        .map(|id| record(id).to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let reader = S2orcV2Accessor::new(MemoryAccessor::new(raw.as_bytes(), 7))
-        .with_partition_options(DecodePartitionOptions {
+    let raw = fixture!("semantic-scholar", "s2orc_v2-sample.jsonl").await;
+    let sequential = batches(&raw, None).await.unwrap();
+    let reader = S2orcV2Accessor::new(MemoryAccessor::new(&raw, 4096)).with_partition_options(
+        DecodePartitionOptions {
             target_bytes: NonZeroUsize::new(64).unwrap(),
-        });
+        },
+    );
     let plan = reader
         .plan_scan(ReadRequest::new("part-00000"))
         .await
         .unwrap();
     assert!(plan.streaming_discovery);
     assert_eq!(plan.metadata.schema, s2orc_v2_schema());
-    let mut planned = plan.into_reader();
-    let mut ids: Vec<u64> = vec![];
-    while let Some(b) = planned.next().await.unwrap() {
-        ids.extend(b["corpusid"].as_primitive::<UInt64Type>().values());
-    }
-    assert_eq!(ids, vec![1_u64, 2, 3, 4, 5]);
+    let planned = into_stream(Box::new(plan.into_reader()))
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    let actual = rows(&planned);
+    let expected = rows(&sequential);
+    assert_eq!(actual, expected);
+    assert_eq!(actual.len(), 20);
 }
 
 #[tokio::test]
 async fn empty_shards_retain_schema_and_truncated_input_fails() {
-    assert!(batches(b"", None).await.unwrap().is_empty());
-    assert!(batches(b"{\"corpusid\":1", None).await.is_err());
-    let raw = json!({"corpusid": 1}).to_string();
-    let out = batches(raw.as_bytes(), None).await.unwrap();
+    let empty = fixture!("semantic-scholar", "s2orc_v2-empty.jsonl").await;
+    assert!(batches(&empty, None).await.unwrap().is_empty());
+    let truncated = fixture!("semantic-scholar", "s2orc_v2-truncated.json").await;
+    assert!(batches(&truncated, None).await.is_err());
+    let raw = fixture!("semantic-scholar", "s2orc_v2-minimal.json").await;
+    let out = batches(&raw, None).await.unwrap();
     assert!(out[0]["body"].is_null(0));
+}
+
+#[tokio::test]
+async fn decodes_official_public_sample() {
+    let raw = fixture!("semantic-scholar", "s2orc_v2-sample.jsonl").await;
+    let out = batches(&raw, None).await.unwrap();
+    assert_eq!(out.iter().map(RecordBatch::num_rows).sum::<usize>(), 20);
+    for batch in &out {
+        assert_eq!(batch.schema(), s2orc_v2_schema());
+    }
+    let first = &out[0];
+    assert_eq!(
+        first["corpusid"].as_primitive::<UInt64Type>().value(0),
+        281539311
+    );
+    assert_eq!(
+        first["title"].as_string::<i64>().value(0),
+        "Post-Heroin Post-Traumatic Stress Disorder Spectrum: Heroin Addiction as a Generator of Trauma Sensitisation in Everyday Life: A Perspective Review"
+    );
+    let authors = first["authors"].as_list::<i32>().value(0);
+    assert_eq!(authors.as_string::<i32>().value(0), "I. Maremmani");
+    let body = first["body"].as_struct();
+    assert!(
+        body["text"]
+            .as_string::<i64>()
+            .value(0)
+            .starts_with("\nIntroduction\n\nPost-Traumatic Stress Disorder (PTSD)")
+    );
+    let annotations = body["annotations"].as_struct();
+    for (name, count) in [
+        ("sentence", 344),
+        ("paragraph", 101),
+        ("section_header", 22),
+        ("bib_ref", 246),
+    ] {
+        assert_eq!(annotations[name].as_list::<i32>().value(0).len(), count);
+    }
+    for columns in [vec!["title".into(), "corpusid".into()], vec![]] {
+        let projected = batches(&raw, Some(columns.clone())).await.unwrap();
+        assert_eq!(
+            projected.iter().map(RecordBatch::num_rows).sum::<usize>(),
+            20
+        );
+        for batch in projected {
+            assert_eq!(batch.num_columns(), columns.len());
+        }
+    }
+}
+
+async fn record(id: u64) -> Value {
+    let raw = fixture!("semantic-scholar", "s2orc_v2-synthetic.json").await;
+    let mut row: Value = serde_json::from_slice(&raw).unwrap();
+    row["corpusid"] = json!(id);
+    row
 }
 
 #[tokio::test]
@@ -155,7 +164,7 @@ async fn rejects_unknown_fields_at_every_object_level_even_when_projected_out() 
         "/bibliography",
         "/bibliography/annotations",
     ] {
-        let mut row = record(1);
+        let mut row = record(1).await;
         row.pointer_mut(path)
             .unwrap()
             .as_object_mut()
@@ -172,7 +181,7 @@ async fn rejects_unknown_fields_at_every_object_level_even_when_projected_out() 
         json!({"start":0,"end":1,"future":true}),
         json!({"start":0,"end":1,"attributes":{"future":true}}),
     ] {
-        let mut row = record(1);
+        let mut row = record(1).await;
         row["body"]["annotations"]["sentence"] = json!(json!([span]).to_string());
         assert!(
             batches(row.to_string().as_bytes(), Some(vec![]))
@@ -196,7 +205,7 @@ async fn rejects_type_drift_and_invalid_identity() {
         ("/body/text", json!({"not":"text"})),
         ("/body/annotations/sentence", json!([])),
     ] {
-        let mut row = record(1);
+        let mut row = record(1).await;
         *row.pointer_mut(path).unwrap() = value;
         assert!(
             batches(row.to_string().as_bytes(), None).await.is_err(),
@@ -217,21 +226,21 @@ async fn validates_span_payloads_and_text_dependency() {
         "[{\"start\":0.5,\"end\":1}]",
         "[{\"end\":1}]",
     ] {
-        let mut row = record(1);
+        let mut row = record(1).await;
         row["body"]["annotations"]["sentence"] = json!(payload);
         assert!(
             batches(row.to_string().as_bytes(), None).await.is_err(),
             "accepted payload {payload}"
         );
     }
-    let mut row = record(1);
+    let mut row = record(1).await;
     row["body"]["text"] = Value::Null;
     assert!(batches(row.to_string().as_bytes(), None).await.is_err());
 }
 
 #[tokio::test]
 async fn all_annotation_kinds_and_external_ids_have_fixed_types_after_null_rows() {
-    let mut row = record(2);
+    let mut row = record(2).await;
     row["openaccessinfo"]["externalids"] = json!({"Medline":"123v1", "MAG":"123", "ACL":"P00-0001", "DOI":"10.example/x", "MedRxiv":"identifier", "PubMedCentral":"123", "ArXiv":"1234.56789"});
     for (section, kinds) in [
         (

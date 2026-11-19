@@ -60,6 +60,8 @@ impl Codec {
 }
 /// Opt-in byte input for positioned format readers. Install on raw storage, in place
 /// of a decompression layer. Uncompressed bytes pass through unchanged.
+/// Uses sequential input by default, overriding network I/O splitting options.
+/// Decoded output chunk size is independent of the underlying response size.
 #[derive(Clone, Debug)]
 pub struct SourcePositionLayer {
     chunk_size: NonZeroUsize,
@@ -100,9 +102,13 @@ impl<A: ByteAccessor> Accessor for SourcePositionAccessor<A> {
             ..self.inner.capability()
         }
     }
-    async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+    async fn open(&self, mut request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let codec = Codec::from_path(request.object.locator());
-        let input = self.inner.open(request.clone()).await?;
+        // Positioned decompression consumes the entire stored byte stream in order.
+        // Network range splitting adds requests without parallelizing this decoder.
+        request.options.io_chunk_size = None;
+        request.options.io_concurrency = NonZeroUsize::MIN;
+        let input = self.inner.open_sequential(request.clone()).await?;
         crate::validation::validate_raw_source_position(input.position(), &request.object)?;
         let Some(codec) = codec else {
             return Ok(input);

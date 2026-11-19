@@ -1,6 +1,8 @@
 //! Typed S2ORC v2 records over an explicitly decompressed byte accessor.
 mod decode;
+mod error;
 mod schema;
+mod validation;
 
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use open_arrow_access_core::{
@@ -12,20 +14,19 @@ use open_arrow_access_file_format::{
     json::{JsonAccessor, JsonFormat},
 };
 pub use schema::s2orc_v2_schema;
-use std::sync::Arc;
 
 /// Streaming typed reader. Input must already be decompressed JSONL.
 /// All fields are decoded and validated before top-level projection. Native scan
 /// planning retains the JSON framer's bounded chunks and parallel decode units.
 pub struct S2orcV2Accessor<A> {
-    input: JsonAccessor<Arc<A>>,
+    input: JsonAccessor<A>,
 }
 
 impl<A> S2orcV2Accessor<A> {
     pub fn new(bytes: A) -> Self {
         Self {
             input: FileAccessor::from_format(
-                Arc::new(bytes),
+                bytes,
                 JsonFormat::new(schema::input_schema()).with_primitive_coercion(false),
             ),
         }
@@ -59,8 +60,7 @@ impl<A: ByteAccessor + 'static> Accessor for S2orcV2Accessor<A> {
     async fn open(&self, mut request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         let projection = request.options.resolve_projection(&s2orc_v2_schema())?;
         request.options.projection = None;
-        let reader = self.input.open(request).await?;
-        Ok(convert_reader(reader, projection))
+        Ok(convert_reader(self.input.open(request).await?, projection))
     }
 }
 
@@ -93,7 +93,7 @@ fn convert_reader(
     let batches = into_stream(reader).map(move |batch| {
         let batch = decode::batch(batch?).map_err(|error| error.with_object(object.as_ref()))?;
         match &projection.indices {
-            Some(indices) => batch.project(indices).map_err(decode::arrow_error),
+            Some(indices) => batch.project(indices).map_err(error::arrow_error),
             None => Ok(batch),
         }
     });

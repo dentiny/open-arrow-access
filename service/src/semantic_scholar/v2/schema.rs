@@ -32,22 +32,18 @@ pub(super) fn span() -> Fields {
     .into()
 }
 fn section(kinds: &[&str], typed: bool) -> DataType {
+    let annotation_type = if typed {
+        DataType::List(Arc::new(Field::new(
+            "item",
+            DataType::Struct(span()),
+            false,
+        )))
+    } else {
+        DataType::Utf8
+    };
     let annotations: Fields = kinds
         .iter()
-        .map(|name| {
-            field(
-                name,
-                if typed {
-                    DataType::List(Arc::new(Field::new(
-                        "item",
-                        DataType::Struct(span()),
-                        false,
-                    )))
-                } else {
-                    DataType::Utf8
-                },
-            )
-        })
+        .map(|name| field(name, annotation_type.clone()))
         .collect();
     DataType::Struct(
         vec![
@@ -95,8 +91,9 @@ fn build(typed: bool) -> SchemaRef {
 /// Fixed typed output; JSON-encoded annotation payloads become List<Struct>.
 pub fn s2orc_v2_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
-    SCHEMA.get_or_init(|| build(true)).clone()
+    SCHEMA.get_or_init(|| build(/* typed= */ true)).clone()
 }
 pub(super) fn input_schema() -> SchemaRef {
-    build(false)
+    static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
+    SCHEMA.get_or_init(|| build(/* typed= */ false)).clone()
 }

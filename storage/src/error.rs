@@ -26,6 +26,14 @@ pub(crate) fn invalid_timeouts() -> Error {
     invalid_config("storage timeouts must be positive")
 }
 
+pub(crate) fn invalid_http_request_interval() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "configure_http_rate_limit",
+        "request interval must be positive and representable",
+    )
+}
+
 pub(crate) fn invalid_http_concurrency() -> Error {
     invalid_config("HTTP concurrency must be positive and not exceed Semaphore::MAX_PERMITS")
 }

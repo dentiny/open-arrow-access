@@ -9,10 +9,10 @@ use open_arrow_access_core::{
 };
 
 use super::WarcHeader;
-use super::batch::WarcBatchBuilder;
+use super::batch::{MAX_BODY_BYTES, WarcBatchBuilder};
 use crate::FileAccessor;
 
-/// Physical WARC records as Arrow rows. Bodies are unmodified LargeBinary;
+/// Physical WARC records as Arrow rows. Bodies are unmodified BinaryView values retaining owned parser buffers;
 /// dates default to millisecond timestamps without a timezone;
 /// target URIs remain strings and are never fetched. No HTTP/entity decoding or
 /// revisit resolution is performed. Standard WARC headers are exposed as strings;
@@ -114,27 +114,7 @@ pub fn arrow_schema() -> SchemaRef {
                 Field::new(*name, data_type.clone(), *nullable)
             }));
             // Keep the public schema's body position, before content_length.
-            fields.insert(7, Field::new("body", DataType::LargeBinary, false));
-            Arc::new(Schema::new(fields))
-        })
-        .clone()
-}
-
-pub(super) fn body_view_schema() -> SchemaRef {
-    static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
-    SCHEMA
-        .get_or_init(|| {
-            let fields = arrow_schema()
-                .fields()
-                .iter()
-                .map(|field| {
-                    if field.name() == "body" {
-                        Arc::new(field.as_ref().clone().with_data_type(DataType::BinaryView))
-                    } else {
-                        field.clone()
-                    }
-                })
-                .collect::<Vec<_>>();
+            fields.insert(7, Field::new("body", DataType::BinaryView, false));
             Arc::new(Schema::new(fields))
         })
         .clone()
@@ -196,7 +176,7 @@ impl ReaderFactory for WarcArrowFormat {
             let source_uri = source_uri.clone();
             async move {
                 let mut batch = WarcBatchBuilder::new(output, batch_size);
-                while batch.len() < batch_size {
+                while batch.len() < batch_size && batch.body_bytes() < MAX_BODY_BYTES {
                     let Some(record) = records.next().await else {
                         break;
                     };
