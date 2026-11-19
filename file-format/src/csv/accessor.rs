@@ -1,4 +1,4 @@
-use super::{CsvDialect, CsvFileFormat, CsvFormat, CsvHeader, CsvInferenceOptions};
+use super::{CsvDialect, CsvFileFormat, CsvFormat, CsvHeader, CsvInferenceOptions, CsvSchemaMode};
 use crate::FileAccessor;
 use open_arrow_access_core::SchemaRef;
 
@@ -21,6 +21,12 @@ impl<B> FileAccessor<B, CsvFileFormat> {
 
     pub fn with_inference_options(self, options: CsvInferenceOptions) -> Self {
         self.map_format(|format| format.with_inference_options(options))
+    }
+
+    /// Discover a schema with inferred types or all nullable Utf8 columns.
+    /// Replaces any explicit schema; header and dialect settings are preserved.
+    pub fn with_schema_mode(self, mode: CsvSchemaMode) -> Self {
+        self.map_format(|format| format.with_schema_mode(mode))
     }
 
     pub fn new(inner: B, schema: SchemaRef) -> Self {

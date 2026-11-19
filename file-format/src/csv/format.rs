@@ -5,7 +5,7 @@ use crate::{
 
 use super::{
     CsvDialect, CsvFormat, CsvHeader,
-    inference::{self, CsvInferenceOptions},
+    inference::{self, CsvInferenceOptions, CsvSchemaMode},
     reader::csv_reader,
     validation,
 };
@@ -30,6 +30,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct CsvFileFormat {
     schema: Option<SchemaRef>,
+    schema_mode: CsvSchemaMode,
     inference: CsvInferenceOptions,
     options: CsvOptions,
     header: CsvHeader,
@@ -55,6 +56,7 @@ impl CsvFileFormat {
     pub fn infer() -> Self {
         Self {
             schema: None,
+            schema_mode: CsvSchemaMode::Infer,
             inference: CsvInferenceOptions::default(),
             options: CsvOptions::Dialect(CsvDialect::default()),
             header: CsvHeader::Auto,
@@ -93,6 +95,15 @@ impl CsvFileFormat {
 
     pub fn with_inference_options(mut self, options: CsvInferenceOptions) -> Self {
         self.inference = options;
+        self
+    }
+
+    /// Choose how to discover a schema, replacing any explicit schema.
+    /// `AllStrings` preserves numeric spelling and supports all-null columns.
+    /// Header, dialect, projection and partition options remain independent.
+    pub fn with_schema_mode(mut self, mode: CsvSchemaMode) -> Self {
+        self.schema = None;
+        self.schema_mode = mode;
         self
     }
 
@@ -221,7 +232,14 @@ impl SchemaInference for CsvFileFormat {
             schema,
             has_header,
             input,
-        }) = inference::resolve(input, dialect, self.inference, self.schema.clone()).await?
+        }) = inference::resolve(
+            input,
+            dialect,
+            self.inference,
+            self.schema.clone(),
+            self.schema_mode,
+        )
+        .await?
         else {
             return Ok(None);
         };
