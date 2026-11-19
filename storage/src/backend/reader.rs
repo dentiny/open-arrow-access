@@ -259,13 +259,16 @@ impl ByteReader for SequentialReader {
     fn position(&self) -> Option<BytePosition> {
         Some(BytePosition::Stored(self.offset))
     }
-    // Reject even empty bulk requests, preserving the streaming reader's
-    // contract without acquiring a second permit while its response is unread.
+    // Nonempty range requests fail without acquiring a second permit while
+    // the response is unread. An empty bulk request is always a no-op.
     async fn read_range(&mut self, _range: Range<u64>) -> Result<Bytes> {
         Err(crate::error::sequential_range_unsupported())
     }
 
-    async fn read_ranges(&mut self, _ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+    async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+        if ranges.is_empty() {
+            return Ok(Vec::new());
+        }
         Err(crate::error::sequential_range_unsupported())
     }
 }

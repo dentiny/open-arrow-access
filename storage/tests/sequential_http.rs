@@ -138,6 +138,32 @@ async fn default_sequential_reads_empty_small_and_large_objects_with_one_get() {
 }
 
 #[tokio::test]
+async fn empty_bulk_requests_do_not_read_or_move_the_cursor() {
+    for sequential in [false, true] {
+        let bytes = vec![1, 2, 3, 4];
+        let (storage, requests) = storage(bytes.clone(), bytes.len(), false);
+        let storage =
+            storage.with_http_concurrency_limit(HttpConcurrencyLimitLayer::new(1).unwrap());
+        let mut reader = if sequential {
+            storage.open_sequential("object".into()).await.unwrap()
+        } else {
+            storage.open("object".into()).await.unwrap()
+        };
+        let opened = requests.0.lock().unwrap().len();
+        let completed = requests.1.load(Ordering::SeqCst);
+        let position = reader.position();
+        assert!(reader.read_ranges(Vec::new()).await.unwrap().is_empty());
+        assert_eq!(reader.position(), position);
+        assert_eq!(requests.0.lock().unwrap().len(), opened);
+        assert_eq!(requests.1.load(Ordering::SeqCst), completed);
+        assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), bytes);
+        assert!(reader.next().await.unwrap().is_none());
+        assert!(reader.read_ranges(Vec::new()).await.unwrap().is_empty());
+        assert!(reader.next().await.unwrap().is_none());
+    }
+}
+
+#[tokio::test]
 async fn sequential_readers_reject_ranges_without_waiting_for_another_http_permit() {
     let bytes: Vec<_> = (0..32).collect();
     let (storage, requests) = storage(bytes.clone(), bytes.len(), false);
@@ -147,10 +173,7 @@ async fn sequential_readers_reject_ranges_without_waiting_for_another_http_permi
     let mut reader = storage.open_sequential("object".into()).await.unwrap();
     let mut output = reader.next().await.unwrap().unwrap().to_vec();
     assert!(!reader.capability().read_with_range);
-    assert_eq!(
-        reader.read_ranges(Vec::new()).await.unwrap_err().kind(),
-        open_arrow_access_core::ErrorKind::Unsupported
-    );
+    assert!(reader.read_ranges(Vec::new()).await.unwrap().is_empty());
     assert_eq!(
         reader.read_range(12..17).await.unwrap_err().kind(),
         open_arrow_access_core::ErrorKind::Unsupported
