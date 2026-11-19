@@ -5,11 +5,10 @@ use crate::{
 
 /// Expose a fixed record selection through the common [`ReadRequest`] interface.
 ///
-/// Each operation clones the bound provider request and replaces only its
-/// [`crate::ReadOptions`] (batch size and projection). The incoming request's object and
-/// byte options are ignored by default; selection and other provider settings
-/// remain those of the bound request. Use `with_incoming_byte_options` to forward
-/// caller-owned storage I/O settings where the provider exposes them.
+/// Each operation clones the bound provider request and replaces its record
+/// options and exposed byte options with the incoming request's settings,
+/// including defaults. The incoming object is ignored; selection identity and
+/// other provider settings remain those of the bound request.
 /// Construction performs no I/O.
 ///
 /// Metadata operations delegate to the inner accessor, preserving specialized
@@ -33,24 +32,11 @@ use crate::{
 pub struct SelectionAccessor<A: Accessor> {
     inner: A,
     request: A::Request,
-    incoming_byte_options: bool,
 }
 
 impl<A: Accessor> SelectionAccessor<A> {
     pub fn new(inner: A, request: A::Request) -> Self {
-        Self {
-            inner,
-            request,
-            incoming_byte_options: false,
-        }
-    }
-
-    /// Forward incoming storage I/O settings to provider requests that expose them.
-    /// By default the bound request retains its byte options. Opt in when a caller
-    /// owns a scan-wide I/O policy, such as a conversion service's request size.
-    pub fn with_incoming_byte_options(mut self) -> Self {
-        self.incoming_byte_options = true;
-        self
+        Self { inner, request }
     }
 }
 
@@ -61,9 +47,7 @@ where
     fn selected(&self, incoming: ReadRequest) -> A::Request {
         let mut request = self.request.clone();
         *request.read_options_mut() = incoming.options;
-        if self.incoming_byte_options
-            && let Some(options) = request.byte_read_options_mut()
-        {
+        if let Some(options) = request.byte_read_options_mut() {
             *options = incoming.byte_options;
         }
         request
