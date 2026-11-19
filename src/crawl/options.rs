@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use crate::{
     EmissionPolicy,
     layers::{CoalesceBatchesLayer, ParallelReadLayer, PrefetchLayer, SchemaEvolutionLayer},
@@ -9,6 +11,8 @@ use crate::{
 pub struct CrawlOptions {
     /// Resident partition/file concurrency, native batch prefetch and per-file
     /// read-ahead byte budget, shared by the crawl's single executor.
+    /// Defaults to 4 resident partitions, 2 queued native batches per partition
+    /// and 8 MiB of read-ahead per streaming file.
     pub parallel_read: ParallelReadLayer,
     /// Defaults to unordered; sources requiring global order reject it.
     pub emission: EmissionPolicy,
@@ -21,16 +25,49 @@ pub struct CrawlOptions {
     pub prefetch: Option<PrefetchLayer>,
 }
 
-impl CrawlOptions {
-    /// Require an explicit concurrency/prefetch budget rather than choosing one
-    /// HTTP request rate for both small metadata objects and large streaming files.
-    pub fn new(parallel_read: ParallelReadLayer) -> Self {
+impl Default for CrawlOptions {
+    fn default() -> Self {
         Self {
-            parallel_read,
+            parallel_read: ParallelReadLayer::new(
+                NonZeroUsize::new(4).unwrap(),
+                NonZeroUsize::new(2).unwrap(),
+            ),
             emission: EmissionPolicy::Unordered,
             evolution: SchemaEvolutionLayer::default(),
             coalesce: None,
             prefetch: None,
         }
+    }
+}
+
+impl CrawlOptions {
+    /// Replace the concurrency, native prefetch and streaming read-ahead settings.
+    pub fn with_parallel_read(mut self, parallel_read: ParallelReadLayer) -> Self {
+        self.parallel_read = parallel_read;
+        self
+    }
+
+    /// Select ordered or unordered emission without weakening source requirements.
+    pub fn with_emission(mut self, emission: EmissionPolicy) -> Self {
+        self.emission = emission;
+        self
+    }
+
+    /// Configure row-local schema and value transformations.
+    pub fn with_evolution(mut self, evolution: SchemaEvolutionLayer) -> Self {
+        self.evolution = evolution;
+        self
+    }
+
+    /// Enable scan-wide coalescing with the supplied row and byte budgets.
+    pub fn with_coalesce(mut self, coalesce: CoalesceBatchesLayer) -> Self {
+        self.coalesce = Some(coalesce);
+        self
+    }
+
+    /// Enable merged-stream prefetch with the supplied row and byte budgets.
+    pub fn with_prefetch(mut self, prefetch: PrefetchLayer) -> Self {
+        self.prefetch = Some(prefetch);
+        self
     }
 }

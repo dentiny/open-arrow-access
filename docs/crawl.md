@@ -32,22 +32,20 @@ use open_arrow_access::{
              PrefetchLayer, SchemaEvolutionLayer},
 };
 
-let parallel_read = ParallelReadLayer::new(
-    NonZeroUsize::new(64).unwrap(), // resident partitions/files
-    NonZeroUsize::new(2).unwrap(),  // native partition batch queue
-).with_read_ahead_bytes(NonZeroUsize::new(8 * 1024 * 1024).unwrap());
-let options = CrawlOptions {
-    evolution: SchemaEvolutionLayer::try_new(vec![
+let options = CrawlOptions::default()
+    .with_parallel_read(ParallelReadLayer::new(
+        NonZeroUsize::new(64).unwrap(), // resident partitions/files
+        NonZeroUsize::new(2).unwrap(),  // native partition batch queue
+    ).with_read_ahead_bytes(NonZeroUsize::new(8 * 1024 * 1024).unwrap()))
+    .with_evolution(SchemaEvolutionLayer::try_new(vec![
         ColumnEvolution::rename_column("paperId", "paper_id"),
         ColumnEvolution::change_data_type("year", DataType::Int64),
-    ])?,
-    coalesce: Some(CoalesceBatchesLayer::rows(NonZeroUsize::new(1024).unwrap())
-        .with_max_estimated_bytes(NonZeroUsize::new(4 * 1024 * 1024).unwrap())),
-    prefetch: Some(PrefetchLayer::estimated_bytes(
+    ])?)
+    .with_coalesce(CoalesceBatchesLayer::rows(NonZeroUsize::new(1024).unwrap())
+        .with_max_estimated_bytes(NonZeroUsize::new(4 * 1024 * 1024).unwrap()))
+    .with_prefetch(PrefetchLayer::estimated_bytes(
         NonZeroUsize::new(8 * 1024 * 1024).unwrap(),
-    ).with_max_rows(NonZeroUsize::new(8192).unwrap())),
-    ..CrawlOptions::new(parallel_read)
-};
+    ).with_max_rows(NonZeroUsize::new(8192).unwrap()));
 let crawl = CrawlAccessor::new(source, options);
 let mut reader = crawl.open(request).await?;
 while let Some(batch) = reader.next().await? { /* consume batch */ }
@@ -55,10 +53,13 @@ while let Some(batch) = reader.next().await? { /* consume batch */ }
 
 These values illustrate the independent budgets, not a production recommendation.
 Every field accepts the existing layer configuration directly, including all its
-builder settings. `CrawlOptions::new(parallel_read)` requires an explicit worker
-budget, defaults to unordered emission and identity evolution, and leaves
-coalescing/prefetch disabled. Configure `emission: EmissionPolicy::Ordered` for
-sources that require global ordering or for reproducible sampling.
+builder settings. `CrawlOptions::default()` uses 4 resident partitions, 2 queued
+batches per native partition, and the parallel layer's default 8 MiB read-ahead
+budget per streaming file. Emission defaults to unordered, evolution is identity,
+and coalescing/prefetch are disabled. Override settings with `with_parallel_read`,
+`with_emission`, `with_evolution`, `with_coalesce` and `with_prefetch`.
+Use `.with_emission(EmissionPolicy::Ordered)` for sources that require global
+ordering or for reproducible sampling.
 
 Request options retain batch size, projection and byte I/O settings. Projections
 use evolved names. Supplying `evolution.with_source_schema(full_schema)` pushes
