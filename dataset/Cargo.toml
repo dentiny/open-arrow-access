@@ -10,6 +10,7 @@ description = "Sequential file-set and directory datasets for Open Arrow Access"
 default = []
 
 [dependencies]
+serde_json.workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
 futures.workspace = true

@@ -2882,6 +2882,7 @@ dependencies = [
  "open-arrow-access-test-support",
  "parquet",
  "percent-encoding",
+ "serde_json",
  "tempfile",
  "tokio",
  "url",

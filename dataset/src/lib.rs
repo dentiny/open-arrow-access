@@ -3,3 +3,5 @@
 pub mod directory;
 pub mod file_set;
 pub mod manifest;
+
+pub mod resolution;

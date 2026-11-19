@@ -78,36 +78,7 @@ where
     B: ByteAccessor,
 {
     async fn resolve(&self, request: DirectoryRequest) -> Result<FileSetRequest> {
-        let super::validation::ResolvedGlob {
-            prefix,
-            pattern: glob,
-        } = resolve_glob(request.prefix.locator())?;
-        let match_options = glob::MatchOptions {
-            case_sensitive: true,
-            require_literal_separator: true,
-            require_literal_leading_dot: false,
-        };
-        let objects = list_files(
-            &self.discovery,
-            ListRequest::new(prefix).with_recursive(request.recursive),
-            |relative| {
-                Ok(!relative.is_empty()
-                    && !relative.ends_with('/')
-                    && glob
-                        .as_ref()
-                        .is_none_or(|pattern| pattern.matches_with(relative, match_options))
-                    && request
-                        .suffix
-                        .as_ref()
-                        .is_none_or(|suffix| relative.ends_with(suffix)))
-            },
-        )
-        .await?;
-        Ok(FileSetRequest {
-            objects,
-            options: request.options,
-            byte_options: request.byte_options,
-        })
+        resolve_directory(&self.discovery, request).await
     }
 }
 
@@ -133,4 +104,43 @@ where
     async fn statistics(&self, request: DirectoryRequest) -> Result<ScanStatistics> {
         self.files.statistics(self.resolve(request).await?).await
     }
+}
+
+/// Resolve directory/glob membership without opening any record readers.
+/// Uses the same recursion, suffix, sorting and deduplication rules as DirectoryAccessor.
+/// Read and byte options are preserved in the resulting file-set request.
+pub async fn resolve_directory<B: ByteAccessor + ?Sized>(
+    discovery: &B,
+    request: DirectoryRequest,
+) -> Result<FileSetRequest> {
+    let super::validation::ResolvedGlob {
+        prefix,
+        pattern: glob,
+    } = resolve_glob(request.prefix.locator())?;
+    let match_options = glob::MatchOptions {
+        case_sensitive: true,
+        require_literal_separator: true,
+        require_literal_leading_dot: false,
+    };
+    let objects = list_files(
+        discovery,
+        ListRequest::new(prefix).with_recursive(request.recursive),
+        |relative| {
+            Ok(!relative.is_empty()
+                && !relative.ends_with('/')
+                && glob
+                    .as_ref()
+                    .is_none_or(|pattern| pattern.matches_with(relative, match_options))
+                && request
+                    .suffix
+                    .as_ref()
+                    .is_none_or(|suffix| relative.ends_with(suffix)))
+        },
+    )
+    .await?;
+    Ok(FileSetRequest {
+        objects,
+        options: request.options,
+        byte_options: request.byte_options,
+    })
 }
