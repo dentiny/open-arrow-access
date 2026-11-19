@@ -60,7 +60,11 @@ impl<A: ByteAccessor + 'static> Accessor for AttachmentAccessor<A> {
     type Reader = dyn RecordReader;
 
     fn capability(&self) -> RecordCapability {
-        RecordCapability::sequential(OrderRequirement::PreserveGlobal)
+        let mut capability = self.inner.capability();
+        capability.ordering = capability
+            .ordering
+            .combine(OrderRequirement::PreserveGlobal);
+        capability
     }
 
     async fn metadata(&self, request: ReadRequest) -> Result<RecordMetadata> {

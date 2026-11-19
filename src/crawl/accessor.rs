@@ -90,6 +90,25 @@ impl CrawlAccessor<crate::dataset::file_set::FileSetRequest> {
     /// same path for every provider. Construction performs no discovery or I/O;
     /// select one or more logical names with `FileSetRequest` when opening.
     /// Generic attachments require ordered emission; configure it in `options`.
+    ///
+    /// ```no_run
+    /// use open_arrow_access::{
+    ///     Accessor, AttachmentFormat, AttachmentOptions, ByteAccessor, EmissionPolicy,
+    ///     Result, crawl::{CrawlAccessor, CrawlOptions},
+    ///     dataset::file_set::FileSetRequest,
+    /// };
+    ///
+    /// async fn read(files: impl ByteAccessor + 'static) -> Result<()> {
+    ///     let crawl = CrawlAccessor::attachments(
+    ///         files,
+    ///         AttachmentOptions::new(AttachmentFormat::Parquet),
+    ///         CrawlOptions::default().with_emission(EmissionPolicy::Ordered),
+    ///     )?;
+    ///     let mut reader = crawl.open(FileSetRequest::new(["part-00000.parquet"])).await?;
+    ///     while let Some(batch) = reader.next().await? { /* consume batch */ }
+    ///     Ok(())
+    /// }
+    /// ```
     pub fn attachments<A: ByteAccessor + 'static>(
         source: A,
         attachment: AttachmentOptions,
