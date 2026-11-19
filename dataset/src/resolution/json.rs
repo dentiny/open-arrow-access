@@ -1,13 +1,15 @@
 use std::num::NonZeroUsize;
 
 use open_arrow_access_core::{
-    ByteAccessor, ByteReadOptions, ByteReadRequest, Error, ErrorKind, ObjectRef, ReaderFactory,
-    ReaderFactoryExt, Result,
+    ByteAccessor, ByteReadOptions, ByteReadRequest, ObjectRef, ReaderFactory, ReaderFactoryExt,
+    Result,
 };
 use open_arrow_access_decompression::CompressionFactory;
 use serde_json::Value;
 
 use open_arrow_access_file_format::DetectedFormat;
+
+use super::error;
 
 pub(super) async fn detect<B: ByteAccessor>(
     storage: &B,
@@ -42,11 +44,7 @@ pub(super) async fn detect<B: ByteAccessor>(
         let eof = next.is_none();
         if let Some(bytes) = next {
             if bytes.is_empty() {
-                return Err(error(
-                    object,
-                    ErrorKind::Decode,
-                    "byte reader returned an empty chunk",
-                ));
+                return Err(error::empty_chunk(object));
             }
             sample.extend_from_slice(&bytes[..bytes.len().min(limit - sample.len())]);
         }
@@ -80,15 +78,7 @@ pub(super) async fn detect<B: ByteAccessor>(
             }
         }
         if at_limit {
-            return Err(error(
-                object,
-                ErrorKind::InvalidInput,
-                "no complete JSON record within the probe byte limit",
-            ));
+            return Err(error::probe_limit(object));
         }
     }
-}
-
-fn error(object: &ObjectRef, kind: ErrorKind, message: &str) -> Error {
-    Error::new(kind, "probe_json_format", message).with_object(Some(object))
 }

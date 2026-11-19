@@ -4,7 +4,7 @@ mod json;
 
 use std::num::NonZeroUsize;
 
-use open_arrow_access_core::{ByteAccessor, Error, ErrorKind, Result};
+use open_arrow_access_core::{ByteAccessor, Result};
 pub use open_arrow_access_file_format::{DetectedFormat, detect_format};
 
 use crate::file_set::FileSetRequest;
@@ -53,11 +53,7 @@ pub async fn resolve_files<B: ByteAccessor>(
     policy: &FormatPolicy,
 ) -> Result<ResolvedFiles> {
     if policy.preferred == Some(DetectedFormat::Atif) {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "resolve_files",
-            "ATIF requires content detection and cannot be a filename preference",
-        ));
+        return Err(error::atif_preference());
     }
     let mut files: Vec<_> = request
         .objects
@@ -71,13 +67,7 @@ pub async fn resolve_files<B: ByteAccessor>(
     {
         files.retain(|(_, format)| *format == preferred);
     }
-    let (first, mut format) = files.first().cloned().ok_or_else(|| {
-        Error::new(
-            ErrorKind::NotFound,
-            "resolve_files",
-            "selection contains no recognized files",
-        )
-    })?;
+    let (first, mut format) = files.first().cloned().ok_or_else(error::empty_selection)?;
     for (object, other) in &files {
         if *other != format {
             return Err(error::mixed(&first, format, object, *other));
