@@ -74,6 +74,29 @@ reads, and EOF or the first error drops the input and terminates the stream.
 I/O errors pass through unchanged. Decompression maps these errors with codec
 context and uses `StreamReader` for metadata, capabilities and terminal behavior.
 
+`read_object(accessor, request, operation)` opens through
+`Accessor::open_sequential` and then collects the complete object. The default
+sequential hook delegates to `open`, so existing accessors retain their behavior.
+A specialized byte reader can omit eager length metadata and range capabilities;
+callers of this hook must consume it through `next` only. `Arc`, metrics and named
+file wrappers forward the hook. Regular `open` retains its eager metadata and
+random-access contract.
+
+Without a supplied content-length hint, `OpenDalAccessor` performs one bounded
+read using `ByteReadOptions::io_chunk_size` (2 MiB when unset). It takes the full
+object length from response metadata when available, otherwise falling back to
+stat. The returned bytes seed the existing reader; only the remainder is read
+through its normal chunking and concurrency implementation. Small PMC metadata
+JSON objects therefore require one Range GET and no preceding HEAD, while larger
+objects reuse the same reader implementation as ordinary opens.
+
+The first response must match the expected range length; short or oversized
+responses fail. A rejected range (including an empty object's 416) falls back to
+the existing metadata/open path. Supplied length hints also keep the existing
+path. This is protocol independent, and output byte chunks remain separate from
+storage request size. Opening performs the first bounded read and returns known
+length metadata; there is no additional read-first reader or state machine.
+
 `read_all(reader, operation)` collects an owned byte reader into a `Vec<u8>`.
 Empty chunks are I/O errors using the supplied operation; upstream errors pass
 through unchanged. Parsing and provider validation stay with callers.

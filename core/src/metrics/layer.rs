@@ -99,6 +99,12 @@ where
             .await
             .map(|reader| reader.instrument(self.exporter.clone()))
     }
+
+    async fn open_sequential(&self, request: A::Request) -> Result<Box<A::Reader>> {
+        Call::observe(&self.exporter, "open", self.inner.open_sequential(request))
+            .await
+            .map(|reader| reader.instrument(self.exporter.clone()))
+    }
 }
 
 #[async_trait]
