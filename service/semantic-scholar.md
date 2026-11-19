@@ -181,32 +181,50 @@ parsed text. Converting S2ORC v2 does not collect the original PDFs.
 4. Enumerate the returned `files[]`. Each member is an independent download
    and a natural conversion task input.
 
-The following Python example uses only the standard library. It lists task
-identities without printing the API key or signed download URLs. Export a valid
-`S2_API_KEY` before running; no file downloads or jobs are started.
+The following Rust example uses the existing `SemanticScholarService` and
+`Accessor::list` API. Export a valid `S2_API_KEY` before running. It resolves
+`latest` once and lists all synthetic member names from that pinned manifest;
+it does not download shard objects, submit jobs, or print signed URLs.
 
-```python
-import json
-import os
-from urllib.request import Request, urlopen
+```toml
+[dependencies]
+open-arrow-access = { version = "0.10.3", default-features = false, features = ["service-semantic-scholar"] }
+futures = "0.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
 
-base = "https://api.semanticscholar.org/datasets/v1"
-key = os.environ["S2_API_KEY"]
-dataset = "s2orc_v2"
+```rust
+use futures::TryStreamExt;
+use open_arrow_access::{
+    Accessor,
+    service::semantic_scholar::SemanticScholarService,
+};
 
-def get_json(path, authenticated=False):
-    headers = {"x-api-key": key} if authenticated else {}
-    with urlopen(Request(base + path, headers=headers), timeout=60) as response:
-        return json.load(response)
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let key = std::env::var("S2_API_KEY")?;
+    let dataset = "s2orc_v2";
+    // Resolves latest once, then fetches this release's dataset manifest.
+    let files = SemanticScholarService::new(&key)?
+        .dataset("latest", dataset)
+        .await?;
+    let release_id = &files.metadata().release_id;
+    let parts = files
+        .list("".into())
+        .await?
+        .try_collect::<Vec<_>>()
+        .await?;
 
-release = get_json("/release/latest")["release_id"]
-manifest = get_json(f"/release/{release}/dataset/{dataset}", authenticated=True)
-files = manifest["files"]
-print(f"release={release} dataset={dataset} shards={len(files)}")
-for index, signed_url in enumerate(files):
-    # Keep the index-to-object mapping in a controlled run manifest.
-    # signed_url is the temporary download location; do not log it.
-    print(f"{release}/{dataset}/part-{index:05}")
+    println!(
+        "release={release_id} dataset={dataset} shards={}",
+        parts.len()
+    );
+    for part in parts {
+        // Synthetic member name only; never print the key or signed URLs.
+        println!("{release_id}/{dataset}/{}", part.locator());
+    }
+    Ok(())
+}
 ```
 
 API access and object downloads are separate steps. The key authenticates the
