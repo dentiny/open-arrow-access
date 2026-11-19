@@ -42,14 +42,6 @@ pub(crate) fn short_read(operation: &'static str) -> Error {
     )
 }
 
-pub(crate) fn sequential_range_unsupported() -> Error {
-    Error::new(
-        ErrorKind::Unsupported,
-        "read_range",
-        "streaming sequential readers do not support ranges; use Accessor::open",
-    )
-}
-
 /// Classify OpenDAL I/O failures; unrecognized categories map to `Io`.
 /// Callers handle configuration errors separately.
 pub fn opendal_error_kind(kind: opendal::ErrorKind) -> open_arrow_access_core::ErrorKind {

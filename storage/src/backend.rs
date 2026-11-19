@@ -1,26 +1,24 @@
 //! Shared OpenDAL byte access.
 
-use std::{collections::HashMap, num::NonZeroUsize, ops::Range, sync::Arc};
+mod reader;
 
-use crate::error::{map_error, short_read};
+use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
+
+use crate::error::map_error;
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteMetadata, ByteReadRequest, ByteReader, Bytes, Capability,
-    ListRequest, ObjectRef, ObjectStream, ReadState, Reader, Result, async_trait,
-    validate_byte_range,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectRef,
+    ObjectStream, Result, async_trait,
 };
 use opendal::{
     Execute, Executor, OperationContext, Operator,
     raw::{BoxedStaticFuture, Layer, Servicer},
 };
+use reader::{RangedReader, SequentialReader};
 use tokio::sync::Semaphore;
 
 const DEFAULT_OUTPUT_CHUNK_SIZE: NonZeroUsize = NonZeroUsize::new(64 * 1024).unwrap();
 const DEFAULT_IO_CHUNK_SIZE: usize = 2 * 1024 * 1024;
-const MAX_FETCH_BATCH_SIZE: u64 = 2 * 1024 * 1024;
-// Bound scattered staging as well as payload bytes: tiny network responses
-// can each retain a receive allocation much larger than their payload.
-const MAX_FETCH_RANGES: usize = 512;
 
 /// Generic OpenDAL byte adapter, shared by storage and provider services.
 #[derive(Clone, Debug)]
@@ -97,7 +95,6 @@ impl OpenDalAccessor {
         &self,
         request: ByteReadRequest,
         len: u64,
-        sequential: Option<opendal::BufferStream>,
     ) -> Result<Box<dyn ByteReader>> {
         let ByteReadRequest { object, options } = request;
         let path = object.locator();
@@ -119,21 +116,13 @@ impl OpenDalAccessor {
             )
             .gap(0);
         let inner = builder.await.map_err(|e| map_error("open", path, e))?;
-        Ok(Box::new(OpenDalReader {
-            inner,
-            metadata: ByteMetadata {
-                source: Some(object),
-                content_length: Some(len),
-                version: None,
-            },
-            offset: 0,
-            sequential_only: sequential.is_some(),
-            sequential,
-            pending: opendal::Buffer::new(),
-            len,
-            chunk_size: self.chunk_size.get(),
-            state: ReadState::default(),
-        }) as Box<dyn ByteReader>)
+        let stream = inner
+            .clone()
+            .into_stream(0..len)
+            .await
+            .map_err(|error| map_error("read", path, error))?;
+        let sequential = SequentialReader::new(stream, object, len, self.chunk_size);
+        Ok(Box::new(RangedReader::new(inner, sequential)))
     }
 }
 
@@ -194,12 +183,17 @@ impl Accessor for OpenDalAccessor {
             }
             Err(error) => return Err(map_error("open", path, error)),
         };
-        self.open_with_length(request, len, Some(stream)).await
+        Ok(Box::new(SequentialReader::new(
+            stream,
+            request.object,
+            len,
+            self.chunk_size,
+        )))
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let len = self.content_length(request.object.locator()).await?;
-        self.open_with_length(request, len, None).await
+        self.open_with_length(request, len).await
     }
 }
 
@@ -261,244 +255,4 @@ impl Execute for ReaderExecutor {
     fn timeout(&self) -> Option<BoxedStaticFuture<()>> {
         self.inner.timeout()
     }
-}
-
-struct OpenDalReader {
-    inner: opendal::Reader,
-    sequential: Option<opendal::BufferStream>,
-    pending: opendal::Buffer,
-    metadata: ByteMetadata,
-    offset: u64,
-    sequential_only: bool,
-    len: u64,
-    chunk_size: usize,
-    state: ReadState,
-}
-
-impl OpenDalReader {
-    async fn finish_sequential_response(&mut self) -> Result<Option<Bytes>> {
-        let path = self.metadata.source.as_ref().unwrap().locator();
-        while let Some(buffer) = self
-            .sequential
-            .as_mut()
-            .unwrap()
-            .try_next()
-            .await
-            .map_err(|error| map_error("read", path, error))?
-        {
-            crate::validation::validate_chunk_length(buffer.len() as u64, 0)?;
-        }
-        Ok(None)
-    }
-
-    fn clear_sequential_input(&mut self) {
-        self.sequential = None;
-        self.pending = opendal::Buffer::new();
-    }
-
-    async fn read_next_chunk(&mut self) -> Result<Bytes> {
-        let path = self.metadata.source.as_ref().unwrap().locator();
-        if self.sequential.is_none() {
-            self.sequential = Some(
-                self.inner
-                    .clone()
-                    .into_stream(0..self.len)
-                    .await
-                    .map_err(|error| map_error("read", path, error))?,
-            );
-        }
-        let target = (self.len - self.offset).min(self.chunk_size as u64) as usize;
-        let mut output = Vec::new();
-        let mut written = 0;
-        while written < target {
-            while self.pending.is_empty() {
-                let Some(buffer) = self
-                    .sequential
-                    .as_mut()
-                    .unwrap()
-                    .try_next()
-                    .await
-                    .map_err(|error| map_error("read", path, error))?
-                else {
-                    return Err(short_read("read"));
-                };
-                crate::validation::validate_chunk_length(
-                    buffer.len() as u64,
-                    self.len - self.offset,
-                )?;
-                self.pending = buffer;
-            }
-            if written == 0 && self.pending.current().len() >= target {
-                self.offset += target as u64;
-                return Ok(self.pending.split_to(target).next().unwrap());
-            }
-            let count = (target - written).min(self.pending.len());
-            output.extend(self.pending.split_to(count));
-            self.offset += count as u64;
-            written += count;
-        }
-        Ok(opendal::Buffer::from(output).to_bytes())
-    }
-
-    async fn read_exact_range(&mut self, range: Range<u64>) -> Result<Bytes> {
-        validate_byte_range(&range, self.len, "read_range")?;
-        if range.is_empty() {
-            return Ok(Bytes::new());
-        }
-        let path = self.metadata.source.as_ref().unwrap().locator();
-        let expected = range.end - range.start;
-        if expected > MAX_FETCH_BATCH_SIZE {
-            // Parquet requires contiguous Bytes. Copy incrementally into the
-            // final allocation rather than retaining every fragment as well.
-            let capacity = crate::validation::range_capacity(expected)?;
-            let mut output = Vec::with_capacity(capacity);
-            let read = self
-                .inner
-                .read_into(&mut output, range)
-                .await
-                .map_err(|error| map_error("read", path, error))?;
-            crate::validation::validate_read_length(read as u64, capacity as u64, "read_range")?;
-            return Ok(Bytes::from(output));
-        }
-        let buffer = self
-            .inner
-            .read(range)
-            .await
-            .map_err(|error| map_error("read", path, error))?;
-        crate::validation::validate_read_length(buffer.len() as u64, expected, "read_range")?;
-        Ok(buffer.to_bytes())
-    }
-
-    async fn fetch_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
-        let lengths = ranges
-            .iter()
-            .map(|range| range.end - range.start)
-            .collect::<Vec<_>>();
-        let path = self.metadata.source.as_ref().unwrap().locator();
-        let buffers = self
-            .inner
-            .fetch(ranges)
-            .await
-            .map_err(|error| map_error("read_ranges", path, error))?;
-        buffers
-            .into_iter()
-            .zip(lengths)
-            .map(|(buffer, expected)| {
-                crate::validation::validate_read_length(
-                    buffer.len() as u64,
-                    expected,
-                    "read_ranges",
-                )?;
-                Ok(compact_range_buffer(buffer))
-            })
-            .collect()
-    }
-}
-
-#[async_trait]
-impl Reader for OpenDalReader {
-    type Item = Bytes;
-    type Metadata = ByteMetadata;
-    type Capability = Capability;
-
-    fn capability(&self) -> Capability {
-        Capability {
-            read: true,
-            read_with_range: !self.sequential_only,
-            read_parallel: false,
-            list: false,
-        }
-    }
-
-    fn metadata(&self) -> &ByteMetadata {
-        &self.metadata
-    }
-
-    async fn next(&mut self) -> Result<Option<Bytes>> {
-        if self.state.is_finished() {
-            return Ok(None);
-        }
-        let result = if self.offset == self.len {
-            if self.sequential_only {
-                // Consume body EOF, rather than dropping a successful response
-                // as cancelled and preventing HTTP connection reuse.
-                self.finish_sequential_response().await
-            } else {
-                Ok(None)
-            }
-        } else {
-            self.read_next_chunk().await.map(Some)
-        };
-        self.state.observe(&result);
-        if self.state.is_finished() {
-            self.clear_sequential_input();
-        }
-        result
-    }
-}
-
-#[async_trait]
-impl ByteReader for OpenDalReader {
-    fn position(&self) -> Option<open_arrow_access_core::BytePosition> {
-        Some(open_arrow_access_core::BytePosition::Stored(self.offset))
-    }
-    async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
-        if self.sequential_only {
-            return Err(crate::error::sequential_range_unsupported());
-        }
-        self.read_exact_range(range).await
-    }
-
-    async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
-        if self.sequential_only {
-            return Err(crate::error::sequential_range_unsupported());
-        }
-        for range in &ranges {
-            validate_byte_range(range, self.len, "read_range")?;
-        }
-        if ranges.iter().all(Range::is_empty) {
-            return Ok(vec![Bytes::new(); ranges.len()]);
-        }
-        let mut output = Vec::with_capacity(ranges.len());
-        let mut start = 0;
-        // Keep fragmented staging bounded. Large ranges are assembled directly;
-        // small ranges retain fetch's coalescing/concurrency within each batch.
-        while start < ranges.len() {
-            if ranges[start].end - ranges[start].start > MAX_FETCH_BATCH_SIZE {
-                output.push(self.read_exact_range(ranges[start].clone()).await?);
-                start += 1;
-                continue;
-            }
-            let mut end = start;
-            let mut size = 0;
-            while end < ranges.len() {
-                if end - start >= MAX_FETCH_RANGES {
-                    let previous = &ranges[end - 1];
-                    let next = &ranges[end];
-                    // Keep adjacent/overlapping runs together so limiting
-                    // scattered work does not split a coalesced backend read.
-                    if next.start > previous.end || next.end < previous.start {
-                        break;
-                    }
-                }
-                let length = ranges[end].end - ranges[end].start;
-                if length > MAX_FETCH_BATCH_SIZE - size {
-                    break;
-                }
-                size += length;
-                end += 1;
-            }
-            output.extend(self.fetch_ranges(ranges[start..end].to_vec()).await?);
-            start = end;
-        }
-        Ok(output)
-    }
-}
-
-// Copy small responses so returned slices do not retain large network allocations.
-fn compact_range_buffer(buffer: opendal::Buffer) -> Bytes {
-    if buffer.len() > 4096 {
-        return buffer.to_bytes();
-    }
-    Bytes::from(buffer.to_vec())
 }

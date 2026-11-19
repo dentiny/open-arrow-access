@@ -182,7 +182,16 @@ async fn ordinary_and_known_length_opens_retain_independent_ranges() {
             reader.read_range(12..17).await.unwrap().as_ref(),
             &bytes[12..17]
         );
-        assert_eq!(read_all(reader, "test").await.unwrap(), bytes);
+        let mut output = Vec::new();
+        while let Some(chunk) = reader.next().await.unwrap() {
+            output.extend_from_slice(&chunk);
+        }
+        assert_eq!(output, bytes);
+        assert_eq!(
+            reader.read_range(12..17).await.unwrap().as_ref(),
+            &bytes[12..17]
+        );
+        assert!(reader.next().await.unwrap().is_none());
         let requests = requests.0.lock().unwrap();
         let reads = if hint {
             &requests[..]
@@ -195,9 +204,45 @@ async fn ordinary_and_known_length_opens_retain_independent_ranges() {
             [
                 (Method::GET, Some("bytes=12-16".into())),
                 (Method::GET, Some("bytes=0-31".into())),
+                (Method::GET, Some("bytes=12-16".into())),
             ]
         );
     }
+}
+
+#[tokio::test]
+async fn ordinary_empty_reader_finishes_without_starting_a_get() {
+    let (storage, requests) = storage(Vec::new(), 0, false);
+    let mut reader = storage.open("object".into()).await.unwrap();
+    assert!(reader.capability().read_with_range);
+    assert!(reader.next().await.unwrap().is_none());
+    assert!(reader.next().await.unwrap().is_none());
+    assert!(reader.read_range(0..0).await.unwrap().is_empty());
+    assert_eq!(*requests.0.lock().unwrap(), [(Method::HEAD, None)]);
+}
+
+#[tokio::test]
+async fn range_validation_errors_leave_the_sequential_cursor_usable() {
+    let bytes: Vec<_> = (0..32).collect();
+    let (storage, _) = storage(bytes.clone(), bytes.len(), false);
+    let storage = storage.with_chunk_size(NonZeroUsize::new(4).unwrap());
+    let mut reader = storage.open("object".into()).await.unwrap();
+    assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), &bytes[..4]);
+    let position = reader.position();
+    assert_eq!(
+        reader.read_range(31..33).await.unwrap_err().kind(),
+        open_arrow_access_core::ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        reader
+            .read_ranges(vec![0..1, 31..33])
+            .await
+            .unwrap_err()
+            .kind(),
+        open_arrow_access_core::ErrorKind::InvalidInput
+    );
+    assert_eq!(reader.position(), position);
+    assert_eq!(reader.next().await.unwrap().unwrap().as_ref(), &bytes[4..8]);
 }
 
 #[tokio::test]
@@ -227,6 +272,14 @@ async fn explicit_chunk_options_keep_known_length_partitioned_io() {
 #[tokio::test]
 async fn truncated_sequential_response_errors_once_and_then_terminates() {
     let (storage, _) = storage(vec![1, 2], 4, false);
+    let mut reader = storage.open_sequential("object".into()).await.unwrap();
+    assert!(reader.next().await.is_err());
+    assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn oversized_sequential_response_errors_once_and_then_terminates() {
+    let (storage, _) = storage(vec![1, 2, 3, 4], 2, false);
     let mut reader = storage.open_sequential("object".into()).await.unwrap();
     assert!(reader.next().await.is_err());
     assert!(reader.next().await.unwrap().is_none());
