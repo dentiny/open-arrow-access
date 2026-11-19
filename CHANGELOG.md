@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0 - 2026-11-18
+
+- Read PMC article metadata from a selected inventory shard, with native partitions for parallel reads.
+- Select PMC PDF, XML or TXT content URLs, defaulting to PDF, through the derived `content_url` column.
+- Flatten PMC metadata into top-level typed fields: remove the duplicate `metadata` struct and rename `text` to `text_url` (breaking schema changes).
+- Allow explicit CSV delimiters to override file extensions.
+- Release all 8 public workspace crates at 0.9.0 with matching internal dependency requirements.
+
 ## 0.8.2 - 2026-11-18
 
 - Preserve pre-consumption source statistics through prepared sources and file selections for ingestion planning.
