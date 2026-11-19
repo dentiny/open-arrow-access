@@ -114,6 +114,24 @@ impl Accessor for OpenDalAccessor {
         }
     }
 
+    async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        // Other services and caller-supplied lengths retain the existing reader.
+        if !matches!(self.operator.info().scheme(), "s3" | "http")
+            || self
+                .content_lengths
+                .as_ref()
+                .is_some_and(|lengths| lengths.contains_key(request.object.locator()))
+        {
+            return self.open(request).await;
+        }
+        Ok(crate::read_first::open(
+            self.operator(),
+            request,
+            self.chunk_size,
+            DEFAULT_IO_CHUNK_SIZE,
+        ))
+    }
+
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let ByteReadRequest { object, options } = request;
         let path = object.locator();

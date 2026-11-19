@@ -43,6 +43,16 @@ where
         }
     }
 
+    async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+        let object = self
+            .files
+            .get(request.object.locator())
+            .ok_or_else(crate::error::unknown_named_file)?;
+        self.inner
+            .open_sequential(ByteReadRequest::new(object.clone()).with_options(request.options))
+            .await
+    }
+
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let object = self
             .files

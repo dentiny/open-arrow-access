@@ -74,6 +74,30 @@ reads, and EOF or the first error drops the input and terminates the stream.
 I/O errors pass through unchanged. Decompression maps these errors with codec
 context and uses `StreamReader` for metadata, capabilities and terminal behavior.
 
+`read_object(accessor, request, operation)` opens through
+`Accessor::open_sequential` and then collects the complete object. The default
+sequential hook delegates to `open`, so existing accessors retain their behavior.
+A specialized byte reader can omit eager length metadata and range capabilities;
+callers of this hook must consume it through `next` only. `Arc`, metrics and named
+file wrappers forward the hook. Regular `open` retains its eager metadata and
+random-access contract.
+
+For HTTP and S3 without a supplied content-length hint, `OpenDalAccessor` starts
+with a bounded Range GET, using `ByteReadOptions::io_chunk_size` (2 MiB when unset).
+It learns complete object length from the GET response (`Content-Range` for partial
+responses) and continues with bounded, sequential ranges when necessary. Small
+PMC metadata JSON objects require one GET and no preceding HEAD. Output byte
+chunks retain the accessor's separate output-size setting. Later ranges use
+`If-Match` when the service supports it and the response supplied an ETag.
+
+An initial 416 on an empty object is confirmed with stat, and missing response
+metadata also falls back to stat. Nonempty range failures, short responses and
+oversized responses fail rather than silently returning partial objects. Servers
+that ignore Range for objects larger than the configured request size are rejected.
+Other backends and supplied content-length hints use the existing reader path.
+The sequential byte reader can start without I/O and keeps its public length
+metadata unknown; regular metadata inspection remains available separately.
+
 `read_all(reader, operation)` collects an owned byte reader into a `Vec<u8>`.
 Empty chunks are I/O errors using the supplied operation; upstream errors pass
 through unchanged. Parsing and provider validation stay with callers.

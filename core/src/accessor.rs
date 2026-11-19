@@ -20,8 +20,8 @@ pub trait Accessor: Send + Sync {
 
     /// Return the metadata exposed by `open(request)`, without consuming output items.
     ///
-    /// For unchanged input and configuration, this must equal the opened reader's
-    /// metadata, including projection and source identity. The compatibility default
+    /// For unchanged input and configuration, this must equal the reader opened
+    /// by `open`, including projection and source identity. The compatibility default
     /// opens and immediately drops a reader; it inherits any opening side effects.
     /// Implementations should override it to inspect only bounded inference samples
     /// or format metadata, without starting background work or retaining readers.
@@ -55,6 +55,15 @@ pub trait Accessor: Send + Sync {
     /// or opening/inspection fails. Failures encountered while consuming items
     /// are subsequently returned by [`Reader::next`].
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>>;
+
+    /// Open for sequential consumption through `Reader::next` only.
+    ///
+    /// Defaults to `open`. Byte backends can avoid eager length/stat requests;
+    /// the returned reader may omit length metadata and range capabilities.
+    /// Use `open` when the caller needs random access or eager metadata.
+    async fn open_sequential(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
+        self.open(request).await
+    }
 }
 
 #[async_trait]
@@ -85,6 +94,10 @@ impl<A: Accessor + ?Sized> Accessor for Arc<A> {
 
     async fn open(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
         (**self).open(request).await
+    }
+
+    async fn open_sequential(&self, request: Self::Request) -> Result<Box<Self::Reader>> {
+        (**self).open_sequential(request).await
     }
 }
 
