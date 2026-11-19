@@ -439,24 +439,30 @@ flowchart LR
 
 ```rust,ignore
 use open_arrow_access::{
-    Accessor, AttachmentAccessor, AttachmentFormat, AttachmentOptions,
-    EmissionPolicy, ReadRequest,
+    Accessor, AttachmentFormat, AttachmentOptions, EmissionPolicy,
     crawl::{CrawlAccessor, CrawlOptions},
+    dataset::file_set::FileSetRequest,
 };
 
 // resolved_files is the provider-bound byte accessor; keep its authentication,
 // snapshot identity, signed URLs and transport policy.
-let records = AttachmentAccessor::new(
+let crawl = CrawlAccessor::attachments(
     resolved_files,
     AttachmentOptions::new(AttachmentFormat::Parquet),
-)?;
-let crawl = CrawlAccessor::new(
-    records,
     CrawlOptions::default().with_emission(EmissionPolicy::Ordered),
-);
-let mut reader = crawl.open(ReadRequest::new("part-00000.parquet")).await?;
+)?;
+let mut reader = crawl.open(FileSetRequest::new([
+    "part-00000.parquet", "part-00001.parquet",
+])).await?;
 while let Some(batch) = reader.next().await? { /* consume batch */ }
 ```
+
+`CrawlAccessor::attachments` is the integrated entry point: it binds
+`AttachmentAccessor`, constructs a native-planning `FileSetAccessor`, then
+installs the crawl execution layers. Select one logical name for a single
+attachment, or several names to read files and their native partitions under
+one executor budget. Provider adapters only resolve metadata and supply the
+bound namespace and selection; they need no per-provider executor or format switch.
 
 | Attachment format | Work exposed by its planner |
 | --- | --- |
@@ -472,13 +478,13 @@ and discarding a bound reader. Planning does not perform a separate metadata cal
 and does not collect all partition openers. Input samples/readers retained by the
 format remain part of its plan.
 
-For several selected attachments, use
-`FileSetAccessor::new(records).with_file_planning()` and pass that to the crawl
-with a `FileSetRequest` containing their logical names. This retains one executor
-budget across files and file-internal partitions. The provider still owns file
-membership; this API does not discover arbitrary links or follow record-level
-`content_url` fields. Advanced format/schema/partition settings can use the typed
-format accessors directly.
+The provider still owns file membership; this API does not discover arbitrary
+links or follow record-level `content_url` fields. Advanced format/schema/partition
+settings can use the typed format accessors with `CrawlAccessor::files` directly.
+Applications retaining a `PreparedSource` can use
+`PreparedSource::prepare_plannable(AttachmentAccessor::new(...), request)` and
+wrap its execution-time plan with `CrawlAccessor::new`; that preserves late
+projection/batch/concurrency settings rather than fixing execution during bind.
 
 ## Differing schemas across files
 
