@@ -68,3 +68,11 @@ pub(super) fn empty_split() -> Error {
         "selected split contains no Parquet shards",
     )
 }
+
+pub(super) fn invalid_dataset_uri() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "parse_huggingface_dataset_uri",
+        "expected hf://datasets/<owner>/<repository>@<revision>/<config>/<split> without credentials, query or fragment; encode slashes in the revision as %2F",
+    )
+}
