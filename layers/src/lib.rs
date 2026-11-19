@@ -1,6 +1,9 @@
 //! Format-independent transformations following the shared `Layer` contract.
 
 mod batch;
+mod coalesce_batches;
+pub use coalesce_batches::{CoalesceBatchesAccessor, CoalesceBatchesLayer};
+
 mod error;
 mod expression;
 mod scan_policy;

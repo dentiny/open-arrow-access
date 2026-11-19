@@ -14,6 +14,7 @@ Byte decompression layers use the same contract but require [codec features](../
 | `LimitLayer` | Keep at most N rows | One budget per open; stops and releases the source at the limit |
 | `SamplingLayer` | Seeded Bernoulli row sampling | Approximate count; preserves selected row order |
 | `PrefetchLayer` | Read ahead while the caller processes batches | Per-open row and/or estimated-byte queue budgets; preserves batch boundaries |
+| `CoalesceBatchesLayer` | Combine small batches across the opened scan | Row and estimated-byte budgets; preserves schema and row order |
 | `ParallelReadLayer` | Execute independent scan partitions concurrently | Requires `ScanPlanner`; preserves output order by default |
 | `UnorderedEmissionLayer` | Emit ready batches from a reorderable scan | Use with parallel execution; global-order sources reject it |
 
@@ -78,6 +79,38 @@ layer outside any of them is unsupported. Supply a complete `with_source_schema`
 read only the source columns needed by all changes and the final output. Without
 it, adding, removing or renaming columns requires reading the full source schema.
 All configured computations run before final projection.
+
+## Coalesce small batches
+
+Document sources such as PMC emit one row per batch. Place `CoalesceBatchesLayer`
+outside `ParallelReadLayer` to combine those rows before a downstream sink, whose
+download concurrency may otherwise be limited by the number of rows in each batch.
+
+```rust
+use std::num::NonZeroUsize;
+use open_arrow_access_core::{Accessor, AccessorExt, RecordReader};
+use open_arrow_access_layers::{CoalesceBatchesAccessor, CoalesceBatchesLayer};
+
+fn coalesce<A: Accessor<Reader = dyn RecordReader>>(source: A) -> CoalesceBatchesAccessor<A> {
+    source.layer(
+        CoalesceBatchesLayer::rows(NonZeroUsize::new(64).unwrap())
+            .with_max_estimated_bytes(NonZeroUsize::new(4 * 1024 * 1024).unwrap()),
+    )
+}
+```
+
+Use `rows(...)` for only a row budget, `estimated_bytes(...)` for only a byte
+budget, or add the other budget with `with_max_rows(...)` /
+`with_max_estimated_bytes(...)`. Constructors always enable at least one budget.
+With both enabled, the first budget reached flushes the batch. A configured row
+limit is strict; larger input batches are sliced. Estimated array bytes
+bound accumulation, with an oversized slice emitted alone. Shared buffers and
+concatenation allocations mean this is not a process memory cap. Empty batches
+are skipped; nonempty zero-column batches cost at least one byte under a byte
+budget. The final partial batch is returned at EOF. Buffered rows precede
+an upstream error. There is no flush timer: a partial batch waits for more input.
+Place `PrefetchLayer` outside coalescing to read the next combined batch while the
+caller processes the current one, with a separate bounded queue budget.
 
 ## Prefetch records
 
