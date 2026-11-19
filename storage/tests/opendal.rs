@@ -58,6 +58,21 @@ async fn filesystem_read_contract() {
 }
 
 #[tokio::test]
+async fn sequential_filesystem_reads_fall_back_when_response_metadata_is_unavailable() {
+    for bytes in [b"".as_slice(), b"small object"] {
+        let (_dir, operator) = temp_fs(&[("data.bin", bytes)]);
+        let accessor = OpenDalAccessor::new(operator);
+        let mut reader = accessor.open_sequential("data.bin".into()).await.unwrap();
+        assert_eq!(reader.metadata().content_length, Some(bytes.len() as u64));
+        let mut output = Vec::new();
+        while let Some(chunk) = reader.next().await.unwrap() {
+            output.extend_from_slice(&chunk);
+        }
+        assert_eq!(output, bytes);
+    }
+}
+
+#[tokio::test]
 async fn sequential_reads_report_short_input_and_terminate() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("short.bin");

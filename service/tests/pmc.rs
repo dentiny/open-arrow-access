@@ -32,7 +32,7 @@ async fn maps_metadata_without_fetching_content() {
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch.schema(), schema());
     assert_eq!(batch.num_rows(), 1);
-    assert_eq!(batch["content_url"], batch["pdf_url"]);
+    assert_eq!(batch["content_url"].to_data(), batch["pdf_url"].to_data());
     assert_eq!(batch.schema().fields().len(), 17);
     assert!(batch.schema().field_with_name("metadata").is_err());
     assert!(batch.schema().field_with_name("metadata_json").is_err());

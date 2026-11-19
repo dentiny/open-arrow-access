@@ -97,7 +97,7 @@ impl OpenDalAccessor {
         &self,
         request: ByteReadRequest,
         len: u64,
-        pending: opendal::Buffer,
+        sequential: Option<opendal::BufferStream>,
     ) -> Result<Box<dyn ByteReader>> {
         let ByteReadRequest { object, options } = request;
         let path = object.locator();
@@ -119,17 +119,6 @@ impl OpenDalAccessor {
             )
             .gap(0);
         let inner = builder.await.map_err(|e| map_error("open", path, e))?;
-        let sequential = if pending.is_empty() {
-            None
-        } else {
-            Some(
-                inner
-                    .clone()
-                    .into_stream(pending.len() as u64..len)
-                    .await
-                    .map_err(|e| map_error("read", path, e))?,
-            )
-        };
         Ok(Box::new(OpenDalReader {
             inner,
             metadata: ByteMetadata {
@@ -138,8 +127,9 @@ impl OpenDalAccessor {
                 version: None,
             },
             offset: 0,
+            sequential_only: sequential.is_some(),
             sequential,
-            pending,
+            pending: opendal::Buffer::new(),
             len,
             chunk_size: self.chunk_size.get(),
             state: ReadState::default(),
@@ -169,50 +159,47 @@ impl Accessor for OpenDalAccessor {
 
     async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let path = request.object.locator();
-        if self
-            .content_lengths
-            .as_ref()
-            .is_some_and(|lengths| lengths.contains_key(path))
+        if request.options.io_chunk_size.is_some()
+            || request.options.io_concurrency.get() > 1
+            || self
+                .content_lengths
+                .as_ref()
+                .is_some_and(|lengths| lengths.contains_key(path))
         {
             return self.open(request).await;
         }
-        let size = request
-            .options
-            .io_chunk_size
-            .map_or(DEFAULT_IO_CHUNK_SIZE, |v| v.get()) as u64;
         let reader = self
             .operator()
             .reader(path)
             .await
             .map_err(|e| map_error("open", path, e))?;
-        // One bounded read supplies both the first bytes and, when available,
-        // the full object length. Reuse the ordinary reader for the remainder.
-        let pending = match reader.read(0..size).await {
-            Ok(buffer) => buffer,
-            Err(error) if error.kind() == opendal::ErrorKind::RangeNotSatisfied => {
-                return self.open(request).await;
-            }
-            Err(error) => return Err(map_error("read", path, error)),
-        };
-        let len = match reader.metadata() {
-            Some(metadata) => {
+        // An unbounded stream avoids both a HEAD and an oversized exact range
+        // for tiny objects. Keep this response for all sequential consumption.
+        // Explicit splitting options above retain the known-length chunked path.
+        let mut stream = reader
+            .into_stream(..)
+            .await
+            .map_err(|e| map_error("open", path, e))?;
+        let len = match stream.metadata().await {
+            Ok(metadata) => {
                 crate::validation::validate_regular_file(metadata.is_file())?;
                 metadata.content_length()
             }
-            None => self.content_length(path).await?,
+            // Some backends (including Fs) cannot expose read-response metadata.
+            Err(error) if error.kind() == opendal::ErrorKind::Unsupported => {
+                // Release any response/HTTP permit before opening the fallback.
+                // Known lengths also avoid oversized filesystem read buffers.
+                drop(stream);
+                return self.open(request).await;
+            }
+            Err(error) => return Err(map_error("open", path, error)),
         };
-        let expected = size.min(len);
-        crate::validation::validate_chunk_length(pending.len() as u64, expected)?;
-        if pending.len() as u64 != expected {
-            return Err(short_read("read"));
-        }
-        self.open_with_length(request, len, pending).await
+        self.open_with_length(request, len, Some(stream)).await
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let len = self.content_length(request.object.locator()).await?;
-        self.open_with_length(request, len, opendal::Buffer::new())
-            .await
+        self.open_with_length(request, len, None).await
     }
 }
 
@@ -282,12 +269,28 @@ struct OpenDalReader {
     pending: opendal::Buffer,
     metadata: ByteMetadata,
     offset: u64,
+    sequential_only: bool,
     len: u64,
     chunk_size: usize,
     state: ReadState,
 }
 
 impl OpenDalReader {
+    async fn finish_sequential_response(&mut self) -> Result<Option<Bytes>> {
+        let path = self.metadata.source.as_ref().unwrap().locator();
+        while let Some(buffer) = self
+            .sequential
+            .as_mut()
+            .unwrap()
+            .try_next()
+            .await
+            .map_err(|error| map_error("read", path, error))?
+        {
+            crate::validation::validate_chunk_length(buffer.len() as u64, 0)?;
+        }
+        Ok(None)
+    }
+
     fn clear_sequential_input(&mut self) {
         self.sequential = None;
         self.pending = opendal::Buffer::new();
@@ -401,7 +404,7 @@ impl Reader for OpenDalReader {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            read_with_range: true,
+            read_with_range: !self.sequential_only,
             read_parallel: false,
             list: false,
         }
@@ -412,12 +415,20 @@ impl Reader for OpenDalReader {
     }
 
     async fn next(&mut self) -> Result<Option<Bytes>> {
-        if self.state.is_finished() || self.offset == self.len {
-            self.state.finish();
-            self.clear_sequential_input();
+        if self.state.is_finished() {
             return Ok(None);
         }
-        let result = self.read_next_chunk().await.map(Some);
+        let result = if self.offset == self.len {
+            if self.sequential_only {
+                // Consume body EOF, rather than dropping a successful response
+                // as cancelled and preventing HTTP connection reuse.
+                self.finish_sequential_response().await
+            } else {
+                Ok(None)
+            }
+        } else {
+            self.read_next_chunk().await.map(Some)
+        };
         self.state.observe(&result);
         if self.state.is_finished() {
             self.clear_sequential_input();
@@ -432,10 +443,16 @@ impl ByteReader for OpenDalReader {
         Some(open_arrow_access_core::BytePosition::Stored(self.offset))
     }
     async fn read_range(&mut self, range: Range<u64>) -> Result<Bytes> {
+        if self.sequential_only {
+            return Err(crate::error::sequential_range_unsupported());
+        }
         self.read_exact_range(range).await
     }
 
     async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+        if self.sequential_only {
+            return Err(crate::error::sequential_range_unsupported());
+        }
         for range in &ranges {
             validate_byte_range(range, self.len, "read_range")?;
         }

@@ -82,6 +82,15 @@ output order and do not enable multi-file parallel scans. Multiple independently
 opened readers have separate budgets. `OpenDalAccessor::with_chunk_size` controls
 emitted byte chunks, independently of both settings above.
 
+With default byte I/O options, `OpenDalAccessor::open_sequential` uses one
+unbounded GET when the backend exposes read-response metadata. It retains that
+response for sequential consumption, avoiding both a preliminary HEAD and a
+bounded probe that can exceed a small object's length. Explicit I/O splitting
+or concurrency, known content-length hints, and backends without response
+metadata use the ordinary known-length reader. Streaming sequential readers
+advertise no range capability: their unread response can hold the only HTTP
+permit. Use ordinary `open` for independent range reads and a preserved cursor.
+
 `OpenDalAccessor::new` and `try_new` enable a budget of 64 ongoing HTTP requests
 by default, shared by all readers and clones of that accessor. Independently
 constructed accessors have independent budgets; this is not a process-global
