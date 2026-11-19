@@ -266,8 +266,9 @@ file set with Parquet readers. It exposes scan planning but retains global order
 an outer parallel layer can read partitions concurrently while emitting in order.
 
 The executor limits resident partitions. This is not a total memory limit:
-streaming-file scans currently use unbounded output queues for each resident
-file, while independent native partitions use bounded batch queues. See
+streaming-file scans use a configurable estimated-byte output budget (default 8 MiB) for each resident
+file (admitting oversized batches alone), while native partitions use bounded
+batch queues. Decoders and batches waiting for admission consume additional memory. See
 [parallel reads](parallel-read.md) for scheduling, ordering, and memory details.
 
 ## Schema, errors, and source identity

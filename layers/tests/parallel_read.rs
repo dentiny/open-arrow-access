@@ -394,3 +394,25 @@ async fn file_read_ahead_is_independent_of_emission_policy(#[case] emission: Emi
     assert_eq!(values, (0..3 * ROWS).collect::<Vec<_>>());
     assert_eq!(opened.load(Ordering::SeqCst), 3);
 }
+
+#[tokio::test]
+async fn streaming_budget_is_forwarded_validated_and_conflict_checked() {
+    let empty = || ScanPlan::new(metadata(), vec![]).with_ordering(OrderRequirement::Reorderable);
+    let layer = ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN)
+        .with_read_ahead_bytes(NonZeroUsize::new(1234).unwrap());
+    let source = Source(OrderRequirement::Reorderable).layer(layer);
+    let plan = source.plan_scan(empty()).await.unwrap();
+    assert_eq!(plan.parallel_read.unwrap().read_ahead_bytes.get(), 1234);
+    let conflict = source.layer(ParallelReadLayer::new(NonZeroUsize::MIN, NonZeroUsize::MIN));
+    assert_eq!(
+        conflict.open(empty()).await.err().unwrap().kind(),
+        ErrorKind::InvalidInput
+    );
+
+    let invalid = Source(OrderRequirement::Reorderable)
+        .layer(layer.with_read_ahead_bytes(NonZeroUsize::new(usize::MAX).unwrap()));
+    assert_eq!(
+        invalid.open(empty()).await.err().unwrap().kind(),
+        ErrorKind::InvalidInput
+    );
+}

@@ -104,6 +104,8 @@ impl<A: ByteAccessor> Accessor for SourcePositionAccessor<A> {
     }
     async fn open(&self, mut request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let codec = Codec::from_path(request.object.locator());
+        // Positioned decompression consumes the entire stored byte stream in order.
+        // Network range splitting adds requests without parallelizing this decoder.
         request.options.io_chunk_size = None;
         request.options.io_concurrency = NonZeroUsize::MIN;
         let input = self.inner.open_sequential(request.clone()).await?;
