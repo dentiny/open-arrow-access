@@ -239,26 +239,3 @@ async fn all_annotation_kinds_and_external_ids_have_fixed_types_after_null_rows(
     assert!(out[0]["body"].is_null(0));
     assert!(out[0]["body"].is_valid(1));
 }
-
-/// Explicit full-input audit, usable against a decompressed local release shard.
-/// No schema inference or row sampling is performed. No file bytes enter the repo.
-#[tokio::test]
-#[ignore = "set S2ORC_V2_SHARD_PATH to a decompressed JSONL file"]
-async fn audit_local_shard() {
-    let path = std::path::PathBuf::from(std::env::var("S2ORC_V2_SHARD_PATH").unwrap());
-    let bytes = open_arrow_access_storage::OpenDalAccessor::new(
-        open_arrow_access_test_support::fs_operator(path.parent().unwrap()),
-    );
-    let mut reader = S2orcV2Accessor::new(bytes)
-        .open(ReadRequest::new(
-            path.file_name().unwrap().to_str().unwrap(),
-        ))
-        .await
-        .unwrap();
-    let mut rows = 0_u64;
-    while let Some(batch) = reader.next().await.unwrap() {
-        assert_eq!(batch.schema(), s2orc_v2_schema());
-        rows += batch.num_rows() as u64;
-    }
-    println!("validated {rows} typed S2ORC v2 rows");
-}
