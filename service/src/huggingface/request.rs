@@ -61,4 +61,8 @@ impl ReadOptionsProvider for HuggingFaceDatasetRequest {
     fn read_options_mut(&mut self) -> &mut ReadOptions {
         &mut self.options
     }
+
+    fn byte_read_options_mut(&mut self) -> Option<&mut ByteReadOptions> {
+        Some(&mut self.byte_options)
+    }
 }

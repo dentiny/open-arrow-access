@@ -47,6 +47,10 @@ impl ReadOptionsProvider for PmcInventoryShardRequest {
     fn read_options_mut(&mut self) -> &mut ReadOptions {
         &mut self.options
     }
+
+    fn byte_read_options_mut(&mut self) -> Option<&mut ByteReadOptions> {
+        Some(&mut self.byte_options)
+    }
 }
 
 /// Yield the ordinary typed PMC article schema, not inventory rows.

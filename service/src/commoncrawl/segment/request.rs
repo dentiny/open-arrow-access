@@ -86,4 +86,8 @@ impl ReadOptionsProvider for CommonCrawlSegmentRequest {
     fn read_options_mut(&mut self) -> &mut ReadOptions {
         self.dataset.read_options_mut()
     }
+
+    fn byte_read_options_mut(&mut self) -> Option<&mut ByteReadOptions> {
+        self.dataset.byte_read_options_mut()
+    }
 }

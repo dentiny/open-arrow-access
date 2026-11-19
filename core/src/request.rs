@@ -245,6 +245,12 @@ pub trait ReadOptionsProvider: Send {
     /// and widen the inner projection to read expression dependencies. Changes
     /// to this request do not reconfigure readers that have already been opened.
     fn read_options_mut(&mut self) -> &mut ReadOptions;
+
+    /// Mutable storage I/O settings, when this request opens byte sources.
+    /// Already-open record views can retain the default `None` implementation.
+    fn byte_read_options_mut(&mut self) -> Option<&mut ByteReadOptions> {
+        None
+    }
 }
 
 /// Request for a single logical file. Dataset and service accessors can define
@@ -299,5 +305,9 @@ impl ReadOptionsProvider for ReadRequest {
 
     fn read_options_mut(&mut self) -> &mut ReadOptions {
         &mut self.options
+    }
+
+    fn byte_read_options_mut(&mut self) -> Option<&mut ByteReadOptions> {
+        Some(&mut self.byte_options)
     }
 }
