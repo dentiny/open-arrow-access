@@ -442,8 +442,7 @@ remains sequential. No whole shard is buffered or reserialized to JSON.
 ### Schema validation and full-input audit
 
 The typed reader uses a fixed schema even when early records contain only nulls.
-Unlike generic JSON's compatibility mode, it rejects numeric/boolean values in
-string fields. Unknown fields at every nested object level and unknown span or
+Like the generic JSON reader, it rejects numeric/boolean values in string fields. Unknown fields at every nested object level and unknown span or
 attribute fields fail decoding before output projection. Corpus IDs must be
 positive UInt64 values. Span offsets accept unsigned integers or digit-only
 strings, reject overflow/reversed ranges, and require text for populated lists.

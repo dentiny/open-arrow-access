@@ -9,10 +9,7 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ReadRequest, RecordCapability, RecordMetadata, RecordReader,
     ResolvedProjection, Result, ScanPlan, ScanPlanner, StreamReader, async_trait, into_stream,
 };
-use open_arrow_access_file_format::{
-    DecodePartitionOptions, FileAccessor,
-    json::{JsonAccessor, JsonFormat},
-};
+use open_arrow_access_file_format::{DecodePartitionOptions, json::JsonAccessor};
 pub use schema::s2orc_v2_schema;
 
 /// Streaming typed reader. Input must already be decompressed JSONL.
@@ -25,10 +22,7 @@ pub struct S2orcV2Accessor<A> {
 impl<A> S2orcV2Accessor<A> {
     pub fn new(bytes: A) -> Self {
         Self {
-            input: FileAccessor::from_format(
-                bytes,
-                JsonFormat::new(schema::input_schema()).with_primitive_coercion(false),
-            ),
+            input: JsonAccessor::new(bytes, schema::input_schema()),
         }
     }
 

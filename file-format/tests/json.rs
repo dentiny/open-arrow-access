@@ -18,8 +18,7 @@ use open_arrow_access_core::{
 
 use open_arrow_access_file_format::json::JsonAccessor;
 use open_arrow_access_test_support::{
-    MemoryAccessor, Observations, fixture, format,
-    record::{assert_same_batches, collect_nullable_strings},
+    MemoryAccessor, Observations, fixture, format, record::assert_same_batches,
 };
 
 fn schema() -> SchemaRef {
@@ -570,55 +569,43 @@ async fn inference_deduces_float_types_for_bare_nonfinite_values_only() {
 }
 
 #[tokio::test]
-async fn utf8_fields_coerce_scalars_without_reformatting_numbers() {
-    let raw = br#"{"value":"text"} {"value":1} {"value":1.2300e+04}
-        {"value":9007199254740993} {"value":true} {"value":false} {"value":null}"#;
-    for infer in [false, true] {
-        let input = MemoryAccessor::new(raw, 1);
-        let accessor = if infer {
-            JsonAccessor::infer(input)
-        } else {
-            JsonAccessor::new(
-                input,
-                Arc::new(Schema::new(vec![Field::new("value", DataType::Utf8, true)])),
-            )
-        };
-        for planned in [false, true] {
-            let reader: Box<dyn RecordReader> = if planned {
-                Box::new(
-                    accessor
-                        .plan_scan(request(2, None))
-                        .await
-                        .unwrap()
-                        .into_reader(),
-                )
+async fn utf8_fields_reject_numeric_and_boolean_values() {
+    for value in ["1", "1.2300e+04", "9007199254740993", "true", "false"] {
+        let raw = format!(r#"{{"value":"text"}} {{"value":{value}}}"#);
+        for infer in [false, true] {
+            let input = MemoryAccessor::new(raw.as_bytes(), 1);
+            let accessor = if infer {
+                JsonAccessor::infer(input)
             } else {
-                accessor.open(request(2, None)).await.unwrap()
+                JsonAccessor::new(
+                    input,
+                    Arc::new(Schema::new(vec![Field::new("value", DataType::Utf8, true)])),
+                )
             };
-            assert_eq!(
-                reader.metadata().schema.field(0).data_type(),
-                &DataType::Utf8
-            );
-            let batches = open_arrow_access_core::into_stream(reader)
-                .try_collect::<Vec<_>>()
-                .await
-                .unwrap();
-            let values = collect_nullable_strings::<i32>(&batches, 0);
-            assert_eq!(
-                values
-                    .iter()
-                    .map(|value| value.as_deref())
-                    .collect::<Vec<_>>(),
-                [
-                    Some("text"),
-                    Some("1"),
-                    Some("1.2300e+04"),
-                    Some("9007199254740993"),
-                    Some("true"),
-                    Some("false"),
-                    None
-                ]
-            );
+            for planned in [false, true] {
+                let reader: Box<dyn RecordReader> = if planned {
+                    Box::new(
+                        accessor
+                            .plan_scan(request(2, None))
+                            .await
+                            .unwrap()
+                            .into_reader(),
+                    )
+                } else {
+                    accessor.open(request(2, None)).await.unwrap()
+                };
+                assert_eq!(
+                    reader.metadata().schema.field(0).data_type(),
+                    &DataType::Utf8
+                );
+                let result = open_arrow_access_core::into_stream(reader)
+                    .try_collect::<Vec<_>>()
+                    .await;
+                assert!(
+                    result.is_err(),
+                    "accepted {value}, infer={infer}, planned={planned}"
+                );
+            }
         }
     }
 }
