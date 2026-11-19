@@ -100,30 +100,9 @@ impl MissingObjectLayer {
         if self.policy != MissingObjectPolicy::Skip
             || error.kind() != ErrorKind::NotFound
             || error.object().is_none()
+            || has_non_404_http_status(error)
         {
             return Ok(false);
-        }
-        // Native storage NotFound includes HTTP 404 and missing local objects.
-        // A provider's explicit HTTP status takes precedence (notably 410).
-        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
-        while let Some(current) = source {
-            if let Some(error) = current.downcast_ref::<Error>()
-                && let Some(status) = error.http_status()
-                && status != 404
-            {
-                return Ok(false);
-            }
-            if let Some(shared) = current.downcast_ref::<Arc<std::io::Error>>() {
-                source = Some(shared.as_ref());
-                continue;
-            }
-            if let Some(error) = current.downcast_ref::<std::io::Error>()
-                && let Some(inner) = error.get_ref()
-            {
-                source = Some(inner);
-                continue;
-            }
-            source = current.source();
         }
         (self.report)(error).map_err(|error| {
             Error::new(
@@ -135,6 +114,30 @@ impl MissingObjectLayer {
         })?;
         Ok(true)
     }
+}
+
+fn has_non_404_http_status(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut source = Some(error);
+    while let Some(current) = source {
+        if let Some(error) = current.downcast_ref::<Error>()
+            && let Some(status) = error.http_status()
+            && status != 404
+        {
+            return true;
+        }
+        if let Some(shared) = current.downcast_ref::<Arc<std::io::Error>>() {
+            source = Some(shared.as_ref());
+            continue;
+        }
+        if let Some(error) = current.downcast_ref::<std::io::Error>()
+            && let Some(inner) = error.get_ref()
+        {
+            source = Some(inner);
+            continue;
+        }
+        source = current.source();
+    }
+    false
 }
 
 pub struct MissingObjectAccessor<A> {
