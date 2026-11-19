@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use futures::StreamExt;
 use open_arrow_access_core::{
     Accessor, ReadRequest, Reader, RecordCapability, RecordMetadata, RecordReader, Result,
@@ -48,7 +50,7 @@ impl SourceColumns {
         <A::Reader as Reader>::Item: SourceColumnBatch,
     {
         SourceColumnsAccessor {
-            inner,
+            inner: Arc::new(inner),
             config: self.clone(),
         }
     }
@@ -64,7 +66,7 @@ impl SourceColumns {
 }
 
 pub struct SourceColumnsAccessor<A> {
-    inner: A,
+    inner: Arc<A>,
     config: SourceColumns,
 }
 #[async_trait]
@@ -126,6 +128,13 @@ where
     <A::Reader as Reader>::Item: SourceColumnBatch,
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        Ok(ScanPlan::whole_input(self.open(request).await?))
+        let metadata = self.metadata(request.clone()).await?;
+        let ordering = self.capability().ordering;
+        let accessor = Self {
+            inner: self.inner.clone(),
+            config: self.config.clone(),
+        };
+        let partition = Box::pin(async move { accessor.open(request).await });
+        Ok(ScanPlan::new(metadata, vec![partition]).with_ordering(ordering))
     }
 }

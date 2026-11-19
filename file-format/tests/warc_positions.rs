@@ -172,3 +172,129 @@ async fn positioned_decoding_matches_ordinary_batches_and_tracks_record_starts()
         }
     }
 }
+
+#[tokio::test]
+async fn positioned_file_plans_do_not_open_a_blocked_first_file() {
+    use open_arrow_access_core::{
+        Accessor, AccessorExt, ByteAccessor, ByteReadRequest, ByteReader, Capability,
+        FactoryAccessor, RecordReader, Result, async_trait,
+    };
+    use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
+    use open_arrow_access_layers::{
+        ParallelReadLayer, SourceColumns, SourcePositionLayer, UnorderedEmissionLayer,
+    };
+    use std::{
+        sync::{Arc, atomic::AtomicUsize},
+        time::Duration,
+    };
+    use tokio::sync::Semaphore;
+
+    struct PendingOpen(Arc<AtomicUsize>);
+    impl Drop for PendingOpen {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+    struct GatedStorage {
+        inner: MemoryAccessor,
+        release: Arc<Semaphore>,
+        pending: Arc<AtomicUsize>,
+    }
+    #[async_trait]
+    impl Accessor for GatedStorage {
+        type Request = ByteReadRequest;
+        type Reader = dyn ByteReader;
+        fn capability(&self) -> Capability {
+            self.inner.capability()
+        }
+        async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
+            if request.object.locator() == "first.warc.gz" {
+                self.pending.fetch_add(1, Ordering::SeqCst);
+                let _pending = PendingOpen(self.pending.clone());
+                self.release.acquire().await.unwrap().forget();
+            }
+            self.inner.open(request).await
+        }
+    }
+    #[async_trait]
+    impl ByteAccessor for GatedStorage {}
+
+    for unordered in [false, true] {
+        let release = Arc::new(Semaphore::new(0));
+        let pending = Arc::new(AtomicUsize::new(0));
+        let storage = GatedStorage {
+            inner: MemoryAccessor::new(
+                &include_bytes!("../../testdata/warc/position-record-0.warc.gz")[..],
+                64,
+            ),
+            release: release.clone(),
+            pending: pending.clone(),
+        };
+        let format = FactoryAccessor::new(
+            storage.layer(SourcePositionLayer::default()),
+            WarcArrowFormat.with_source_positions(),
+        );
+        let files = FileSetAccessor::new(
+            SourceColumns::new()
+                .with_object("path")
+                .with_offset("offset")
+                .wrap(format),
+        )
+        .with_file_planning()
+        .layer(ParallelReadLayer::new(
+            NonZeroUsize::new(2).unwrap(),
+            NonZeroUsize::MIN,
+        ));
+        let source: Box<dyn Accessor<Request = FileSetRequest, Reader = dyn RecordReader>> =
+            if unordered {
+                Box::new(files.layer(UnorderedEmissionLayer))
+            } else {
+                Box::new(files)
+            };
+        let request = FileSetRequest::new(["first.warc.gz", "second.warc.gz"]);
+        let mut reader = tokio::time::timeout(Duration::from_secs(1), source.open(request))
+            .await
+            .expect("schema planning must not open the gated byte source")
+            .unwrap();
+        assert_eq!(pending.load(Ordering::SeqCst), 0);
+        if unordered {
+            let batch = tokio::time::timeout(Duration::from_secs(1), reader.next())
+                .await
+                .expect("ready later file must bypass a blocked first open")
+                .unwrap()
+                .unwrap();
+            let paths = batch
+                .column_by_name("path")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<arrow_array::StringArray>()
+                .unwrap();
+            assert_eq!(paths.value(0), "second.warc.gz");
+            assert_eq!(pending.load(Ordering::SeqCst), 1);
+            drop(reader);
+            for _ in 0..10 {
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(pending.load(Ordering::SeqCst), 0);
+        } else {
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), reader.next())
+                    .await
+                    .is_err()
+            );
+            assert_eq!(pending.load(Ordering::SeqCst), 1);
+            release.add_permits(1);
+            let mut names = Vec::new();
+            while let Some(batch) = reader.next().await.unwrap() {
+                let paths = batch
+                    .column_by_name("path")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<arrow_array::StringArray>()
+                    .unwrap();
+                names.extend(paths.iter().flatten().map(str::to_owned));
+            }
+            assert_eq!(names, ["first.warc.gz", "second.warc.gz"]);
+        }
+    }
+}
