@@ -26,22 +26,23 @@ The result is a `RecordReader` with exactly one row for a valid object. Full sch
 | `pmcid` | Utf8 | No |
 | `version` | UInt32, positive when supplied | Yes |
 | `pmid` | UInt64 | Yes |
-| `mid`, `doi`, `license_code`, `xml_url`, `pdf_url`, `text` | Utf8 | Yes |
+| `mid`, `doi`, `license_code`, `xml_url`, `pdf_url`, `text_url` | Utf8 | Yes |
 | `title`, `citation` | LargeUtf8 | Yes |
 | `is_pmc_openaccess`, `is_manuscript`, `is_historical_ocr`, `is_retracted` | Boolean | Yes |
 | `media_urls` | List of nullable Utf8 items; JSON items must be strings | Yes |
 | `content_url` | Utf8; selected PDF/XML/TXT URL, default PDF | Yes |
 | `metadata` | Struct containing all 16 PMC metadata fields with their original names and Arrow types | No |
 
-The Arrow `text` column contains the URL from the input JSON's `text_url` field,
-not inline article text. URL encoding and query parameters are preserved. The
-input JSON field remains `text_url`; use `text` in Arrow projections.
+The Arrow `text_url` column contains the TXT URL from the input JSON's
+`text_url` field, not inline article text. Like `pdf_url` and `xml_url`, its name
+matches the source field. URL encoding and query parameters are preserved.
+Use `text_url` in Arrow projections; no `text` alias is provided.
 
 Optional missing/null fields become null; duplicate keys use their final value.
 `metadata` retains the complete PMC metadata object as typed Arrow children,
 including nullable `mid`, numeric `pmid`, Boolean flags and `media_urls` as a list.
-Its `text_url` child uses the original input name, while the top-level `text`
-column remains the mapped content URL. The struct shares decoded arrays with
+Both the top-level `text_url` and nested `metadata.text_url` use the original
+input field name. The struct shares decoded arrays with
 mapped columns; no JSON string or serialization fallback is used.
 
 Unexpected upstream fields are rejected, including when projected away. The
@@ -122,7 +123,7 @@ The nullable `content_url` output column selects the chosen upstream URL:
 | --- | --- |
 | `PmcFormat::Pdf` / `pdf` (default) | `pdf_url` |
 | `PmcFormat::Xml` / `xml` | `xml_url` |
-| `PmcFormat::Txt` / `txt` | `text_url` (also exposed as top-level `text`) |
+| `PmcFormat::Txt` / `txt` | `text_url` |
 
 For a directory or exact JSON object:
 

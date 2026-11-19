@@ -56,6 +56,11 @@ async fn maps_metadata_without_fetching_content() {
         &batch["pdf_url"]
     );
     assert!(batch.schema().field_with_name("metadata_json").is_err());
+    assert!(batch.schema().field_with_name("text").is_err());
+    assert_eq!(
+        metadata.column_by_name("text_url").unwrap(),
+        &batch["text_url"]
+    );
     for (field, expected) in [("pmcid", " pmc00123 "), ("license_code", "CC BY")] {
         assert_eq!(batch[field].as_string::<i32>().value(0), expected);
     }
@@ -70,14 +75,14 @@ async fn maps_metadata_without_fetching_content() {
         .unwrap();
     assert!(batch["pdf_url"].is_null(0));
     assert!(batch["pmid"].is_null(0));
-    assert!(batch["text"].is_null(0));
+    assert!(batch["text_url"].is_null(0));
     let batch = read(
         br#"{"pmcid":"PMC1","text_url":"s3://pmc-oa-opendata/PMC1.1/article%20name.txt?md5=opaque"}"#,
-        Some(vec!["text".into()]),
+        Some(vec!["text_url".into()]),
     ).await.unwrap();
-    assert_eq!(batch.schema().field(0).name(), "text");
+    assert_eq!(batch.schema().field(0).name(), "text_url");
     assert_eq!(
-        batch["text"].as_string::<i32>().value(0),
+        batch["text_url"].as_string::<i32>().value(0),
         "s3://pmc-oa-opendata/PMC1.1/article%20name.txt?md5=opaque"
     );
 }

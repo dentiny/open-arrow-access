@@ -47,19 +47,10 @@ pub fn schema() -> SchemaRef {
                     DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
                     true,
                 ),
-                Field::new("text", DataType::Utf8, true),
+                Field::new("text_url", DataType::Utf8, true),
                 Field::new("mid", DataType::Utf8, true),
             ];
-            let metadata_fields = fields
-                .iter()
-                .map(|field| {
-                    if field.name() == "text" {
-                        field.clone().with_name("text_url")
-                    } else {
-                        field.clone()
-                    }
-                })
-                .collect::<Vec<_>>();
+            let metadata_fields = fields.clone();
             fields.push(Field::new(
                 "metadata",
                 DataType::Struct(metadata_fields.into()),

@@ -64,7 +64,6 @@ pub(super) async fn decode_batch(
             }
             let source_name = match field.name().as_str() {
                 "content_url" => format.metadata_field(),
-                "text" => "text_url",
                 name => name,
             };
             let index = field_index
