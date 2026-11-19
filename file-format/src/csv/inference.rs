@@ -83,6 +83,25 @@ fn first_record(sample: &[u8]) -> Result<csv::ByteRecord> {
     Ok(first)
 }
 
+fn all_strings_schema(sample: &[u8], has_header: bool) -> Result<Schema> {
+    let first = first_record(sample)?;
+    let fields = first
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let name = if has_header {
+                std::str::from_utf8(value)
+                    .map_err(|error| super::error::inference_error(error.into()))?
+                    .to_owned()
+            } else {
+                format!("column_{}", index + 1)
+            };
+            Ok(arrow_schema::Field::new(name, DataType::Utf8, true))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Schema::new(fields))
+}
+
 pub(super) struct ResolvedCsvInput {
     pub schema: SchemaRef,
     pub has_header: bool,
@@ -150,22 +169,7 @@ pub(super) async fn resolve(
             )?,
         };
         let schema = if schema_mode == CsvSchemaMode::AllStrings {
-            let first = first_record(&sample)?;
-            let fields = first
-                .iter()
-                .enumerate()
-                .map(|(index, value)| {
-                    let name = if has_header {
-                        std::str::from_utf8(value)
-                            .map_err(|error| super::error::inference_error(error.into()))?
-                            .to_owned()
-                    } else {
-                        format!("column_{}", index + 1)
-                    };
-                    Ok(arrow_schema::Field::new(name, DataType::Utf8, true))
-                })
-                .collect::<Result<Vec<_>>>()?;
-            Schema::new(fields)
+            all_strings_schema(&sample, has_header)?
         } else {
             infer_sample(&sample, has_header, dialect.allow_truncated_rows)?
         };
