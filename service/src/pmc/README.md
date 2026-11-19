@@ -129,6 +129,46 @@ training example. PDF is useful when layout and figures matter; XML is useful
 for structured text processing; TXT is derived from XML. Preserve metadata and
 content URLs so additional formats can be obtained later when needed.
 
+## Arrow output schema
+
+The schema proposed in [open-arrow-access #554](https://github.com/dentiny/open-arrow-access/pull/554)
+has **17 top-level columns**: all 16 upstream metadata fields, each stored once,
+and the derived `content_url`. There is no duplicate `metadata` struct or JSON
+string column. This schema requires upgrading beyond released 0.8.2, which still
+has the nested struct and spells the top-level TXT URL column `text`.
+
+| Field | Arrow type | Nullable | Value |
+| --- | --- | --- | --- |
+| `pmcid` | `Utf8` | No | PMC article identifier. |
+| `version` | `UInt32` | Yes | Article version; positive when provided. |
+| `pmid` | `UInt64` | Yes | Numeric PubMed identifier. |
+| `doi` | `Utf8` | Yes | DOI string. |
+| `title` | `LargeUtf8` | Yes | Article title. |
+| `citation` | `LargeUtf8` | Yes | Upstream formatted bibliographic citation string. |
+| `is_pmc_openaccess` | `Boolean` | Yes | Open Access Subset flag. |
+| `is_manuscript` | `Boolean` | Yes | Author-manuscript flag. |
+| `is_historical_ocr` | `Boolean` | Yes | Historical back-scanning/OCR flag. |
+| `is_retracted` | `Boolean` | Yes | Retraction flag. |
+| `license_code` | `Utf8` | Yes | Upstream license code. |
+| `xml_url` | `Utf8` | Yes | URL of the article's JATS XML. |
+| `pdf_url` | `Utf8` | Yes | PDF URL, if available. |
+| `media_urls` | `List<Utf8>` | Yes | URLs of figures and supplementary files. |
+| `text_url` | `Utf8` | Yes | URL of the TXT representation, not its text content. |
+| `mid` | `Utf8` | Yes | Manuscript identifier, when provided. |
+| `content_url` | `Utf8` | Yes | Selected PDF/XML/TXT URL; PDF by default. |
+
+For example, `citation` may be `Edinb Med J. 1868 May;13(11):1015–42.`.
+It is the upstream bibliographic string, not an array of cited papers. Both
+`Utf8` and `LargeUtf8` are string types.
+
+Missing optional fields become null. `media_urls` may be null or empty; provided
+elements must be strings. Its Arrow item field is nullable, but the decoder
+rejects null list elements. Unknown upstream fields fail decoding rather than
+being silently dropped.
+
+A sink can ingest `content_url` as a blob while preserving `pdf_url`, `xml_url`
+and `text_url` as the original URLs. The reader itself does not fetch content.
+
 ## Updates and reproducibility
 
 PMC is **not static**. Article versions are added and updated continuously, and
@@ -154,10 +194,8 @@ and are not part of the released 0.8.2 API yet.
   exposes one native scan partition per metadata object, and works with
   `ParallelReadLayer`.
 
-Article output includes mapped columns and a complete typed `metadata` struct.
-The reader does not download PDFs, XML, text or media. The top-level Arrow `text`
-column is the source `text_url` value, not extracted article text; the nested
-`metadata.text_url` retains the original source field name. URL encoding/query
+Article output follows the schema described above after #554 is integrated.
+The reader does not download PDFs, XML, text or media. URL encoding and query
 parameters are preserved in content URLs.
 
 Format selection (`PmcFormat`, default PDF, selecting a shared `content_url`)
