@@ -182,7 +182,7 @@ parsed text. Converting S2ORC v2 does not collect the original PDFs.
    and a natural conversion task input.
 
 The following Rust example uses the existing `SemanticScholarService` and
-`Accessor::list` API. Export a valid `S2_API_KEY` before running. It resolves
+`ByteAccessor::list` API. Export a valid `S2_API_KEY` before running. It resolves
 `latest` once and lists all synthetic member names from that pinned manifest;
 it does not download shard objects, submit jobs, or print signed URLs.
 
@@ -196,7 +196,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```rust
 use futures::TryStreamExt;
 use open_arrow_access::{
-    Accessor,
+    ByteAccessor,
     service::semantic_scholar::SemanticScholarService,
 };
 
