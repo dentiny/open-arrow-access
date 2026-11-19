@@ -1,10 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- WARC Arrow bodies now default to BinaryView, retaining owned parser buffers in both ordinary and positioned reads. Remove the separate body-view decoder and opt-in method.
-- Apply a soft 16 MiB body-byte batch budget by default; oversized records remain intact. The default body schema changes from LargeBinary to BinaryView.
-
 ## 0.10.3 - 2026-11-19
 
 - Build WARC dates directly as millisecond timestamps, avoiding string formatting and reparsing.
