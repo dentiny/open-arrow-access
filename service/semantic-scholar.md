@@ -3,14 +3,14 @@
 ## Service and data
 
 Semantic Scholar distributes scholarly datasets, including releases such as
-S2ORC, with metadata and partition download URLs. This provider resolves a release
+S2ORC v2, with metadata and partition download URLs. This provider resolves a release
 and dataset or retrieves an incremental update/deletion manifest.
 
 Enable facade feature `service-semantic-scholar`. See [example setup](README.md#example-setup) for dependencies and the async runtime.
 
 ## Release → dataset → shard → paper record
 
-Semantic Scholar publishes snapshots containing several related datasets. S2ORC
+Semantic Scholar publishes snapshots containing several related datasets. S2ORC v2
 is parsed scholarly full text; it is one dataset in a release, not the whole
 Academic Graph and not a bulk archive of original PDF files.
 
@@ -19,8 +19,7 @@ Datasets API
 └── release/<release_id>                      # One dated snapshot
     ├── dataset/papers                       # Paper metadata
     ├── dataset/abstracts                    # Abstracts where available
-    ├── dataset/s2orc                        # Older parsed full-text schema
-    └── dataset/s2orc_v2                     # Replacement full-text dataset
+    └── dataset/s2orc_v2                     # Parsed full-text dataset
         └── files[]                          # Signed download URL per shard
             ├── files[0] → gzip JSONL object
             │   ├── JSON object → one paper's parsed full text
@@ -43,14 +42,13 @@ not by file position or row number.
 
 ## Full-text formats and identity
 
-The release README describes `s2orc_v2` as the replacement for `s2orc`.
-Choose the dataset explicitly; switching names also changes the record schema.
+This guide covers the `s2orc_v2` full-text dataset. Select that dataset explicitly
+when obtaining the release manifest.
 
 | Dataset | Principal documented content |
 | --- | --- |
 | `papers` | Core paper metadata; not full-body text. |
 | `abstracts` | Abstract text where available; not full-body text. |
-| `s2orc` | `externalIds`; `content.source` with PDF URLs and open-access information; `content.text` and `content.annotations`. |
 | `s2orc_v2` | `openaccessinfo`, `title`, `authors`, and separate `body` and `bibliography`, each with text and annotation spans. |
 
 A decompressed shard is JSONL: each line is a JSON object. Text and annotation
@@ -67,7 +65,7 @@ or arXiv inputs. Conversion alone does not deduplicate those corpora.
 
 Parsed JSON contains neither original PDF bytes nor page images. Fetching a
 paper URL is a separate operation and may have different availability from the
-parsed text. Do not assume that converting S2ORC satisfies a raw-PDF collection
+parsed text. Do not assume that converting S2ORC v2 satisfies a raw-PDF collection
 requirement.
 
 ## Obtaining the shard list
@@ -117,8 +115,7 @@ position in that resolved manifest. Archive source objects and checksums if
 long-term replay must survive upstream availability changes.
 
 On **2026-11-19**, the public `latest` response resolved to **2026-11-10**.
-Its dataset descriptions advertised `s2orc` as approximately 10M records in
-30 × 4GB files and `s2orc_v2` as approximately 16M records in 30 × 6GB files.
+Its `s2orc_v2` description advertised approximately 16M records in 30 × 6GB files.
 These are upstream README descriptions, not measured counts or a guarantee
 about a later release. The authenticated `files[]` is authoritative for actual
 task membership. Exact per-shard rows and decoded bytes require reading the
@@ -166,7 +163,7 @@ additional fields may be present):
 
 ```json
 {
-  "name": "s2orc",
+  "name": "s2orc_v2",
   "README": "Dataset-specific schema and license information",
   "files": [
     "https://files.example.org/part?signature=example"
@@ -199,7 +196,7 @@ async fn inspect_dataset(key: &str, release: &str, dataset: &str) -> Result<()> 
 }
 ```
 
-For dataset `s2orc`, the example reports the resolved release and a partition
+For dataset `s2orc_v2`, the example reports the resolved release and a partition
 name, then reads its first original chunk. Apply gzip/JSON decoding according to
 the selected dataset's own schema; no fixed Arrow columns are added here.
 
@@ -228,7 +225,7 @@ does not decompress `part-00000`: it does not sniff gzip magic bytes. Adding
 The generic JSON reader infers a fixed schema from a bounded sample and rejects
 later unknown fields, including nested ones. A consumer requiring every upstream
 field should validate a complete schema or preserve each complete JSON record
-alongside extracted columns. There is no S2ORC-specific typed Arrow schema,
+alongside extracted columns. There is no S2ORC v2-specific typed Arrow schema,
 automatic raw-JSON column, PDF downloader, all-shard job scheduler, or automatic
 diff application in this provider.
 
@@ -239,9 +236,8 @@ For conversion-service task inputs and remaining integration work, see the
 
 - [Datasets API](https://api.semanticscholar.org/api-docs/datasets)
 - [Pinned release used for the dated descriptions](https://api.semanticscholar.org/datasets/v1/release/2026-11-10)
-- [S2ORC project and bulk download instructions](https://github.com/allenai/s2orc)
+- [S2ORC project (bulk API access instructions)](https://github.com/allenai/s2orc)
 - [API tutorial](https://www.semanticscholar.org/product/api/tutorial)
 
 Preserve dataset-specific license and attribution information from the release
 README alongside the data.
-
