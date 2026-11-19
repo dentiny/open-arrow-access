@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, Error, ErrorKind, Layer, RecordCapability, RecordReader, Result, ScanPartition,
-    ScanPlan, ScanPlanner, StreamReader, async_trait,
+    Accessor, Error, ErrorKind, Layer, OrderRequirement, RecordCapability, RecordMetadata,
+    RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner, StreamReader, async_trait,
 };
 
 use crate::scan_policy::{ScanPolicy, ScanPolicyAccessor};
@@ -47,6 +47,53 @@ impl MissingObjectLayer {
             policy,
             report: Arc::new(report),
         }
+    }
+
+    async fn open_partition(
+        self,
+        partition: ScanPartition,
+        metadata: RecordMetadata,
+        ordering: OrderRequirement,
+    ) -> Result<Box<dyn RecordReader>> {
+        match partition.await {
+            Ok(reader) => Ok(self.wrap_reader(reader)),
+            Err(error) => {
+                if self.skip(&error)? {
+                    Ok(Box::new(StreamReader::records(
+                        stream::empty(),
+                        metadata,
+                        ordering,
+                    )))
+                } else {
+                    Err(error)
+                }
+            }
+        }
+    }
+
+    fn wrap_reader(self, reader: Box<dyn RecordReader>) -> Box<dyn RecordReader> {
+        let metadata = reader.metadata().clone();
+        let ordering = reader.capability().ordering;
+        let batches = stream::try_unfold((reader, false), move |(mut reader, emitted)| {
+            let policy = self.clone();
+            async move {
+                match reader.next().await {
+                    Ok(Some(batch)) => {
+                        let emitted = emitted || batch.num_rows() > 0;
+                        Ok(Some((batch, (reader, emitted))))
+                    }
+                    Ok(None) => Ok(None),
+                    Err(error) => {
+                        if !emitted && policy.skip(&error)? {
+                            Ok(None)
+                        } else {
+                            Err(error)
+                        }
+                    }
+                }
+            }
+        });
+        Box::new(StreamReader::records(batches, metadata, ordering))
     }
 
     fn skip(&self, error: &Error) -> Result<bool> {
@@ -147,48 +194,11 @@ impl ScanPolicy for MissingObjectLayer {
         let partitions = std::mem::replace(&mut plan.partitions, stream::empty().boxed());
         plan.partitions = partitions
             .map_ok(move |partition| {
-                let policy = policy.clone();
-                let metadata = metadata.clone();
-                Box::pin(async move {
-                    let reader = match partition.await {
-                        Ok(reader) => reader,
-                        Err(error) => {
-                            if policy.skip(&error)? {
-                                return Ok(Box::new(StreamReader::records(
-                                    stream::empty(),
-                                    metadata,
-                                    ordering,
-                                ))
-                                    as Box<dyn RecordReader>);
-                            }
-                            return Err(error);
-                        }
-                    };
-                    let metadata = reader.metadata().clone();
-                    let ordering = reader.capability().ordering;
-                    let batches =
-                        stream::try_unfold((reader, false), move |(mut reader, emitted)| {
-                            let policy = policy.clone();
-                            async move {
-                                match reader.next().await {
-                                    Ok(Some(batch)) => {
-                                        let emitted = emitted || batch.num_rows() > 0;
-                                        Ok(Some((batch, (reader, emitted))))
-                                    }
-                                    Ok(None) => Ok(None),
-                                    Err(error) => {
-                                        if !emitted && policy.skip(&error)? {
-                                            Ok(None)
-                                        } else {
-                                            Err(error)
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    Ok(Box::new(StreamReader::records(batches, metadata, ordering))
-                        as Box<dyn RecordReader>)
-                }) as ScanPartition
+                Box::pin(
+                    policy
+                        .clone()
+                        .open_partition(partition, metadata.clone(), ordering),
+                ) as ScanPartition
             })
             .boxed();
         Ok(())
