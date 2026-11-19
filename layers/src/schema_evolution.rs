@@ -2,8 +2,10 @@ use std::{collections::HashSet, sync::Arc};
 
 use arrow_schema::{DataType, SchemaRef};
 use datafusion::logical_expr::Expr;
+use futures::StreamExt;
 use open_arrow_access_core::{
-    Accessor, Layer, ReadOptionsProvider, RecordCapability, RecordReader, Result, async_trait,
+    Accessor, Layer, ReadOptionsProvider, RecordCapability, RecordReader, Result, ScanPartition,
+    ScanPlan, ScanPlanner, async_trait,
 };
 
 use crate::validation;
@@ -281,5 +283,48 @@ where
             }
         }
         Ok((output_options, planned))
+    }
+}
+
+#[async_trait]
+impl<A> ScanPlanner for SchemaEvolutionAccessor<A>
+where
+    A: ScanPlanner,
+    A::Request: ReadOptionsProvider,
+{
+    /// Compile once per scan and share the immutable transform across workers.
+    /// Partition discovery, native partitioning, execution budgets and source
+    /// ordering remain those of the original plan.
+    async fn plan_scan(&self, mut request: A::Request) -> Result<ScanPlan> {
+        if self.config.changes.is_empty() {
+            return self.inner.plan_scan(request).await;
+        }
+        let (output_options, planned) = self.prepare_request(&mut request)?;
+        let mut scan = self.inner.plan_scan(request).await?;
+        let plan = Arc::new(match planned {
+            Some(plan) => plan,
+            None => SchemaEvolutionPlan::new(
+                &self.config.changes,
+                &scan.metadata.schema,
+                &output_options,
+                false,
+            )?,
+        });
+        crate::validation::validate_evolution_input_schema(
+            &scan.metadata.schema,
+            &plan.source_schema,
+        )?;
+        scan.metadata.schema = plan.target_schema.clone();
+        scan.partitions = scan
+            .partitions
+            .map(move |partition| {
+                let plan = plan.clone();
+                partition.map(|partition| {
+                    Box::pin(async move { plan.into_shared_reader(partition.await?) })
+                        as ScanPartition
+                })
+            })
+            .boxed();
+        Ok(scan)
     }
 }

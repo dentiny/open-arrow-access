@@ -13,6 +13,8 @@ mod blocking;
 #[cfg(feature = "blocking")]
 pub use blocking::BlockingRecordBatchReader;
 
+pub mod crawl;
+
 mod attachment;
 pub use attachment::{
     AttachmentAccessor, AttachmentFormat, AttachmentOptions, open_attachment_source,
