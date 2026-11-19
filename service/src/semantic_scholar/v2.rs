@@ -1,6 +1,8 @@
 //! Typed S2ORC v2 records over an explicitly decompressed byte accessor.
 mod decode;
+mod error;
 mod schema;
+mod validation;
 
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use open_arrow_access_core::{
@@ -87,7 +89,7 @@ fn convert_reader(
     let batches = into_stream(reader).map(move |batch| {
         let batch = decode::batch(batch?).map_err(|error| error.with_object(object.as_ref()))?;
         match &projection.indices {
-            Some(indices) => batch.project(indices).map_err(decode::arrow_error),
+            Some(indices) => batch.project(indices).map_err(error::arrow_error),
             None => Ok(batch),
         }
     });

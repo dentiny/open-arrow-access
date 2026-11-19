@@ -1,52 +1,12 @@
-use super::schema;
+use super::{
+    error::{annotation_error, arrow_error},
+    schema, validation,
+};
 use arrow_array::builder::{ListBuilder, StringBuilder, StructBuilder, UInt64Builder};
 use arrow_array::{Array, ArrayRef, RecordBatch, StringArray, StructArray};
-use arrow_schema::{ArrowError, DataType, Field};
-use open_arrow_access_core::{Error, ErrorKind, Result};
-use serde::Deserialize;
+use arrow_schema::{DataType, Field};
+use open_arrow_access_core::Result;
 use std::sync::Arc;
-
-pub(super) fn arrow_error(error: ArrowError) -> Error {
-    Error::new(ErrorKind::Decode, "decode_s2orc_v2", error.to_string()).with_source(error)
-}
-fn error(message: impl Into<String>) -> Error {
-    Error::new(ErrorKind::Decode, "decode_s2orc_v2", message)
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Attributes {
-    n: Option<String>,
-    id: Option<String>,
-    ref_id: Option<String>,
-    matched_paper_id: Option<u64>,
-}
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum Offset {
-    Number(u64),
-    Decimal(String),
-}
-impl Offset {
-    fn value(self) -> Result<u64> {
-        match self {
-            Self::Number(n) => Ok(n),
-            Self::Decimal(s) if !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit()) => {
-                s.parse().map_err(|_| error("span offset overflows UInt64"))
-            }
-            _ => Err(error(
-                "span offset must be an unsigned integer or decimal string",
-            )),
-        }
-    }
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Span {
-    start: Offset,
-    end: Offset,
-    attributes: Option<Attributes>,
-}
 
 fn spans(input: &StringArray) -> Result<ArrayRef> {
     let mut list =
@@ -58,20 +18,16 @@ fn spans(input: &StringArray) -> Result<ArrayRef> {
             list.append(false);
             continue;
         };
-        let spans: Vec<Span> = serde_json::from_str(value)
-            .map_err(|_| error("invalid annotation payload or unknown span/attribute field"))?;
-        for span in spans {
-            let start = span.start.value()?;
-            let end = span.end.value()?;
+        for span in validation::parse_spans(value)? {
             let builder = list.values();
             builder
                 .field_builder::<UInt64Builder>(0)
                 .unwrap()
-                .append_value(start);
+                .append_value(span.start);
             builder
                 .field_builder::<UInt64Builder>(1)
                 .unwrap()
-                .append_value(end);
+                .append_value(span.end);
             let attrs = builder.field_builder::<StructBuilder>(2).unwrap();
             let values = span.attributes;
             attrs
@@ -116,7 +72,7 @@ fn section(input: &StructArray, output: &DataType) -> Result<ArrayRef> {
         .enumerate()
         .map(|(index, column)| {
             spans(column.as_any().downcast_ref::<StringArray>().unwrap())
-                .map_err(|e| error(format!("{}: {e}", annotation_fields[index].name())))
+                .map_err(|e| annotation_error(annotation_fields[index].name(), e))
         })
         .collect::<Result<Vec<_>>>()?;
     let annotations: ArrayRef = Arc::new(
