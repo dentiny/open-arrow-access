@@ -155,10 +155,12 @@ and are not part of the released 0.8.2 API yet.
   `ParallelReadLayer`.
 
 Article output includes mapped columns and a complete typed `metadata` struct.
-The reader does not download PDFs, XML, text or media. The top-level Arrow `text`
-column is the source `text_url` value, not extracted article text; the nested
-`metadata.text_url` retains the original source field name. URL encoding/query
-parameters are preserved in content URLs.
+The reader does not download PDFs, XML, text or media. The TXT field holds a
+URL, not extracted article text. [#554](https://github.com/dentiny/open-arrow-access/pull/554)
+renames the top-level field to `text_url`, matching `pdf_url`, `xml_url` and
+`metadata.text_url`; it does not retain a `text` alias. Released 0.8.2 still uses
+the old top-level `text` spelling. URL encoding/query parameters are preserved
+in content URLs.
 
 Format selection (`PmcFormat`, default PDF, selecting a shared `content_url`)
 is proposed separately in [#554](https://github.com/dentiny/open-arrow-access/pull/554);
