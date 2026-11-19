@@ -12,7 +12,8 @@ pub struct CrawlOptions {
     pub parallel_read: ParallelReadLayer,
     /// Defaults to unordered; sources requiring global order reject it.
     pub emission: EmissionPolicy,
-    /// Row-local transforms execute in partition workers, before queue admission.
+    /// Optional row-local transforms; the default leaves schema and values unchanged.
+    /// Configured transforms execute in partition workers, before queue admission.
     pub evolution: SchemaEvolutionLayer,
     /// Optional scan-wide coalescing after merging; useful for document sources.
     pub coalesce: Option<CoalesceBatchesLayer>,
