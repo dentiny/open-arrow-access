@@ -128,9 +128,6 @@ where
     <A::Reader as Reader>::Item: SourceColumnBatch,
 {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        // Metadata-only formats can establish their schema without opening the
-        // byte input. Keep opening inside the partition so a slow first file
-        // cannot prevent the parallel executor from starting later files.
         let metadata = self.metadata(request.clone()).await?;
         let ordering = self.capability().ordering;
         let accessor = Self {
