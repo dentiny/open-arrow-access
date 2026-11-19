@@ -142,3 +142,57 @@ and the complete typed `metadata` struct remain available, including all three
 content URLs when supplied. A missing selected URL stays null; no other format
 is substituted. Format selection does not create additional article rows or
 automatically download multiple representations.
+
+## One task per inventory shard
+
+Use a fixed inventory manifest to discover task inputs, then read each exact
+shard independently. Shard keys come from the manifest; do not invent a numeric
+shard index or scan the entire `metadata/` prefix in every task.
+
+```rust,no_run
+use open_arrow_access::{
+    Accessor, AccessorExt, ByteReadRequest, ReadOptions, Result,
+    layers::ParallelReadLayer,
+    service::{
+        pmc::{PmcInventoryShardAccessor, PmcInventoryShardRequest},
+        pmc_inventory::PmcInventoryAccessor,
+    },
+    storage::OpenDalAccessor,
+};
+use std::num::NonZeroUsize;
+
+async fn convert_shards(manifest: &str) -> Result<()> {
+    let storage = OpenDalAccessor::new(open_arrow_access::service::pmc::bucket_operator()?);
+    let shards = PmcInventoryAccessor::new(storage.clone())
+        .shards(ByteReadRequest::new(manifest)).await?;
+    for shard in shards {
+        // Submit one downstream task with (manifest, shard), and a distinct destination.
+        let request = PmcInventoryShardRequest::new(manifest, shard)
+            .with_options(ReadOptions::default().with_projection(["pmcid", "metadata", "pdf_url"]));
+        let source = PmcInventoryShardAccessor::new(storage.clone())
+            .layer(ParallelReadLayer::new(NonZeroUsize::new(4).unwrap(), NonZeroUsize::MIN));
+        let mut rows = source.open(request).await?;
+        while let Some(batch) = rows.next().await? {
+            // Feed typed article rows into a sink; select pdf_url for blob ingestion.
+            let _ = batch;
+        }
+    }
+    Ok(())
+}
+```
+
+The inventory accessor's `shards` method reads only the manifest. Each article
+task verifies that its shard is listed in that manifest, reads only that gzip CSV,
+and URL-decodes each validated metadata key once. Discovery is streaming with one
+inventory batch buffered; duplicate rows remain duplicate article requests.
+Output uses the ordinary PMC schema, including the complete typed `metadata`
+struct. Inventory columns and the article projection are independent; even a
+zero-column article scan validates Bucket/Key and preserves row counts.
+
+Each metadata object is an independent native scan partition. `ParallelReadLayer`
+limits concurrent article readers. Read/byte options propagate through the
+manifest, CSV shard and metadata reads. Missing or invalid metadata fails the
+stream; this reader neither fetches PDFs nor silently skips articles. The
+selected inventory fixes membership, not immutable article contents: JSON objects
+may change after the inventory was generated. Inventory reports expire upstream,
+so retain the manifest and CSV objects if tasks need to be replayed later.

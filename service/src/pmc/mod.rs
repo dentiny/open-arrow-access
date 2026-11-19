@@ -5,6 +5,8 @@ mod bucket;
 mod dataset;
 mod error;
 mod format;
+
+mod inventory;
 mod metadata;
 mod validation;
 
@@ -12,6 +14,8 @@ pub use accessor::{PmcAccessor, PmcDecoder};
 pub use bucket::{BUCKET_URL, bucket_operator};
 pub use dataset::PmcDatasetAccessor;
 pub use format::PmcFormat;
+
+pub use inventory::{PmcInventoryShardAccessor, PmcInventoryShardRequest};
 
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use std::{

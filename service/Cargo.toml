@@ -37,6 +37,7 @@ meca = [
 oapen = ["oai"]
 openstax = []
 pmc = [
+    "dep:percent-encoding",
     "opendal/services-s3",
     "dep:arrow-json",
     "dep:arrow-array",

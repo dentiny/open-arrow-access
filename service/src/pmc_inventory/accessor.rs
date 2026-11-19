@@ -16,11 +16,13 @@ struct PreparedInventoryScan {
 /// Read the gzip CSV shards listed in an inventory manifest.
 pub struct PmcInventoryAccessor<A> {
     inner: Arc<A>,
+    shard: Option<ObjectRef>,
 }
 impl<A> Clone for PmcInventoryAccessor<A> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            shard: self.shard.clone(),
         }
     }
 }
@@ -28,9 +30,28 @@ impl<A> PmcInventoryAccessor<A> {
     pub fn new(inner: A) -> Self {
         Self {
             inner: Arc::new(inner),
+            shard: None,
         }
     }
+    /// Read only this exact shard key, which must belong to the selected manifest.
+    pub fn with_shard(mut self, shard: impl Into<ObjectRef>) -> Self {
+        self.shard = Some(shard.into());
+        self
+    }
 }
+
+impl<A: ByteAccessor + 'static> PmcInventoryAccessor<A> {
+    /// List shard keys from a validated manifest without opening any CSV shards.
+    pub async fn shards(&self, request: ByteReadRequest) -> Result<Vec<ObjectRef>> {
+        Ok(manifest::read(self.inner.as_ref(), request)
+            .await?
+            .files
+            .into_iter()
+            .map(|file| file.key.into())
+            .collect())
+    }
+}
+
 #[async_trait]
 impl<A: ByteAccessor + 'static> Accessor for PmcInventoryAccessor<A> {
     type Request = ReadRequest;
@@ -65,6 +86,17 @@ impl<A: ByteAccessor + 'static> PmcInventoryAccessor<A> {
             ByteReadRequest::new(request.object.clone()).with_options(request.byte_options),
         )
         .await?;
+        if let Some(shard) = &self.shard {
+            super::validation::validate_shard_membership(&manifest, shard)?;
+        }
+        let files = match &self.shard {
+            Some(shard) => vec![shard.clone()],
+            None => manifest
+                .files
+                .into_iter()
+                .map(|file| file.key.into())
+                .collect(),
+        };
         let csv_schema = manifest.file_schema;
         let metadata = HashMap::from([
             (
@@ -106,11 +138,7 @@ impl<A: ByteAccessor + 'static> PmcInventoryAccessor<A> {
         };
         Ok(PreparedInventoryScan {
             transform,
-            files: manifest
-                .files
-                .into_iter()
-                .map(|file| file.key.into())
-                .collect(),
+            files,
             request,
         })
     }
