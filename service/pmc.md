@@ -50,6 +50,13 @@ row. Record metadata has `source = Some(request.object)`; schema metadata contai
 `pmc.row_kind = article_metadata`. Content URLs remain strings and are not fetched.
 Configure filesystem/S3 credentials and optional decompression on the input storage.
 
+The metadata reader reuses one clean Arrow JSON decoder per thread. The input
+schema is fixed; format selection and output projection are applied independently
+for each document. Decoder state is discarded on errors and after documents
+larger than 64 KiB, so a large article cannot permanently retain its parser
+allocations in the thread cache. Output remains one independently owned Arrow row
+per document; strict input validation still runs before projection.
+
 ## Usage and results
 
 ```rust
