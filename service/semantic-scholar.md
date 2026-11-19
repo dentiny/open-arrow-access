@@ -253,6 +253,97 @@ descriptive counts for this documentation.
 | Group upstream shards | Resolve an explicit list of members into one job. | Fewer jobs, larger retry scope; requires a consumer that accepts multiple members. |
 | Create smaller local shards | Stream-decompress each input and rotate outputs only between complete JSONL records. | Additional preprocessing and storage; useful when upstream files are too large or more tasks are needed. |
 
+### File hierarchy: reuse upstream shards
+
+The source hierarchy below is **logical manifest membership**, not a public S3
+directory to construct or list. `part-00000` is our provider's synthetic name
+for `files[0]`; the actual gzip object is reached through its signed URL.
+Each source object contains many paper records.
+
+```text
+release/2026-11-10/
+└── dataset/s2orc_v2/
+    └── files[]                             # Authenticated API manifest
+        ├── [0] → part-00000 → gzip object   # Task 0 input
+        │   ├── JSONL paper record
+        │   ├── JSONL paper record
+        │   └── ...
+        ├── [1] → part-00001 → gzip object   # Task 1 input
+        │   └── many JSONL paper records
+        └── ...
+
+oci://pretrain-dataset/s2orc_v2/2026-11-10/
+├── part-00000.lance/                        # Task 0 destination dataset
+│   ├── <dataset metadata>
+│   └── <writer-generated data files>
+├── part-00001.lance/                        # Task 1 destination dataset
+│   ├── <dataset metadata>
+│   └── <writer-generated data files>
+└── ...
+```
+
+One input gzip shard maps to one task and one independent Lance dataset. A
+`.lance/` destination is a dataset directory/object prefix, not one physical
+file. Its internal data files are controlled by the writer; they do not inherit
+the source shard count.
+
+### File hierarchy: group upstream shards
+
+Grouping changes the task's selected membership, not the upstream files:
+
+```text
+Selected source members                     Destination datasets
+├── group-00000: files[0], files[1]       →   .../group-00000.lance/
+│   ├── part-00000 → gzip object             ├── <dataset metadata>
+│   └── part-00001 → gzip object             └── <writer-generated data files>
+└── group-00001: files[2], files[3]       →   .../group-00001.lance/
+    ├── part-00002 → gzip object             ├── <dataset metadata>
+    └── part-00003 → gzip object             └── <writer-generated data files>
+```
+
+`group-00000` is an illustrative planner label, not an upstream directory or
+a currently supported single-file service selector. A consumer must accept an
+explicit multi-member selection to execute this plan; the current conversion
+URI selects only one `file_name`. Give each selected input member to exactly
+one group for disjoint full coverage.
+
+### File hierarchy: create smaller derived shards
+
+A preprocessing pass can mirror and stream-decompress each upstream object,
+then write smaller gzip JSONL files at complete record boundaries. The paths
+below are a **proposed local layout**, not upstream object names or directories
+automatically created by the provider.
+
+```text
+/mnt/datasets/s2orc_v2/2026-11-10/
+├── original/
+│   ├── part-00000.jsonl.gz                  # Mirror of source files[0]
+│   └── part-00001.jsonl.gz                  # Mirror of source files[1]
+└── derived/
+    ├── part-00000/
+    │   ├── chunk-00000.jsonl.gz             # First complete record range
+    │   ├── chunk-00001.jsonl.gz             # Next disjoint record range
+    │   └── ...
+    └── part-00001/
+        ├── chunk-00000.jsonl.gz
+        └── ...
+
+oci://pretrain-dataset/s2orc_v2/2026-11-10/derived/
+├── part-00000/
+│   ├── chunk-00000.lance/                  # One task per derived input file
+│   ├── chunk-00001.lance/
+│   └── ...
+└── part-00001/
+    ├── chunk-00000.lance/
+    └── ...
+```
+
+Only the derived files are inputs to this conversion plan; do not also convert
+their original mirror files into the same logical corpus. Record the mapping
+from each derived path to its original member and complete record range.
+Recompression creates independently decodable files; it does not make arbitrary
+byte ranges of the original gzip independently readable.
+
 For derived shards, persist the source release/object, record boundaries, output
 membership, counts and checksums. A hash partition on corpus ID is another
 possible downstream scheme, but still requires reading the source and writing
