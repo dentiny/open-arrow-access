@@ -172,3 +172,117 @@ async fn positioned_decoding_matches_ordinary_batches_and_tracks_record_starts()
         }
     }
 }
+
+#[tokio::test]
+async fn body_views_preserve_projection_positions_and_owned_batch_lifetimes() {
+    use arrow_array::{Array, BinaryViewArray, TimestampMillisecondArray};
+    use open_arrow_access_core::ReaderFactory;
+    let first = record(&vec![0xfe; 4096]);
+    let mut input = first.clone();
+    input.extend(record(b"tail"));
+    let format = WarcArrowFormat.with_source_positions().with_body_view();
+    let options = ReadOptions {
+        batch_size: NonZeroUsize::MIN,
+        projection: Some(vec!["body".into(), "date".into()]),
+    };
+    let request = ReadRequest::new("data.warc").with_options(options);
+    let expected = format.prepare(&request).unwrap();
+    let mut reader = format
+        .open_reader(&MemoryAccessor::new(&input, 97), request)
+        .await
+        .unwrap();
+    assert_eq!(reader.metadata().schema, expected);
+    let first_batch = reader.next().await.unwrap().unwrap();
+    let second_batch = reader.next().await.unwrap().unwrap();
+    assert!(reader.next().await.unwrap().is_none());
+    drop(reader);
+    let (first_output, first_positions) = first_batch.into_parts();
+    let (second_output, second_positions) = second_batch.into_parts();
+    assert_eq!(first_positions, [BytePosition::Stored(0)]);
+    assert_eq!(second_positions, [BytePosition::Stored(first.len() as u64)]);
+    assert_eq!(first_output.num_columns(), 2);
+    let body = first_output
+        .column(0)
+        .as_any()
+        .downcast_ref::<BinaryViewArray>()
+        .unwrap();
+    assert_eq!(body.value(0), vec![0xfe; 4096]);
+    assert_eq!(body.null_count(), 0);
+    let dates = first_output
+        .column(1)
+        .as_any()
+        .downcast_ref::<TimestampMillisecondArray>()
+        .unwrap();
+    assert_eq!(dates.value(0), 1_594_176_775_000);
+    assert_eq!(
+        second_output
+            .column(0)
+            .as_any()
+            .downcast_ref::<BinaryViewArray>()
+            .unwrap()
+            .value(0),
+        b"tail"
+    );
+}
+
+#[tokio::test]
+async fn body_view_batches_bound_body_bytes_without_splitting_records() {
+    use arrow_array::BinaryViewArray;
+    use flate2::{Compression, write::GzEncoder};
+    use open_arrow_access_core::Layer;
+    use open_arrow_access_layers::SourcePositionLayer;
+    use std::io::Write;
+
+    let bodies = [vec![b'a'; 17], vec![b'b'; 17], vec![b'c'; 40]];
+    let mut plain = Vec::new();
+    let mut compressed = Vec::new();
+    let mut plain_positions = Vec::new();
+    let mut frame_positions = Vec::new();
+    for body in &bodies {
+        plain_positions.push(BytePosition::Stored(plain.len() as u64));
+        frame_positions.push(BytePosition::Frame {
+            frame: compressed.len() as u64,
+            decoded: 0,
+        });
+        let input = record(body);
+        plain.extend_from_slice(&input);
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&input).unwrap();
+        compressed.extend_from_slice(&encoder.finish().unwrap());
+    }
+    for (path, input, positions) in [
+        ("input.warc", plain, plain_positions),
+        ("input.warc.gz", compressed, frame_positions),
+    ] {
+        let storage = SourcePositionLayer::default().layer(MemoryAccessor::new(&input, 19));
+        let mut reader = WarcArrowFormat
+            .with_source_positions()
+            .with_body_view()
+            .with_max_body_bytes(NonZeroUsize::new(32).unwrap())
+            .open_reader(&storage, ReadRequest::new(path))
+            .await
+            .unwrap();
+        let first = reader.next().await.unwrap().unwrap();
+        let second = reader.next().await.unwrap().unwrap();
+        assert!(reader.next().await.unwrap().is_none());
+        assert_eq!(first.positions(), &positions[..2]);
+        assert_eq!(second.positions(), &positions[2..]);
+        let first_body = first
+            .batch()
+            .column_by_name("body")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryViewArray>()
+            .unwrap();
+        let second_body = second
+            .batch()
+            .column_by_name("body")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BinaryViewArray>()
+            .unwrap();
+        assert_eq!(first_body.value(0), bodies[0]);
+        assert_eq!(first_body.value(1), bodies[1]);
+        assert_eq!(second_body.value(0), bodies[2]);
+    }
+}

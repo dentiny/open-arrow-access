@@ -4,12 +4,12 @@ use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Capability, FactoryToken, OrderRequirement, ReadRequest,
-    ReaderFactory, RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, Result,
-    SchemaRef, StreamReader, async_trait,
+    ReaderFactory, RecordCapability, RecordMetadata, RecordReader, Result, SchemaRef, StreamReader,
+    async_trait,
 };
-use open_arrow_access_layers::{ColumnEvolution, SchemaEvolutionLayer};
 
-use super::{WarcFormat, WarcHeader, WarcRecord};
+use super::WarcHeader;
+use super::batch::WarcBatchBuilder;
 use crate::FileAccessor;
 
 /// Physical WARC records as Arrow rows. Bodies are unmodified LargeBinary;
@@ -29,7 +29,7 @@ impl<B> FileAccessor<B, WarcArrowFormat> {
 }
 
 // Header mapping shared by the physical schema and row population.
-const HEADER_COLUMNS: &[(&str, WarcHeader, DataType, bool)] = &[
+pub(super) const HEADER_COLUMNS: &[(&str, WarcHeader, DataType, bool)] = &[
     (
         "target_uri",
         WarcHeader::TargetURI,
@@ -98,7 +98,7 @@ const HEADER_COLUMNS: &[(&str, WarcHeader, DataType, bool)] = &[
     ("warc_info_id", WarcHeader::WarcInfoID, DataType::Utf8, true),
 ];
 
-fn raw_arrow_schema() -> SchemaRef {
+fn base_arrow_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
@@ -106,7 +106,7 @@ fn raw_arrow_schema() -> SchemaRef {
                 Field::new("id", DataType::Utf8, false),
                 Field::new("type", DataType::Utf8, false),
                 Field::new("warc_version", DataType::Utf8, false),
-                Field::new("date", DataType::Utf8, false),
+                Field::new("date", date_type(), false),
                 Field::new("source_uri", DataType::LargeUtf8, false),
             ];
             fields.extend(HEADER_COLUMNS.iter().map(|(name, _, data_type, nullable)| {
@@ -121,15 +121,19 @@ fn raw_arrow_schema() -> SchemaRef {
 
 /// Default WARC Arrow schema, including a non-null millisecond timestamp date.
 pub fn arrow_schema() -> SchemaRef {
+    base_arrow_schema()
+}
+
+pub(super) fn body_view_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
-            let fields = raw_arrow_schema()
+            let fields = arrow_schema()
                 .fields()
                 .iter()
                 .map(|field| {
-                    if field.name() == "date" {
-                        Arc::new(field.as_ref().clone().with_data_type(date_type()))
+                    if field.name() == "body" {
+                        Arc::new(field.as_ref().clone().with_data_type(DataType::BinaryView))
                     } else {
                         field.clone()
                     }
@@ -142,24 +146,6 @@ pub fn arrow_schema() -> SchemaRef {
 
 pub(super) fn date_type() -> DataType {
     DataType::Timestamp(TimeUnit::Millisecond, /*timezone=*/ None)
-}
-
-pub(super) fn evolve_reader(reader: Box<dyn RecordReader>) -> Result<Box<dyn RecordReader>> {
-    if reader.metadata().schema.index_of("date").is_err() {
-        return Ok(reader);
-    }
-    SchemaEvolutionLayer::try_new(vec![ColumnEvolution::change_data_type("date", date_type())])?
-        .wrap_reader(reader)
-}
-
-pub(super) fn raw_projection(output: &SchemaRef) -> Result<SchemaRef> {
-    let names = output
-        .fields()
-        .iter()
-        .map(|field| field.name().clone())
-        .collect::<Vec<_>>();
-    open_arrow_access_core::ResolvedProjection::resolve(&raw_arrow_schema(), Some(&names))
-        .map(|projection| projection.schema)
 }
 
 #[async_trait]
@@ -204,23 +190,22 @@ impl ReaderFactory for WarcArrowFormat {
         schema: SchemaRef,
     ) -> Result<Box<dyn RecordReader>> {
         let source = request.object.clone();
-        let records = WarcFormat
-            .create_reader(token, input, ByteReadRequest::from(&request), ())
-            .await?;
+        let input = open_arrow_access_core::into_async_read(input, "read_warc");
+        let records = warc::WarcReader::new(input).iter_raw_records();
         let batch_size = request.options.batch_size.get();
-        let schema = raw_projection(&schema)?;
         let output = schema.clone();
         let source_uri = request.object.locator().to_owned();
         let batches = stream::try_unfold(records, move |mut records| {
             let output = output.clone();
             let source_uri = source_uri.clone();
             async move {
-                let mut batch = new_batch(&output)?;
+                let mut batch = WarcBatchBuilder::new(output, batch_size)?;
                 while batch.len() < batch_size {
-                    let Some(record) = records.next().await? else {
+                    let Some(record) = records.next().await else {
                         break;
                     };
-                    append_record(&mut batch, &record, &source_uri)?;
+                    let (headers, body) = record.map_err(super::decode_error)?;
+                    batch.append(headers, body, &source_uri)?;
                 }
                 if batch.is_empty() {
                     return Ok(None);
@@ -228,7 +213,8 @@ impl ReaderFactory for WarcArrowFormat {
                 Ok(Some((batch.finish()?, records)))
             }
         });
-        evolve_reader(Box::new(StreamReader::records(
+        let _ = token;
+        Ok(Box::new(StreamReader::records(
             batches,
             RecordMetadata {
                 schema,
@@ -237,35 +223,4 @@ impl ReaderFactory for WarcArrowFormat {
             OrderRequirement::Reorderable,
         )))
     }
-}
-
-pub(super) fn new_batch(output: &SchemaRef) -> Result<RecordBatchBuilder> {
-    RecordBatchBuilder::new(
-        raw_arrow_schema(),
-        Some(
-            output
-                .fields()
-                .iter()
-                .map(|field| field.name().clone())
-                .collect(),
-        ),
-    )
-}
-
-pub(super) fn append_record(
-    batch: &mut RecordBatchBuilder,
-    record: &WarcRecord,
-    source_uri: &str,
-) -> Result<()> {
-    batch.push(|row| {
-        row.append("id", record.warc_id())?;
-        row.append("type", record.warc_type().as_str())?;
-        row.append("warc_version", record.warc_version())?;
-        row.append("date", record.date().to_rfc3339().as_str())?;
-        row.append("source_uri", source_uri)?;
-        for (name, header, _, _) in HEADER_COLUMNS {
-            row.append(name, record.header(header.clone()).as_deref())?;
-        }
-        row.append("body", record.body())
-    })
 }

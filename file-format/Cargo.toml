@@ -23,7 +23,7 @@ parquet-brotli = ["parquet", "parquet/brotli"]
 parquet-gzip = ["parquet", "parquet/flate2-zlib-rs"]
 parquet-lz4 = ["parquet", "parquet/lz4"]
 parquet-zstd = ["parquet", "parquet/zstd"]
-warc = ["dep:warc", "dep:arrow-schema", "dep:open-arrow-access-layers"]
+warc = ["dep:arrow-array", "dep:warc", "dep:arrow-schema", "dep:open-arrow-access-layers"]
 xml = ["dep:xml-arrow"]
 
 [dependencies]
