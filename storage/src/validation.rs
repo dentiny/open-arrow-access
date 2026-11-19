@@ -1,7 +1,16 @@
+use std::time::Duration;
+
 use indexmap::{IndexMap, map::Entry};
 
 use crate::error;
 use open_arrow_access_core::Result;
+
+pub(crate) fn validate_http_request_interval(interval: Duration) -> Result<()> {
+    if interval.is_zero() || tokio::time::Instant::now().checked_add(interval).is_none() {
+        return Err(error::invalid_http_request_interval());
+    }
+    Ok(())
+}
 
 pub(crate) fn validate_http_concurrency(limit: usize) -> Result<()> {
     if limit == 0 || limit > tokio::sync::Semaphore::MAX_PERMITS {

@@ -6,7 +6,7 @@ mod format;
 mod planning;
 mod positioned;
 pub use arrow::{WarcArrowAccessor, WarcArrowFormat, arrow_schema};
-pub use positioned::{PositionedWarcArrowFormat, PositionedWarcArrowViewFormat};
+pub use positioned::PositionedWarcArrowFormat;
 
 pub use accessor::WarcAccessor;
 pub use format::WarcFormat;
