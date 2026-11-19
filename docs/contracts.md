@@ -40,6 +40,14 @@ another valid random-access mechanism. See [decompression](../decompression/READ
 `into_stream` owns the reader and stops polling it after EOF or the first error.
 No background execution is created by these contracts.
 
+`PositionedRecordReader` uses the same metadata and record capabilities but emits
+`PositionedBatch`: an Arrow batch paired with one `BytePosition` per row.
+`PositionedBatch::try_new` validates the count, including zero-column batches.
+Coordinates are either `Stored(offset)` or `Frame { frame, decoded }`; they
+describe source bytes, not row numbers. Row-changing transforms must update
+coordinates with their rows. Ordinary record readers do not promise offsets.
+See [source positions](source-positions.md) for decoder support and source columns.
+
 `StreamReader::new(stream, metadata)` adapts an owned stream of shared results
 back into a sequential `Reader`, including streams that are not `Unpin`.
 Metadata is available without polling. EOF and errors drop the stream and make
@@ -165,33 +173,44 @@ invalid options, or unavailable metadata. Parquet also checks the opened byte
 reader's range flag and known length. Capabilities are not authorization or
 snapshot guarantees, and new operation flags are added alongside their APIs.
 Cargo features control which implementations are compiled; runtime capabilities
-describe which operations a particular composed object exposes. `read_parallel`
-is a declaration only: existing concrete implementations report `false`, and
-transparent wrappers forward it. It does not enable execution, describe
-per-reader byte I/O concurrency, or describe caller-managed concurrency across
-separate readers. No parallel scheduler or emission-policy flag is introduced.
+describe which operations a particular composed object exposes.
+`ParallelReadLayer` reports `read_parallel` on its accessor when the inner
+interface supports reading, and on its opened reader. Merely implementing
+`ScanPlanner` does not report parallel execution. Inspecting the flag enables no
+work and does not describe per-reader byte I/O concurrency or caller-managed
+concurrency across readers. Source `ordering` and the requested `EmissionPolicy`
+are separate from this flag; parallel execution preserves order by default.
 
 ## Accessor
-
-Future record-side introspection separates declared `SourceAttributes` from
-resolved `ScanProperties`. Formats, datasets and provider services contribute
-ordering requirements and partition strategies; byte storage keeps its existing
-capability contract. Our ATIF adapter requires global order, so unordered
-emission must be rejected for the entire composed ATIF scan. See
-[source attributes and planning](source-attributes.md) for conditional indexed
-WARC support, dataset/service composition and the optional planner design.
-These are proposed contracts, not new runtime capabilities in the current implementation.
 
 `Accessor` is a Send + Sync factory. Associated `Request` and `Reader` types
 allow storage, formats, datasets, and services to use the same `open`
 contract without a closed enum of every source or format.
 
+`metadata(request)` returns the output metadata without consuming output items.
+For unchanged input and configuration, it must equal the metadata returned by
+`open(request)`, including projection and source identity. Its compatibility
+default opens and drops a reader and inherits opening side effects. Overrides
+should inspect only format metadata or bounded inference samples, without
+starting background work or retaining readers. `inspect_metadata(request)` wraps
+that result in `Some` by default; `None` is reserved for an input proven empty
+with no schema. Explicit schemas, unknown row presence, and JSON `{}` rows retain
+`Some`. `ReaderFactory` supplies corresponding hooks that receive byte storage;
+`FactoryAccessor` forwards them to the factory.
+
+Current record ordering is declared by `RecordCapability::ordering` and resolved
+in `ScanPlan::ordering`. The ATIF adapter requires global order, so unordered
+emission is rejected for its entire composed scan. The fuller `SourceAttributes`
+and `ScanProperties` types in [source-attribute design](source-attributes.md)
+remain proposals, not current exports. The implemented planning and admission
+rules are documented below and in [parallel reads](parallel-read.md).
+
 Core `ReaderFactory` transforms one opened `ByteReader` into its associated
 reader interface. Associated `Request` and `Reader` types keep Arrow batches,
 bytes and other parsed items distinct. `Prepared: Send` retains per-open decoders
 and resolved schemas without repeating validation or constructing a decoder twice.
-The blanket `ReaderFactoryExt::open_reader` implementation runs `prepare(&request)`,
-converts the request into `ByteReadRequest`, opens storage, then invokes
+The blanket `ReaderFactoryExt::open_reader` implementation converts the request
+into `ByteReadRequest`, runs `prepare(&request)` before opening storage, then invokes
 `create_reader` with a borrowed `FactoryToken`, the owned input and prepared
 state. Preparation performs no I/O; reader creation can inspect input and must
 expose metadata when it completes. Errors pass through unchanged.
@@ -221,9 +240,11 @@ prepares no decoder until its input is available and checks actual range support
 and known length before inspecting the file. XML validates its path, limits and
 explicit projection before opening; inferred projection still resolves after
 bounded sampling. `capability(input)` maps upstream byte capabilities to the
-format's record-accessor capabilities without I/O. The default reports sequential
-record reading; Parquet also requires upstream range support. Both report no
-byte-range, listing or parallel operations on their record output.
+format's record-accessor capabilities without I/O. Each factory must declare its
+capabilities and record ordering explicitly; there is no default implementation.
+Built-in Arrow formats report sequential record reading; Parquet also requires
+upstream range support. Their record output exposes no byte-range or listing
+operations; parallel execution is supplied by an execution layer.
 
 Existing built-in accessor types alias the shared accessor and preserve their
 constructors/builders. Custom formats use `FileAccessor::from_format` and need
@@ -278,6 +299,63 @@ reads share an executor budget allocated per opened reader, so interleaving the
 two paths does not multiply in-flight I/O. Contiguous output fragments are sliced
 without copying; fragmented output is assembled only when needed.
 
+## Bound and prepared sources
+
+`BoundSource::bind` saves a typed accessor and complete request behind an erased
+interface, opens one reader, and retains its metadata without polling output
+rows. The first `reader()` takes that reader; later calls clone the saved request
+and reopen independently. Reopened metadata schemas must match the bound schema,
+including schema metadata. The state lock is released before asynchronous opens,
+so concurrent callers never share a reader cursor.
+
+`PreparedSource` binds the complete unprojected schema, then accepts projection
+and batch size in each `scan(ReadOptions)`. A scan with no projection and the
+preparation batch size uses the bound-reader path; other options reopen the
+selection. Both reader metadata and emitted batches are checked against the
+projected bound schema. `prepare_plannable` retains `plan_scan`; ordinary
+`prepare` does not. `scan` executes the accessor's `open` path, while `plan_scan`
+returns partitions and policies for a consumer to handle. These helpers fix a
+schema and selection, not source contents, file membership, or a version snapshot.
+
+## Scan planning and execution
+
+`ScanPlanner` is an optional extension of record accessors. `plan_scan(request)`
+returns a `ScanPlan` with fixed `RecordMetadata`, an `OrderRequirement`, execution
+settings, and a stream of `Result<ScanPartition>`. A `ScanPartition` is an owned
+future that opens an independent `RecordReader`. Polling the stream may perform
+discovery I/O; awaiting an opener creates its reader. Partitions cover the
+selection exactly once in logical order, retaining duplicate selections.
+Planning may inspect an initial input but must not eagerly open every partition.
+
+`streaming_discovery` marks plans whose discovery consumes a shared sequential
+input. Multi-file planners can keep each such file in one worker so downloads
+and framing overlap across files. `file_streams` marks complete streaming-file
+partitions for estimated-byte output budgeting. Independent native partitions,
+such as Parquet row groups, retain batch-count queues. These flags describe work
+shape, not permission to reorder it.
+
+`ScanPlan::ordering` defaults to `PreserveGlobal`; providers may declare
+`Reorderable` only for a selection whose semantics permit it. Composition through
+`require_ordering` can strengthen a requirement but never relax it.
+`EmissionPolicy::Ordered` is the default output policy. `Unordered` is admitted
+only for a reorderable plan, including empty or single-partition scans.
+
+`ParallelReadOptions` holds the resident-partition limit, native-partition
+`prefetch` batch count, and per-streaming-file `read_ahead_bytes` estimate
+(default 8 MiB through `ParallelReadLayer`). Finished partitions retain their
+slots until their queues drain. Oversized streaming batches are admitted alone;
+decoder memory and a batch waiting for byte-budget admission remain outside
+the queue budget. These settings do not bound process memory or storage-global
+I/O concurrency.
+
+`ScanPlan::into_reader()` validates schema and reads partitions sequentially; it
+does not execute collected parallel or emission policies. Open the composed
+accessor to validate and execute those policies. Partition workers start on
+consumption and require a Tokio runtime; dropping the output reader aborts its
+owned tasks. All partition metadata and batches must match the plan schema,
+including schema metadata. See [parallel reads](parallel-read.md) for queue,
+failure, and cancellation behavior.
+
 ## Layer
 
 `Layer<A>` wraps an accessor while preserving its request and reader types.
@@ -302,6 +380,14 @@ alone does not create concurrency. Both collect settings in `ScanPlan` before
 one executor starts, independently of layer insertion order. Global-order sources
 reject unordered requests before execution. Partition planning remains an optional
 extension, not a required method for every byte reader.
+
+`SchemaEvolutionLayer` preserves `ScanPlanner` when its inner accessor implements
+it: one immutable evolution plan is compiled per scan and applied inside each
+partition, retaining native partitions, execution settings, and source ordering.
+It can also run outside the executor over the merged stream. Sampling, limits,
+and prefetch do not expose `ScanPlanner`; their state and budgets cover the merged
+scan rather than resetting per partition. See
+[layer composition](../layers/README.md#compose-layers).
 
 ## Implementation boundaries
 
@@ -338,13 +424,16 @@ storage paths.
   independent gzip/LZ4/bzip2/Zstandard features use upstream decoders with
   concatenated frames or members;
   source versions remain upstream identities and decoded lengths are unknown.
-- `format-json` adds an Arrow JSON decoder with a caller-supplied fixed schema.
+- `format-json` adds an Arrow JSON decoder with an explicit or inferred fixed schema.
   It reads whitespace-separated objects, including JSONL, from sequential bytes
   without materializing the input. Top-level arrays/null/scalars are rejected;
-  projection selects the decoder schema before opening input. Byte options pass
-  through the same `ReadRequest` contract as Parquet.
-- `dataset/` always provides sequential `FileSetAccessor` and `DirectoryAccessor`,
-  without depending on a format.
+  output projection does not skip validation of unselected source fields. Byte
+  options pass through the same `ReadRequest` contract as Parquet.
+- `dataset/` always provides `FileSetAccessor` and `DirectoryAccessor`, without
+  depending on a format. Ordinary opens read sequentially; optional planning
+  exposes file or native partitions for execution layers. Strict projected-schema
+  matching is the default; `with_union_by_name` inspects selected schemas and
+  aligns missing fields before emitting rows. See [datasets](../dataset/README.md).
 - `service/` provides default-off Hugging Face repository access over the shared
   OpenDAL byte adapter. The same service implements the record accessor contract
   for `HuggingFaceDatasetRequest`: pin the Parquet export revision, list/sort shards,
@@ -352,7 +441,10 @@ storage paths.
   ownership of decoding, projection, schema checks and sequential execution.
   Partial exports require explicit opt-in. Fixed commits enable upstream resolve
   caching; floating repository reads keep their existing resolution behavior.
-- `layers/` remains an extension point.
+- `layers/` implements schema evolution, sampling, limits, coalescing, prefetch,
+  parallel execution, and emission policy over the shared contracts.
+- `src/crawl/` composes service/dataset planners and these layers into
+  `CrawlAccessor`; it reuses the existing executor. See [integrated crawls](crawl.md).
 
 The project output boundary is Arrow records. Internal temporary inputs may be
 introduced for materialization in a later decompression PR; downstream writes,
