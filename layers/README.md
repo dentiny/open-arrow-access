@@ -92,17 +92,22 @@ use open_arrow_access_core::{Accessor, AccessorExt, RecordReader};
 use open_arrow_access_layers::{CoalesceBatchesAccessor, CoalesceBatchesLayer};
 
 fn coalesce<A: Accessor<Reader = dyn RecordReader>>(source: A) -> CoalesceBatchesAccessor<A> {
-    source.layer(CoalesceBatchesLayer::new(
-        NonZeroUsize::new(64).unwrap(),
-        NonZeroUsize::new(4 * 1024 * 1024).unwrap(),
-    ))
+    source.layer(
+        CoalesceBatchesLayer::rows(NonZeroUsize::new(64).unwrap())
+            .with_max_estimated_bytes(NonZeroUsize::new(4 * 1024 * 1024).unwrap()),
+    )
 }
 ```
 
-The row limit is strict; larger input batches are sliced. Estimated array bytes
+Use `rows(...)` for only a row budget, `estimated_bytes(...)` for only a byte
+budget, or add the other budget with `with_max_rows(...)` /
+`with_max_estimated_bytes(...)`. Constructors always enable at least one budget.
+With both enabled, the first budget reached flushes the batch. A configured row
+limit is strict; larger input batches are sliced. Estimated array bytes
 bound accumulation, with an oversized slice emitted alone. Shared buffers and
 concatenation allocations mean this is not a process memory cap. Empty batches
-are skipped, and the final partial batch is returned at EOF. Buffered rows precede
+are skipped; nonempty zero-column batches cost at least one byte under a byte
+budget. The final partial batch is returned at EOF. Buffered rows precede
 an upstream error. There is no flush timer: a partial batch waits for more input.
 Place `PrefetchLayer` outside coalescing to read the next combined batch while the
 caller processes the current one, with a separate bounded queue budget.

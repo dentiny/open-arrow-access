@@ -10,8 +10,9 @@ use open_arrow_access_core::{
 /// Combine small batches over one opened scan, preserving schema and row order.
 ///
 /// Place outside `ParallelReadLayer` to combine rows from different partitions.
-/// Outputs contain at most `max_rows` rows. Estimated input array bytes bound
-/// accumulation; a single slice exceeding that budget is emitted alone. Slices
+/// Configure a row budget, an estimated-byte budget, or both. When both are
+/// set, either budget can flush the output. A configured row limit is strict;
+/// a single slice exceeding the byte budget is emitted alone. Slices
 /// can retain shared input buffers, and concatenation allocates output arrays,
 /// so this is not a hard bound on process memory. Empty batches are discarded.
 ///
@@ -21,16 +22,38 @@ use open_arrow_access_core::{
 /// Dropping the output releases the source and buffered batches. No task is spawned.
 #[derive(Clone, Copy, Debug)]
 pub struct CoalesceBatchesLayer {
-    max_rows: NonZeroUsize,
-    max_estimated_bytes: NonZeroUsize,
+    max_rows: Option<NonZeroUsize>,
+    max_estimated_bytes: Option<NonZeroUsize>,
 }
 
 impl CoalesceBatchesLayer {
-    pub fn new(max_rows: NonZeroUsize, max_estimated_bytes: NonZeroUsize) -> Self {
+    /// Bound output rows. Larger input batches are sliced.
+    pub fn rows(max_rows: NonZeroUsize) -> Self {
         Self {
-            max_rows,
-            max_estimated_bytes,
+            max_rows: Some(max_rows),
+            max_estimated_bytes: None,
         }
+    }
+
+    /// Bound estimated array bytes accumulated per output; oversized slices emit alone.
+    /// Nonempty zero-column batches cost at least one byte to bound accumulation.
+    pub fn estimated_bytes(max_estimated_bytes: NonZeroUsize) -> Self {
+        Self {
+            max_rows: None,
+            max_estimated_bytes: Some(max_estimated_bytes),
+        }
+    }
+
+    /// Add or replace the row budget, retaining any byte budget.
+    pub fn with_max_rows(mut self, max_rows: NonZeroUsize) -> Self {
+        self.max_rows = Some(max_rows);
+        self
+    }
+
+    /// Add or replace the estimated-byte budget, retaining any row budget.
+    pub fn with_max_estimated_bytes(mut self, max_estimated_bytes: NonZeroUsize) -> Self {
+        self.max_estimated_bytes = Some(max_estimated_bytes);
+        self
     }
 }
 
@@ -111,7 +134,8 @@ impl Coalescer {
         let mut batches = Vec::new();
         let mut rows = 0;
         let mut bytes = 0usize;
-        while rows < self.settings.max_rows.get() {
+        let max_rows = self.settings.max_rows.map_or(usize::MAX, NonZeroUsize::get);
+        while rows < max_rows {
             let batch = match self.pending.take() {
                 Some(batch) => batch,
                 None => {
@@ -142,15 +166,17 @@ impl Coalescer {
             if batch.num_rows() == 0 {
                 continue;
             }
-            let take = batch.num_rows().min(self.settings.max_rows.get() - rows);
+            let take = batch.num_rows().min(max_rows - rows);
             let part = batch.slice(0, take);
-            let estimated_bytes = part.get_array_memory_size();
-            let remaining_bytes = self
+            let estimated_bytes = self
                 .settings
                 .max_estimated_bytes
-                .get()
-                .saturating_sub(bytes);
-            if !batches.is_empty() && estimated_bytes > remaining_bytes {
+                .map_or(0, |_| part.get_array_memory_size().max(1));
+            let exceeds_bytes = self
+                .settings
+                .max_estimated_bytes
+                .is_some_and(|max| estimated_bytes > max.get().saturating_sub(bytes));
+            if !batches.is_empty() && exceeds_bytes {
                 self.pending = Some(batch);
                 break;
             }
@@ -160,7 +186,11 @@ impl Coalescer {
             rows += take;
             bytes = bytes.saturating_add(estimated_bytes);
             batches.push(part);
-            if bytes >= self.settings.max_estimated_bytes.get() {
+            if self
+                .settings
+                .max_estimated_bytes
+                .is_some_and(|max| bytes >= max.get())
+            {
                 break;
             }
         }
