@@ -67,3 +67,35 @@ pub(super) fn validate_batch(batch: &RecordBatch, [bucket, key]: [usize; 2]) -> 
     }
     Ok(())
 }
+
+pub(crate) fn validate_shard_selection(shard: &open_arrow_access_core::ObjectRef) -> Result<()> {
+    if !shard.locator().ends_with(".csv.gz") {
+        return Err(super::error::invalid_shard().with_object(Some(shard)));
+    }
+    Ok(())
+}
+pub(super) fn validate_shard_membership(
+    manifest: &Manifest,
+    shard: &open_arrow_access_core::ObjectRef,
+) -> Result<()> {
+    validate_shard_selection(shard)?;
+    if !manifest
+        .files
+        .iter()
+        .any(|file| file.key == shard.locator())
+    {
+        return Err(super::error::unknown_shard(shard));
+    }
+    Ok(())
+}
+pub(super) fn validate_metadata_key(key: &str) -> Result<()> {
+    if !key.starts_with("metadata/")
+        || !key.ends_with(".json")
+        || key.chars().any(char::is_control)
+        || key.contains('\\')
+        || key.split('/').any(|part| matches!(part, "" | "." | ".."))
+    {
+        return Err(super::error::invalid_metadata_key());
+    }
+    Ok(())
+}

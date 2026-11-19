@@ -66,18 +66,28 @@ impl<A: ByteAccessor + 'static> Accessor for PmcDatasetAccessor<A> {
 #[async_trait]
 impl<A: ByteAccessor + 'static> ScanPlanner for PmcDatasetAccessor<A> {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        let metadata = RecordMetadata {
-            schema: request.options.resolve_projection(&schema())?.schema,
-            source: None,
-        };
+        self.metadata(request.clone()).await?;
         let objects = self.metadata_paths(&request).await?;
-        let articles = PmcAccessor::with_default_decoder(self.storage.clone());
-        let partitions = objects.map_ok(move |object| {
-            let articles = articles.clone();
-            let mut request = request.clone();
-            request.object = object;
-            Box::pin(async move { articles.open(request).await }) as ScanPartition
-        });
-        Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(self.capability().ordering))
+        article_plan(self.storage.clone(), request, objects)
     }
+}
+
+pub(super) fn article_plan<A: ByteAccessor + 'static>(
+    storage: Arc<A>,
+    request: ReadRequest,
+    objects: ObjectStream,
+) -> Result<ScanPlan> {
+    let metadata = RecordMetadata {
+        schema: request.options.resolve_projection(&schema())?.schema,
+        source: None,
+    };
+    let articles = PmcAccessor::with_default_decoder(storage);
+    let ordering = articles.capability().ordering;
+    let partitions = objects.map_ok(move |object| {
+        let articles = articles.clone();
+        let mut request = request.clone();
+        request.object = object;
+        Box::pin(async move { articles.open(request).await }) as ScanPartition
+    });
+    Ok(ScanPlan::from_stream(metadata, partitions).with_ordering(ordering))
 }

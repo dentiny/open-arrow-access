@@ -1,0 +1,65 @@
+{
+  "sourceBucket": "pmc-oa-opendata",
+  "destinationBucket": "arn:aws:s3:::pmc-oa-opendata",
+  "version": "2016-11-30",
+  "creationTimestamp": "1794963600000",
+  "fileFormat": "CSV",
+  "fileSchema": "Bucket, Key, LastModifiedDate, ETag",
+  "files": [
+    {
+      "key": "inventory-reports/pmc-oa-opendata/metadata/data/13cbabe4-91e8-4d22-977f-adc2fc7eb6cb.csv.gz",
+      "size": 182,
+      "MD5checksum": "49b37ef2a47b1af6a5c3f256ae52e377"
+    },
+    {
+      "key": "inventory-reports/pmc-oa-opendata/metadata/data/35a3e3a9-aab9-4c3d-9867-ea68bf400a6b.csv.gz",
+      "size": 24480895,
+      "MD5checksum": "55a671b3ebdbf6fd94d1b6c5888fd97d"
+    },
+    {
+      "key": "inventory-reports/pmc-oa-opendata/metadata/data/beb23322-7c7d-4708-b207-f68bda240a39.csv.gz",
+      "size": 20632774,
+      "MD5checksum": "84190a49274d3e27eb5b26a6a1023190"
+    },
+    {
+      "key": "inventory-reports/pmc-oa-opendata/metadata/data/f25d830b-f977-4791-8867-fa82315886d8.csv.gz",
+      "size": 18906334,
+      "MD5checksum": "18bec2fc4b28f146e26937b2c955e00b"
+    },
+    {
+      "key": "inventory-reports/pmc-oa-opendata/metadata/data/ae999652-fcc5-4552-bc9a-39c907095c8f.csv.gz",
+      "size": 25258838,
+      "MD5checksum": "03cb7986221d6c9aff5e9bab43183607"
+    },
+    {
+      "key": "inventory-reports/pmc-oa-opendata/metadata/data/8c75e4c0-7449-4edc-9871-0e379eb39e77.csv.gz",
+      "size": 20267105,
+      "MD5checksum": "da6099f65e859581cfb5d613a55be3e9"
+    },
+    {
+      "key": "inventory-reports/pmc-oa-opendata/metadata/data/618db35c-377c-4fc8-be21-23efea7100c2.csv.gz",
+      "size": 24480996,
+      "MD5checksum": "1946f998e7bbb6c96b6b22b071cf2957"
+    },
+    {
+      "key": "inventory-reports/pmc-oa-opendata/metadata/data/fa64cfbc-13aa-414b-b725-a186857b1bf5.csv.gz",
+      "size": 22272894,
+      "MD5checksum": "7cb418db6d0b49d39f14892d6a9acc5c"
+    },
+    {
+      "key": "inventory-reports/pmc-oa-opendata/metadata/data/f676f4bf-3fb0-4b3d-a2d0-b8d72bf7063b.csv.gz",
+      "size": 25154567,
+      "MD5checksum": "38a4c49077f8fa98e32c968f0b7f4d1a"
+    },
+    {
+      "key": "inventory-reports/pmc-oa-opendata/metadata/data/8f1e81a7-43be-4a24-92e3-9729bb0b1cef.csv.gz",
+      "size": 23596228,
+      "MD5checksum": "b85830773358a496d2568a7872c02373"
+    },
+    {
+      "key": "inventory-reports/pmc-oa-opendata/metadata/data/ba6d6aa6-d7e2-426a-b432-fe97ac85274b.csv.gz",
+      "size": 29268030,
+      "MD5checksum": "cfd590220e970c26ea8d22902da2812b"
+    }
+  ]
+}
