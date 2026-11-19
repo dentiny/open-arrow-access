@@ -303,7 +303,7 @@ The fixed schema has 22 top-level fields:
 | `source_uri` | LargeUtf8 (input locator) | No |
 | `target_uri` | LargeUtf8 | Yes |
 | `content_type` | Utf8 | Yes |
-| `body` | LargeBinary | No |
+| `body` | BinaryView | No |
 | `content_length` | Utf8 | No |
 | `block_digest` | Utf8 | Yes |
 | `payload_digest` | Utf8 | Yes |

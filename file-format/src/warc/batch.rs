@@ -4,13 +4,15 @@ use std::borrow::Cow;
 use arrow_array::{
     RecordBatch, RecordBatchOptions,
     builder::{
-        ArrayBuilder, BinaryViewBuilder, LargeBinaryBuilder, LargeStringBuilder, StringBuilder,
-        StructBuilder, TimestampMillisecondBuilder,
+        ArrayBuilder, BinaryViewBuilder, LargeStringBuilder, StringBuilder, StructBuilder,
+        TimestampMillisecondBuilder,
     },
 };
 use open_arrow_access_core::{Result, SchemaRef};
 
 use super::{arrow::HEADER_COLUMNS, decode_error};
+
+pub(super) const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
 pub(super) struct WarcBatchBuilder {
     schema: SchemaRef,
@@ -96,21 +98,18 @@ impl WarcBatchBuilder {
         }
         self.body_bytes = self.body_bytes.saturating_add(body.len());
         if let Ok(index) = self.schema.index_of("body") {
-            if let Some(builder) = self.builder.field_builder::<BinaryViewBuilder>(index) {
-                if body.len() <= 12 {
-                    builder.append_value(&body);
-                } else {
-                    let length = u32::try_from(body.len()).map_err(decode_error)?;
-                    let block = builder.append_block(body.into());
-                    builder
-                        .try_append_view(block, 0, length)
-                        .map_err(decode_error)?;
-                }
+            let builder = self
+                .builder
+                .field_builder::<BinaryViewBuilder>(index)
+                .unwrap();
+            if body.len() <= 12 {
+                builder.append_value(&body);
             } else {
-                self.builder
-                    .field_builder::<LargeBinaryBuilder>(index)
-                    .unwrap()
-                    .append_value(&body);
+                let length = u32::try_from(body.len()).map_err(decode_error)?;
+                let block = builder.append_block(body.into());
+                builder
+                    .try_append_view(block, 0, length)
+                    .map_err(decode_error)?;
             }
         }
         self.builder.append(true);
@@ -121,5 +120,33 @@ impl WarcBatchBuilder {
         let options = RecordBatchOptions::new().with_row_count(Some(self.len()));
         let columns = self.builder.finish().columns().to_vec();
         RecordBatch::try_new_with_options(self.schema, columns, &options).map_err(decode_error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_array::cast::AsArray;
+    #[tokio::test]
+    async fn default_batch_retains_the_parsers_owned_body_allocation() {
+        let body = b"a body longer than the twelve byte inline limit";
+        let mut input = format!(
+            "WARC/1.1\r\nWARC-Type: resource\r\nWARC-Record-ID: <urn:test:view>\r\nWARC-Date: 2020-07-08T02:52:55Z\r\nContent-Length: {}\r\n\r\n", body.len(),
+        ).into_bytes();
+        input.extend_from_slice(body);
+        input.extend_from_slice(b"\r\n\r\n");
+        let (headers, owned) = warc::WarcReader::new(futures::io::Cursor::new(input))
+            .iter_raw_records()
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
+        let pointer = owned.as_ptr();
+        let mut builder = WarcBatchBuilder::new(super::super::arrow_schema(), 1);
+        builder.append(headers, owned, "input.warc").unwrap();
+        let batch = builder.finish().unwrap();
+        let view = batch["body"].as_binary_view();
+        assert_eq!(view.value(0), body);
+        assert_eq!(view.data_buffers()[0].as_ptr(), pointer);
     }
 }
