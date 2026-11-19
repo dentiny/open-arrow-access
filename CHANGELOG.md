@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.0 - 2026-11-19
+
+- Add `crawl::CrawlAccessor` with existing-source, file-set, directory and provider-resolver entry points for integrated crawls.
+- Expose default crawl options and builders for parallel reads, emission, schema evolution, coalescing and prefetch.
+- Preserve native scan planning through schema evolution, sharing one immutable transformation plan across partition workers.
+- Document discovery, manifest-to-file mapping, execution/emission workflows, layer boundaries and performance tuning.
+- Release all 8 public workspace crates at 0.12.0 with matching internal dependency requirements.
+
 ## 0.11.0 - 2026-11-19
 
 - Add a typed S2ORC v2 reader with a fixed Arrow schema, native scan planning, and validation before output projection.
