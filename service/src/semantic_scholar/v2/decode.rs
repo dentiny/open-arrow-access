@@ -96,7 +96,8 @@ fn section(input: &StructArray, output: &DataType) -> Result<ArrayRef> {
 pub(super) fn batch(input: RecordBatch) -> Result<RecordBatch> {
     let schema = schema::s2orc_v2_schema();
     let mut columns = input.columns().to_vec();
-    for index in [4, 5] {
+    for name in ["body", "bibliography"] {
+        let index = schema.index_of(name).map_err(arrow_error)?;
         columns[index] = section(
             input
                 .column(index)
