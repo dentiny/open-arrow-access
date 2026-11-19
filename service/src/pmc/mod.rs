@@ -50,12 +50,6 @@ pub fn schema() -> SchemaRef {
                 Field::new("text_url", DataType::Utf8, true),
                 Field::new("mid", DataType::Utf8, true),
             ];
-            let metadata_fields = fields.clone();
-            fields.push(Field::new(
-                "metadata",
-                DataType::Struct(metadata_fields.into()),
-                false,
-            ));
             // A selected URL is an output convenience, not an upstream metadata field.
             fields.push(Field::new("content_url", DataType::Utf8, true));
             Arc::new(Schema::new_with_metadata(

@@ -33,34 +33,11 @@ async fn maps_metadata_without_fetching_content() {
     assert_eq!(batch.schema(), schema());
     assert_eq!(batch.num_rows(), 1);
     assert_eq!(batch["content_url"], batch["pdf_url"]);
-    let metadata = batch["metadata"].as_struct();
-    assert_eq!(metadata.num_columns(), 16);
-    assert_eq!(
-        metadata
-            .column_by_name("mid")
-            .unwrap()
-            .as_string::<i32>()
-            .value(0),
-        "NIHMS123"
-    );
-    assert_eq!(
-        metadata
-            .column_by_name("pmid")
-            .unwrap()
-            .as_primitive::<UInt64Type>()
-            .value(0),
-        36537061
-    );
-    assert_eq!(
-        metadata.column_by_name("pdf_url").unwrap(),
-        &batch["pdf_url"]
-    );
+    assert_eq!(batch.schema().fields().len(), 17);
+    assert!(batch.schema().field_with_name("metadata").is_err());
     assert!(batch.schema().field_with_name("metadata_json").is_err());
     assert!(batch.schema().field_with_name("text").is_err());
-    assert_eq!(
-        metadata.column_by_name("text_url").unwrap(),
-        &batch["text_url"]
-    );
+    assert_eq!(batch["mid"].as_string::<i32>().value(0), "NIHMS123");
     for (field, expected) in [("pmcid", " pmc00123 "), ("license_code", "CC BY")] {
         assert_eq!(batch[field].as_string::<i32>().value(0), expected);
     }
@@ -107,7 +84,7 @@ async fn projection_preserves_order_and_zero_column_rows() {
 #[tokio::test]
 async fn unknown_metadata_fields_fail_instead_of_being_dropped() {
     let raw = br#"{"pmcid":"PMC1","future_field":{"a":1}}"#;
-    for projection in [None, Some(vec!["metadata".into()]), Some(vec![])] {
+    for projection in [None, Some(vec!["pmcid".into()]), Some(vec![])] {
         assert_eq!(
             read(raw, projection).await.unwrap_err().kind(),
             ErrorKind::Decode
@@ -280,7 +257,7 @@ async fn content_format_selects_one_url_without_fetching_or_falling_back() {
             .unwrap();
         let batch = direct.next().await.unwrap().unwrap();
         assert_eq!(batch["content_url"].as_string::<i32>().value(0), expected);
-        assert_eq!(batch["metadata"].as_struct().num_columns(), 16);
+        assert!(batch.schema().field_with_name("metadata").is_err());
         let mut dataset = PmcDatasetAccessor::new(storage)
             .with_format(format)
             .open(

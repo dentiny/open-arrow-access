@@ -31,19 +31,16 @@ The result is a `RecordReader` with exactly one row for a valid object. Full sch
 | `is_pmc_openaccess`, `is_manuscript`, `is_historical_ocr`, `is_retracted` | Boolean | Yes |
 | `media_urls` | List of nullable Utf8 items; JSON items must be strings | Yes |
 | `content_url` | Utf8; selected PDF/XML/TXT URL, default PDF | Yes |
-| `metadata` | Struct containing all 16 PMC metadata fields with their original names and Arrow types | No |
 
 The Arrow `text_url` column contains the TXT URL from the input JSON's
 `text_url` field, not inline article text. Like `pdf_url` and `xml_url`, its name
 matches the source field. URL encoding and query parameters are preserved.
 Use `text_url` in Arrow projections; no `text` alias is provided.
 
-Optional missing/null fields become null; duplicate keys use their final value.
-`metadata` retains the complete PMC metadata object as typed Arrow children,
-including nullable `mid`, numeric `pmid`, Boolean flags and `media_urls` as a list.
-Both the top-level `text_url` and nested `metadata.text_url` use the original
-input field name. The struct shares decoded arrays with
-mapped columns; no JSON string or serialization fallback is used.
+All 16 upstream metadata fields are retained once as typed top-level columns,
+using their original names. Optional missing/null fields become null; duplicate
+JSON keys use their final value. No duplicate `metadata` struct or JSON string
+column is emitted. `content_url` is the only derived convenience column.
 
 Unexpected upstream fields are rejected, including when projected away. The
 schema must be extended for a new field before accepting it; fields are never
@@ -139,7 +136,7 @@ including selecting only `content_url` or zero columns.
 
 Selection does not fetch or parse the content. A downstream sink should ingest
 **`content_url`** to obtain just the chosen representation. Original URL columns
-and the complete typed `metadata` struct remain available, including all three
+and all original metadata fields remain available, including all three
 content URLs when supplied. A missing selected URL stays null; no other format
 is substituted. Format selection does not create additional article rows or
 automatically download multiple representations.
@@ -169,7 +166,7 @@ async fn convert_shards(manifest: &str) -> Result<()> {
     for shard in shards {
         // Submit one downstream task with (manifest, shard), and a distinct destination.
         let request = PmcInventoryShardRequest::new(manifest, shard)
-            .with_options(ReadOptions::default().with_projection(["pmcid", "metadata", "pdf_url"]));
+            .with_options(ReadOptions::default().with_projection(["pmcid", "pmid", "pdf_url"]));
         let source = PmcInventoryShardAccessor::new(storage.clone())
             .layer(ParallelReadLayer::new(NonZeroUsize::new(4).unwrap(), NonZeroUsize::MIN));
         let mut rows = source.open(request).await?;
@@ -186,8 +183,8 @@ The inventory accessor's `shards` method reads only the manifest. Each article
 task verifies that its shard is listed in that manifest, reads only that gzip CSV,
 and URL-decodes each validated metadata key once. Discovery is streaming with one
 inventory batch buffered; duplicate rows remain duplicate article requests.
-Output uses the ordinary PMC schema, including the complete typed `metadata`
-struct. Inventory columns and the article projection are independent; even a
+Output uses the same flat PMC schema, retaining all upstream metadata fields.
+Inventory columns and the article projection are independent; even a
 zero-column article scan validates Bucket/Key and preserves row counts.
 
 Each metadata object is an independent native scan partition. `ParallelReadLayer`
