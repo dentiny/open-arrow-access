@@ -95,8 +95,9 @@ fn build(typed: bool) -> SchemaRef {
 /// Fixed typed output; JSON-encoded annotation payloads become List<Struct>.
 pub fn s2orc_v2_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
-    SCHEMA.get_or_init(|| build(true)).clone()
+    SCHEMA.get_or_init(|| build(/* typed= */ true)).clone()
 }
 pub(super) fn input_schema() -> SchemaRef {
-    build(false)
+    static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
+    SCHEMA.get_or_init(|| build(/* typed= */ false)).clone()
 }
