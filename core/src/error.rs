@@ -123,6 +123,11 @@ impl Error {
         self
     }
 
+    /// Exact failing object, including child objects within a dataset selection.
+    pub fn object(&self) -> Option<&ObjectRef> {
+        self.object.as_ref()
+    }
+
     pub fn with_source<E>(mut self, source: E) -> Self
     where
         E: std::error::Error + Send + Sync + 'static,
