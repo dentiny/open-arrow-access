@@ -146,15 +146,23 @@ async fn decodes_official_public_sample() {
     }
 }
 
-async fn record(id: u64) -> Value {
-    let raw = fixture!("semantic-scholar", "s2orc_v2-synthetic.json").await;
-    let mut row: Value = serde_json::from_slice(&raw).unwrap();
-    row["corpusid"] = json!(id);
-    row
+async fn valid_record() -> Value {
+    serde_json::from_slice(&fixture!("semantic-scholar", "s2orc_v2-synthetic.json").await).unwrap()
+}
+
+// Empty projection still validates the complete input record.
+async fn assert_rejected(row: Value) {
+    assert!(
+        batches(row.to_string().as_bytes(), Some(vec![]))
+            .await
+            .is_err(),
+        "accepted {row}"
+    );
 }
 
 #[tokio::test]
-async fn rejects_unknown_fields_at_every_object_level_even_when_projected_out() {
+async fn rejects_unknown_fields_even_when_projected_out() {
+    let base = valid_record().await;
     for path in [
         "",
         "/openaccessinfo",
@@ -164,35 +172,15 @@ async fn rejects_unknown_fields_at_every_object_level_even_when_projected_out() 
         "/bibliography",
         "/bibliography/annotations",
     ] {
-        let mut row = record(1).await;
-        row.pointer_mut(path)
-            .unwrap()
-            .as_object_mut()
-            .unwrap()
-            .insert("unexpected".into(), json!("must not disappear"));
-        assert!(
-            batches(row.to_string().as_bytes(), Some(vec!["corpusid".into()]))
-                .await
-                .is_err(),
-            "accepted unknown field at {path}"
-        );
-    }
-    for span in [
-        json!({"start":0,"end":1,"future":true}),
-        json!({"start":0,"end":1,"attributes":{"future":true}}),
-    ] {
-        let mut row = record(1).await;
-        row["body"]["annotations"]["sentence"] = json!(json!([span]).to_string());
-        assert!(
-            batches(row.to_string().as_bytes(), Some(vec![]))
-                .await
-                .is_err()
-        );
+        let mut row = base.clone();
+        row.pointer_mut(path).unwrap()["unexpected"] = json!(true);
+        assert_rejected(row).await;
     }
 }
 
 #[tokio::test]
-async fn rejects_type_drift_and_invalid_identity() {
+async fn rejects_invalid_values_even_when_projected_out() {
+    let base = valid_record().await;
     for (path, value) in [
         ("/corpusid", json!(null)),
         ("/corpusid", json!(0)),
@@ -203,69 +191,48 @@ async fn rejects_type_drift_and_invalid_identity() {
         ("/openaccessinfo/license", json!(true)),
         ("/openaccessinfo/externalids/DOI", json!(123)),
         ("/body/text", json!({"not":"text"})),
+        ("/body/text", json!(null)),
         ("/body/annotations/sentence", json!([])),
     ] {
-        let mut row = record(1).await;
+        let mut row = base.clone();
         *row.pointer_mut(path).unwrap() = value;
-        assert!(
-            batches(row.to_string().as_bytes(), None).await.is_err(),
-            "accepted invalid value at {path}"
-        );
+        assert_rejected(row).await;
     }
-}
-
-#[tokio::test]
-async fn validates_span_payloads_and_text_dependency() {
     for payload in [
         "null",
         "{}",
         "[null]",
-        "[{\"start\":2,\"end\":1}]",
-        "[{\"start\":\"-1\",\"end\":1}]",
-        "[{\"start\":\"18446744073709551616\",\"end\":1}]",
-        "[{\"start\":0.5,\"end\":1}]",
-        "[{\"end\":1}]",
+        r#"[{"start":2,"end":1}]"#,
+        r#"[{"start":"-1","end":1}]"#,
+        r#"[{"start":"18446744073709551616","end":1}]"#,
+        r#"[{"start":0.5,"end":1}]"#,
+        r#"[{"end":1}]"#,
+        r#"[{"start":0,"end":1,"future":true}]"#,
+        r#"[{"start":0,"end":1,"attributes":{"future":true}}]"#,
     ] {
-        let mut row = record(1).await;
+        let mut row = base.clone();
         row["body"]["annotations"]["sentence"] = json!(payload);
-        assert!(
-            batches(row.to_string().as_bytes(), None).await.is_err(),
-            "accepted payload {payload}"
-        );
+        assert_rejected(row).await;
     }
-    let mut row = record(1).await;
-    row["body"]["text"] = Value::Null;
-    assert!(batches(row.to_string().as_bytes(), None).await.is_err());
 }
 
 #[tokio::test]
 async fn all_annotation_kinds_and_external_ids_have_fixed_types_after_null_rows() {
-    let mut row = record(2).await;
+    let mut row = valid_record().await;
     row["openaccessinfo"]["externalids"] = json!({"Medline":"123v1", "MAG":"123", "ACL":"P00-0001", "DOI":"10.example/x", "MedRxiv":"identifier", "PubMedCentral":"123", "ArXiv":"1234.56789"});
+    let span = json!([{"start":0,"end":1,"attributes":{"n":"1","id":"b0","ref_id":"b0","matched_paper_id":42}}]).to_string();
     for (section, kinds) in [
-        (
-            "body",
-            vec!["sentence", "paragraph", "section_header", "bib_ref"],
-        ),
+        ("body", "sentence paragraph section_header bib_ref"),
         (
             "bibliography",
-            vec![
-                "bib_entry",
-                "bib_id",
-                "bib_title",
-                "bib_venue",
-                "bib_author_first_name",
-                "bib_author_last_name",
-            ],
+            "bib_entry bib_id bib_title bib_venue bib_author_first_name bib_author_last_name",
         ),
     ] {
-        for kind in kinds {
-            row[section]["annotations"][kind] = json!(
-                "[{\"start\":0,\"end\":1,\"attributes\":{\"n\":\"1\",\"id\":\"b0\",\"ref_id\":\"b0\",\"matched_paper_id\":42}}]"
-            );
+        for kind in kinds.split_whitespace() {
+            row[section]["annotations"][kind] = json!(span);
         }
     }
-    let raw = format!("{}\n{}", json!({"corpusid":1}), row);
+    let raw = format!("{}\n{}", json!({"corpusid":2}), row);
     let out = batches(raw.as_bytes(), None).await.unwrap();
     assert_eq!(out[0].schema(), s2orc_v2_schema());
     assert_eq!(out[0].num_rows(), 2);
