@@ -36,10 +36,7 @@ async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
         sender,
         batches: ready,
     } = partition_channel(1, false, READ_AHEAD_BYTES);
-    let crate::ordered_buffer::PartitionSender::Bounded(sender) = sender else {
-        unreachable!()
-    };
-    sender.try_send(batch.clone()).unwrap();
+    assert!(sender.send(batch.clone(), None).await);
     drop(sender);
     let PartitionChannel {
         sender,

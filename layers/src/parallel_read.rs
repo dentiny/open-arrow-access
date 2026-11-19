@@ -24,22 +24,17 @@ use crate::{
 /// Requires an active Tokio runtime.
 #[derive(Clone, Copy, Debug)]
 pub struct ParallelReadLayer {
-    /// Maximum resident partitions, including completed partitions with queued batches.
-    partitions: NonZeroUsize,
-    /// Queue capacity for independent native partitions. Streaming files use
-    /// a configurable queued-byte budget per resident partition under either emission
-    /// policy; oversized batches occupy the whole budget. One further decoded
-    /// batch per partition can wait for admission.
-    prefetch: NonZeroUsize,
-    read_ahead_bytes: NonZeroUsize,
+    settings: ParallelReadOptions,
 }
 
 impl ParallelReadLayer {
     pub fn new(partitions: NonZeroUsize, prefetch: NonZeroUsize) -> Self {
         Self {
-            partitions,
-            prefetch,
-            read_ahead_bytes: ParallelReadOptions::DEFAULT_READ_AHEAD_BYTES,
+            settings: ParallelReadOptions {
+                partitions,
+                prefetch,
+                read_ahead_bytes: ParallelReadOptions::DEFAULT_READ_AHEAD_BYTES,
+            },
         }
     }
 
@@ -50,7 +45,7 @@ impl ParallelReadLayer {
     /// decoded batch can wait outside the queue. Invalid semaphore-sized values
     /// are rejected when planning/opening a scan rather than panicking.
     pub fn with_read_ahead_bytes(mut self, bytes: NonZeroUsize) -> Self {
-        self.read_ahead_bytes = bytes;
+        self.settings.read_ahead_bytes = bytes;
         self
     }
 }
@@ -103,11 +98,7 @@ impl ScanPolicy for ParallelReadLayer {
     }
 
     fn apply(&self, plan: &mut ScanPlan) -> Result<()> {
-        let settings = ParallelReadOptions {
-            partitions: self.partitions,
-            prefetch: self.prefetch,
-            read_ahead_bytes: self.read_ahead_bytes,
-        };
+        let settings = self.settings;
         validate_parallel_read_settings(plan.parallel_read, settings)?;
         plan.parallel_read = Some(settings);
         Ok(())

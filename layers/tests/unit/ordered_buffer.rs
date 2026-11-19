@@ -23,10 +23,7 @@ async fn queued_batches_are_released_on_delivery_or_cancellation() {
                 sender,
                 mut batches,
             } = partition_channel(1, read_ahead, READ_AHEAD_BYTES);
-            match sender {
-                PartitionSender::Bounded(sender) => sender.send(expected).await.unwrap(),
-                PartitionSender::ReadAhead(sender) => assert!(sender.send(expected).await),
-            }
+            assert!(sender.send(expected, None).await);
             assert!(column.upgrade().is_some());
             if consume {
                 let delivered = batches.next().await.unwrap();
@@ -85,11 +82,8 @@ async fn streaming_byte_budget_waits_for_consumption_and_releases_on_drop() {
             sender,
             mut batches,
         } = partition_channel(1, true, READ_AHEAD_BYTES);
-        let PartitionSender::ReadAhead(sender) = sender else {
-            unreachable!()
-        };
-        assert!(sender.send(large.clone()).await);
-        let pending = tokio::spawn(async move { sender.send(large).await });
+        assert!(sender.send(large.clone(), None).await);
+        let pending = tokio::spawn(async move { sender.send(large, None).await });
         tokio::task::yield_now().await;
         assert!(!pending.is_finished(), "a second oversized batch must wait");
         if consume {
@@ -116,13 +110,10 @@ async fn configured_byte_budget_controls_queue_capacity() {
             sender,
             mut batches,
         } = partition_channel(1, true, bytes * capacity);
-        let PartitionSender::ReadAhead(sender) = sender else {
-            unreachable!()
-        };
         for _ in 0..capacity {
-            assert!(sender.send(item.clone()).await);
+            assert!(sender.send(item.clone(), None).await);
         }
-        let pending = sender.send(item);
+        let pending = sender.send(item, None);
         tokio::pin!(pending);
         assert!(futures::poll!(&mut pending).is_pending());
         let _delivered = batches.next().await.unwrap();
