@@ -69,8 +69,9 @@ in particular its `externalIds` spelling differs from the sample's
 **JSONL is the upstream transport format, not the intended Arrow storage type.**
 Known scalar fields become typed columns; nested records become Arrow
 `Struct` and arrays become `List`. Do not serialize a known record, struct or
-annotation array into a JSON string column. The mapping below is the proposed
-typed output contract; the current byte provider does not implement it yet.
+annotation array into a JSON string column. The mapping below is the typed
+output contract implemented by `S2orcV2Accessor`; the byte provider itself still
+returns original bytes.
 Nullable output fields accommodate missing upstream values; validate required
 paper identity. Sample observations alone do not establish full-release
 nullability or rule out additional fields.
@@ -422,6 +423,22 @@ configuring a custom endpoint, transport or HTTP policy. This reuses the same
 key validation and authentication header as `new(key)`, preserves other
 connection settings, and replaces any previously configured API key.
 
+## Typed S2ORC v2 records
+
+`S2orcV2Accessor::new(decompressed_bytes)` reads one paper per Arrow row with
+`s2orc_v2_schema()`. Nested metadata stays in structs; author names are a list,
+and JSON-encoded annotation arrays are decoded to `List<Struct>`. There is no
+whole-record JSON string column. The byte accessor supplied here must already
+expose uncompressed JSONL; the provider download interface still returns original
+bytes.
+
+The reader validates all input columns before projection, preserves null versus
+empty annotation lists, and implements `ScanPlanner` using the shared JSON
+framer. `with_partition_options` configures the soft decoded-byte chunk target;
+a single complete record may exceed it. Use `ParallelReadLayer` to execute
+planned chunks concurrently with bounded read-ahead; opening the reader directly
+remains sequential. No whole shard is buffered or reserialized to JSON.
+
 ## Decoding and current limitations
 
 `SemanticScholarService::dataset` returns a byte accessor. Its synthetic
@@ -439,8 +456,10 @@ The generic JSON reader infers a fixed schema from a bounded sample and rejects
 later unknown fields, including nested ones. A consumer requiring every upstream
 field must use an explicit validated Arrow schema, including typed nested
 structs/lists and secondary decoding of annotation payload strings as described
-above. There is no S2ORC v2-specific typed reader, PDF downloader, all-shard job
-scheduler, or automatic diff application in this provider.
+above. `S2orcV2Accessor` provides that typed decoding over already-decompressed
+JSONL; validating the schema and annotation semantics against full-release data
+remains a separate step. This provider has no PDF downloader, all-shard job
+scheduler, or automatic diff application.
 
 For conversion-service task inputs and remaining integration work, see the
 [ml-infra source guide](https://github.com/Adcock-AGI-Inc/ml-infra/blob/main/lance/lance_migration/docs/sources/semantic-scholar.md).

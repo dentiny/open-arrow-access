@@ -53,7 +53,10 @@ async fn validates_identity_and_required_arrays() {
     );
     let s = SemanticScholarService::with_connection(providers::connection(&f));
     assert_eq!(
-        s.dataset("2026-10-27", "s2orc_v2").await.unwrap_err().kind(),
+        s.dataset("2026-10-27", "s2orc_v2")
+            .await
+            .unwrap_err()
+            .kind(),
         ErrorKind::Decode
     );
     assert!(SemanticScholarService::new("").is_err());
