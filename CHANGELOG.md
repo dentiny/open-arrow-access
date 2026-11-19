@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add process-local HTTP read/stat pacing shared by cloned operators, preserving Retry-After outside attempt timeouts. HTTP 403 throttling is explicit for origins that document it.
+
 ## 0.10.3 - 2026-11-19
 
 - Build WARC dates directly as millisecond timestamps, avoiding string formatting and reparsing.

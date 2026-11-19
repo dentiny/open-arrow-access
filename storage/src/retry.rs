@@ -23,10 +23,11 @@ use tokio::time::Instant;
 
 /// Must be applied after `TimeoutLayer` and before `RetryLayer`. A server delay
 /// pauses every new attempt through the same operator, not only the throttled one.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct RetryAfterLayer {
     max_delay: Duration,
     gate: Arc<Gate>,
+    retry_forbidden: bool,
 }
 
 impl RetryAfterLayer {
@@ -34,6 +35,7 @@ impl RetryAfterLayer {
         Self {
             max_delay,
             gate: Arc::default(),
+            retry_forbidden: false,
         }
     }
 }
@@ -51,29 +53,96 @@ impl Layer for RetryAfterLayer {
             inner: context.http_transport().clone(),
             max_delay: self.max_delay,
             gate: self.gate.clone(),
+            retry_forbidden: self.retry_forbidden,
         };
         context.with_http_transport(HttpTransporter::new(transport))
     }
 }
 
-/// Earliest instant at which the operator may start another attempt.
+/// Shared HTTP object-read/stat pacing and cooldown for cloned operators. Install outside
+/// TimeoutLayer and inside RetryLayer so server cooldowns precede attempt timeouts.
+/// This is process-local coordination; share clones per origin and divide the
+/// desired origin rate across independent worker processes.
+///
+/// Each object read/range open or stat consumes an admission; streaming body
+/// chunks do not. This requires an HTTP-backed operator. Create one layer per
+/// origin and clone it across that origin's operators; unrelated origins should
+/// use separate layers. The layer does not inspect or partition by URL.
+///
+/// Apply layers in this order: `operator.layer(timeout).layer(rate).layer(retry)`.
+/// The default classifies 429/503 as temporary errors, preserves Retry-After,
+/// and caps accepted server cooldowns at ten minutes.
+#[derive(Clone, Debug)]
+pub struct HttpReadRateLimitLayer {
+    inner: RetryAfterLayer,
+}
+impl HttpReadRateLimitLayer {
+    pub fn new(min_request_interval: Duration) -> open_arrow_access_core::Result<Self> {
+        if min_request_interval.is_zero()
+            || Instant::now().checked_add(min_request_interval).is_none()
+        {
+            return Err(open_arrow_access_core::Error::new(
+                open_arrow_access_core::ErrorKind::InvalidInput,
+                "configure_http_rate_limit",
+                "request interval must be positive and representable",
+            ));
+        }
+        let mut inner = RetryAfterLayer::new(Duration::from_secs(600));
+        inner.gate = Arc::new(Gate {
+            interval: Some(min_request_interval),
+            ..Default::default()
+        });
+        Ok(Self { inner })
+    }
+    /// Opt in only for origins that document HTTP 403 as a throttle response.
+    /// Permission failures are not retryable by default.
+    pub fn with_forbidden_throttling(mut self) -> Self {
+        self.inner.retry_forbidden = true;
+        self
+    }
+}
+impl Layer for HttpReadRateLimitLayer {
+    fn apply_service(&self, inner: Servicer) -> Servicer {
+        self.inner.apply_service(inner)
+    }
+    fn apply_context(&self, inner: Servicer, context: OperationContext) -> OperationContext {
+        self.inner.apply_context(inner, context)
+    }
+}
 #[derive(Debug, Default)]
-struct Gate(Mutex<Option<Instant>>);
-
+struct Gate {
+    cooldown: Mutex<Option<Instant>>,
+    interval: Option<Duration>,
+    next_request: tokio::sync::Mutex<Option<Instant>>,
+}
 impl Gate {
     fn delay(&self, delay: Duration) {
         let Some(until) = Instant::now().checked_add(delay) else {
             return;
         };
-        let mut next = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut next = self.cooldown.lock().unwrap_or_else(PoisonError::into_inner);
         *next = Some(next.map_or(until, |next| next.max(until)));
     }
-
     async fn wait(&self) {
-        let next = *self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(next) = next {
-            tokio::time::sleep_until(next).await;
+        loop {
+            let next = *self.cooldown.lock().unwrap_or_else(PoisonError::into_inner);
+            match next.filter(|next| *next > Instant::now()) {
+                Some(next) => tokio::time::sleep_until(next).await,
+                None => return,
+            }
         }
+    }
+    async fn admit_request(&self) {
+        let Some(interval) = self.interval else {
+            self.wait().await;
+            return;
+        };
+        let mut next = self.next_request.lock().await;
+        if let Some(when) = *next {
+            tokio::time::sleep_until(when).await;
+        }
+        self.wait().await;
+        *next = Instant::now().checked_add(interval);
     }
 }
 
@@ -81,13 +150,16 @@ struct RetryAfterTransport {
     inner: HttpTransporter,
     max_delay: Duration,
     gate: Arc<Gate>,
+    retry_forbidden: bool,
 }
 
 impl HttpTransport for RetryAfterTransport {
     async fn fetch(&self, request: http::Request<Buffer>) -> Result<http::Response<HttpBody>> {
         let response = self.inner.fetch(request).await?;
         let status = response.status();
-        if !matches!(status.as_u16(), 429 | 503) {
+        if !matches!(status.as_u16(), 429 | 503)
+            && !(self.retry_forbidden && status.as_u16() == 403)
+        {
             return Ok(response);
         }
         let header = response
@@ -100,6 +172,9 @@ impl HttpTransport for RetryAfterTransport {
         let error = Error::new(ErrorKind::Unexpected, "storage HTTP request was throttled")
             .with_context("status", status);
         let Some(header) = header else {
+            if let Some(interval) = self.gate.interval {
+                self.gate.delay(interval);
+            }
             return Err(error.set_temporary());
         };
         let error = error.with_context("retry_after", &header);
@@ -167,7 +242,7 @@ impl Service for GateService {
     }
 
     async fn stat(&self, ctx: &OperationContext, path: &str, args: OpStat) -> Result<RpStat> {
-        self.gate.wait().await;
+        self.gate.admit_request().await;
         self.inner.stat(ctx, path, args).await
     }
 
@@ -250,12 +325,12 @@ struct Gated<T> {
 
 impl<R: oio::Read> oio::Read for Gated<R> {
     async fn open(&self, range: BytesRange) -> Result<(RpRead, Box<dyn oio::ReadStreamDyn>)> {
-        self.gate.wait().await;
+        self.gate.admit_request().await;
         self.inner.open(range).await
     }
 
     async fn read(&self, range: BytesRange) -> Result<(RpRead, Buffer)> {
-        self.gate.wait().await;
+        self.gate.admit_request().await;
         self.inner.read(range).await
     }
 }
