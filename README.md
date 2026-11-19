@@ -285,3 +285,10 @@ Encoded source size is not projected Arrow memory or destination file size. It
 can be used as an explicitly labeled planning proxy, or converted by the
 application when output-size information is available. If later processing
 filters records or materializes external blobs, update or discard the estimate.
+
+## Integrated crawls
+
+Use [`crawl::CrawlAccessor`](docs/crawl.md) to combine service/dataset discovery,
+native scan planning, bounded parallel reads, unordered emission, schema
+conversion and optional coalescing/read-ahead. Supply existing layer configurations
+through `CrawlOptions`; caller-bound storage retains HTTP, retry and I/O policy.

@@ -73,9 +73,13 @@ without sampling it keeps the first 100 input rows. This is not uniform random
 fixed-size sampling. If fewer rows are available, all available rows are returned.
 Zero reads no batches (the source is still opened for metadata).
 
-Keep schema evolution, sampling, and limits **outside** `ParallelReadLayer` so they run
-over one merged scan. They do not implement `ScanPlanner`; putting the parallel
-layer outside any of them is unsupported. Supply a complete `with_source_schema` to
+Keep sampling and limits **outside** `ParallelReadLayer` so they run over one
+merged scan; they do not implement `ScanPlanner`. Schema evolution can run outside
+for a serial transform, or inside for parallel partition-local transforms. Its
+`ScanPlanner` implementation compiles expressions once per scan, shares the
+immutable plan across workers, and retains native partitions and scan policies.
+Stable expressions such as `now()` use the same planned value across partitions.
+[`CrawlAccessor`](../docs/crawl.md) uses this parallel placement by default. Supply a complete `with_source_schema` to
 read only the source columns needed by all changes and the final output. Without
 it, adding, removing or renaming columns requires reading the full source schema.
 All configured computations run before final projection.

@@ -31,6 +31,25 @@ impl SchemaEvolutionPlan {
         )))
     }
 
+    pub(super) fn into_shared_reader(
+        self: Arc<Self>,
+        inner: Box<dyn RecordReader>,
+    ) -> Result<Box<dyn RecordReader>> {
+        let source = inner.metadata().schema.clone();
+        validation::validate_evolution_input_schema(&source, &self.source_schema)?;
+        if self.is_identity(&source) {
+            return Ok(inner);
+        }
+        let capability = inner.capability();
+        let schema = Arc::clone(&self.target_schema);
+        Ok(Box::new(map_record_reader(
+            inner,
+            schema,
+            capability,
+            move |batch| self.convert_from(batch, &source),
+        )))
+    }
+
     pub(super) fn into_positioned_reader(
         mut self,
         inner: Box<dyn PositionedRecordReader>,
@@ -62,11 +81,15 @@ impl SchemaEvolutionPlan {
     }
 
     fn convert(&self, batch: RecordBatch) -> Result<RecordBatch> {
-        validation::validate_evolution_batch_schema(
-            batch.schema_ref(),
-            &self.source_schema,
-            &self.affected,
-        )?;
+        self.convert_from(batch, &self.source_schema)
+    }
+
+    fn convert_from(
+        &self,
+        batch: RecordBatch,
+        source: &arrow_schema::SchemaRef,
+    ) -> Result<RecordBatch> {
+        validation::validate_evolution_batch_schema(batch.schema_ref(), source, &self.affected)?;
         let mut values = HashMap::new();
         let options = CastOptions {
             safe: false,
