@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.0 - 2026-11-18
+
+- Add `CoalesceLayer` with a strict row cap and a soft estimated-byte budget for grouping small record batches.
+- Forward scan byte-read options through provider selections so downstream IO configuration reaches the underlying source.
+- Start eligible whole-object reads with a Range GET instead of a preflight metadata HEAD, retaining existing handling for caller-supplied lengths.
+- Parse fully qualified Hugging Face dataset split URIs.
+- Add an all-strings CSV schema discovery mode.
+- Release all 8 public workspace crates at 0.10.0 with matching internal dependency requirements.
+
 ## 0.9.0 - 2026-11-18
 
 - Read PMC article metadata from a selected inventory shard, with native partitions for parallel reads.
