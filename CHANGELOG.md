@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.3 - 2026-11-19
+
+- Build WARC dates directly as millisecond timestamps, avoiding string formatting and reparsing.
+- Add opt-in positioned WARC BinaryView bodies that retain parser allocations, with a configurable soft body-byte batch budget.
+- Simplify WARC batch construction using Arrow builders while preserving the default LargeBinary schema and source positions.
+- Release all 8 public workspace crates at 0.10.3 with matching internal dependency requirements.
+
 ## 0.10.2 - 2026-11-19
 
 - Defer positioned source opens until scan execution so a slow first file does not block later parallel reads.
