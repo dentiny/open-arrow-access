@@ -143,3 +143,146 @@ async fn empty_shards_retain_schema_and_truncated_input_fails() {
     let out = batches(raw.as_bytes(), None).await.unwrap();
     assert!(out[0]["body"].is_null(0));
 }
+
+#[tokio::test]
+async fn rejects_unknown_fields_at_every_object_level_even_when_projected_out() {
+    for path in [
+        "",
+        "/openaccessinfo",
+        "/openaccessinfo/externalids",
+        "/body",
+        "/body/annotations",
+        "/bibliography",
+        "/bibliography/annotations",
+    ] {
+        let mut row = record(1);
+        row.pointer_mut(path)
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .insert("unexpected".into(), json!("must not disappear"));
+        assert!(
+            batches(row.to_string().as_bytes(), Some(vec!["corpusid".into()]))
+                .await
+                .is_err(),
+            "accepted unknown field at {path}"
+        );
+    }
+    for span in [
+        json!({"start":0,"end":1,"future":true}),
+        json!({"start":0,"end":1,"attributes":{"future":true}}),
+    ] {
+        let mut row = record(1);
+        row["body"]["annotations"]["sentence"] = json!(json!([span]).to_string());
+        assert!(
+            batches(row.to_string().as_bytes(), Some(vec![]))
+                .await
+                .is_err()
+        );
+    }
+}
+
+#[tokio::test]
+async fn rejects_type_drift_and_invalid_identity() {
+    for (path, value) in [
+        ("/corpusid", json!(null)),
+        ("/corpusid", json!(0)),
+        ("/corpusid", json!(-1)),
+        ("/title", json!(123)),
+        ("/authors", json!([true])),
+        ("/authors", json!([null])),
+        ("/openaccessinfo/license", json!(true)),
+        ("/openaccessinfo/externalids/DOI", json!(123)),
+        ("/body/text", json!({"not":"text"})),
+        ("/body/annotations/sentence", json!([])),
+    ] {
+        let mut row = record(1);
+        *row.pointer_mut(path).unwrap() = value;
+        assert!(
+            batches(row.to_string().as_bytes(), None).await.is_err(),
+            "accepted invalid value at {path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn validates_span_payloads_and_text_dependency() {
+    for payload in [
+        "null",
+        "{}",
+        "[null]",
+        "[{\"start\":2,\"end\":1}]",
+        "[{\"start\":\"-1\",\"end\":1}]",
+        "[{\"start\":\"18446744073709551616\",\"end\":1}]",
+        "[{\"start\":0.5,\"end\":1}]",
+        "[{\"end\":1}]",
+    ] {
+        let mut row = record(1);
+        row["body"]["annotations"]["sentence"] = json!(payload);
+        assert!(
+            batches(row.to_string().as_bytes(), None).await.is_err(),
+            "accepted payload {payload}"
+        );
+    }
+    let mut row = record(1);
+    row["body"]["text"] = Value::Null;
+    assert!(batches(row.to_string().as_bytes(), None).await.is_err());
+}
+
+#[tokio::test]
+async fn all_annotation_kinds_and_external_ids_have_fixed_types_after_null_rows() {
+    let mut row = record(2);
+    row["openaccessinfo"]["externalids"] = json!({"Medline":"123v1", "MAG":"123", "ACL":"P00-0001", "DOI":"10.example/x", "MedRxiv":"identifier", "PubMedCentral":"123", "ArXiv":"1234.56789"});
+    for (section, kinds) in [
+        (
+            "body",
+            vec!["sentence", "paragraph", "section_header", "bib_ref"],
+        ),
+        (
+            "bibliography",
+            vec![
+                "bib_entry",
+                "bib_id",
+                "bib_title",
+                "bib_venue",
+                "bib_author_first_name",
+                "bib_author_last_name",
+            ],
+        ),
+    ] {
+        for kind in kinds {
+            row[section]["annotations"][kind] = json!(
+                "[{\"start\":0,\"end\":1,\"attributes\":{\"n\":\"1\",\"id\":\"b0\",\"ref_id\":\"b0\",\"matched_paper_id\":42}}]"
+            );
+        }
+    }
+    let raw = format!("{}\n{}", json!({"corpusid":1}), row);
+    let out = batches(raw.as_bytes(), None).await.unwrap();
+    assert_eq!(out[0].schema(), s2orc_v2_schema());
+    assert_eq!(out[0].num_rows(), 2);
+    assert!(out[0]["body"].is_null(0));
+    assert!(out[0]["body"].is_valid(1));
+}
+
+/// Explicit full-input audit, usable against a decompressed local release shard.
+/// No schema inference or row sampling is performed. No file bytes enter the repo.
+#[tokio::test]
+#[ignore = "set S2ORC_V2_SHARD_PATH to a decompressed JSONL file"]
+async fn audit_local_shard() {
+    let path = std::path::PathBuf::from(std::env::var("S2ORC_V2_SHARD_PATH").unwrap());
+    let bytes = open_arrow_access_storage::OpenDalAccessor::new(
+        open_arrow_access_test_support::fs_operator(path.parent().unwrap()),
+    );
+    let mut reader = S2orcV2Accessor::new(bytes)
+        .open(ReadRequest::new(
+            path.file_name().unwrap().to_str().unwrap(),
+        ))
+        .await
+        .unwrap();
+    let mut rows = 0_u64;
+    while let Some(batch) = reader.next().await.unwrap() {
+        assert_eq!(batch.schema(), s2orc_v2_schema());
+        rows += batch.num_rows() as u64;
+    }
+    println!("validated {rows} typed S2ORC v2 rows");
+}

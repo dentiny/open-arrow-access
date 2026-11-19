@@ -7,7 +7,10 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ReadRequest, RecordCapability, RecordMetadata, RecordReader,
     ResolvedProjection, Result, ScanPlan, ScanPlanner, StreamReader, async_trait, into_stream,
 };
-use open_arrow_access_file_format::{DecodePartitionOptions, json::JsonAccessor};
+use open_arrow_access_file_format::{
+    DecodePartitionOptions, FileAccessor,
+    json::{JsonAccessor, JsonFormat},
+};
 pub use schema::s2orc_v2_schema;
 use std::sync::Arc;
 
@@ -21,7 +24,10 @@ pub struct S2orcV2Accessor<A> {
 impl<A> S2orcV2Accessor<A> {
     pub fn new(bytes: A) -> Self {
         Self {
-            input: JsonAccessor::new(Arc::new(bytes), schema::input_schema()),
+            input: FileAccessor::from_format(
+                Arc::new(bytes),
+                JsonFormat::new(schema::input_schema()).with_primitive_coercion(false),
+            ),
         }
     }
 

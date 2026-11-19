@@ -90,3 +90,31 @@ framer. `with_partition_options` configures the soft decoded-byte chunk target;
 a single complete record may exceed it. Use `ParallelReadLayer` to execute
 planned chunks concurrently with bounded read-ahead; opening the reader directly
 remains sequential. No whole shard is buffered or reserialized to JSON.
+
+### Schema validation and full-input audit
+
+The typed reader uses a fixed schema even when early records contain only nulls.
+Unlike generic JSON's compatibility mode, it rejects numeric/boolean values in
+string fields. Unknown fields at every nested object level and unknown span or
+attribute fields fail decoding before output projection. Corpus IDs must be
+positive UInt64 values. Span offsets accept unsigned integers or digit-only
+strings, reject overflow/reversed ranges, and require text for populated lists.
+Offsets are preserved without guessing a byte/character coordinate conversion.
+
+The same explicit span/attribute schema is used for every annotation kind,
+including fields that were all-null in the public sample. Synthetic tests exercise
+non-null values in every declared field; this is not evidence that every future
+upstream payload has that shape. Unknown shapes fail closed and need an explicit
+typed schema update, never a JSON-string fallback.
+
+Audit every row of a decompressed local release shard, without schema sampling:
+
+```shell
+S2ORC_V2_SHARD_PATH=/absolute/path/part.jsonl \
+  cargo test -p open-arrow-access-service --features semantic-scholar \
+  --test s2orc_v2 audit_local_shard -- --ignored --nocapture
+```
+
+The audit was run against all 20 records in the official public v2 sample. A
+production release has not been downloaded or certified by that sample check;
+run this audit on actual release inputs before treating their schema as verified.

@@ -25,6 +25,7 @@ use open_arrow_access_core::{
 pub struct JsonFormat {
     schema: Option<SchemaRef>,
     inference: JsonInferenceOptions,
+    coerce_primitive: bool,
 }
 
 /// Validated JSON decoder and its source schema for one open request.
@@ -40,6 +41,7 @@ impl JsonFormat {
         Self {
             schema: None,
             inference: JsonInferenceOptions::default(),
+            coerce_primitive: true,
         }
     }
 
@@ -48,10 +50,19 @@ impl JsonFormat {
         self
     }
 
+    /// Whether numeric and boolean values may be coerced into string fields.
+    /// Defaults to true for compatibility. Fixed provider schemas can disable
+    /// coercion to reject upstream type drift instead of changing its meaning.
+    pub fn with_primitive_coercion(mut self, enabled: bool) -> Self {
+        self.coerce_primitive = enabled;
+        self
+    }
+
     pub fn new(schema: SchemaRef) -> Self {
         Self {
             schema: Some(schema),
             inference: JsonInferenceOptions::default(),
+            coerce_primitive: true,
         }
     }
 
@@ -76,7 +87,7 @@ impl JsonFormat {
     fn build_decoder(&self, schema: SchemaRef, request: &ReadRequest) -> Result<Decoder> {
         ReaderBuilder::new(schema)
             .with_strict_mode(true)
-            .with_coerce_primitive(true)
+            .with_coerce_primitive(self.coerce_primitive)
             .with_batch_size(request.options.batch_size.get())
             .build_decoder()
             .map_err(super::error::open_error)
@@ -112,7 +123,7 @@ impl SchemaInference for JsonFormat {
             return Ok(None);
         };
         Ok(Some(ResolvedFormat {
-            format: Self::new(schema),
+            format: Self::new(schema).with_primitive_coercion(self.coerce_primitive),
             input,
         }))
     }

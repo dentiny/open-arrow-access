@@ -1,6 +1,6 @@
 use super::schema;
 use arrow_array::builder::{ListBuilder, StringBuilder, StructBuilder, UInt64Builder};
-use arrow_array::{Array, ArrayRef, RecordBatch, StringArray, StructArray};
+use arrow_array::{Array, ArrayRef, RecordBatch, StringArray, StructArray, UInt64Array};
 use arrow_schema::{ArrowError, DataType, Field};
 use open_arrow_access_core::{Error, ErrorKind, Result};
 use serde::Deserialize;
@@ -63,6 +63,9 @@ fn spans(input: &StringArray) -> Result<ArrayRef> {
         for span in spans {
             let start = span.start.value()?;
             let end = span.end.value()?;
+            if start > end {
+                return Err(error("annotation start exceeds end"));
+            }
             let builder = list.values();
             builder
                 .field_builder::<UInt64Builder>(0)
@@ -119,6 +122,19 @@ fn section(input: &StructArray, output: &DataType) -> Result<ArrayRef> {
                 .map_err(|e| error(format!("{}: {e}", annotation_fields[index].name())))
         })
         .collect::<Result<Vec<_>>>()?;
+    for row in 0..input.len() {
+        if input.is_valid(row) && input.column(0).is_null(row) && annotations.is_valid(row) {
+            for array in &arrays {
+                let list = array
+                    .as_any()
+                    .downcast_ref::<arrow_array::ListArray>()
+                    .unwrap();
+                if list.is_valid(row) && list.value_length(row) > 0 {
+                    return Err(error("populated annotation spans require section text"));
+                }
+            }
+        }
+    }
     let annotations: ArrayRef = Arc::new(
         StructArray::try_new(
             annotation_fields.clone(),
@@ -138,6 +154,14 @@ fn section(input: &StructArray, output: &DataType) -> Result<ArrayRef> {
 }
 
 pub(super) fn batch(input: RecordBatch) -> Result<RecordBatch> {
+    let ids = input
+        .column(0)
+        .as_any()
+        .downcast_ref::<UInt64Array>()
+        .unwrap();
+    if ids.iter().any(|id| id.is_none_or(|id| id == 0)) {
+        return Err(error("corpusid must be a positive UInt64"));
+    }
     let schema = schema::s2orc_v2_schema();
     let mut columns = input.columns().to_vec();
     for index in [4, 5] {
