@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.1 - 2026-11-19
+
+- Add an opt-in layer to skip missing source objects with explicit reporting.
+- Reuse one streaming GET for sequential reads and separate sequential readers, ranged readers, and buffering.
+- Reuse Arrow JSON decoders across PMC metadata documents.
+- Release all 8 public workspace crates at 0.10.1 with matching internal dependency requirements.
+
 ## 0.10.0 - 2026-11-18
 
 - Add `CoalesceLayer` with a strict row cap and a soft estimated-byte budget for grouping small record batches.
