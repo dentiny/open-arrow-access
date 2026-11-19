@@ -7,14 +7,14 @@ use open_arrow_access_core::{
 use open_arrow_access_decompression::CompressionFactory;
 use serde_json::Value;
 
-use super::ResolvedFileFormat;
+use open_arrow_access_file_format::DetectedFormat;
 
 pub(super) async fn detect<B: ByteAccessor>(
     storage: &B,
     object: &ObjectRef,
     mut options: ByteReadOptions,
     limit: NonZeroUsize,
-) -> Result<Option<ResolvedFileFormat>> {
+) -> Result<Option<DetectedFormat>> {
     let limit = limit.get();
     options.io_chunk_size = NonZeroUsize::new(
         options
@@ -63,9 +63,9 @@ pub(super) async fn detect<B: ByteAccessor>(
                             .and_then(Value::as_str)
                             .is_some_and(|version| version.starts_with("ATIF-"))
                         {
-                            ResolvedFileFormat::Atif
+                            DetectedFormat::Atif
                         } else {
-                            ResolvedFileFormat::Json
+                            DetectedFormat::Json
                         },
                     ));
                 }
@@ -73,7 +73,7 @@ pub(super) async fn detect<B: ByteAccessor>(
                     // JSON readers also accept extensions such as bare NaN.
                     // Only a successfully parsed ATIF marker selects ATIF; leave
                     // all other syntax and type validation to the chosen reader.
-                    return Ok(Some(ResolvedFileFormat::Json));
+                    return Ok(Some(DetectedFormat::Json));
                 }
                 None if eof => return Ok(None),
                 _ => {}

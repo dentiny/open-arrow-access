@@ -1,4 +1,4 @@
-/// File format inferred from a filename, independently of enabled readers.
+/// File format identified by filename or content, independently of enabled readers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DetectedFormat {
     Parquet,
@@ -6,6 +6,8 @@ pub enum DetectedFormat {
     Tsv,
     Json,
     JsonLines,
+    /// Content-detected ATIF JSON; filename detection never returns this variant.
+    Atif,
     Warc,
     Xml,
 }

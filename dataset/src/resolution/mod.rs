@@ -8,34 +8,12 @@ pub use open_arrow_access_file_format::{DetectedFormat, detect_format};
 
 use crate::file_set::FileSetRequest;
 
-/// CSV/TSV and JSON/JSONL share decoder families; ATIF uses `AtifFormat::Auto`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ResolvedFileFormat {
-    Parquet,
-    Delimited,
-    Json,
-    Atif,
-    Warc,
-    Xml,
-}
-
-impl From<DetectedFormat> for ResolvedFileFormat {
-    fn from(format: DetectedFormat) -> Self {
-        match format {
-            DetectedFormat::Parquet => Self::Parquet,
-            DetectedFormat::Csv | DetectedFormat::Tsv => Self::Delimited,
-            DetectedFormat::Json | DetectedFormat::JsonLines => Self::Json,
-            DetectedFormat::Warc => Self::Warc,
-            DetectedFormat::Xml => Self::Xml,
-        }
-    }
-}
-
 /// File selection and bounded JSON/ATIF detection.
 #[derive(Clone, Debug)]
 pub struct FormatPolicy {
     /// If present, select only this decoder family when it occurs in the input.
     /// For example, Some(Parquet) ignores JSON sidecars. Default: reject mixed families.
+    /// Content-only Atif is not a filename preference.
     pub preferred: Option<DetectedFormat>,
     /// Maximum decoded JSON sample per file. None disables content probing.
     /// Default: 1 MiB; every nonempty JSON file must agree on JSON versus ATIF.
@@ -54,7 +32,8 @@ impl Default for FormatPolicy {
 /// Feed `request` to a FileSetAccessor using the selected decoder family.
 #[derive(Clone, Debug)]
 pub struct ResolvedFiles {
-    pub format: ResolvedFileFormat,
+    /// Csv covers CSV/TSV; Json covers JSON/JSONL. Atif uses AtifFormat::Auto.
+    pub format: DetectedFormat,
     pub request: FileSetRequest,
 }
 
@@ -72,12 +51,21 @@ pub async fn resolve_files<B: ByteAccessor>(
     mut request: FileSetRequest,
     policy: &FormatPolicy,
 ) -> Result<ResolvedFiles> {
+    if policy.preferred == Some(DetectedFormat::Atif) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "resolve_files",
+            "ATIF requires content detection and cannot be a filename preference",
+        ));
+    }
     let mut files: Vec<_> = request
         .objects
         .into_iter()
-        .filter_map(|object| detect_format(object.locator()).map(|format| (object, format.into())))
+        .filter_map(|object| {
+            detect_format(object.locator()).map(|format| (object, decoder_format(format)))
+        })
         .collect();
-    if let Some(preferred) = policy.preferred.map(ResolvedFileFormat::from)
+    if let Some(preferred) = policy.preferred.map(decoder_format)
         && files.iter().any(|(_, format)| *format == preferred)
     {
         files.retain(|(_, format)| *format == preferred);
@@ -96,7 +84,7 @@ pub async fn resolve_files<B: ByteAccessor>(
     }
     if let Some(limit) = policy
         .json_probe_bytes
-        .filter(|_| format == ResolvedFileFormat::Json)
+        .filter(|_| format == DetectedFormat::Json)
     {
         let mut first_json = None;
         for (object, _) in &files {
@@ -118,11 +106,20 @@ pub async fn resolve_files<B: ByteAccessor>(
     Ok(ResolvedFiles { format, request })
 }
 
+// Normalize only decoder-compatible aliases; filename detection keeps its distinctions.
+fn decoder_format(format: DetectedFormat) -> DetectedFormat {
+    match format {
+        DetectedFormat::Tsv => DetectedFormat::Csv,
+        DetectedFormat::JsonLines => DetectedFormat::Json,
+        other => other,
+    }
+}
+
 fn mixed(
     first: &ObjectRef,
-    format: ResolvedFileFormat,
+    format: DetectedFormat,
     other: &ObjectRef,
-    other_format: ResolvedFileFormat,
+    other_format: DetectedFormat,
 ) -> Error {
     Error::new(
         ErrorKind::InvalidInput,

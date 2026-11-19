@@ -4,7 +4,7 @@ use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, ReadOptions};
 use open_arrow_access_dataset::{
     directory::{DirectoryRequest, resolve_directory},
     file_set::{FileSetAccessor, FileSetRequest},
-    resolution::{DetectedFormat, FormatPolicy, ResolvedFileFormat as Format, resolve_files},
+    resolution::{DetectedFormat as Format, FormatPolicy, resolve_files},
 };
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::{MemoryAccessor, fs_operator};
@@ -21,7 +21,7 @@ async fn filename_selection_preserves_options_and_checks_mixed_and_empty_inputs_
     let resolved = resolve_files(&storage, request, &FormatPolicy::default())
         .await
         .unwrap();
-    assert_eq!(resolved.format, Format::Delimited);
+    assert_eq!(resolved.format, Format::Csv);
     assert_eq!(
         resolved.request.objects,
         FileSetRequest::new(["b.tsv.GZ", "a.csv", "a.csv"]).objects
@@ -37,7 +37,7 @@ async fn filename_selection_preserves_options_and_checks_mixed_and_empty_inputs_
         error.to_string().contains("sidecar.json") && error.to_string().contains("data.parquet")
     );
     let policy = FormatPolicy {
-        preferred: Some(DetectedFormat::Parquet),
+        preferred: Some(Format::Parquet),
         ..Default::default()
     };
     let resolved = resolve_files(&storage, mixed, &policy).await.unwrap();
@@ -62,6 +62,17 @@ async fn filename_selection_preserves_options_and_checks_mixed_and_empty_inputs_
         .await
         .unwrap();
     assert_eq!(resolved.request.objects[0].locator(), locator);
+    let policy = FormatPolicy {
+        preferred: Some(Format::Atif),
+        ..Default::default()
+    };
+    assert_eq!(
+        resolve_files(&storage, FileSetRequest::new(["data.json"]), &policy)
+            .await
+            .unwrap_err()
+            .kind(),
+        ErrorKind::InvalidInput
+    );
     assert!(storage.observations.requests.lock().unwrap().is_empty());
 }
 
@@ -84,7 +95,7 @@ async fn directory_glob_selection_feeds_existing_parallel_csv_readers() {
     let resolved = resolve_files(&storage, request, &FormatPolicy::default())
         .await
         .unwrap();
-    assert_eq!(resolved.format, Format::Delimited);
+    assert_eq!(resolved.format, Format::Csv);
     assert_eq!(
         resolved.request.objects,
         FileSetRequest::new(["a.csv", "b.tsv"]).objects
