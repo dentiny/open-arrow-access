@@ -60,28 +60,20 @@ impl Codec {
 }
 /// Opt-in byte input for positioned format readers. Install on raw storage, in place
 /// of a decompression layer. Uncompressed bytes pass through unchanged.
+/// Uses sequential input by default, overriding network I/O splitting options.
+/// Decoded output chunk size is independent of the underlying response size.
 #[derive(Clone, Debug)]
 pub struct SourcePositionLayer {
     chunk_size: NonZeroUsize,
-    sequential_input: bool,
 }
 impl Default for SourcePositionLayer {
     fn default() -> Self {
         Self {
             chunk_size: NonZeroUsize::new(64 * 1024).unwrap(),
-            sequential_input: false,
         }
     }
 }
 impl SourcePositionLayer {
-    /// Request one sequential source response where supported, rather than
-    /// splitting a whole-file scan into range requests. Overrides input I/O
-    /// chunking and concurrency; decoded output chunk size remains independent.
-    pub fn with_sequential_input(mut self) -> Self {
-        self.sequential_input = true;
-        self
-    }
-
     pub fn with_chunk_size(mut self, chunk_size: NonZeroUsize) -> Self {
         self.chunk_size = chunk_size;
         self
@@ -90,7 +82,6 @@ impl SourcePositionLayer {
 pub struct SourcePositionAccessor<A> {
     inner: A,
     chunk_size: NonZeroUsize,
-    sequential_input: bool,
 }
 impl<A: ByteAccessor> Layer<A> for SourcePositionLayer {
     type Layered = SourcePositionAccessor<A>;
@@ -98,7 +89,6 @@ impl<A: ByteAccessor> Layer<A> for SourcePositionLayer {
         SourcePositionAccessor {
             inner,
             chunk_size: self.chunk_size,
-            sequential_input: self.sequential_input,
         }
     }
 }
@@ -114,13 +104,11 @@ impl<A: ByteAccessor> Accessor for SourcePositionAccessor<A> {
     }
     async fn open(&self, mut request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let codec = Codec::from_path(request.object.locator());
-        let input = if self.sequential_input {
-            request.options.io_chunk_size = None;
-            request.options.io_concurrency = NonZeroUsize::MIN;
-            self.inner.open_sequential(request.clone()).await?
-        } else {
-            self.inner.open(request.clone()).await?
-        };
+        // Positioned decompression consumes the entire stored byte stream in order.
+        // Network range splitting adds requests without parallelizing this decoder.
+        request.options.io_chunk_size = None;
+        request.options.io_concurrency = NonZeroUsize::MIN;
+        let input = self.inner.open_sequential(request.clone()).await?;
         crate::validation::validate_raw_source_position(input.position(), &request.object)?;
         let Some(codec) = codec else {
             return Ok(input);
