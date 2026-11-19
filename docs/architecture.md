@@ -42,6 +42,7 @@ or projected Arrow batches through `WarcArrowAccessor`.
 | Crate / directory | Responsibility | Reuses |
 | --- | --- | --- |
 | Root facade | Feature selection and public re-exports | Component crates |
+| `src/crawl/` | Integrated discovery, scan execution, transformations, and optional output buffering | Service/dataset planners and existing layers; no second scheduler |
 | `core/` | Reader/accessor/layer contracts, requests, capabilities, errors, stream and decoder adapters | Arrow and common types; no concrete backend |
 | `storage/` | OpenDAL byte access, exact ranges, discovery, named-file namespaces | Caller-configured operator |
 | `decompression/` | Streaming codecs and TAR/ZIP entry access | Byte readers and upstream decoders |
@@ -73,6 +74,7 @@ creates an independent reader.
 
 ```text
 Accessor::open(request).await -> owned Reader
+Accessor::metadata(request).await -> output metadata without consuming items
 Accessor::capability()        -> available operations before opening
 Reader::metadata()            -> stable metadata for this opened representation
 Reader::next().await          -> Result<Option<Item>>
@@ -151,9 +153,18 @@ flowchart LR
     Limit --> App["Application"]
 ```
 
-This placement gives transformations one merged scan. Schema evolution, sampling,
-limits, and prefetch do not expose `ScanPlanner`; install planning/execution layers
-inside them. See [layer composition](../layers/README.md#compose-layers).
+This placement gives transformations one merged scan. Schema evolution can also
+go inside `ParallelReadLayer`: its `ScanPlanner` implementation compiles one
+transform plan and shares it across partition workers. Sampling, limits, and
+prefetch operate on the merged stream and do not expose `ScanPlanner`; install
+planning/execution layers inside them. See
+[layer composition](../layers/README.md#compose-layers).
+
+`CrawlAccessor` provides an integrated entry point using these same contracts.
+It places schema evolution inside partition workers, then applies execution and
+emission policies, with optional coalescing and prefetch after merging. Its
+default emission policy is unordered, so globally ordered sources need explicit
+ordered crawl options. See [integrated crawls](crawl.md).
 
 ### Bind a source for later reads
 
@@ -223,7 +234,7 @@ Ordinary file-set reads open files sequentially in caller order; directory scans
 sort selected paths. By default, later files must match the first file's projected
 schema, including metadata. Optional `with_union_by_name()` inspects full schemas
 before execution and aligns missing fields. See
-[schema policies](../dataset/README.md#union-by-name). Discovery may collect a file
+[schema policies](../dataset/README.md#choose-a-schema-policy). Discovery may collect a file
 list; decoders may buffer a document, record, or row group. Batch/chunk targets do
 not bound total memory or an individual value's size.
 
@@ -277,6 +288,20 @@ Record metadata is available when `open` completes and every returned batch
 matches that schema. Opening may perform I/O to inspect Parquet metadata, sample
 XML records, or discover a provider's shard list. Fixed-schema validation can
 happen before opening bytes.
+
+`Accessor::metadata(request)` inspects output metadata without consuming output
+items. For unchanged input and configuration, it must match `open(request)`,
+including projection and source identity. The compatibility default opens and
+drops a reader; overrides can inspect format metadata or bounded inference
+samples. `inspect_metadata` additionally distinguishes a proven empty input
+with no schema from an explicit schema or unknown row presence. Neither method
+binds a reusable reader or creates a snapshot.
+
+Row-level provenance is separate from reader metadata. A `PositionedRecordReader`
+emits `PositionedBatch`, pairing an Arrow batch with one `BytePosition` per row.
+Coordinates identify stored bytes or a frame plus its decoded offset; transforms
+must keep positions aligned with rows. Source-column adapters can expose these
+coordinates as Arrow columns. See [source positions](source-positions.md).
 
 EOF and errors terminate record reading. Error categories and source chains are
 preserved across adapters. If an in-flight decoder call is cancelled, drop its
