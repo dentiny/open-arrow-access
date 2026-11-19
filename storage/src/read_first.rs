@@ -124,8 +124,8 @@ impl ReadFirst {
                 self.received = 0;
             }
             let next = self.stream.as_mut().unwrap().try_next().await;
-            // S3 returns 416 for any range on an empty object. Only that edge
-            // case falls back to stat; nonempty range errors remain failures.
+            // Some backends reject any range on an empty object. Confirm only
+            // that edge with stat; nonempty range errors remain failures.
             if self.offset == 0
                 && self.received == 0
                 && let Err(error) = &next

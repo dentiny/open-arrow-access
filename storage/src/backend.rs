@@ -115,12 +115,11 @@ impl Accessor for OpenDalAccessor {
     }
 
     async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        // Other services and caller-supplied lengths retain the existing reader.
-        if !matches!(self.operator.info().scheme(), "s3" | "http")
-            || self
-                .content_lengths
-                .as_ref()
-                .is_some_and(|lengths| lengths.contains_key(request.object.locator()))
+        // A supplied length already avoids stat and keeps the existing reader.
+        if self
+            .content_lengths
+            .as_ref()
+            .is_some_and(|lengths| lengths.contains_key(request.object.locator()))
         {
             return self.open(request).await;
         }
