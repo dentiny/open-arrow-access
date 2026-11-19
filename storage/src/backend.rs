@@ -450,6 +450,10 @@ impl ByteReader for OpenDalReader {
     }
 
     async fn read_ranges(&mut self, ranges: Vec<Range<u64>>) -> Result<Vec<Bytes>> {
+        // Empty bulk requests are a no-op, even without range capability.
+        if ranges.is_empty() {
+            return Ok(Vec::new());
+        }
         if self.sequential_only {
             return Err(crate::error::sequential_range_unsupported());
         }
