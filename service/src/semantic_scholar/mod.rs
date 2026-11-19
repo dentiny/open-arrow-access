@@ -3,8 +3,10 @@
 use crate::common::{ApiDocument, ApiKey, Connection, RemoteFiles, segment, text};
 mod error;
 mod parser;
+mod v2;
 mod validation;
 use open_arrow_access_core::Result;
+pub use v2::{S2orcV2Accessor, s2orc_v2_schema};
 
 #[derive(Clone, Debug)]
 pub struct SemanticScholarService {

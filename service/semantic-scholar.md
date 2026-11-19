@@ -29,7 +29,7 @@ additional fields may be present):
 
 ```json
 {
-  "name": "s2orc",
+  "name": "s2orc_v2",
   "README": "Dataset-specific schema and license information",
   "files": [
     "https://files.example.org/part?signature=example"
@@ -62,7 +62,7 @@ async fn inspect_dataset(key: &str, release: &str, dataset: &str) -> Result<()> 
 }
 ```
 
-For dataset `s2orc`, the example reports the resolved release and a partition
+For dataset `s2orc_v2`, the example reports the resolved release and a partition
 name, then reads its first original chunk. Apply gzip/JSON decoding according to
 the selected dataset's own schema; no fixed Arrow columns are added here.
 
@@ -74,3 +74,19 @@ Use `SemanticScholarService::with_connection(connection).with_key(key)?` when
 configuring a custom endpoint, transport or HTTP policy. This reuses the same
 key validation and authentication header as `new(key)`, preserves other
 connection settings, and replaces any previously configured API key.
+
+## Typed S2ORC v2 records
+
+`S2orcV2Accessor::new(decompressed_bytes)` reads one paper per Arrow row with
+`s2orc_v2_schema()`. Nested metadata stays in structs; author names are a list,
+and JSON-encoded annotation arrays are decoded to `List<Struct>`. There is no
+whole-record JSON string column. The byte accessor supplied here must already
+expose uncompressed JSONL; the provider download interface still returns original
+bytes.
+
+The reader validates all input columns before projection, preserves null versus
+empty annotation lists, and implements `ScanPlanner` using the shared JSON
+framer. `with_partition_options` configures the soft decoded-byte chunk target;
+a single complete record may exceed it. Use `ParallelReadLayer` to execute
+planned chunks concurrently with bounded read-ahead; opening the reader directly
+remains sequential. No whole shard is buffered or reserialized to JSON.

@@ -17,7 +17,7 @@ async fn pins_latest_and_preserves_signed_partitions_without_leaking_key() {
         .unwrap()
         .replace("ORIGIN", download.endpoint());
     f.respond(
-        "/datasets/v1/release/2026-10-27/dataset/s2orc",
+        "/datasets/v1/release/2026-10-27/dataset/s2orc_v2",
         StatusCode::OK,
         raw.into_bytes(),
     );
@@ -27,7 +27,7 @@ async fn pins_latest_and_preserves_signed_partitions_without_leaking_key() {
             .with_header("x-api-key", "test")
             .unwrap(),
     );
-    let files = s.dataset("latest", "s2orc").await.unwrap();
+    let files = s.dataset("latest", "s2orc_v2").await.unwrap();
     assert_eq!(files.metadata().release_id, "2026-10-27");
     assert_eq!(files.metadata().dataset.value()["README"], "source license");
     assert_eq!(f.requests().len(), 2);
@@ -47,13 +47,16 @@ async fn validates_identity_and_required_arrays() {
         fixture!("semantic-scholar", "release.json").await,
     );
     f.respond(
-        "/datasets/v1/release/2026-10-27/dataset/s2orc",
+        "/datasets/v1/release/2026-10-27/dataset/s2orc_v2",
         StatusCode::OK,
         fixture!("semantic-scholar", "bad-dataset-identity.json").await,
     );
     let s = SemanticScholarService::with_connection(providers::connection(&f));
     assert_eq!(
-        s.dataset("2026-10-27", "s2orc").await.unwrap_err().kind(),
+        s.dataset("2026-10-27", "s2orc_v2")
+            .await
+            .unwrap_err()
+            .kind(),
         ErrorKind::Decode
     );
     assert!(SemanticScholarService::new("").is_err());

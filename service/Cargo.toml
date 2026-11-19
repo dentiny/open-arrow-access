@@ -53,7 +53,7 @@ pmc = [
     "open-arrow-access-decompression/gzip",
 ]
 regulations = []
-semantic-scholar = []
+semantic-scholar = ["dep:arrow-array", "dep:arrow-schema", "open-arrow-access-file-format/json"]
 uspto = []
 warc = ["open-arrow-access-file-format/warc"]
 zenodo = []
@@ -219,6 +219,10 @@ required-features = ["openstax"]
 
 [[test]]
 name = "semantic_scholar"
+required-features = ["semantic-scholar"]
+
+[[test]]
+name = "s2orc_v2"
 required-features = ["semantic-scholar"]
 
 [[test]]
