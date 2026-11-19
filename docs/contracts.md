@@ -82,23 +82,20 @@ callers of this hook must consume it through `next` only. `Arc`, metrics and nam
 file wrappers forward the hook. Regular `open` retains its eager metadata and
 random-access contract.
 
-Without a supplied content-length hint, `OpenDalAccessor` starts with a bounded
-read using `ByteReadOptions::io_chunk_size` (2 MiB when unset), for every backend.
-It learns complete object length from read-response metadata when available
-(`Content-Range` for partial HTTP responses) and continues with bounded, sequential
-ranges when necessary. Small PMC metadata JSON objects require one GET and no
-preceding HEAD. Output byte
-chunks retain the accessor's separate output-size setting. Later ranges use
-`If-Match` when the service supports it and the response supplied an ETag.
+Without a supplied content-length hint, `OpenDalAccessor` performs one bounded
+read using `ByteReadOptions::io_chunk_size` (2 MiB when unset). It takes the full
+object length from response metadata when available, otherwise falling back to
+stat. The returned bytes seed the existing reader; only the remainder is read
+through its normal chunking and concurrency implementation. Small PMC metadata
+JSON objects therefore require one Range GET and no preceding HEAD, while larger
+objects reuse the same reader implementation as ordinary opens.
 
-An initial 416 on an empty object is confirmed with stat, and missing response
-metadata also falls back to stat. Nonempty range failures, short responses and
-oversized responses fail rather than silently returning partial objects. Servers
-that ignore Range for objects larger than the configured request size are rejected.
-Supplied content-length hints use the existing reader path. There is no protocol
-allowlist; backends without complete read-response metadata use the stat fallback.
-The sequential byte reader can start without I/O and keeps its public length
-metadata unknown; regular metadata inspection remains available separately.
+The first response must match the expected range length; short or oversized
+responses fail. A rejected range (including an empty object's 416) falls back to
+the existing metadata/open path. Supplied length hints also keep the existing
+path. This is protocol independent, and output byte chunks remain separate from
+storage request size. Opening performs the first bounded read and returns known
+length metadata; there is no additional read-first reader or state machine.
 
 `read_all(reader, operation)` collects an owned byte reader into a `Vec<u8>`.
 Empty chunks are I/O errors using the supplied operation; upstream errors pass

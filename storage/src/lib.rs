@@ -22,7 +22,6 @@ mod backend;
 mod config;
 mod error;
 mod http_limit;
-mod read_first;
 mod retry;
 pub use config::{RetryConfig, StorageConfig, TimeoutConfig};
 pub use http_limit::HttpConcurrencyLimitLayer;
