@@ -1,11 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Preserve native attachment scan planning for Parquet, CSV/TSV, JSON/JSONL and XML, enabling shared crawl execution for provider files.
-- Bind attachment formats and outer compression once, forward format metadata inspection, and remove temporary per-open bound sources.
-- Retain conservative provider-independent ordering in attachment plans and opened readers; binary attachments remain whole-document rows.
-
 ## 0.12.0 - 2026-11-19
 
 - Add `crawl::CrawlAccessor` with existing-source, file-set, directory and provider-resolver entry points for integrated crawls.
