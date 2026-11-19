@@ -1,9 +1,10 @@
 //! Select one decoder family for a file set before schema inspection or reading.
+mod error;
 mod json;
 
 use std::num::NonZeroUsize;
 
-use open_arrow_access_core::{ByteAccessor, Error, ErrorKind, ObjectRef, Result};
+use open_arrow_access_core::{ByteAccessor, Error, ErrorKind, Result};
 pub use open_arrow_access_file_format::{DetectedFormat, detect_format};
 
 use crate::file_set::FileSetRequest;
@@ -79,7 +80,7 @@ pub async fn resolve_files<B: ByteAccessor>(
     })?;
     for (object, other) in &files {
         if *other != format {
-            return Err(mixed(&first, format, object, *other));
+            return Err(error::mixed(&first, format, object, *other));
         }
     }
     if let Some(limit) = policy
@@ -94,7 +95,7 @@ pub async fn resolve_files<B: ByteAccessor>(
             };
             if let Some((previous, kind)) = &first_json {
                 if detected != *kind {
-                    return Err(mixed(previous, *kind, object, detected));
+                    return Err(error::mixed(previous, *kind, object, detected));
                 }
             } else {
                 first_json = Some((object.clone(), detected));
@@ -113,21 +114,4 @@ fn decoder_format(format: DetectedFormat) -> DetectedFormat {
         DetectedFormat::JsonLines => DetectedFormat::Json,
         other => other,
     }
-}
-
-fn mixed(
-    first: &ObjectRef,
-    format: DetectedFormat,
-    other: &ObjectRef,
-    other_format: DetectedFormat,
-) -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "resolve_files",
-        format!(
-            "selection mixes {format:?} file {:?} and {other_format:?} file {:?}",
-            first.locator(),
-            other.locator()
-        ),
-    )
 }
