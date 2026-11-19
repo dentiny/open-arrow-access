@@ -78,15 +78,7 @@ pub struct HttpReadRateLimitLayer {
 }
 impl HttpReadRateLimitLayer {
     pub fn new(min_request_interval: Duration) -> open_arrow_access_core::Result<Self> {
-        if min_request_interval.is_zero()
-            || Instant::now().checked_add(min_request_interval).is_none()
-        {
-            return Err(open_arrow_access_core::Error::new(
-                open_arrow_access_core::ErrorKind::InvalidInput,
-                "configure_http_rate_limit",
-                "request interval must be positive and representable",
-            ));
-        }
+        crate::validation::validate_http_request_interval(min_request_interval)?;
         let mut inner = RetryAfterLayer::new(Duration::from_secs(600));
         inner.gate = Arc::new(Gate {
             interval: Some(min_request_interval),
