@@ -129,6 +129,54 @@ training example. PDF is useful when layout and figures matter; XML is useful
 for structured text processing; TXT is derived from XML. Preserve metadata and
 content URLs so additional formats can be obtained later when needed.
 
+## Arrow `metadata` struct
+
+Each article row has a **non-null `metadata: Struct`** containing the 16 known
+upstream JSON fields below, using their original names. It is a typed Arrow
+object, not a JSON string, a list of references, or a container for PDF/XML/TXT
+bytes. Child nullability is independent of the non-null struct itself.
+
+| Child field | Arrow type | Nullable | Value |
+| --- | --- | --- | --- |
+| `pmcid` | `Utf8` | No | PMC article identifier. |
+| `version` | `UInt32` | Yes | Article version; positive when provided. |
+| `pmid` | `UInt64` | Yes | Numeric PubMed identifier. |
+| `doi` | `Utf8` | Yes | DOI string. |
+| `title` | `LargeUtf8` | Yes | Article title. |
+| `citation` | `LargeUtf8` | Yes | Upstream formatted bibliographic citation string. |
+| `is_pmc_openaccess` | `Boolean` | Yes | Open Access Subset flag. |
+| `is_manuscript` | `Boolean` | Yes | Author-manuscript flag. |
+| `is_historical_ocr` | `Boolean` | Yes | Historical back-scanning/OCR flag. |
+| `is_retracted` | `Boolean` | Yes | Retraction flag. |
+| `license_code` | `Utf8` | Yes | Upstream license code. |
+| `xml_url` | `Utf8` | Yes | URL of the article's JATS XML. |
+| `pdf_url` | `Utf8` | Yes | PDF URL, if available. |
+| `media_urls` | `List<Utf8>` | Yes | URLs of figures and supplementary files. |
+| `text_url` | `Utf8` | Yes | URL of the TXT representation, not its text content. |
+| `mid` | `Utf8` | Yes | Manuscript identifier, when provided. |
+
+For example, `metadata.citation` may be
+`Edinb Med J. 1868 May;13(11):1015–42.`. The source provides one string; the
+reader does not invent journal/year/volume/page subfields or turn it into an
+array of cited papers. Both `Utf8` and `LargeUtf8` are string types; the current
+schema uses `LargeUtf8` for title and citation.
+
+Missing optional JSON fields become null. `media_urls` can be null or an empty
+list; provided elements must be strings. Its Arrow item field is declared
+nullable, but the PMC decoder rejects null list elements. This is a fixed schema:
+unrecognized upstream fields fail decoding rather than being silently dropped.
+
+Top-level article columns provide convenient access to the same metadata values.
+The nested struct always retains the original field names, including `text_url`.
+Released 0.8.2 spells the top-level TXT URL column `text`; [#554](https://github.com/dentiny/open-arrow-access/pull/554) renames that column
+to `text_url`, matching `metadata.text_url`, `pdf_url` and `xml_url`.
+The `content_url` convenience column proposed in [#554](https://github.com/dentiny/open-arrow-access/pull/554) is derived from the selected
+format and is **not** an extra child of `metadata`.
+
+When a downstream sink downloads a selected URL as a blob, the content bytes are
+stored separately from the metadata struct, in the selected content column.
+The nested struct continues to retain the original URL and descriptive fields.
+
 ## Updates and reproducibility
 
 PMC is **not static**. Article versions are added and updated continuously, and
