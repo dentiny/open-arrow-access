@@ -15,7 +15,7 @@ use tokio::task::JoinSet;
 
 use crate::{
     error::partition_task_error,
-    ordered_buffer::{PartitionChannel, partition_channel},
+    ordered_buffer::{PartitionChannel, QueueBudget, partition_channel},
     scan_policy::{ScanPolicy, ScanPolicyAccessor},
     validation::{validate_emission_policy, validate_parallel_read_settings},
 };
@@ -24,19 +24,29 @@ use crate::{
 /// Requires an active Tokio runtime.
 #[derive(Clone, Copy, Debug)]
 pub struct ParallelReadLayer {
-    /// Maximum resident partitions, including completed partitions with queued batches.
-    partitions: NonZeroUsize,
-    /// Queue capacity for independent native partitions. Streaming files use
-    /// unbounded in-memory queues under either emission policy.
-    prefetch: NonZeroUsize,
+    settings: ParallelReadOptions,
 }
 
 impl ParallelReadLayer {
     pub fn new(partitions: NonZeroUsize, prefetch: NonZeroUsize) -> Self {
         Self {
-            partitions,
-            prefetch,
+            settings: ParallelReadOptions {
+                partitions,
+                prefetch,
+                read_ahead_bytes: ParallelReadOptions::DEFAULT_READ_AHEAD_BYTES,
+            },
         }
+    }
+
+    /// Set the queued Arrow memory budget for each resident streaming file.
+    /// Defaults to 8 MiB; applies to ordered and unordered emission. Native
+    /// partitions continue using the constructor's batch-count prefetch.
+    /// This is a soft budget: oversized batches are admitted alone, and one
+    /// decoded batch can wait outside the queue. Invalid semaphore-sized values
+    /// are rejected when planning/opening a scan rather than panicking.
+    pub fn with_read_ahead_bytes(mut self, bytes: NonZeroUsize) -> Self {
+        self.settings.read_ahead_bytes = bytes;
+        self
     }
 }
 
@@ -88,10 +98,7 @@ impl ScanPolicy for ParallelReadLayer {
     }
 
     fn apply(&self, plan: &mut ScanPlan) -> Result<()> {
-        let settings = ParallelReadOptions {
-            partitions: self.partitions,
-            prefetch: self.prefetch,
-        };
+        let settings = self.settings;
         validate_parallel_read_settings(plan.parallel_read, settings)?;
         plan.parallel_read = Some(settings);
         Ok(())
@@ -101,7 +108,10 @@ impl ScanPolicy for ParallelReadLayer {
 pub(crate) fn open_plan(plan: ScanPlan) -> Result<Box<dyn RecordReader>> {
     validate_emission_policy(plan.emission, plan.ordering)?;
     match plan.parallel_read {
-        Some(settings) => Ok(Box::new(ParallelReader::new(plan, settings))),
+        Some(settings) => {
+            validate_parallel_read_settings(None, settings)?;
+            Ok(Box::new(ParallelReader::new(plan, settings)))
+        }
         None => Ok(Box::new(plan.into_reader())),
     }
 }
@@ -111,7 +121,7 @@ struct ParallelReader {
     metadata: RecordMetadata,
     remaining: Fuse<BoxStream<'static, Result<ScanPartition>>>,
     partition_receivers: VecDeque<BoxStream<'static, RecordBatch>>,
-    read_ahead: bool,
+    queue_budget: QueueBudget,
     tasks: JoinSet<Result<()>>,
     settings: ParallelReadOptions,
     emission: EmissionPolicy,
@@ -121,7 +131,11 @@ impl ParallelReader {
     fn new(plan: ScanPlan, settings: ParallelReadOptions) -> Self {
         Self {
             ordering: plan.ordering,
-            read_ahead: plan.file_streams,
+            queue_budget: if plan.file_streams {
+                QueueBudget::Bytes(settings.read_ahead_bytes.get())
+            } else {
+                QueueBudget::Batches(settings.prefetch.get())
+            },
             metadata: plan.metadata,
             remaining: plan.partitions.fuse(),
             partition_receivers: VecDeque::new(),
@@ -132,8 +146,7 @@ impl ParallelReader {
     }
 
     fn spawn_partition(&mut self, open: ScanPartition) {
-        let PartitionChannel { sender, batches } =
-            partition_channel(self.settings.prefetch.get(), self.read_ahead);
+        let PartitionChannel { sender, batches } = partition_channel(self.queue_budget);
         let schema = self.metadata.schema.clone();
         self.tasks.spawn(async move {
             let mut reader = open.await?;

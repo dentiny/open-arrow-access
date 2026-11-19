@@ -1,84 +1,110 @@
-//! Partition output queues for concurrency-limited streaming-file read-ahead.
+//! Partition output queues with batch-count or estimated-byte backpressure.
+
+use std::sync::Arc;
 
 use futures::{
     StreamExt,
     stream::{self, BoxStream},
 };
 use open_arrow_access_core::{RecordBatch, RecordReader, Result, SchemaRef};
-use tokio::sync::mpsc;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 
-/// Delivers a partition worker's decoded batches using its queue policy.
-pub(crate) enum PartitionSender {
-    /// For independent native partitions: reserve one of the configured prefetch
-    /// slots before decoding, so a full queue pauses further reads.
-    Bounded(mpsc::Sender<RecordBatch>),
-    /// For whole streaming files: queue batches in memory without waiting for
-    /// consumption. Concurrency limits resident files; queued bytes are unbounded.
-    ReadAhead(mpsc::UnboundedSender<RecordBatch>),
+/// A partition queue is bounded by either batch count or estimated Arrow bytes.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum QueueBudget {
+    Batches(usize),
+    Bytes(usize),
 }
 
-/// A partition worker's output sender and matching batch stream.
+/// Queued batches retain permits until delivery or cancellation. Native
+/// partitions reserve a slot before decoding; streaming files reserve bytes
+/// after decoding. Each partition owns its budget to avoid ordered-output deadlocks.
+pub(crate) struct PartitionSender {
+    sender: mpsc::UnboundedSender<(RecordBatch, OwnedSemaphorePermit)>,
+    permits: Arc<Semaphore>,
+    budget: QueueBudget,
+}
+
 pub(crate) struct PartitionChannel {
-    /// Producer endpoint using the selected buffering policy.
     pub(crate) sender: PartitionSender,
-    /// Receiver stream preserving batch order within this partition.
     pub(crate) batches: BoxStream<'static, RecordBatch>,
 }
 
-pub(crate) fn partition_channel(prefetch: usize, read_ahead: bool) -> PartitionChannel {
-    if read_ahead {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        let batches = stream::unfold(receiver, |mut receiver| async move {
-            receiver.recv().await.map(|batch| (batch, receiver))
-        });
-        PartitionChannel {
-            sender: PartitionSender::ReadAhead(sender),
-            batches: batches.boxed(),
-        }
-    } else {
-        let (sender, receiver) = mpsc::channel(prefetch);
-        let batches = stream::unfold(receiver, |mut receiver| async move {
-            receiver.recv().await.map(|batch| (batch, receiver))
-        });
-        PartitionChannel {
-            sender: PartitionSender::Bounded(sender),
-            batches: batches.boxed(),
-        }
+pub(crate) fn partition_channel(budget: QueueBudget) -> PartitionChannel {
+    let capacity = match budget {
+        QueueBudget::Batches(count) | QueueBudget::Bytes(count) => count,
+    };
+    let (sender, receiver) = mpsc::unbounded_channel();
+    let batches = stream::unfold(receiver, |mut receiver| async move {
+        receiver
+            .recv()
+            .await
+            .map(|(batch, _permit)| (batch, receiver))
+    });
+    PartitionChannel {
+        sender: PartitionSender {
+            sender,
+            permits: Arc::new(Semaphore::new(capacity)),
+            budget,
+        },
+        batches: batches.boxed(),
     }
 }
 
 impl PartitionSender {
+    async fn reserve(&self, permits: u32) -> OwnedSemaphorePermit {
+        self.permits
+            .clone()
+            .acquire_many_owned(permits)
+            .await
+            .expect("partition budget is never closed")
+    }
+
+    pub(crate) async fn send(
+        &self,
+        batch: RecordBatch,
+        slot: Option<OwnedSemaphorePermit>,
+    ) -> bool {
+        let permit = match slot {
+            Some(slot) => slot,
+            None => {
+                // Oversized batches occupy the budget alone. One further decoded
+                // batch may wait for admission outside the queue.
+                let permits = match self.budget {
+                    QueueBudget::Batches(_) => 1,
+                    QueueBudget::Bytes(limit) => batch.get_array_memory_size().clamp(1, limit),
+                };
+                self.reserve(permits as u32).await
+            }
+        };
+        self.sender.send((batch, permit)).is_ok()
+    }
+
     pub(crate) async fn read(
         self,
         reader: &mut dyn RecordReader,
         schema: &SchemaRef,
     ) -> Result<()> {
-        match self {
-            Self::Bounded(sender) => loop {
-                // Reserve before decoding to preserve ordinary queue backpressure.
-                let Ok(permit) = sender.reserve().await else {
-                    return Ok(());
-                };
-                let Some(batch) = reader.next().await? else {
-                    return Ok(());
-                };
-                crate::validation::validate_partition_schema(&batch.schema(), schema)?;
-                permit.send(batch);
-            },
-            Self::ReadAhead(sender) => loop {
-                if sender.is_closed() {
-                    return Ok(());
-                }
-                let Some(batch) = reader.next().await? else {
-                    return Ok(());
-                };
-                crate::validation::validate_partition_schema(&batch.schema(), schema)?;
-                if sender.send(batch).is_err() {
-                    return Ok(());
-                }
-                // Ready sources remain cooperative without queue-capacity waits.
+        loop {
+            let slot = if matches!(self.budget, QueueBudget::Batches(_)) {
+                Some(self.reserve(1).await)
+            } else {
+                None
+            };
+            if self.sender.is_closed() {
+                return Ok(());
+            }
+            let Some(batch) = reader.next().await? else {
+                return Ok(());
+            };
+            crate::validation::validate_partition_schema(&batch.schema(), schema)?;
+            if !self.send(batch, slot).await {
+                return Ok(());
+            }
+            // Small ready batches still cooperate with other partition tasks.
+            if matches!(self.budget, QueueBudget::Bytes(_)) {
                 tokio::task::yield_now().await;
-            },
+            }
         }
     }
 }
