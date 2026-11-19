@@ -129,14 +129,15 @@ training example. PDF is useful when layout and figures matter; XML is useful
 for structured text processing; TXT is derived from XML. Preserve metadata and
 content URLs so additional formats can be obtained later when needed.
 
-## Arrow `metadata` struct
+## Arrow output schema
 
-Each article row has a **non-null `metadata: Struct`** containing the 16 known
-upstream JSON fields below, using their original names. It is a typed Arrow
-object, not a JSON string, a list of references, or a container for PDF/XML/TXT
-bytes. Child nullability is independent of the non-null struct itself.
+The schema proposed in [open-arrow-access #554](https://github.com/dentiny/open-arrow-access/pull/554)
+has **17 top-level columns**: all 16 upstream metadata fields, each stored once,
+and the derived `content_url`. There is no duplicate `metadata` struct or JSON
+string column. This schema requires upgrading beyond released 0.8.2, which still
+has the nested struct and spells the top-level TXT URL column `text`.
 
-| Child field | Arrow type | Nullable | Value |
+| Field | Arrow type | Nullable | Value |
 | --- | --- | --- | --- |
 | `pmcid` | `Utf8` | No | PMC article identifier. |
 | `version` | `UInt32` | Yes | Article version; positive when provided. |
@@ -154,28 +155,19 @@ bytes. Child nullability is independent of the non-null struct itself.
 | `media_urls` | `List<Utf8>` | Yes | URLs of figures and supplementary files. |
 | `text_url` | `Utf8` | Yes | URL of the TXT representation, not its text content. |
 | `mid` | `Utf8` | Yes | Manuscript identifier, when provided. |
+| `content_url` | `Utf8` | Yes | Selected PDF/XML/TXT URL; PDF by default. |
 
-For example, `metadata.citation` may be
-`Edinb Med J. 1868 May;13(11):1015–42.`. The source provides one string; the
-reader does not invent journal/year/volume/page subfields or turn it into an
-array of cited papers. Both `Utf8` and `LargeUtf8` are string types; the current
-schema uses `LargeUtf8` for title and citation.
+For example, `citation` may be `Edinb Med J. 1868 May;13(11):1015–42.`.
+It is the upstream bibliographic string, not an array of cited papers. Both
+`Utf8` and `LargeUtf8` are string types.
 
-Missing optional JSON fields become null. `media_urls` can be null or an empty
-list; provided elements must be strings. Its Arrow item field is declared
-nullable, but the PMC decoder rejects null list elements. This is a fixed schema:
-unrecognized upstream fields fail decoding rather than being silently dropped.
+Missing optional fields become null. `media_urls` may be null or empty; provided
+elements must be strings. Its Arrow item field is nullable, but the decoder
+rejects null list elements. Unknown upstream fields fail decoding rather than
+being silently dropped.
 
-Top-level article columns provide convenient access to the same metadata values.
-The nested struct always retains the original field names, including `text_url`.
-Released 0.8.2 spells the top-level TXT URL column `text`; [#554](https://github.com/dentiny/open-arrow-access/pull/554) renames that column
-to `text_url`, matching `metadata.text_url`, `pdf_url` and `xml_url`.
-The `content_url` convenience column proposed in [#554](https://github.com/dentiny/open-arrow-access/pull/554) is derived from the selected
-format and is **not** an extra child of `metadata`.
-
-When a downstream sink downloads a selected URL as a blob, the content bytes are
-stored separately from the metadata struct, in the selected content column.
-The nested struct continues to retain the original URL and descriptive fields.
+A sink can ingest `content_url` as a blob while preserving `pdf_url`, `xml_url`
+and `text_url` as the original URLs. The reader itself does not fetch content.
 
 ## Updates and reproducibility
 
@@ -202,13 +194,9 @@ and are not part of the released 0.8.2 API yet.
   exposes one native scan partition per metadata object, and works with
   `ParallelReadLayer`.
 
-Article output includes mapped columns and a complete typed `metadata` struct.
-The reader does not download PDFs, XML, text or media. The TXT field holds a
-URL, not extracted article text. [#554](https://github.com/dentiny/open-arrow-access/pull/554)
-renames the top-level field to `text_url`, matching `pdf_url`, `xml_url` and
-`metadata.text_url`; it does not retain a `text` alias. Released 0.8.2 still uses
-the old top-level `text` spelling. URL encoding/query parameters are preserved
-in content URLs.
+Article output follows the schema described above after #554 is integrated.
+The reader does not download PDFs, XML, text or media. URL encoding and query
+parameters are preserved in content URLs.
 
 Format selection (`PmcFormat`, default PDF, selecting a shared `content_url`)
 is proposed separately in [#554](https://github.com/dentiny/open-arrow-access/pull/554);
