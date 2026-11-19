@@ -73,7 +73,7 @@ async fn lz4() {
 }
 
 #[tokio::test]
-async fn sequential_input_overrides_network_splitting_but_retains_frame_positions() {
+async fn default_input_overrides_network_splitting_but_retains_frame_positions() {
     use open_arrow_access_core::{
         ByteAccessor, ByteReadRequest, ByteReader, Capability, Result, async_trait,
     };
@@ -98,8 +98,7 @@ async fn sequential_input_overrides_network_splitting_but_retains_frame_position
     impl ByteAccessor for Sequential {}
     let member = fixture!("gzip", "payload.gz").await;
     let input = [member.as_slice(), member.as_slice()].concat();
-    let source = Sequential(MemoryAccessor::new(&input, 3))
-        .layer(SourcePositionLayer::default().with_sequential_input());
+    let source = Sequential(MemoryAccessor::new(&input, 3)).layer(SourcePositionLayer::default());
     let mut request = ByteReadRequest::new("object.gz");
     request.options.io_chunk_size = NonZeroUsize::new(64 * 1024 * 1024);
     request.options.io_concurrency = NonZeroUsize::new(8).unwrap();
