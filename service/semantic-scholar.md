@@ -40,33 +40,137 @@ Do not assume equal row counts, stable ordering, or matching shard numbers
 between datasets or releases. Join related paper datasets by their corpus ID,
 not by file position or row number.
 
-## Full-text formats and identity
+## Dataset names, record columns and Arrow types
 
-This guide covers the `s2orc_v2` full-text dataset. Select that dataset explicitly
-when obtaining the release manifest.
+`papers`, `abstracts` and `s2orc_v2` are **separate dataset names** accepted by
+`/release/<release_id>/dataset/<name>`. They are not Arrow types or fields
+inside an S2ORC v2 record. Selecting `s2orc_v2` does not also download `papers`
+or `abstracts`. A later metadata join would read those datasets separately.
 
-| Dataset | Principal documented content |
+| Dataset name (not a column/type) | Record contents |
 | --- | --- |
-| `papers` | Core paper metadata; not full-body text. |
-| `abstracts` | Abstract text where available; not full-body text. |
-| `s2orc_v2` | `openaccessinfo`, `title`, `authors`, and separate `body` and `bibliography`, each with text and annotation spans. |
+| `papers` | One paper's graph metadata; no full-body text. It has its own record schema, outside this v2 ingestion contract. |
+| `abstracts` | One paper's abstract where available; a separate record schema, outside this v2 ingestion contract. |
+| `s2orc_v2` | One paper's parsed full text and metadata, with the six top-level fields listed below. |
 
-A decompressed shard is JSONL: each line is a JSON object. Text and annotation
-spans describe the parsed document; annotations are not separate paper records.
-Preserve the original text when retaining span offsets. Do not flatten away
-bibliography, annotation or open-access fields when complete upstream metadata
-is required. Consult the selected release's dataset README and actual records
-for field names, types and optionality; this table is not a complete Arrow schema.
+### Evidence and storage contract
+
+The following field inventory was checked against **all 20 records** in the
+[official public v2 sample](https://s3-us-west-2.amazonaws.com/ai2-s2ag/samples/s2orc_v2/s2orc_v2-sample.jsonl.gz)
+on **2026-11-19**, together with its
+[README](https://s3-us-west-2.amazonaws.com/ai2-s2ag/samples/s2orc_v2/README.txt).
+The compressed sample's SHA-256 is
+`4833173b3dea488e71cd8450c5c2e2a86fc8cd4b63afb35d78c51dbb517d4c47`.
+It is a public sample, not a verified sample from our pinned full release.
+The README is descriptive rather than a complete type/nullability contract;
+in particular its `externalIds` spelling differs from the sample's
+`externalids`. Use exact observed field names and validate the full release.
+
+**JSONL is the upstream transport format, not the intended Arrow storage type.**
+Known scalar fields become typed columns; nested records become Arrow
+`Struct` and arrays become `List`. Do not serialize a known record, struct or
+annotation array into a JSON string column. The mapping below is the proposed
+typed output contract; the current byte provider does not implement it yet.
+Nullable output fields accommodate missing upstream values; validate required
+paper identity. Sample observations alone do not establish full-release
+nullability or rule out additional fields.
+
+### Top-level columns: one paper per row
+
+| Column | Observed upstream value | Proposed Arrow type | Meaning |
+| --- | --- | --- | --- |
+| `corpusid` | Integer in all 20 records | `UInt64`, required | Paper identity; preserve the lowercase spelling. |
+| `openaccessinfo` | Object | `Struct`, nullable | Open-access metadata; children below. |
+| `title` | String | `LargeUtf8`, nullable | Paper title. |
+| `authors` | Array of strings | `List<Utf8>`, nullable | Author names, not author-ID objects; retain list order. |
+| `body` | Object | `Struct<text: LargeUtf8, annotations: Struct<...>>`, nullable | Full-body text and typed annotation lists. |
+| `bibliography` | Object | `Struct<text: LargeUtf8, annotations: Struct<...>>`, nullable | Bibliographic text and typed annotation lists. |
+
+All nested children below are nullable in the proposed schema. Keep
+`openaccessinfo`, `body` and `bibliography` as typed structs, or explicitly
+normalize their children to columns such as `openaccessinfo_license`,
+`body_text` and `bibliography_text`. Either representation preserves types;
+do not keep both duplicate representations by default.
+
+### Open-access struct children
+
+| Field path | Proposed Arrow type | Observed meaning/type |
+| --- | --- | --- |
+| `openaccessinfo.disclaimer` | `LargeUtf8` | Human-readable provenance/copyright statement; string. |
+| `openaccessinfo.license` | `Utf8` | License label; string or null. |
+| `openaccessinfo.url` | `Utf8` | Source paper URL; string, not downloaded PDF bytes. |
+| `openaccessinfo.status` | `Utf8` | Open-access status such as `GOLD`; string. |
+| `openaccessinfo.externalids` | `Struct<Medline: Utf8, MAG: Utf8, ACL: Utf8, DOI: Utf8, MedRxiv: Utf8, PubMedCentral: Utf8, ArXiv: Utf8>` | External catalog identifiers. |
+
+The sample's `Medline`, `MAG`, `DOI` and `PubMedCentral` values are strings
+or null. Keep identifiers as strings even when they contain only digits.
+`ACL`, `MedRxiv` and `ArXiv` are present but null in every sample record:
+their proposed `Utf8` type is an identifier-storage choice, not an observed
+non-null type. Confirm non-null values against the full-release contract before
+finalizing the reader. Do not infer Arrow `Null` as their permanent type.
+
+### Text and annotation struct children
+
+`body.text` and `bibliography.text` map to `LargeUtf8`. Each annotation
+field listed below maps to a nullable `List<Span>` after decoding its payload.
+
+| Field path | Public sample evidence |
+| --- | --- |
+| `body.annotations.sentence` | JSON-encoded array string or null; start/end are decimal strings inside populated arrays. |
+| `body.annotations.paragraph` | JSON-encoded array string; integer start/end. |
+| `body.annotations.section_header` | JSON-encoded array string or null; integer start/end; optional section-number attribute `n`. |
+| `body.annotations.bib_ref` | JSON-encoded array string; integer start/end; optional `ref_id` and `matched_paper_id`. |
+| `bibliography.annotations.bib_entry` | JSON-encoded array string; integer start/end; attributes include `id` and optional `matched_paper_id`. |
+| `bibliography.annotations.bib_title` | JSON-encoded array string or null; integer start/end. |
+| `bibliography.annotations.bib_venue` | JSON-encoded array string; integer start/end. |
+| `bibliography.annotations.bib_id` | Null in all 20 records; non-null payload schema remains unverified. |
+| `bibliography.annotations.bib_author_first_name` | Null in all 20 records; non-null payload schema remains unverified. |
+| `bibliography.annotations.bib_author_last_name` | Null in all 20 records; non-null payload schema remains unverified. |
+
+The shared target `Span` is an Arrow struct, not a JSON string:
+
+```text
+Span: Struct<
+  start: UInt64,
+  end: UInt64,
+  attributes: Struct<
+    n: Utf8,
+    id: Utf8,
+    ref_id: Utf8,
+    matched_paper_id: UInt64
+  >
+>
+```
+
+`start` and `end` are required within a populated span. `attributes` and its
+children are nullable; they cover the union of attribute keys observed in this
+sample. Parse decimal-string offsets strictly into integers and preserve
+integer offsets. Preserve null versus empty list, span order, null attributes,
+and missing attribute values. The three all-null annotation fields provisionally
+use `List<Span>` in this design, but their non-null payloads must be verified
+before that schema is treated as complete.
+
+This requires two decoding steps: parse the outer JSONL paper record, then parse
+each non-null annotation string into the typed span list. Validate offsets
+against the corresponding unchanged text using the upstream offset convention;
+do not silently reinterpret character offsets as UTF-8 byte offsets.
+
+Unknown fields or annotation attribute shapes must produce an explicit schema
+validation failure until their typed mapping is added. Do not silently drop
+them, infer a permanent type from all-null samples, or fall back to whole-record
+`raw_json`. A complete typed schema must be validated on actual release data
+before production ingestion.
+
+## Full-text identity
 
 Corpus ID identifies a paper in the graph; it is not a shard ID or a PMC
 article-version identifier. Preserve dataset/release/shard provenance separately.
 The same paper can appear in different releases and may overlap with our PMC
 or arXiv inputs. Conversion alone does not deduplicate those corpora.
 
-Parsed JSON contains neither original PDF bytes nor page images. Fetching a
+Parsed text contains neither original PDF bytes nor page images. Fetching a
 paper URL is a separate operation and may have different availability from the
-parsed text. Do not assume that converting S2ORC v2 satisfies a raw-PDF collection
-requirement.
+parsed text. Converting S2ORC v2 does not collect the original PDFs.
 
 ## Obtaining the shard list
 
@@ -224,10 +328,10 @@ does not decompress `part-00000`: it does not sniff gzip magic bytes. Adding
 
 The generic JSON reader infers a fixed schema from a bounded sample and rejects
 later unknown fields, including nested ones. A consumer requiring every upstream
-field should validate a complete schema or preserve each complete JSON record
-alongside extracted columns. There is no S2ORC v2-specific typed Arrow schema,
-automatic raw-JSON column, PDF downloader, all-shard job scheduler, or automatic
-diff application in this provider.
+field must use an explicit validated Arrow schema, including typed nested
+structs/lists and secondary decoding of annotation payload strings as described
+above. There is no S2ORC v2-specific typed reader, PDF downloader, all-shard job
+scheduler, or automatic diff application in this provider.
 
 For conversion-service task inputs and remaining integration work, see the
 [ml-infra source guide](https://github.com/Adcock-AGI-Inc/ml-infra/blob/main/lance/lance_migration/docs/sources/semantic-scholar.md).
