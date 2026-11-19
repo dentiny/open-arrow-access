@@ -4,9 +4,6 @@ use open_arrow_access_core::{OrderRequirement, Schema};
 
 use super::*;
 
-const READ_AHEAD_BYTES: usize =
-    open_arrow_access_core::ParallelReadOptions::DEFAULT_READ_AHEAD_BYTES.get();
-
 #[tokio::test]
 async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
     let metadata = RecordMetadata {
@@ -35,13 +32,13 @@ async fn refilling_last_slot_does_not_skip_an_existing_ready_queue() {
     let PartitionChannel {
         sender,
         batches: ready,
-    } = partition_channel(1, false, READ_AHEAD_BYTES);
+    } = partition_channel(QueueBudget::Batches(1));
     assert!(sender.send(batch.clone(), None).await);
     drop(sender);
     let PartitionChannel {
         sender,
         batches: closed,
-    } = partition_channel(1, false, READ_AHEAD_BYTES);
+    } = partition_channel(QueueBudget::Batches(1));
     drop(sender);
     reader.partition_receivers.extend([closed, ready]);
 

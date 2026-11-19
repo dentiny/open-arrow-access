@@ -9,13 +9,20 @@ use futures::{
 use open_arrow_access_core::{RecordBatch, RecordReader, Result, SchemaRef};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 
+/// A partition queue is bounded by either batch count or estimated Arrow bytes.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum QueueBudget {
+    Batches(usize),
+    Bytes(usize),
+}
+
 /// Queued batches retain permits until delivery or cancellation. Native
 /// partitions reserve a slot before decoding; streaming files reserve bytes
 /// after decoding. Each partition owns its budget to avoid ordered-output deadlocks.
 pub(crate) struct PartitionSender {
     sender: mpsc::UnboundedSender<(RecordBatch, OwnedSemaphorePermit)>,
-    budget: Arc<Semaphore>,
-    read_ahead_bytes: Option<usize>,
+    permits: Arc<Semaphore>,
+    budget: QueueBudget,
 }
 
 pub(crate) struct PartitionChannel {
@@ -23,11 +30,10 @@ pub(crate) struct PartitionChannel {
     pub(crate) batches: BoxStream<'static, RecordBatch>,
 }
 
-pub(crate) fn partition_channel(
-    prefetch: usize,
-    read_ahead: bool,
-    read_ahead_bytes: usize,
-) -> PartitionChannel {
+pub(crate) fn partition_channel(budget: QueueBudget) -> PartitionChannel {
+    let capacity = match budget {
+        QueueBudget::Batches(count) | QueueBudget::Bytes(count) => count,
+    };
     let (sender, receiver) = mpsc::unbounded_channel();
     let batches = stream::unfold(receiver, |mut receiver| async move {
         receiver
@@ -38,12 +44,8 @@ pub(crate) fn partition_channel(
     PartitionChannel {
         sender: PartitionSender {
             sender,
-            budget: Arc::new(Semaphore::new(if read_ahead {
-                read_ahead_bytes
-            } else {
-                prefetch
-            })),
-            read_ahead_bytes: read_ahead.then_some(read_ahead_bytes),
+            permits: Arc::new(Semaphore::new(capacity)),
+            budget,
         },
         batches: batches.boxed(),
     }
@@ -51,7 +53,7 @@ pub(crate) fn partition_channel(
 
 impl PartitionSender {
     async fn reserve(&self, permits: u32) -> OwnedSemaphorePermit {
-        self.budget
+        self.permits
             .clone()
             .acquire_many_owned(permits)
             .await
@@ -68,10 +70,11 @@ impl PartitionSender {
             None => {
                 // Oversized batches occupy the budget alone. One further decoded
                 // batch may wait for admission outside the queue.
-                let bytes = self
-                    .read_ahead_bytes
-                    .map_or(1, |limit| batch.get_array_memory_size().clamp(1, limit));
-                self.reserve(bytes as u32).await
+                let permits = match self.budget {
+                    QueueBudget::Batches(_) => 1,
+                    QueueBudget::Bytes(limit) => batch.get_array_memory_size().clamp(1, limit),
+                };
+                self.reserve(permits as u32).await
             }
         };
         self.sender.send((batch, permit)).is_ok()
@@ -83,7 +86,7 @@ impl PartitionSender {
         schema: &SchemaRef,
     ) -> Result<()> {
         loop {
-            let slot = if self.read_ahead_bytes.is_none() {
+            let slot = if matches!(self.budget, QueueBudget::Batches(_)) {
                 Some(self.reserve(1).await)
             } else {
                 None
@@ -99,7 +102,7 @@ impl PartitionSender {
                 return Ok(());
             }
             // Small ready batches still cooperate with other partition tasks.
-            if self.read_ahead_bytes.is_some() {
+            if matches!(self.budget, QueueBudget::Bytes(_)) {
                 tokio::task::yield_now().await;
             }
         }
