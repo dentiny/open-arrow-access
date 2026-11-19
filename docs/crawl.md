@@ -421,6 +421,65 @@ sequential inside each independent continuation chain.
   checkpoint or commit semantics; restarting a failed crawl does not imply that
   its previous output can safely be skipped.
 
+## Attachment providers share the same execution path
+
+Providers such as Semantic Scholar, Zenodo, Dataverse and Figshare already resolve
+metadata into a byte-accessible file namespace. Once that step has selected file
+membership and retained the provider's transport context, attachment decoding and
+execution need no provider-specific worker or format switch in the application.
+
+```mermaid
+flowchart LR
+    Providers["Provider API: release/record/dataset metadata"] --> Namespace["Resolved byte namespace: logical names to exact objects/URLs"]
+    Namespace --> Attachment["AttachmentAccessor: bind format + outer compression once"]
+    Attachment --> Native["ScanPlanner: native partitions with fixed schema"]
+    Native --> Crawl["CrawlAccessor: shared worker budget and ordered merge"]
+    Crawl --> Output["Arrow batches"]
+```
+
+```rust,ignore
+use open_arrow_access::{
+    Accessor, AttachmentAccessor, AttachmentFormat, AttachmentOptions,
+    EmissionPolicy, ReadRequest,
+    crawl::{CrawlAccessor, CrawlOptions},
+};
+
+// resolved_files is the provider-bound byte accessor; keep its authentication,
+// snapshot identity, signed URLs and transport policy.
+let records = AttachmentAccessor::new(
+    resolved_files,
+    AttachmentOptions::new(AttachmentFormat::Parquet),
+)?;
+let crawl = CrawlAccessor::new(
+    records,
+    CrawlOptions::default().with_emission(EmissionPolicy::Ordered),
+);
+let mut reader = crawl.open(ReadRequest::new("part-00000.parquet")).await?;
+while let Some(batch) = reader.next().await? { /* consume batch */ }
+```
+
+| Attachment format | Work exposed by its planner |
+| --- | --- |
+| Parquet | Native independently readable partitions, retaining range access where the bound storage supports it. |
+| CSV/TSV, JSON/JSONL and XML | The format's streaming/chunk plan; discovery/framing may remain sequential while decode chunks run in workers. |
+| Binary | One whole-document partition; a single object remains one unchanged binary row. |
+
+`AttachmentAccessor` retains `PreserveGlobal` ordering for provider-independent
+selections. Configure ordered emission; adding native planning does not grant
+permission to reorder unknown provider data. An attachment's own `metadata` and
+`inspect_metadata` operations delegate to the selected format rather than opening
+and discarding a bound reader. Planning does not perform a separate metadata call
+and does not collect all partition openers. Input samples/readers retained by the
+format remain part of its plan.
+
+For several selected attachments, use
+`FileSetAccessor::new(records).with_file_planning()` and pass that to the crawl
+with a `FileSetRequest` containing their logical names. This retains one executor
+budget across files and file-internal partitions. The provider still owns file
+membership; this API does not discover arbitrary links or follow record-level
+`content_url` fields. Advanced format/schema/partition settings can use the typed
+format accessors directly.
+
 ## Differing schemas across files
 
 A scan must have one fixed output schema. `options.evolution` runs after the
