@@ -344,3 +344,20 @@ Supply external decompression separately. For `.warc.gz`, construct the byte
 accessor with `bytes.layer(DecompressionLayer::new(Gzip))` before passing it to
 `WarcArrowAccessor::new`, importing `AccessorExt` and enabling
 `decompression-gzip`. Decompression and WARC framing remain sequential.
+
+### CSV columns as strings
+
+Use `CsvAccessor::infer(bytes).with_schema_mode(CsvSchemaMode::AllStrings)`
+(or the same method on `CsvFileFormat`) to discover column names and read every
+column as nullable `Utf8`. This preserves leading zeroes and numeric spelling,
+accepts all-null columns and header-only files, and lets the caller apply types
+later. Selecting a schema mode replaces any explicit schema.
+
+Header handling is independent: use `with_header(CsvHeader::Present)` for known
+headers or `Absent` for generated `column_1`, `column_2`, … names. These policies
+need only the first record to establish the schema; the record is replayed into
+the same scan rather than reopening storage. `Auto` retains the existing bounded
+header-detection heuristic and preserves ambiguous all-string first rows as data.
+Empty or duplicate header names still fail. Projection, TSV delimiter selection,
+compression layers, metadata inspection, and parallel scan planning use the same
+schema and decoding path as the regular CSV reader.

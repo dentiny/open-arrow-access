@@ -8,6 +8,19 @@ use open_arrow_access_core::{ByteReader, Result, SchemaRef, StreamReader};
 
 use super::{CsvDialect, CsvFormat, CsvHeader, error::inference_error, planning::CsvChunks};
 
+/// How to determine column types when no explicit schema is supplied.
+/// Header handling remains controlled independently by [`CsvHeader`].
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CsvSchemaMode {
+    /// Infer types from a bounded sample (the default).
+    #[default]
+    Infer,
+    /// Discover column names/width and read every column as nullable Utf8.
+    /// With Present/Absent headers, only the first record is sampled.
+    /// Auto headers retain the normal bounded header-detection heuristic.
+    AllStrings,
+}
+
 /// Per-input schema sampling targets. Byte targets measure canonical
 /// CSV bytes and are checked between records, allowing one oversized record.
 #[derive(Clone, Copy, Debug)]
@@ -70,6 +83,25 @@ fn first_record(sample: &[u8]) -> Result<csv::ByteRecord> {
     Ok(first)
 }
 
+fn all_strings_schema(sample: &[u8], has_header: bool) -> Result<Schema> {
+    let first = first_record(sample)?;
+    let fields = first
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let name = if has_header {
+                std::str::from_utf8(value)
+                    .map_err(|error| super::error::inference_error(error.into()))?
+                    .to_owned()
+            } else {
+                format!("column_{}", index + 1)
+            };
+            Ok(arrow_schema::Field::new(name, DataType::Utf8, true))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Schema::new(fields))
+}
+
 pub(super) struct ResolvedCsvInput {
     pub schema: SchemaRef,
     pub has_header: bool,
@@ -81,6 +113,7 @@ pub(super) async fn resolve(
     dialect: CsvDialect,
     options: CsvInferenceOptions,
     explicit_schema: Option<SchemaRef>,
+    schema_mode: CsvSchemaMode,
 ) -> Result<Option<ResolvedCsvInput>> {
     let mut metadata = input.metadata().clone();
     // Frame every row, including the potential header, with the source dialect.
@@ -94,7 +127,9 @@ pub(super) async fn resolve(
     .await?;
     let mut sample = Vec::new();
     let mut first_end = 0;
-    let max_records = if explicit_schema.is_some() {
+    let max_records = if explicit_schema.is_some()
+        || (schema_mode == CsvSchemaMode::AllStrings && dialect.header != CsvHeader::Auto)
+    {
         1
     } else {
         options.max_records
@@ -133,7 +168,11 @@ pub(super) async fn resolve(
                 dialect.allow_truncated_rows,
             )?,
         };
-        let schema = infer_sample(&sample, has_header, dialect.allow_truncated_rows)?;
+        let schema = if schema_mode == CsvSchemaMode::AllStrings {
+            all_strings_schema(&sample, has_header)?
+        } else {
+            infer_sample(&sample, has_header, dialect.allow_truncated_rows)?
+        };
         super::validation::validate_inferred_schema(&schema)?;
         (Arc::new(schema), has_header)
     };

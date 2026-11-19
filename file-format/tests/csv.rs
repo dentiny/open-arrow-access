@@ -14,7 +14,7 @@ use open_arrow_access_core::{
 use futures::TryStreamExt;
 use open_arrow_access_file_format::{
     DecodePartitionOptions,
-    csv::{CsvAccessor, CsvDialect, CsvFormat, CsvHeader},
+    csv::{CsvAccessor, CsvDialect, CsvFormat, CsvHeader, CsvSchemaMode},
 };
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_test_support::{
@@ -756,4 +756,87 @@ async fn explicit_delimiter_preserves_opaque_format_header_validation() {
         column::<StringArray>(&batches[0], "title").value(0),
         "alpha;one"
     );
+}
+
+#[rstest::rstest]
+#[tokio::test]
+async fn all_strings_preserves_spelling_null_columns_and_parallel_projection(
+    #[values(false, true)] parallel: bool,
+    #[values("records.csv", "records.tsv")] locator: &str,
+) {
+    let csv = b"id,empty,title\n001,,true\n1.50,,\"two\nlines\"\ntext,,2026-01-01\n";
+    let bytes = if locator.ends_with(".tsv") {
+        csv.iter()
+            .map(|byte| if *byte == b',' { b'\t' } else { *byte })
+            .collect::<Vec<_>>()
+    } else {
+        csv.to_vec()
+    };
+    let input = MemoryAccessor::new(&bytes, 1);
+    let observed = input.observations.clone();
+    let accessor = CsvAccessor::infer(input)
+        .with_schema_mode(CsvSchemaMode::AllStrings)
+        .with_header(CsvHeader::Present)
+        .with_inference_options(open_arrow_access_file_format::csv::CsvInferenceOptions {
+            max_records: 1,
+            max_bytes: 1024,
+        })
+        .with_partition_options(DecodePartitionOptions {
+            target_bytes: NonZeroUsize::MIN,
+        });
+    let request =
+        ReadRequest::new(locator).with_options(options(1, Some(vec!["title", "id", "empty"])));
+    let metadata = accessor.metadata(request.clone()).await.unwrap();
+    assert!(
+        metadata
+            .schema
+            .fields()
+            .iter()
+            .all(|field| field.data_type() == &DataType::Utf8 && field.is_nullable())
+    );
+    let mut reader = if parallel {
+        accessor
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::MIN,
+            ))
+            .open(request)
+            .await
+            .unwrap()
+    } else {
+        accessor.open(request).await.unwrap()
+    };
+    assert_eq!(reader.metadata(), &metadata);
+    let mut ids = Vec::new();
+    let mut titles = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        ids.extend(
+            column::<StringArray>(&batch, "id")
+                .iter()
+                .map(|value| value.map(str::to_owned)),
+        );
+        titles.extend(
+            column::<StringArray>(&batch, "title")
+                .iter()
+                .map(|value| value.map(str::to_owned)),
+        );
+        assert_eq!(
+            column::<StringArray>(&batch, "empty").null_count(),
+            batch.num_rows()
+        );
+    }
+    assert_eq!(
+        ids,
+        [Some("001".into()), Some("1.50".into()), Some("text".into())]
+    );
+    assert_eq!(
+        titles,
+        [
+            Some("true".into()),
+            Some("two\nlines".into()),
+            Some("2026-01-01".into())
+        ]
+    );
+    // One inspection and one scan, with no separate header-only reopen in either.
+    assert_eq!(observed.requests.lock().unwrap().len(), 2);
 }
