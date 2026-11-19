@@ -1,0 +1,31 @@
+{
+  "retrieved_on": "2026-11-18",
+  "official_description": "https://pmc-oa-opendata.s3.amazonaws.com/README.txt",
+  "manifest_url": "https://pmc-oa-opendata.s3.amazonaws.com/inventory-reports/pmc-oa-opendata/metadata/2026-11-18T01-00Z/manifest.json",
+  "shard_url": "https://pmc-oa-opendata.s3.amazonaws.com/inventory-reports/pmc-oa-opendata/metadata/data/13cbabe4-91e8-4d22-977f-adc2fc7eb6cb.csv.gz",
+  "transformations": [
+    "Keep the first three complete decompressed CSV lines byte-for-byte; recompress as a complete gzip stream with mtime=0.",
+    "Retain the official manifest schema, provenance and all 11 shard keys; update only the sampled shard size and MD5checksum to describe the committed excerpt.",
+    "Preserve each referenced metadata JSON response byte-for-byte; no article PDF/XML/TXT/media content is included."
+  ],
+  "scope": "This is a small excerpt from a real shard, not the original full 840670-record shard.",
+  "csv_records": 3,
+  "original_shard_compressed_bytes": 22525000,
+  "metadata_files": [
+    {
+      "file": "PMC5000000.1.json",
+      "url": "https://pmc-oa-opendata.s3.amazonaws.com/metadata/PMC5000000.1.json",
+      "sha256": "c45aada4e21cae911aaccd1c29066251fe379f4b5145c835afa02aa9b9b74e12"
+    },
+    {
+      "file": "PMC5000001.1.json",
+      "url": "https://pmc-oa-opendata.s3.amazonaws.com/metadata/PMC5000001.1.json",
+      "sha256": "e0476c10bec953a6b4bd3eb83a7969143aa81d6c03721720c0fcddf66506b15d"
+    },
+    {
+      "file": "PMC5000002.1.json",
+      "url": "https://pmc-oa-opendata.s3.amazonaws.com/metadata/PMC5000002.1.json",
+      "sha256": "6ac107406f4a4ad51074049a9f0df646a18ce8a074a21ab2bb863852fc71e3ba"
+    }
+  ]
+}

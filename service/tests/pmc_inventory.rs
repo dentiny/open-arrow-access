@@ -267,82 +267,104 @@ async fn forwards_shard_keys_without_path_validation() {
 }
 
 #[tokio::test]
-async fn inventory_shard_discovery_and_article_reads_are_independent() {
+async fn real_inventory_shard_reads_only_its_referenced_article_metadata() {
     use open_arrow_access_service::pmc::{PmcInventoryShardAccessor, PmcInventoryShardRequest};
-    let mut source = Objects::fixture().await;
-    source.insert("metadata/PMC1.1.json", br#"{"pmcid":"PMC1","version":1,"pmid":77,"pdf_url":"s3://pmc-oa-opendata/PMC1.1/paper.pdf"}"#);
+    const SNAPSHOT: &str =
+        "inventory-reports/pmc-oa-opendata/metadata/2026-11-18T01-00Z/manifest.json";
+    const SHARD: &str = "inventory-reports/pmc-oa-opendata/metadata/data/13cbabe4-91e8-4d22-977f-adc2fc7eb6cb.csv.gz";
+    let mut source = Objects::default();
     source.insert(
-        "metadata/PMC2.1.json",
-        br#"{"pmcid":"PMC2","version":1,"pmid":88}"#,
+        SNAPSHOT,
+        &fixture!("pmc/inventory/upstream", "manifest.json").await,
     );
+    source.insert(
+        SHARD,
+        &fixture!("pmc/inventory/upstream", "shard.csv.gz").await,
+    );
+    let ids = ["PMC5000000", "PMC5000001", "PMC5000002"];
+    for id in ids {
+        let filename = format!("{id}.1.json");
+        source.insert(
+            &format!("metadata/{filename}"),
+            &fixture!("pmc/inventory/upstream", &filename).await,
+        );
+    }
     let shards = PmcInventoryAccessor::new(source.clone())
-        .shards(ByteReadRequest::new(MANIFEST))
+        .shards(ByteReadRequest::new(SNAPSHOT))
+        .await
+        .unwrap();
+    assert_eq!(shards.len(), 11);
+    assert_eq!(shards[0].locator(), SHARD);
+    assert_eq!(source.opened.lock().unwrap().len(), 1);
+    for projection in [
+        None,
+        Some(vec!["metadata".into(), "pmcid".into(), "pdf_url".into()]),
+        Some(vec![]),
+    ] {
+        source.opened.lock().unwrap().clear();
+        let options = ByteReadOptions {
+            io_concurrency: NonZeroUsize::new(3).unwrap(),
+            io_chunk_size: NonZeroUsize::new(7),
+        };
+        let mut reader = PmcInventoryShardAccessor::new(source.clone())
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::MIN,
+            ))
+            .open(
+                PmcInventoryShardRequest::new(SNAPSHOT, SHARD)
+                    .with_options(ReadOptions {
+                        batch_size: NonZeroUsize::MIN,
+                        projection: projection.clone(),
+                    })
+                    .with_byte_options(options),
+            )
+            .await
+            .unwrap();
+        // Opening the plan reads just the manifest; CSV and JSON reads are lazy.
+        assert_eq!(source.opened.lock().unwrap().len(), 1);
+        let mut rows = 0;
+        while let Some(batch) = reader.next().await.unwrap() {
+            if projection
+                .as_ref()
+                .is_none_or(|columns| !columns.is_empty())
+            {
+                assert_eq!(batch["pmcid"].as_string::<i32>().value(0), ids[rows]);
+                let metadata = batch["metadata"].as_struct();
+                assert_eq!(
+                    metadata.column_by_name("pmid").unwrap().data_type(),
+                    &arrow_schema::DataType::UInt64
+                );
+                assert_eq!(
+                    metadata.column_by_name("pdf_url").unwrap(),
+                    &batch["pdf_url"]
+                );
+            }
+            rows += batch.num_rows();
+        }
+        assert_eq!(rows, 3);
+        let opened = source.opened.lock().unwrap();
+        assert_eq!(opened.len(), 5); // One manifest, one CSV, three article JSONs; no PDFs.
+        assert_eq!(opened[1].object.locator(), SHARD);
+        assert!(opened.iter().all(|request| request.options == options));
+    }
+}
+
+#[tokio::test]
+async fn selected_inventory_paths_decode_keys_and_keep_duplicate_records() {
+    use futures::TryStreamExt;
+    let paths = PmcInventoryAccessor::new(Objects::fixture().await)
+        .with_shard(FIRST)
+        .metadata_paths(request(None))
+        .await
+        .unwrap()
+        .try_collect::<Vec<_>>()
         .await
         .unwrap();
     assert_eq!(
-        shards.iter().map(|key| key.locator()).collect::<Vec<_>>(),
-        [FIRST, SECOND]
+        paths.iter().map(|path| path.locator()).collect::<Vec<_>>(),
+        ["metadata/PMC1.1.json", "metadata/PMC1.1.json"]
     );
-    assert_eq!(source.opened.lock().unwrap().len(), 1);
-    for (selected, other, expected_rows, expected_id) in
-        [(FIRST, SECOND, 2, "PMC1"), (SECOND, FIRST, 1, "PMC2")]
-    {
-        for projection in [
-            None,
-            Some(vec!["metadata".into(), "pmcid".into(), "pdf_url".into()]),
-            Some(vec![]),
-        ] {
-            source.opened.lock().unwrap().clear();
-            let options = ByteReadOptions {
-                io_concurrency: NonZeroUsize::new(3).unwrap(),
-                io_chunk_size: NonZeroUsize::new(7),
-            };
-            let mut reader = PmcInventoryShardAccessor::new(source.clone())
-                .layer(ParallelReadLayer::new(
-                    NonZeroUsize::new(2).unwrap(),
-                    NonZeroUsize::MIN,
-                ))
-                .open(
-                    PmcInventoryShardRequest::new(MANIFEST, selected)
-                        .with_options(ReadOptions {
-                            batch_size: NonZeroUsize::MIN,
-                            projection: projection.clone(),
-                        })
-                        .with_byte_options(options),
-                )
-                .await
-                .unwrap();
-            // Planning reads only the manifest; no CSV or metadata object is opened yet.
-            assert_eq!(source.opened.lock().unwrap().len(), 1);
-            let mut rows = 0;
-            while let Some(batch) = reader.next().await.unwrap() {
-                rows += batch.num_rows();
-                if projection.as_ref().is_none_or(|fields| !fields.is_empty()) {
-                    assert_eq!(batch["pmcid"].as_string::<i32>().value(0), expected_id);
-                    assert!(
-                        batch["metadata"]
-                            .as_struct()
-                            .column_by_name("pmid")
-                            .is_some()
-                    );
-                }
-            }
-            assert_eq!(rows, expected_rows);
-            let opened = source.opened.lock().unwrap();
-            assert!(
-                opened
-                    .iter()
-                    .any(|request| request.object.locator() == selected)
-            );
-            assert!(
-                opened
-                    .iter()
-                    .all(|request| request.object.locator() != other
-                        && !request.object.locator().contains("%2F"))
-            );
-            assert!(opened.iter().all(|request| request.options == options));
-        }
-    }
 }
 
 #[tokio::test]
