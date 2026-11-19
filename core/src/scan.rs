@@ -24,8 +24,9 @@ pub enum EmissionPolicy {
 pub struct ParallelReadOptions {
     /// Maximum resident partitions, including completed queues awaiting consumption.
     pub partitions: NonZeroUsize,
-    /// Capacity of bounded partition queues. Streaming-file scans use unbounded
-    /// in-memory queues under either emission policy; this is not a byte cap.
+    /// Capacity of native partition queues. Streaming-file scans instead use
+    /// an 8 MiB estimated-byte budget per resident partition. A batch larger
+    /// than that budget is admitted alone; decoder allocations are separate.
     pub prefetch: NonZeroUsize,
 }
 

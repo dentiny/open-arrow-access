@@ -27,7 +27,9 @@ pub struct ParallelReadLayer {
     /// Maximum resident partitions, including completed partitions with queued batches.
     partitions: NonZeroUsize,
     /// Queue capacity for independent native partitions. Streaming files use
-    /// unbounded in-memory queues under either emission policy.
+    /// an 8 MiB queued-byte budget per resident partition under either emission
+    /// policy; oversized batches occupy the whole budget. One further decoded
+    /// batch per partition can wait for admission.
     prefetch: NonZeroUsize,
 }
 

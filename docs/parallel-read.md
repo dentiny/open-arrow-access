@@ -63,10 +63,10 @@ reader, framing state and buffers separately from partition workers.
 
 For native independent partitions, P bounds resident partitions and each worker
 uses a Q-batch queue, reserving capacity before decoding. Streaming-file scans
-instead give every resident file one unbounded in-memory output queue under both
-ordered and unordered emission.
-Workers continue downloading and decoding without waiting for earlier files to
-finish. Ordered emission drains file queues in their original order; unordered
+instead give every resident file an 8 MiB estimated-byte output budget under
+both ordered and unordered emission. Budgets are independent: a later file cannot
+use capacity needed by the first ordered file. Workers download and decode until
+their own queue fills, then resume as their output is consumed. Ordered emission drains file queues in their original order; unordered
 emission polls all resident queues for ready batches. The producer/read-ahead path
 is the same, and uses no temporary files or IPC serialization.
 
@@ -76,10 +76,11 @@ A finished file does not free its slot until all of its output has drained, so a
 blocked first file cannot cause the entire selection to accumulate in memory.
 Cancellation and errors drop buffered batches and cancel owned workers.
 
-There is currently no memory upper bound for these resident files: read-ahead
-may retain complete decoded files, and memory consumption grows with their size.
-Q does not cap streaming-file queues. Input/decoder buffers and
-caller-held batches add further allocations. Ordinary sequential `open` retains
+Byte estimates use Arrow array memory size, including array overhead. Shared
+buffers may be counted more than once. One oversized batch occupies its whole
+partition budget, and each producer may hold one decoded batch waiting for
+admission. Q does not cap streaming-file queues. Input/decoder buffers and
+caller-held batches add further allocations, so this is not a process memory cap. Ordinary sequential `open` retains
 its existing lazy behavior without this read-ahead.
 
 Storage's per-reader I/O limit remains separate: P readers may each use their
@@ -156,7 +157,7 @@ Polling rotates among ready receivers to avoid starving a partition. Completed
 partitions retain their slots until their queues drain. Both policies share the
 same read-ahead selection, schema checks, fail-fast errors and drop cancellation.
 Independent native partitions reserve queue capacity before decoding; streaming
-files use unbounded memory queues under either emission policy.
+files use independent 8 MiB estimated-byte queues under either emission policy.
 
 ## Opting into unordered emission
 

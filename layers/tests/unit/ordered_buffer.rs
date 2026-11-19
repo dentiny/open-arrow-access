@@ -22,7 +22,7 @@ async fn queued_batches_are_released_on_delivery_or_cancellation() {
             } = partition_channel(1, read_ahead);
             match sender {
                 PartitionSender::Bounded(sender) => sender.send(expected).await.unwrap(),
-                PartitionSender::ReadAhead(sender) => sender.send(expected).unwrap(),
+                PartitionSender::ReadAhead(sender) => assert!(sender.send(expected).await),
             }
             assert!(column.upgrade().is_some());
             if consume {
@@ -65,4 +65,41 @@ async fn file_read_ahead_finishes_without_polling_output_and_keeps_batch_order()
         assert_eq!(batches.next().await.unwrap(), batch(value));
     }
     assert!(batches.next().await.is_none());
+}
+
+#[tokio::test]
+async fn streaming_byte_budget_waits_for_consumption_and_releases_on_drop() {
+    use arrow_array::BinaryArray;
+    for consume in [false, true] {
+        let large = RecordBatch::try_from_iter([(
+            "body",
+            Arc::new(BinaryArray::from(vec![
+                vec![0; READ_AHEAD_BYTES + 1].as_slice(),
+            ])) as _,
+        )])
+        .unwrap();
+        let PartitionChannel {
+            sender,
+            mut batches,
+        } = partition_channel(1, true);
+        let PartitionSender::ReadAhead(sender) = sender else {
+            unreachable!()
+        };
+        assert!(sender.send(large.clone()).await);
+        let pending = tokio::spawn(async move { sender.send(large).await });
+        tokio::task::yield_now().await;
+        assert!(!pending.is_finished(), "a second oversized batch must wait");
+        if consume {
+            let delivered = batches.next().await.unwrap();
+            assert!(pending.await.unwrap());
+            assert!(batches.next().await.is_some());
+            drop(delivered);
+        } else {
+            drop(batches);
+            assert!(
+                !pending.await.unwrap(),
+                "cancellation must release the waiting producer"
+            );
+        }
+    }
 }
