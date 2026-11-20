@@ -133,15 +133,44 @@ shards remain independent scan partitions and share the immutable index.
 s3://arxiv/                              # Or a mirror rooted here
 ├── pdf/
 │   ├── arXiv_pdf_manifest.xml           # Global XML inventory, not PDF bytes
-│   ├── arXiv_pdf_YYMM_NNN.tar           # One upstream shard
-│   │   ├── YYMM/<article-id>.pdf        # Illustrative member name
+│   ├── arXiv_pdf_2410_001.tar           # October 2024, sequence 1
+│   │   ├── 2410/<article-id>.pdf        # Illustrative member name
 │   │   └── ...                         # Many original PDFs
-│   └── ...                             # Other months/sequences
+│   ├── arXiv_pdf_2410_002.tar           # Same month, another shard
+│   └── arXiv_pdf_2411_001.tar           # November, same directory
 └── src/
     ├── arXiv_src_manifest.xml           # Independent source inventory
     └── arXiv_src_YYMM_NNN.tar
         └── <article source payload>     # May itself be compressed/packaged
 ```
+
+**Month selection filters manifest records; it does not select a month
+directory.** TARs from different months sit alongside each other under `pdf/`
+(or `src/`). For example, `arXiv_pdf_2410_001.tar` encodes October 2024
+(`2410`) and sequence 1 (`001`), but discovery uses the manifest's `yymm`
+field rather than guessing filenames or listing a `pdf/2410/` directory.
+The `2410/` member path shown inside a TAR is separate from this storage layout.
+
+For illustration, a PDF manifest could contain the following records
+(simplified from XML; these are not the complete upstream inventory):
+
+| filename/key | yymm | seq_num |
+| --- | --- | --- |
+| `pdf/arXiv_pdf_2410_001.tar` | `2410` | 1 |
+| `pdf/arXiv_pdf_2410_002.tar` | `2410` | 2 |
+| `pdf/arXiv_pdf_2411_001.tar` | `2411` | 1 |
+
+`manifest(ArxivKind::Pdf, Some(2410), byte_options)` reads the PDF manifest
+and retains records with `yymm == 2410`: the first two TARs in this
+illustration. `Some(2411)` selects the third TAR. The native Arrow equivalent
+is `ArxivReadRequest::new(ArxivKind::Pdf).with_month(2410)`, whose scan plan
+contains one partition per selected TAR. The storage root is unchanged.
+
+A scheduler can assign these disjoint month selections to separate jobs and
+destinations. This groups existing TARs into monthly tasks; it does not repack
+files or split a TAR. Months can have different total byte sizes and TAR counts,
+so monthly tasks are not necessarily balanced. Explicit subsets within a month
+have the separate API limitations described under sharding below.
 
 The outer bulk container is an uncompressed TAR. Source members can contain
 compressed TeX/LaTeX packages; reading the outer TAR does not recursively unpack
