@@ -22,6 +22,9 @@ pub struct ArxivReadRequest {
     /// Distribution selection; defaults to automatic discovery of both manifests.
     pub kind: ArxivKind,
     pub month: Option<u16>,
+    /// One uncompressed TAR object, relative to the service storage root.
+    /// Bypasses manifest discovery; cannot be combined with a month selector.
+    pub shard: Option<String>,
     pub options: ReadOptions,
     pub byte_options: ByteReadOptions,
     /// Soft serialized payload target per Arrow batch. A complete entry can
@@ -40,6 +43,7 @@ impl ArxivReadRequest {
         Self {
             kind,
             month: None,
+            shard: None,
             options: ReadOptions::default(),
             byte_options: ByteReadOptions::default(),
             target_bytes: NonZeroUsize::new(DEFAULT_BATCH_TARGET_BYTES).unwrap(),
@@ -47,6 +51,10 @@ impl ArxivReadRequest {
     }
     pub fn with_month(mut self, month: u16) -> Self {
         self.month = Some(month);
+        self
+    }
+    pub fn with_shard(mut self, shard: impl Into<String>) -> Self {
+        self.shard = Some(shard.into());
         self
     }
     pub fn with_options(mut self, options: ReadOptions) -> Self {
@@ -135,22 +143,47 @@ where
 {
     async fn plan_scan(&self, request: ArxivReadRequest) -> Result<ScanPlan> {
         let schema = request.options.resolve_projection(&record_schema())?.schema;
-        let archives = self
-            .service
-            .manifest(request.kind, request.month, request.byte_options)
-            .await?;
+        let archives = if let Some(shard) = &request.shard {
+            if request.month.is_some()
+                || !shard.ends_with(".tar")
+                || shard.starts_with('/')
+                || shard.contains(['\\', ':', '?', '#'])
+                || shard.split('/').any(|part| matches!(part, "" | "." | ".."))
+            {
+                return Err(super::error::invalid(
+                    "shard must be a relative TAR key without a month selector",
+                ));
+            }
+            vec![(shard.clone(), None)]
+        } else {
+            self.service
+                .manifest(request.kind, request.month, request.byte_options)
+                .await?
+                .into_iter()
+                .map(|archive| (archive.filename.clone(), Some(archive)))
+                .collect()
+        };
         let metadata = RecordMetadata {
             schema: schema.clone(),
             source: None,
         };
         let service = self.service.clone();
-        let partitions = archives.into_iter().map(move |archive| {
+        let partitions = archives.into_iter().map(move |(source, archive)| {
             let service = service.clone();
             let request = request.clone();
             let schema = schema.clone();
             scan_partition(async move {
-                let tar = service.stream(&archive, request.byte_options).await?;
-                let source = archive.filename;
+                let tar = if let Some(archive) = archive {
+                    service.stream(&archive, request.byte_options).await?
+                } else {
+                    let input = service
+                        .storage
+                        .open(
+                            ByteReadRequest::new(source.clone()).with_options(request.byte_options),
+                        )
+                        .await?;
+                    super::TarStream::new(input, service.tar_limits.clone())
+                };
                 let output = RecordMetadata {
                     schema,
                     source: Some(ObjectRef::new(source.clone())),
