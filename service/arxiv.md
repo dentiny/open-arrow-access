@@ -7,9 +7,6 @@ manifests describing each shard. This provider selects shards and opens archive
 entries over caller-configured storage. Bibliographic harvesting is a separate
 [OAI-PMH metadata entry point](arxiv-metadata.md).
 
-See [native article formats, source assets and Lance storage](arxiv-articles.md)
-for explicit PDF/source/HTML reads and opt-in image/multimedia package expansion.
-
 Enable facade feature `service-arxiv`. See [example setup](README.md#example-setup) for dependencies and the async runtime.
 
 ## Request and response
@@ -89,9 +86,7 @@ snapshot to each PDF before emitting Arrow batches. Pass
 `ArxivReadRequest::new(ArxivKind::Pdf)`; source/automatic requests are rejected.
 The output retains the four bulk columns above and adds a non-null `metadata`
 struct containing **every column** of the snapshot with its original Arrow type.
-Write these batches to one Lance dataset with ordinary binary `data`, or
-explicitly configure the sink for Blob V2 as described in the
-[Lance storage design](arxiv-articles.md#lance-blob-v2-is-a-writer-decision).
+Write these batches to one Lance dataset, selecting `data` as the PDF blob column.
 No second metadata table or metadata fetch per PDF is required.
 
 ```rust

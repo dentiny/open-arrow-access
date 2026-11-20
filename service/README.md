@@ -21,7 +21,6 @@ directly, remove the `service-` prefix. Common Crawl shares `service-warc`.
 | PMC | `service-pmc` | One article-version metadata JSON as one Arrow row | [Article metadata](pmc.md) |
 | PMC inventory | `service-pmc` | Manifest-selected inventory CSV shards as Arrow rows | [Inventory](pmc-inventory.md) |
 | arXiv bulk | `service-arxiv` | PDF/source TAR manifests and archive member bytes | [Bulk archives](arxiv.md) |
-| arXiv articles/assets | `service-arxiv` | Explicit PDF/source/HTML routes and source-member expansion | [Formats and Lance design](arxiv-articles.md) |
 | arXiv metadata | `service-arxiv` | Raw OAI-PMH article metadata XML pages | [Metadata](arxiv-metadata.md) |
 | bioRxiv / medRxiv | `service-biorxiv` | Dated preprint metadata pages and JATS XML links | [Preprints](biorxiv.md) |
 | MECA | `service-meca` | Scholarly ZIP package manifests and selected members | [MECA](meca.md) |
