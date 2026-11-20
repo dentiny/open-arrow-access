@@ -155,23 +155,14 @@ impl AsRef<[u8]> for ArticleBytes {
     }
 }
 
+/// Expand one article row into attachment-free LaTeX content batches.
+/// Share the input Arrow buffer, decode gzip when present, and sniff one TAR
+/// header before choosing a single-file or archive reader. TAR batches are
+/// emitted incrementally; consume the stream through EOF to catch trailer errors.
 async fn expand(batch: RecordBatch, options: ReadOptions) -> Result<RecordStream> {
     let name = batch["entry_name"].as_binary::<i64>().value(0);
     let article_id = validation::content_article_id(name, ArxivContentFormat::Latex)?;
-    let shard = batch["shard_uri"].as_string::<i64>().value(0);
-    let outer_index = batch["entry_index"]
-        .as_primitive::<arrow_array::types::UInt64Type>()
-        .value(0);
-    let source = Some(ObjectRef::new(format!("{shard}#entry={outer_index}")));
-    let values = batch["data"].as_binary::<i64>();
-    // Retain the Arrow array instead of copying the compressed article package.
-    let data = Bytes::from_owner(ArticleBytes(values.clone()));
-    let gzip = data.starts_with(&[0x1f, 0x8b]);
-    let input = Box::pin(into_async_read(
-        Box::new(bytes_reader(data, source.clone())),
-        "read_arxiv_latex",
-    ));
-    let mut input: DecodedInput = if gzip { Gzip.decoder(input) } else { input };
+    let (mut input, source) = latex_input(&batch);
     // Inspect only one TAR header, then replay it into the streaming parser.
     let mut prefix = Vec::with_capacity(512);
     (&mut input)
@@ -180,14 +171,7 @@ async fn expand(batch: RecordBatch, options: ReadOptions) -> Result<RecordStream
         .await
         .map_err(|e| error::decode("invalid source package").with_source(e))?;
     if !validation::is_tar(&prefix) {
-        input
-            .read_to_end(&mut prefix)
-            .await
-            .map_err(|e| error::decode("invalid source package").with_source(e))?;
-        validation::source_packaging(&prefix)?;
-        let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
-        append_latex(&mut builder, &batch, &article_id, 0, b"main.tex", &prefix)?;
-        return Ok(stream::iter([builder.finish()]).boxed());
+        return expand_single_latex(input, prefix, &batch, &article_id).await;
     }
     let input = decoded_reader(
         Cursor::new(prefix).chain(input),
@@ -206,37 +190,56 @@ async fn expand(batch: RecordBatch, options: ReadOptions) -> Result<RecordStream
             ..TarLimits::default()
         },
     );
-    let target = ArxivSourceOptions::default().target_bytes.get();
-    Ok(stream::try_unfold((tar, false), move |(mut tar, emitted)| {
+    Ok(expand_tar_latex(tar, batch, article_id, options))
+}
+
+/// Retain the article's Arrow array while decoding, without copying its payload.
+fn latex_input(batch: &RecordBatch) -> (DecodedInput, Option<ObjectRef>) {
+    let shard = batch["shard_uri"].as_string::<i64>().value(0);
+    let outer_index = batch["entry_index"]
+        .as_primitive::<arrow_array::types::UInt64Type>()
+        .value(0);
+    let source = Some(ObjectRef::new(format!("{shard}#entry={outer_index}")));
+    let values = batch["data"].as_binary::<i64>();
+    let data = Bytes::from_owner(ArticleBytes(values.clone()));
+    let gzip = data.starts_with(&[0x1f, 0x8b]);
+    let input = Box::pin(into_async_read(
+        Box::new(bytes_reader(data, source.clone())),
+        "read_arxiv_latex",
+    ));
+    let input: DecodedInput = if gzip { Gzip.decoder(input) } else { input };
+    (input, source)
+}
+
+async fn expand_single_latex(
+    mut input: DecodedInput,
+    mut data: Vec<u8>,
+    batch: &RecordBatch,
+    article_id: &str,
+) -> Result<RecordStream> {
+    input
+        .read_to_end(&mut data)
+        .await
+        .map_err(|e| error::decode("invalid source package").with_source(e))?;
+    validation::source_packaging(&data)?;
+    let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
+    append_latex(&mut builder, batch, article_id, 0, b"main.tex", &data)?;
+    Ok(stream::iter([builder.finish()]).boxed())
+}
+
+fn expand_tar_latex(
+    tar: TarStream,
+    batch: RecordBatch,
+    article_id: String,
+    options: ReadOptions,
+) -> RecordStream {
+    stream::try_unfold((tar, false), move |(mut tar, emitted)| {
         let batch = batch.clone();
         let article_id = article_id.clone();
         let options = options.clone();
         async move {
-            let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
-            let mut bytes = 0usize;
-            while builder.len() < options.batch_size.get() && (builder.is_empty() || bytes < target)
-            {
-                let Some(member) = tar.next_entry().await? else {
-                    break;
-                };
-                // Dropping an excluded member drains it on the next header read;
-                // no attachment-sized buffer or intermediate Arrow batch is built.
-                if !member.entry.is_file || !validation::is_tex(&member.entry.name)? {
-                    drop(member.reader);
-                    continue;
-                }
-                let data = read_all(member.reader, "read_arxiv_tex").await?;
-                bytes = bytes.saturating_add(data.len());
-                append_latex(
-                    &mut builder,
-                    &batch,
-                    &article_id,
-                    member.entry.index as u64,
-                    &member.entry.name,
-                    &data,
-                )?;
-            }
-            if builder.is_empty() {
+            let batch = read_latex_batch(&mut tar, &batch, &article_id, &options).await?;
+            if batch.num_rows() == 0 {
                 if !emitted {
                     return Err(error::decode(
                         "source package contains no non-ancillary LaTeX files",
@@ -244,11 +247,45 @@ async fn expand(batch: RecordBatch, options: ReadOptions) -> Result<RecordStream
                 }
                 Ok(None)
             } else {
-                Ok(Some((builder.finish()?, (tar, true))))
+                Ok(Some((batch, (tar, true))))
             }
         }
     })
-    .boxed())
+    .boxed()
+}
+
+/// Fill one batch up to the row limit or soft selected-TeX byte target.
+async fn read_latex_batch(
+    tar: &mut TarStream,
+    outer: &RecordBatch,
+    article_id: &str,
+    options: &ReadOptions,
+) -> Result<RecordBatch> {
+    let target = ArxivSourceOptions::default().target_bytes.get();
+    let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
+    let mut bytes = 0usize;
+    while builder.len() < options.batch_size.get() && (builder.is_empty() || bytes < target) {
+        let Some(member) = tar.next_entry().await? else {
+            break;
+        };
+        // Dropping an excluded member drains it on the next header read;
+        // no attachment-sized buffer or intermediate Arrow batch is built.
+        if !member.entry.is_file || !validation::is_tex(&member.entry.name)? {
+            drop(member.reader);
+            continue;
+        }
+        let data = read_all(member.reader, "read_arxiv_tex").await?;
+        bytes = bytes.saturating_add(data.len());
+        append_latex(
+            &mut builder,
+            outer,
+            article_id,
+            member.entry.index as u64,
+            &member.entry.name,
+            &data,
+        )?;
+    }
+    builder.finish()
 }
 
 fn append_latex(
