@@ -161,23 +161,7 @@ fn content_partition(
         };
         let batches = into_stream(reader)
             .and_then(move |batch| {
-                let options = options.clone();
-                let metadata = metadata.clone();
-                async move {
-                    let article = validation::content_article_id(
-                        batch["entry_name"].as_binary::<i64>().value(0),
-                        format,
-                    )?;
-                    let index = metadata.resolve(&article).await?;
-                    let batches = match format {
-                        ArxivContentFormat::Latex => expand(&batch, &options).await,
-                        _ => Ok(vec![document_batch(&batch, format)?]),
-                    }?;
-                    batches
-                        .into_iter()
-                        .map(|batch| index.attach_content(batch))
-                        .collect::<Result<Vec<_>>>()
-                }
+                content_batches(batch, format, options.clone(), metadata.clone())
             })
             .map_ok(|batches| stream::iter(batches.into_iter().map(Ok)))
             .try_flatten();
@@ -188,6 +172,25 @@ fn content_partition(
             ordering,
         ))
     })
+}
+
+async fn content_batches(
+    batch: RecordBatch,
+    format: ArxivContentFormat,
+    options: ReadOptions,
+    metadata: ContentMetadata,
+) -> Result<Vec<RecordBatch>> {
+    let article =
+        validation::content_article_id(batch["entry_name"].as_binary::<i64>().value(0), format)?;
+    let index = metadata.resolve(&article).await?;
+    let batches = match format {
+        ArxivContentFormat::Latex => expand(&batch, &options).await?,
+        _ => vec![document_batch(&batch, format)?],
+    };
+    batches
+        .into_iter()
+        .map(|batch| index.attach_content(batch))
+        .collect()
 }
 
 async fn expand(batch: &RecordBatch, options: &ReadOptions) -> Result<Vec<RecordBatch>> {

@@ -17,7 +17,7 @@ use super::{ArxivMetadataIndex, error, id, validation};
 use crate::{
     arxiv_metadata::{ArxivMetadata, single_record_format},
     common::Connection,
-    oai::{OaiProvider, OaiService},
+    oai::{OaiPage, OaiProvider, OaiService},
 };
 
 const REQUEST_INTERVAL: Duration = Duration::from_secs(3);
@@ -25,6 +25,16 @@ const CACHE_SIZE: usize = 1024;
 
 // Preserve the gap after the final attempt, including retries and cancellation.
 struct RequestPermit<'a>(MutexGuard<'a, Option<Instant>>);
+impl<'a> RequestPermit<'a> {
+    async fn acquire(gate: &'a Mutex<Option<Instant>>) -> Self {
+        let next = gate.lock().await;
+        if let Some(deadline) = *next {
+            sleep_until(deadline).await;
+        }
+        Self(next)
+    }
+}
+
 impl Drop for RequestPermit<'_> {
     fn drop(&mut self) {
         *self.0 = Some(Instant::now() + REQUEST_INTERVAL);
@@ -42,6 +52,35 @@ struct State {
     connection: Option<Connection>,
     cache: HashMap<String, Arc<ArxivMetadataIndex>>,
     order: VecDeque<String>,
+}
+
+impl State {
+    fn connection(&mut self) -> Result<&Connection> {
+        if self.connection.is_none() {
+            self.connection = Some(default_connection()?);
+        }
+        Ok(self.connection.as_ref().unwrap())
+    }
+
+    fn insert(&mut self, key: String, index: Arc<ArxivMetadataIndex>) {
+        if self.cache.len() == CACHE_SIZE {
+            let oldest = self.order.pop_front().unwrap();
+            self.cache.remove(&oldest);
+        }
+        self.order.push_back(key.clone());
+        self.cache.insert(key, index);
+    }
+}
+
+fn default_connection() -> Result<Connection> {
+    Connection::new(ArxivMetadata::ORIGIN)?.with_http_config(StorageConfig {
+        retry: Some(RetryConfig {
+            min_delay: REQUEST_INTERVAL,
+            jitter: false,
+            ..Default::default()
+        }),
+        timeout: Some(TimeoutConfig::default()),
+    })
 }
 
 impl std::fmt::Debug for MetadataResolver {
@@ -69,19 +108,13 @@ impl MetadataResolver {
         if let Some(index) = state.cache.get(&key) {
             return Ok(index.clone());
         }
-        if state.connection.is_none() {
-            state.connection = Some(Connection::new(ArxivMetadata::ORIGIN)?.with_http_config(
-                StorageConfig {
-                    retry: Some(RetryConfig {
-                        min_delay: REQUEST_INTERVAL,
-                        jitter: false,
-                        ..Default::default()
-                    }),
-                    timeout: Some(TimeoutConfig::default()),
-                },
-            )?);
-        }
-        let connection = state.connection.as_ref().unwrap();
+        let page = self.fetch(state.connection()?, &key).await?;
+        let index = Arc::new(decode_metadata(page, &key).await?);
+        state.insert(key, index.clone());
+        Ok(index)
+    }
+
+    async fn fetch(&self, connection: &Connection, article: &str) -> Result<OaiPage> {
         let service = OaiService::new(
             connection.clone(),
             ArxivMetadata::PATH,
@@ -95,33 +128,23 @@ impl MetadataResolver {
         } else {
             &self.gate
         };
-        let page = {
-            let next = gate.lock().await;
-            if let Some(deadline) = *next {
-                sleep_until(deadline).await;
-            }
-            let _permit = RequestPermit(next);
-            service.get_record(&id::oai_identifier(&key)?).await?
-        };
-        validation::validate_metadata_record_count(page.record_count)?;
-        let reader = page
-            .records(single_record_format())
-            .open(ReadRequest::new("metadata"))
-            .await?;
-        let batches: Vec<_> = into_stream(reader).try_collect().await?;
-        let batch = arrow_select::concat::concat_batches(
-            &crate::arxiv_metadata::schema().arrow_schema(),
-            &batches,
-        )
-        .map_err(error::arrow_error)?;
-        validation::validate_fetched_metadata(&batch, &key)?;
-        let index = Arc::new(ArxivMetadataIndex::from_oai_records(batch)?);
-        if state.cache.len() == CACHE_SIZE {
-            let oldest = state.order.pop_front().unwrap();
-            state.cache.remove(&oldest);
-        }
-        state.order.push_back(key.clone());
-        state.cache.insert(key, index.clone());
-        Ok(index)
+        let _permit = RequestPermit::acquire(gate).await;
+        service.get_record(&id::oai_identifier(article)?).await
     }
+}
+
+async fn decode_metadata(page: OaiPage, article: &str) -> Result<ArxivMetadataIndex> {
+    validation::validate_metadata_record_count(page.record_count)?;
+    let reader = page
+        .records(single_record_format())
+        .open(ReadRequest::new("metadata"))
+        .await?;
+    let batches: Vec<_> = into_stream(reader).try_collect().await?;
+    let batch = arrow_select::concat::concat_batches(
+        &crate::arxiv_metadata::schema().arrow_schema(),
+        &batches,
+    )
+    .map_err(error::arrow_error)?;
+    validation::validate_fetched_metadata(&batch, article)?;
+    ArxivMetadataIndex::from_oai_records(batch)
 }

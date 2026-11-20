@@ -551,67 +551,42 @@ should select `content(format)` rather than emitting those raw schemas.
 ## Automatic content metadata
 
 ```rust
-use open_arrow_access::{Accessor, Result};
-use open_arrow_access::service::arxiv::{
-    ArxivContentFormat, ArxivKind, ArxivReadRequest, ArxivService,
-};
-use open_arrow_access::storage::OpenDalAccessor;
-
-async fn read_content(storage: OpenDalAccessor) -> Result<()> {
-    let records = ArxivService::new(storage)
-        .records()
-        .content(ArxivContentFormat::Pdf);
-    let mut reader = records.open(
-        ArxivReadRequest::new(ArxivKind::Pdf)
-            .with_shard("pdf/arXiv_pdf_2410_001.tar"),
-    ).await?;
-    while let Some(batch) = reader.next().await? {
-        assert_eq!(batch["metadata"].null_count(), 0);
-    }
-    Ok(())
+let records = ArxivService::new(storage).records().content(ArxivContentFormat::Pdf);
+let mut reader = records.open(
+    ArxivReadRequest::new(ArxivKind::Pdf).with_shard("pdf/arXiv_pdf_2410_001.tar"),
+).await?;
+while let Some(batch) = reader.next().await? {
+    assert_eq!(batch["metadata"].null_count(), 0);
 }
 ```
 
-The same default applies to `Latex` and `Xml` with `ArxivKind::Source`.
-On first use of an article, the accessor requests `GetRecord` with
-`metadataPrefix=arXivRaw` at `https://oaipmh.arxiv.org/oai`. It decodes the complete
-record with the fixed typed mapping and matches both the OAI header and article
-ID. Legacy bulk IDs regain the slash required by OAI. Every TeX row from an
-article receives the same metadata. Deleted records keep their header and null
-inner metadata. Missing, malformed, mismatched and failed responses fail the scan;
-there is no null-metadata fallback, even when metadata is projected away.
+PDF, LaTeX and XML content automatically request matching `arXivRaw` metadata
+via OAI `GetRecord`. No `with_metadata` call is required. Lookups are lazy;
+legacy IDs regain the OAI slash, and every TeX row receives the complete record.
+Deleted records retain their header with null inner metadata. Missing, malformed,
+mismatched and failed responses fail the scan, even if metadata is projected away.
 
-Lookups are lazy: constructing/planning an explicit shard does not fetch metadata.
-A service and its clones share a bounded FIFO cache of 1,024 article records.
-Concurrent requests for a cached/in-flight article reuse one successful result;
-metadata is reused across TeX files and repeated scans. Public arXiv content
-lookups share a process-wide serial request gate with at least three seconds
-between request starts. Default retries also wait at least three seconds and
-honor supported Retry-After delays. Caller-configured transports retain their own
-HTTP policies. Coordinate other API clients and processes separately, as the
-[arXiv limit](https://info.arxiv.org/help/api/tou.html) applies to all your machines.
-A custom OAI mirror/transport can be supplied with
-`ArxivService::with_metadata_connection(connection)`; custom origins have a
-separate serial gate per service. This does not change the bulk-storage root.
+Services and their clones share a 1,024-record FIFO cache, including concurrent
+lookups for the same article. Public content lookups share a process-wide serial
+gate with a three-second gap; default retries honor that gap and Retry-After.
+Other clients/processes need separate coordination under the
+[arXiv rate limit](https://info.arxiv.org/help/api/tou.html).
+`ArxivService::with_metadata_connection(connection)` configures a mirror/custom
+transport with its own HTTP policies and a separate serial gate per service.
 
-Online metadata reflects the latest OAI record, including version history; it is
-not an immutable snapshot of the content's submission version. Large bulk jobs
-can avoid per-article HTTP requests and pin metadata by supplying an existing
-reconciled typed snapshot:
+Online metadata is the latest OAI record, including version history. For bulk or
+offline jobs, a reconciled typed snapshot pins metadata and avoids per-article HTTP:
 
 ```rust
 let index = std::sync::Arc::new(ArxivMetadataIndex::from_oai_records(snapshot)?);
 let records = service.records().content(format).with_metadata(index)?;
 ```
 
-This is an optimization, not a prerequisite for populated metadata. Use
-`ArxivMetadataService::inferred_record_format()` when harvesting snapshot batches;
-follow continuation tokens, reconcile repeated updates and concatenate the
-selected batches. OAI date selectors describe updates, not submission months.
-Duplicate/null IDs and incompatible snapshot schemas are rejected; missing
-snapshot matches fail rather than silently falling back to the network. The
-legacy raw-PDF `records().with_metadata(index)` API continues to support arbitrary
-caller snapshot schemas; content snapshots require the fixed typed arXivRaw schema.
+Harvest snapshot batches with `ArxivMetadataService::inferred_record_format()`,
+follow continuation tokens, reconcile updates and concatenate selected batches.
+OAI dates select updates, not submission months. Duplicate/null IDs and incompatible
+schemas are rejected; missing snapshot matches fail without network fallback.
+The legacy raw-PDF join still accepts arbitrary caller snapshot schemas.
 
 ## LaTeX-only bulk output
 
