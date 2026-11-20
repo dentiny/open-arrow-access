@@ -293,6 +293,9 @@ async fn read_latex_batch(
     builder.finish()
 }
 
+/// Validate the LaTeX bytes and append one content row, preserving the payload
+/// unchanged. Combine shard/article provenance from the single-row `outer` batch
+/// with the selected source file's index and name.
 fn append_latex(
     builder: &mut RecordBatchBuilder,
     outer: &RecordBatch,
