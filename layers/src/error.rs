@@ -131,6 +131,35 @@ pub(crate) fn invalid_evolution(message: &str) -> Error {
         message,
     )
 }
+
+pub(crate) fn nested_path_too_short() -> Error {
+    invalid_evolution("nested field path requires a column and at least one child")
+}
+
+pub(crate) fn nested_extension_field(name: &str) -> Error {
+    invalid_evolution(&format!(
+        "cannot remove fields inside extension type {name:?}"
+    ))
+}
+
+pub(crate) fn nested_non_struct(name: &str) -> Error {
+    invalid_evolution(&format!(
+        "nested field path only traverses structs, got {name:?}"
+    ))
+}
+
+pub(crate) fn nested_field_not_unique(name: &str) -> Error {
+    invalid_evolution(&format!(
+        "nested field {name:?} must resolve to exactly one field"
+    ))
+}
+
+pub(crate) fn nullable_nested_extraction(name: &str) -> Error {
+    invalid_evolution(&format!(
+        "cannot extract union or run-end encoded field {name:?} through nullable structs"
+    ))
+}
+
 pub(crate) fn evolution_source(name: &str) -> Error {
     let error = ArrowError::SchemaError(format!("unknown field {name:?}"));
     Error::new(

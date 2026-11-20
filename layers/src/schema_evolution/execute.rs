@@ -135,6 +135,22 @@ impl SchemaEvolutionPlan {
                         })?;
                     values.insert(*index, array);
                 }
+                EvolutionStep::ExtractNestedField {
+                    index,
+                    source,
+                    path,
+                } => {
+                    let column = values.get(source).unwrap_or_else(|| batch.column(*source));
+                    let array =
+                        extract_array(column, path).map_err(crate::error::evolution_batch)?;
+                    values.insert(*index, array);
+                }
+                EvolutionStep::RemoveNestedField { index, path, field } => {
+                    let column = values.get(index).unwrap_or_else(|| batch.column(*index));
+                    let array = prune_array(column, path, field.data_type())
+                        .map_err(crate::error::evolution_batch)?;
+                    values.insert(*index, array);
+                }
                 EvolutionStep::Remove(index) => {
                     values.remove(index);
                 }
@@ -146,6 +162,47 @@ impl SchemaEvolutionPlan {
         assemble_batch(&self.target_schema, &self.output_indices, &batch, &values)
             .map_err(crate::error::evolution_batch)
     }
+}
+
+/// Reuse value buffers and allocate only the combined validity bitmap when needed.
+fn extract_array(input: &ArrayRef, path: &[usize]) -> std::result::Result<ArrayRef, ArrowError> {
+    let mut array = input.clone();
+    let mut nulls = None;
+    for &index in path {
+        nulls = arrow_buffer::NullBuffer::union(nulls.as_ref(), array.nulls());
+        array = array.as_struct().column(index).clone();
+    }
+    if nulls.is_none() || array.data_type() == &DataType::Null {
+        return Ok(array);
+    }
+    let nulls = arrow_buffer::NullBuffer::union(nulls.as_ref(), array.nulls());
+    Ok(arrow_array::make_array(
+        array.to_data().into_builder().nulls(nulls).build()?,
+    ))
+}
+
+/// Parent validity and row count are unchanged, including sliced/empty structs.
+fn prune_array(
+    input: &ArrayRef,
+    path: &[usize],
+    target: &DataType,
+) -> std::result::Result<ArrayRef, ArrowError> {
+    let parent = input.as_struct();
+    let DataType::Struct(fields) = target else {
+        unreachable!("planned struct field")
+    };
+    let mut columns = parent.columns().to_vec();
+    if path.len() == 1 {
+        columns.remove(path[0]);
+    } else {
+        columns[path[0]] = prune_array(&columns[path[0]], &path[1..], fields[path[0]].data_type())?;
+    }
+    Ok(Arc::new(arrow_array::StructArray::try_new_with_length(
+        fields.clone(),
+        columns,
+        parent.nulls().cloned(),
+        parent.len(),
+    )?))
 }
 
 /// Supply omitted seconds, then let Arrow validate dates, offsets, timezones and range.

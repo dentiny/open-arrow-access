@@ -67,6 +67,10 @@ impl<'a> EvolutionPlanner<'a> {
                 expression,
             } => self.add(name, data_type.as_ref(), expression),
             ColumnEvolution::RemoveColumn { name } => self.remove(name),
+            ColumnEvolution::ExtractNestedField { path, name } => {
+                self.nested_field(path, Some(name))
+            }
+            ColumnEvolution::RemoveNestedField { path } => self.nested_field(path, None),
             ColumnEvolution::RenameColumn {
                 source_name,
                 target_name,
@@ -147,6 +151,32 @@ impl<'a> EvolutionPlanner<'a> {
         Ok(())
     }
 
+    fn nested_field(&mut self, path: &[String], name: Option<&str>) -> Result<()> {
+        let source = self.resolve(&path[0])?;
+        let (indices, field) = validation::resolve_nested_field(&self.fields[source], &path[1..])?;
+        if let Some(name) = name {
+            validation::validate_evolution_target(None, self.names.get(name).copied())?;
+            validation::validate_nested_extraction(&field)?;
+            let index = self.fields.len();
+            self.fields
+                .push(Arc::new(field.as_ref().clone().with_name(name)));
+            self.names.insert(name.to_owned(), index);
+            self.steps.push(EvolutionStep::ExtractNestedField {
+                index,
+                source: self.inputs.bind(source),
+                path: indices.clone(),
+            });
+        }
+        let field = without_field(&self.fields[source], &indices);
+        self.fields[source] = field.clone();
+        self.steps.push(EvolutionStep::RemoveNestedField {
+            index: self.inputs.bind(source),
+            path: indices,
+            field,
+        });
+        Ok(())
+    }
+
     fn rename(&mut self, source_name: &str, target_name: &str) -> Result<()> {
         let index = self.resolve(source_name)?;
         validation::validate_evolution_target(Some(index), self.names.get(target_name).copied())?;
@@ -208,7 +238,13 @@ impl<'a> EvolutionPlanner<'a> {
         let lifetimes = ValueLifetimePlan::new(
             self.steps.iter().map(|step| match step {
                 EvolutionStep::Add { index, input, .. } => (Some(*index), input.slots()),
-                EvolutionStep::Cast { index, .. } => (Some(*index), std::slice::from_ref(index)),
+                EvolutionStep::ExtractNestedField { index, source, .. } => {
+                    (Some(*index), std::slice::from_ref(source))
+                }
+                EvolutionStep::Cast { index, .. }
+                | EvolutionStep::RemoveNestedField { index, .. } => {
+                    (Some(*index), std::slice::from_ref(index))
+                }
                 EvolutionStep::Remove(_) => (None, &[][..]),
             }),
             &output_indices,
@@ -244,4 +280,23 @@ fn added_field(
             .insert("open_arrow_access:generated_expression".into(), sql.clone());
     }
     Ok(field)
+}
+
+/// Rebuild only the struct ancestors of the already validated field path.
+fn without_field(field: &FieldRef, path: &[usize]) -> FieldRef {
+    let DataType::Struct(children) = field.data_type() else {
+        unreachable!("validated struct path")
+    };
+    let mut children = children.to_vec();
+    if path.len() == 1 {
+        children.remove(path[0]);
+    } else {
+        children[path[0]] = without_field(&children[path[0]], &path[1..]);
+    }
+    Arc::new(
+        field
+            .as_ref()
+            .clone()
+            .with_data_type(DataType::Struct(children.into())),
+    )
 }

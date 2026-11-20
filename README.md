@@ -188,6 +188,35 @@ Facade and component-crate feature names differ: `format-json` becomes `json` on
 expose the facade's `file_format`, `dataset`, or `decompression` modules; enable
 those facade features when importing them yourself.
 
+## S2ORC v2 output schema
+
+After explicit gzip decompression, `S2orcV2Accessor` produces one paper per
+Arrow row with body text in a top-level `text` column:
+
+| Column | Arrow output type | Contents |
+| --- | --- | --- |
+| `corpusid` | Required `UInt64` | Paper identity |
+| `openaccessinfo` | Nullable `Struct` | Open-access metadata and external IDs |
+| `title` | Nullable `LargeUtf8` | Paper title |
+| `authors` | Nullable `List<Utf8>` | Author names |
+| `body` | Nullable `Struct<annotations: Struct<...>>` | Body annotations |
+| `bibliography` | Nullable `Struct<text: LargeUtf8, annotations: Struct<...>>` | Reference text and annotations |
+| `text` | Nullable `LargeUtf8` | Paper body moved from upstream `body.text` |
+
+The typed reader applies `SchemaEvolutionLayer` after decoding and validation,
+removing the original `body.text` while preserving body annotation offsets,
+parent nulls and the independent bibliography. Metadata, sequential reads and
+native scan partitions expose the same schema, including projected reads.
+`SemanticScholarService::dataset` continues to return original compressed shard
+bytes; the byte interface does not perform this transformation.
+
+This changes the typed output from published 0.12.0: consumers must read `text`
+instead of `body.text` and account for the appended seventh column. Existing
+stored datasets require separate conversion/migration. Downstream writers can
+request per-column LZ4 for `text`; the access reader returns strings and does
+not choose storage compression. See the [Semantic Scholar guide](service/semantic-scholar.md#typed-s2orc-v2-records)
+for nested types and the decoding contract.
+
 ## Common compositions
 
 ```mermaid

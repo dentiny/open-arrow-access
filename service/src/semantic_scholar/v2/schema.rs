@@ -1,4 +1,5 @@
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef};
+use open_arrow_access_layers::{ColumnEvolution, SchemaEvolutionLayer};
 use std::sync::{Arc, OnceLock};
 
 pub(super) const BODY: &[&str] = &["sentence", "paragraph", "section_header", "bib_ref"];
@@ -88,11 +89,35 @@ fn build(typed: bool) -> SchemaRef {
         field("bibliography", section(BIBLIOGRAPHY, typed)),
     ]))
 }
-/// Fixed typed output; JSON-encoded annotation payloads become List<Struct>.
-pub fn s2orc_v2_schema() -> SchemaRef {
+/// Typed schema before moving the body text; used by annotation decoding.
+pub(super) fn decoded_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA.get_or_init(|| build(/* typed= */ true)).clone()
 }
+pub(super) fn evolution() -> &'static SchemaEvolutionLayer {
+    static LAYER: OnceLock<SchemaEvolutionLayer> = OnceLock::new();
+    LAYER.get_or_init(|| {
+        SchemaEvolutionLayer::try_new(vec![ColumnEvolution::extract_nested_field(
+            ["body", "text"],
+            "text",
+        )])
+        .expect("valid S2ORC body-text extraction")
+    })
+}
+
+/// Fixed typed output with top-level body text and typed annotation lists.
+/// `body` retains annotations; `bibliography` retains its own text and annotations.
+pub fn s2orc_v2_schema() -> SchemaRef {
+    static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
+    SCHEMA
+        .get_or_init(|| {
+            evolution()
+                .transform_schema(&decoded_schema())
+                .expect("S2ORC body-text extraction matches the decoded schema")
+        })
+        .clone()
+}
+
 pub(super) fn input_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA.get_or_init(|| build(/* typed= */ false)).clone()

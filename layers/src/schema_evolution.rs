@@ -23,7 +23,7 @@ pub enum ColumnExpression {
     Sql(String),
 }
 
-/// One ordered change to the current top-level schema.
+/// One ordered change to the current schema.
 /// Names refer to the schema produced by preceding vector items.
 #[derive(Clone, Debug)]
 pub enum ColumnEvolution {
@@ -36,6 +36,15 @@ pub enum ColumnEvolution {
     },
     RemoveColumn {
         name: String,
+    },
+    /// Move a nested struct field into a new top-level column.
+    ExtractNestedField {
+        path: Vec<String>,
+        name: String,
+    },
+    /// Remove a field inside nested structs; path segments are literal names.
+    RemoveNestedField {
+        path: Vec<String>,
     },
     RenameColumn {
         source_name: String,
@@ -50,6 +59,7 @@ pub enum ColumnEvolution {
 impl ColumnEvolution {
     fn name(&self) -> &str {
         match self {
+            Self::RemoveNestedField { path } | Self::ExtractNestedField { path, .. } => &path[0],
             Self::AddColumn { name, .. }
             | Self::RemoveColumn { name }
             | Self::RenameColumn {
@@ -92,6 +102,29 @@ impl ColumnEvolution {
         Self::RemoveColumn { name: name.into() }
     }
 
+    /// Move a nested struct field to the end of the top-level schema.
+    /// Parent nulls mask the extracted values. Retained arrays share buffers;
+    /// the original field is removed while its siblings and parent structs remain.
+    /// Paths use literal names and traverse structs only.
+    pub fn extract_nested_field(
+        path: impl IntoIterator<Item = impl Into<String>>,
+        name: impl Into<String>,
+    ) -> Self {
+        Self::ExtractNestedField {
+            path: path.into_iter().map(Into::into).collect(),
+            name: name.into(),
+        }
+    }
+
+    /// Remove one nested struct field while preserving sibling fields and parent nulls.
+    /// The path includes the top-level column and at least one child. Lists are
+    /// not traversed. Empty parent structs are retained with their row count.
+    pub fn remove_nested_field(path: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self::RemoveNestedField {
+            path: path.into_iter().map(Into::into).collect(),
+        }
+    }
+
     pub fn rename_column(source_name: impl Into<String>, target_name: impl Into<String>) -> Self {
         Self::RenameColumn {
             source_name: source_name.into(),
@@ -107,7 +140,7 @@ impl ColumnEvolution {
     }
 }
 
-/// Add, remove, rename, and cast top-level columns with a fixed output schema.
+/// Add, remove, rename, cast, and extract fields with a fixed output schema.
 ///
 /// Changes run in vector order. Expressions see preceding additions, removals,
 /// renames, and casts, even when omitted by the final projection.
@@ -126,6 +159,17 @@ impl SchemaEvolutionLayer {
             changes: changes.into(),
             source_schema: None,
         })
+    }
+
+    /// Derive the complete output schema without opening or reading a source.
+    pub fn transform_schema(&self, source: &SchemaRef) -> Result<SchemaRef> {
+        if self.changes.is_empty() {
+            return Ok(source.clone());
+        }
+        Ok(
+            SchemaEvolutionPlan::new(&self.changes, source, &Default::default(), false)?
+                .target_schema,
+        )
     }
 
     /// Wrap an opened reader with schema evolution based on its actual schema.
