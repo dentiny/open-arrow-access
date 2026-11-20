@@ -217,50 +217,89 @@ async fn expand(batch: &RecordBatch, options: &ReadOptions) -> Result<Vec<Record
         ArxivSourceOptions::default(),
     )
     .await?;
-    let mut builder = RecordBatchBuilder::new(latex_schema(), None)?;
-    let mut batches = Vec::new();
-    let mut count = 0;
-    let mut text_bytes = 0;
+    let article = LatexArticle {
+        id: &article_id,
+        shard,
+        outer_index,
+        name,
+    };
+    let mut output = LatexBatches {
+        builder: RecordBatchBuilder::new(latex_schema(), None)?,
+        batches: Vec::new(),
+        text_bytes: 0,
+        max_rows: options.batch_size.get(),
+    };
     while let Some(batch) = reader.next().await? {
         for row in 0..batch.num_rows() {
-            let source_name = batch["entry_name"].as_binary::<i64>().value(row);
-            if !is_tex(source_name)? {
-                continue;
-            }
-            let text = std::str::from_utf8(batch["data"].as_binary::<i64>().value(row))
-                .map_err(|_| error::decode("LaTeX member is not UTF-8"))?;
-            let source_index = batch["entry_index"]
-                .as_primitive::<arrow_array::types::UInt64Type>()
-                .value(row);
-            builder.push(|output| {
-                output.append("article_id", article_id.as_str())?;
-                output.append("format", "latex")?;
-                output.append("shard_uri", shard)?;
-                output.append("entry_index", outer_index)?;
-                output.append("entry_name", name)?;
-                output.append("source_index", source_index)?;
-                output.append("source_name", source_name)?;
-                output.append("text", text)
-            })?;
-            count += 1;
-            text_bytes += text.len();
-            if builder.len() >= options.batch_size.get() || text_bytes >= 4 * 1024 * 1024 {
-                batches.push(builder.finish()?);
-                builder = RecordBatchBuilder::new(latex_schema(), None)?;
-                text_bytes = 0;
-            }
+            output.append_member(&article, &batch, row)?;
         }
     }
-    if count == 0 {
-        return Err(error::decode(
-            "source package contains no non-ancillary LaTeX files",
-        ));
-    }
-    if !builder.is_empty() {
-        batches.push(builder.finish()?);
-    }
-    Ok(batches)
+    output.finish()
 }
+
+struct LatexArticle<'a> {
+    id: &'a str,
+    shard: &'a str,
+    outer_index: u64,
+    name: &'a [u8],
+}
+
+struct LatexBatches {
+    builder: RecordBatchBuilder,
+    batches: Vec<RecordBatch>,
+    text_bytes: usize,
+    max_rows: usize,
+}
+
+impl LatexBatches {
+    fn append_member(
+        &mut self,
+        article: &LatexArticle<'_>,
+        batch: &RecordBatch,
+        row: usize,
+    ) -> Result<()> {
+        let source_name = batch["entry_name"].as_binary::<i64>().value(row);
+        if !is_tex(source_name)? {
+            return Ok(());
+        }
+        let text = std::str::from_utf8(batch["data"].as_binary::<i64>().value(row))
+            .map_err(|_| error::decode("LaTeX member is not UTF-8"))?;
+        let source_index = batch["entry_index"]
+            .as_primitive::<arrow_array::types::UInt64Type>()
+            .value(row);
+        self.builder.push(|output| {
+            output.append("article_id", article.id)?;
+            output.append("format", "latex")?;
+            output.append("shard_uri", article.shard)?;
+            output.append("entry_index", article.outer_index)?;
+            output.append("entry_name", article.name)?;
+            output.append("source_index", source_index)?;
+            output.append("source_name", source_name)?;
+            output.append("text", text)
+        })?;
+        self.text_bytes += text.len();
+        if self.builder.len() >= self.max_rows || self.text_bytes >= 4 * 1024 * 1024 {
+            let next = RecordBatchBuilder::new(latex_schema(), None)?;
+            let batch = std::mem::replace(&mut self.builder, next).finish()?;
+            self.batches.push(batch);
+            self.text_bytes = 0;
+        }
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<Vec<RecordBatch>> {
+        if self.batches.is_empty() && self.builder.is_empty() {
+            return Err(error::decode(
+                "source package contains no non-ancillary LaTeX files",
+            ));
+        }
+        if !self.builder.is_empty() {
+            self.batches.push(self.builder.finish()?);
+        }
+        Ok(self.batches)
+    }
+}
+
 fn is_tex(name: &[u8]) -> Result<bool> {
     if !name.to_ascii_lowercase().ends_with(b".tex") {
         return Ok(false);
