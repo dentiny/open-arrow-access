@@ -8,9 +8,9 @@ use arrow_schema::{DataType, Field, Schema};
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ObjectRef, ReadOptions, RecordBatch,
-    RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, Result, ScanPlan,
-    ScanPlanner, SchemaRef, StreamReader, async_trait, bytes_reader, into_async_read,
-    project_batch, scan_partition,
+    RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result,
+    ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, bytes_reader,
+    into_async_read, project_batch, scan_partition,
 };
 use open_arrow_access_decompression::{Codec, gzip::Gzip};
 use std::sync::{Arc, OnceLock};
@@ -89,52 +89,74 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
         plan.partitions = plan
             .partitions
             .map(move |partition| {
-                let projection = projection.clone();
-                let options = options.clone();
-                let index = index.clone();
                 partition.map(|partition| {
-                    scan_partition(async move {
-                        let reader = partition.await?;
-                        let ordering = reader.capability().ordering;
-                        let output = RecordMetadata {
-                            schema: projection.schema.clone(),
-                            source: reader.metadata().source.clone(),
-                        };
-                        let batches = stream::try_unfold(
-                            (reader, Vec::<RecordBatch>::new().into_iter()),
-                            move |(mut reader, mut pending)| {
-                                let projection = projection.clone();
-                                let options = options.clone();
-                                let index = index.clone();
-                                async move {
-                                    loop {
-                                        if let Some(batch) = pending.next() {
-                                            let batch = if let Some(index) = &index {
-                                                index.attach_articles(batch)?
-                                            } else {
-                                                batch
-                                            };
-                                            let batch = project_batch(
-                                                batch,
-                                                projection.indices.as_deref(),
-                                                projection.schema.clone(),
-                                            )?;
-                                            return Ok(Some((batch, (reader, pending))));
-                                        }
-                                        let Some(batch) = reader.next().await? else {
-                                            return Ok(None);
-                                        };
-                                        pending = expand(&batch, &options).await?.into_iter();
-                                    }
-                                }
-                            },
-                        );
-                        Ok(StreamReader::records(batches, output, ordering))
-                    })
+                    latex_partition(
+                        partition,
+                        projection.clone(),
+                        options.clone(),
+                        index.clone(),
+                    )
                 })
             })
             .boxed();
         Ok(plan)
+    }
+}
+
+struct LatexScanState {
+    reader: Box<dyn RecordReader>,
+    pending: std::vec::IntoIter<RecordBatch>,
+    projection: ResolvedProjection,
+    options: ReadOptions,
+    index: Option<Arc<ArxivMetadataIndex>>,
+}
+
+fn latex_partition(
+    partition: ScanPartition,
+    projection: ResolvedProjection,
+    options: ReadOptions,
+    index: Option<Arc<ArxivMetadataIndex>>,
+) -> ScanPartition {
+    scan_partition(async move {
+        let reader = partition.await?;
+        let ordering = reader.capability().ordering;
+        let output = RecordMetadata {
+            schema: projection.schema.clone(),
+            source: reader.metadata().source.clone(),
+        };
+        let state = LatexScanState {
+            reader,
+            pending: Vec::new().into_iter(),
+            projection,
+            options,
+            index,
+        };
+        let batches = stream::try_unfold(state, next_latex_batch);
+        Ok(StreamReader::records(batches, output, ordering))
+    })
+}
+
+async fn next_latex_batch(
+    mut state: LatexScanState,
+) -> Result<Option<(RecordBatch, LatexScanState)>> {
+    loop {
+        if let Some(batch) = state.pending.next() {
+            let batch = if let Some(index) = &state.index {
+                index.attach_articles(batch)?
+            } else {
+                batch
+            };
+            let batch = project_batch(
+                batch,
+                state.projection.indices.as_deref(),
+                state.projection.schema.clone(),
+            )?;
+            return Ok(Some((batch, state)));
+        }
+        let Some(batch) = state.reader.next().await? else {
+            return Ok(None);
+        };
+        state.pending = expand(&batch, &state.options).await?.into_iter();
     }
 }
 
