@@ -12,13 +12,8 @@ async fn load(name: &str) -> Vec<u8> {
 }
 
 #[test]
-fn article_routes_accept_modern_legacy_and_versions_without_path_injection() {
-    for id in [
-        "2410.00001",
-        "2410.00001v2",
-        "hep-th/9901001v1",
-        "solv-int/9901001",
-    ] {
+fn article_routes_accept_modern_ids_and_versions_without_path_injection() {
+    for id in ["0704.0001", "2410.00001", "2410.00001v2"] {
         for (format, prefix) in [
             (Format::Pdf, "pdf"),
             (Format::Source, "src"),
@@ -39,6 +34,8 @@ fn article_routes_accept_modern_legacy_and_versions_without_path_injection() {
         "2410.00001v01",
         "2410.00001v",
         "hep-th9901001",
+        "hep-th/9901001v1",
+        "solv-int/9901001",
         "2410.00001/extra",
     ] {
         assert!(

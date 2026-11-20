@@ -114,7 +114,7 @@ async fn gzip_single_sources_and_empty_files_are_not_assumed_to_be_archives() {
             };
             let mut reader = open_source_package(
                 input(load(&path).await),
-                "hep-th/9901001v1",
+                "2410.00001v1",
                 packaging,
                 ArxivSourceOptions::default(),
             )
