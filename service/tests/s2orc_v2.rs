@@ -248,6 +248,7 @@ async fn rejects_invalid_values_even_when_projected_out() {
         "{}",
         "[null]",
         r#"[{"start":2,"end":1}]"#,
+        r#"[{"start":0,"end":1},{"start":2,"end":1}]"#,
         r#"[{"start":"-1","end":1}]"#,
         r#"[{"start":"18446744073709551616","end":1}]"#,
         r#"[{"start":0.5,"end":1}]"#,

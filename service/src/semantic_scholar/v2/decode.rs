@@ -19,6 +19,7 @@ fn spans(input: &StringArray) -> Result<ArrayRef> {
             continue;
         };
         for span in validation::parse_spans(value)? {
+            let span = span?;
             let builder = list.values();
             builder
                 .field_builder::<UInt64Builder>(0)
