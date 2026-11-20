@@ -145,7 +145,7 @@ where
         let schema = request.options.resolve_projection(&record_schema())?.schema;
         let archives = if let Some(shard) = &request.shard {
             super::validation::validate_shard(shard, request.month)?;
-            vec![(shard.clone(), None)]
+            vec![(shard.clone(), /* manifest_archive= */ None)]
         } else {
             self.service
                 .manifest(request.kind, request.month, request.byte_options)
