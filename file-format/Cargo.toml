@@ -17,7 +17,7 @@ csv = [
     "dep:regex",
 ]
 default = []
-json = ["dep:arrow-json", "dep:arrow-schema", "dep:bytes", "dep:serde_json"]
+json = ["dep:arrow-json", "dep:arrow-schema", "dep:bytes", "dep:memchr", "dep:serde_json"]
 parquet = ["dep:parquet", "dep:arrow-schema"]
 parquet-brotli = ["parquet", "parquet/brotli"]
 parquet-gzip = ["parquet", "parquet/flate2-zlib-rs"]
@@ -36,6 +36,7 @@ bytes = { workspace = true, optional = true }
 csv = { workspace = true, optional = true }
 csv-async = { workspace = true, optional = true }
 futures.workspace = true
+memchr = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 open-arrow-access-decompression.workspace = true
 open-arrow-access-layers = { workspace = true, optional = true }

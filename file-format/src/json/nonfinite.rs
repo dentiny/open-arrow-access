@@ -1,4 +1,5 @@
 use futures::stream;
+use memchr::memchr2;
 use open_arrow_access_core::{ByteReader, Bytes, StreamReader, empty_chunk, next_nonempty};
 
 /// Adapt nonfinite value tokens before either serde_json framing or Arrow decoding.
@@ -68,9 +69,23 @@ impl Normalizer {
         token
     }
 
-    fn decode(&mut self, bytes: &[u8]) -> Vec<u8> {
+    fn decode(&mut self, mut bytes: &[u8]) -> Vec<u8> {
         let mut output = Vec::with_capacity(bytes.len());
-        for &byte in bytes {
+        while !bytes.is_empty() {
+            if self.in_string && !self.escaped {
+                // Only a quote or backslash changes string state. Long document
+                // text can be scanned with memchr and copied as one slice instead
+                // of branching and pushing every byte. Preserve partial escapes
+                // across input chunks; downstream decoding still validates JSON.
+                let end = memchr2(b'"', b'\\', bytes).unwrap_or(bytes.len());
+                output.extend_from_slice(&bytes[..end]);
+                bytes = &bytes[end..];
+                if bytes.is_empty() {
+                    break;
+                }
+            }
+            let byte = bytes[0];
+            bytes = &bytes[1..];
             if !self.token.is_empty() {
                 if !matches!(
                     byte,
@@ -117,5 +132,46 @@ impl Normalizer {
             output.push(byte);
         }
         output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Normalizer;
+
+    fn normalize<'a>(chunks: impl IntoIterator<Item = &'a [u8]>, inference: bool) -> Vec<u8> {
+        let mut state = Normalizer {
+            inference,
+            ..Normalizer::default()
+        };
+        let mut output = Vec::new();
+        for chunk in chunks {
+            output.extend(state.decode(chunk));
+        }
+        output.extend(state.take_token());
+        output
+    }
+
+    #[test]
+    fn quoted_bytes_and_nonfinite_values_survive_every_chunk_boundary() {
+        let input = r#"{"text":"正文 \"quoted\" \\path\u0000 {[,:]} NaN Infinity -Infinity","v":[NaN,Infinity,-Infinity,1e-3]}"#.as_bytes();
+        let expected = r#"{"text":"正文 \"quoted\" \\path\u0000 {[,:]} NaN Infinity -Infinity","v":["NaN","Infinity","-Infinity",1e-3]}"#.as_bytes();
+        let inferred = r#"{"text":"正文 \"quoted\" \\path\u0000 {[,:]} NaN Infinity -Infinity","v":[0.0,0.0     ,0.0      ,1e-3]}"#.as_bytes();
+        for split in 0..=input.len() {
+            let chunks = [&input[..split], &input[split..]];
+            assert_eq!(normalize(chunks, false), expected, "read split {split}");
+            assert_eq!(normalize(chunks, true), inferred, "inference split {split}");
+        }
+    }
+
+    #[test]
+    fn long_quoted_runs_are_unchanged_in_both_modes() {
+        let text = "ordinary UTF-8 正文 NaN Infinity ".repeat(4096);
+        let input = format!(r#"{{"text":"{text}"}}"#).into_bytes();
+        for size in [1, 7, 4095, 4096, 4097, input.len()] {
+            for inference in [false, true] {
+                assert_eq!(normalize(input.chunks(size), inference), input);
+            }
+        }
     }
 }

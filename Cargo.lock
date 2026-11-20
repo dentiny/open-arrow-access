@@ -2916,6 +2916,7 @@ dependencies = [
  "csv-async",
  "flate2",
  "futures",
+ "memchr",
  "more-asserts",
  "open-arrow-access-core",
  "open-arrow-access-dataset",
