@@ -1,7 +1,6 @@
 //! Common binary-content rows for PDF, attachment-free LaTeX, and supplied XML shards.
 use super::{
-    ArxivMetadataIndex, ArxivReadRequest, ArxivRecords, ArxivSourceOptions, error,
-    open_source_package, validation,
+    ArxivReadRequest, ArxivRecords, ArxivSourceOptions, error, open_source_package, validation,
 };
 use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
@@ -52,21 +51,13 @@ pub fn content_schema() -> SchemaRef {
 pub struct ArxivContentRecords<A> {
     format: ArxivContentFormat,
     records: ArxivRecords<A>,
-    metadata: Option<Arc<ArxivMetadataIndex>>,
 }
 impl<A> ArxivRecords<A> {
     pub fn content(self, format: ArxivContentFormat) -> ArxivContentRecords<A> {
         ArxivContentRecords {
             records: self,
-            metadata: None,
             format,
         }
-    }
-}
-impl<A> ArxivContentRecords<A> {
-    pub fn with_metadata(mut self, metadata: Arc<ArxivMetadataIndex>) -> Self {
-        self.metadata = Some(metadata);
-        self
     }
 }
 #[async_trait]
@@ -88,29 +79,19 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
 {
     async fn plan_scan(&self, mut request: Self::Request) -> Result<ScanPlan> {
         validation::validate_content_kind(self.format, request.kind)?;
-        let schema = self
-            .metadata
-            .as_ref()
-            .map_or_else(content_schema, |index| index.schema_for(&content_schema()));
+        let schema = content_schema();
         let projection = request.options.resolve_projection(&schema)?;
         let options = request.options.clone();
         request.options.projection = None;
         request.options.batch_size = std::num::NonZeroUsize::MIN;
         let mut plan = self.records.plan_scan(request).await?;
         plan.metadata.schema = projection.schema.clone();
-        let index = self.metadata.clone();
         let format = self.format;
         plan.partitions = plan
             .partitions
             .map(move |partition| {
                 partition.map(|partition| {
-                    content_partition(
-                        partition,
-                        format,
-                        projection.clone(),
-                        options.clone(),
-                        index.clone(),
-                    )
+                    content_partition(partition, format, projection.clone(), options.clone())
                 })
             })
             .boxed();
@@ -123,7 +104,6 @@ fn content_partition(
     format: ArxivContentFormat,
     projection: ResolvedProjection,
     options: ReadOptions,
-    index: Option<Arc<ArxivMetadataIndex>>,
 ) -> ScanPartition {
     scan_partition(async move {
         let reader = partition.await?;
@@ -143,11 +123,7 @@ fn content_partition(
                 }
             })
             .map_ok(|batches| stream::iter(batches.into_iter().map(Ok)))
-            .try_flatten()
-            .map(move |batch| match &index {
-                Some(index) => index.attach_articles(batch?),
-                None => batch,
-            });
+            .try_flatten();
         Ok(record_stream_reader(
             batches,
             output,

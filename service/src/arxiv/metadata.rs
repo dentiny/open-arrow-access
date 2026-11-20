@@ -65,36 +65,6 @@ impl ArxivMetadataIndex {
         RecordBatch::try_new(self.schema(), columns).map_err(error::arrow_error)
     }
 
-    pub(super) fn attach_articles(&self, batch: RecordBatch) -> Result<RecordBatch> {
-        let ids = batch["article_id"].as_string::<i64>();
-        let indices = ids
-            .iter()
-            .map(|value| {
-                let key = id::metadata_id(value.ok_or_else(error::null_metadata_id)?)?;
-                self.ids
-                    .get(&key)
-                    .copied()
-                    .ok_or_else(error::missing_pdf_metadata)
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let metadata = arrow_select::take::take(&self.rows, &UInt64Array::from(indices), None)
-            .map_err(error::arrow_error)?;
-        let schema = self.schema_for(&batch.schema());
-        let mut columns = batch.columns().to_vec();
-        columns.push(metadata);
-        RecordBatch::try_new(schema, columns).map_err(error::arrow_error)
-    }
-
-    pub(super) fn schema_for(&self, schema: &Schema) -> Arc<Schema> {
-        let mut fields = schema.fields().to_vec();
-        fields.push(Arc::new(Field::new(
-            "metadata",
-            self.rows.data_type().clone(),
-            false,
-        )));
-        Arc::new(Schema::new(fields))
-    }
-
     fn schema(&self) -> Arc<Schema> {
         let mut fields = record_schema().fields().to_vec();
         fields.push(Arc::new(Field::new(
