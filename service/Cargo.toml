@@ -101,8 +101,6 @@ url.workspace = true
 arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
-flate2.workspace = true
-tar.workspace = true
 more-asserts.workspace = true
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = [
     "csv",

@@ -147,13 +147,11 @@ locator/provenance, rather than supplying only the outer TAR URI.
 
 ### Lance Blob V2 is a writer decision
 
-The reader's `LargeBinary` is ordinary Arrow binary. The optional downstream
-[Python bridge](examples/arxiv_lance.py) explicitly converts `data` with Lance's
-`blob_field`/`blob_array` helpers and writes file format **2.2**. It preserves all
-identity/path columns. The library adds no Lance dependency or URL-download
-layer. For large inputs, feed bounded batches to a coordinated writer instead
-of materializing a corpus-sized Python table or letting independent jobs write
-the same destination.
+The reader emits ordinary Arrow `LargeBinary`. A downstream sink must explicitly
+convert that column to Lance Blob V2 if desired; plain binary writes do not
+become Blob V2 automatically. Identity/path columns remain ordinary typed
+columns. This Rust reader has no Lance dependency and does not download blob
+URLs or choose the sink's physical layout.
 
 Conceptually, the Blob V2 writer maps payload bytes to compact descriptors.
 Small payloads can remain inline; larger payloads can use Lance-owned sidecars.
@@ -176,6 +174,15 @@ compressed member offsets are not directly addressable external blob ranges.
 Deterministic tests cover native routes, lazy partitions, error propagation,
 projection/row counts, IDs and versions, bounded reads, source single files,
 gzip integrity, TAR limits, duplicate names, binary names and image/video bytes.
+Inputs live in [`testdata/arxiv-articles/`](../testdata/arxiv-articles/README.md),
+including `anc/` XML, CSV, ZIP and opaque video payloads. Rust tests compare the
+original bytes and preserve nested archives without recursively expanding them.
+The facade integration test also reads PDF/source/HTML through `CrawlAccessor`.
+
+```sh
+cargo test -p open-arrow-access-service --features arxiv --test arxiv_articles
+cargo test --features service-arxiv --test arxiv_documents
+```
 
 A small live probe of `2401.04088v1` returned HTML HTTP 200 (192,348 bytes),
 source HTTP 200 (`application/gzip`, 2,878,415 bytes), and PDF HTTP 206 for a
@@ -189,13 +196,4 @@ To inspect a downloaded gzip-TAR package without disk extraction:
 ```sh
 cargo run -p open-arrow-access-service --features arxiv \
   --example arxiv_source_package -- /path/to/source.tar.gz 2401.04088v1
-```
-
-The optional sink example passed with `pylance 14.0.3` and `pyarrow 26.0.1`:
-four artifact rows retained byte-exact PDF/TeX/image/video test payloads after
-Blob V2 write/read, with identity/path columns scanned separately. It uses
-synthetic bytes to check storage fidelity, not media decoding:
-
-```sh
-python service/examples/arxiv_lance.py /path/to/new-artifacts.lance
 ```

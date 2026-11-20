@@ -8,8 +8,8 @@ use open_arrow_access_service::arxiv::{
     ArxivArticle, ArxivArticleFormat as Format, ArxivArticleReadRequest, ArxivService,
     ArxivSourceOptions, ArxivSourcePackaging as Packaging, open_source_package,
 };
-use open_arrow_access_test_support::MemoryAccessor;
-use std::{io::Write, num::NonZeroUsize};
+use open_arrow_access_test_support::{MemoryAccessor, fixture};
+use std::num::NonZeroUsize;
 
 fn input(data: Vec<u8>) -> Box<dyn ByteReader> {
     Box::new(bytes_reader(
@@ -17,27 +17,8 @@ fn input(data: Vec<u8>) -> Box<dyn ByteReader> {
         Some(ObjectRef::new("src/shard.tar#member=7")),
     ))
 }
-fn tar(entries: &[(&str, &[u8])]) -> Vec<u8> {
-    let mut tar = tar::Builder::new(Vec::new());
-    let mut dir = tar::Header::new_ustar();
-    dir.set_entry_type(tar::EntryType::Directory);
-    dir.set_size(0);
-    dir.set_mode(0o755);
-    dir.set_cksum();
-    tar.append_data(&mut dir, "figures/", &b""[..]).unwrap();
-    for (name, data) in entries {
-        let mut header = tar::Header::new_ustar();
-        header.set_size(data.len() as u64);
-        header.set_mode(0o644);
-        header.set_cksum();
-        tar.append_data(&mut header, name, *data).unwrap();
-    }
-    tar.into_inner().unwrap()
-}
-fn gzip(data: &[u8]) -> Vec<u8> {
-    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    gzip.write_all(data).unwrap();
-    gzip.finish().unwrap()
+async fn load(name: &str) -> Vec<u8> {
+    fixture!("arxiv-articles", name).await
 }
 
 #[test]
@@ -80,7 +61,8 @@ fn article_routes_accept_modern_legacy_and_versions_without_path_injection() {
 #[tokio::test]
 async fn explicit_formats_have_independent_lazy_partitions_and_preserve_payloads() {
     // Storage interprets routes; the reader never probes S3 manifests or other formats.
-    let storage = MemoryAccessor::new(b"<html>full text<img src='x.png'></html>", 3);
+    let original = load("paper.html").await;
+    let storage = MemoryAccessor::new(&original, 3);
     let observed = storage.observations.clone();
     let accessor = ArxivService::new(storage).article_records();
     let mut request = ArxivArticleReadRequest::new(vec![
@@ -112,7 +94,7 @@ async fn explicit_formats_have_independent_lazy_partitions_and_preserve_payloads
                 .unwrap()
                 .as_binary::<i64>()
                 .value(0),
-            b"<html>full text<img src='x.png'></html>"
+            original
         );
         assert!(reader.next().await.unwrap().is_none());
         count += 1;
@@ -131,7 +113,7 @@ async fn explicit_formats_have_independent_lazy_partitions_and_preserve_payloads
 
 #[tokio::test]
 async fn invalid_selection_and_projection_fail_before_any_storage_io() {
-    let storage = MemoryAccessor::new(b"payload", 2);
+    let storage = MemoryAccessor::new(&load("paper.pdf").await, 2);
     let observed = storage.observations.clone();
     let accessor = ArxivService::new(storage).article_records();
     let request = ArxivArticleReadRequest::new(vec![
@@ -148,7 +130,8 @@ async fn invalid_selection_and_projection_fail_before_any_storage_io() {
 
 #[tokio::test]
 async fn article_size_limit_and_zero_column_projection() {
-    let accessor = ArxivService::new(MemoryAccessor::new(b"payload", 2)).article_records();
+    let accessor =
+        ArxivService::new(MemoryAccessor::new(&load("paper.pdf").await, 2)).article_records();
     let mut request =
         ArxivArticleReadRequest::new(vec![ArxivArticle::new("2410.00001", Format::Source)]);
     request.max_bytes = NonZeroUsize::new(3).unwrap();
@@ -165,23 +148,28 @@ async fn article_size_limit_and_zero_column_projection() {
 
 #[tokio::test]
 async fn expands_tex_figures_video_and_data_preserving_duplicates_indices_and_bytes() {
-    let members: Vec<(&str, &[u8])> = vec![
-        ("main.tex", br"\includegraphics{figures/a.png}"),
-        ("figures/a.png", b"\x89PNG\0\xff"),
-        ("anc/demo.mp4", b"\0video\xff"),
-        ("anc/data.csv", b"x,y\n1,2"),
-        ("main.tex", b"duplicate"),
-    ];
+    let mut members = Vec::new();
+    for name in [
+        "main.tex",
+        "figures/a.png",
+        "anc/demo.mp4",
+        "anc/data.csv",
+        "anc/metadata.xml",
+        "anc/archive.zip",
+    ] {
+        members.push((name, load(&format!("members/{name}")).await));
+    }
+    members.push(("main.tex", load("duplicate.tex").await));
     let mut options = ArxivSourceOptions::default();
     options.options.batch_size = NonZeroUsize::new(2).unwrap();
     options.target_bytes = NonZeroUsize::new(1).unwrap();
     for packaging in [Packaging::Tar, Packaging::GzipTar] {
-        let data = tar(&members);
-        let data = if matches!(packaging, Packaging::GzipTar) {
-            gzip(&data)
+        let data = load(if matches!(packaging, Packaging::GzipTar) {
+            "source.tar.gz"
         } else {
-            data
-        };
+            "source.tar"
+        })
+        .await;
         let mut reader =
             open_source_package(input(data), "2410.00001v2", packaging, options.clone())
                 .await
@@ -237,26 +225,25 @@ async fn expands_tex_figures_video_and_data_preserving_duplicates_indices_and_by
 
 #[tokio::test]
 async fn gzip_single_sources_and_empty_files_are_not_assumed_to_be_archives() {
-    for data in [
-        b"\\documentclass{article}".as_slice(),
-        b"%PDF-fallback",
-        b"",
-    ] {
-        for packaging in [
-            Packaging::Single {
-                name: b"original".to_vec(),
-            },
-            Packaging::GzipSingle {
-                name: b"original".to_vec(),
-            },
-        ] {
-            let compressed = matches!(packaging, Packaging::GzipSingle { .. });
+    for name in ["main.tex", "paper.pdf", "empty.tex"] {
+        let original = load(name).await;
+        for compressed in [false, true] {
+            let packaging = if compressed {
+                Packaging::GzipSingle {
+                    name: name.as_bytes().to_vec(),
+                }
+            } else {
+                Packaging::Single {
+                    name: name.as_bytes().to_vec(),
+                }
+            };
+            let path = if compressed {
+                format!("{name}.gz")
+            } else {
+                name.into()
+            };
             let mut reader = open_source_package(
-                input(if compressed {
-                    gzip(data)
-                } else {
-                    data.to_vec()
-                }),
+                input(load(&path).await),
                 "hep-th/9901001v1",
                 packaging,
                 ArxivSourceOptions::default(),
@@ -264,13 +251,10 @@ async fn gzip_single_sources_and_empty_files_are_not_assumed_to_be_archives() {
             .await
             .unwrap();
             let batch = reader.next().await.unwrap().unwrap();
+            assert_eq!(batch["data"].as_binary::<i64>().value(0), original);
             assert_eq!(
-                batch
-                    .column_by_name("data")
-                    .unwrap()
-                    .as_binary::<i64>()
-                    .value(0),
-                data
+                batch["entry_name"].as_binary::<i64>().value(0),
+                name.as_bytes()
             );
             assert!(reader.next().await.unwrap().is_none());
         }
@@ -279,17 +263,10 @@ async fn gzip_single_sources_and_empty_files_are_not_assumed_to_be_archives() {
 
 #[tokio::test]
 async fn rejects_gzip_corruption_truncation_trailing_bytes_and_decoded_bombs() {
-    let bytes = tar(&[("main.tex", b"hello")]);
-    let valid = gzip(&bytes);
-    let mut corrupt = valid.clone();
-    let index = corrupt.len() - 8;
-    corrupt[index] ^= 1;
-    let mut trailing = valid.clone();
-    trailing.extend_from_slice(b"garbage");
-    for invalid in [corrupt, valid[..valid.len() - 4].to_vec(), trailing] {
+    for name in ["bad-crc.tar.gz", "truncated.tar.gz", "trailing.tar.gz"] {
         assert!(
             open_source_package(
-                input(invalid),
+                input(load(name).await),
                 "2410.00001",
                 Packaging::GzipTar,
                 ArxivSourceOptions::default()
@@ -298,6 +275,7 @@ async fn rejects_gzip_corruption_truncation_trailing_bytes_and_decoded_bombs() {
             .is_err()
         );
     }
+    let valid = load("source.tar.gz").await;
     let options = ArxivSourceOptions {
         max_decoded_bytes: NonZeroUsize::new(10).unwrap(),
         ..Default::default()
@@ -311,13 +289,7 @@ async fn rejects_gzip_corruption_truncation_trailing_bytes_and_decoded_bombs() {
 
 #[tokio::test]
 async fn applies_tar_limits_and_preserves_non_utf8_names_without_filesystem_extraction() {
-    let mut data = tar(&[("file", b"abc")]);
-    // First regular header follows a directory. Change name bytes and re-checksum.
-    let header = &mut data[512..1024];
-    header[..5].copy_from_slice(b"\xff.tex");
-    header[148..156].fill(b' ');
-    let checksum: u32 = header.iter().map(|b| *b as u32).sum();
-    header[148..156].copy_from_slice(format!("{checksum:06o}\0 ").as_bytes());
+    let data = load("binary-name.tar").await;
     let mut reader = open_source_package(
         input(data.clone()),
         "2410.00001",
@@ -346,7 +318,7 @@ async fn applies_tar_limits_and_preserves_non_utf8_names_without_filesystem_extr
 
 #[tokio::test]
 async fn source_projection_retains_row_count_and_rejects_unknown_fields() {
-    let data = tar(&[("a.tex", b"a"), ("anc/b.mp4", b"b")]);
+    let data = load("source.tar").await;
     let mut options = ArxivSourceOptions {
         options: ReadOptions::default(),
         ..Default::default()
@@ -361,7 +333,7 @@ async fn source_projection_retains_row_count_and_rejects_unknown_fields() {
     .await
     .unwrap();
     let batch = reader.next().await.unwrap().unwrap();
-    assert_eq!((batch.num_columns(), batch.num_rows()), (0, 2));
+    assert_eq!((batch.num_columns(), batch.num_rows()), (0, 7));
     options.options.projection = Some(vec!["unknown".into()]);
     assert!(
         open_source_package(input(data), "2410.00001", Packaging::Tar, options)
@@ -376,12 +348,16 @@ async fn http_formats_preserve_distinct_bytes_and_missing_html_does_not_fallback
     use open_arrow_access_storage::OpenDalAccessor;
     use open_arrow_access_test_support::http::HttpFixture;
     let http = HttpFixture::new();
-    http.file("/pdf/2410.00001v1", Bytes::from_static(b"%PDF-original"));
-    http.file("/src/2410.00001v1", Bytes::from_static(b"source-original"));
-    http.file(
-        "/html/2410.00001v1",
-        Bytes::from_static(b"<html>original</html>"),
-    );
+    for (route, fixture) in [
+        ("pdf", "paper.pdf"),
+        ("src", "source.tar.gz"),
+        ("html", "paper.html"),
+    ] {
+        http.file(
+            &format!("/{route}/2410.00001v1"),
+            Bytes::from(load(fixture).await),
+        );
+    }
     http.respond_for(
         http::Method::HEAD,
         "/html/2410.00002v1",
@@ -403,11 +379,8 @@ async fn http_formats_preserve_distinct_bytes_and_missing_html_does_not_fallback
         .open(ArxivArticleReadRequest::new(selections))
         .await
         .unwrap();
-    for expected in [
-        b"%PDF-original".as_slice(),
-        b"source-original",
-        b"<html>original</html>",
-    ] {
+    for name in ["paper.pdf", "source.tar.gz", "paper.html"] {
+        let expected = load(name).await;
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(
             batch
