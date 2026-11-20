@@ -1,12 +1,10 @@
-//! arXiv bulk discovery, native article representations and source-package assets.
+//! arXiv bulk discovery, native article representations.
 
 mod articles;
 mod error;
 pub use articles::{
     ArxivArticle, ArxivArticleFormat, ArxivArticleReadRequest, ArxivArticles, article_schema,
 };
-mod source_package;
-pub use source_package::{ArxivSourceOptions, ArxivSourcePackaging, open_source_package};
 mod id;
 mod manifest;
 mod metadata;
