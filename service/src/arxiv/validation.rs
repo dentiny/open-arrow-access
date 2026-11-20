@@ -4,6 +4,9 @@ use open_arrow_access_core::Result;
 
 use super::{ArxivArchive, ArxivContentFormat, ArxivKind, ArxivSourcePackaging, error, id};
 
+/// TAR headers occupy one fixed 512-byte block.
+pub(super) const TAR_HEADER_SIZE: usize = 512;
+
 pub(super) fn validate_unique_metadata_id(previous: Option<u64>) -> Result<()> {
     if previous.is_some() {
         return Err(error::duplicate_metadata_id());
@@ -175,7 +178,7 @@ pub(super) fn is_tex(name: &[u8]) -> Result<bool> {
         && name.to_ascii_lowercase().ends_with(".tex"))
 }
 pub(super) fn is_tar(data: &[u8]) -> bool {
-    if data.len() < 512 {
+    if data.len() < TAR_HEADER_SIZE {
         return false;
     }
     if &data[257..262] == b"ustar" {
@@ -184,7 +187,7 @@ pub(super) fn is_tar(data: &[u8]) -> bool {
     let checksum = std::str::from_utf8(&data[148..156])
         .ok()
         .and_then(|s| u64::from_str_radix(s.trim_matches(['\0', ' ']), 8).ok());
-    let sum: u64 = data[..512]
+    let sum: u64 = data[..TAR_HEADER_SIZE]
         .iter()
         .enumerate()
         .map(|(i, &v)| {

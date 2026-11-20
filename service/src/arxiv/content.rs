@@ -164,9 +164,9 @@ async fn expand(batch: RecordBatch, options: ReadOptions) -> Result<RecordStream
     let article_id = validation::content_article_id(name, ArxivContentFormat::Latex)?;
     let (mut input, source) = latex_input(&batch);
     // Inspect only one TAR header, then replay it into the streaming parser.
-    let mut prefix = Vec::with_capacity(512);
+    let mut prefix = Vec::with_capacity(validation::TAR_HEADER_SIZE);
     (&mut input)
-        .take(512)
+        .take(validation::TAR_HEADER_SIZE as u64)
         .read_to_end(&mut prefix)
         .await
         .map_err(|e| error::decode("invalid source package").with_source(e))?;
