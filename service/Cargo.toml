@@ -248,10 +248,6 @@ required-features = ["oai"]
 name = "arxiv_articles"
 required-features = ["arxiv"]
 
-[[example]]
-name = "arxiv_source_package"
-required-features = ["arxiv"]
-
 [[test]]
 name = "arxiv_source_package"
 required-features = ["arxiv"]
