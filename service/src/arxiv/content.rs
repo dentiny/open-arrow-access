@@ -211,6 +211,8 @@ fn latex_input(batch: &RecordBatch) -> (DecodedInput, Option<ObjectRef>) {
     (input, source)
 }
 
+/// Append the remaining decoded bytes to the sniffed prefix and validate the
+/// complete single-file source before emitting one `main.tex` content row.
 async fn expand_single_latex(
     mut input: DecodedInput,
     mut data: Vec<u8>,
@@ -227,6 +229,9 @@ async fn expand_single_latex(
     Ok(stream::iter([builder.finish()]).boxed())
 }
 
+/// Stream batches of non-ancillary TeX members while preserving article provenance.
+/// Reject archives with no selected files; decoder and source errors may follow
+/// earlier batches, so callers must consume the stream through EOF.
 fn expand_tar_latex(
     tar: TarStream,
     batch: RecordBatch,
