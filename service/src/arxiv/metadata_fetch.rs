@@ -50,6 +50,8 @@ pub(super) struct MetadataResolver {
 #[derive(Default)]
 struct State {
     connection: Option<Connection>,
+    /// Maps normalized, unversioned article IDs (legacy IDs omit the slash)
+    /// to shared indexes containing each article's complete typed OAI record.
     cache: HashMap<String, Arc<ArxivMetadataIndex>>,
     order: VecDeque<String>,
 }
