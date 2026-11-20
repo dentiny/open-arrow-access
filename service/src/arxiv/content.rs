@@ -1,4 +1,4 @@
-//! LaTeX-only bulk source records; ancillary assets never enter the output.
+//! Common binary-content rows for PDF, attachment-free LaTeX, and supplied XML shards.
 use super::{
     ArxivKind, ArxivMetadataIndex, ArxivReadRequest, ArxivRecords, ArxivSourceOptions,
     ArxivSourcePackaging, error, id, open_source_package,
@@ -15,7 +15,23 @@ use open_arrow_access_core::{
 use open_arrow_access_decompression::{Codec, gzip::Gzip};
 use std::sync::{Arc, OnceLock};
 
-pub fn latex_schema() -> SchemaRef {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArxivContentFormat {
+    Pdf,
+    Latex,
+    Xml,
+}
+impl ArxivContentFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pdf => "pdf",
+            Self::Latex => "latex",
+            Self::Xml => "xml",
+        }
+    }
+}
+
+pub fn content_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
@@ -27,28 +43,40 @@ pub fn latex_schema() -> SchemaRef {
                 Field::new("entry_name", DataType::LargeBinary, false),
                 Field::new("source_index", DataType::UInt64, false),
                 Field::new("source_name", DataType::LargeBinary, false),
-                Field::new("text", DataType::LargeUtf8, false),
+                Field::new("data", DataType::LargeBinary, false),
             ]))
         })
         .clone()
 }
 
-pub struct ArxivLatexRecords<A> {
+/// Compatibility alias for callers using `.latex()`.
+pub type ArxivLatexRecords<A> = ArxivContentRecords<A>;
+pub fn latex_schema() -> SchemaRef {
+    content_schema()
+}
+
+pub struct ArxivContentRecords<A> {
+    format: ArxivContentFormat,
     records: ArxivRecords<A>,
     metadata: Option<Arc<ArxivMetadataIndex>>,
 }
 impl<A> ArxivRecords<A> {
+    pub fn content(self, format: ArxivContentFormat) -> ArxivContentRecords<A> {
+        ArxivContentRecords {
+            records: self,
+            metadata: None,
+            format,
+        }
+    }
+
     /// Expand source packages to UTF-8 `.tex` files outside `anc/`. Each file is
     /// a row; no concatenation, compilation, include expansion or PDF fallback.
     /// Sources without TeX, invalid UTF-8 and corrupt archives fail the scan.
     pub fn latex(self) -> ArxivLatexRecords<A> {
-        ArxivLatexRecords {
-            records: self,
-            metadata: None,
-        }
+        self.content(ArxivContentFormat::Latex)
     }
 }
-impl<A> ArxivLatexRecords<A> {
+impl<A> ArxivContentRecords<A> {
     pub fn with_metadata(mut self, metadata: Arc<ArxivMetadataIndex>) -> Self {
         self.metadata = Some(metadata);
         self
@@ -56,7 +84,7 @@ impl<A> ArxivLatexRecords<A> {
 }
 #[async_trait]
 impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> Accessor
-    for ArxivLatexRecords<A>
+    for ArxivContentRecords<A>
 {
     type Request = ArxivReadRequest;
     type Reader = dyn RecordReader;
@@ -69,16 +97,27 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
 }
 #[async_trait]
 impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> ScanPlanner
-    for ArxivLatexRecords<A>
+    for ArxivContentRecords<A>
 {
     async fn plan_scan(&self, mut request: Self::Request) -> Result<ScanPlan> {
-        if request.kind != ArxivKind::Source {
-            return Err(error::invalid("LaTeX records require kind=source"));
+        match self.format {
+            ArxivContentFormat::Latex if request.kind != ArxivKind::Source => {
+                return Err(error::invalid("LaTeX content requires kind=source"));
+            }
+            ArxivContentFormat::Pdf if request.kind != ArxivKind::Pdf => {
+                return Err(error::invalid("PDF content requires kind=pdf"));
+            }
+            ArxivContentFormat::Xml if request.kind != ArxivKind::Source => {
+                return Err(error::invalid(
+                    "XML content requires a caller-owned source inventory",
+                ));
+            }
+            _ => {}
         }
         let schema = self
             .metadata
             .as_ref()
-            .map_or_else(latex_schema, |index| index.schema_for(&latex_schema()));
+            .map_or_else(content_schema, |index| index.schema_for(&content_schema()));
         let projection = request.options.resolve_projection(&schema)?;
         let options = request.options.clone();
         request.options.projection = None;
@@ -86,12 +125,14 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
         let mut plan = self.records.plan_scan(request).await?;
         plan.metadata.schema = projection.schema.clone();
         let index = self.metadata.clone();
+        let format = self.format;
         plan.partitions = plan
             .partitions
             .map(move |partition| {
                 partition.map(|partition| {
-                    latex_partition(
+                    content_partition(
                         partition,
+                        format,
                         projection.clone(),
                         options.clone(),
                         index.clone(),
@@ -103,8 +144,9 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
     }
 }
 
-fn latex_partition(
+fn content_partition(
     partition: ScanPartition,
+    format: ArxivContentFormat,
     projection: ResolvedProjection,
     options: ReadOptions,
     index: Option<Arc<ArxivMetadataIndex>>,
@@ -119,7 +161,12 @@ fn latex_partition(
         let batches = into_stream(reader)
             .and_then(move |batch| {
                 let options = options.clone();
-                async move { expand(&batch, &options).await }
+                async move {
+                    match format {
+                        ArxivContentFormat::Latex => expand(&batch, &options).await,
+                        _ => Ok(vec![document_batch(&batch, format)?]),
+                    }
+                }
             })
             .map_ok(|batches| stream::iter(batches.into_iter().map(Ok)))
             .try_flatten()
@@ -220,7 +267,7 @@ fn latex_batch(outer: &RecordBatch, article_id: &str, batch: &RecordBatch) -> Re
         .as_primitive::<arrow_array::types::UInt64Type>()
         .value(0);
     let name = outer["entry_name"].as_binary::<i64>().value(0);
-    let mut builder = RecordBatchBuilder::new(latex_schema(), None)?;
+    let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
     let names = batch["entry_name"].as_binary::<i64>();
     let data = batch["data"].as_binary::<i64>();
     let indices = batch["entry_index"].as_primitive::<arrow_array::types::UInt64Type>();
@@ -229,7 +276,7 @@ fn latex_batch(outer: &RecordBatch, article_id: &str, batch: &RecordBatch) -> Re
         if !is_tex(source_name)? {
             continue;
         }
-        let text = std::str::from_utf8(data.value(row))
+        std::str::from_utf8(data.value(row))
             .map_err(|_| error::decode("LaTeX member is not UTF-8"))?;
         builder.push(|output| {
             output.append("article_id", article_id)?;
@@ -239,9 +286,40 @@ fn latex_batch(outer: &RecordBatch, article_id: &str, batch: &RecordBatch) -> Re
             output.append("entry_name", name)?;
             output.append("source_index", indices.value(row))?;
             output.append("source_name", source_name)?;
-            output.append("text", text)
+            output.append("data", data.value(row))
         })?;
     }
+    builder.finish()
+}
+
+fn document_batch(batch: &RecordBatch, format: ArxivContentFormat) -> Result<RecordBatch> {
+    let name = batch["entry_name"].as_binary::<i64>().value(0);
+    let id = if format == ArxivContentFormat::Pdf {
+        id::pdf_id(name)?
+    } else {
+        let name =
+            std::str::from_utf8(name).map_err(|_| error::decode("XML filename is not UTF-8"))?;
+        let stem = name
+            .strip_suffix(".xml")
+            .ok_or_else(|| error::decode("XML shard member must end in .xml"))?;
+        id::pdf_id(format!("{stem}.pdf").as_bytes())?
+    };
+    let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
+    builder.push(|row| {
+        row.append("article_id", id.as_str())?;
+        row.append("format", format.as_str())?;
+        row.append("shard_uri", batch["shard_uri"].as_string::<i64>().value(0))?;
+        row.append(
+            "entry_index",
+            batch["entry_index"]
+                .as_primitive::<arrow_array::types::UInt64Type>()
+                .value(0),
+        )?;
+        row.append("entry_name", name)?;
+        row.append("source_index", 0_u64)?;
+        row.append("source_name", b"".as_slice())?;
+        row.append("data", batch["data"].as_binary::<i64>().value(0))
+    })?;
     builder.finish()
 }
 

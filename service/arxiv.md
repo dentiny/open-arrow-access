@@ -415,6 +415,42 @@ was changed; native `records()` still uses manifest size and still fails. This
 establishes real PDF-byte access, not a repaired conversion path or sustained
 throughput benchmark.
 
+## Common PDF / LaTeX / XML content schema
+
+Use `records().content(ArxivContentFormat::Pdf | Latex | Xml)` for the
+conversion-facing content contract. All three formats emit exactly the same
+field names, order, Arrow types and nullability:
+
+| Field | Arrow type | Meaning |
+| --- | --- | --- |
+| `article_id` | `LargeUtf8`, non-null | Normalized unversioned article ID |
+| `format` | `LargeUtf8`, non-null | `pdf`, `latex`, or `xml` |
+| `shard_uri` | `LargeUtf8`, non-null | Selected outer TAR locator |
+| `entry_index` | `UInt64`, non-null | Physical outer member index |
+| `entry_name` | `LargeBinary`, non-null | Original outer filename including version spelling |
+| `source_index` | `UInt64`, non-null | Inner TeX member index; zero for whole PDF/XML documents |
+| `source_name` | `LargeBinary`, non-null | Inner TeX filename; empty for whole PDF/XML documents |
+| `data` | `LargeBinary`, non-null | PDF bytes, decoded UTF-8 TeX bytes, or original XML bytes |
+
+`.with_metadata(index)` adds the same non-null `metadata: Struct` for all
+formats when using the same snapshot. Matching precedes projection. Without a
+snapshot, all three omit that column. There is no format-specific `text` column.
+`content_schema()` is the single definition; `latex_schema()` aliases it.
+
+PDF uses `kind=pdf`; LaTeX uses `kind=source` and filters attachments. XML reads
+a caller-owned source inventory whose TAR article members end in `.xml`: arXiv does
+not expose an official XML full-text bulk manifest, and this reader does not
+synthesize XML from PDF/TeX or treat OAI bibliographic metadata as full text.
+The XML mirror uses the existing source-inventory layout; no new provider
+manifest is introduced. XML bytes are retained without projecting document-specific XML fields into
+the common schema. PDF/XML bytes are whole outer members; LaTeX files are
+expanded from their source package. Both identities remain explicit.
+
+The lower-level `records()` retains raw archive rows, and `article_records()` /
+`open_source_package()` retain their artifact-byte contracts. Those transport
+APIs are distinct from the common content output; conversion integrations
+should select `content(format)` rather than emitting those raw schemas.
+
 ## LaTeX-only bulk output
 
 `service.records().latex()` accepts `ArxivKind::Source` and retains one lazy
@@ -429,7 +465,7 @@ row skipping occurs.
 
 The schema is `article_id: LargeUtf8`, `format: LargeUtf8` (`latex`),
 `shard_uri: LargeUtf8`, `entry_index: UInt64`, `entry_name: LargeBinary`,
-`source_index: UInt64`, `source_name: LargeBinary`, `text: LargeUtf8` (all
+`source_index: UInt64`, `source_name: LargeBinary`, `data: LargeBinary` (all
 non-null). Outer and inner physical indices preserve duplicate-name identity.
 `article_id` is the normalized unversioned metadata key; original outer names
 retain version spelling. Modern and legacy bulk IDs are supported.
@@ -441,6 +477,6 @@ metadata matching. Projection, including a zero-column projection, still
 validates source contents and metadata matches.
 
 Each article package is buffered while decoding and selecting files. Batches
-respect the row limit and a soft 4 MiB text target; one complete file can exceed
+respect the row limit and a soft 4 MiB source-payload target; one complete file can exceed
 that target. Bound active TAR partitions to control resident package memory.
 Existing raw `records()` and general `open_source_package()` output are unchanged.
