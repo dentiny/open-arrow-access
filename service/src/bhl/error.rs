@@ -49,3 +49,7 @@ pub(super) fn page_record(source: arrow_schema::ArrowError) -> Error {
     )
     .with_source(source)
 }
+
+pub(super) fn invalid_pages(message: impl Into<String>) -> Error {
+    Error::new(ErrorKind::InvalidInput, "bhl_pages", message)
+}

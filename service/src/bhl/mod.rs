@@ -2,7 +2,9 @@
 mod error;
 mod open_data;
 mod page;
+mod pages;
 pub use page::{BhlPageRecord, page_schema};
+pub use pages::{BhlPageAccessor, BhlPageIdentity};
 mod resolver;
 mod validation;
 use crate::{
