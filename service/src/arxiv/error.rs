@@ -107,3 +107,7 @@ pub(super) fn invalid_manifest_kind() -> Error {
 pub(super) fn duplicate_archive() -> Error {
     decode("duplicate archive in arXiv manifest")
 }
+
+pub(super) fn invalid_shard() -> Error {
+    invalid("shard must be a relative TAR key without a month selector")
+}

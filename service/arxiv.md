@@ -480,3 +480,17 @@ Each article package is buffered while decoding and selecting files. Batches
 respect the row limit and a soft 4 MiB source-payload target; one complete file can exceed
 that target. Bound active TAR partitions to control resident package memory.
 Existing raw `records()` and general `open_source_package()` output are unchanged.
+
+
+## Explicit single-shard jobs
+
+`ArxivReadRequest::new(kind).with_shard("src/arXiv_src_2410_001.tar")`
+selects exactly one uncompressed TAR key relative to the service storage root.
+Planning creates one lazy partition, performs no manifest requests or listing,
+and execution opens only that object. This also works through `.latex()` and
+metadata-enriched readers because the same request is forwarded. Month and shard
+selectors cannot be combined; invalid/absolute/traversing keys are rejected
+before I/O. A caller-owned XML TAR can use this path without inventing an
+upstream XML distribution manifest. Keep storage credentials on the service,
+not in the shard key. TAR structural/length checks still apply; manifest size,
+MD5 and membership cannot be checked when the manifest is intentionally bypassed.
