@@ -19,7 +19,11 @@ fn article_routes_accept_modern_legacy_and_versions_without_path_injection() {
         "hep-th/9901001v1",
         "solv-int/9901001",
     ] {
-        for (format, prefix) in [(Format::Pdf, "pdf"), (Format::Html, "html")] {
+        for (format, prefix) in [
+            (Format::Pdf, "pdf"),
+            (Format::Source, "src"),
+            (Format::Html, "html"),
+        ] {
             assert_eq!(
                 ArxivArticle::new(id, format).locator().unwrap(),
                 format!("{prefix}/{id}")
@@ -54,6 +58,7 @@ async fn explicit_formats_have_independent_lazy_partitions_and_preserve_payloads
     let mut request = ArxivArticleReadRequest::new(vec![
         ArxivArticle::new("2410.00001v2", Format::Html),
         ArxivArticle::new("2410.00001v2", Format::Pdf),
+        ArxivArticle::new("2410.00001v2", Format::Source),
     ]);
     request.byte_options = ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
@@ -84,14 +89,14 @@ async fn explicit_formats_have_independent_lazy_partitions_and_preserve_payloads
         assert!(reader.next().await.unwrap().is_none());
         count += 1;
     }
-    assert_eq!(count, 2);
+    assert_eq!(count, 3);
     let requests = observed.requests.lock().unwrap();
     assert_eq!(
         requests
             .iter()
             .map(|r| r.object.locator())
             .collect::<Vec<_>>(),
-        vec!["html/2410.00001v2", "pdf/2410.00001v2"]
+        vec!["html/2410.00001v2", "pdf/2410.00001v2", "src/2410.00001v2"]
     );
     assert!(requests.iter().all(|r| r.options.io_concurrency.get() == 3));
 }
@@ -118,7 +123,7 @@ async fn article_size_limit_and_zero_column_projection() {
     let accessor =
         ArxivService::new(MemoryAccessor::new(&load("paper.pdf").await, 2)).article_records();
     let mut request =
-        ArxivArticleReadRequest::new(vec![ArxivArticle::new("2410.00001", Format::Pdf)]);
+        ArxivArticleReadRequest::new(vec![ArxivArticle::new("2410.00001", Format::Source)]);
     request.max_bytes = NonZeroUsize::new(3).unwrap();
     let mut reader = accessor.open(request).await.unwrap();
     assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
@@ -137,7 +142,11 @@ async fn http_formats_preserve_distinct_bytes_and_missing_html_does_not_fallback
     use open_arrow_access_storage::OpenDalAccessor;
     use open_arrow_access_test_support::http::HttpFixture;
     let http = HttpFixture::new();
-    for (route, fixture) in [("pdf", "paper.pdf"), ("html", "paper.html")] {
+    for (route, fixture) in [
+        ("pdf", "paper.pdf"),
+        ("src", "source.tar.gz"),
+        ("html", "paper.html"),
+    ] {
         http.file(
             &format!("/{route}/2410.00001v1"),
             Bytes::from(load(fixture).await),
@@ -157,13 +166,14 @@ async fn http_formats_preserve_distinct_bytes_and_missing_html_does_not_fallback
     let accessor = ArxivService::new(OpenDalAccessor::new(operator)).article_records();
     let selections = vec![
         ArxivArticle::new("2410.00001v1", Format::Pdf),
+        ArxivArticle::new("2410.00001v1", Format::Source),
         ArxivArticle::new("2410.00001v1", Format::Html),
     ];
     let mut reader = accessor
         .open(ArxivArticleReadRequest::new(selections))
         .await
         .unwrap();
-    for name in ["paper.pdf", "paper.html"] {
+    for name in ["paper.pdf", "source.tar.gz", "paper.html"] {
         let expected = load(name).await;
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(

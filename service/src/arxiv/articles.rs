@@ -17,18 +17,21 @@ use std::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ArxivArticleFormat {
     Pdf,
+    Source,
     Html,
 }
 impl ArxivArticleFormat {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Pdf => "pdf",
+            Self::Source => "source",
             Self::Html => "html",
         }
     }
     fn prefix(self) -> &'static str {
         match self {
             Self::Pdf => "pdf",
+            Self::Source => "src",
             Self::Html => "html",
         }
     }
