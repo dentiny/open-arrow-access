@@ -1,5 +1,14 @@
 # arXiv bulk PDF and source archives
 
+**Upstream fix status:** the two baseline failures documented below are fixed in
+[PR #594](https://github.com/dentiny/open-arrow-access/pull/594): manifest size
+can count member payloads without TAR framing, and arXivRaw uses its published
+string/struct/list schema. With that patch, the native reader returned the
+first real 5,706,452-byte PDF without a size override and decoded the complete
+1,300-record metadata page. The conversion inspector also passed both real
+source URIs when linked to the patch. These fixes require merge/release and a
+consumer upgrade; the baseline evidence below describes unpatched 0.12.1.
+
 ## Service and data
 
 arXiv distributes research preprints as bulk PDF/source TAR shards, with XML
