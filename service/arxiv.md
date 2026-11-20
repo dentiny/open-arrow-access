@@ -509,32 +509,21 @@ MD5 and membership cannot be checked when the manifest is intentionally bypassed
 
 ## Parallel content reads inside a single shard
 
-For `records().content(format)` with an explicit shard, one sequential TAR
-reader discovers and buffers one regular article member at a time, then yields
-an independently owned native partition. No full header index, 512-byte header
-range requests, or per-article storage reopen is needed. The first article can
-be decoded before later headers are available. Directories are drained without
-creating partitions, and physical entry indices and original names are retained.
+For `records().content(format)` with an explicit shard, `open_sequential` and
+`TarStream` read one input and yield an owned partition per regular article.
+There is no upfront header index or per-article storage reopen. The first article
+can be processed before later headers arrive; physical entry indices and names
+are preserved.
 
-`CrawlAccessor` / `ParallelReadLayer` limits resident article partitions and
-allows their decoding to overlap with reading subsequent articles. Discovery
-is polled only while the executor has a free slot; it does not collect every
-article in the shard. Consume plans incrementally: explicitly collecting all
-partition openers would retain all discovered article payloads. Plain accessor
-`open()` executes partitions sequentially.
+`CrawlAccessor` / `ParallelReadLayer` bounds resident articles and overlaps their
+processing with subsequent reads. `read_concurrency` controls article processing;
+`io_concurrency` and `io_chunk_size` are forwarded for backend-managed I/O.
+Supported HTTP backends can reuse one GET; explicit splitting options may use
+chunked/concurrent requests. Consume partitions incrementally: collecting their
+openers would retain all article payloads. Shared-stream discovery is marked for
+the existing multi-file planner budget; plain accessor `open()` is sequential.
 
-Storage is opened through `open_sequential`, allowing supported HTTP/object
-backends to reuse one response without a HEAD request. Explicit byte options,
-including `io_concurrency` and `io_chunk_size`, are forwarded unchanged and may
-select backend-managed chunked/concurrent I/O. `read_concurrency` controls article
-processing; it no longer creates independent article range downloads. Input is
-consumed in physical TAR order; article payloads come from the same input instead
-of separate per-article range requests. Shared-stream discovery
-is marked for enclosing multi-file planners to preserve their file-level budget.
-
-The caller must consume through EOF before committing results. A later malformed
-header, truncated body or storage failure can follow earlier emitted articles;
-errors propagate instead of returning a silently shortened shard. Immutable/pinned
-inputs remain caller-owned. Raw archive scans, month/distribution scans and the
-generic random-access `TarArchive` API are unchanged. This change does not fix
-full-package LaTeX buffering or non-TeX error policy.
+Later malformed headers or storage errors remain fatal. Consume through EOF
+before committing results. Raw scans, month scans and random-access `TarArchive`
+are unchanged. Compressed article buffering, inner-package expansion and
+non-TeX policy remain separate work.
