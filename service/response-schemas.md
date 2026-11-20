@@ -80,5 +80,7 @@ PDF, LaTeX and caller-supplied XML shards use one
 `records().content(format)`. `data: LargeBinary` holds content bytes in every
 format. Content has ten fields, including nullable `metadata: Struct` with the full
 arXivRaw OAI record schema. Current content readers leave that column null;
-this schema change does not fetch or join metadata. Raw archive/artifact access
+this schema change does not fetch or join metadata. See the
+[complete metadata field reference](arxiv.md#exact-fields-of-the-content-metadata-struct-0160)
+for all nested fields, types and nullability. Raw archive/artifact access
 and parsed OAI metadata are separate contracts.

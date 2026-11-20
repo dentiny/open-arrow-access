@@ -440,6 +440,91 @@ reserves the column only: current content readers emit null metadata and do not
 fetch or join OAI records. `content_schema()` defines the same schema for all
 three formats.
 
+### Exact fields of the content `metadata` struct (0.16.0)
+
+`metadata` contains the **whole OAI record**, including its header; it is not a
+flat article struct. The literal Arrow field names retain namespace prefixes,
+colons, hyphens and attribute markers. The following tree lists every field in
+schema order. `?` means nullable; a field without `?` is non-null when its parent
+struct or list element exists.
+
+```text
+metadata: Struct?
+├── oai:header: Struct
+│   ├── oai:identifier: Utf8?
+│   ├── oai:datestamp: Utf8?
+│   ├── @status: Utf8?
+│   └── oai:setSpec: List<Utf8?>?
+└── oai:metadata: Struct?
+    └── arxiv:arXivRaw: Struct?
+        ├── arxiv:id: Utf8?
+        ├── arxiv:submitter: Utf8?
+        ├── arxiv:title: Utf8?
+        ├── arxiv:authors: Utf8?
+        ├── arxiv:categories: Utf8?
+        ├── arxiv:comments: Utf8?
+        ├── arxiv:proxy: Utf8?
+        ├── arxiv:report-no: Utf8?
+        ├── arxiv:acm-class: Utf8?
+        ├── arxiv:msc-class: Utf8?
+        ├── arxiv:journal-ref: Utf8?
+        ├── arxiv:doi: Utf8?
+        ├── arxiv:license: Utf8?
+        ├── arxiv:abstract: Utf8?
+        ├── @xsi:schemaLocation: Utf8?
+        └── arxiv:version: List<item: Struct>?
+            ├── @version: Utf8?
+            ├── arxiv:date: Utf8?
+            ├── arxiv:size: Utf8?
+            └── arxiv:source_type: Utf8?
+```
+
+The `oai:setSpec` list's Arrow item field is named `oai:setSpec` and is
+nullable. The `arxiv:version` list's item field is named `item` and is a
+non-null struct; all four fields inside each version are nullable.
+
+| Field / parent | Meaning |
+| --- | --- |
+| `oai:header.oai:identifier` | OAI record identifier, distinct from the article's `arxiv:id` |
+| `oai:header.oai:datestamp` | OAI record datestamp used for harvesting updates |
+| `oai:header.@status` | OAI header status, such as `deleted`, when supplied |
+| `oai:header.oai:setSpec` | Repeated OAI set memberships |
+| `arxiv:id` under `oai:metadata.arxiv:arXivRaw` | Article identifier retained as text, including leading zeros or legacy spelling |
+| `arxiv:submitter` | Submitter text |
+| `arxiv:title` | Article title |
+| `arxiv:authors` | Original author text; not a list of normalized author objects |
+| `arxiv:categories` | Original category text; not a list of category objects |
+| `arxiv:comments` | Author comments |
+| `arxiv:proxy` | Proxy submission text |
+| `arxiv:report-no` | Report number text |
+| `arxiv:acm-class` | ACM classification text |
+| `arxiv:msc-class` | Mathematics Subject Classification text |
+| `arxiv:journal-ref` | Journal reference text |
+| `arxiv:doi` | DOI text; not a normalized DOI list |
+| `arxiv:license` | License value supplied by arXiv |
+| `arxiv:abstract` | Abstract text |
+| `@xsi:schemaLocation` | XML schema-location attribute on `arxiv:arXivRaw` |
+| `arxiv:version[].@version` | Version label supplied in the XML attribute |
+| `arxiv:version[].arxiv:date` | Original version date text |
+| `arxiv:version[].arxiv:size` | Original version size text; not parsed as a numeric byte count |
+| `arxiv:version[].arxiv:source_type` | Original version source-type text |
+
+All scalar values above are Arrow **`Utf8`**, not `LargeUtf8`, numeric, date or
+list values. Missing optional scalar values are null. Set memberships and
+version history retain list types even with one entry; an existing container
+with no matching entries yields an empty list. The namespace URI selects XML
+fields, while the Arrow names shown above use the fixed `oai`, `arxiv` and `xsi`
+prefixes regardless of the input XML's prefix spelling.
+
+In **0.16.0 content output**, the entire top-level `metadata` value is currently
+null for every row. The schema reserves this shape; content scans do not fetch
+or join OAI records. A null parent does not imply that its non-null child fields
+are materialized. Separately harvested typed OAI records have `oai:header` and
+`oai:metadata` as their top-level columns, without the outer content `metadata`
+wrapper. Deleted OAI records retain their header and have null `oai:metadata`.
+The legacy raw-PDF snapshot join uses the caller's snapshot schema instead of
+this reserved content schema.
+
 `data_type` is a separate top-level string column alongside `data`; the two are
 not wrapped in a Struct. It tags each row's binary payload, so consumers need not
 infer its representation from the Arrow binary type. The existing `format`
@@ -520,23 +605,21 @@ MD5 and membership cannot be checked when the manifest is intentionally bypassed
 
 ## Parallel content reads inside a single shard
 
-For `records().content(format)` with an explicit shard, each regular outer TAR
-member is now a native scan partition. `CrawlAccessor` / `ParallelReadLayer`
-bounds the number of active member readers and decoders; conversion's existing
-`options.read_concurrency` controls that same executor. Each member task owns an
-independent range reader, then decodes its gzip/package and emits content rows.
-Members are not read through cloned `TarArchive::open_entry` readers, whose
-shared seek adapter serializes reads. Known whole-object length is forwarded
-as a request hint so OpenDAL does not issue a HEAD for every member.
+For `records().content(format)` with an explicit shard, `open_sequential` and
+`TarStream` read one input and yield an owned partition per regular article.
+There is no upfront header index or per-article storage reopen. The first article
+can be processed before later headers arrive; physical entry indices and names
+are preserved.
 
-Discovery first scans TAR headers to validate and record payload ranges; it
-must finish before member tasks begin. This adds serial header-range requests
-and first-result latency, rather than promising that range mode is always
-faster than one sequential GET. Use immutable/pinned shards: the length hint
-is not a checksum or object-version guarantee. Ranged, known-length byte access
-is required and unsupported backends fail rather than silently serializing.
-Raw archive scans and month/distribution scans retain their sequential-per-TAR
-behavior. Plain accessor `open()` remains sequential; compose the shared crawl
-executor to execute member partitions concurrently. Admission is per member,
-so peak package-decoding memory grows with the chosen concurrency. This change
-does not fix full-package buffering or non-TeX error policy.
+`CrawlAccessor` / `ParallelReadLayer` bounds resident articles and overlaps their
+processing with subsequent reads. `read_concurrency` controls article processing;
+`io_concurrency` and `io_chunk_size` are forwarded for backend-managed I/O.
+Supported HTTP backends can reuse one GET; explicit splitting options may use
+chunked/concurrent requests. Consume partitions incrementally: collecting their
+openers would retain all article payloads. Shared-stream discovery is marked for
+the existing multi-file planner budget; plain accessor `open()` is sequential.
+
+Later malformed headers or storage errors remain fatal. Consume through EOF
+before committing results. Raw scans, month scans and random-access `TarArchive`
+are unchanged. Compressed article buffering, inner-package expansion and
+non-TeX policy remain separate work.

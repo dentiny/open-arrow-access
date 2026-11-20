@@ -178,13 +178,14 @@ metadata/license does not replace per-item rights from BHL tables/API. Record
 missing payloads, blank pages, failed reads and unresolved joins explicitly.
 No new OCR, language/license filtering, normalization or indexing is implied.
 
-## Proposed Arrow / Lance schema: one OCR page per row
+## Fixed Arrow / Lance page schema and value assignment
 
-**Design proposal, not implemented output.** The current binary attachment
-route emits one `data: LargeBinary` value for an entire selected attachment.
-The page schema below is the intended contract for a future OCR decoder and
-the resulting Lance dataset; adding this documentation enables no job option
-and does not migrate existing outputs.
+`page_schema()` defines the fixed output types below. `BhlPageRecord::into_batch()`
+assigns every caller-supplied value to its column, including the supplied
+metadata StructArray. Metadata is required and must contain one populated row
+matching the fixed 13-table / 104-field schema; null or mismatched metadata fails.
+This is a record/schema API only: existing readers do not acquire or join
+metadata automatically and are wired separately.
 
 | Column | Arrow type | Nullable | Meaning |
 | --- | --- | --- | --- |
@@ -196,7 +197,7 @@ and does not migrate existing outputs.
 | `source_path` | `LargeUtf8` | No | Original TAR member path or full AWS object URI |
 | `snapshot_id` | `Utf8` | No | Explicit source snapshot identity, e.g. `figshare-21422193-v24`; AWS uses a caller-assigned frozen-inventory ID |
 | `source_entry_index` | `UInt64` | Yes | Zero-based physical TAR header-entry ordinal, including directory headers in the count; null for individual AWS objects |
-| `metadata` | `Struct` ([complete definition below](#metadata-child-fields-tsv-profile)) | Yes | 13 declared TSV-derived children covering page/item/part/title, authors, identifiers, subjects, names and rights |
+| `metadata` | `Struct` ([complete definition below](#metadata-child-fields-tsv-profile)) | No | 13 declared TSV-derived children covering page/item/part/title, authors, identifiers, subjects, names and rights |
 
 The eight previously proposed content/identity columns are accompanied by
 `source_entry_index` to preserve repeated member names in an archive.
@@ -224,7 +225,7 @@ be reported explicitly rather than coerced to zero.
 
 ### Metadata child fields: TSV profile
 
-This proposal uses the **13 TSV tables actually listed under AWS data/**,
+This fixed schema uses the **13 TSV tables actually listed under AWS data/**,
 not guessed API response fields. All 104 source columns are enumerated below,
 with their original case-sensitive names. Table names become the struct/list
 children. `?` means nullable; list containers and list elements are non-null
@@ -369,7 +370,7 @@ metadata: Struct<
     DOI: LargeUtf8,
     CreationDate: LargeUtf8
   >>
->?
+>
 ```
 
 #### Join scope and cardinality

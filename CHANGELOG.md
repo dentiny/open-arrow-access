@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Stream arXiv bulk LaTeX package decoding from the existing Arrow buffer, filter attachments before body materialization and yield batches incrementally. Sequential TAR streams always drain their underlying input through EOF after end markers to surface decoder and source errors.
+- Stream explicit arXiv content shards once and yield owned article partitions incrementally, removing upfront header-range indexing and per-article storage reopens while overlapping input reads with bounded article processing.
 
 ## 0.16.0 - 2026-11-20
 
