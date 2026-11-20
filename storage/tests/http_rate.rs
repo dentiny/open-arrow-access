@@ -120,3 +120,18 @@ async fn cancelled_waiter_does_not_hold_the_shared_request_gate() {
 fn zero_request_interval_is_rejected() {
     assert!(HttpReadRateLimitLayer::new(Duration::ZERO).is_err());
 }
+
+#[tokio::test]
+async fn direct_requests_share_admission_with_layered_operators() {
+    let interval = Duration::from_millis(40);
+    let rate = HttpReadRateLimitLayer::new(interval).unwrap();
+    let started = Instant::now();
+    rate.wait().await;
+    operator(Server::default(), rate.clone())
+        .read("body")
+        .await
+        .unwrap();
+    more_asserts::assert_ge!(started.elapsed(), interval);
+    rate.wait().await;
+    more_asserts::assert_ge!(started.elapsed(), interval * 2);
+}

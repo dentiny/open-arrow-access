@@ -568,7 +568,8 @@ mismatched and failed responses fail the scan, even if metadata is projected awa
 
 Services and their clones share a 1,024-record FIFO cache, including concurrent
 lookups for the same article. Public content lookups share a process-wide serial
-gate with a three-second gap. Retry and timeout policies come from the caller
+gate using the storage layer's request admission, with at least three seconds
+between request starts. Retry and timeout policies come from the caller
 through the shared `Connection`; providers do not install their own storage config.
 Other clients/processes need separate coordination under the
 [arXiv rate limit](https://info.arxiv.org/help/api/tou.html).

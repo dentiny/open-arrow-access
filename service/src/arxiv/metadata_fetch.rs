@@ -5,12 +5,9 @@ use std::{
     time::Duration,
 };
 
-use futures::{
-    TryStreamExt,
-    lock::{Mutex, MutexGuard},
-};
+use futures::{TryStreamExt, lock::Mutex};
 use open_arrow_access_core::{Accessor, ReadRequest, Result, into_stream};
-use tokio::time::{Instant, sleep_until};
+use open_arrow_access_storage::HttpReadRateLimitLayer;
 
 use super::{ArxivMetadataIndex, error, id, validation};
 use crate::{
@@ -22,28 +19,25 @@ use crate::{
 const REQUEST_INTERVAL: Duration = Duration::from_secs(3);
 const CACHE_SIZE: usize = 1024;
 
-// Preserve the gap after the final attempt, including retries and cancellation.
-struct RequestPermit<'a>(MutexGuard<'a, Option<Instant>>);
-impl<'a> RequestPermit<'a> {
-    async fn acquire(gate: &'a Mutex<Option<Instant>>) -> Self {
-        let next = gate.lock().await;
-        if let Some(deadline) = *next {
-            sleep_until(deadline).await;
-        }
-        Self(next)
-    }
-}
-
-impl Drop for RequestPermit<'_> {
-    fn drop(&mut self) {
-        *self.0 = Some(Instant::now() + REQUEST_INTERVAL);
-    }
-}
-
-#[derive(Default)]
 pub(super) struct MetadataResolver {
     state: Mutex<State>,
-    gate: Mutex<Option<Instant>>,
+    gate: Mutex<HttpReadRateLimitLayer>,
+}
+
+impl Default for MetadataResolver {
+    fn default() -> Self {
+        Self {
+            state: Mutex::default(),
+            gate: request_gate(),
+        }
+    }
+}
+
+fn request_gate() -> Mutex<HttpReadRateLimitLayer> {
+    Mutex::new(
+        HttpReadRateLimitLayer::new(REQUEST_INTERVAL)
+            .expect("the arXiv request interval is positive"),
+    )
 }
 
 #[derive(Default)]
@@ -112,13 +106,15 @@ impl MetadataResolver {
         )?;
         // Public arXiv requests share one process-wide gate across services.
         // Mirrors/custom endpoints have a separate gate per resolver.
-        static PUBLIC_GATE: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+        static PUBLIC_GATE: OnceLock<Mutex<HttpReadRateLimitLayer>> = OnceLock::new();
         let gate = if connection.origin().host_str() == Some("oaipmh.arxiv.org") {
-            PUBLIC_GATE.get_or_init(Mutex::default)
+            PUBLIC_GATE.get_or_init(request_gate)
         } else {
             &self.gate
         };
-        let _permit = RequestPermit::acquire(gate).await;
+        // Serialize full record fetches; the shared storage layer owns timing.
+        let rate = gate.lock().await;
+        rate.wait().await;
         service.get_record(&id::oai_identifier(article)?).await
     }
 }
