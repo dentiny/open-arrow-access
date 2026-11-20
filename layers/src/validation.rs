@@ -336,21 +336,11 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
     for change in changes {
         let name = match change {
             ColumnEvolution::ExtractNestedField { path, name } => {
-                validate_evolution_name(name)?;
-                validate_evolution_specs(&[ColumnEvolution::RemoveNestedField {
-                    path: path.clone(),
-                }])?;
-                &path[0]
+                validate_nested_path(path)?;
+                name
             }
             ColumnEvolution::RemoveNestedField { path } => {
-                if path.len() < 2 {
-                    return Err(crate::error::invalid_evolution(
-                        "nested field path requires a column and at least one child",
-                    ));
-                }
-                for name in path {
-                    validate_evolution_name(name)?;
-                }
+                validate_nested_path(path)?;
                 &path[0]
             }
             ColumnEvolution::RemoveColumn { name } => name,
@@ -388,6 +378,63 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
             }
         };
         validate_evolution_name(name)?;
+    }
+    Ok(())
+}
+
+fn validate_nested_path(path: &[String]) -> Result<()> {
+    if path.len() < 2 {
+        return Err(crate::error::nested_path_too_short());
+    }
+    path.iter()
+        .try_for_each(|name| validate_evolution_name(name))
+}
+
+/// Validate a literal struct path once at open, returning indices and the
+/// selected field with nullability inherited from every parent.
+pub(crate) fn resolve_nested_field(
+    root: &arrow_schema::FieldRef,
+    path: &[String],
+) -> Result<(Vec<usize>, arrow_schema::FieldRef)> {
+    let mut field = root.clone();
+    let mut nullable = field.is_nullable();
+    let mut indices = Vec::with_capacity(path.len());
+    for name in path {
+        if field.metadata().contains_key("ARROW:extension:name") {
+            return Err(crate::error::nested_extension_field(field.name()));
+        }
+        let DataType::Struct(children) = field.data_type() else {
+            return Err(crate::error::nested_non_struct(field.name()));
+        };
+        let mut matches = children
+            .iter()
+            .enumerate()
+            .filter(|(_, child)| child.name() == name);
+        let (index, child) = matches
+            .next()
+            .ok_or_else(|| crate::error::nested_field_not_unique(name))?;
+        if matches.next().is_some() {
+            return Err(crate::error::nested_field_not_unique(name));
+        }
+        indices.push(index);
+        field = child.clone();
+        nullable |= field.is_nullable();
+    }
+    Ok((
+        indices,
+        std::sync::Arc::new(field.as_ref().clone().with_nullable(nullable)),
+    ))
+}
+
+pub(crate) fn validate_nested_extraction(field: &Field) -> Result<()> {
+    // These types have no top-level validity bitmap for a null parent.
+    if field.is_nullable()
+        && matches!(
+            field.data_type(),
+            DataType::Union(..) | DataType::RunEndEncoded(..)
+        )
+    {
+        return Err(crate::error::nullable_nested_extraction(field.name()));
     }
     Ok(())
 }
