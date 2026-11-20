@@ -136,6 +136,11 @@ window, including resumed tables; it does not promise an atomic AWS export.
 Keep the published SQLite file immutable and accessible at the identical path on
 every worker. Jobs fail on missing/incomplete snapshots or fingerprint mismatch.
 
+Page projections resolve before OCR reads. Selecting `page_id`, metadata or other
+columns without `data` performs no OCR object opens or body downloads; only the
+selected Arrow columns are built. An empty projection preserves one row per page.
+Selecting `data` retains original bytes, storage I/O options and read failures.
+
 ## Validation
 
 `service/tests/bhl_open_data.rs` verifies scoped discovery, explicit cached
