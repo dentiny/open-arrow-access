@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Accept arXiv manifest sizes that count member payloads without TAR framing; retain lower-bound length and TAR structural/truncation validation.
+- Bind arXivRaw metadata to its published string/struct/list schema, preserving modern and legacy IDs and stable optional/version fields instead of sampled numeric inference. Full-record output uses stable `arxiv:` field prefixes; protocol-header-only mapping remains unchanged.
+- Add an overridable full-record mapping hook for OAI providers, keeping sampled inference as the default for other providers.
+
 ## 0.12.1 - 2026-11-19
 
 - Move S2ORC v2 paper body text from `body.text` to top-level `text: LargeUtf8` by default; retain body annotations and independent bibliography text (typed-output schema change).

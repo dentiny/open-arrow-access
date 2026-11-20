@@ -31,7 +31,10 @@ existing empty manifest or a month with no matches returns an empty vector.
 Permission, authentication, I/O and malformed-manifest errors are propagated,
 even if the other distribution is available. If both exist, both are included;
 use `Pdf` or `Source` to select only one representation. MD5 and item counts
-are metadata, not verified content.
+are metadata, not verified content. The manifest size may be the sum of member
+payload bytes, excluding TAR framing; it is not an exact object length. A known
+object length smaller than this size is rejected, while TAR headers, alignment,
+end markers and stream truncation are checked by the TAR reader.
 `TarStream::next_entry()` returns `TarEntryReader { entry, reader }`; the body
 contains original PDF/source-member bytes, not Arrow rows.
 

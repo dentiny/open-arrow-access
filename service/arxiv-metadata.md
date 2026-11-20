@@ -55,3 +55,29 @@ header columns with a fixed schema, including empty pages, use
 [default Arrow record format](oai-provider.md#default-arrow-records).
 
 Sources: [provider metadata documentation](https://info.arxiv.org/help/oa/index.html), [shared OAI-PMH guide](oai-protocol.md).
+
+## Typed arXivRaw records
+
+`page.records(service.inferred_record_format())` uses the provider's fixed
+[arXivRaw XSD](https://oaipmh.arxiv.org/OAI/arXivRaw.xsd) mapping instead of
+sampling scalar types. Article IDs (including leading zeros and legacy IDs),
+DOIs, dates, titles, authors and other schema-defined text remain `Utf8`.
+The output contains `oai:header` and nullable `oai:metadata` structs; the latter
+contains `arxiv:arXivRaw`. Header set memberships and raw version history are
+always lists, including when only one value is present. Version entries retain
+`@version`, `arxiv:date`, `arxiv:size` and `arxiv:source_type`. Schema-defined
+optional fields are nullable. Deleted headers retain a null metadata struct;
+empty pages expose the same full schema. The XML namespace URI, not the source
+prefix spelling, selects each field.
+
+This changes the former content-dependent inferred schema: arXiv field names
+now use the stable `arxiv:` prefix rather than a sampled `ns0:` alias. It avoids
+numeric-looking article IDs being converted to floats and late legacy IDs
+failing decoding after the inference sample. All fields in the published XSD
+are mapped, plus the optional schema-location attribute; newly introduced
+upstream fields require a mapping update. Original page XML remains available.
+`record_format()` still provides only the standard protocol-header columns.
+Other OAI providers continue to use sampled inference unless they override the
+new `OaiProvider::inferred_record_format` hook. Harvesting full metadata uses
+`service.harvest().with_format(service.inferred_record_format())`; persisting
+and reconciling a complete snapshot remains caller-owned.
