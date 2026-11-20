@@ -1,8 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 - 2026-11-20
 
 - Append non-null `data_type: LargeUtf8` to the shared arXiv PDF/LaTeX/XML content schema, tagging each row's unchanged `data: LargeBinary` payload; retain the existing `format` column. Consumers of the previous eight-field content schema must accept this ninth field.
+
+- Add provider-independent typed attachment cells and `AttachmentFallbackLayer` for per-cell primary/fallback selection; arXiv provider wiring remains separate.
+- Expose pinned Semantic Scholar dataset manifests and their native file entries.
+- Release all 8 public workspace crates at 0.15.0 with matching internal dependency requirements.
 
 ## 0.14.1 - 2026-11-20
 
