@@ -40,3 +40,12 @@ pub(super) fn open_data_object_required() -> Error {
 fn invalid_open_data(message: &str) -> Error {
     Error::new(ErrorKind::InvalidInput, "bhl_open_data", message)
 }
+
+pub(super) fn page_record(source: arrow_schema::ArrowError) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "bhl_page_record",
+        source.to_string(),
+    )
+    .with_source(source)
+}
