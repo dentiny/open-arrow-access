@@ -7,7 +7,7 @@ mod join;
 use super::{BhlPageIdentity, page_schema};
 use arrow_array::StructArray;
 use arrow_schema::{DataType, Fields};
-pub use index::{BhlMetadataInfo, SourceInfo};
+pub use index::{BhlMetadataIndex, BhlMetadataInfo, BhlMetadataRow, SourceInfo};
 use open_arrow_access_core::{ByteAccessor, ObjectRef, Result};
 use serde::Serialize;
 use std::{
@@ -81,9 +81,7 @@ pub async fn prepare<A: ByteAccessor + 'static>(
 }
 /// Inspect the completed read-only snapshot without fetching source tables.
 pub fn inspect(path: &Path) -> Result<BhlMetadataInfo> {
-    index::Store::open(path)
-        .map(|store| store.info)
-        .map_err(Into::into)
+    BhlMetadataIndex::open(path).map(|store| store.info)
 }
 
 #[derive(Default, Serialize)]
@@ -101,7 +99,7 @@ impl BhlPageMetadata {
     /// Indexed local/NFS I/O. Call from a blocking worker, not a Tokio reactor.
     /// Both the preparation format and caller's expected fingerprint are checked.
     pub fn load(path: &Path, fingerprint: &str, keys: &[ObjectRef]) -> Result<Self> {
-        let mut store = index::Store::open(path).map_err(open_arrow_access_core::Error::from)?;
+        let mut store = BhlMetadataIndex::open(path)?;
         if store.info.fingerprint != fingerprint {
             return Err(error::invalid("metadata snapshot fingerprint mismatch").into());
         }
@@ -152,3 +150,6 @@ impl BhlPageMetadata {
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod index_tests;

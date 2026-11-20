@@ -5,7 +5,7 @@ use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::temp_fs;
 use std::{collections::BTreeMap, io::Write};
 
-async fn fixture(extra: bool) -> (tempfile::TempDir, std::path::PathBuf, BhlMetadataInfo) {
+async fn fixture() -> (tempfile::TempDir, std::path::PathBuf, BhlMetadataInfo) {
     let rows: BTreeMap<&str, Vec<Vec<(&str, &str)>>> = BTreeMap::from([
         (
             "title",
@@ -96,9 +96,6 @@ async fn fixture(extra: bool) -> (tempfile::TempDir, std::path::PathBuf, BhlMeta
                     .join("\t")
                     + "\n");
             }
-            if extra && table.name == "title" {
-                content += &format!("1{}\n", "\t".repeat(table.fields.len() - 1));
-            }
             let mut gzip = GzEncoder::new(Vec::new(), Compression::fast());
             gzip.write_all(content.as_bytes()).unwrap();
             (
@@ -115,20 +112,6 @@ async fn fixture(extra: bool) -> (tempfile::TempDir, std::path::PathBuf, BhlMeta
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("metadata.sqlite");
     let info = prepare(OpenDalAccessor::new(operator), "s3://bhl-open-data/", &path).await;
-    if extra {
-        assert!(info.is_err());
-        assert!(!path.exists());
-        return (
-            root,
-            path,
-            BhlMetadataInfo {
-                version: 0,
-                source_root: String::new(),
-                fingerprint: String::new(),
-                sources: BTreeMap::new(),
-            },
-        );
-    }
     (root, path, info.unwrap())
 }
 fn cell<'a>(metadata: &'a StructArray, table: &str, field: &str) -> &'a str {
@@ -146,8 +129,8 @@ fn cell<'a>(metadata: &'a StructArray, table: &str, field: &str) -> &'a str {
         .value(0)
 }
 #[tokio::test]
-async fn gzip_index_joins_all_sources_preserves_cells_and_reports_gaps() {
-    let (_root, path, info) = fixture(false).await;
+async fn joins_indexed_metadata_preserves_rights_and_reports_gaps() {
+    let (_root, path, info) = fixture().await;
     assert_eq!(inspect(&path).unwrap().fingerprint, info.fingerprint);
     assert_eq!(info.sources.len(), 13);
     let keys = [
@@ -206,22 +189,4 @@ async fn gzip_index_joins_all_sources_preserves_cells_and_reports_gaps() {
         )
         .is_err()
     );
-}
-#[tokio::test]
-async fn duplicate_numeric_singleton_keys_are_rejected() {
-    fixture(true).await;
-}
-
-#[tokio::test]
-async fn missing_source_table_never_publishes_a_snapshot() {
-    let (_source, operator) = temp_fs(&[]);
-    let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("incomplete.sqlite");
-    assert!(
-        prepare(OpenDalAccessor::new(operator), "s3://bhl-open-data/", &path)
-            .await
-            .is_err()
-    );
-    assert!(!path.exists());
-    assert!(inspect(&path.with_extension("building.sqlite")).is_err());
 }

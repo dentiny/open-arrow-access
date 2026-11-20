@@ -1,6 +1,6 @@
 use super::{
     error::Result,
-    index::{Row, Store},
+    index::{BhlMetadataIndex as Store, BhlMetadataRow as Row},
     tables,
 };
 use crate::bhl::{BhlPageIdentity, page_schema};

@@ -1,9 +1,29 @@
 use super::*;
 use crate::arxiv::{ArxivContentFormat, ArxivKind, ArxivService};
+use crate::common::Connection;
 use open_arrow_access_core::{AccessorExt, ByteReadOptions, ErrorKind};
 use open_arrow_access_layers::ParallelReadLayer;
-use open_arrow_access_test_support::{MemoryAccessor, fixture};
+use open_arrow_access_test_support::{MemoryAccessor, fixture, http::HttpFixture};
 use std::{num::NonZeroUsize, sync::atomic::Ordering};
+
+async fn metadata_connection(http: &HttpFixture) -> Connection {
+    for (id, file) in [
+        ("2410.00001", "metadata-record.xml"),
+        ("2410.00002", "metadata-second.xml"),
+    ] {
+        let path = format!(
+            "/oai?verb=GetRecord&metadataPrefix=arXivRaw&identifier=oai%3AarXiv.org%3A{id}"
+        );
+        http.respond(
+            &path,
+            http::StatusCode::OK,
+            fixture!("arxiv-content", file).await,
+        );
+    }
+    Connection::new(http.endpoint())
+        .unwrap()
+        .with_context(http.context())
+}
 
 #[tokio::test]
 async fn first_article_precedes_later_discovery_errors() {
@@ -16,7 +36,9 @@ async fn first_article_precedes_later_discovery_errors() {
         io_concurrency: NonZeroUsize::new(2).unwrap(),
         io_chunk_size: NonZeroUsize::new(128),
     };
+    let http = HttpFixture::new();
     let records = ArxivService::new(source)
+        .with_metadata_connection(metadata_connection(&http).await)
         .records()
         .content(ArxivContentFormat::Latex);
     let mut reader = records
@@ -44,7 +66,6 @@ async fn first_article_precedes_later_discovery_errors() {
 #[tokio::test]
 async fn http_shard_uses_one_get_for_parallel_content() {
     use open_arrow_access_storage::OpenDalAccessor;
-    use open_arrow_access_test_support::http::HttpFixture;
     let http = HttpFixture::new();
     http.respond(
         "/src/one.tar",
@@ -56,6 +77,7 @@ async fn http_shard_uses_one_get_for_parallel_content() {
             .unwrap()
             .with_context(http.context());
     let records = ArxivService::new(OpenDalAccessor::new(operator))
+        .with_metadata_connection(metadata_connection(&http).await)
         .records()
         .content(ArxivContentFormat::Latex)
         .layer(ParallelReadLayer::new(
@@ -68,11 +90,15 @@ async fn http_shard_uses_one_get_for_parallel_content() {
         .unwrap();
     let mut rows = 0;
     while let Some(batch) = reader.next().await.unwrap() {
+        assert_eq!(batch["metadata"].null_count(), 0);
         rows += batch.num_rows();
     }
     assert_eq!(rows, 2);
     let requests = http.requests();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].method, http::Method::GET);
-    assert_eq!(requests[0].path, "/src/one.tar");
+    assert_eq!(requests.len(), 3); // One shard GET, two serialized OAI lookups.
+    assert!(requests.iter().all(|r| r.method == http::Method::GET));
+    assert_eq!(
+        requests.iter().filter(|r| r.path == "/src/one.tar").count(),
+        1
+    );
 }
