@@ -594,23 +594,21 @@ MD5 and membership cannot be checked when the manifest is intentionally bypassed
 
 ## Parallel content reads inside a single shard
 
-For `records().content(format)` with an explicit shard, each regular outer TAR
-member is now a native scan partition. `CrawlAccessor` / `ParallelReadLayer`
-bounds the number of active member readers and decoders; conversion's existing
-`options.read_concurrency` controls that same executor. Each member task owns an
-independent range reader, then decodes its gzip/package and emits content rows.
-Members are not read through cloned `TarArchive::open_entry` readers, whose
-shared seek adapter serializes reads. Known whole-object length is forwarded
-as a request hint so OpenDAL does not issue a HEAD for every member.
+For `records().content(format)` with an explicit shard, `open_sequential` and
+`TarStream` read one input and yield an owned partition per regular article.
+There is no upfront header index or per-article storage reopen. The first article
+can be processed before later headers arrive; physical entry indices and names
+are preserved.
 
-Discovery first scans TAR headers to validate and record payload ranges; it
-must finish before member tasks begin. This adds serial header-range requests
-and first-result latency, rather than promising that range mode is always
-faster than one sequential GET. Use immutable/pinned shards: the length hint
-is not a checksum or object-version guarantee. Ranged, known-length byte access
-is required and unsupported backends fail rather than silently serializing.
-Raw archive scans and month/distribution scans retain their sequential-per-TAR
-behavior. Plain accessor `open()` remains sequential; compose the shared crawl
-executor to execute member partitions concurrently. Admission is per member,
-so peak package-decoding memory grows with the chosen concurrency. This change
-does not fix full-package buffering or non-TeX error policy.
+`CrawlAccessor` / `ParallelReadLayer` bounds resident articles and overlaps their
+processing with subsequent reads. `read_concurrency` controls article processing;
+`io_concurrency` and `io_chunk_size` are forwarded for backend-managed I/O.
+Supported HTTP backends can reuse one GET; explicit splitting options may use
+chunked/concurrent requests. Consume partitions incrementally: collecting their
+openers would retain all article payloads. Shared-stream discovery is marked for
+the existing multi-file planner budget; plain accessor `open()` is sequential.
+
+Later malformed headers or storage errors remain fatal. Consume through EOF
+before committing results. Raw scans, month scans and random-access `TarArchive`
+are unchanged. Compressed article buffering, inner-package expansion and
+non-TeX policy remain separate work.

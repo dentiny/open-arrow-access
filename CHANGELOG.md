@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Stream explicit arXiv content shards once and yield owned article partitions incrementally, removing upfront header-range indexing and per-article storage reopens while overlapping input reads with bounded article processing.
+
 ## 0.16.0 - 2026-11-20
 
 - Append nullable `metadata: Struct` to the common arXiv content schema, reusing the full arXivRaw OAI record schema. Current content readers leave the column null; metadata fetching and joining are not part of this schema change.
