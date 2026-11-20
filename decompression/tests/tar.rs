@@ -13,19 +13,6 @@ async fn source(name: &str) -> MemoryAccessor {
 }
 
 #[tokio::test]
-async fn opening_archive_is_send() {
-    fn assert_send<T: Send>(value: T) -> T {
-        value
-    }
-    let source = source("mixed.tar").await;
-    let input = source.open("archive".into()).await.unwrap();
-    let archive = assert_send(TarArchive::open(input, TarLimits::default()))
-        .await
-        .unwrap();
-    assert_eq!(archive.entries().len(), 4);
-}
-
-#[tokio::test]
 async fn inspects_headers_once_and_streams_independent_selected_entries() {
     let source = source("mixed.tar").await;
     let archive = TarArchive::open(

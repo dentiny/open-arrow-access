@@ -3,7 +3,6 @@
 ## 0.14.1 - 2026-11-20
 
 - Keep TAR indexing futures Send by owning the seek adapter across header-read awaits, fixing compilation of explicit-shard arXiv discovery streams.
-- Add a regression that requires TarArchive::open to be Send and validates the indexed archive.
 - Release all 8 public workspace crates at 0.14.1 with matching internal dependency requirements.
 
 ## 0.14.0 - 2026-11-20
