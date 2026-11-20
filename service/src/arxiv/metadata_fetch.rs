@@ -10,7 +10,6 @@ use futures::{
     lock::{Mutex, MutexGuard},
 };
 use open_arrow_access_core::{Accessor, ReadRequest, Result, into_stream};
-use open_arrow_access_storage::{RetryConfig, StorageConfig, TimeoutConfig};
 use tokio::time::{Instant, sleep_until};
 
 use super::{ArxivMetadataIndex, error, id, validation};
@@ -59,7 +58,7 @@ struct State {
 impl State {
     fn connection(&mut self) -> Result<&Connection> {
         if self.connection.is_none() {
-            self.connection = Some(default_connection()?);
+            self.connection = Some(Connection::new(ArxivMetadata::ORIGIN)?);
         }
         Ok(self.connection.as_ref().unwrap())
     }
@@ -72,17 +71,6 @@ impl State {
         self.order.push_back(key.clone());
         self.cache.insert(key, index);
     }
-}
-
-fn default_connection() -> Result<Connection> {
-    Connection::new(ArxivMetadata::ORIGIN)?.with_http_config(StorageConfig {
-        retry: Some(RetryConfig {
-            min_delay: REQUEST_INTERVAL,
-            jitter: false,
-            ..Default::default()
-        }),
-        timeout: Some(TimeoutConfig::default()),
-    })
 }
 
 impl std::fmt::Debug for MetadataResolver {
