@@ -1,5 +1,5 @@
 //! Explicit article representations over caller-owned HTTP or mirror storage.
-use super::{ArxivService, error, validation};
+use super::{ArxivService, error};
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
@@ -37,7 +37,7 @@ impl ArxivArticleFormat {
 /// An explicit article/version and representation. No format fallback is implicit.
 #[derive(Clone, Debug)]
 pub struct ArxivArticle {
-    /// Canonical ID, optionally versioned, e.g. `2410.00001v2` or `hep-th/9901001v1`.
+    /// Modern ID, optionally versioned, e.g. `2410.00001v2`.
     pub id: String,
     pub format: ArxivArticleFormat,
 }
@@ -62,12 +62,15 @@ impl ArxivArticle {
         } else {
             id
         };
-        validation::validate_metadata_id(unversioned)?;
-        // Website routes require the slash for legacy IDs; bulk join keys do not.
-        if !unversioned.as_bytes()[0].is_ascii_digit() && !unversioned.contains('/') {
-            return Err(error::invalid(
-                "legacy article routes require category/number",
-            ));
+        let Some((month, number)) = unversioned.split_once('.') else {
+            return Err(error::invalid("expected modern arXiv article ID"));
+        };
+        if month.len() != 4
+            || !month.bytes().all(|b| b.is_ascii_digit())
+            || !matches!(number.len(), 4 | 5)
+            || !number.bytes().all(|b| b.is_ascii_digit())
+        {
+            return Err(error::invalid("expected modern arXiv article ID"));
         }
         Ok(format!("{}/{}", self.format.prefix(), id))
     }
