@@ -1,5 +1,7 @@
 //! arXiv bulk discovery, native article representations and source-package assets.
 
+mod latex;
+pub use latex::{ArxivLatexRecords, latex_schema};
 mod articles;
 mod error;
 pub use articles::{
