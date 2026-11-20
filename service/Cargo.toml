@@ -256,6 +256,3 @@ required-features = ["arxiv"]
 name = "arxiv_source_package"
 required-features = ["arxiv"]
 
-[[example]]
-name = "bhl_open_data"
-required-features = ["bhl"]

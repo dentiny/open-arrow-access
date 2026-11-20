@@ -124,14 +124,8 @@ A bounded live smoke check also read exactly two public AWS OCR objects through
 the anonymous operator and parallel file-set path: item 346951 / page 65077706 /
 sequence 14 and item 21356 / page 2839616 / sequence 127. It returned two rows
 and 5,659 original bytes without listing the corpus. This verifies those reads,
-not complete AWS/Figshare equivalence or sustained throughput. Reproduce from a
-source checkout with explicit keys:
-
-```sh
-cargo run -p open-arrow-access-service --example bhl_open_data --features bhl --locked -- \
-  ocr/item-346951/item-346951-65077706-0014.txt \
-  ocr/item-021356/item-021356-02839616-0127.txt
-```
+not complete AWS/Figshare equivalence or sustained throughput. The standalone
+smoke-check example used for that validation has since been removed.
 
 See [BHL service](bhl.md), [resolved file sets](remote-files.md) and
 [parallel reading](../docs/parallel-read.md) for the shared contracts.
