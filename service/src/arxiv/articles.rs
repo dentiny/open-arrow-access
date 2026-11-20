@@ -1,17 +1,14 @@
 //! Explicit article representations over caller-owned HTTP or mirror storage.
-use super::{ArxivService, error, validation};
+use super::{ArxivService, validation};
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability, ObjectRef,
     OrderRequirement, ReadOptions, ReadOptionsProvider, RecordBatchBuilder, RecordCapability,
     RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, SchemaRef, StreamReader,
-    async_trait,
+    async_trait, read_all,
 };
-use std::{
-    num::NonZeroUsize,
-    sync::{Arc, OnceLock},
-};
+use std::sync::{Arc, OnceLock};
 
 /// Native article download routes, independent of the S3 bulk manifests.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -62,8 +59,6 @@ pub struct ArxivArticleReadRequest {
     pub articles: Vec<ArxivArticle>,
     pub options: ReadOptions,
     pub byte_options: ByteReadOptions,
-    /// Hard per-object buffering limit; defaults to 256 MiB.
-    pub max_bytes: NonZeroUsize,
 }
 impl ArxivArticleReadRequest {
     pub fn new(articles: Vec<ArxivArticle>) -> Self {
@@ -71,7 +66,6 @@ impl ArxivArticleReadRequest {
             articles,
             options: ReadOptions::default(),
             byte_options: ByteReadOptions::default(),
-            max_bytes: NonZeroUsize::new(256 * 1024 * 1024).unwrap(),
         }
     }
 }
@@ -115,33 +109,6 @@ impl<A> ArxivService<A> {
             storage: Arc::new(self.storage),
         }
     }
-}
-
-pub(super) async fn read_bounded(
-    mut input: Box<dyn ByteReader>,
-    max_bytes: usize,
-) -> Result<Vec<u8>> {
-    let object = input.metadata().source.clone();
-    let too_large =
-        || error::decode("arXiv payload exceeds configured max_bytes").with_object(object.as_ref());
-    if input
-        .metadata()
-        .content_length
-        .is_some_and(|n| n > max_bytes as u64)
-    {
-        return Err(too_large());
-    }
-    let mut output = Vec::new();
-    while let Some(chunk) = input.next().await? {
-        if chunk.is_empty() {
-            return Err(error::decode("empty arXiv byte chunk"));
-        }
-        if chunk.len() > max_bytes - output.len() {
-            return Err(too_large());
-        }
-        output.extend_from_slice(&chunk);
-    }
-    Ok(output)
 }
 
 #[async_trait]
@@ -194,7 +161,6 @@ where
                     let storage = storage.clone();
                     let options = request.options.clone();
                     let byte_options = request.byte_options;
-                    let max_bytes = request.max_bytes.get();
                     let schema = schema.clone();
                     open_arrow_access_core::scan_partition(async move {
                         let source = ObjectRef::new(locator.clone());
@@ -209,7 +175,7 @@ where
                                         .with_options(byte_options),
                                 )
                                 .await?;
-                            let data = read_bounded(input, max_bytes).await?;
+                            let data = read_all(input, "read_arxiv_article").await?;
                             let mut builder =
                                 RecordBatchBuilder::new(article_schema(), options.projection)?;
                             builder.push(|row| {
