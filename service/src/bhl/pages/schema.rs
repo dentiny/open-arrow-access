@@ -1,51 +1,186 @@
 use arrow_schema::{DataType, Field, Schema};
 use open_arrow_access_core::SchemaRef;
-use serde::Deserialize;
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, OnceLock},
-};
+use std::sync::{Arc, OnceLock};
 
-#[derive(Deserialize)]
-pub(super) struct TableProfile {
-    pub name: String,
-    pub columns: Vec<String>,
-    pub key: String,
-    pub single: bool,
+// Fixed BHL TSV source schema. Every cell retains its original lexical string.
+macro_rules! record {
+    ($($column:literal),+ $(,)?) => { DataType::Struct(vec![$(Field::new($column, DataType::LargeUtf8, false)),+].into()) };
+}
+macro_rules! many {
+    ($($column:literal),+ $(,)?) => { DataType::List(Arc::new(Field::new("item", record!($($column),+), false))) };
 }
 
-pub(super) fn profile() -> &'static [TableProfile] {
-    static PROFILE: OnceLock<Vec<TableProfile>> = OnceLock::new();
-    PROFILE.get_or_init(|| {
-        serde_json::from_str(include_str!("profile.json")).expect("static BHL profile")
-    })
-}
-
-pub(super) fn fields(table: &TableProfile) -> arrow_schema::Fields {
-    table
-        .columns
-        .iter()
-        .map(|name| Field::new(name, DataType::LargeUtf8, false))
-        .collect()
-}
-
-/// All 104 TSV columns remain lexical LargeUtf8 cells, under 13 named children.
+/// Fixed page schema, including the 13-table / 104-field metadata contract.
+/// The current page accessor emits null metadata; no metadata acquisition or join occurs.
 pub fn page_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
-            let metadata = profile()
-                .iter()
-                .map(|table| {
-                    let record = DataType::Struct(fields(table));
-                    let data_type = if table.single {
-                        record
-                    } else {
-                        DataType::List(Arc::new(Field::new("item", record, false)))
-                    };
-                    Field::new(&table.name, data_type, table.single)
-                })
-                .collect::<Vec<_>>();
+            let metadata = vec![
+                Field::new(
+                    "title",
+                    record!(
+                        "TitleID",
+                        "MARCBibID",
+                        "MARCLeader",
+                        "FullTitle",
+                        "ShortTitle",
+                        "PublicationDetails",
+                        "CallNumber",
+                        "StartYear",
+                        "EndYear",
+                        "LanguageCode",
+                        "TL2Author",
+                        "TitleURL",
+                        "CreationDate"
+                    ),
+                    true,
+                ),
+                Field::new(
+                    "item",
+                    record!(
+                        "ItemID",
+                        "TitleID",
+                        "ThumbnailPageID",
+                        "BarCode",
+                        "MARCItemID",
+                        "CallNumber",
+                        "VolumeInfo",
+                        "ItemURL",
+                        "ItemTextURL",
+                        "ItemPDFURL",
+                        "ItemImagesURL",
+                        "LocalID",
+                        "Year",
+                        "InstitutionName",
+                        "ZQuery",
+                        "CreationDate",
+                        "CopyrightStatus",
+                        "RightsStatement",
+                        "LicenseType",
+                        "RightsHolder"
+                    ),
+                    true,
+                ),
+                Field::new(
+                    "page",
+                    record!(
+                        "PageID",
+                        "ItemID",
+                        "SequenceOrder",
+                        "Year",
+                        "Volume",
+                        "Issue",
+                        "PagePrefix",
+                        "PageNumber",
+                        "PageTypeName",
+                        "CreationDate"
+                    ),
+                    true,
+                ),
+                Field::new(
+                    "part",
+                    record!(
+                        "PartID",
+                        "ItemID",
+                        "ContributorName",
+                        "SequenceOrder",
+                        "SegmentType",
+                        "Title",
+                        "ContainerTitle",
+                        "PublicationDetails",
+                        "Volume",
+                        "Series",
+                        "Issue",
+                        "Date",
+                        "PageRange",
+                        "StartPageID",
+                        "LanguageName",
+                        "SegmentUrl",
+                        "ExternalUrl",
+                        "DownloadUrl",
+                        "RightsStatus",
+                        "RightsStatement",
+                        "LicenseName",
+                        "LicenseUrl",
+                        "RightsHolder",
+                        "BarCode"
+                    ),
+                    true,
+                ),
+                Field::new(
+                    "partpage",
+                    many!(
+                        "PartID",
+                        "PageID",
+                        "ItemID",
+                        "SequenceOrder",
+                        "CreationDate"
+                    ),
+                    false,
+                ),
+                Field::new(
+                    "creator",
+                    many!(
+                        "TitleID",
+                        "CreatorID",
+                        "CreatorType",
+                        "CreatorName",
+                        "CreationDate"
+                    ),
+                    false,
+                ),
+                Field::new(
+                    "creatoridentifier",
+                    many!(
+                        "CreatorID",
+                        "IdentifierName",
+                        "IdentifierValue",
+                        "CreationDate"
+                    ),
+                    false,
+                ),
+                Field::new(
+                    "subject",
+                    many!("TitleID", "Subject", "CreationDate"),
+                    false,
+                ),
+                Field::new(
+                    "titleidentifier",
+                    many!(
+                        "TitleID",
+                        "IdentifierName",
+                        "IdentifierValue",
+                        "CreationDate"
+                    ),
+                    false,
+                ),
+                Field::new(
+                    "partcreator",
+                    many!("PartID", "CreatorID", "CreatorName", "CreationDate"),
+                    false,
+                ),
+                Field::new(
+                    "partidentifier",
+                    many!(
+                        "PartID",
+                        "IdentifierName",
+                        "IdentifierValue",
+                        "CreationDate"
+                    ),
+                    false,
+                ),
+                Field::new(
+                    "pagename",
+                    many!("NameBankID", "NameConfirmed", "PageID", "CreationDate"),
+                    false,
+                ),
+                Field::new(
+                    "doi",
+                    many!("EntityType", "EntityID", "DOI", "CreationDate"),
+                    false,
+                ),
+            ];
             Arc::new(Schema::new(vec![
                 Field::new("entity_type", DataType::Utf8, false),
                 Field::new("entity_id", DataType::UInt64, false),
@@ -60,5 +195,3 @@ pub fn page_schema() -> SchemaRef {
         })
         .clone()
 }
-
-pub(super) type Row = BTreeMap<String, String>;

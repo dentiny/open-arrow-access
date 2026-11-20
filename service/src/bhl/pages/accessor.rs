@@ -1,27 +1,29 @@
-use super::{BhlMetadata, page_schema};
+use super::{BhlPageIdentity, page_schema};
 use crate::FileSetRequest;
-use arrow_schema::Schema;
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, Capability, OrderRequirement, RecordBatchBuilder,
     RecordCapability, RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader,
     async_trait, read_object, scan_partition,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-/// One lazy partition per selected OCR object, with full joined source metadata.
-/// Generic scan layers own concurrency. Sidecars are preselected offline, so
-/// planning never lists AWS or downloads the 13 whole-corpus metadata tables.
+/// One OCR page per row. Metadata fields are declared but remain null until a
+/// separate metadata-join implementation is available. Shared scan layers own concurrency.
 pub struct BhlPageAccessor<A> {
     storage: Arc<A>,
-    metadata: Arc<BhlMetadata>,
+    snapshot_id: Arc<str>,
 }
 impl<A> BhlPageAccessor<A> {
-    pub fn new(storage: A, metadata: BhlMetadata) -> Self {
-        Self {
-            storage: Arc::new(storage),
-            metadata: Arc::new(metadata),
+    pub fn new(storage: A, snapshot_id: impl Into<String>) -> Result<Self> {
+        let snapshot_id = snapshot_id.into();
+        if snapshot_id.trim().is_empty() {
+            return Err(super::invalid("BHL pages require a nonempty snapshot_id"));
         }
+        Ok(Self {
+            storage: Arc::new(storage),
+            snapshot_id: snapshot_id.into(),
+        })
     }
 }
 
@@ -49,60 +51,38 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
         if request.objects.is_empty() {
             return Err(super::invalid("empty BHL page selection"));
         }
-        let reports = request
+        let identities = request
             .objects
             .iter()
-            .map(|object| {
-                self.metadata
-                    .report(object.locator())
-                    .map(|r| (object.locator().to_owned(), r))
-            })
-            .collect::<Result<std::collections::BTreeMap<_, _>>>()?;
-        let schema = page_schema();
-        let schema = Arc::new(Schema::new_with_metadata(
-            schema.fields().clone(),
-            HashMap::from([
-                ("bhl.snapshot_id".into(), self.metadata.snapshot_id.clone()),
-                (
-                    "bhl.reconciliation".into(),
-                    serde_json::to_string(&reports).expect("serializable reports"),
-                ),
-                (
-                    "bhl.source_tables".into(),
-                    serde_json::to_string(&self.metadata.source_tables)
-                        .expect("serializable provenance"),
-                ),
-            ]),
-        ));
-        let output = request.options.resolve_projection(&schema)?.schema;
-        let record_metadata = RecordMetadata {
+            .map(|object| BhlPageIdentity::parse(object.locator()))
+            .collect::<Result<Vec<_>>>()?;
+        let full = page_schema();
+        let output = request.options.resolve_projection(&full)?.schema;
+        let metadata = RecordMetadata {
             schema: output.clone(),
             source: None,
         };
         let partitions = request
             .objects
             .into_iter()
-            .map(|object| {
+            .zip(identities)
+            .map(|(object, identity)| {
                 let storage = self.storage.clone();
-                let metadata = self.metadata.clone();
-                let full = schema.clone();
-                let output = output.clone();
-                let reader_metadata = record_metadata.clone();
-                let byte_options = request.byte_options;
+                let snapshot = self.snapshot_id.clone();
+                let (full, output, metadata) = (full.clone(), output.clone(), metadata.clone());
                 scan_partition(async move {
                     let batches = stream::once(async move {
-                        let joined = metadata.join(object.locator())?;
                         let data = read_object(
                             storage.as_ref(),
-                            ByteReadRequest::new(object.clone()).with_options(byte_options),
+                            ByteReadRequest::new(object.clone()).with_options(request.byte_options),
                             "read_bhl_page",
                         )
                         .await?;
                         RecordBatchBuilder::build_row(full, output, |row| {
-                            row.append("entity_type", joined.identity.entity_type.as_str())?;
-                            row.append("entity_id", joined.identity.entity_id)?;
-                            row.append("page_id", joined.identity.page_id)?;
-                            row.append("sequence", joined.identity.sequence)?;
+                            row.append("entity_type", identity.entity_type.as_str())?;
+                            row.append("entity_id", identity.entity_id)?;
+                            row.append("page_id", identity.page_id)?;
+                            row.append("sequence", identity.sequence)?;
                             row.append("data", data.as_slice())?;
                             row.append(
                                 "source_path",
@@ -113,18 +93,18 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                                 )
                                 .as_str(),
                             )?;
-                            row.append("snapshot_id", metadata.snapshot_id.as_str())?;
-                            joined.append(row)
+                            row.append("snapshot_id", snapshot.as_ref())
+                            // Nullable metadata and source_entry_index are left unset (null).
                         })
                     });
                     Ok(StreamReader::records(
                         batches,
-                        reader_metadata,
+                        metadata,
                         OrderRequirement::Reorderable,
                     ))
                 })
             })
             .collect();
-        Ok(ScanPlan::new(record_metadata, partitions).with_ordering(OrderRequirement::Reorderable))
+        Ok(ScanPlan::new(metadata, partitions).with_ordering(OrderRequirement::Reorderable))
     }
 }

@@ -44,11 +44,3 @@ pub(super) fn number(value: &str) -> Result<u64> {
         .filter(|&n| n > 0)
         .ok_or_else(|| super::invalid(format!("invalid BHL numeric ID/sequence: {value:?}")))
 }
-
-pub(super) fn optional_number(value: &str) -> Result<Option<u64>> {
-    if value.is_empty() {
-        Ok(None)
-    } else {
-        number(value).map(Some)
-    }
-}
