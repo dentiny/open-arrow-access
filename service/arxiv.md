@@ -11,37 +11,55 @@ consumer upgrade; the baseline evidence below describes unpatched 0.12.1.
 
 ## Service and data
 
-arXiv distributes research preprints as bulk PDF/source TAR shards, with XML
+This bulk provider reads PDF/source TAR shards, with XML
 manifests describing each shard. This provider selects shards and opens archive
 entries over caller-configured storage. Bibliographic harvesting is a separate
 [OAI-PMH metadata entry point](arxiv-metadata.md).
 
-## LaTeX/source format and attachments
+## Article representations: PDF, source and HTML
 
-**arXiv provides author-submitted TeX/LaTeX source as well as PDF.** In the
-bulk hierarchy, `src/` is the source distribution: it is not extracted PDF
-text and is not limited to a lone `.tex` file. Multi-file source submissions
-are packaged with their figures and any included ancillary attachments.
+For ingestion, distinguish **three main full-text representations of the same
+article**. They are alternatives at the article level; availability depends
+on the article/version.
 
-| Part of an article source package | Example files | Meaning |
+| Full-text representation | What it contains | How arXiv distributes it |
 | --- | --- | --- |
-| LaTeX source and build inputs | `main.tex`, `references.bib`, `style.sty` | Manuscript text, equations, bibliography and formatting inputs |
-| Paper figures | `figures/plot.png`, `figures/diagram.pdf`, JPEG/EPS files | Submitted image/figure assets referenced by the manuscript |
-| Optional ancillary attachments | `anc/demo.mp4`, `anc/data.csv`, code or extra images | Author-supplied supplementary material; not present for every paper |
+| **PDF** | The rendered paper, with its layout, equations and figures | Website `/pdf/<id>`; bulk `pdf/` TARs and PDF manifest |
+| **Source (usually TeX/LaTeX)** | Author-submitted manuscript source and supporting files, often packaged together | Website `/src/<id>`; bulk `src/` TARs and source manifest |
+| **HTML** | A browser-readable full-text rendering | Website `/html/<id>`, where available; no HTML bulk manifest is documented in the linked S3 guide |
 
-Select source TARs with
-`manifest(ArxivKind::Source, Some(2410), byte_options)`, or use
-`ArxivReadRequest::new(ArxivKind::Source).with_month(2410)` for bulk Arrow rows.
+Source is commonly LaTeX, but is not guaranteed to be LaTeX for every submission.
+HTML is not available for every paper. Use an explicit article version when
+comparing representations; matching TAR sequence numbers does not identify the
+same papers. The table describes documented distribution routes, not a
+successful authenticated enumeration of every S3 prefix.
 
-The existing bulk reader preserves a whole article package in `data`; it
-does not emit a separate row for each `.tex`, figure or video. The
-[LaTeX and attachment details](#latex-source-packages-figures-and-multimedia-attachments)
-below explain packaging and preservation. Source contents depend on the
-article/version; some submissions have no LaTeX source. External linked assets
-are not automatically downloaded.
-[open-arrow-access #597](https://github.com/dentiny/open-arrow-access/pull/597)
-proposes an explicit one-level source-package expansion API; that proposal is
-separate from the existing bulk-reader behavior described here.
+**XML is not a fourth full-text counterpart in these interfaces.** The
+API/OAI-PMH XML describes the article (identifier, title, authors, abstract,
+dates, etc.). Separately, the bulk XML manifests describe TAR files (keys,
+months, sizes and checksums). Neither is an XML encoding of the paper's full
+body. A pipeline producing full-text XML or TXT would be an additional
+conversion step, not another format selected by the existing bulk provider.
+
+```text
+One article/version
+├── PDF representation
+├── Source representation (usually LaTeX)
+│   ├── main.tex, references.bib, style.sty
+│   ├── figures/plot.png, figures/diagram.pdf
+│   └── anc/demo.mp4, anc/data.csv           # Optional attachments
+├── HTML representation                    # Where available
+└── Metadata record (XML)                  # Describes the paper; not full text
+```
+
+Figures and ancillary files are **members of the source representation**, not
+additional full-text counterpart formats. The following hierarchy describes
+how the PDF/source representations are packaged into bulk TAR shards.
+
+Sources: [official bulk distribution](https://info.arxiv.org/help/bulk_data_s3.html),
+[HTML full text](https://info.arxiv.org/about/accessible_HTML.html),
+[API metadata XML](https://info.arxiv.org/help/api/user-manual.html) and
+[OAI-PMH metadata](https://info.arxiv.org/help/oa/index.html).
 
 Enable facade feature `service-arxiv`. See [example setup](README.md#example-setup) for dependencies and the async runtime.
 
@@ -234,44 +252,34 @@ are not automatically checked against streamed content. Known archive length
 is checked, but equal length is not a content identity guarantee. Pin a mirror
 snapshot and verify its checksums separately when reproducibility is required.
 
-### LaTeX source packages, figures and multimedia attachments
+### Files inside one source representation
 
-A LaTeX source download is not limited to `.tex` text. For multi-file
-submissions, arXiv packages the source together with the submitted figures
-(for example, PNG, JPEG, PDF or EPS files). Authors may also supply optional
-ancillary material under `anc/`, including extra images, movies, data and
-code. arXiv documents that ancillary files are included in the complete article
-source download. Their presence and contents depend on the submission and
-article version; not every article has LaTeX source or multimedia attachments.
-
-For example, a multi-file article source payload inside an outer bulk TAR
-could contain the following (illustrative, not a required layout):
+The source package can contain the LaTeX manuscript (`.tex`), bibliography and
+style files (`.bib`, `.bbl`, `.sty`), submitted paper figures (PNG/JPEG/PDF/EPS),
+and optional `anc/` attachments such as movies, extra images, data or code.
+A figure stored as PDF here is an asset inside the source package, not the
+whole-paper PDF representation in `pdf/`. Contents vary by article/version.
 
 ```text
-arXiv_src_2410_001.tar              # Outer bulk shard: many article payloads
-└── <article source package>       # Inner package, often .tar.gz
+arXiv_src_2410_001.tar              # Bulk shard containing many articles
+└── <one article source package>   # Often .tar.gz
     ├── main.tex
     ├── references.bib
-    ├── figures/
-    │   ├── architecture.pdf
-    │   └── results.png
-    └── anc/                      # Optional author-supplied attachments
-        ├── demo.mp4
-        └── data.csv
+    ├── figures/architecture.pdf
+    └── anc/demo.mp4               # Optional
 ```
 
-The current bulk reader emits each regular member of the **outer** TAR as one
-row with its complete original payload in `data`. When that payload is a
-compressed article package, any included figures and attachments remain inside
-those bytes. The reader does not recursively unpack the package, resolve
-LaTeX figure references, or emit separate image/video rows. Asset extraction
-and associations with text/captions require a downstream step. Resources
-referenced only by external links are not fetched automatically. This describes
-preservation of files present in the payload, not verified completeness of
-ancillary material across the S3 corpus.
+The existing bulk reader emits one row per regular member of the **outer**
+TAR. An article package remains intact in `data`, including files within it.
+It does not automatically unpack that package, emit separate asset rows,
+compile LaTeX, associate captions, or fetch external links.
+[open-arrow-access #597](https://github.com/dentiny/open-arrow-access/pull/597)
+proposes opt-in one-level expansion; it is separate from this bulk-reader
+contract. Retaining a package does not establish that every possible external
+attachment has been acquired.
 
-See arXiv's [source download description](https://info.arxiv.org/help/config_browser.html#source)
-and [ancillary-file packaging and download rules](https://info.arxiv.org/help/ancillary_files.html).
+See the official [source packaging](https://info.arxiv.org/help/config_browser.html#source)
+and [ancillary-file inclusion rules](https://info.arxiv.org/help/ancillary_files.html).
 
 ### Arrow row contract
 
