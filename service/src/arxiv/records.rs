@@ -144,16 +144,7 @@ where
     async fn plan_scan(&self, request: ArxivReadRequest) -> Result<ScanPlan> {
         let schema = request.options.resolve_projection(&record_schema())?.schema;
         let archives = if let Some(shard) = &request.shard {
-            if request.month.is_some()
-                || !shard.ends_with(".tar")
-                || shard.starts_with('/')
-                || shard.contains(['\\', ':', '?', '#'])
-                || shard.split('/').any(|part| matches!(part, "" | "." | ".."))
-            {
-                return Err(super::error::invalid(
-                    "shard must be a relative TAR key without a month selector",
-                ));
-            }
+            super::validation::validate_shard(shard, request.month)?;
             vec![(shard.clone(), None)]
         } else {
             self.service
