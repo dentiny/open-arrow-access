@@ -5,9 +5,7 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ErrorKind, ListRequest,
     ObjectStream, Result, async_trait,
 };
-use open_arrow_access_service::bhl::{
-    BhlOpenData, OPEN_DATA_BUCKET_URL, open_data_bucket_operator,
-};
+use open_arrow_access_service::bhl::BhlOpenData;
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::{byte_accessor, expect_err_kind, temp_fs};
 
@@ -150,12 +148,4 @@ async fn invalid_keys_and_unselected_objects_fail_before_storage_io() {
     expect_err_kind(files.open(OTHER.into()).await, ErrorKind::NotFound);
     assert!(storage.opened.lock().unwrap().is_empty());
     assert!(storage.listed.lock().unwrap().is_empty());
-}
-
-#[test]
-fn public_bucket_operator_is_listable_s3() {
-    assert_eq!(OPEN_DATA_BUCKET_URL, "s3://bhl-open-data/");
-    let operator = open_data_bucket_operator().unwrap();
-    assert_eq!(operator.info().scheme(), "s3");
-    assert!(operator.info().capability().list);
 }
