@@ -432,10 +432,10 @@ field names, order, Arrow types and nullability:
 | `source_name` | `LargeBinary`, non-null | Inner TeX filename; empty for whole PDF/XML documents |
 | `data` | `LargeBinary`, non-null | PDF bytes, decoded UTF-8 TeX bytes, or original XML bytes |
 
-`.with_metadata(index)` adds the same non-null `metadata: Struct` for all
-formats when using the same snapshot. Matching precedes projection. Without a
-snapshot, all three omit that column. There is no format-specific `text` column.
-`content_schema()` is the single definition.
+The content schema is fixed at these eight fields. There is no metadata option,
+metadata struct, or format-specific text column. Harvest OAI metadata separately
+and join by `article_id` downstream when needed. `content_schema()` is the single
+definition for all content formats.
 
 PDF uses `kind=pdf`; LaTeX uses `kind=source` and filters attachments. XML reads
 a caller-owned source inventory whose TAR article members end in `.xml`: arXiv does
@@ -470,11 +470,8 @@ non-null). Outer and inner physical indices preserve duplicate-name identity.
 `article_id` is the normalized unversioned metadata key; original outer names
 retain version spelling. Modern and legacy bulk IDs are supported.
 
-Call `.content(ArxivContentFormat::Latex).with_metadata(index)` to attach all cached snapshot fields as a
-non-null `metadata` struct, matching by article ID before projection. Missing
-matches fail. This does not build snapshots or establish historical-version
-metadata matching. Projection, including a zero-column projection, still
-validates source contents and metadata matches.
+Metadata is a separate OAI dataset; content readers do not load snapshots or
+conditionally add fields.
 
 Each article package is buffered while decoding and selecting files. Batches
 respect the row limit and a soft 4 MiB source-payload target; one complete file can exceed
