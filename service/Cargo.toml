@@ -242,3 +242,7 @@ required-features = ["regulations"]
 [[test]]
 name = "oai_harvest"
 required-features = ["oai"]
+
+[[test]]
+name = "arxiv_articles"
+required-features = ["arxiv"]

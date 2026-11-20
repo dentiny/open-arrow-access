@@ -1,6 +1,10 @@
-//! arXiv bulk-manifest discovery over caller-configured byte storage.
+//! arXiv bulk discovery, native article representations.
 
+mod articles;
 mod error;
+pub use articles::{
+    ArxivArticle, ArxivArticleFormat, ArxivArticleReadRequest, ArxivArticles, article_schema,
+};
 mod id;
 mod manifest;
 mod metadata;
