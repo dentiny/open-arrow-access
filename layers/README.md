@@ -9,6 +9,7 @@ Byte decompression layers use the same contract but require [codec features](../
 
 | Layer | Use it for | Key behavior |
 | --- | --- | --- |
+| `FallbackLayer` | Select an alternative record accessor | Defaults to missing-input errors before the first batch; never switches after selection |
 | `MetricsLayer` | Observe byte/record reads | In-memory aggregates by default; optional OpenDAL instrumentation |
 | `SchemaEvolutionLayer` | Add computed columns, remove, rename, or cast top-level columns | Ordered DataFusion Expr / SQL operations; fixed output schema |
 | `LimitLayer` | Keep at most N rows | One budget per open; stops and releases the source at the limit |
@@ -291,3 +292,36 @@ manifest) remain fatal. A partition that already emitted rows also fails rather
 than silently returning a truncated file. Schema must be known from the underlying
 plan; a missing input required for schema inference cannot be skipped by this
 layer. Surviving partition order and configured executor budgets are preserved.
+
+## Select a fallback representation
+
+```rust,ignore
+use open_arrow_access_core::AccessorExt;
+use open_arrow_access_layers::FallbackLayer;
+
+let documents = text_source.layer(FallbackLayer::new(pdf_source));
+let reader = documents.open(article_request).await?;
+```
+
+The layer is independent of providers and formats. Both accessors accept the
+same logical request; each resolves its own format and storage. Configure
+alternate keys or article-version resolution inside those accessors, not in the
+layer. Chain fallback accessors to express more than two candidates.
+
+By default, only `NotFound` from opening or the first `next()` selects the
+alternative. Use `.when(|error| ...)` to explicitly classify another
+representation-unavailable error. Authentication, permissions, transport and
+decoding errors propagate by default; a successful empty stream is not missing.
+
+`open()` probes and buffers the first batch, including an empty batch. Once a
+batch is selected, later failures propagate without switching or restarting.
+This prevents duplicated rows or mixed representations. Metadata is taken from
+the selected reader; metadata inspection must therefore probe selection too.
+Candidates may expose different schemas; this layer does not normalize them.
+For consumers requiring one fixed schema, adapt both candidates before wrapping.
+
+Selection applies to **one open request**, not every row in a corpus. Providers
+such as arXiv should expose one article per request and classify a genuinely
+missing representation before their first batch. Place the layer at that
+boundary. It does not implement `ScanPlanner`, infer partition correspondence,
+retry requests, fetch a specific provider, or implement PDF/text conversion.
