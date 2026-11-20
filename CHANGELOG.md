@@ -1,9 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Move S2ORC v2 body text to top-level `text: LargeUtf8` using schema evolution, removing the original `body.text` field (breaking typed-output schema change). Preserve body annotations, bibliography and parent nulls across metadata, sequential reads and native scan partitions.
-
 ## 0.12.0 - 2026-11-19
 
 - Add `crawl::CrawlAccessor` with existing-source, file-set, directory and provider-resolver entry points for integrated crawls.
