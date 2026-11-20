@@ -20,7 +20,7 @@ use super::{ArxivReadRequest, ArxivRecords, error, id, record_schema, validation
 /// between shard readers. For large snapshots, load a month at a time.
 pub struct ArxivMetadataIndex {
     // Metadata records; each struct row retains all columns from the snapshot.
-    rows: StructArray,
+    pub(super) rows: StructArray,
     // Maps from normalized, unversioned arXiv article IDs (e.g. "2410.01234"
     // or "hep-th9901001", without the OAI prefix or legacy slash) to
     // zero-based row indices in `rows`.
@@ -65,10 +65,6 @@ impl ArxivMetadataIndex {
             rows: StructArray::from(batch),
             ids,
         })
-    }
-
-    pub(super) fn validate_content_schema(&self) -> Result<()> {
-        validation::validate_content_metadata_schema(self.rows.fields())
     }
 
     pub(super) fn attach_content(&self, batch: RecordBatch) -> Result<RecordBatch> {

@@ -91,7 +91,7 @@ impl<A> ArxivContentRecords<A> {
     /// Missing article matches fail the scan, including when metadata is projected
     /// away. No metadata network requests are made by content workers.
     pub fn with_metadata(mut self, metadata: Arc<ArxivMetadataIndex>) -> Result<Self> {
-        metadata.validate_content_schema()?;
+        validation::validate_content_schema(&metadata)?;
         self.metadata = ContentMetadata::Snapshot(metadata);
         Ok(self)
     }

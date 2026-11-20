@@ -1,8 +1,11 @@
 use arrow_array::{Array, RecordBatch, cast::AsArray};
-use arrow_schema::{DataType, Fields};
+use arrow_schema::DataType;
 use open_arrow_access_core::Result;
 
-use super::{ArxivArchive, ArxivContentFormat, ArxivKind, ArxivSourcePackaging, error, id};
+use super::{
+    ArxivArchive, ArxivContentFormat, ArxivKind, ArxivMetadataIndex, ArxivSourcePackaging, error,
+    id,
+};
 
 pub(super) fn validate_oai_metadata(batch: &RecordBatch) -> Result<()> {
     if batch.schema().as_ref() != crate::arxiv_metadata::schema().arrow_schema().as_ref() {
@@ -47,8 +50,8 @@ pub(super) fn validate_fetched_metadata(batch: &RecordBatch, article: &str) -> R
     Ok(())
 }
 
-pub(super) fn validate_content_metadata_schema(fields: &Fields) -> Result<()> {
-    if fields != crate::arxiv_metadata::schema().arrow_schema().fields() {
+pub(super) fn validate_content_schema(metadata: &ArxivMetadataIndex) -> Result<()> {
+    if metadata.rows.fields() != crate::arxiv_metadata::schema().arrow_schema().fields() {
         return Err(error::invalid_content_metadata_schema());
     }
     Ok(())
