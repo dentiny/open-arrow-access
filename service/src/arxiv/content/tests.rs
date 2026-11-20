@@ -123,9 +123,7 @@ async fn formats_emit_identical_schemas_and_preserve_content() {
         };
         assert_eq!(batch["data"].as_binary::<i64>().value(0), expected);
         assert!(reader.next().await.unwrap().is_none());
-        let index = Arc::new(
-            ArxivMetadataIndex::from_oai_records(oai_snapshot(&["2410.00001"]).await).unwrap(),
-        );
+        let index = Arc::new(ArxivMetadataIndex::from_oai_records(oai_snapshot().await).unwrap());
         let records = records.with_metadata(index).unwrap();
         let mut reader = records
             .open(ArxivReadRequest::new(kind).with_month(2410))
@@ -137,20 +135,13 @@ async fn formats_emit_identical_schemas_and_preserve_content() {
     }
 }
 
-async fn oai_snapshot(ids: &[&str]) -> RecordBatch {
+async fn oai_snapshot() -> RecordBatch {
     use crate::{arxiv_metadata::ArxivMetadataService, oai::OaiPage};
     use open_arrow_access_core::ReadRequest;
     use open_arrow_access_test_support::format::collect_batches;
-    let mut xml = String::from(
-        r#"<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/" xmlns:a="http://arxiv.org/OAI/arXivRaw/"><ListRecords>"#,
-    );
-    for id in ids {
-        xml.push_str(&format!(r#"<record><header><identifier>oai:arXiv.org:{id}</identifier><datestamp>2026-11-20</datestamp><setSpec>physics</setSpec></header><metadata><a:arXivRaw><a:id>{id}</a:id><a:title>Title for {id}</a:title><a:authors>Author</a:authors><a:abstract>Abstract</a:abstract><a:doi>10.1234/example</a:doi><a:license>CC-BY</a:license><a:version version="v1"><a:date>2024-10-01</a:date></a:version><a:version version="v2"><a:date>2024-10-02</a:date></a:version></a:arXivRaw></metadata></record>"#));
-    }
-    xml.push_str(r#"<record><header status="deleted"><identifier>oai:arXiv.org:2410.99999</identifier><datestamp>2026-11-20</datestamp></header></record></ListRecords></OAI-PMH>"#);
     let page = OaiPage {
-        bytes: Bytes::from(xml),
-        record_count: ids.len() + 1,
+        bytes: fixture!("arxiv-content", "metadata.xml").await.into(),
+        record_count: 3,
         resumption_token: None,
     };
     collect_batches(
@@ -171,7 +162,7 @@ async fn content_fills_full_metadata_for_all_formats_and_projections() {
     use open_arrow_access_storage::OpenDalAccessor;
     use open_arrow_access_test_support::temp_fs;
     // Deliberately reverse snapshot order relative to content, including a legacy ID.
-    let snapshot = oai_snapshot(&["hep-th/9901001", "2410.00001"]).await;
+    let snapshot = oai_snapshot().await;
     let index = Arc::new(ArxivMetadataIndex::from_oai_records(snapshot.clone()).unwrap());
     let expected = StructArray::from(snapshot).slice(1, 1);
     for (format, kind, file, key) in [
@@ -235,8 +226,9 @@ async fn content_fills_full_metadata_for_all_formats_and_projections() {
             assert_eq!(rows, 1);
         }
         // A missing match must also fail if the caller omits metadata entirely.
-        let missing =
-            Arc::new(ArxivMetadataIndex::from_oai_records(oai_snapshot(&[]).await).unwrap());
+        let missing = Arc::new(
+            ArxivMetadataIndex::from_oai_records(oai_snapshot().await.slice(2, 1)).unwrap(),
+        );
         let bytes = fixture!("arxiv-content", file).await;
         let (_temp, operator) = temp_fs(&[(key, &bytes)]);
         let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
@@ -254,7 +246,7 @@ async fn content_fills_full_metadata_for_all_formats_and_projections() {
 #[tokio::test]
 async fn metadata_normalizes_legacy_ids_repeats_tex_rows_and_retains_deletions() {
     use arrow_array::{Array, StructArray};
-    let snapshot = oai_snapshot(&["hep-th/9901001"]).await;
+    let snapshot = oai_snapshot().await;
     let index = ArxivMetadataIndex::from_oai_records(snapshot.clone()).unwrap();
     let batches = read(
         "hep-th/9901001v2.gz",
@@ -295,10 +287,12 @@ async fn metadata_normalizes_legacy_ids_repeats_tex_rows_and_retains_deletions()
             .value(0),
         "deleted"
     );
-    assert!(
-        ArxivMetadataIndex::from_oai_records(oai_snapshot(&["2410.00001", "2410.00001"]).await)
-            .is_err()
-    );
+    let duplicate = arrow_select::concat::concat_batches(
+        &snapshot.schema(),
+        &[snapshot.slice(1, 1), snapshot.slice(1, 1)],
+    )
+    .unwrap();
+    assert!(ArxivMetadataIndex::from_oai_records(duplicate).is_err());
     let empty = RecordBatch::new_empty(crate::arxiv::record_schema());
     assert!(ArxivMetadataIndex::from_oai_records(empty).is_err());
 }
@@ -308,7 +302,7 @@ async fn rejects_null_ids_and_untyped_content_snapshots() {
     use arrow_array::{ArrayRef, StringArray, StructArray};
     use open_arrow_access_storage::OpenDalAccessor;
     use open_arrow_access_test_support::temp_fs;
-    let snapshot = oai_snapshot(&["2410.00001"]).await;
+    let snapshot = oai_snapshot().await;
     let header = snapshot["oai:header"].as_struct();
     let mut header_columns = header.columns().to_vec();
     header_columns[0] = Arc::new(StringArray::from(vec![None::<&str>; snapshot.num_rows()]));
