@@ -86,13 +86,6 @@ impl HttpReadRateLimitLayer {
         });
         Ok(Self { inner })
     }
-    /// Wait for admission before a direct HTTP request, sharing pacing/cooldown
-    /// with cloned layers and operators. Call before each retry attempt and its
-    /// timeout. This does not fetch a response or limit concurrent connections.
-    pub async fn wait(&self) {
-        self.inner.gate.admit_request().await;
-    }
-
     /// Opt in only for origins that document HTTP 403 as a throttle response.
     /// Permission failures are not retryable by default.
     pub fn with_forbidden_throttling(mut self) -> Self {

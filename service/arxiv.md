@@ -567,14 +567,10 @@ Deleted records retain their header with null inner metadata. Missing, malformed
 mismatched and failed responses fail the scan, even if metadata is projected away.
 
 Services and their clones share a 1,024-record FIFO cache, including concurrent
-lookups for the same article. Public content lookups share a process-wide serial
-gate using the storage layer's request admission, with at least three seconds
-between request starts. Retry and timeout policies come from the caller
-through the shared `Connection`; providers do not install their own storage config.
-Other clients/processes need separate coordination under the
-[arXiv rate limit](https://info.arxiv.org/help/api/tou.html).
-`ArxivService::with_metadata_connection(connection)` configures a mirror/custom
-transport with its own HTTP policies and a separate serial gate per service.
+lookups for the same article. The resolver uses the shared `Connection` directly;
+request pacing, retry and timeout policies are caller-owned. Configure the
+connection/transport to follow the [arXiv rate limit](https://info.arxiv.org/help/api/tou.html),
+and pass it with `ArxivService::with_metadata_connection(connection)`.
 
 Online metadata is the latest OAI record, including version history. For bulk or
 offline jobs, a reconciled typed snapshot pins metadata and avoids per-article HTTP:

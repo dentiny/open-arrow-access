@@ -1,13 +1,11 @@
 //! Lazy, shared OAI lookups for the default content metadata path.
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, OnceLock},
-    time::Duration,
+    sync::Arc,
 };
 
 use futures::{TryStreamExt, lock::Mutex};
 use open_arrow_access_core::{Accessor, ReadRequest, Result, into_stream};
-use open_arrow_access_storage::HttpReadRateLimitLayer;
 
 use super::{ArxivMetadataIndex, error, id, validation};
 use crate::{
@@ -16,28 +14,11 @@ use crate::{
     oai::{OaiPage, OaiProvider, OaiService},
 };
 
-const REQUEST_INTERVAL: Duration = Duration::from_secs(3);
 const CACHE_SIZE: usize = 1024;
 
+#[derive(Default)]
 pub(super) struct MetadataResolver {
     state: Mutex<State>,
-    gate: Mutex<HttpReadRateLimitLayer>,
-}
-
-impl Default for MetadataResolver {
-    fn default() -> Self {
-        Self {
-            state: Mutex::default(),
-            gate: request_gate(),
-        }
-    }
-}
-
-fn request_gate() -> Mutex<HttpReadRateLimitLayer> {
-    Mutex::new(
-        HttpReadRateLimitLayer::new(REQUEST_INTERVAL)
-            .expect("the arXiv request interval is positive"),
-    )
 }
 
 #[derive(Default)]
@@ -80,7 +61,6 @@ impl MetadataResolver {
                 connection: Some(connection),
                 ..Default::default()
             }),
-            ..Default::default()
         }
     }
 
@@ -92,31 +72,20 @@ impl MetadataResolver {
         if let Some(index) = state.cache.get(&key) {
             return Ok(index.clone());
         }
-        let page = self.fetch(state.connection()?, &key).await?;
+        let page = fetch_metadata(state.connection()?, &key).await?;
         let index = Arc::new(decode_metadata(page, &key).await?);
         state.insert(key, index.clone());
         Ok(index)
     }
+}
 
-    async fn fetch(&self, connection: &Connection, article: &str) -> Result<OaiPage> {
-        let service = OaiService::new(
-            connection.clone(),
-            ArxivMetadata::PATH,
-            ArxivMetadata::METADATA_PREFIX,
-        )?;
-        // Public arXiv requests share one process-wide gate across services.
-        // Mirrors/custom endpoints have a separate gate per resolver.
-        static PUBLIC_GATE: OnceLock<Mutex<HttpReadRateLimitLayer>> = OnceLock::new();
-        let gate = if connection.origin().host_str() == Some("oaipmh.arxiv.org") {
-            PUBLIC_GATE.get_or_init(request_gate)
-        } else {
-            &self.gate
-        };
-        // Serialize full record fetches; the shared storage layer owns timing.
-        let rate = gate.lock().await;
-        rate.wait().await;
-        service.get_record(&id::oai_identifier(article)?).await
-    }
+async fn fetch_metadata(connection: &Connection, article: &str) -> Result<OaiPage> {
+    let service = OaiService::new(
+        connection.clone(),
+        ArxivMetadata::PATH,
+        ArxivMetadata::METADATA_PREFIX,
+    )?;
+    service.get_record(&id::oai_identifier(article)?).await
 }
 
 async fn decode_metadata(page: OaiPage, article: &str) -> Result<ArxivMetadataIndex> {
