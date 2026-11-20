@@ -28,14 +28,10 @@ pub(super) fn validate_item(items: &[Value], id: u64) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn validate_open_data_partition(objects: &[ObjectRef]) -> Result<()> {
-    if objects.is_empty() {
+pub(super) fn validate_objectds(objects: &[ObjectRef], allow_empty: bool) -> Result<()> {
+    if !allow_empty && objects.is_empty() {
         return Err(error::empty_open_data_partition());
     }
-    validate_open_data_objects(objects)
-}
-
-pub(super) fn validate_open_data_objects(objects: &[ObjectRef]) -> Result<()> {
     for object in objects {
         validate_open_data_key(object.locator(), false)?;
     }

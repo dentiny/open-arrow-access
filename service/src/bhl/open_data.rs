@@ -59,7 +59,7 @@ impl<A> BhlOpenData<A> {
         objects: impl IntoIterator<Item = impl Into<ObjectRef>>,
     ) -> Result<ResolvedFileSet<Arc<A>, Vec<ObjectRef>>> {
         let objects = objects.into_iter().map(Into::into).collect::<Vec<_>>();
-        validation::validate_open_data_partition(&objects)?;
+        validation::validate_objectds(&objects, false)?;
         let files = objects.iter().cloned().map(|object| FileSpec {
             name: object.locator().to_owned(),
             object,
@@ -84,7 +84,7 @@ impl<A: ByteAccessor> BhlOpenData<A> {
             validation::select_open_data_file,
         )
         .await?;
-        validation::validate_open_data_objects(&objects)?;
+        validation::validate_objectds(&objects, true)?;
         Ok(objects)
     }
 }
