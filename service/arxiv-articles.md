@@ -113,9 +113,9 @@ is buffered in full; gzip checks run through EOF before rows are emitted. This c
 trailers and trailing garbage. Budget decoder/package memory per active task.
 
 For TARs, regular files emit rows and directories are skipped; byte names,
-physical header indices and duplicate names are retained. `TarLimits` bound
-headers and individual member sizes; the existing parser rejects unsupported
-links, sparse files and extension headers. Nothing is extracted to disk, so
+physical header indices and duplicate names are retained. Source members have
+no configured byte-size cap. The existing parser rejects unsupported links,
+sparse files and extension headers. Nothing is extracted to disk, so
 member names are metadata rather than filesystem paths. Expansion is one level:
 a ZIP/TAR inside `anc/` remains a file. No compilation, figure-reference/caption
 resolution, recursive archive expansion or external resource fetching occurs.
@@ -179,7 +179,7 @@ compressed member offsets are not directly addressable external blob ranges.
 
 Deterministic tests cover native routes, lazy partitions, error propagation,
 projection/row counts, IDs and versions, original bytes, source single files,
-gzip integrity, TAR limits, duplicate names, binary names and image/video bytes.
+gzip integrity, duplicate names, binary names and image/video bytes.
 Inputs live in [`testdata/arxiv-articles/`](https://github.com/dentiny/open-arrow-access/blob/feat/arxiv-source-packages/testdata/arxiv-articles/README.md),
 including `anc/` XML, CSV, ZIP and opaque video payloads. Rust tests compare the
 original bytes and preserve nested archives without recursively expanding them.
