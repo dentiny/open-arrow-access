@@ -1,7 +1,7 @@
 use open_arrow_access_core::Result;
 
 /// Numeric join keys; original zero padding remains in `source_path`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BhlPageIdentity {
     pub entity_type: String,
     pub entity_id: u64,
@@ -32,7 +32,7 @@ impl BhlPageIdentity {
     }
 }
 
-pub(super) fn number(value: &str) -> Result<u64> {
+pub(in crate::bhl) fn number(value: &str) -> Result<u64> {
     if value.is_empty() || !value.bytes().all(|c| c.is_ascii_digit()) {
         return Err(super::invalid(format!(
             "invalid BHL numeric ID/sequence: {value:?}"

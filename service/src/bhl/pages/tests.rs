@@ -21,7 +21,11 @@ async fn pages_preserve_bytes_identity_supplied_metadata_and_projection() {
             ))
         },
     )
-    .unwrap();
+    .unwrap()
+    .with_schema_metadata(std::collections::HashMap::from([(
+        "bhl.metadata.fingerprint".into(),
+        "fixture-fingerprint".into(),
+    )]));
     let plan = pages
         .plan_scan(FileSetRequest::new([item, part]))
         .await
@@ -31,6 +35,10 @@ async fn pages_preserve_bytes_identity_supplied_metadata_and_projection() {
     for (index, partition) in partitions.into_iter().enumerate() {
         let mut reader = partition.await.unwrap();
         let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(
+            batch.schema().metadata()["bhl.metadata.fingerprint"],
+            "fixture-fingerprint"
+        );
         assert_eq!(batch.num_rows(), 1);
         let data = batch
             .column_by_name("data")

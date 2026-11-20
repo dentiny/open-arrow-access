@@ -184,8 +184,10 @@ No new OCR, language/license filtering, normalization or indexing is implied.
 assigns every caller-supplied value to its column, including the supplied
 metadata StructArray. Metadata is required and must contain one populated row
 matching the fixed 13-table / 104-field schema; null or mismatched metadata fails.
-This is a record/schema API only: existing readers do not acquire or join
-metadata automatically and are wired separately.
+The optional `service-bhl-metadata` feature prepares the AWS TSV snapshot and
+joins selected pages through an indexed provider; see the
+[AWS implementation guide](bhl-open-data.md). The record API also accepts any
+caller-supplied metadata that satisfies this fixed schema.
 
 | Column | Arrow type | Nullable | Meaning |
 | --- | --- | --- | --- |

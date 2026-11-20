@@ -8,7 +8,7 @@ use open_arrow_access_core::{
     RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait,
     read_object, scan_partition,
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 type MetadataProvider = dyn Fn(&BhlPageIdentity) -> Result<StructArray> + Send + Sync;
 
@@ -18,6 +18,7 @@ pub struct BhlPageAccessor<A> {
     storage: Arc<A>,
     snapshot_id: Arc<str>,
     metadata: Arc<MetadataProvider>,
+    schema_metadata: HashMap<String, String>,
 }
 impl<A> BhlPageAccessor<A> {
     pub fn new(
@@ -33,7 +34,13 @@ impl<A> BhlPageAccessor<A> {
             storage: Arc::new(storage),
             snapshot_id: snapshot_id.into(),
             metadata: Arc::new(metadata),
+            schema_metadata: HashMap::new(),
         })
+    }
+    /// Attach metadata snapshot provenance and reconciliation to emitted batches.
+    pub fn with_schema_metadata(mut self, metadata: HashMap<String, String>) -> Self {
+        self.schema_metadata = metadata;
+        self
     }
 }
 #[async_trait]
@@ -68,7 +75,13 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                 Ok((identity, metadata))
             })
             .collect::<Result<Vec<_>>>()?;
-        let projection = request.options.resolve_projection(&page_schema())?;
+        let schema = Arc::new(
+            page_schema()
+                .as_ref()
+                .clone()
+                .with_metadata(self.schema_metadata.clone()),
+        );
+        let projection = request.options.resolve_projection(&schema)?;
         let metadata = RecordMetadata {
             schema: projection.schema,
             source: None,
@@ -83,6 +96,7 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                 let indices = projection.indices.clone();
                 let metadata = metadata.clone();
                 scan_partition(async move {
+                    let output_schema = metadata.schema.clone();
                     let batches = stream::once(async move {
                         let data = read_object(
                             storage.as_ref(),
@@ -104,12 +118,18 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                             metadata: source_metadata,
                         }
                         .into_batch()?;
-                        match indices {
+                        let batch = match indices {
                             Some(indices) => batch
                                 .project(&indices)
                                 .map_err(super::super::error::page_record),
                             None => Ok(batch),
-                        }
+                        }?;
+                        open_arrow_access_core::record_batch_with_rows(
+                            output_schema,
+                            batch.columns().to_vec(),
+                            batch.num_rows(),
+                        )
+                        .map_err(super::super::error::page_record)
                     });
                     Ok(StreamReader::records(
                         batches,

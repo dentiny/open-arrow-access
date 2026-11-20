@@ -1,5 +1,7 @@
 //! BHL API v3 and its versioned Smithsonian Figshare OCR export.
 mod error;
+#[cfg(feature = "bhl-metadata")]
+pub mod metadata;
 mod open_data;
 mod page;
 mod pages;
