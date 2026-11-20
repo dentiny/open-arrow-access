@@ -44,24 +44,21 @@ pub(super) struct Span {
     pub(super) attributes: Option<Attributes>,
 }
 
-pub(super) fn parse_spans(input: &str) -> Result<Vec<Span>> {
+pub(super) fn parse_spans(input: &str) -> Result<impl Iterator<Item = Result<Span>>> {
     let spans: Vec<RawSpan> = serde_json::from_str(input)
         .map_err(|_| error("invalid annotation payload or unknown span/attribute field"))?;
-    spans
-        .into_iter()
-        .map(|span| {
-            let start = span.start.value()?;
-            let end = span.end.value()?;
-            if start > end {
-                return Err(error("annotation start exceeds end"));
-            }
-            Ok(Span {
-                start,
-                end,
-                attributes: span.attributes,
-            })
+    Ok(spans.into_iter().map(|span| {
+        let start = span.start.value()?;
+        let end = span.end.value()?;
+        if start > end {
+            return Err(error("annotation start exceeds end"));
+        }
+        Ok(Span {
+            start,
+            end,
+            attributes: span.attributes,
         })
-        .collect()
+    }))
 }
 
 pub(super) fn validate_ids(ids: &UInt64Array) -> Result<()> {
