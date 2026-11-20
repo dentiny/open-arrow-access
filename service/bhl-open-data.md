@@ -112,13 +112,12 @@ Generic object reads do not claim that mapping is already implemented.
 
 ## Validation
 
-`service/tests/bhl_open_data.rs` verifies cached membership, scoped discovery,
-one lazy partition per object across TXT/JP2/XML/metadata files, rejection of
-out-of-selection reads, exact blank/binary content, byte-option forwarding,
-empty projection, missing-object errors and actual concurrent page opens.
-The concurrency regression uses a barrier: a serial implementation cannot pass.
-Fixtures exercise caller-bound filesystem storage; they are not a live AWS
-coverage, throughput or object-version consistency test.
+`service/tests/bhl_open_data.rs` verifies scoped discovery, explicit cached
+membership without storage I/O, accepted key namespaces, rejection of invalid
+keys and out-of-selection reads, and public S3 operator configuration. Reads use
+the shared byte-accessor contract helper. Generic file-set planning, projection
+and parallel execution remain covered by their own tests. Fixtures use
+caller-bound filesystem storage; they do not test live AWS coverage or throughput.
 
 A bounded live smoke check also read exactly two public AWS OCR objects through
 the anonymous operator and parallel file-set path: item 346951 / page 65077706 /
