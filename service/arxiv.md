@@ -487,8 +487,8 @@ Existing raw `records()` and general `open_source_package()` output are unchange
 `ArxivReadRequest::new(kind).with_shard("src/arXiv_src_2410_001.tar")`
 selects exactly one uncompressed TAR key relative to the service storage root.
 Planning creates one lazy partition, performs no manifest requests or listing,
-and execution opens only that object. This also works through `.latex()` and
-metadata-enriched readers because the same request is forwarded. Month and shard
+and execution opens only that object. Content and
+metadata wrappers forward the same request. Month and shard
 selectors cannot be combined; invalid/absolute/traversing keys are rejected
 before I/O. A caller-owned XML TAR can use this path without inventing an
 upstream XML distribution manifest. Keep storage credentials on the service,
