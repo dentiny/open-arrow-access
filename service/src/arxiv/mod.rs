@@ -14,6 +14,7 @@ mod manifest;
 mod metadata;
 pub use metadata::{ArxivMetadataIndex, ArxivPdfRecords};
 mod records;
+mod shard_records;
 pub use records::{ArxivReadRequest, ArxivRecords, record_schema};
 mod tar_records;
 mod validation;
