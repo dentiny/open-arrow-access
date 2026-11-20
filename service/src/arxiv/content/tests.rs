@@ -89,10 +89,10 @@ async fn accepts_legacy_single_sources_and_rejects_non_latex() {
         b"nested/ANC/extra.tex",
         b"figure.png",
     ] {
-        assert!(!is_tex(name).unwrap());
+        assert!(!validation::is_tex(name).unwrap());
     }
-    assert!(is_tex(b"chapters/intro.tex").unwrap());
-    assert!(is_tex(b"../escape.tex").is_err());
+    assert!(validation::is_tex(b"chapters/intro.tex").unwrap());
+    assert!(validation::is_tex(b"../escape.tex").is_err());
 }
 
 #[tokio::test]
