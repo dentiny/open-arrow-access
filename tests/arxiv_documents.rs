@@ -1,5 +1,3 @@
-#![cfg(feature = "service-arxiv")]
-
 use arrow_array::cast::AsArray;
 use open_arrow_access::{
     Accessor, Bytes, ObjectRef, bytes_reader,
