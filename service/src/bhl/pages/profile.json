@@ -1,0 +1,197 @@
+[
+  {
+    "name": "title",
+    "columns": [
+      "TitleID",
+      "MARCBibID",
+      "MARCLeader",
+      "FullTitle",
+      "ShortTitle",
+      "PublicationDetails",
+      "CallNumber",
+      "StartYear",
+      "EndYear",
+      "LanguageCode",
+      "TL2Author",
+      "TitleURL",
+      "CreationDate"
+    ],
+    "key": "TitleID",
+    "single": true
+  },
+  {
+    "name": "item",
+    "columns": [
+      "ItemID",
+      "TitleID",
+      "ThumbnailPageID",
+      "BarCode",
+      "MARCItemID",
+      "CallNumber",
+      "VolumeInfo",
+      "ItemURL",
+      "ItemTextURL",
+      "ItemPDFURL",
+      "ItemImagesURL",
+      "LocalID",
+      "Year",
+      "InstitutionName",
+      "ZQuery",
+      "CreationDate",
+      "CopyrightStatus",
+      "RightsStatement",
+      "LicenseType",
+      "RightsHolder"
+    ],
+    "key": "ItemID",
+    "single": true
+  },
+  {
+    "name": "page",
+    "columns": [
+      "PageID",
+      "ItemID",
+      "SequenceOrder",
+      "Year",
+      "Volume",
+      "Issue",
+      "PagePrefix",
+      "PageNumber",
+      "PageTypeName",
+      "CreationDate"
+    ],
+    "key": "PageID",
+    "single": true
+  },
+  {
+    "name": "part",
+    "columns": [
+      "PartID",
+      "ItemID",
+      "ContributorName",
+      "SequenceOrder",
+      "SegmentType",
+      "Title",
+      "ContainerTitle",
+      "PublicationDetails",
+      "Volume",
+      "Series",
+      "Issue",
+      "Date",
+      "PageRange",
+      "StartPageID",
+      "LanguageName",
+      "SegmentUrl",
+      "ExternalUrl",
+      "DownloadUrl",
+      "RightsStatus",
+      "RightsStatement",
+      "LicenseName",
+      "LicenseUrl",
+      "RightsHolder",
+      "BarCode"
+    ],
+    "key": "PartID",
+    "single": true
+  },
+  {
+    "name": "partpage",
+    "columns": [
+      "PartID",
+      "PageID",
+      "ItemID",
+      "SequenceOrder",
+      "CreationDate"
+    ],
+    "key": "PartID",
+    "single": false
+  },
+  {
+    "name": "creator",
+    "columns": [
+      "TitleID",
+      "CreatorID",
+      "CreatorType",
+      "CreatorName",
+      "CreationDate"
+    ],
+    "key": "TitleID",
+    "single": false
+  },
+  {
+    "name": "creatoridentifier",
+    "columns": [
+      "CreatorID",
+      "IdentifierName",
+      "IdentifierValue",
+      "CreationDate"
+    ],
+    "key": "CreatorID",
+    "single": false
+  },
+  {
+    "name": "subject",
+    "columns": [
+      "TitleID",
+      "Subject",
+      "CreationDate"
+    ],
+    "key": "TitleID",
+    "single": false
+  },
+  {
+    "name": "titleidentifier",
+    "columns": [
+      "TitleID",
+      "IdentifierName",
+      "IdentifierValue",
+      "CreationDate"
+    ],
+    "key": "TitleID",
+    "single": false
+  },
+  {
+    "name": "partcreator",
+    "columns": [
+      "PartID",
+      "CreatorID",
+      "CreatorName",
+      "CreationDate"
+    ],
+    "key": "PartID",
+    "single": false
+  },
+  {
+    "name": "partidentifier",
+    "columns": [
+      "PartID",
+      "IdentifierName",
+      "IdentifierValue",
+      "CreationDate"
+    ],
+    "key": "PartID",
+    "single": false
+  },
+  {
+    "name": "pagename",
+    "columns": [
+      "NameBankID",
+      "NameConfirmed",
+      "PageID",
+      "CreationDate"
+    ],
+    "key": "PageID",
+    "single": false
+  },
+  {
+    "name": "doi",
+    "columns": [
+      "EntityType",
+      "EntityID",
+      "DOI",
+      "CreationDate"
+    ],
+    "key": "EntityID",
+    "single": false
+  }
+]

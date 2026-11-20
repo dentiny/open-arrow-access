@@ -144,8 +144,8 @@ part views so the same source page is not counted twice accidentally.
 The README says OCR/images/scandata update weekly and metadata tables monthly.
 The bucket is live: metadata and content fetched at different times can differ.
 Pin the acquisition window and reconcile available IDs, pages and payloads
-before treating this as a reproducible dataset. AWS coverage must be compared
-against the Figshare export before substituting this route for task #3984.
+before treating this as a reproducible dataset. The selected corpus route is AWS Open Data; equivalence to the separate
+Figshare export is not a prerequisite for this route.
 
 ## API/item downloads: logical file names are not bucket paths
 
@@ -178,13 +178,11 @@ metadata/license does not replace per-item rights from BHL tables/API. Record
 missing payloads, blank pages, failed reads and unresolved joins explicitly.
 No new OCR, language/license filtering, normalization or indexing is implied.
 
-## Proposed Arrow / Lance schema: one OCR page per row
+## Arrow / Lance schema: one OCR page per row
 
-**Design proposal, not implemented output.** The current binary attachment
-route emits one `data: LargeBinary` value for an entire selected attachment.
-The page schema below is the intended contract for a future OCR decoder and
-the resulting Lance dataset; adding this documentation enables no job option
-and does not migrate existing outputs.
+**Implemented by `BhlPageAccessor` for selected AWS OCR objects with a prepared
+metadata sidecar.** The binary attachment route remains available. The joined
+page route implements the schema below without changing existing outputs.
 
 | Column | Arrow type | Nullable | Meaning |
 | --- | --- | --- | --- |
@@ -224,7 +222,7 @@ be reported explicitly rather than coerced to zero.
 
 ### Metadata child fields: TSV profile
 
-This proposal uses the **13 TSV tables actually listed under AWS data/**,
+This page profile uses the **13 TSV tables actually listed under AWS data/**,
 not guessed API response fields. All 104 source columns are enumerated below,
 with their original case-sensitive names. Table names become the struct/list
 children. `?` means nullable; list containers and list elements are non-null
@@ -452,7 +450,8 @@ bucket-root operator. The explicit selection composes with the existing native
 file-set planner and shared parallel executor, with one object per partition
 and no worker-side corpus listing. The implementation is merged and included
 in the 0.14.2 release. See the [implementation guide](bhl-open-data.md)
-for usage and exact boundaries. It does not implement the proposed page-metadata
+for usage and exact boundaries. For joined output use `BhlPageAccessor` below;
+`BhlOpenData` alone does not implement the page-metadata
 join/schema above or establish AWS/Figshare equivalence.
 
 
@@ -492,8 +491,8 @@ This establishes the displayed sampled paths and blank pages, not corpus-wide
 counts, checksum validity, format coverage or sustained throughput. AWS hierarchy
 and item/part exceptions were checked against official documentation. The AWS
 metadata object listing and bounded table-header prefixes were read for the
-schema proposal; OCR/image objects were not enumerated or compared to the export. No new Rust code, runtime
-test, production conversion or deployment is included.
+schema proposal; OCR/image objects were not enumerated or compared to the export. That original inspection did not include a production conversion or deployment.
+The joined AWS implementation and its fixture validation are described below.
 
 ## Existing library API
 
@@ -569,3 +568,93 @@ Sources: [BHL API v3](https://www.biodiversitylibrary.org/docs/api3.html), [Figs
 
 
 
+
+## Joined AWS page accessor and metadata preparation
+
+`BhlMetadata::from_json` validates a shard-scoped source-table sidecar.
+`BhlPageAccessor::new(storage, metadata)` accepts `FileSetRequest` selections and
+emits the page schema above, with one lazy partition per OCR object. Shared scan
+layers own read concurrency. Filename IDs are strictly validated; zero padding
+is retained in the full AWS `source_path`. Empty OCR is a valid non-null binary
+value, and failed body reads propagate as failures rather than empty rows.
+
+```rust,ignore
+use open_arrow_access::{Accessor, service::{FileSetRequest, bhl::{
+    BhlMetadata, BhlPageAccessor, open_data_bucket_operator,
+}}, storage::OpenDalAccessor};
+let metadata = BhlMetadata::from_json(&sidecar_bytes)?;
+let pages = BhlPageAccessor::new(OpenDalAccessor::new(open_data_bucket_operator()?), metadata);
+let reader = pages.open(FileSetRequest::new(selected_keys)).await?;
+```
+
+The complete profile is shared by the native schema/join code and offline
+preparation in `src/bhl/pages/profile.json`. All 13 table acquisitions must be
+present even if a selection matches no rows; missing files, changed headers,
+malformed rows, invalid IDs and duplicate single-row keys fail validation.
+Original TSV cell spelling, quotes, empty strings and source relation order are
+preserved. Numeric join keys compare numerically without rewriting stored cells.
+An empty foreign-key cell means no relationship; malformed nonempty IDs fail.
+Both item and part rights remain separate. DOI joins use EntityType and EntityID.
+Item pages never acquire arbitrary part metadata merely by sharing a PageID.
+
+For part OCR, parent resolution uses `part.ItemID`, then matching `partpage`,
+then `page.ItemID` when the earlier join is missing. Disagreements are reported
+and all matched source rows remain intact. The filename supplies the top-level
+sequence; item `page.SequenceOrder` or part `partpage.SequenceOrder` is compared
+against it. `part.SequenceOrder` is never used as a page order.
+
+`BhlMetadata::report(key)` exposes missing singleton/membership joins and parent
+or sequence conflicts. Each scan also stores per-key reports in Arrow schema
+metadata `bhl.reconciliation`, with `bhl.snapshot_id` and source-table provenance
+in `bhl.source_tables`. No OCR page is removed for a missing join. Nullable
+singleton children become null; relationship lists remain non-null and empty
+when no matches exist. Duplicate relation rows remain distinct. Source table
+acquisition failures cannot masquerade as empty relations.
+
+Whole-corpus metadata is too large to load into every worker. Pin the 13 AWS
+`data/<table>.txt.gz` objects in a local directory, retain the original compressed
+objects with the acquisition inventory, and build one disk index:
+
+```sh
+python3 service/tools/bhl_metadata.py index /path/to/pinned-data /path/to/metadata.sqlite \
+  --snapshot-id YOUR_METADATA_ACQUISITION_ID
+# For a standalone selected-key JSON array:
+python3 service/tools/bhl_metadata.py export /path/to/metadata.sqlite \
+  /path/to/keys.json /path/to/metadata.json
+```
+
+The importer streams gzip and TSV with bounded batches into SQLite and hashes
+the compressed source bytes. Each table is committed atomically; a failed table
+can be retried without reimporting completed tables. Resume verifies that pinned
+files for committed tables have unchanged hashes. It rejects a changed snapshot,
+source directory or profile. Do not run concurrent importers on one index.
+Preserve the original gzipped metadata tables: the index and sidecars preserve
+all parsed source cells, while the retained originals preserve raw TSV bytes.
+
+`MetadataIndex.select(keys)` performs indexed lookups and extracts only related
+source rows, retaining source ordinals and duplicates. `write(keys, path,
+snapshot_id=...)` publishes a sidecar exclusively. It never overwrites an existing
+file. The version-1 JSON contract is:
+
+```text
+version: 1
+snapshot_id: explicit OCR-and-metadata snapshot ID
+keys: unique bucket-relative OCR object keys
+source_tables: { each of the 13 table names: {key, sha256, rows} }
+tables: { each of the 13 table names: [records with every declared string cell] }
+```
+
+Join computation remains in the native upstream accessor; the preparation tool
+only imports and selects original source rows. For many jobs, use the conversion
+inventory planner's metadata integration to reuse one SQLite index across all
+shards, export one sidecar per job and assign a combined inventory/table plan ID
+as `snapshot_id`. Upload sidecars to their declared physical URIs before job
+submission. Sidecars do not pin the live OCR bytes; retain and check the frozen
+OCR inventory separately.
+
+Validation covers all 104 fields/13 children, both namespaces, rights, source
+relation duplicates/order, DOI type scoping, padded IDs, missing joins, conflicts,
+empty foreign keys, binary/blank OCR, Arrow projection, selected-key membership,
+TSV header/row validation and atomic table import failure. Test data in
+`../testdata/bhl/pages/metadata.json` was generated through the Python gzip/TSV
+index/export path and is consumed by the native Arrow tests.

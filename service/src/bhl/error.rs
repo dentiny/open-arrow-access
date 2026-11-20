@@ -40,3 +40,7 @@ pub(super) fn open_data_object_required() -> Error {
 fn invalid_open_data(message: &str) -> Error {
     Error::new(ErrorKind::InvalidInput, "bhl_open_data", message)
 }
+
+pub(super) fn invalid_pages(message: impl Into<String>) -> Error {
+    Error::new(ErrorKind::InvalidInput, "bhl_pages", message)
+}
