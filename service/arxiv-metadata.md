@@ -81,3 +81,5 @@ Other OAI providers continue to use sampled inference unless they override the
 new `OaiProvider::inferred_record_format` hook. Harvesting full metadata uses
 `service.harvest().with_format(service.inferred_record_format())`; persisting
 and reconciling a complete snapshot remains caller-owned.
+
+The [complete nested field reference](arxiv.md#exact-fields-of-the-content-metadata-struct-0160) lists every header, article and version field, its Arrow type and nullability. For these harvested records, omit the outer content `metadata` wrapper shown there.
