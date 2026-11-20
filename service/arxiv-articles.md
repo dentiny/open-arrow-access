@@ -33,7 +33,7 @@ async fn read_articles(storage: OpenDalAccessor) -> Result<()> {
     let source = ArxivService::new(storage).article_records();
     let request = ArxivArticleReadRequest::new(vec![
         ArxivArticle::new("2401.04088v1", ArxivArticleFormat::Pdf),
-        ArxivArticle::new("2401.04088v1", ArxivArticleFormat::Source),
+        ArxivArticle::new("2401.04088v1", ArxivArticleFormat::Latex),
         ArxivArticle::new("2401.04088v1", ArxivArticleFormat::Html),
     ]);
     let mut reader = source.open(request).await?;
@@ -48,7 +48,7 @@ async fn read_articles(storage: OpenDalAccessor) -> Result<()> {
 | Format | Relative route | Output |
 | --- | --- | --- |
 | `Pdf` | `pdf/<article-id>` | Original PDF bytes |
-| `Source` | `src/<article-id>` | Original source response; may be a package or a single file |
+| `Latex` | `src/<article-id>` | Original source response; may be a package or a single file |
 | `Html` | `html/<article-id>` | Original HTML bytes, including references to assets |
 
 IDs use modern `YYMM.NNNN` or `YYMM.NNNNN` syntax, optionally versioned.
@@ -130,7 +130,7 @@ Both new APIs return the same schema, independently of any sink:
 | Column | Arrow type | Meaning |
 | --- | --- | --- |
 | `article_id` | `LargeUtf8`, non-null | Requested article ID, retaining an explicit version suffix |
-| `format` | `LargeUtf8`, non-null | `pdf`, `source`, `html`, or `source_member` |
+| `format` | `LargeUtf8`, non-null | `pdf`, `latex`, `html`, or `source_member` |
 | `source_uri` | `LargeUtf8`, non-null | Website-relative locator, or input reader locator for expansion; empty if unknown |
 | `entry_index` | `UInt64`, non-null | Physical inner TAR header index; zero for whole responses/single files |
 | `entry_name` | `LargeBinary`, non-null | Exact inner filename bytes; empty for whole responses |
