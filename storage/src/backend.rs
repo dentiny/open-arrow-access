@@ -96,7 +96,9 @@ impl OpenDalAccessor {
         request: ByteReadRequest,
         len: u64,
     ) -> Result<Box<dyn ByteReader>> {
-        let ByteReadRequest { object, options } = request;
+        let ByteReadRequest {
+            object, options, ..
+        } = request;
         let path = object.locator();
         // Share a budget across OpenDAL's stream/fetch queues so interleaved
         // range reads cannot multiply sequential prefetch concurrency.
@@ -148,7 +150,8 @@ impl Accessor for OpenDalAccessor {
 
     async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         let path = request.object.locator();
-        if request.options.io_chunk_size.is_some()
+        if request.content_length.is_some()
+            || request.options.io_chunk_size.is_some()
             || request.options.io_concurrency.get() > 1
             || self
                 .content_lengths
@@ -192,7 +195,10 @@ impl Accessor for OpenDalAccessor {
     }
 
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        let len = self.content_length(request.object.locator()).await?;
+        let len = match request.content_length {
+            Some(length) => length,
+            None => self.content_length(request.object.locator()).await?,
+        };
         self.open_with_length(request, len).await
     }
 }

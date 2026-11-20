@@ -88,7 +88,7 @@ impl ReadOptionsProvider for ArxivReadRequest {
 /// Each partition owns one sequential TAR stream; TarLimits apply.
 /// See [`ArxivReadRequest::target_bytes`] for batch payload sizing.
 pub struct ArxivRecords<A> {
-    service: Arc<ArxivService<A>>,
+    pub(super) service: Arc<ArxivService<A>>,
 }
 
 impl<A> ArxivService<A> {

@@ -483,11 +483,35 @@ Existing raw `records()` and general `open_source_package()` output are unchange
 
 `ArxivReadRequest::new(kind).with_shard("src/arXiv_src_2410_001.tar")`
 selects exactly one uncompressed TAR key relative to the service storage root.
-Planning creates one lazy partition, performs no manifest requests or listing,
-and execution opens only that object. Content and
+Raw archive planning creates one lazy shard partition with no manifest requests
+or listing. Content planning uses the member partitions described below; every
+reader still addresses only the selected object. Content and
 metadata wrappers forward the same request. Month and shard
 selectors cannot be combined; invalid/absolute/traversing keys are rejected
 before I/O. A caller-owned XML TAR can use this path without inventing an
 upstream XML distribution manifest. Keep storage credentials on the service,
 not in the shard key. TAR structural/length checks still apply; manifest size,
 MD5 and membership cannot be checked when the manifest is intentionally bypassed.
+
+## Parallel content reads inside a single shard
+
+For `records().content(format)` with an explicit shard, each regular outer TAR
+member is now a native scan partition. `CrawlAccessor` / `ParallelReadLayer`
+bounds the number of active member readers and decoders; conversion's existing
+`options.read_concurrency` controls that same executor. Each member task owns an
+independent range reader, then decodes its gzip/package and emits content rows.
+Members are not read through cloned `TarArchive::open_entry` readers, whose
+shared seek adapter serializes reads. Known whole-object length is forwarded
+as a request hint so OpenDAL does not issue a HEAD for every member.
+
+Discovery first scans TAR headers to validate and record payload ranges; it
+must finish before member tasks begin. This adds serial header-range requests
+and first-result latency, rather than promising that range mode is always
+faster than one sequential GET. Use immutable/pinned shards: the length hint
+is not a checksum or object-version guarantee. Ranged, known-length byte access
+is required and unsupported backends fail rather than silently serializing.
+Raw archive scans and month/distribution scans retain their sequential-per-TAR
+behavior. Plain accessor `open()` remains sequential; compose the shared crawl
+executor to execute member partitions concurrently. Admission is per member,
+so peak package-decoding memory grows with the chosen concurrency. This change
+does not fix full-package buffering or non-TeX error policy.

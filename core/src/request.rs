@@ -96,6 +96,9 @@ impl Default for ByteReadOptions {
 pub struct ByteReadRequest {
     pub object: ObjectRef,
     pub options: ByteReadOptions,
+    /// Caller-known whole-object length for a fixed input. Supporting backends
+    /// can skip a repeated stat; this is not a version or integrity guarantee.
+    pub content_length: Option<u64>,
 }
 
 impl ByteReadRequest {
@@ -103,7 +106,13 @@ impl ByteReadRequest {
         Self {
             object: object.into(),
             options: ByteReadOptions::default(),
+            content_length: None,
         }
+    }
+
+    pub fn with_content_length(mut self, length: u64) -> Self {
+        self.content_length = Some(length);
+        self
     }
 
     pub fn with_options(mut self, options: ByteReadOptions) -> Self {
