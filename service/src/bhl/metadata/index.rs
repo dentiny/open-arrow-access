@@ -32,7 +32,7 @@ pub struct BhlMetadataInfo {
     pub sources: BTreeMap<String, SourceInfo>,
 }
 #[derive(Clone)]
-pub(super) struct Row {
+pub struct BhlMetadataRow {
     pub ordinal: u64,
     pub values: BTreeMap<String, String>,
 }
@@ -176,13 +176,16 @@ pub(super) async fn prepare<A: ByteAccessor + 'static>(
     fs::remove_file(stage)?;
     Ok(info)
 }
-pub(super) struct Store {
+pub struct BhlMetadataIndex {
     db: Connection,
     pub info: BhlMetadataInfo,
-    cache: HashMap<(String, u64), Arc<Vec<Row>>>,
+    cache: HashMap<(String, u64), Arc<Vec<BhlMetadataRow>>>,
 }
-impl Store {
-    pub fn open(path: &Path) -> Result<Self> {
+impl BhlMetadataIndex {
+    pub fn open(path: &Path) -> open_arrow_access_core::Result<Self> {
+        Self::open_inner(path).map_err(Into::into)
+    }
+    fn open_inner(path: &Path) -> Result<Self> {
         if !path.is_absolute() {
             return Err(invalid("metadata index must be an absolute local/NFS path"));
         }
@@ -214,7 +217,14 @@ impl Store {
             cache: HashMap::new(),
         })
     }
-    pub fn rows(&mut self, name: &str, id: Option<u64>) -> Result<Vec<Row>> {
+    pub fn rows(
+        &mut self,
+        name: &str,
+        id: Option<u64>,
+    ) -> open_arrow_access_core::Result<Vec<BhlMetadataRow>> {
+        self.rows_inner(name, id).map_err(Into::into)
+    }
+    fn rows_inner(&mut self, name: &str, id: Option<u64>) -> Result<Vec<BhlMetadataRow>> {
         let Some(id) = id else {
             return Ok(vec![]);
         };
@@ -223,7 +233,7 @@ impl Store {
             let table: Table = tables()
                 .into_iter()
                 .find(|table| table.name == name)
-                .expect("fixed table");
+                .ok_or_else(|| invalid(format!("unknown BHL metadata table: {name}")))?;
             let mut statement = self.db.prepare_cached(
                 "SELECT ordinal,cells FROM rows WHERE name=?1 AND id=?2 ORDER BY ordinal",
             )?;
@@ -236,7 +246,7 @@ impl Store {
                 if cells.len() != table.fields.len() {
                     return Err(invalid("metadata row does not match fixed schema"));
                 }
-                rows.push(Row {
+                rows.push(BhlMetadataRow {
                     ordinal,
                     values: table
                         .fields

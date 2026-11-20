@@ -111,3 +111,21 @@ pub(super) fn duplicate_archive() -> Error {
 pub(super) fn invalid_shard() -> Error {
     invalid("shard must be a relative TAR key without a month selector")
 }
+
+pub(super) fn invalid_oai_metadata_schema() -> Error {
+    invalid("expected the complete typed arXivRaw OAI schema")
+}
+
+pub(super) fn invalid_content_metadata_schema() -> Error {
+    invalid("content metadata requires the complete typed arXivRaw OAI schema")
+}
+
+pub(super) fn missing_content_metadata(id: &str) -> Error {
+    decode(&format!(
+        "article {id} has no matching metadata in the snapshot"
+    ))
+}
+
+pub(super) fn invalid_metadata_response() -> Error {
+    decode("expected one complete OAI record matching the requested arXiv article")
+}

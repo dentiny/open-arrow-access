@@ -165,3 +165,14 @@ smoke-check example used for that validation has since been removed.
 
 See [BHL service](bhl.md), [resolved file sets](remote-files.md) and
 [parallel reading](../docs/parallel-read.md) for the shared contracts.
+
+## Page records with supplied metadata
+
+With `service-bhl`, `BhlPageAccessor::new(storage, snapshot_id, provider)` maps
+selected item/part OCR filenames to the fixed `page_schema()` and assigns the
+provider's one-row metadata StructArray. The caller supplies metadata; this
+reader does not acquire TSV tables or join bibliographic records. Invalid keys,
+provider errors and schema mismatches fail explicitly. Native partitions use the
+shared scan executor. `with_schema_metadata` retains caller provenance in the
+plan and emitted batch schemas. This API is the reader foundation for separate
+TSV-index and metadata-join changes.

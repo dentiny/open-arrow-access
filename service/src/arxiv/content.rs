@@ -1,6 +1,7 @@
 //! Common binary-content rows for PDF, attachment-free LaTeX, and supplied XML shards.
 use super::{
-    ArxivReadRequest, ArxivRecords, ArxivSourceOptions, error, open_source_package, validation,
+    ArxivMetadataIndex, ArxivReadRequest, ArxivRecords, ArxivSourceOptions, error,
+    open_source_package, validation,
 };
 use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
@@ -55,16 +56,44 @@ pub fn content_schema() -> SchemaRef {
         .clone()
 }
 
+#[derive(Clone)]
+enum ContentMetadata {
+    Online(Arc<super::metadata_fetch::MetadataResolver>),
+    Snapshot(Arc<ArxivMetadataIndex>),
+}
+impl ContentMetadata {
+    async fn resolve(&self, article: &str) -> Result<Arc<ArxivMetadataIndex>> {
+        match self {
+            Self::Online(resolver) => resolver.get(article).await,
+            Self::Snapshot(index) => Ok(index.clone()),
+        }
+    }
+}
+
 pub struct ArxivContentRecords<A> {
     format: ArxivContentFormat,
     records: ArxivRecords<A>,
+    metadata: ContentMetadata,
 }
 impl<A> ArxivRecords<A> {
+    /// Read content with complete OAI metadata, fetched lazily and cached by article ID.
     pub fn content(self, format: ArxivContentFormat) -> ArxivContentRecords<A> {
+        let metadata = ContentMetadata::Online(self.service.metadata.clone());
         ArxivContentRecords {
             records: self,
             format,
+            metadata,
         }
+    }
+}
+impl<A> ArxivContentRecords<A> {
+    /// Use a shared typed OAI snapshot instead of fetching metadata automatically.
+    /// Missing article matches fail the scan, including when metadata is projected
+    /// away. No metadata network requests are made by content workers.
+    pub fn with_metadata(mut self, metadata: Arc<ArxivMetadataIndex>) -> Result<Self> {
+        validation::validate_content_schema(&metadata)?;
+        self.metadata = ContentMetadata::Snapshot(metadata);
+        Ok(self)
     }
 }
 #[async_trait]
@@ -97,11 +126,18 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
         };
         plan.metadata.schema = projection.schema.clone();
         let format = self.format;
+        let metadata = self.metadata.clone();
         plan.partitions = plan
             .partitions
             .map(move |partition| {
                 partition.map(|partition| {
-                    content_partition(partition, format, projection.clone(), options.clone())
+                    content_partition(
+                        partition,
+                        format,
+                        projection.clone(),
+                        options.clone(),
+                        metadata.clone(),
+                    )
                 })
             })
             .boxed();
@@ -114,6 +150,7 @@ fn content_partition(
     format: ArxivContentFormat,
     projection: ResolvedProjection,
     options: ReadOptions,
+    metadata: ContentMetadata,
 ) -> ScanPartition {
     scan_partition(async move {
         let reader = partition.await?;
@@ -124,13 +161,7 @@ fn content_partition(
         };
         let batches = into_stream(reader)
             .and_then(move |batch| {
-                let options = options.clone();
-                async move {
-                    match format {
-                        ArxivContentFormat::Latex => expand(&batch, &options).await,
-                        _ => Ok(vec![document_batch(&batch, format)?]),
-                    }
-                }
+                content_batches(batch, format, options.clone(), metadata.clone())
             })
             .map_ok(|batches| stream::iter(batches.into_iter().map(Ok)))
             .try_flatten();
@@ -141,6 +172,25 @@ fn content_partition(
             ordering,
         ))
     })
+}
+
+async fn content_batches(
+    batch: RecordBatch,
+    format: ArxivContentFormat,
+    options: ReadOptions,
+    metadata: ContentMetadata,
+) -> Result<Vec<RecordBatch>> {
+    let article =
+        validation::content_article_id(batch["entry_name"].as_binary::<i64>().value(0), format)?;
+    let index = metadata.resolve(&article).await?;
+    let batches = match format {
+        ArxivContentFormat::Latex => expand(&batch, &options).await?,
+        _ => vec![document_batch(&batch, format)?],
+    };
+    batches
+        .into_iter()
+        .map(|batch| index.attach_content(batch))
+        .collect()
 }
 
 async fn expand(batch: &RecordBatch, options: &ReadOptions) -> Result<Vec<RecordBatch>> {

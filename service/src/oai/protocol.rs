@@ -53,6 +53,19 @@ impl OaiService {
         self.page(&query).await
     }
 
+    /// Retrieve one complete record, retaining the original GetRecord envelope.
+    pub async fn get_record(&self, identifier: &str) -> Result<OaiPage> {
+        validation::validate_nonempty_text(identifier, "identifier")?;
+        let mut url = self.endpoint.clone();
+        url.query_pairs_mut().extend_pairs([
+            ("verb", "GetRecord"),
+            ("metadataPrefix", self.metadata_prefix.as_str()),
+            ("identifier", identifier),
+        ]);
+        let bytes = self.connection.bytes(url, "application/xml").await?;
+        parser::parse_record(bytes).await
+    }
+
     /// Resumption requests contain only verb and token, as required by OAI-PMH.
     pub async fn resume(&self, token: &str) -> Result<OaiPage> {
         validation::validate_nonempty_text(token, "resumption token")?;
