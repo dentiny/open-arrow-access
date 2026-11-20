@@ -5,12 +5,12 @@ use super::{
 };
 use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
-use futures::{StreamExt, stream};
+use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, Bytes, ObjectRef, ReadOptions, RecordBatch,
     RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result,
-    ScanPartition, ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait, bytes_reader,
-    into_async_read, project_batch, scan_partition,
+    ScanPartition, ScanPlan, ScanPlanner, SchemaRef, async_trait, bytes_reader, into_async_read,
+    into_stream, record_stream_reader, scan_partition,
 };
 use open_arrow_access_decompression::{Codec, gzip::Gzip};
 use std::sync::{Arc, OnceLock};
@@ -103,14 +103,6 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
     }
 }
 
-struct LatexScanState {
-    reader: Box<dyn RecordReader>,
-    pending: std::vec::IntoIter<RecordBatch>,
-    projection: ResolvedProjection,
-    options: ReadOptions,
-    index: Option<Arc<ArxivMetadataIndex>>,
-}
-
 fn latex_partition(
     partition: ScanPartition,
     projection: ResolvedProjection,
@@ -121,43 +113,27 @@ fn latex_partition(
         let reader = partition.await?;
         let ordering = reader.capability().ordering;
         let output = RecordMetadata {
-            schema: projection.schema.clone(),
+            schema: projection.schema,
             source: reader.metadata().source.clone(),
         };
-        let state = LatexScanState {
-            reader,
-            pending: Vec::new().into_iter(),
-            projection,
-            options,
-            index,
-        };
-        let batches = stream::try_unfold(state, next_latex_batch);
-        Ok(StreamReader::records(batches, output, ordering))
+        let batches = into_stream(reader)
+            .and_then(move |batch| {
+                let options = options.clone();
+                async move { expand(&batch, &options).await }
+            })
+            .map_ok(|batches| stream::iter(batches.into_iter().map(Ok)))
+            .try_flatten()
+            .map(move |batch| match &index {
+                Some(index) => index.attach_articles(batch?),
+                None => batch,
+            });
+        Ok(record_stream_reader(
+            batches,
+            output,
+            projection.indices,
+            ordering,
+        ))
     })
-}
-
-async fn next_latex_batch(
-    mut state: LatexScanState,
-) -> Result<Option<(RecordBatch, LatexScanState)>> {
-    loop {
-        if let Some(batch) = state.pending.next() {
-            let batch = if let Some(index) = &state.index {
-                index.attach_articles(batch)?
-            } else {
-                batch
-            };
-            let batch = project_batch(
-                batch,
-                state.projection.indices.as_deref(),
-                state.projection.schema.clone(),
-            )?;
-            return Ok(Some((batch, state)));
-        }
-        let Some(batch) = state.reader.next().await? else {
-            return Ok(None);
-        };
-        state.pending = expand(&batch, &state.options).await?.into_iter();
-    }
 }
 
 async fn expand(batch: &RecordBatch, options: &ReadOptions) -> Result<Vec<RecordBatch>> {
@@ -214,90 +190,59 @@ async fn expand(batch: &RecordBatch, options: &ReadOptions) -> Result<Vec<Record
         Box::new(input),
         &article_id,
         packaging,
-        ArxivSourceOptions::default(),
+        ArxivSourceOptions {
+            options: ReadOptions {
+                projection: None,
+                ..options.clone()
+            },
+            ..ArxivSourceOptions::default()
+        },
     )
     .await?;
-    let article = LatexArticle {
-        id: &article_id,
-        shard,
-        outer_index,
-        name,
-    };
-    let mut output = LatexBatches {
-        builder: RecordBatchBuilder::new(latex_schema(), None)?,
-        batches: Vec::new(),
-        text_bytes: 0,
-        max_rows: options.batch_size.get(),
-    };
-    while let Some(batch) = reader.next().await? {
-        for row in 0..batch.num_rows() {
-            output.append_member(&article, &batch, row)?;
+    let mut batches = Vec::new();
+    while let Some(member_batch) = reader.next().await? {
+        let batch = latex_batch(batch, &article_id, &member_batch)?;
+        if batch.num_rows() != 0 {
+            batches.push(batch);
         }
     }
-    output.finish()
+    if batches.is_empty() {
+        return Err(error::decode(
+            "source package contains no non-ancillary LaTeX files",
+        ));
+    }
+    Ok(batches)
 }
 
-struct LatexArticle<'a> {
-    id: &'a str,
-    shard: &'a str,
-    outer_index: u64,
-    name: &'a [u8],
-}
-
-struct LatexBatches {
-    builder: RecordBatchBuilder,
-    batches: Vec<RecordBatch>,
-    text_bytes: usize,
-    max_rows: usize,
-}
-
-impl LatexBatches {
-    fn append_member(
-        &mut self,
-        article: &LatexArticle<'_>,
-        batch: &RecordBatch,
-        row: usize,
-    ) -> Result<()> {
-        let source_name = batch["entry_name"].as_binary::<i64>().value(row);
+fn latex_batch(outer: &RecordBatch, article_id: &str, batch: &RecordBatch) -> Result<RecordBatch> {
+    let shard = outer["shard_uri"].as_string::<i64>().value(0);
+    let outer_index = outer["entry_index"]
+        .as_primitive::<arrow_array::types::UInt64Type>()
+        .value(0);
+    let name = outer["entry_name"].as_binary::<i64>().value(0);
+    let mut builder = RecordBatchBuilder::new(latex_schema(), None)?;
+    let names = batch["entry_name"].as_binary::<i64>();
+    let data = batch["data"].as_binary::<i64>();
+    let indices = batch["entry_index"].as_primitive::<arrow_array::types::UInt64Type>();
+    for row in 0..batch.num_rows() {
+        let source_name = names.value(row);
         if !is_tex(source_name)? {
-            return Ok(());
+            continue;
         }
-        let text = std::str::from_utf8(batch["data"].as_binary::<i64>().value(row))
+        let text = std::str::from_utf8(data.value(row))
             .map_err(|_| error::decode("LaTeX member is not UTF-8"))?;
-        let source_index = batch["entry_index"]
-            .as_primitive::<arrow_array::types::UInt64Type>()
-            .value(row);
-        self.builder.push(|output| {
-            output.append("article_id", article.id)?;
+        builder.push(|output| {
+            output.append("article_id", article_id)?;
             output.append("format", "latex")?;
-            output.append("shard_uri", article.shard)?;
-            output.append("entry_index", article.outer_index)?;
-            output.append("entry_name", article.name)?;
-            output.append("source_index", source_index)?;
+            output.append("shard_uri", shard)?;
+            output.append("entry_index", outer_index)?;
+            output.append("entry_name", name)?;
+            output.append("source_index", indices.value(row))?;
             output.append("source_name", source_name)?;
             output.append("text", text)
         })?;
-        self.text_bytes += text.len();
-        if self.builder.len() >= self.max_rows || self.text_bytes >= 4 * 1024 * 1024 {
-            let next = RecordBatchBuilder::new(latex_schema(), None)?;
-            let batch = std::mem::replace(&mut self.builder, next).finish()?;
-            self.batches.push(batch);
-            self.text_bytes = 0;
-        }
-        Ok(())
     }
-
-    fn finish(mut self) -> Result<Vec<RecordBatch>> {
-        if self.batches.is_empty() && self.builder.is_empty() {
-            return Err(error::decode(
-                "source package contains no non-ancillary LaTeX files",
-            ));
-        }
-        if !self.builder.is_empty() {
-            self.batches.push(self.builder.finish()?);
-        }
-        Ok(self.batches)
-    }
+    builder.finish()
 }
 
 fn is_tex(name: &[u8]) -> Result<bool> {
