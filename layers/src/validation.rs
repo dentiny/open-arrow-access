@@ -335,6 +335,24 @@ pub(crate) fn validate_evolution_specs(changes: &[crate::ColumnEvolution]) -> Re
     use crate::ColumnEvolution;
     for change in changes {
         let name = match change {
+            ColumnEvolution::ExtractNestedField { path, name } => {
+                validate_evolution_name(name)?;
+                validate_evolution_specs(&[ColumnEvolution::RemoveNestedField {
+                    path: path.clone(),
+                }])?;
+                &path[0]
+            }
+            ColumnEvolution::RemoveNestedField { path } => {
+                if path.len() < 2 {
+                    return Err(crate::error::invalid_evolution(
+                        "nested field path requires a column and at least one child",
+                    ));
+                }
+                for name in path {
+                    validate_evolution_name(name)?;
+                }
+                &path[0]
+            }
             ColumnEvolution::RemoveColumn { name } => name,
             ColumnEvolution::AddColumn {
                 name,

@@ -33,6 +33,18 @@ pub(super) enum EvolutionStep {
     },
     /// Cast the current array at `index` to `field.data_type()` and cache the result.
     Cast { index: usize, field: FieldRef },
+    /// Extract the field, combining the validity of all parent structs.
+    ExtractNestedField {
+        index: usize,
+        source: usize,
+        path: Vec<usize>,
+    },
+    /// Rebuild nested structs without one field, sharing retained child buffers.
+    RemoveNestedField {
+        index: usize,
+        path: Vec<usize>,
+        field: FieldRef,
+    },
     /// Drop the slot's cached array; the source batch itself remains unchanged.
     Remove(usize),
 }

@@ -67,6 +67,10 @@ impl<'a> EvolutionPlanner<'a> {
                 expression,
             } => self.add(name, data_type.as_ref(), expression),
             ColumnEvolution::RemoveColumn { name } => self.remove(name),
+            ColumnEvolution::ExtractNestedField { path, name } => {
+                self.extract_nested_field(path, name)
+            }
+            ColumnEvolution::RemoveNestedField { path } => self.remove_nested_field(path),
             ColumnEvolution::RenameColumn {
                 source_name,
                 target_name,
@@ -147,6 +151,63 @@ impl<'a> EvolutionPlanner<'a> {
         Ok(())
     }
 
+    fn extract_nested_field(&mut self, path: &[String], name: &str) -> Result<()> {
+        validation::validate_evolution_target(None, self.names.get(name).copied())?;
+        let source = self.resolve(&path[0])?;
+        let mut indices = Vec::new();
+        // Validate the same path and extension-type constraints as removal.
+        prune_field(&self.fields[source], &path[1..], &mut indices)?;
+        let mut field = self.fields[source].clone();
+        let mut nullable = field.is_nullable();
+        for &index in &indices {
+            let DataType::Struct(children) = field.data_type() else {
+                unreachable!("validated path")
+            };
+            field = children[index].clone();
+            nullable |= field.is_nullable();
+        }
+        // These Arrow types have no top-level validity bitmap to carry a null
+        // parent. Reject them before reading instead of exposing hidden values.
+        if nullable
+            && matches!(
+                field.data_type(),
+                DataType::Union(..) | DataType::RunEndEncoded(..)
+            )
+        {
+            return Err(crate::error::invalid_evolution(
+                "cannot extract union or run-end encoded fields through nullable structs",
+            ));
+        }
+        let index = self.fields.len();
+        self.fields.push(Arc::new(
+            field
+                .as_ref()
+                .clone()
+                .with_name(name)
+                .with_nullable(nullable),
+        ));
+        self.names.insert(name.to_owned(), index);
+        self.steps.push(EvolutionStep::ExtractNestedField {
+            index,
+            source: self.inputs.bind(source),
+            path: indices,
+        });
+        self.remove_nested_field(path)
+    }
+
+    fn remove_nested_field(&mut self, path: &[String]) -> Result<()> {
+        let index = self.resolve(&path[0])?;
+        let mut indices = Vec::new();
+        let field = prune_field(&self.fields[index], &path[1..], &mut indices)?;
+        self.fields[index] = field.clone();
+        self.steps.push(EvolutionStep::RemoveNestedField {
+            index: self.inputs.bind(index),
+            path: indices,
+            field,
+        });
+        Ok(())
+    }
+
     fn rename(&mut self, source_name: &str, target_name: &str) -> Result<()> {
         let index = self.resolve(source_name)?;
         validation::validate_evolution_target(Some(index), self.names.get(target_name).copied())?;
@@ -208,7 +269,13 @@ impl<'a> EvolutionPlanner<'a> {
         let lifetimes = ValueLifetimePlan::new(
             self.steps.iter().map(|step| match step {
                 EvolutionStep::Add { index, input, .. } => (Some(*index), input.slots()),
-                EvolutionStep::Cast { index, .. } => (Some(*index), std::slice::from_ref(index)),
+                EvolutionStep::ExtractNestedField { index, source, .. } => {
+                    (Some(*index), std::slice::from_ref(source))
+                }
+                EvolutionStep::Cast { index, .. }
+                | EvolutionStep::RemoveNestedField { index, .. } => {
+                    (Some(*index), std::slice::from_ref(index))
+                }
                 EvolutionStep::Remove(_) => (None, &[][..]),
             }),
             &output_indices,
@@ -244,4 +311,42 @@ fn added_field(
             .insert("open_arrow_access:generated_expression".into(), sql.clone());
     }
     Ok(field)
+}
+
+/// Resolve names once at open and retain field metadata on each parent.
+fn prune_field(field: &FieldRef, path: &[String], indices: &mut Vec<usize>) -> Result<FieldRef> {
+    if field.metadata().contains_key("ARROW:extension:name") {
+        return Err(crate::error::invalid_evolution(
+            "cannot remove fields inside an extension type",
+        ));
+    }
+    let DataType::Struct(children) = field.data_type() else {
+        return Err(crate::error::invalid_evolution(
+            "nested field removal only traverses structs",
+        ));
+    };
+    let matches = children
+        .iter()
+        .enumerate()
+        .filter(|(_, child)| child.name() == &path[0])
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let [index] = matches.as_slice() else {
+        return Err(crate::error::invalid_evolution(
+            "nested field path must resolve to exactly one field",
+        ));
+    };
+    indices.push(*index);
+    let mut children = children.to_vec();
+    if path.len() == 1 {
+        children.remove(*index);
+    } else {
+        children[*index] = prune_field(&children[*index], &path[1..], indices)?;
+    }
+    Ok(Arc::new(
+        field
+            .as_ref()
+            .clone()
+            .with_data_type(DataType::Struct(children.into())),
+    ))
 }

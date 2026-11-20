@@ -87,3 +87,40 @@ For internal parallel reads, compose in this order:
 Generation runs once over the ordered merged batches, sharing one query context.
 The schema evolution wrapper forwards internal read concurrency but does not
 implement `ScanPlanner`, so placing `ParallelReadLayer` outside it is not supported.
+
+## Move a nested field to a top-level column
+
+For parsed corpora such as S2ORC v2, `body.text` is the paper's body text,
+while `bibliography.text` is a separate reference list. Move the body text
+without retaining a duplicate in the struct:
+
+```rust,ignore
+let records = source.layer(SchemaEvolutionLayer::try_new(vec![
+    ColumnEvolution::extract_nested_field(["body", "text"], "text"),
+])?);
+```
+
+The resulting schema has a top-level `text` field, `body` retains its other
+children (such as annotations), and `bibliography` is unchanged. Compression
+belongs to the writer; send these Arrow batches to open-arrow-sink and configure
+`CompressionSpec::Lz4Raw` for `text`. Do not compress the strings into binary
+values before passing them to the writer.
+
+`extract_nested_field(path, name)` appends the moved field to the top-level
+schema. It retains its type and metadata, widening nullability if any parent is
+nullable. Each null parent masks the extracted value, even if its child array
+contains a non-null hidden value. Retained value buffers are shared; extraction
+may allocate a combined validity bitmap. The original field is removed from
+its parent, without changing row counts, sibling fields, parent validity or
+schema metadata. Empty structs are retained, including in zero-row batches.
+
+Use `remove_nested_field(path)` when only removal is needed. Both operations
+run in declaration order alongside casts, renames and generated columns;
+subsequent expressions see the new schema. Paths contain literal name segments
+(including dots), require at least a column and a child, and traverse structs
+only. Missing/ambiguous fields, list traversal, changes inside extension
+structs, and output-name collisions fail at open. Extraction of union or
+run-end encoded fields through a nullable path is rejected because those Arrow
+types cannot carry the required top-level validity bitmap. Existing exact-name
+`remove_column("body.text")` semantics are unchanged: that names a literal
+top-level column, not a nested path.
