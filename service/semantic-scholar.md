@@ -519,3 +519,37 @@ caller-managed brokers, snapshots and caches without duplicating provider parsin
 Imported documents remain caller-owned: this does not authenticate their provenance,
 refresh their signatures or prove that the dataset belongs to a given release
 beyond the identities actually present in the provider documents.
+
+## Optional shared manifest cache
+
+`service.with_manifest_cache(ManifestCacheOptions::default())?` creates an
+explicit `CachedSemanticScholarService`. Clones share metadata within one process;
+ordinary services remain uncached. Construct a new instance for each endpoint
+and credential scope, and replace it on credential rotation. The wrapper has no
+credential mutation API and does not share global state. Multi-process workers
+still need an application broker; HTTP routes, caller authentication, protocol
+negotiation and deployment configuration are application responsibilities.
+
+The wrapper exposes `release`, `dataset_manifest`, and `dataset`. Defaults are
+32 documents, 16 MiB of encoded JSON, 32 admitted callers, five-minute fixed
+release/dataset TTLs and a 30-second `latest` TTL. Equal-key refreshes coalesce;
+unrelated keys do not hold a common lock during network I/O. Admission bounds
+live per-key state, and cancelled refreshes release their locks and permits.
+Errors and uncacheable documents can be shared by overlapping callers but are
+not retained once those callers finish. Cache eviction is deterministic by key,
+not LRU. Callers may hold returned `Arc<ApiDocument>` values beyond eviction.
+
+Dataset entries expire before the earliest recognized legacy S3 or SigV4 URL
+expiry, with a default 60-second margin and five-minute cap. Empty file lists,
+unknown signing schemes, ambiguous repeated query parameters and already-expired
+URLs are not cached. URL strings are never rewritten. Credential expiry or
+revocation can invalidate URLs earlier; this cache does not guarantee download
+success or renew signatures during an ongoing scan. A `latest` request resolves
+to a concrete release before dataset acquisition. Provider HTTP retry/timeout
+policy is reused, not reimplemented in the cache.
+
+The byte limit measures encoded JSON retained by cache entries, not exact Rust
+heap usage. In-flight responses, parsing/measurement buffers and caller-held
+values are additional memory; a response larger than the cache budget is still
+returned without caching. Cached documents are not persisted, logged by the
+wrapper, or exposed in its Debug output. No stale-on-error fallback is performed.

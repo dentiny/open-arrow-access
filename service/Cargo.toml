@@ -55,6 +55,8 @@ pmc = [
 ]
 regulations = []
 semantic-scholar = [
+    "dep:chrono",
+    "tokio/sync",
     "dep:arrow-array",
     "dep:arrow-schema",
     "open-arrow-access-file-format/json",

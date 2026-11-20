@@ -1,6 +1,8 @@
 //! Semantic Scholar release-pinned bulk datasets and incremental diff manifests.
 //! Signed download URLs are preserved exactly.
 use crate::common::{ApiDocument, ApiKey, Connection, RemoteFiles, segment, text};
+mod cache;
+pub use cache::{CachedSemanticScholarService, ManifestCacheOptions};
 mod error;
 mod parser;
 mod v2;
