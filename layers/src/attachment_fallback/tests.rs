@@ -107,7 +107,7 @@ async fn primary_success_is_delivered_once_without_opening_fallback() {
     let fallback = Source::new(vec![Event::Batch(vec![99])]);
     let opens = fallback.opens.clone();
     let accessor = Source::new(vec![Event::Batch(vec![1, 2]), Event::Batch(vec![3])])
-        .layer(FallbackLayer::new(fallback));
+        .layer(AttachmentFallbackLayer::new(fallback));
     assert_eq!(
         values(accessor.open(7).await.unwrap()).await.unwrap(),
         [1, 2, 3]
@@ -134,7 +134,7 @@ async fn missing_open_or_first_batch_selects_fallback_and_its_metadata(#[case] a
     let schema = fallback.schema.clone();
     let primary_requests = primary.requests.clone();
     let fallback_requests = fallback.requests.clone();
-    let accessor = primary.layer(FallbackLayer::new(fallback));
+    let accessor = primary.layer(AttachmentFallbackLayer::new(fallback));
     assert_eq!(accessor.metadata(42).await.unwrap().schema, schema);
     let reader = accessor.open(42).await.unwrap();
     assert_eq!(reader.metadata().schema, schema);
@@ -157,7 +157,7 @@ async fn default_policy_preserves_fatal_errors(#[case] kind: ErrorKind) {
         primary.open_error = at_open.then_some(kind);
         let fallback = Source::new(vec![Event::Batch(vec![9])]);
         let opens = fallback.opens.clone();
-        let accessor = primary.layer(FallbackLayer::new(fallback));
+        let accessor = primary.layer(AttachmentFallbackLayer::new(fallback));
         let error = accessor.open(0).await.err().unwrap();
         assert_eq!(error.kind(), kind);
         assert_eq!(error.operation(), "source_read");
@@ -176,7 +176,7 @@ async fn failures_after_any_selected_batch_never_switch(#[case] first: Vec<i32>)
     ]);
     let fallback = Source::new(vec![Event::Batch(vec![9])]);
     let opens = fallback.opens.clone();
-    let accessor = primary.layer(FallbackLayer::new(fallback));
+    let accessor = primary.layer(AttachmentFallbackLayer::new(fallback));
     let mut reader = accessor.open(0).await.unwrap();
     assert_eq!(
         reader.next().await.unwrap().unwrap().num_rows(),
@@ -190,7 +190,7 @@ async fn failures_after_any_selected_batch_never_switch(#[case] first: Vec<i32>)
 async fn successful_empty_stream_is_not_missing() {
     let fallback = Source::new(vec![Event::Batch(vec![9])]);
     let opens = fallback.opens.clone();
-    let accessor = Source::new(vec![]).layer(FallbackLayer::new(fallback));
+    let accessor = Source::new(vec![]).layer(AttachmentFallbackLayer::new(fallback));
     assert!(
         values(accessor.open(0).await.unwrap())
             .await
@@ -202,16 +202,19 @@ async fn successful_empty_stream_is_not_missing() {
 
 #[tokio::test]
 async fn explicit_condition_and_chained_candidates_preserve_final_error() {
-    let secondary =
-        Source::absent().layer(FallbackLayer::new(Source::new(vec![Event::Batch(vec![8])])));
+    let secondary = Source::absent().layer(AttachmentFallbackLayer::new(Source::new(vec![
+        Event::Batch(vec![8]),
+    ])));
     let primary = Source::new(vec![Event::Error(ErrorKind::Unsupported)]);
-    let accessor = primary
-        .layer(FallbackLayer::new(secondary).when(|error| error.kind() == ErrorKind::Unsupported));
+    let accessor = primary.layer(
+        AttachmentFallbackLayer::new(secondary)
+            .when(|error| error.kind() == ErrorKind::Unsupported),
+    );
     assert_eq!(values(accessor.open(0).await.unwrap()).await.unwrap(), [8]);
     let primary = Source::absent();
     let fallback = Source::new(vec![Event::Error(ErrorKind::PermissionDenied)]);
     let error = primary
-        .layer(FallbackLayer::new(fallback))
+        .layer(AttachmentFallbackLayer::new(fallback))
         .open(0)
         .await
         .err()
@@ -225,7 +228,7 @@ fn capability_retains_stricter_ordering_without_exposing_discovery() {
     let primary = Source::new(vec![]);
     let mut fallback = Source::new(vec![]);
     fallback.ordering = OrderRequirement::PreserveGlobal;
-    let layer = FallbackLayer::new(fallback);
+    let layer = AttachmentFallbackLayer::new(fallback);
     let accessor = primary.layer(layer.clone());
     assert_eq!(
         accessor.capability(),

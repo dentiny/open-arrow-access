@@ -43,5 +43,5 @@ pub use source_columns::{SourcePositionAccessor, SourcePositionLayer};
 mod missing_object;
 pub use missing_object::{MissingObjectAccessor, MissingObjectLayer, MissingObjectPolicy};
 
-mod fallback;
-pub use fallback::{FallbackAccessor, FallbackLayer};
+mod attachment_fallback;
+pub use attachment_fallback::{AttachmentFallbackAccessor, AttachmentFallbackLayer};

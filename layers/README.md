@@ -9,7 +9,7 @@ Byte decompression layers use the same contract but require [codec features](../
 
 | Layer | Use it for | Key behavior |
 | --- | --- | --- |
-| `FallbackLayer` | Select an alternative record accessor | Defaults to missing-input errors before the first batch; never switches after selection |
+| `AttachmentFallbackLayer` | Select an alternative attachment representation | Defaults to missing-input errors before the first batch; never switches after selection |
 | `MetricsLayer` | Observe byte/record reads | In-memory aggregates by default; optional OpenDAL instrumentation |
 | `SchemaEvolutionLayer` | Add computed columns, remove, rename, or cast top-level columns | Ordered DataFusion Expr / SQL operations; fixed output schema |
 | `LimitLayer` | Keep at most N rows | One budget per open; stops and releases the source at the limit |
@@ -293,13 +293,13 @@ than silently returning a truncated file. Schema must be known from the underlyi
 plan; a missing input required for schema inference cannot be skipped by this
 layer. Surviving partition order and configured executor budgets are preserved.
 
-## Select a fallback representation
+## Select a fallback attachment representation
 
 ```rust,ignore
 use open_arrow_access_core::AccessorExt;
-use open_arrow_access_layers::FallbackLayer;
+use open_arrow_access_layers::AttachmentFallbackLayer;
 
-let documents = text_source.layer(FallbackLayer::new(pdf_source));
+let documents = text_source.layer(AttachmentFallbackLayer::new(pdf_source));
 let reader = documents.open(article_request).await?;
 ```
 

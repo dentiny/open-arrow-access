@@ -1,4 +1,4 @@
-//! Select an alternative record representation before committing to a stream.
+//! Select an alternative attachment representation before committing to a stream.
 use std::sync::Arc;
 
 use futures::{StreamExt, stream};
@@ -9,7 +9,7 @@ use open_arrow_access_core::{
 
 type Condition = dyn Fn(&Error) -> bool + Send + Sync;
 
-/// Try another accessor when a record representation is unavailable.
+/// Try another accessor when an attachment representation is unavailable.
 ///
 /// By default only `NotFound` during opening or before the first batch selects
 /// the fallback. Successful empty streams stay empty. Permission, transport and
@@ -29,23 +29,23 @@ type Condition = dyn Fn(&Error) -> bool + Send + Sync;
 ///
 /// ```
 /// use open_arrow_access_core::{Accessor, AccessorExt, RecordReader};
-/// use open_arrow_access_layers::{FallbackAccessor, FallbackLayer};
+/// use open_arrow_access_layers::{AttachmentFallbackAccessor, AttachmentFallbackLayer};
 ///
-/// fn prefer<A, F>(primary: A, alternate: F) -> FallbackAccessor<A, F>
+/// fn prefer<A, F>(primary: A, alternate: F) -> AttachmentFallbackAccessor<A, F>
 /// where
 ///     A: Accessor<Reader = dyn RecordReader>,
 ///     A::Request: Clone,
 ///     F: Accessor<Request = A::Request, Reader = dyn RecordReader>,
 /// {
-///     primary.layer(FallbackLayer::new(alternate))
+///     primary.layer(AttachmentFallbackLayer::new(alternate))
 /// }
 /// ```
-pub struct FallbackLayer<F> {
+pub struct AttachmentFallbackLayer<F> {
     fallback: Arc<F>,
     condition: Arc<Condition>,
 }
 
-impl<F> Clone for FallbackLayer<F> {
+impl<F> Clone for AttachmentFallbackLayer<F> {
     fn clone(&self) -> Self {
         Self {
             fallback: self.fallback.clone(),
@@ -54,7 +54,7 @@ impl<F> Clone for FallbackLayer<F> {
     }
 }
 
-impl<F> FallbackLayer<F> {
+impl<F> AttachmentFallbackLayer<F> {
     pub fn new(fallback: F) -> Self {
         Self {
             fallback: Arc::new(fallback),
@@ -70,22 +70,22 @@ impl<F> FallbackLayer<F> {
     }
 }
 
-pub struct FallbackAccessor<A, F> {
+pub struct AttachmentFallbackAccessor<A, F> {
     primary: A,
     fallback: Arc<F>,
     condition: Arc<Condition>,
 }
 
-impl<A, F> Layer<A> for FallbackLayer<F>
+impl<A, F> Layer<A> for AttachmentFallbackLayer<F>
 where
     A: Accessor<Reader = dyn RecordReader>,
     A::Request: Clone,
     F: Accessor<Request = A::Request, Reader = dyn RecordReader>,
 {
-    type Layered = FallbackAccessor<A, F>;
+    type Layered = AttachmentFallbackAccessor<A, F>;
 
     fn layer(&self, primary: A) -> Self::Layered {
-        FallbackAccessor {
+        AttachmentFallbackAccessor {
             primary,
             fallback: self.fallback.clone(),
             condition: self.condition.clone(),
@@ -94,7 +94,7 @@ where
 }
 
 #[async_trait]
-impl<A, F> Accessor for FallbackAccessor<A, F>
+impl<A, F> Accessor for AttachmentFallbackAccessor<A, F>
 where
     A: Accessor<Reader = dyn RecordReader>,
     A::Request: Clone,
