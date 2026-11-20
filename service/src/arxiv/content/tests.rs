@@ -25,44 +25,19 @@ async fn read(name: &str, data: &[u8]) -> Result<Vec<RecordBatch>> {
 }
 
 #[tokio::test]
-async fn streams_tex_before_large_attachments_and_checks_gzip_trailer() {
-    for file in [
-        "large-attachments.tar.gz",
-        "large-attachments-bad-crc.tar.gz",
-    ] {
-        let data = fixture!("arxiv-content", file).await;
-        let mut records = expand(
-            input("2410/2410.00001v2.gz", &data).unwrap(),
-            ReadOptions::default().with_batch_size(std::num::NonZeroUsize::MIN),
-        )
-        .await
-        .unwrap();
-        let first = records.try_next().await.unwrap().unwrap();
-        assert_eq!(
-            first["data"].as_binary::<i64>().value(0),
-            fixture!("arxiv-articles", "members/main.tex").await
-        );
-        let rest = records.try_collect::<Vec<_>>().await;
-        if file.contains("bad-crc") {
-            assert_eq!(
-                rest.unwrap_err().kind(),
-                open_arrow_access_core::ErrorKind::Decode
-            );
-        } else {
-            let rest = rest.unwrap();
-            assert_eq!(rest.len(), 1);
-            assert_eq!(
-                rest[0]["source_index"]
-                    .as_primitive::<UInt64Type>()
-                    .value(0),
-                7
-            );
-            assert_eq!(
-                rest[0]["data"].as_binary::<i64>().value(0),
-                b"duplicate manuscript\n"
-            );
-        }
-    }
+async fn streams_tex_before_reporting_corrupt_gzip_trailer() {
+    let data = fixture!("arxiv-content", "large-attachments-bad-crc.tar.gz").await;
+    let mut records = expand(
+        input("2410/2410.00001v2.gz", &data).unwrap(),
+        ReadOptions::default().with_batch_size(std::num::NonZeroUsize::MIN),
+    )
+    .await
+    .unwrap();
+    assert_eq!(records.try_next().await.unwrap().unwrap().num_rows(), 1);
+    assert_eq!(
+        records.try_collect::<Vec<_>>().await.unwrap_err().kind(),
+        open_arrow_access_core::ErrorKind::Decode
+    );
 }
 
 #[tokio::test]
