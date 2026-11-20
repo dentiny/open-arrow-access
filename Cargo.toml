@@ -90,6 +90,7 @@ open-arrow-access-dataset = { path = "dataset", version = "0.16.0", default-feat
 open-arrow-access-service = { path = "service", version = "0.16.0", default-features = false }
 
 [features]
+archive = ["dep:arrow-schema", "dep:futures", "decompression-tar", "decompression-gzip"]
 blocking = ["dep:arrow-array", "dep:arrow-schema", "dep:tokio"]
 decompression-bz2 = ["open-arrow-access-decompression/bz2"]
 decompression-gzip = ["open-arrow-access-decompression/gzip"]
@@ -136,6 +137,7 @@ source-positions = ["open-arrow-access-layers/source-positions"]
 [dependencies]
 arrow-array = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 open-arrow-access-core.workspace = true
 open-arrow-access-dataset.workspace = true
 open-arrow-access-decompression.workspace = true
@@ -166,3 +168,7 @@ required-features = ["format-xml"]
 [[test]]
 name = "arxiv_documents"
 required-features = ["service-arxiv"]
+
+[[test]]
+name = "archive"
+required-features = ["archive"]

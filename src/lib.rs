@@ -15,6 +15,11 @@ pub use blocking::BlockingRecordBatchReader;
 
 pub mod crawl;
 
+#[cfg(feature = "archive")]
+mod archive;
+#[cfg(feature = "archive")]
+pub use archive::{ArchiveAccessor, ArchiveFormat, ArchiveOptions, archive_schema};
+
 mod attachment;
 pub use attachment::{
     AttachmentAccessor, AttachmentFormat, AttachmentOptions, open_attachment_source,
