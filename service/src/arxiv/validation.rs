@@ -1,8 +1,8 @@
-use arrow_array::Array;
+use arrow_array::{Array, RecordBatch};
 use arrow_schema::DataType;
 use open_arrow_access_core::Result;
 
-use super::{ArxivArchive, ArxivContentFormat, ArxivKind, error};
+use super::{ArxivArchive, ArxivContentFormat, ArxivKind, ArxivSourcePackaging, error, id};
 
 pub(super) fn validate_unique_metadata_id(previous: Option<u64>) -> Result<()> {
     if previous.is_some() {
@@ -147,4 +147,100 @@ pub(super) fn validate_content_kind(format: ArxivContentFormat, kind: ArxivKind)
             "PDF content requires kind=pdf; LaTeX/XML content requires kind=source",
         )),
     }
+}
+
+pub(super) fn is_tex(name: &[u8]) -> Result<bool> {
+    if !name.to_ascii_lowercase().ends_with(b".tex") {
+        return Ok(false);
+    }
+    let name =
+        std::str::from_utf8(name).map_err(|_| error::decode("LaTeX member name is not UTF-8"))?;
+    let parts = name.split('/').collect::<Vec<_>>();
+    if name.starts_with('/') || parts.contains(&"..") || name.contains('\\') {
+        return Err(error::decode("unsafe source member name"));
+    }
+    Ok(!parts.iter().any(|part| part.eq_ignore_ascii_case("anc"))
+        && name.to_ascii_lowercase().ends_with(".tex"))
+}
+fn is_tar(data: &[u8]) -> bool {
+    if data.len() < 512 {
+        return false;
+    }
+    if &data[257..262] == b"ustar" {
+        return true;
+    }
+    let checksum = std::str::from_utf8(&data[148..156])
+        .ok()
+        .and_then(|s| u64::from_str_radix(s.trim_matches(['\0', ' ']), 8).ok());
+    let sum: u64 = data[..512]
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| {
+            if (148..156).contains(&i) {
+                32
+            } else {
+                u64::from(v)
+            }
+        })
+        .sum();
+    checksum == Some(sum)
+}
+
+pub(super) fn content_article_id(name: &[u8], format: ArxivContentFormat) -> Result<String> {
+    if format == ArxivContentFormat::Pdf {
+        return id::pdf_id(name);
+    }
+    let path =
+        std::str::from_utf8(name).map_err(|_| error::decode("article filename is not UTF-8"))?;
+    let mut stem = path.to_owned();
+    match format {
+        ArxivContentFormat::Latex => {
+            for suffix in [".gz", ".tar", ".tex"] {
+                if let Some(value) = stem.strip_suffix(suffix) {
+                    stem = value.to_owned();
+                }
+            }
+        }
+        ArxivContentFormat::Xml => {
+            stem = path
+                .strip_suffix(".xml")
+                .ok_or_else(|| error::decode("XML shard member must end in .xml"))?
+                .to_owned();
+        }
+        ArxivContentFormat::Pdf => unreachable!(),
+    }
+    id::pdf_id(format!("{stem}.pdf").as_bytes())
+}
+
+pub(super) fn source_packaging(data: &[u8]) -> Result<ArxivSourcePackaging> {
+    if is_tar(data) {
+        return Ok(ArxivSourcePackaging::Tar);
+    }
+    let text = std::str::from_utf8(data)
+        .map_err(|_| error::decode("source is neither a TAR nor UTF-8 LaTeX"))?;
+    if !["\\documentclass", "\\documentstyle", "\\begin{document}"]
+        .iter()
+        .any(|marker| text.contains(marker))
+    {
+        return Err(error::decode(
+            "single-file source is not recognized as LaTeX",
+        ));
+    }
+    Ok(ArxivSourcePackaging::Single {
+        name: b"main.tex".to_vec(),
+    })
+}
+
+pub(super) fn validate_latex_bytes(data: &[u8]) -> Result<()> {
+    std::str::from_utf8(data).map_err(|_| error::decode("LaTeX member is not UTF-8"))?;
+    Ok(())
+}
+
+pub(super) fn validate_latex_files(batches: &[RecordBatch]) -> Result<()> {
+    if batches.is_empty() {
+        return Err(error::decode(
+            "source package contains no non-ancillary LaTeX files",
+        ));
+    }
+    Ok(())
 }
