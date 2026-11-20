@@ -79,6 +79,32 @@ pub(super) fn validate_archive_length(archive: &ArxivArchive, length: Option<u64
     Ok(())
 }
 
+/// Modern article download ID with an optional positive version suffix.
+pub(super) fn validate_article_id(id: &str) -> Result<()> {
+    let unversioned = if let Some((base, version)) = id.rsplit_once('v')
+        && !version.is_empty()
+        && version.bytes().all(|b| b.is_ascii_digit())
+    {
+        if version.starts_with('0') {
+            return Err(error::invalid("invalid arXiv article version"));
+        }
+        base
+    } else {
+        id
+    };
+    let Some((month, number)) = unversioned.split_once('.') else {
+        return Err(error::invalid("expected modern arXiv article ID"));
+    };
+    if month.len() != 4
+        || !month.bytes().all(|b| b.is_ascii_digit())
+        || !matches!(number.len(), 4 | 5)
+        || !number.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(error::invalid("expected modern arXiv article ID"));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_metadata_id(id: &str) -> Result<()> {
     if !id.is_ascii() {
         return Err(error::non_ascii_metadata_id());
