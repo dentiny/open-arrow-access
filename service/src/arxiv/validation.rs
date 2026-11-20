@@ -1,8 +1,30 @@
-use arrow_array::{Array, RecordBatch};
-use arrow_schema::DataType;
+use arrow_array::{Array, RecordBatch, cast::AsArray};
+use arrow_schema::{DataType, Fields};
 use open_arrow_access_core::Result;
 
 use super::{ArxivArchive, ArxivContentFormat, ArxivKind, ArxivSourcePackaging, error, id};
+
+pub(super) fn validate_oai_metadata(batch: &RecordBatch) -> Result<()> {
+    if batch.schema().as_ref() != crate::arxiv_metadata::schema().arrow_schema().as_ref() {
+        return Err(error::invalid_oai_metadata_schema());
+    }
+    let header = batch["oai:header"].as_struct();
+    if header.null_count() != 0 {
+        return Err(error::null_metadata_id());
+    }
+    validate_metadata_id_column(header["oai:identifier"].as_ref())
+}
+
+pub(super) fn validate_content_metadata_schema(fields: &Fields) -> Result<()> {
+    if fields != crate::arxiv_metadata::schema().arrow_schema().fields() {
+        return Err(error::invalid_content_metadata_schema());
+    }
+    Ok(())
+}
+
+pub(super) fn validate_content_metadata_match(row: Option<u64>, id: &str) -> Result<u64> {
+    row.ok_or_else(|| error::missing_content_metadata(id))
+}
 
 pub(super) fn validate_unique_metadata_id(previous: Option<u64>) -> Result<()> {
     if previous.is_some() {
