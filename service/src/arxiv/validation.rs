@@ -11,6 +11,18 @@ pub(super) fn validate_unique_metadata_id(previous: Option<u64>) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn validate_shard(shard: &str, month: Option<u16>) -> Result<()> {
+    if month.is_some()
+        || !shard.ends_with(".tar")
+        || shard.starts_with('/')
+        || shard.contains(['\\', ':', '?', '#'])
+        || shard.split('/').any(|part| matches!(part, "" | "." | ".."))
+    {
+        return Err(error::invalid_shard());
+    }
+    Ok(())
+}
+
 pub(super) fn validate_pdf_kind(kind: ArxivKind) -> Result<()> {
     if kind != ArxivKind::Pdf {
         return Err(error::pdf_kind_required());
