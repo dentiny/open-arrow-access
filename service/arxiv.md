@@ -435,7 +435,7 @@ field names, order, Arrow types and nullability:
 `.with_metadata(index)` adds the same non-null `metadata: Struct` for all
 formats when using the same snapshot. Matching precedes projection. Without a
 snapshot, all three omit that column. There is no format-specific `text` column.
-`content_schema()` is the single definition; `latex_schema()` aliases it.
+`content_schema()` is the single definition.
 
 PDF uses `kind=pdf`; LaTeX uses `kind=source` and filters attachments. XML reads
 a caller-owned source inventory whose TAR article members end in `.xml`: arXiv does
@@ -453,7 +453,7 @@ should select `content(format)` rather than emitting those raw schemas.
 
 ## LaTeX-only bulk output
 
-`service.records().latex()` accepts `ArxivKind::Source` and retains one lazy
+`service.records().content(ArxivContentFormat::Latex)` accepts `ArxivKind::Source` and retains one lazy
 partition per source TAR. It decodes gzip source payloads, detects TAR packages,
 and emits each UTF-8 `.tex` member outside any `anc/` directory. Images,
 ancillary TeX, videos, bibliography/style files and the original package are
@@ -470,7 +470,7 @@ non-null). Outer and inner physical indices preserve duplicate-name identity.
 `article_id` is the normalized unversioned metadata key; original outer names
 retain version spelling. Modern and legacy bulk IDs are supported.
 
-Call `.latex().with_metadata(index)` to attach all cached snapshot fields as a
+Call `.content(ArxivContentFormat::Latex).with_metadata(index)` to attach all cached snapshot fields as a
 non-null `metadata` struct, matching by article ID before projection. Missing
 matches fail. This does not build snapshots or establish historical-version
 metadata matching. Projection, including a zero-column projection, still
