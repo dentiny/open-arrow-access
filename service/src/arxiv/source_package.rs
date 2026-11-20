@@ -2,7 +2,7 @@
 use super::{ArxivArticle, ArxivArticleFormat, article_schema};
 use futures::stream;
 use open_arrow_access_core::{
-    ByteReader, Bytes, ObjectRef, OrderRequirement, ReadOptions, RecordBatchBuilder,
+    ByteReader, Bytes, ObjectRef, OrderRequirement, ReadOptions, RecordBatch, RecordBatchBuilder,
     RecordMetadata, RecordReader, Result, StreamReader, bytes_reader, into_async_read, read_all,
 };
 use open_arrow_access_decompression::{
@@ -124,40 +124,14 @@ pub async fn open_source_package(
         }
         ArxivSourcePackaging::Tar | ArxivSourcePackaging::GzipTar => {
             let tar = TarStream::new(Box::new(bytes_reader(data, source)), options.tar_limits);
-            let batches = stream::try_unfold(tar, move |mut tar| {
-                let projection = options.options.projection.clone();
-                let rows = options.options.batch_size.get();
-                let target = options.target_bytes.get();
-                let article_id = article_id.clone();
-                let source_uri = source_uri.clone();
-                async move {
-                    let mut builder = RecordBatchBuilder::new(article_schema(), projection)?;
-                    let mut bytes = 0_usize;
-                    while builder.len() < rows && (builder.is_empty() || bytes < target) {
-                        let Some(member) = tar.next_entry().await? else {
-                            break;
-                        };
-                        if !member.entry.is_file {
-                            drop(member.reader);
-                            continue;
-                        }
-                        let data = read_all(member.reader, "read_arxiv_source_member").await?;
-                        bytes = bytes.saturating_add(data.len());
-                        builder.push(|row| {
-                            row.append("article_id", article_id.as_str())?;
-                            row.append("format", "source_member")?;
-                            row.append("source_uri", source_uri.as_str())?;
-                            row.append("entry_index", member.entry.index as u64)?;
-                            row.append("entry_name", member.entry.name.as_slice())?;
-                            row.append("data", data.as_slice())
-                        })?;
-                    }
-                    if builder.is_empty() {
-                        Ok(None)
-                    } else {
-                        Ok(Some((builder.finish()?, tar)))
-                    }
-                }
+            let batches = stream::try_unfold(tar, move |tar| {
+                read_source_batch(
+                    tar,
+                    article_id.clone(),
+                    source_uri.clone(),
+                    options.options.clone(),
+                    options.target_bytes.get(),
+                )
             });
             Ok(Box::new(StreamReader::records(
                 batches,
@@ -165,5 +139,41 @@ pub async fn open_source_package(
                 OrderRequirement::PreserveGlobal,
             )))
         }
+    }
+}
+
+async fn read_source_batch(
+    mut tar: TarStream,
+    article_id: String,
+    source_uri: String,
+    options: ReadOptions,
+    target: usize,
+) -> Result<Option<(RecordBatch, TarStream)>> {
+    let rows = options.batch_size.get();
+    let mut builder = RecordBatchBuilder::new(article_schema(), options.projection)?;
+    let mut bytes = 0_usize;
+    while builder.len() < rows && (builder.is_empty() || bytes < target) {
+        let Some(member) = tar.next_entry().await? else {
+            break;
+        };
+        if !member.entry.is_file {
+            drop(member.reader);
+            continue;
+        }
+        let data = read_all(member.reader, "read_arxiv_source_member").await?;
+        bytes = bytes.saturating_add(data.len());
+        builder.push(|row| {
+            row.append("article_id", article_id.as_str())?;
+            row.append("format", "source_member")?;
+            row.append("source_uri", source_uri.as_str())?;
+            row.append("entry_index", member.entry.index as u64)?;
+            row.append("entry_name", member.entry.name.as_slice())?;
+            row.append("data", data.as_slice())
+        })?;
+    }
+    if builder.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some((builder.finish()?, tar)))
     }
 }
