@@ -66,7 +66,7 @@ pub async fn open_source_package(
     options: ArxivSourceOptions,
 ) -> Result<Box<dyn RecordReader>> {
     let article_id = article_id.into();
-    ArxivArticle::new(&article_id, ArxivArticleFormat::Source).locator()?;
+    ArxivArticle::new(&article_id, ArxivArticleFormat::Latex).locator()?;
     let schema = options
         .options
         .resolve_projection(&article_schema())?

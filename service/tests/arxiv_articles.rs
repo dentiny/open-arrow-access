@@ -16,7 +16,7 @@ fn article_routes_accept_modern_ids_and_versions_without_path_injection() {
     for id in ["0704.0001", "2410.00001", "2410.00001v2"] {
         for (format, prefix) in [
             (Format::Pdf, "pdf"),
-            (Format::Source, "src"),
+            (Format::Latex, "src"),
             (Format::Html, "html"),
         ] {
             assert_eq!(
@@ -55,7 +55,7 @@ async fn explicit_formats_have_independent_lazy_partitions_and_preserve_payloads
     let mut request = ArxivArticleReadRequest::new(vec![
         ArxivArticle::new("2410.00001v2", Format::Html),
         ArxivArticle::new("2410.00001v2", Format::Pdf),
-        ArxivArticle::new("2410.00001v2", Format::Source),
+        ArxivArticle::new("2410.00001v2", Format::Latex),
     ]);
     request.byte_options = ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
@@ -157,7 +157,7 @@ async fn http_formats_preserve_distinct_bytes_and_missing_html_does_not_fallback
     let accessor = ArxivService::new(OpenDalAccessor::new(operator)).article_records();
     let selections = vec![
         ArxivArticle::new("2410.00001v1", Format::Pdf),
-        ArxivArticle::new("2410.00001v1", Format::Source),
+        ArxivArticle::new("2410.00001v1", Format::Latex),
         ArxivArticle::new("2410.00001v1", Format::Html),
     ];
     let mut reader = accessor

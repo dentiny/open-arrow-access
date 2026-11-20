@@ -21,7 +21,7 @@ async fn crawl_preserves_original_formats_and_source_ancillary_files() {
     let mut reader = crawl
         .open(ArxivArticleReadRequest::new(vec![
             ArxivArticle::new("2410.00001v1", ArxivArticleFormat::Pdf),
-            ArxivArticle::new("2410.00001v1", ArxivArticleFormat::Source),
+            ArxivArticle::new("2410.00001v1", ArxivArticleFormat::Latex),
             ArxivArticle::new("2410.00001v1", ArxivArticleFormat::Html),
         ]))
         .await
@@ -37,20 +37,20 @@ async fn crawl_preserves_original_formats_and_source_ancillary_files() {
             let format = batch["format"].as_string::<i64>().value(row);
             let path = match format {
                 "pdf" => "paper.pdf",
-                "source" => "source.tar.gz",
+                "latex" => "source.tar.gz",
                 "html" => "paper.html",
                 other => panic!("unexpected format {other}"),
             };
             let bytes = batch["data"].as_binary::<i64>().value(row);
             assert_eq!(bytes, fixture!("arxiv-articles", path).await);
-            if format == "source" {
+            if format == "latex" {
                 source = Some(bytes.to_vec());
             }
             formats.push(format.to_owned());
         }
     }
     formats.sort();
-    assert_eq!(formats, ["html", "pdf", "source"]);
+    assert_eq!(formats, ["html", "latex", "pdf"]);
 
     // Package expansion is explicit; the original source bytes remain available.
     let mut members = open_source_package(
