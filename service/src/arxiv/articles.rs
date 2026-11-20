@@ -14,18 +14,21 @@ use std::sync::{Arc, OnceLock};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ArxivArticleFormat {
     Pdf,
+    Latex,
     Html,
 }
 impl ArxivArticleFormat {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Pdf => "pdf",
+            Self::Latex => "latex",
             Self::Html => "html",
         }
     }
     fn prefix(self) -> &'static str {
         match self {
             Self::Pdf => "pdf",
+            Self::Latex => "src",
             Self::Html => "html",
         }
     }

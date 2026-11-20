@@ -8,7 +8,7 @@ use open_arrow_access::{
 use open_arrow_access_test_support::{fixture, fixture_path, fs_operator};
 
 #[tokio::test]
-async fn crawl_preserves_original_pdf_and_html() {
+async fn crawl_preserves_original_formats() {
     let articles = ArxivService::new(OpenDalAccessor::new(fs_operator(fixture_path!(
         "arxiv-articles",
         ""
@@ -18,6 +18,7 @@ async fn crawl_preserves_original_pdf_and_html() {
     let mut reader = crawl
         .open(ArxivArticleReadRequest::new(vec![
             ArxivArticle::new("2410.00001v1", ArxivArticleFormat::Pdf),
+            ArxivArticle::new("2410.00001v1", ArxivArticleFormat::Latex),
             ArxivArticle::new("2410.00001v1", ArxivArticleFormat::Html),
         ]))
         .await
@@ -32,6 +33,7 @@ async fn crawl_preserves_original_pdf_and_html() {
             let format = batch["format"].as_string::<i64>().value(row);
             let path = match format {
                 "pdf" => "paper.pdf",
+                "latex" => "source.tar.gz",
                 "html" => "paper.html",
                 other => panic!("unexpected format {other}"),
             };
@@ -41,5 +43,5 @@ async fn crawl_preserves_original_pdf_and_html() {
         }
     }
     formats.sort();
-    assert_eq!(formats, ["html", "pdf"]);
+    assert_eq!(formats, ["html", "latex", "pdf"]);
 }

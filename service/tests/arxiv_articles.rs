@@ -11,17 +11,24 @@ async fn load(name: &str) -> Vec<u8> {
     fixture!("arxiv-articles", name).await
 }
 
-#[test]
-fn article_routes_accept_modern_ids_and_versions_without_path_injection() {
-    for id in ["0704.0001", "2410.00001", "2410.00001v2"] {
-        for (format, prefix) in [(Format::Pdf, "pdf"), (Format::Html, "html")] {
-            assert_eq!(
-                ArxivArticle::new(id, format).locator().unwrap(),
-                format!("{prefix}/{id}")
-            );
-        }
-    }
-    for id in [
+#[rstest::rstest]
+#[case(Format::Pdf, "pdf")]
+#[case(Format::Latex, "src")]
+#[case(Format::Html, "html")]
+fn article_routes_accept_modern_ids_and_versions(
+    #[values("0704.0001", "2410.00001", "2410.00001v2")] id: &str,
+    #[case] format: Format,
+    #[case] prefix: &str,
+) {
+    assert_eq!(
+        ArxivArticle::new(id, format).locator().unwrap(),
+        format!("{prefix}/{id}")
+    );
+}
+
+#[rstest::rstest]
+fn article_routes_reject_invalid_ids(
+    #[values(
         "",
         "../2410.00001",
         "2410.00001?x=1",
@@ -32,13 +39,11 @@ fn article_routes_accept_modern_ids_and_versions_without_path_injection() {
         "hep-th9901001",
         "hep-th/9901001v1",
         "solv-int/9901001",
-        "2410.00001/extra",
-    ] {
-        assert!(
-            ArxivArticle::new(id, Format::Html).locator().is_err(),
-            "{id}"
-        );
-    }
+        "2410.00001/extra"
+    )]
+    id: &str,
+) {
+    assert!(ArxivArticle::new(id, Format::Html).locator().is_err());
 }
 
 #[tokio::test]
@@ -51,6 +56,7 @@ async fn explicit_formats_have_independent_lazy_partitions_and_preserve_payloads
     let mut request = ArxivArticleReadRequest::new(vec![
         ArxivArticle::new("2410.00001v2", Format::Html),
         ArxivArticle::new("2410.00001v2", Format::Pdf),
+        ArxivArticle::new("2410.00001v2", Format::Latex),
     ]);
     request.byte_options = ByteReadOptions {
         io_concurrency: NonZeroUsize::new(3).unwrap(),
@@ -63,32 +69,21 @@ async fn explicit_formats_have_independent_lazy_partitions_and_preserve_payloads
         let mut reader = partition.unwrap().await.unwrap();
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(
-            batch
-                .column_by_name("article_id")
-                .unwrap()
-                .as_string::<i64>()
-                .value(0),
+            batch["article_id"].as_string::<i64>().value(0),
             "2410.00001v2"
         );
-        assert_eq!(
-            batch
-                .column_by_name("data")
-                .unwrap()
-                .as_binary::<i64>()
-                .value(0),
-            original
-        );
+        assert_eq!(batch["data"].as_binary::<i64>().value(0), original);
         assert!(reader.next().await.unwrap().is_none());
         count += 1;
     }
-    assert_eq!(count, 2);
+    assert_eq!(count, 3);
     let requests = observed.requests.lock().unwrap();
     assert_eq!(
         requests
             .iter()
             .map(|r| r.object.locator())
             .collect::<Vec<_>>(),
-        vec!["html/2410.00001v2", "pdf/2410.00001v2"]
+        vec!["html/2410.00001v2", "pdf/2410.00001v2", "src/2410.00001v2"]
     );
     assert!(requests.iter().all(|r| r.options.io_concurrency.get() == 3));
 }
@@ -128,7 +123,11 @@ async fn http_formats_preserve_distinct_bytes_and_missing_html_does_not_fallback
     use open_arrow_access_storage::OpenDalAccessor;
     use open_arrow_access_test_support::http::HttpFixture;
     let http = HttpFixture::new();
-    for (route, fixture) in [("pdf", "paper.pdf"), ("html", "paper.html")] {
+    for (route, fixture) in [
+        ("pdf", "paper.pdf"),
+        ("src", "source.tar.gz"),
+        ("html", "paper.html"),
+    ] {
         http.file(
             &format!("/{route}/2410.00001v1"),
             Bytes::from(load(fixture).await),
@@ -148,23 +147,17 @@ async fn http_formats_preserve_distinct_bytes_and_missing_html_does_not_fallback
     let accessor = ArxivService::new(OpenDalAccessor::new(operator)).article_records();
     let selections = vec![
         ArxivArticle::new("2410.00001v1", Format::Pdf),
+        ArxivArticle::new("2410.00001v1", Format::Latex),
         ArxivArticle::new("2410.00001v1", Format::Html),
     ];
     let mut reader = accessor
         .open(ArxivArticleReadRequest::new(selections))
         .await
         .unwrap();
-    for name in ["paper.pdf", "paper.html"] {
+    for name in ["paper.pdf", "source.tar.gz", "paper.html"] {
         let expected = load(name).await;
         let batch = reader.next().await.unwrap().unwrap();
-        assert_eq!(
-            batch
-                .column_by_name("data")
-                .unwrap()
-                .as_binary::<i64>()
-                .value(0),
-            expected
-        );
+        assert_eq!(batch["data"].as_binary::<i64>().value(0), expected);
     }
     assert!(reader.next().await.unwrap().is_none());
     http.clear_requests();
