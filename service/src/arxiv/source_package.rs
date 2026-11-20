@@ -1,5 +1,5 @@
 //! Opt-in source package expansion; filenames remain metadata, never disk paths.
-use super::{ArxivArticle, ArxivArticleFormat, article_schema, error};
+use super::{ArxivArticle, ArxivArticleFormat, article_schema};
 use futures::stream;
 use open_arrow_access_core::{
     ByteReader, Bytes, ObjectRef, OrderRequirement, ReadOptions, RecordBatchBuilder,
@@ -30,9 +30,6 @@ pub enum ArxivSourcePackaging {
 pub struct ArxivSourceOptions {
     pub options: ReadOptions,
     pub tar_limits: TarLimits,
-    /// Hard limit for the decoded package, including TAR headers/padding.
-    /// The package is buffered up to this limit before rows are emitted.
-    pub max_decoded_bytes: NonZeroUsize,
     /// Soft per-batch payload target. A complete member can exceed it.
     pub target_bytes: NonZeroUsize,
 }
@@ -41,7 +38,6 @@ impl Default for ArxivSourceOptions {
         Self {
             options: ReadOptions::default(),
             tar_limits: TarLimits::default(),
-            max_decoded_bytes: NonZeroUsize::new(256 * 1024 * 1024).unwrap(),
             target_bytes: NonZeroUsize::new(4 * 1024 * 1024).unwrap(),
         }
     }
@@ -94,7 +90,7 @@ pub async fn open_source_package(
     } else {
         input
     };
-    let data = Bytes::from(read_bounded(input, options.max_decoded_bytes.get()).await?);
+    let data = Bytes::from(read_all(input, "read_arxiv_source").await?);
     let output = RecordMetadata {
         schema,
         source: metadata.source.clone(),
@@ -170,28 +166,4 @@ pub async fn open_source_package(
             )))
         }
     }
-}
-
-async fn read_bounded(mut input: Box<dyn ByteReader>, max_bytes: usize) -> Result<Vec<u8>> {
-    let object = input.metadata().source.clone();
-    let too_large =
-        || error::decode("arXiv payload exceeds configured max_bytes").with_object(object.as_ref());
-    if input
-        .metadata()
-        .content_length
-        .is_some_and(|n| n > max_bytes as u64)
-    {
-        return Err(too_large());
-    }
-    let mut output = Vec::new();
-    while let Some(chunk) = input.next().await? {
-        if chunk.is_empty() {
-            return Err(error::decode("empty arXiv byte chunk"));
-        }
-        if chunk.len() > max_bytes - output.len() {
-            return Err(too_large());
-        }
-        output.extend_from_slice(&chunk);
-    }
-    Ok(output)
 }

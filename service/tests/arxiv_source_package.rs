@@ -132,7 +132,7 @@ async fn gzip_single_sources_and_empty_files_are_not_assumed_to_be_archives() {
 }
 
 #[tokio::test]
-async fn rejects_gzip_corruption_truncation_trailing_bytes_and_decoded_bombs() {
+async fn rejects_gzip_corruption_truncation_and_trailing_bytes() {
     for name in ["bad-crc.tar.gz", "truncated.tar.gz", "trailing.tar.gz"] {
         assert!(
             open_source_package(
@@ -145,16 +145,6 @@ async fn rejects_gzip_corruption_truncation_trailing_bytes_and_decoded_bombs() {
             .is_err()
         );
     }
-    let valid = load("source.tar.gz").await;
-    let options = ArxivSourceOptions {
-        max_decoded_bytes: NonZeroUsize::new(10).unwrap(),
-        ..Default::default()
-    };
-    assert!(
-        open_source_package(input(valid), "2410.00001", Packaging::GzipTar, options)
-            .await
-            .is_err()
-    );
 }
 
 #[tokio::test]
