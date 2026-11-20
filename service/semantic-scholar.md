@@ -198,7 +198,7 @@ it does not download shard objects, submit jobs, or print signed URLs.
 
 ```toml
 [dependencies]
-open-arrow-access = { version = "0.12.0", default-features = false, features = ["service-semantic-scholar"] }
+open-arrow-access = { version = "0.12.1", default-features = false, features = ["service-semantic-scholar"] }
 futures = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
