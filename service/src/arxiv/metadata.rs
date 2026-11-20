@@ -1,4 +1,4 @@
-//! Join PDF entries to a previously harvested, fixed metadata snapshot.
+//! Join raw PDFs and common content rows to a previously harvested metadata snapshot.
 use std::{collections::HashMap, sync::Arc};
 
 use arrow_array::{Array, RecordBatch, StructArray, UInt64Array, cast::AsArray};
@@ -47,6 +47,67 @@ impl ArxivMetadataIndex {
             rows: StructArray::from(batch),
             ids,
         })
+    }
+
+    /// Build an index directly from the fixed arXivRaw OAI record schema.
+    /// Deleted records are retained and join by their OAI header identifier.
+    /// Reconcile repeated updates before constructing this immutable snapshot.
+    pub fn from_oai_records(batch: RecordBatch) -> Result<Self> {
+        if batch.schema().as_ref() != crate::arxiv_metadata::schema().arrow_schema().as_ref() {
+            return Err(error::invalid(
+                "expected the complete typed arXivRaw OAI schema",
+            ));
+        }
+        let header = batch["oai:header"].as_struct();
+        if header.null_count() != 0 {
+            return Err(error::null_metadata_id());
+        }
+        let identifiers = header.column_by_name("oai:identifier").unwrap();
+        validation::validate_metadata_id_column(identifiers.as_ref())?;
+        let mut ids = HashMap::with_capacity(batch.num_rows());
+        for (row, identifier) in identifiers.as_string::<i32>().iter().enumerate() {
+            validation::validate_unique_metadata_id(
+                ids.insert(id::metadata_id(identifier.unwrap())?, row as u64),
+            )?;
+        }
+        Ok(Self {
+            rows: StructArray::from(batch),
+            ids,
+        })
+    }
+
+    pub(super) fn validate_content_schema(&self) -> Result<()> {
+        let expected = crate::arxiv_metadata::schema().arrow_schema();
+        if self.rows.fields() != expected.fields() {
+            return Err(error::invalid(
+                "content metadata requires the complete typed arXivRaw OAI schema",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn attach_content(&self, batch: RecordBatch) -> Result<RecordBatch> {
+        let indices = batch["article_id"]
+            .as_string::<i64>()
+            .iter()
+            .map(|article| {
+                let key = id::metadata_id(article.ok_or_else(error::null_metadata_id)?)?;
+                self.ids.get(&key).copied().ok_or_else(|| {
+                    error::decode(&format!(
+                        "article {key} has no matching metadata in the snapshot"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let metadata = arrow_select::take::take(&self.rows, &UInt64Array::from(indices), None)
+            .map_err(error::arrow_error)?;
+        let mut columns = batch.columns().to_vec();
+        let position = batch
+            .schema()
+            .index_of("metadata")
+            .map_err(error::arrow_error)?;
+        columns[position] = metadata;
+        RecordBatch::try_new(batch.schema(), columns).map_err(error::arrow_error)
     }
 
     fn attach(&self, batch: RecordBatch) -> Result<RecordBatch> {
