@@ -1,127 +1,101 @@
-use arrow_array::cast::AsArray;
-use open_arrow_access_core::{ByteReader, Bytes, ObjectRef, ReadOptions, bytes_reader};
+use arrow_array::{cast::AsArray, types::UInt64Type};
+use open_arrow_access_core::{Bytes, ObjectRef, RecordReader, Result, bytes_reader};
 use open_arrow_access_service::arxiv::{
     ArxivSourceOptions, ArxivSourcePackaging as Packaging, open_source_package,
 };
 use open_arrow_access_test_support::fixture;
 use std::num::NonZeroUsize;
 
-fn input(data: Vec<u8>) -> Box<dyn ByteReader> {
-    Box::new(bytes_reader(
-        Bytes::from(data),
+async fn open(
+    name: &str,
+    packaging: Packaging,
+    options: ArxivSourceOptions,
+) -> Result<Box<dyn RecordReader>> {
+    let input = bytes_reader(
+        Bytes::from(fixture!("arxiv-articles", name).await),
         Some(ObjectRef::new("src/shard.tar#member=7")),
-    ))
-}
-async fn load(name: &str) -> Vec<u8> {
-    fixture!("arxiv-articles", name).await
+    );
+    open_source_package(Box::new(input), "2410.00001v1", packaging, options).await
 }
 
 #[tokio::test]
-async fn expands_tex_figures_video_and_data_preserving_duplicates_indices_and_bytes() {
-    let mut members = Vec::new();
-    for name in [
+async fn tar_preserves_members_and_ancillary_bytes() {
+    let names = [
         "main.tex",
         "figures/a.png",
         "anc/demo.mp4",
         "anc/data.csv",
         "anc/metadata.xml",
         "anc/archive.zip",
-    ] {
-        members.push((name, load(&format!("members/{name}")).await));
-    }
-    members.push(("main.tex", load("duplicate.tex").await));
+        "main.tex",
+    ];
     let mut options = ArxivSourceOptions::default();
     options.options.batch_size = NonZeroUsize::new(2).unwrap();
-    options.target_bytes = NonZeroUsize::new(1).unwrap();
-    for packaging in [Packaging::Tar, Packaging::GzipTar] {
-        let data = load(if matches!(packaging, Packaging::GzipTar) {
-            "source.tar.gz"
-        } else {
-            "source.tar"
-        })
-        .await;
-        let mut reader =
-            open_source_package(input(data), "2410.00001v2", packaging, options.clone())
-                .await
-                .unwrap();
-        let mut index = 0;
-        while let Some(batch) = reader.next().await.unwrap() {
-            assert_eq!(batch.num_rows(), 1); // soft byte target: whole members survive
+    options.target_bytes = NonZeroUsize::MIN;
+    for (path, packaging) in [
+        ("source.tar", Packaging::Tar),
+        ("source.tar.gz", Packaging::GzipTar),
+    ] {
+        let mut reader = open(path, packaging, options.clone()).await.unwrap();
+        for (index, name) in names.iter().enumerate() {
+            let batch = reader.next().await.unwrap().unwrap();
+            let expected = if index == 6 {
+                "duplicate.tex".into()
+            } else {
+                format!("members/{name}")
+            };
+            assert_eq!(batch.num_rows(), 1); // Whole files can exceed the soft byte target.
             assert_eq!(
-                batch
-                    .column_by_name("entry_name")
-                    .unwrap()
-                    .as_binary::<i64>()
-                    .value(0),
-                members[index].0.as_bytes()
+                batch["entry_name"].as_binary::<i64>().value(0),
+                name.as_bytes()
             );
             assert_eq!(
-                batch
-                    .column_by_name("entry_index")
-                    .unwrap()
-                    .as_primitive::<arrow_array::types::UInt64Type>()
-                    .value(0),
+                batch["entry_index"].as_primitive::<UInt64Type>().value(0),
                 index as u64 + 1
-            ); // directory skipped
-            assert_eq!(
-                batch
-                    .column_by_name("data")
-                    .unwrap()
-                    .as_binary::<i64>()
-                    .value(0),
-                members[index].1
             );
             assert_eq!(
-                batch
-                    .column_by_name("format")
-                    .unwrap()
-                    .as_string::<i64>()
-                    .value(0),
-                "source_member"
+                batch["data"].as_binary::<i64>().value(0),
+                fixture!("arxiv-articles", &expected).await
             );
             assert_eq!(
-                batch
-                    .column_by_name("source_uri")
-                    .unwrap()
-                    .as_string::<i64>()
-                    .value(0),
+                batch["article_id"].as_string::<i64>().value(0),
+                "2410.00001v1"
+            );
+            assert_eq!(batch["format"].as_string::<i64>().value(0), "source_member");
+            assert_eq!(
+                batch["source_uri"].as_string::<i64>().value(0),
                 "src/shard.tar#member=7"
             );
-            index += 1;
         }
-        assert_eq!(index, members.len());
+        assert!(reader.next().await.unwrap().is_none());
     }
 }
 
 #[tokio::test]
-async fn gzip_single_sources_and_empty_files_are_not_assumed_to_be_archives() {
+async fn single_files_preserve_original_and_empty_payloads() {
     for name in ["main.tex", "paper.pdf", "empty.tex"] {
-        let original = load(name).await;
-        for compressed in [false, true] {
-            let packaging = if compressed {
-                Packaging::GzipSingle {
-                    name: name.as_bytes().to_vec(),
-                }
-            } else {
+        for (path, packaging) in [
+            (
+                name.to_owned(),
                 Packaging::Single {
                     name: name.as_bytes().to_vec(),
-                }
-            };
-            let path = if compressed {
-                format!("{name}.gz")
-            } else {
-                name.into()
-            };
-            let mut reader = open_source_package(
-                input(load(&path).await),
-                "2410.00001v1",
-                packaging,
-                ArxivSourceOptions::default(),
-            )
-            .await
-            .unwrap();
+                },
+            ),
+            (
+                format!("{name}.gz"),
+                Packaging::GzipSingle {
+                    name: name.as_bytes().to_vec(),
+                },
+            ),
+        ] {
+            let mut reader = open(&path, packaging, ArxivSourceOptions::default())
+                .await
+                .unwrap();
             let batch = reader.next().await.unwrap().unwrap();
-            assert_eq!(batch["data"].as_binary::<i64>().value(0), original);
+            assert_eq!(
+                batch["data"].as_binary::<i64>().value(0),
+                fixture!("arxiv-articles", name).await
+            );
             assert_eq!(
                 batch["entry_name"].as_binary::<i64>().value(0),
                 name.as_bytes()
@@ -132,44 +106,27 @@ async fn gzip_single_sources_and_empty_files_are_not_assumed_to_be_archives() {
 }
 
 #[tokio::test]
-async fn rejects_gzip_corruption_truncation_and_trailing_bytes() {
+async fn rejects_invalid_gzip() {
     for name in ["bad-crc.tar.gz", "truncated.tar.gz", "trailing.tar.gz"] {
         assert!(
-            open_source_package(
-                input(load(name).await),
-                "2410.00001",
-                Packaging::GzipTar,
-                ArxivSourceOptions::default()
-            )
-            .await
-            .is_err()
+            open(name, Packaging::GzipTar, ArxivSourceOptions::default())
+                .await
+                .is_err(),
+            "{name}"
         );
     }
 }
 
 #[tokio::test]
-async fn applies_tar_limits_and_preserves_non_utf8_names_without_filesystem_extraction() {
-    let data = load("binary-name.tar").await;
-    let mut reader = open_source_package(
-        input(data.clone()),
-        "2410.00001",
-        Packaging::Tar,
-        ArxivSourceOptions::default(),
-    )
-    .await
-    .unwrap();
-    let batch = reader.next().await.unwrap().unwrap();
-    assert_eq!(
-        batch
-            .column_by_name("entry_name")
-            .unwrap()
-            .as_binary::<i64>()
-            .value(0),
-        b"\xff.tex"
-    );
+async fn binary_names_and_tar_limits() {
     let mut options = ArxivSourceOptions::default();
+    let mut reader = open("binary-name.tar", Packaging::Tar, options.clone())
+        .await
+        .unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(batch["entry_name"].as_binary::<i64>().value(0), b"\xff.tex");
     options.tar_limits.max_entry_bytes = 2;
-    let mut reader = open_source_package(input(data), "2410.00001", Packaging::Tar, options)
+    let mut reader = open("binary-name.tar", Packaging::Tar, options)
         .await
         .unwrap();
     assert!(reader.next().await.is_err());
@@ -177,27 +134,14 @@ async fn applies_tar_limits_and_preserves_non_utf8_names_without_filesystem_extr
 }
 
 #[tokio::test]
-async fn source_projection_retains_row_count_and_rejects_unknown_fields() {
-    let data = load("source.tar").await;
-    let mut options = ArxivSourceOptions {
-        options: ReadOptions::default(),
-        ..Default::default()
-    };
+async fn projection_preserves_rows_and_rejects_unknown_fields() {
+    let mut options = ArxivSourceOptions::default();
     options.options.projection = Some(vec![]);
-    let mut reader = open_source_package(
-        input(data.clone()),
-        "2410.00001",
-        Packaging::Tar,
-        options.clone(),
-    )
-    .await
-    .unwrap();
+    let mut reader = open("source.tar", Packaging::Tar, options.clone())
+        .await
+        .unwrap();
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!((batch.num_columns(), batch.num_rows()), (0, 7));
     options.options.projection = Some(vec!["unknown".into()]);
-    assert!(
-        open_source_package(input(data), "2410.00001", Packaging::Tar, options)
-            .await
-            .is_err()
-    );
+    assert!(open("source.tar", Packaging::Tar, options).await.is_err());
 }

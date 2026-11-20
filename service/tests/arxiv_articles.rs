@@ -68,21 +68,10 @@ async fn explicit_formats_have_independent_lazy_partitions_and_preserve_payloads
         let mut reader = partition.unwrap().await.unwrap();
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(
-            batch
-                .column_by_name("article_id")
-                .unwrap()
-                .as_string::<i64>()
-                .value(0),
+            batch["article_id"].as_string::<i64>().value(0),
             "2410.00001v2"
         );
-        assert_eq!(
-            batch
-                .column_by_name("data")
-                .unwrap()
-                .as_binary::<i64>()
-                .value(0),
-            original
-        );
+        assert_eq!(batch["data"].as_binary::<i64>().value(0), original);
         assert!(reader.next().await.unwrap().is_none());
         count += 1;
     }
@@ -167,14 +156,7 @@ async fn http_formats_preserve_distinct_bytes_and_missing_html_does_not_fallback
     for name in ["paper.pdf", "source.tar.gz", "paper.html"] {
         let expected = load(name).await;
         let batch = reader.next().await.unwrap().unwrap();
-        assert_eq!(
-            batch
-                .column_by_name("data")
-                .unwrap()
-                .as_binary::<i64>()
-                .value(0),
-            expected
-        );
+        assert_eq!(batch["data"].as_binary::<i64>().value(0), expected);
     }
     assert!(reader.next().await.unwrap().is_none());
     http.clear_requests();
