@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.1 - 2026-11-20
+
+- Keep TAR indexing futures Send by owning the seek adapter across header-read awaits, fixing compilation of explicit-shard arXiv discovery streams.
+- Release all 8 public workspace crates at 0.14.1 with matching internal dependency requirements.
+
 ## 0.14.0 - 2026-11-20
 
 - Add a common, fixed eight-column arXiv content schema for PDF, LaTeX and XML, with all content emitted as `data: LargeBinary`; keep metadata as a separate data source.

@@ -61,7 +61,8 @@ impl TarArchive {
     }
 
     async fn inspect(source: ArchiveSource, limits: TarLimits) -> Result<Self> {
-        let input = &source.input;
+        // Own the adapter across awaits: its buffered reader is Send, not Sync.
+        let input = source.input.clone();
         let mut offset = 0;
         let mut entries = Vec::new();
         loop {
