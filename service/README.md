@@ -31,7 +31,7 @@ directly, remove the `service-` prefix. Common Crawl shares `service-warc`.
 | OAPEN | `service-oapen` | Book metadata via OAI-PMH and selected hosted book bytes | [OAPEN](oapen.md) |
 | HathiTrust | `service-hathifiles` | Full/update Hathifiles catalogue exports | [Hathifiles](hathifiles.md) |
 | OpenStax | `service-openstax` | Commit-pinned textbook source ZIP archives | [OpenStax](openstax.md) |
-| BHL | `service-bhl` | Biodiversity literature metadata, item links and OCR export files | [BHL](bhl.md) |
+| BHL | `service-bhl` | Item links and OCR export bytes; Figshare/AWS hierarchy and sharding limits | [BHL](bhl.md) |
 | BHL AWS Open Data | `service-bhl` | Explicit object partitions over public S3 or caller-owned mirrors | [AWS partitions](bhl-open-data.md) |
 | Common Crawl | `service-warc` | Crawl/segment WARC membership and separately composed record reads | [Common Crawl](commoncrawl.md) |
 | CourtListener | `service-courtlistener` | Dated bulk table exports as decompressed CSV bytes | [CourtListener](courtlistener.md) |
@@ -158,4 +158,5 @@ version checks, mapping, and pagination in the service.
 
 See [adding a service](../docs/extending.md#add-a-service) for implementation
 steps, feature wiring, and examples.
+
 
