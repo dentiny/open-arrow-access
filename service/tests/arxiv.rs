@@ -387,37 +387,10 @@ async fn manifest_payload_sizes_allow_tar_framing_in_stream_index_and_native_sca
 }
 
 #[tokio::test]
-async fn explicit_shard_opens_only_that_object_without_a_manifest() {
+async fn explicit_shard_validates_selection_and_reads_only_that_object() {
     use futures::TryStreamExt;
     let bytes = fixture!("arxiv", "pdf/arXiv_pdf_2410_001.tar").await;
     let source = MemoryAccessor::new(&bytes, 512);
-    let observed = source.observations.clone();
-    let records = ArxivService::new(source).records();
-    let shard = "pdf/arXiv_pdf_2410_001.tar";
-    let plan = records
-        .plan_scan(ArxivReadRequest::new(ArxivKind::Pdf).with_shard(shard))
-        .await
-        .unwrap();
-    let mut partitions = plan.partitions.try_collect::<Vec<_>>().await.unwrap();
-    assert_eq!(partitions.len(), 1);
-    assert!(observed.requests.lock().unwrap().is_empty());
-    let mut reader = partitions.pop().unwrap().await.unwrap();
-    while let Some(batch) = reader.next().await.unwrap() {
-        assert!(
-            batch["shard_uri"]
-                .as_string::<i64>()
-                .iter()
-                .all(|value| value == Some(shard))
-        );
-    }
-    let requests = observed.requests.lock().unwrap();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].object.locator(), shard);
-}
-
-#[tokio::test]
-async fn explicit_shard_rejects_ambiguous_or_invalid_selection_before_io() {
-    let source = MemoryAccessor::new(b"", 1);
     let observed = source.observations.clone();
     let records = ArxivService::new(source).records();
     for shard in [
@@ -446,4 +419,24 @@ async fn explicit_shard_rejects_ambiguous_or_invalid_selection_before_io() {
             .is_err()
     );
     assert!(observed.requests.lock().unwrap().is_empty());
+    let shard = "pdf/arXiv_pdf_2410_001.tar";
+    let plan = records
+        .plan_scan(ArxivReadRequest::new(ArxivKind::Pdf).with_shard(shard))
+        .await
+        .unwrap();
+    let mut partitions = plan.partitions.try_collect::<Vec<_>>().await.unwrap();
+    assert_eq!(partitions.len(), 1);
+    assert!(observed.requests.lock().unwrap().is_empty());
+    let mut reader = partitions.pop().unwrap().await.unwrap();
+    while let Some(batch) = reader.next().await.unwrap() {
+        assert!(
+            batch["shard_uri"]
+                .as_string::<i64>()
+                .iter()
+                .all(|value| value == Some(shard))
+        );
+    }
+    let requests = observed.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].object.locator(), shard);
 }
