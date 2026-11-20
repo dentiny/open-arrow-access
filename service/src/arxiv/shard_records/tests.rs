@@ -96,7 +96,7 @@ async fn http_shard_uses_one_get_for_parallel_content() {
     }
     assert_eq!(rows, 2);
     let requests = http.requests();
-    assert!(started.elapsed() >= std::time::Duration::from_secs(3));
+    more_asserts::assert_ge!(started.elapsed(), std::time::Duration::from_secs(3));
     assert_eq!(requests.len(), 3); // One shard GET, two serialized OAI lookups.
     assert!(requests.iter().all(|r| r.method == http::Method::GET));
     assert_eq!(
