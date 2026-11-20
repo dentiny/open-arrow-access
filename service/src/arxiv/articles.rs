@@ -1,5 +1,5 @@
 //! Explicit article representations over caller-owned HTTP or mirror storage.
-use super::{ArxivService, error};
+use super::{ArxivService, error, validation};
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
@@ -54,27 +54,7 @@ impl ArxivArticle {
     /// Relative website route; configure byte storage above pdf/src/html.
     pub fn locator(&self) -> Result<String> {
         let id = self.id.as_str();
-        let unversioned = if let Some((base, version)) = id.rsplit_once('v')
-            && !version.is_empty()
-            && version.bytes().all(|b| b.is_ascii_digit())
-        {
-            if version.starts_with('0') {
-                return Err(error::invalid("invalid arXiv article version"));
-            }
-            base
-        } else {
-            id
-        };
-        let Some((month, number)) = unversioned.split_once('.') else {
-            return Err(error::invalid("expected modern arXiv article ID"));
-        };
-        if month.len() != 4
-            || !month.bytes().all(|b| b.is_ascii_digit())
-            || !matches!(number.len(), 4 | 5)
-            || !number.bytes().all(|b| b.is_ascii_digit())
-        {
-            return Err(error::invalid("expected modern arXiv article ID"));
-        }
+        validation::validate_article_id(id)?;
         Ok(format!("{}/{}", self.format.prefix(), id))
     }
 }
