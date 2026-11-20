@@ -1,4 +1,3 @@
-use open_arrow_access_decompression::tar::TarEntryReader;
 use std::{
     num::NonZeroUsize,
     sync::{Arc, OnceLock},
@@ -7,13 +6,13 @@ use std::{
 use arrow_schema::{DataType, Field, Schema};
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, Capability, FieldNameIndex,
-    ObjectRef, OrderRequirement, ReadOptions, ReadOptionsProvider, RecordBatchBuilder,
-    RecordCapability, RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, SchemaRef,
-    StreamReader, async_trait, read_all, scan_partition,
+    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Capability, ObjectRef,
+    OrderRequirement, ReadOptions, ReadOptionsProvider, RecordCapability, RecordMetadata,
+    RecordReader, Result, ScanPlan, ScanPlanner, SchemaRef, StreamReader, async_trait,
+    scan_partition,
 };
 
-use super::{ArxivKind, ArxivService};
+use super::{ArxivKind, ArxivService, tar_records::read_tar_batch};
 
 const DEFAULT_BATCH_TARGET_BYTES: usize = 4 * 1024 * 1024;
 
@@ -136,7 +135,6 @@ where
 {
     async fn plan_scan(&self, request: ArxivReadRequest) -> Result<ScanPlan> {
         let schema = request.options.resolve_projection(&record_schema())?.schema;
-        let include_data = FieldNameIndex::new(schema.fields()).get("data").is_some();
         let archives = self
             .service
             .manifest(request.kind, request.month, request.byte_options)
@@ -157,47 +155,20 @@ where
                     schema,
                     source: Some(ObjectRef::new(source.clone())),
                 };
-                let batches = stream::try_unfold(tar, move |mut tar| {
+                let batches = stream::try_unfold(tar, move |tar| {
                     let source = source.clone();
-                    let projection = request.options.projection.clone();
-                    let rows = request.options.batch_size.get();
-                    let target_bytes = request.target_bytes.get() as u64;
-                    async move {
-                        let mut builder = RecordBatchBuilder::new(record_schema(), projection)?;
-                        let mut payload_bytes = 0_u64;
-                        while builder.len() < rows
-                            && (builder.is_empty() || payload_bytes < target_bytes)
-                        {
-                            let Some(TarEntryReader {
-                                entry,
-                                reader: mut body,
-                            }) = tar.next_entry().await?
-                            else {
-                                break;
-                            };
-                            if !entry.is_file {
-                                drop(body);
-                                continue;
-                            }
-                            payload_bytes = payload_bytes.saturating_add(entry.size);
-                            let data = if include_data {
-                                Bytes::from(read_all(body, "read_arxiv_entry").await?)
-                            } else {
-                                while body.next().await?.is_some() {}
-                                Bytes::new()
-                            };
-                            builder.push(|row| {
-                                row.append("shard_uri", source.as_str())?;
-                                row.append("entry_index", entry.index as u64)?;
-                                row.append("entry_name", entry.name.as_slice())?;
-                                row.append("data", data.as_ref())
-                            })?;
-                        }
-                        if builder.is_empty() {
-                            return Ok(None);
-                        }
-                        Ok(Some((builder.finish()?, tar)))
-                    }
+                    read_tar_batch(
+                        tar,
+                        record_schema(),
+                        request.options.clone(),
+                        request.target_bytes.get(),
+                        move |row, entry, data| {
+                            row.append("shard_uri", source.as_str())?;
+                            row.append("entry_index", entry.index as u64)?;
+                            row.append("entry_name", entry.name.as_slice())?;
+                            row.append("data", data)
+                        },
+                    )
                 });
                 Ok(StreamReader::records(
                     batches,

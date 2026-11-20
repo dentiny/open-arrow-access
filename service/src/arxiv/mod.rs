@@ -13,6 +13,7 @@ mod metadata;
 pub use metadata::{ArxivMetadataIndex, ArxivPdfRecords};
 mod records;
 pub use records::{ArxivReadRequest, ArxivRecords, record_schema};
+mod tar_records;
 mod validation;
 
 use open_arrow_access_core::{
