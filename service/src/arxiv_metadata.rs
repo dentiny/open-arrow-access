@@ -9,6 +9,10 @@ impl OaiProvider for ArxivMetadata {
     const PATH: &'static str = "oai";
     const METADATA_PREFIX: &'static str = "arXivRaw";
 
+    fn record_format() -> open_arrow_access_file_format::xml::XmlFormat {
+        format::record_format()
+    }
+
     fn inferred_record_format() -> open_arrow_access_file_format::xml::XmlFormat {
         format::record_format()
     }

@@ -417,7 +417,7 @@ throughput benchmark.
 
 ## Common PDF / LaTeX / XML content schema
 
-Use `records().content(ArxivContentFormat::Pdf | Latex | Xml)` for the
+Use `records().content(ArxivContentFormat::Pdf | Latex | Xml, metadata_index)` for the
 conversion-facing content contract. All three formats emit exactly the same
 field names, order, Arrow types and nullability:
 
@@ -432,11 +432,47 @@ field names, order, Arrow types and nullability:
 | `source_name` | `LargeBinary`, non-null | Inner TeX filename; empty for whole PDF/XML documents |
 | `data` | `LargeBinary`, non-null | PDF bytes, decoded UTF-8 TeX bytes, or original XML bytes |
 | `data_type` | `LargeUtf8`, non-null | Representation of this row's payload: `pdf`, `latex`, or `xml` |
+| `metadata` | `Struct`, non-null | Complete matching snapshot record; child fields retain their original types and nullability |
 
-The content schema is fixed at these nine fields. There is no metadata option,
-metadata struct, or format-specific text column. Harvest OAI metadata separately
-and join by `article_id` downstream when needed. `content_schema()` is the single
-definition for all content formats.
+Content always appends a tenth, non-null `metadata: Struct` containing **all
+columns of the supplied snapshot**, including nested values, license, optional
+nulls, OAI headers and version history. There is no switch to disable the join.
+The struct's children match the snapshot schema; all three formats use the same
+schema when they share that snapshot. `content_schema(&metadata_index)` returns
+the complete output schema.
+
+Harvest a full arXivRaw snapshot once with `ArxivMetadataService::harvest()`;
+arXiv's default record mapping now includes provider metadata, not only protocol
+headers. Concatenate compatible batches, persist the frozen snapshot, and build
+`ArxivMetadataIndex::from_oai(snapshot)` to retain every harvested field. OAI
+tombstones have no provider record and are excluded from the live join index.
+For an already prepared snapshot with a top-level ID column, use
+`ArxivMetadataIndex::try_new(snapshot, "article_id")`; it retains every input
+column without selecting a metadata subset. Pass an `Arc` of the index to
+`content(format, index)` and share it across shard readers. Indexing a full corpus
+requires memory for the snapshot and ID lookup; callers may partition snapshots
+by the articles covered by each conversion batch.
+
+Each content article must have a matching live metadata record. Missing or
+duplicate IDs fail explicitly; projecting `metadata` out of the result does not
+bypass this validation. The join performs no per-article network requests and
+preserves native partition concurrency. It matches normalized unversioned
+article IDs. Keep the snapshot provenance and `entry_name` version spelling:
+latest OAI metadata does not establish the license of every historical content
+version. The reader retains the supplied record rather than inventing one.
+
+```rust,no_run
+use std::sync::Arc;
+use open_arrow_access::service::arxiv::{ArxivContentFormat, ArxivMetadataIndex, ArxivService};
+# use open_arrow_access::storage::OpenDalAccessor;
+# use open_arrow_access::{RecordBatch, Result};
+# fn example(storage: OpenDalAccessor, full_oai_snapshot: RecordBatch) -> Result<()> {
+let metadata = Arc::new(ArxivMetadataIndex::from_oai(full_oai_snapshot)?);
+let content = ArxivService::new(storage).records()
+    .content(ArxivContentFormat::Latex, metadata);
+# Ok(())
+# }
+```
 
 `data_type` is a separate top-level string column alongside `data`; the two are
 not wrapped in a Struct. It tags each row's binary payload, so consumers need not
@@ -444,9 +480,10 @@ infer its representation from the Arrow binary type. The existing `format`
 column remains available. In the current explicit-format readers, both tags
 agree. This schema addition does not enable provider-level cell fallback yet.
 
-Consumers with the previous fixed eight-field schema must accept the appended
-non-null `data_type: LargeUtf8` field. Row identity, byte contents, provenance and
-existing column positions remain unchanged.
+Consumers of the previous nine-field content schema must supply the required
+metadata index and accept the appended non-null `metadata: Struct` field.
+Row identity, byte contents, provenance and existing column positions remain
+unchanged.
 
 PDF uses `kind=pdf`; LaTeX uses `kind=source` and filters attachments. XML reads
 a caller-owned source inventory whose TAR article members end in `.xml`: arXiv does
@@ -460,11 +497,11 @@ expanded from their source package. Both identities remain explicit.
 The lower-level `records()` retains raw archive rows, and `article_records()` /
 `open_source_package()` retain their artifact-byte contracts. Those transport
 APIs are distinct from the common content output; conversion integrations
-should select `content(format)` rather than emitting those raw schemas.
+should select `content(format, metadata_index)` rather than emitting those raw schemas.
 
 ## LaTeX-only bulk output
 
-`service.records().content(ArxivContentFormat::Latex)` accepts `ArxivKind::Source` and retains one lazy
+`service.records().content(ArxivContentFormat::Latex, metadata_index)` accepts `ArxivKind::Source` and retains one lazy
 partition per source TAR. It decodes gzip source payloads, detects TAR packages,
 and emits each UTF-8 `.tex` member outside any `anc/` directory. Images,
 ancillary TeX, videos, bibliography/style files and the original package are
@@ -477,7 +514,7 @@ row skipping occurs.
 The schema is `article_id: LargeUtf8`, `format: LargeUtf8` (`latex`),
 `shard_uri: LargeUtf8`, `entry_index: UInt64`, `entry_name: LargeBinary`,
 `source_index: UInt64`, `source_name: LargeBinary`, `data: LargeBinary`,
-`data_type: LargeUtf8` (`latex`) (all
+`data_type: LargeUtf8` (`latex`), `metadata: Struct` (all
 non-null). Outer and inner physical indices preserve duplicate-name identity.
 `article_id` is the normalized unversioned metadata key; original outer names
 retain version spelling. Modern and legacy bulk IDs are supported.
@@ -507,7 +544,7 @@ MD5 and membership cannot be checked when the manifest is intentionally bypassed
 
 ## Parallel content reads inside a single shard
 
-For `records().content(format)` with an explicit shard, each regular outer TAR
+For `records().content(format, metadata_index)` with an explicit shard, each regular outer TAR
 member is now a native scan partition. `CrawlAccessor` / `ParallelReadLayer`
 bounds the number of active member readers and decoders; conversion's existing
 `options.read_concurrency` controls that same executor. Each member task owns an

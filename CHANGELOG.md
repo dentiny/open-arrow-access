@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Require a frozen metadata index for arXiv PDF/LaTeX/XML content scans. Always append the complete matching record as non-null `metadata: Struct`, preserve all snapshot fields and reject missing matches even when projection omits metadata. Content consumers must supply the index and accept the tenth field.
+- Harvest full arXivRaw metadata by default, including license and version history, and add `ArxivMetadataIndex::from_oai` for direct indexing of full snapshots with tombstones excluded.
+
 ## 0.15.0 - 2026-11-20
 
 - Append non-null `data_type: LargeUtf8` to the shared arXiv PDF/LaTeX/XML content schema, tagging each row's unchanged `data: LargeBinary` payload; retain the existing `format` column. Consumers of the previous eight-field content schema must accept this ninth field.

@@ -92,7 +92,7 @@ async fn arxiv_raw_keeps_string_ids_after_sample_boundary_and_stable_optional_li
         .chain(["cond-mat/0604352".into(), "0001.0123".into()])
         .collect();
     for id in &ids {
-        xml.push_str(&format!(r#"<record><header><identifier>oai:arXiv.org:{id}</identifier><datestamp>2026-11-02</datestamp><setSpec>physics:cond-mat</setSpec><setSpec>physics</setSpec></header><metadata><a:arXivRaw><a:id>{id}</a:id><a:submitter>Sample</a:submitter><a:version version="v1"><a:date>2006-01-01</a:date><a:size>21kb</a:size></a:version><a:version version="v2"><a:date>2026-11-02</a:date><a:source_type>D</a:source_type></a:version><a:title>00123</a:title><a:authors>Test Author</a:authors><a:categories>cond-mat</a:categories><a:doi>001</a:doi><a:abstract>Text</a:abstract></a:arXivRaw></metadata></record>"#));
+        xml.push_str(&format!(r#"<record><header><identifier>oai:arXiv.org:{id}</identifier><datestamp>2026-11-02</datestamp><setSpec>physics:cond-mat</setSpec><setSpec>physics</setSpec></header><metadata><a:arXivRaw><a:id>{id}</a:id><a:submitter>Sample</a:submitter><a:version version="v1"><a:date>2006-01-01</a:date><a:size>21kb</a:size></a:version><a:version version="v2"><a:date>2026-11-02</a:date><a:source_type>D</a:source_type></a:version><a:title>00123</a:title><a:authors>Test Author</a:authors><a:categories>cond-mat</a:categories><a:doi>001</a:doi><a:license>http://creativecommons.org/licenses/by/4.0/</a:license><a:abstract>Text</a:abstract></a:arXivRaw></metadata></record>"#));
     }
     xml.push_str(r#"<record><header status="deleted"><identifier>oai:arXiv.org:2410.99999</identifier><datestamp>2026-11-02</datestamp></header></record></ListRecords></OAI-PMH>"#);
     let page = OaiPage {
@@ -101,11 +101,38 @@ async fn arxiv_raw_keeps_string_ids_after_sample_boundary_and_stable_optional_li
         resumption_token: None,
     };
     let batches = collect_batches(
-        &page.records(service.inferred_record_format()),
+        &page.records(service.record_format()),
         ReadRequest::new("arxiv"),
     )
     .await;
     assert_eq!(batches.len(), 1);
+    let index =
+        open_arrow_access_service::arxiv::ArxivMetadataIndex::from_oai(batches[0].clone()).unwrap();
+    let content = open_arrow_access_service::arxiv::content_schema(&index);
+    assert_eq!(
+        content.field_with_name("metadata").unwrap().data_type(),
+        &arrow_schema::DataType::Struct(batches[0].schema().fields().clone())
+    );
+    // The required join retains the complete harvested record, not a subset.
+    use open_arrow_access_core::Accessor;
+    use open_arrow_access_service::arxiv::{
+        ArxivContentFormat, ArxivKind, ArxivReadRequest, ArxivService,
+    };
+    let pdf = fixture!("arxiv-content", "pdf.tar").await;
+    let content = ArxivService::new(
+        open_arrow_access_test_support::MemoryAccessor::new(&pdf, 512).with_ranges(),
+    )
+    .records()
+    .content(ArxivContentFormat::Pdf, std::sync::Arc::new(index));
+    let mut reader = content
+        .open(ArxivReadRequest::new(ArxivKind::Pdf).with_shard("one.tar"))
+        .await
+        .unwrap();
+    let joined = reader.next().await.unwrap().unwrap();
+    assert_eq!(
+        joined["metadata"].as_struct(),
+        &StructArray::from(batches[0].slice(1, 1))
+    );
     let records = StructArray::from(batches[0].clone());
     let metadata = child(&records, "metadata").as_struct();
     assert!(metadata.is_null(ids.len()));
@@ -116,6 +143,10 @@ async fn arxiv_raw_keeps_string_ids_after_sample_boundary_and_stable_optional_li
     }
     assert_eq!(child(raw, "title").as_string::<i32>().value(0), "00123");
     assert_eq!(child(raw, "doi").as_string::<i32>().value(0), "001");
+    assert_eq!(
+        child(raw, "license").as_string::<i32>().value(0),
+        "http://creativecommons.org/licenses/by/4.0/"
+    );
     let versions = child(raw, "version").as_list::<i32>().value(0);
     assert_eq!(versions.len(), 2);
     let versions = versions.as_struct();
@@ -142,7 +173,6 @@ async fn arxiv_raw_keeps_string_ids_after_sample_boundary_and_stable_optional_li
         record_count: 0,
         resumption_token: None,
     };
-    use open_arrow_access_core::Accessor;
     let reader = empty
         .records(service.inferred_record_format())
         .open(ReadRequest::new("empty"))

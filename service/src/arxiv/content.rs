@@ -1,6 +1,7 @@
 //! Common binary-content rows for PDF, attachment-free LaTeX, and supplied XML shards.
 use super::{
-    ArxivReadRequest, ArxivRecords, ArxivSourceOptions, error, open_source_package, validation,
+    ArxivMetadataIndex, ArxivReadRequest, ArxivRecords, ArxivSourceOptions, error,
+    open_source_package, validation,
 };
 use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
@@ -30,7 +31,12 @@ impl ArxivContentFormat {
     }
 }
 
-pub fn content_schema() -> SchemaRef {
+/// Content fields plus the complete, non-null metadata record from the required snapshot.
+pub fn content_schema(metadata: &ArxivMetadataIndex) -> SchemaRef {
+    metadata.enrich_schema(&payload_schema())
+}
+
+fn payload_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
@@ -52,12 +58,22 @@ pub fn content_schema() -> SchemaRef {
 pub struct ArxivContentRecords<A> {
     format: ArxivContentFormat,
     records: ArxivRecords<A>,
+    metadata: Arc<ArxivMetadataIndex>,
 }
 impl<A> ArxivRecords<A> {
-    pub fn content(self, format: ArxivContentFormat) -> ArxivContentRecords<A> {
+    /// Read content with mandatory metadata enrichment from one frozen snapshot.
+    ///
+    /// Every article must match the snapshot, even when output projection omits
+    /// `metadata`. All snapshot columns and nested values are retained.
+    pub fn content(
+        self,
+        format: ArxivContentFormat,
+        metadata: Arc<ArxivMetadataIndex>,
+    ) -> ArxivContentRecords<A> {
         ArxivContentRecords {
             records: self,
             format,
+            metadata,
         }
     }
 }
@@ -80,7 +96,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
 {
     async fn plan_scan(&self, mut request: Self::Request) -> Result<ScanPlan> {
         validation::validate_content_kind(self.format, request.kind)?;
-        let schema = content_schema();
+        let schema = content_schema(&self.metadata);
         let projection = request.options.resolve_projection(&schema)?;
         let options = request.options.clone();
         request.options.projection = None;
@@ -91,11 +107,18 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
         };
         plan.metadata.schema = projection.schema.clone();
         let format = self.format;
+        let metadata = self.metadata.clone();
         plan.partitions = plan
             .partitions
             .map(move |partition| {
                 partition.map(|partition| {
-                    content_partition(partition, format, projection.clone(), options.clone())
+                    content_partition(
+                        partition,
+                        format,
+                        metadata.clone(),
+                        projection.clone(),
+                        options.clone(),
+                    )
                 })
             })
             .boxed();
@@ -106,6 +129,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
 fn content_partition(
     partition: ScanPartition,
     format: ArxivContentFormat,
+    metadata: Arc<ArxivMetadataIndex>,
     projection: ResolvedProjection,
     options: ReadOptions,
 ) -> ScanPartition {
@@ -119,11 +143,16 @@ fn content_partition(
         let batches = into_stream(reader)
             .and_then(move |batch| {
                 let options = options.clone();
+                let metadata = metadata.clone();
                 async move {
-                    match format {
+                    let batches = match format {
                         ArxivContentFormat::Latex => expand(&batch, &options).await,
                         _ => Ok(vec![document_batch(&batch, format)?]),
-                    }
+                    }?;
+                    batches
+                        .into_iter()
+                        .map(|batch| metadata.attach_content(batch))
+                        .collect::<Result<Vec<_>>>()
                 }
             })
             .map_ok(|batches| stream::iter(batches.into_iter().map(Ok)))
@@ -193,7 +222,7 @@ fn latex_batch(outer: &RecordBatch, article_id: &str, batch: &RecordBatch) -> Re
         .as_primitive::<arrow_array::types::UInt64Type>()
         .value(0);
     let name = outer["entry_name"].as_binary::<i64>().value(0);
-    let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
+    let mut builder = RecordBatchBuilder::new(payload_schema(), None)?;
     let names = batch["entry_name"].as_binary::<i64>();
     let data = batch["data"].as_binary::<i64>();
     let indices = batch["entry_index"].as_primitive::<arrow_array::types::UInt64Type>();
@@ -221,7 +250,7 @@ fn latex_batch(outer: &RecordBatch, article_id: &str, batch: &RecordBatch) -> Re
 fn document_batch(batch: &RecordBatch, format: ArxivContentFormat) -> Result<RecordBatch> {
     let name = batch["entry_name"].as_binary::<i64>().value(0);
     let id = validation::content_article_id(name, format)?;
-    let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
+    let mut builder = RecordBatchBuilder::new(payload_schema(), None)?;
     builder.push(|row| {
         row.append("article_id", id.as_str())?;
         row.append("format", format.as_str())?;
