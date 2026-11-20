@@ -78,5 +78,7 @@ For byte responses, use `ByteReader::next()` and apply a matching decoder.
 PDF, LaTeX and caller-supplied XML shards use one
 [common content schema](arxiv.md#common-pdf--latex--xml-content-schema) through
 `records().content(format)`. `data: LargeBinary` holds content bytes in every
-format. Content always has eight fields; OAI metadata remains a separate dataset. Raw archive/artifact access
+format. Content has ten fields, including nullable `metadata: Struct` with the full
+arXivRaw OAI record schema. Current content readers leave that column null;
+this schema change does not fetch or join metadata. Raw archive/artifact access
 and parsed OAI metadata are separate contracts.

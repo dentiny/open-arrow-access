@@ -432,11 +432,13 @@ field names, order, Arrow types and nullability:
 | `source_name` | `LargeBinary`, non-null | Inner TeX filename; empty for whole PDF/XML documents |
 | `data` | `LargeBinary`, non-null | PDF bytes, decoded UTF-8 TeX bytes, or original XML bytes |
 | `data_type` | `LargeUtf8`, non-null | Representation of this row's payload: `pdf`, `latex`, or `xml` |
+| `metadata` | `Struct`, nullable | Full arXivRaw OAI record schema; currently null in content output |
 
-The content schema is fixed at these nine fields. There is no metadata option,
-metadata struct, or format-specific text column. Harvest OAI metadata separately
-and join by `article_id` downstream when needed. `content_schema()` is the single
-definition for all content formats.
+The content schema has ten fields. `metadata` reuses the complete typed arXivRaw
+OAI record schema, including license and version history. This schema addition
+reserves the column only: current content readers emit null metadata and do not
+fetch or join OAI records. `content_schema()` defines the same schema for all
+three formats.
 
 `data_type` is a separate top-level string column alongside `data`; the two are
 not wrapped in a Struct. It tags each row's binary payload, so consumers need not
