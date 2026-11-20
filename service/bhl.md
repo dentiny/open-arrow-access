@@ -177,6 +177,69 @@ metadata/license does not replace per-item rights from BHL tables/API. Record
 missing payloads, blank pages, failed reads and unresolved joins explicitly.
 No new OCR, language/license filtering, normalization or indexing is implied.
 
+## Proposed Arrow / Lance schema: one OCR page per row
+
+**Design proposal, not implemented output.** The current binary attachment
+route emits one `data: LargeBinary` value for an entire selected attachment.
+The page schema below is the intended contract for a future OCR decoder and
+the resulting Lance dataset; adding this documentation enables no job option
+and does not migrate existing outputs.
+
+| Column | Arrow type | Nullable | Meaning |
+| --- | --- | --- | --- |
+| `entity_type` | `Utf8` | No | `item` or `part`, identifying the source OCR namespace |
+| `entity_id` | `UInt64` | No | ItemID for item OCR, or PartID for part OCR |
+| `page_id` | `UInt64` | No | BHL PageID, distinct from page sequence |
+| `sequence` | `UInt64` | No | Page sequence within the selected item/part namespace |
+| `data` | `LargeBinary` | No | Complete original page TXT bytes, including empty/blank content and original line endings |
+| `source_path` | `LargeUtf8` | No | Original TAR member path or full AWS object URI |
+| `snapshot_id` | `Utf8` | No | Explicit source snapshot identity, e.g. `figshare-21422193-v24`; AWS uses a caller-assigned frozen-inventory ID |
+| `source_entry_index` | `UInt64` | Yes | Zero-based physical TAR header-entry ordinal, including directory headers in the count; null for individual AWS objects |
+| `metadata` | `Struct<...>` | Yes | Complete joined source metadata for the page and its related item/part/title, including rights fields |
+
+The eight previously proposed content/identity columns are accompanied by
+`source_entry_index` to preserve repeated member names in an archive.
+The sampled page `item-295621-61016244-0039.txt` maps to `entity_type=item`,
+`entity_id=295621`, `page_id=61016244`, `sequence=39` and `data=0D 0A`.
+Its physical member ordinal is 3 in the inspected TAR prefix; its logical
+sequence is 39. Numeric IDs are for joins; `source_path` retains original
+zero-padding and spelling.
+
+Use `(snapshot_id, entity_type, entity_id, page_id, sequence)` as a candidate
+logical page key, **subject to full-inventory uniqueness validation**.
+It is not a verified upstream primary key, nor a uniqueness constraint
+automatically enforced by Lance. Keep physical provenance as well:
+`(snapshot_id, source_path, source_entry_index)` distinguishes repeated TAR
+members; AWS provenance uses the frozen inventory plus object URI.
+Report repeated logical keys rather than silently dropping rows. Different
+snapshots/routes can contain the same PageID and still represent separate
+source records.
+
+`data` is binary so ingestion need not decode, normalize, strip headers or
+re-encode OCR. No derived `text` column is proposed here. Missing payloads
+are accounted failures, not fabricated empty-byte rows. Actual empty/blank
+source files remain valid non-null payloads. An unparseable identifier must
+be reported explicitly rather than coerced to zero.
+
+The exact children of `metadata` must be specified after inspecting the
+selected upstream TSV/API schemas. `Struct<...>` deliberately is not a
+complete Arrow schema ready to construct today. Preserve original field names
+and all fields/values using typed nested structs/lists for related records;
+do not replace metadata with a title/license-only projection. Keep complete
+source tables/API responses and join provenance with the snapshot. A missing
+join leaves the corresponding metadata nullable and produces an explicit
+gap report; it must not drop the OCR page. Article-level Figshare metadata
+belongs with the snapshot inventory and cannot supply missing per-item rights.
+
+PDF, JP2 and scandata XML have different row granularity and do not become
+extra OCR page rows. If ingested, use separate representation tables: item PDF
+keyed by snapshot/entity identity; page JP2 keyed by snapshot plus its
+validated BarCode/sequence-to-PageID mapping; scandata XML keyed by snapshot
+and BarCode. Preserve original bytes and source locators there too.
+Those asset schemas and any parent-item relationship for a part require
+their own explicit contract; `entity_id` must not be assumed to be a parent
+ItemID when `entity_type=part`.
+
 ## Current open-arrow-access support
 
 Enable facade feature `service-bhl`. Existing BHL methods resolve metadata and
@@ -287,4 +350,5 @@ file's first chunk. To read a specific API item instead, construct with a BHL ke
 and call `item(id)`; optional missing PDF/text links do not remove the metadata.
 
 Sources: [BHL API v3](https://www.biodiversitylibrary.org/docs/api3.html), [Figshare guide](figshare.md).
+
 
