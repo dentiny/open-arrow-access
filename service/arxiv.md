@@ -509,23 +509,32 @@ MD5 and membership cannot be checked when the manifest is intentionally bypassed
 
 ## Parallel content reads inside a single shard
 
-For `records().content(format)` with an explicit shard, each regular outer TAR
-member is now a native scan partition. `CrawlAccessor` / `ParallelReadLayer`
-bounds the number of active member readers and decoders; conversion's existing
-`options.read_concurrency` controls that same executor. Each member task owns an
-independent range reader, then decodes its gzip/package and emits content rows.
-Members are not read through cloned `TarArchive::open_entry` readers, whose
-shared seek adapter serializes reads. Known whole-object length is forwarded
-as a request hint so OpenDAL does not issue a HEAD for every member.
+For `records().content(format)` with an explicit shard, one sequential TAR
+reader discovers and buffers one regular article member at a time, then yields
+an independently owned native partition. No full header index, 512-byte header
+range requests, or per-article storage reopen is needed. The first article can
+be decoded before later headers are available. Directories are drained without
+creating partitions, and physical entry indices and original names are retained.
 
-Discovery first scans TAR headers to validate and record payload ranges; it
-must finish before member tasks begin. This adds serial header-range requests
-and first-result latency, rather than promising that range mode is always
-faster than one sequential GET. Use immutable/pinned shards: the length hint
-is not a checksum or object-version guarantee. Ranged, known-length byte access
-is required and unsupported backends fail rather than silently serializing.
-Raw archive scans and month/distribution scans retain their sequential-per-TAR
-behavior. Plain accessor `open()` remains sequential; compose the shared crawl
-executor to execute member partitions concurrently. Admission is per member,
-so peak package-decoding memory grows with the chosen concurrency. This change
-does not fix full-package buffering or non-TeX error policy.
+`CrawlAccessor` / `ParallelReadLayer` limits resident article partitions and
+allows their decoding to overlap with reading subsequent articles. Discovery
+is polled only while the executor has a free slot; it does not collect every
+article in the shard. Consume plans incrementally: explicitly collecting all
+partition openers would retain all discovered article payloads. Plain accessor
+`open()` executes partitions sequentially.
+
+Storage is opened through `open_sequential`, allowing supported HTTP/object
+backends to reuse one response without a HEAD request. Explicit byte options,
+including `io_concurrency` and `io_chunk_size`, are forwarded unchanged and may
+select backend-managed chunked/concurrent I/O. `read_concurrency` controls article
+processing; it no longer creates independent article range downloads. Input is
+consumed in physical TAR order; article payloads come from the same input instead
+of separate per-article range requests. Shared-stream discovery
+is marked for enclosing multi-file planners to preserve their file-level budget.
+
+The caller must consume through EOF before committing results. A later malformed
+header, truncated body or storage failure can follow earlier emitted articles;
+errors propagate instead of returning a silently shortened shard. Immutable/pinned
+inputs remain caller-owned. Raw archive scans, month/distribution scans and the
+generic random-access `TarArchive` API are unchanged. This change does not fix
+full-package LaTeX buffering or non-TeX error policy.
