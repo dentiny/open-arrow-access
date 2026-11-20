@@ -49,7 +49,7 @@ pub(super) fn invalid_archive_checksum() -> Error {
 }
 
 pub(super) fn archive_length_mismatch() -> Error {
-    decode("archive length differs from manifest metadata")
+    decode("archive length is smaller than manifest payload size")
 }
 
 pub(super) fn non_ascii_metadata_id() -> Error {

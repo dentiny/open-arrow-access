@@ -65,6 +65,8 @@ pub struct ArxivArchive {
     /// One-based TAR chunk number within `month` for the selected `kind`.
     /// Maps to manifest `seq_num` and the filename suffix, e.g. `_003.tar`.
     pub sequence: u32,
+    /// Manifest-reported size. Upstream may report the sum of member payload
+    /// bytes without TAR framing; do not use this as the exact object length.
     pub size: u64,
     pub num_items: u64,
     pub checksum: String,
