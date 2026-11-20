@@ -1,6 +1,6 @@
 use super::*;
 use crate::arxiv::ArxivKind;
-use arrow_array::{ArrayRef, StringArray, types::UInt64Type};
+use arrow_array::types::UInt64Type;
 use open_arrow_access_test_support::fixture;
 
 async fn read(name: &str, data: &[u8]) -> Result<Vec<RecordBatch>> {
@@ -18,17 +18,8 @@ async fn read(name: &str, data: &[u8]) -> Result<Vec<RecordBatch>> {
     .await
 }
 
-fn metadata(id: &str) -> ArxivMetadataIndex {
-    let batch = RecordBatch::try_from_iter(vec![(
-        "identifier",
-        Arc::new(StringArray::from(vec![id])) as ArrayRef,
-    )])
-    .unwrap();
-    ArxivMetadataIndex::try_new(batch, "identifier").unwrap()
-}
-
 #[tokio::test]
-async fn packages_keep_only_tex_with_provenance_and_metadata() {
+async fn packages_keep_only_tex_with_provenance() {
     let original = fixture!("arxiv-articles", "members/main.tex").await;
     for file in ["source.tar", "source.tar.gz"] {
         let data = fixture!("arxiv-articles", file).await;
@@ -49,22 +40,6 @@ async fn packages_keep_only_tex_with_provenance_and_metadata() {
         );
         let indices = batch["source_index"].as_primitive::<UInt64Type>();
         assert_ne!(indices.value(0), indices.value(1));
-        let joined = metadata("oai:arXiv.org:2410.00001")
-            .attach_articles(batch.clone())
-            .unwrap();
-        assert_eq!(
-            joined["metadata"]
-                .as_struct()
-                .column(0)
-                .as_string::<i32>()
-                .value(0),
-            "oai:arXiv.org:2410.00001"
-        );
-        assert!(
-            metadata("2410.99999")
-                .attach_articles(batch.clone())
-                .is_err()
-        );
     }
 }
 
@@ -99,8 +74,7 @@ async fn accepts_legacy_single_sources_and_rejects_non_latex() {
 async fn formats_emit_identical_schemas_and_preserve_content() {
     use open_arrow_access_storage::OpenDalAccessor;
     use open_arrow_access_test_support::temp_fs;
-    let index = Arc::new(metadata("2410.00001"));
-    let schema = index.schema_for(&content_schema());
+    let schema = content_schema();
     for (format, kind, fixture_name) in [
         (ArxivContentFormat::Pdf, ArxivKind::Pdf, "pdf.tar"),
         (ArxivContentFormat::Latex, ArxivKind::Source, "latex.tar"),
@@ -121,8 +95,7 @@ async fn formats_emit_identical_schemas_and_preserve_content() {
         let (_temp, operator) = temp_fs(&[(&manifest_key, manifest.as_bytes()), (&key, &bytes)]);
         let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
             .records()
-            .content(format)
-            .with_metadata(index.clone());
+            .content(format);
         let mut reader = records.open(ArxivReadRequest::new(kind)).await.unwrap();
         assert_eq!(reader.metadata().schema, schema);
         let batch = reader.next().await.unwrap().unwrap();
