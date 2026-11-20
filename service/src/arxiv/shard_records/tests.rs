@@ -54,7 +54,7 @@ impl ByteReader for GatedReader {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn a_single_shard_reads_members_concurrently_before_latex_parsing() {
     let bytes = fixture!("arxiv-content", "latex-two.tar").await;
     let source = MemoryAccessor::new(&bytes, 512).with_ranges();
