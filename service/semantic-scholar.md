@@ -499,3 +499,13 @@ For conversion-service task inputs and remaining integration work, see the
 
 Preserve dataset-specific license and attribution information from the release
 README alongside the data.
+
+## Resolve metadata without binding downloads
+
+`release(id)` fetches and validates a release document. Use
+`dataset_manifest(resolved_release_id, dataset_name)` to fetch only that dataset
+manifest, retaining unknown fields. It rejects `latest` and empty selections
+before I/O; resolve aliases through `release` first. It validates dataset identity
+and partition URL string types, while download-URL validation remains part of
+file binding. Neither method downloads dataset content. Existing `dataset()`
+continues to compose release resolution, manifest acquisition and file binding.

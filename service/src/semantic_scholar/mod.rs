@@ -45,6 +45,31 @@ impl SemanticScholarService {
             .validated(|value| validation::validate_release(value, id))
     }
 
+    /// Fetch one dataset manifest for a resolved, immutable release ID.
+    /// Does not request the release document or download any dataset content.
+    /// Resolve `latest` with [`Self::release`] first. Provider identity and
+    /// partition URL string types are validated; binding files validates URLs.
+    pub async fn dataset_manifest(&self, release_id: &str, dataset: &str) -> Result<ApiDocument> {
+        if release_id.is_empty() || release_id == "latest" || dataset.is_empty() {
+            return Err(crate::common::invalid(
+                "dataset manifest requires a resolved release ID and dataset name",
+            ));
+        }
+        let document = self
+            .connection
+            .json(
+                &format!(
+                    "datasets/v1/release/{}/dataset/{}",
+                    segment(release_id)?,
+                    segment(dataset)?
+                ),
+                &[],
+            )
+            .await?;
+        parser::parse_dataset_files(document.value(), dataset)?;
+        Ok(document)
+    }
+
     /// Resolve latest once, then obtain signed download URLs using the immutable release ID.
     pub async fn dataset(
         &self,
@@ -53,17 +78,7 @@ impl SemanticScholarService {
     ) -> Result<RemoteFiles<DatasetMetadata>> {
         let release = self.release(release).await?;
         let release_id = text(release.value(), "release_id")?.to_owned();
-        let doc = self
-            .connection
-            .json(
-                &format!(
-                    "datasets/v1/release/{}/dataset/{}",
-                    segment(&release_id)?,
-                    segment(dataset)?
-                ),
-                &[],
-            )
-            .await?;
+        let doc = self.dataset_manifest(&release_id, dataset).await?;
         let files = parser::parse_dataset_files(doc.value(), dataset)?;
         self.connection.files(
             files,
