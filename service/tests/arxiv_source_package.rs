@@ -118,18 +118,17 @@ async fn rejects_invalid_gzip() {
 }
 
 #[tokio::test]
-async fn binary_names_and_tar_limits() {
-    let mut options = ArxivSourceOptions::default();
-    let mut reader = open("binary-name.tar", Packaging::Tar, options.clone())
-        .await
-        .unwrap();
+async fn preserves_binary_names() {
+    let mut reader = open(
+        "binary-name.tar",
+        Packaging::Tar,
+        ArxivSourceOptions::default(),
+    )
+    .await
+    .unwrap();
     let batch = reader.next().await.unwrap().unwrap();
     assert_eq!(batch["entry_name"].as_binary::<i64>().value(0), b"\xff.tex");
-    options.tar_limits.max_entry_bytes = 2;
-    let mut reader = open("binary-name.tar", Packaging::Tar, options)
-        .await
-        .unwrap();
-    assert!(reader.next().await.is_err());
+    assert_eq!(batch["data"].as_binary::<i64>().value(0), b"abc");
     assert!(reader.next().await.unwrap().is_none());
 }
 

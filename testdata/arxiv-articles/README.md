@@ -13,7 +13,7 @@ bytes without generating archives or modifying corrupt fields at runtime.
 - `anc/` contains CSV, XML, a ZIP, and opaque synthetic MP4-like bytes. The latter
   checks byte preservation, not video decoding. The nested ZIP stays opaque.
 - `binary-name.tar` contains a directory followed by a regular file named
-  `\xff.tex` with payload `abc`, testing binary names and entry size limits.
+  `\xff.tex` with payload `abc`, testing binary filename preservation.
 - `bad-crc.tar.gz`, `truncated.tar.gz`, and `trailing.tar.gz` are serialized
   malformed variants testing checksum, incomplete trailer, and trailing bytes.
 - `pdf/`, `src/`, and `html/` mirror article routes for local storage and HTTP

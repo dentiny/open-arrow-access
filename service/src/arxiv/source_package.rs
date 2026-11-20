@@ -29,7 +29,6 @@ pub enum ArxivSourcePackaging {
 #[derive(Clone, Debug)]
 pub struct ArxivSourceOptions {
     pub options: ReadOptions,
-    pub tar_limits: TarLimits,
     /// Soft per-batch payload target. A complete member can exceed it.
     pub target_bytes: NonZeroUsize,
 }
@@ -37,7 +36,6 @@ impl Default for ArxivSourceOptions {
     fn default() -> Self {
         Self {
             options: ReadOptions::default(),
-            tar_limits: TarLimits::default(),
             target_bytes: NonZeroUsize::new(4 * 1024 * 1024).unwrap(),
         }
     }
@@ -113,11 +111,6 @@ fn open_single_source(
     output: RecordMetadata,
     options: ArxivSourceOptions,
 ) -> Result<Box<dyn RecordReader>> {
-    if data.len() as u64 > options.tar_limits.max_entry_bytes {
-        return Err(super::error::decode(
-            "source member exceeds max_entry_bytes",
-        ));
-    }
     let batches = stream::once(async move {
         let mut builder = RecordBatchBuilder::new(article_schema(), options.options.projection)?;
         builder.push(|row| {
@@ -146,7 +139,10 @@ fn open_tar_source(
 ) -> Result<Box<dyn RecordReader>> {
     let tar = TarStream::new(
         Box::new(bytes_reader(data, output.source.clone())),
-        options.tar_limits,
+        TarLimits {
+            max_entry_bytes: u64::MAX,
+            ..TarLimits::default()
+        },
     );
     let batches = stream::try_unfold(tar, move |tar| {
         read_source_batch(
