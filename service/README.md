@@ -26,7 +26,7 @@ directly, remove the `service-` prefix. Common Crawl shares `service-warc`.
 | bioRxiv / medRxiv | `service-biorxiv` | Dated preprint metadata pages and JATS XML links | [Preprints](biorxiv.md) |
 | MECA | `service-meca` | Scholarly ZIP package manifests and selected members | [MECA](meca.md) |
 | Semantic Scholar | `service-semantic-scholar` | Release-pinned bulk partitions and diff manifests | [Bulk datasets](semantic-scholar.md) |
-| Project Gutenberg | `service-gutenberg` | Per-book RDF metadata as one Arrow row | [Gutenberg](gutenberg.md) |
+| Project Gutenberg | `service-gutenberg` | Per-book RDF metadata; book formats, hierarchy and sharding limits | [Gutenberg](gutenberg.md) |
 | DOAB | `service-doab` | Open-access book metadata via OAI-PMH | [DOAB](doab.md) |
 | OAPEN | `service-oapen` | Book metadata via OAI-PMH and selected hosted book bytes | [OAPEN](oapen.md) |
 | HathiTrust | `service-hathifiles` | Full/update Hathifiles catalogue exports | [Hathifiles](hathifiles.md) |
@@ -157,3 +157,4 @@ version checks, mapping, and pagination in the service.
 
 See [adding a service](../docs/extending.md#add-a-service) for implementation
 steps, feature wiring, and examples.
+
