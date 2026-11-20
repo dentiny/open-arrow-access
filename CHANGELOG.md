@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.1 - 2026-11-19
+
+- Move S2ORC v2 paper body text from `body.text` to top-level `text: LargeUtf8` by default; retain body annotations and independent bibliography text (typed-output schema change).
+- Add nested struct field extraction/removal through schema evolution, with parent-null propagation, shared value buffers and schema-only transformation.
+- Scan and copy quoted JSON string runs in bulk while retaining JSON validation and decoding behavior.
+- Align architecture/API documentation and document the seven-column S2ORC output schema and consumer migration.
+- Release all 8 public workspace crates at 0.12.1 with matching internal dependency requirements.
+
 ## 0.12.0 - 2026-11-19
 
 - Add `crawl::CrawlAccessor` with existing-source, file-set, directory and provider-resolver entry points for integrated crawls.
