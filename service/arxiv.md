@@ -16,6 +16,9 @@ manifests describing each shard. This provider selects shards and opens archive
 entries over caller-configured storage. Bibliographic harvesting is a separate
 [OAI-PMH metadata entry point](arxiv-metadata.md).
 
+See [native article formats, source assets and Lance storage](arxiv-articles.md)
+for explicit PDF/source/HTML reads, source-package expansion and `anc/` attachments.
+
 ## Article representations: PDF, source and HTML
 
 For ingestion, distinguish **three main full-text representations of the same
