@@ -219,6 +219,30 @@ explicitly identifiable and preservable through original-byte access.
 A shared binary reader is useful infrastructure, not proof that all of those
 Gutenberg format routes have already been implemented.
 
+## Persisted shard manifest and completion checks
+
+For the book-grouped plan above, persist one row per selected representation with
+ebook ID, original advertised URL, resolved module-relative mirror key, format,
+size, source-byte digest and shard ID. Record the inventory timestamp, selection
+policy, parser version and plan digest alongside it. Keep unknown formats visible
+in the manifest; a missing payload is a coverage result, not a successful book
+read. This is a proposed application manifest, not a library request schema.
+
+If using hash assignment, specify the algorithm precisely: SHA-256 of the UTF-8
+decimal ebook ID, first eight bytes interpreted as an unsigned big-endian integer,
+modulo fixed N. All selected files for an ID inherit that assignment. Persist N
+and membership; changing N creates a new plan. Use measured whole-book bytes to
+identify skew before choosing a recorded size-balanced assignment instead.
+
+A retry consumes the same mirror snapshot and object digests. Publish separate
+counts for distinct books, selected representations, retained assets and failed
+or missing files. Verify IDs are disjoint across shards and that each selected
+payload belongs to exactly one book/representation entry. A successful scan of
+all RDF rows does not prove that the selected book contents were acquired.
+Neither an Arrow batch boundary nor a Lance fragment defines upstream shard
+membership. Changes in a later mirror require a new manifest and explicit
+replacement/deletion reconciliation.
+
 ## Evidence and limits
 
 This guide follows the hierarchy/sharding structure of [arXiv](arxiv.md).
