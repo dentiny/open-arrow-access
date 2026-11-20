@@ -104,6 +104,7 @@ s3://bhl-open-data/                          # Public; region us-east-2
     ├── item.txt.gz
     ├── page.txt.gz
     ├── part.txt.gz
+    ├── partpage.txt.gz                       # Confirmed by live metadata listing
     ├── creator.txt.gz
     ├── subject.txt.gz
     ├── titleidentifier.txt.gz
@@ -195,7 +196,7 @@ and does not migrate existing outputs.
 | `source_path` | `LargeUtf8` | No | Original TAR member path or full AWS object URI |
 | `snapshot_id` | `Utf8` | No | Explicit source snapshot identity, e.g. `figshare-21422193-v24`; AWS uses a caller-assigned frozen-inventory ID |
 | `source_entry_index` | `UInt64` | Yes | Zero-based physical TAR header-entry ordinal, including directory headers in the count; null for individual AWS objects |
-| `metadata` | `Struct<...>` | Yes | Complete joined source metadata for the page and its related item/part/title, including rights fields |
+| `metadata` | `Struct` ([complete definition below](#metadata-child-fields-tsv-profile)) | Yes | 13 declared TSV-derived children covering page/item/part/title, authors, identifiers, subjects, names and rights |
 
 The eight previously proposed content/identity columns are accompanied by
 `source_entry_index` to preserve repeated member names in an archive.
@@ -221,15 +222,218 @@ are accounted failures, not fabricated empty-byte rows. Actual empty/blank
 source files remain valid non-null payloads. An unparseable identifier must
 be reported explicitly rather than coerced to zero.
 
-The exact children of `metadata` must be specified after inspecting the
-selected upstream TSV/API schemas. `Struct<...>` deliberately is not a
-complete Arrow schema ready to construct today. Preserve original field names
-and all fields/values using typed nested structs/lists for related records;
-do not replace metadata with a title/license-only projection. Keep complete
-source tables/API responses and join provenance with the snapshot. A missing
-join leaves the corresponding metadata nullable and produces an explicit
-gap report; it must not drop the OCR page. Article-level Figshare metadata
-belongs with the snapshot inventory and cannot supply missing per-item rights.
+### Metadata child fields: TSV profile
+
+This proposal uses the **13 TSV tables actually listed under AWS data/**,
+not guessed API response fields. All 104 source columns are enumerated below,
+with their original case-sensitive names. Table names become the struct/list
+children. `?` means nullable; list containers and list elements are non-null
+when their enclosing `metadata` struct is present.
+
+Every source TSV cell uses `LargeUtf8`, including IDs, dates and years.
+This preserves original lexical values, empty strings and date precision.
+It is an explicit string-valued source profile, not inferred numeric/date
+types. The separate top-level `entity_id`, `page_id` and `sequence` are
+validated `UInt64` join/ordering columns. No JSON-encoded whole-record blob
+or unlisted extension struct replaces these declared columns.
+
+```text
+metadata: Struct<
+  title: Struct<
+    TitleID: LargeUtf8,
+    MARCBibID: LargeUtf8,
+    MARCLeader: LargeUtf8,
+    FullTitle: LargeUtf8,
+    ShortTitle: LargeUtf8,
+    PublicationDetails: LargeUtf8,
+    CallNumber: LargeUtf8,
+    StartYear: LargeUtf8,
+    EndYear: LargeUtf8,
+    LanguageCode: LargeUtf8,
+    TL2Author: LargeUtf8,
+    TitleURL: LargeUtf8,
+    CreationDate: LargeUtf8
+  >?,
+  item: Struct<
+    ItemID: LargeUtf8,
+    TitleID: LargeUtf8,
+    ThumbnailPageID: LargeUtf8,
+    BarCode: LargeUtf8,
+    MARCItemID: LargeUtf8,
+    CallNumber: LargeUtf8,
+    VolumeInfo: LargeUtf8,
+    ItemURL: LargeUtf8,
+    ItemTextURL: LargeUtf8,
+    ItemPDFURL: LargeUtf8,
+    ItemImagesURL: LargeUtf8,
+    LocalID: LargeUtf8,
+    Year: LargeUtf8,
+    InstitutionName: LargeUtf8,
+    ZQuery: LargeUtf8,
+    CreationDate: LargeUtf8,
+    CopyrightStatus: LargeUtf8,
+    RightsStatement: LargeUtf8,
+    LicenseType: LargeUtf8,
+    RightsHolder: LargeUtf8
+  >?,
+  page: Struct<
+    PageID: LargeUtf8,
+    ItemID: LargeUtf8,
+    SequenceOrder: LargeUtf8,
+    Year: LargeUtf8,
+    Volume: LargeUtf8,
+    Issue: LargeUtf8,
+    PagePrefix: LargeUtf8,
+    PageNumber: LargeUtf8,
+    PageTypeName: LargeUtf8,
+    CreationDate: LargeUtf8
+  >?,
+  part: Struct<
+    PartID: LargeUtf8,
+    ItemID: LargeUtf8,
+    ContributorName: LargeUtf8,
+    SequenceOrder: LargeUtf8,
+    SegmentType: LargeUtf8,
+    Title: LargeUtf8,
+    ContainerTitle: LargeUtf8,
+    PublicationDetails: LargeUtf8,
+    Volume: LargeUtf8,
+    Series: LargeUtf8,
+    Issue: LargeUtf8,
+    Date: LargeUtf8,
+    PageRange: LargeUtf8,
+    StartPageID: LargeUtf8,
+    LanguageName: LargeUtf8,
+    SegmentUrl: LargeUtf8,
+    ExternalUrl: LargeUtf8,
+    DownloadUrl: LargeUtf8,
+    RightsStatus: LargeUtf8,
+    RightsStatement: LargeUtf8,
+    LicenseName: LargeUtf8,
+    LicenseUrl: LargeUtf8,
+    RightsHolder: LargeUtf8,
+    BarCode: LargeUtf8
+  >?,
+  partpage: List<Struct<
+    PartID: LargeUtf8,
+    PageID: LargeUtf8,
+    ItemID: LargeUtf8,
+    SequenceOrder: LargeUtf8,
+    CreationDate: LargeUtf8
+  >>,
+  creator: List<Struct<
+    TitleID: LargeUtf8,
+    CreatorID: LargeUtf8,
+    CreatorType: LargeUtf8,
+    CreatorName: LargeUtf8,
+    CreationDate: LargeUtf8
+  >>,
+  creatoridentifier: List<Struct<
+    CreatorID: LargeUtf8,
+    IdentifierName: LargeUtf8,
+    IdentifierValue: LargeUtf8,
+    CreationDate: LargeUtf8
+  >>,
+  subject: List<Struct<
+    TitleID: LargeUtf8,
+    Subject: LargeUtf8,
+    CreationDate: LargeUtf8
+  >>,
+  titleidentifier: List<Struct<
+    TitleID: LargeUtf8,
+    IdentifierName: LargeUtf8,
+    IdentifierValue: LargeUtf8,
+    CreationDate: LargeUtf8
+  >>,
+  partcreator: List<Struct<
+    PartID: LargeUtf8,
+    CreatorID: LargeUtf8,
+    CreatorName: LargeUtf8,
+    CreationDate: LargeUtf8
+  >>,
+  partidentifier: List<Struct<
+    PartID: LargeUtf8,
+    IdentifierName: LargeUtf8,
+    IdentifierValue: LargeUtf8,
+    CreationDate: LargeUtf8
+  >>,
+  pagename: List<Struct<
+    NameBankID: LargeUtf8,
+    NameConfirmed: LargeUtf8,
+    PageID: LargeUtf8,
+    CreationDate: LargeUtf8
+  >>,
+  doi: List<Struct<
+    EntityType: LargeUtf8,
+    EntityID: LargeUtf8,
+    DOI: LargeUtf8,
+    CreationDate: LargeUtf8
+  >>
+>?
+```
+
+#### Join scope and cardinality
+
+| Child | Rows attached to the OCR page |
+| --- | --- |
+| `page` | `page.PageID = page_id`; at most one source row |
+| `item` | For item OCR, `item.ItemID = entity_id`; for part OCR, resolve the parent using `part.ItemID` and compare the page/partpage relationship |
+| `title` | `title.TitleID = item.TitleID` for the resolved item |
+| `part` | For part OCR only, `part.PartID = entity_id`; null for an item-namespace row |
+| `partpage` | For part OCR, all rows matching the selected PartID and PageID; empty for an item-namespace row |
+| `creator` | All creator rows for the resolved TitleID |
+| `creatoridentifier` | All rows whose CreatorID occurs in the selected `creator` or `partcreator` rows |
+| `subject` | All subject rows for the resolved TitleID |
+| `titleidentifier` | All identifier rows for the resolved TitleID |
+| `partcreator` | All creator rows for the selected PartID; empty for item OCR |
+| `partidentifier` | All identifier rows for the selected PartID; empty for item OCR |
+| `pagename` | All scientific-name rows for the PageID; `NameConfirmed` is the upstream name value |
+| `doi` | All DOI rows matching the related Title, Item, Page and, where selected, Part by both EntityType and EntityID |
+
+Use item page.SequenceOrder for the item view and the matching
+partpage.SequenceOrder for a part view; part.SequenceOrder orders the part
+itself and must not substitute for its page sequence. Cross-check these with
+the source filename, preserving and reporting disagreements.
+
+Preserve all matching relation rows and their source order in lists, including
+duplicates. Do not use an arbitrary first creator, first subject or first
+identifier. Duplicate matches for a supposedly single-row title/item/page/part
+join are an explicit schema/data validation failure, not permission to pick one.
+A missing join leaves that child null and is recorded in the reconciliation
+report; it never drops the OCR page. A valid empty relationship yields an empty
+list. Failed table acquisition must not be reported as an empty relationship.
+
+The concrete rights fields are `item.CopyrightStatus`, `RightsStatement`,
+`LicenseType`, `RightsHolder`, plus `part.RightsStatus`,
+`RightsStatement`, `LicenseName`, `LicenseUrl`, `RightsHolder` when a part
+is selected. Retain both levels without silently choosing or rewriting a
+license. These fields, author names, publication details, identifiers and
+scientific names are all present in the declared schema.
+
+#### Metadata provenance and schema changes
+
+The headers were read on 2026-11-20 using one bounded 65,536-byte gzip range
+per table; no whole-table scan or join was run. The inspected objects reported
+Last-Modified 2026-06-06, whereas the Figshare OCR export is dated November.
+The two sources are **not asserted to be the same snapshot or to have complete
+join coverage**. The official advertised update cadence does not establish
+the contents' actual freshness.
+
+Acquiring these companion tables is additional work: the inspected Figshare
+TAR prefix supplies OCR, not a ready joined metadata record. Freeze the metadata
+objects separately with keys, ETags/checksums where available, observed timestamps,
+table headers, and source-row provenance. Associate that manifest with the OCR
+snapshot. Preserve the complete original source tables/API responses alongside
+the inventory so unmatched records remain available; successful page joins do
+not constitute preservation of every row in a source table.
+
+A changed/new header requires an explicit schema revision before ingestion;
+do not silently discard extra columns or infer new types from a sample.
+API JSON/XML has a different field contract and is not silently merged into
+this TSV profile. An API-based enrichment needs its own fully declared mapping
+while preserving the complete source response. If no metadata snapshot is
+available, `metadata` is null and the missing enrichment must be reported.
+
 
 PDF, JP2 and scandata XML have different row granularity and do not become
 extra OCR page rows. If ingested, use separate representation tables: item PDF
@@ -276,8 +480,9 @@ The version-24 public metadata and first 1 MiB of compressed payload were read
 on 2026-11-20; 40 TAR header entries in the decoded prefix were inspected.
 This establishes the displayed sampled paths and blank pages, not corpus-wide
 counts, checksum validity, format coverage or sustained throughput. AWS hierarchy
-and item/part exceptions were checked against official documentation; the AWS
-corpus was not enumerated or compared to the export. No new Rust code, runtime
+and item/part exceptions were checked against official documentation. The AWS
+metadata object listing and bounded table-header prefixes were read for the
+schema proposal; OCR/image objects were not enumerated or compared to the export. No new Rust code, runtime
 test, production conversion or deployment is included.
 
 ## Existing library API
@@ -350,5 +555,6 @@ file's first chunk. To read a specific API item instead, construct with a BHL ke
 and call `item(id)`; optional missing PDF/text links do not remove the metadata.
 
 Sources: [BHL API v3](https://www.biodiversitylibrary.org/docs/api3.html), [Figshare guide](figshare.md).
+
 
 
