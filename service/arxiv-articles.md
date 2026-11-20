@@ -51,8 +51,8 @@ async fn read_articles(storage: OpenDalAccessor) -> Result<()> {
 | `Source` | `src/<article-id>` | Original source response; may be a package or a single file |
 | `Html` | `html/<article-id>` | Original HTML bytes, including references to assets |
 
-IDs may be modern or canonical legacy IDs, optionally versioned. Version
-suffixes are retained; use explicit versions for reproducible article identity.
+IDs use modern `YYMM.NNNN` or `YYMM.NNNNN` syntax, optionally versioned.
+Legacy category/number IDs are rejected. Version suffixes are retained; use explicit versions for reproducible article identity.
 Unversioned routes can change as authors update papers. Missing HTML propagates
 the backend error; it does not silently fall back to PDF. There is no implicit
 format probing, deduplication, metadata join, or HTML asset/link downloading.
