@@ -61,3 +61,41 @@ async fn validates_identity_and_required_arrays() {
     );
     assert!(SemanticScholarService::new("").is_err());
 }
+
+#[tokio::test]
+async fn fetches_only_the_pinned_dataset_manifest_and_validates_it() {
+    let f = HttpFixture::new();
+    f.respond(
+        "/datasets/v1/release/2026-10-27/dataset/s2orc_v2",
+        StatusCode::OK,
+        fixture!("semantic-scholar", "dataset.json").await,
+    );
+    let service = SemanticScholarService::with_connection(providers::connection(&f));
+    assert!(
+        service
+            .dataset_manifest("latest", "s2orc_v2")
+            .await
+            .is_err()
+    );
+    assert!(service.dataset_manifest("", "s2orc_v2").await.is_err());
+    assert!(f.requests().is_empty());
+    let manifest = service
+        .dataset_manifest("2026-10-27", "s2orc_v2")
+        .await
+        .unwrap();
+    assert_eq!(manifest.value()["README"], "source license");
+    assert_eq!(f.requests().len(), 1);
+    f.respond(
+        "/datasets/v1/release/2026-10-27/dataset/s2orc_v2",
+        StatusCode::OK,
+        fixture!("semantic-scholar", "bad-dataset-identity.json").await,
+    );
+    assert_eq!(
+        service
+            .dataset_manifest("2026-10-27", "s2orc_v2")
+            .await
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Decode
+    );
+}
