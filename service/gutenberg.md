@@ -35,27 +35,90 @@ The main and generated collections are separate rsync modules. A mirror can
 mount the generated module at cache/epub/ below the main root:
 
 ```text
-<caller-owned mirror>/                    # Illustrative combined layout
-├── 1/2/3/4/12345/                        # Main collection: ebook ID 12345
-│   ├── <advertised text file>.txt        # Names/encodings vary by ebook
-│   ├── <advertised HTML directory>/
-│   │   ├── <book>.htm
-│   │   └── images/<image files>
-│   └── <advertised archive>.zip
-└── cache/epub/                           # Generated collection mounted here
-    ├── 12345/
-    │   ├── pg12345.rdf                   # Per-ebook catalogue record
-    │   └── <advertised generated files>  # TXT/HTML/EPUB/Kindle as available
-    └── feeds/
-        ├── rdf-files.tar.bz2             # Catalogue archive, not full books
-        ├── pg_catalog.csv.gz            # Alternate catalogue export
-        └── txt-files.tar.zip            # Separate bulk plain-text package
+<caller-owned mirror>/                       # Combined main + generated layout
+├── 1/2/3/4/12345/                           # Main: ebook ID 12345; illustrative
+│   ├── <basename>.txt                      # Plain text: UTF-8 or older charset
+│   ├── <basename>.zip                      # Compressed text/other source files
+│   ├── <html-directory>/                   # Submitted HTML; name varies
+│   │   ├── <basename>.htm                  # Or .html / .xhtml
+│   │   ├── <stylesheet>.css                # If stored separately
+│   │   └── images/
+│   │       ├── <illustration>.jpg          # Or .jpeg
+│   │       ├── <illustration>.png
+│   │       ├── <illustration>.gif
+│   │       └── <illustration>.svg
+│   ├── <html-package>.zip                  # HTML plus referenced local assets
+│   ├── <basename>.tex                      # TeX/LaTeX, selected books only
+│   ├── <basename>.pdf                      # PDF, selected books only
+│   ├── <basename>.dvi                      # Legacy typeset output
+│   ├── <basename>.ps                       # PostScript
+│   ├── <basename>.eps                      # Encapsulated PostScript
+│   ├── <basename>.rtf                      # Rich Text Format
+│   ├── <basename>.xml                      # Rare full-text XML, not RDF metadata
+│   ├── <basename>.lit                      # Legacy Microsoft Reader
+│   ├── <basename>.pdb                      # Legacy Palm / Plucker family
+│   ├── <basename>.prc                      # Legacy Mobipocket
+│   ├── <audio>.mp3                         # Audio/non-text item or HTML asset
+│   ├── <music>.mid                         # MIDI; .midi also possible
+│   ├── <score>.mus                         # Legacy sheet-music data
+│   ├── <video>.avi                         # Legacy multimedia
+│   ├── <video>.mpg                         # MPEG; .mpeg also possible
+│   └── <disc-image>.iso                    # Legacy CD/DVD collection image
+└── cache/epub/                              # Generated module mounted here
+    ├── 1342/                               # Indexed real example: ebook 1342
+    │   ├── pg1342.rdf                      # Catalogue metadata
+    │   ├── pg1342.txt                      # UTF-8 text
+    │   ├── pg1342-images.html              # Generated HTML
+    │   ├── images/                         # HTML image dependencies
+    │   ├── pg1342-h.zip                    # Complete HTML download package
+    │   ├── pg1342-images-3.epub             # EPUB3 with images
+    │   ├── pg1342-images.epub               # EPUB2 with images
+    │   ├── pg1342.epub                      # EPUB2 without images
+    │   ├── pg1342-images-kf8.mobi           # Kindle KF8, despite .mobi suffix
+    │   ├── pg1342-images.mobi               # Legacy Kindle/MOBI with images
+    │   ├── pg1342.mobi                      # Legacy MOBI without images
+    │   ├── pg1342.cover.medium.jpg         # Generated cover asset
+    │   └── pg1342.cover.small.jpg
+    └── feeds/                              # Cross-book catalogue/bulk exports
+        ├── rdf-files.tar.bz2               # Catalogue archive, not full books
+        ├── pg_catalog.csv.gz               # Alternate catalogue export
+        └── txt-files.tar.zip               # Separate bulk plain-text package
 ```
 
-Paths with angle brackets illustrate roles, not filenames verified for ebook
-12345. The documented main-directory example is 1/2/3/4/12345/; these are
-digits of the ID, not submission dates or balanced shard numbers. Older items
-can have different layout/name conventions.
+**The directory name `cache/epub/` does not restrict it to EPUB.** It is the
+generated collection's historical mount point and also contains TXT, HTML,
+HTML ZIP, Kindle/MOBI, covers and metadata. These are sibling representation
+files under a book ID, not separate top-level `txt/`, `pdf/` or `mobi/`
+collections.
+
+The main-tree branch is a format-location illustration, not a claim that book
+12345 has every listed file or that those files have standardized names.
+PDF/TeX, XML and legacy/non-text formats occur only in some items; actual
+names, nesting and archive membership must come from the selected inventory.
+The catalogue's format list is open-ended: keep unrecognized advertised
+formats as identifiable original files rather than assuming this list is exhaustive.
+Plucker/PDB and QiOO are legacy download families; discover their actual
+packaging and MIME type instead of assigning a universal suffix or directory.
+
+The generated branch uses concrete filenames from the
+[official ebook 1342 directory listing](https://www.gutenberg.org/cache/epub/1342/?C=D%3BO%3DA)
+as indexed during this documentation review, not a fresh live snapshot.
+It deliberately omits converter logs, QR codes, debug output and historical
+intermediate files. Their presence in a directory does not make them current
+advertised book representations. KF8 and old MOBI can both end in `.mobi`;
+retain the advertised format and filename, not just the extension.
+
+HTML ZIP stores the HTML and its local dependencies inside one archive;
+the HTML directory above shows the logical payload layout, not a guaranteed
+ZIP root. EPUB/EPUB3 similarly package content and assets into one `.epub`
+object. KF8/MOBI and PDF are individual file objects, not directories of
+chapters. TeX may be a single source file or accompanied by assets/archive
+members; keep actual membership. No archive expansion, rendering or
+text extraction is implied by this hierarchy.
+
+The documented main-directory example is `1/2/3/4/12345/`; these are digits
+of the ID, not dates or balanced shard numbers. Older items can have different
+layout/name conventions.
 
 Do not confuse the mirror paths with website /ebooks/<id> landing/download
 routes or /files/<id>/ aliases. The generated module has a different root from
@@ -226,4 +289,5 @@ its title/file columns. Ebook text is a separate download selected from those
 links; there is no `files[].data` column.
 
 Source: [Project Gutenberg machine-readable catalogue](https://www.gutenberg.org/ebooks/offline_catalogs.html).
+
 
