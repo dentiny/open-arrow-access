@@ -95,51 +95,73 @@ pub async fn open_source_package(
         schema,
         source: metadata.source.clone(),
     };
-    let source = metadata.source;
     match packaging {
         ArxivSourcePackaging::Single { name } | ArxivSourcePackaging::GzipSingle { name } => {
-            if data.len() as u64 > options.tar_limits.max_entry_bytes {
-                return Err(super::error::decode(
-                    "source member exceeds max_entry_bytes",
-                ));
-            }
-            let batches = stream::once(async move {
-                let mut builder =
-                    RecordBatchBuilder::new(article_schema(), options.options.projection)?;
-                builder.push(|row| {
-                    row.append("article_id", article_id.as_str())?;
-                    row.append("format", "source_member")?;
-                    row.append("source_uri", source_uri.as_str())?;
-                    row.append("entry_index", 0_u64)?;
-                    row.append("entry_name", name.as_slice())?;
-                    row.append("data", data.as_ref())
-                })?;
-                builder.finish()
-            });
-            Ok(Box::new(StreamReader::records(
-                batches,
-                output,
-                OrderRequirement::PreserveGlobal,
-            )))
+            open_single_source(data, name, article_id, source_uri, output, options)
         }
         ArxivSourcePackaging::Tar | ArxivSourcePackaging::GzipTar => {
-            let tar = TarStream::new(Box::new(bytes_reader(data, source)), options.tar_limits);
-            let batches = stream::try_unfold(tar, move |tar| {
-                read_source_batch(
-                    tar,
-                    article_id.clone(),
-                    source_uri.clone(),
-                    options.options.clone(),
-                    options.target_bytes.get(),
-                )
-            });
-            Ok(Box::new(StreamReader::records(
-                batches,
-                output,
-                OrderRequirement::PreserveGlobal,
-            )))
+            open_tar_source(data, article_id, source_uri, output, options)
         }
     }
+}
+
+fn open_single_source(
+    data: Bytes,
+    name: Vec<u8>,
+    article_id: String,
+    source_uri: String,
+    output: RecordMetadata,
+    options: ArxivSourceOptions,
+) -> Result<Box<dyn RecordReader>> {
+    if data.len() as u64 > options.tar_limits.max_entry_bytes {
+        return Err(super::error::decode(
+            "source member exceeds max_entry_bytes",
+        ));
+    }
+    let batches = stream::once(async move {
+        let mut builder = RecordBatchBuilder::new(article_schema(), options.options.projection)?;
+        builder.push(|row| {
+            row.append("article_id", article_id.as_str())?;
+            row.append("format", "source_member")?;
+            row.append("source_uri", source_uri.as_str())?;
+            row.append("entry_index", 0_u64)?;
+            row.append("entry_name", name.as_slice())?;
+            row.append("data", data.as_ref())
+        })?;
+        builder.finish()
+    });
+    Ok(Box::new(StreamReader::records(
+        batches,
+        output,
+        OrderRequirement::PreserveGlobal,
+    )))
+}
+
+fn open_tar_source(
+    data: Bytes,
+    article_id: String,
+    source_uri: String,
+    output: RecordMetadata,
+    options: ArxivSourceOptions,
+) -> Result<Box<dyn RecordReader>> {
+    let tar = TarStream::new(
+        Box::new(bytes_reader(data, output.source.clone())),
+        options.tar_limits,
+    );
+    let batches = stream::try_unfold(tar, move |tar| {
+        read_source_batch(
+            tar,
+            article_id.clone(),
+            source_uri.clone(),
+            options.options.clone(),
+            options.target_bytes.get(),
+        )
+    });
+    Ok(Box::new(StreamReader::records(
+        batches,
+        output,
+        OrderRequirement::PreserveGlobal,
+    )))
 }
 
 async fn read_source_batch(
