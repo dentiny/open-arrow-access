@@ -2,8 +2,7 @@
 
 ## Unreleased
 
-- Require a frozen metadata index for arXiv PDF/LaTeX/XML content scans. Always append the complete matching record as non-null `metadata: Struct`, preserve all snapshot fields and reject missing matches even when projection omits metadata. Content consumers must supply the index and accept the tenth field.
-- Harvest full arXivRaw metadata by default, including license and version history, and add `ArxivMetadataIndex::from_oai` for direct indexing of full snapshots with tombstones excluded.
+- Append nullable `metadata: Struct` to the common arXiv content schema, reusing the full arXivRaw OAI record schema. Current content readers leave the column null; metadata fetching and joining are not part of this schema change.
 
 ## 0.15.0 - 2026-11-20
 

@@ -1,7 +1,7 @@
-//! Join arXiv content and raw PDF entries to a frozen metadata snapshot.
+//! Join PDF entries to a previously harvested, fixed metadata snapshot.
 use std::{collections::HashMap, sync::Arc};
 
-use arrow_array::{Array, ArrayRef, RecordBatch, StructArray, UInt64Array, cast::AsArray};
+use arrow_array::{Array, RecordBatch, StructArray, UInt64Array, cast::AsArray};
 use arrow_schema::{DataType, Field, Schema};
 use futures::StreamExt;
 use open_arrow_access_core::{
@@ -32,35 +32,6 @@ impl ArxivMetadataIndex {
         let column = batch
             .column_by_name(id_column)
             .ok_or_else(error::missing_metadata_id_column)?;
-        Self::from_column(batch.clone(), column.clone())
-    }
-
-    /// Index complete records from the default arXivRaw harvester. Deleted
-    /// records have no provider metadata and are excluded from the join index.
-    /// All columns of live records, including headers and version history, remain.
-    pub fn from_oai(batch: RecordBatch) -> Result<Self> {
-        let metadata = batch
-            .column_by_name("oai:metadata")
-            .and_then(|column| column.as_any().downcast_ref::<StructArray>())
-            .ok_or_else(|| error::invalid("expected full arXivRaw OAI metadata"))?;
-        let raw = metadata
-            .column_by_name("arxiv:arXivRaw")
-            .and_then(|column| column.as_any().downcast_ref::<StructArray>())
-            .ok_or_else(|| error::invalid("expected arxiv:arXivRaw metadata"))?;
-        let column = raw
-            .column_by_name("arxiv:id")
-            .ok_or_else(error::missing_metadata_id_column)?;
-        let live = arrow_array::BooleanArray::from_iter(
-            (0..batch.num_rows()).map(|row| Some(!metadata.is_null(row) && !raw.is_null(row))),
-        );
-        let column =
-            arrow_select::filter::filter(column.as_ref(), &live).map_err(error::arrow_error)?;
-        let batch =
-            arrow_select::filter::filter_record_batch(&batch, &live).map_err(error::arrow_error)?;
-        Self::from_column(batch, column)
-    }
-
-    fn from_column(batch: RecordBatch, column: ArrayRef) -> Result<Self> {
         validation::validate_metadata_id_column(column.as_ref())?;
         let mut ids = HashMap::with_capacity(batch.num_rows());
         for row in 0..batch.num_rows() {
@@ -87,46 +58,21 @@ impl ArxivMetadataIndex {
             .iter()
             .map(|name| pdf_metadata_row(name, &self.ids))
             .collect::<Result<Vec<_>>>()?;
-        self.attach_rows(batch, indices)
-    }
-
-    pub(super) fn attach_content(&self, batch: RecordBatch) -> Result<RecordBatch> {
-        let ids = batch["article_id"].as_string::<i64>();
-        let indices = ids
-            .iter()
-            .map(|id| {
-                let id = id.ok_or_else(error::null_metadata_id)?;
-                self.ids.get(id).copied().ok_or_else(|| {
-                    error::decode(&format!(
-                        "article {id} has no matching metadata in the snapshot"
-                    ))
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        self.attach_rows(batch, indices)
-    }
-
-    fn attach_rows(&self, batch: RecordBatch, indices: Vec<u64>) -> Result<RecordBatch> {
         let metadata = arrow_select::take::take(&self.rows, &UInt64Array::from(indices), None)
             .map_err(error::arrow_error)?;
-        let schema = self.enrich_schema(&batch.schema());
         let mut columns = batch.columns().to_vec();
         columns.push(metadata);
-        RecordBatch::try_new(schema, columns).map_err(error::arrow_error)
+        RecordBatch::try_new(self.schema(), columns).map_err(error::arrow_error)
     }
 
-    pub(super) fn enrich_schema(&self, schema: &Schema) -> Arc<Schema> {
-        let mut fields = schema.fields().to_vec();
+    fn schema(&self) -> Arc<Schema> {
+        let mut fields = record_schema().fields().to_vec();
         fields.push(Arc::new(Field::new(
             "metadata",
             self.rows.data_type().clone(),
             false,
         )));
-        Arc::new(Schema::new_with_metadata(fields, schema.metadata().clone()))
-    }
-
-    fn schema(&self) -> Arc<Schema> {
-        self.enrich_schema(&record_schema())
+        Arc::new(Schema::new(fields))
     }
 }
 

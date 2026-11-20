@@ -26,7 +26,7 @@ async fn packages_keep_only_tex_with_provenance() {
         let batches = read("2410/2410.00001v2.gz", &data).await.unwrap();
         assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
         assert!(batches.iter().all(|batch| batch.num_rows() == 1));
-        let batch = arrow_select::concat::concat_batches(&payload_schema(), &batches).unwrap();
+        let batch = arrow_select::concat::concat_batches(&content_schema(), &batches).unwrap();
         assert_eq!(batch["data"].as_binary::<i64>().value(0), original);
         assert!(
             batch["source_name"]
@@ -74,43 +74,10 @@ async fn accepts_legacy_single_sources_and_rejects_non_latex() {
 async fn formats_emit_identical_schemas_and_preserve_content() {
     use open_arrow_access_storage::OpenDalAccessor;
     use open_arrow_access_test_support::temp_fs;
-    let snapshot = RecordBatch::try_from_iter(vec![
-        (
-            "id",
-            Arc::new(arrow_array::StringArray::from(vec![
-                "oai:arXiv.org:2410.00001",
-            ])) as arrow_array::ArrayRef,
-        ),
-        (
-            "arxiv:license",
-            Arc::new(arrow_array::StringArray::from(vec![Some(
-                "http://creativecommons.org/licenses/by/4.0/",
-            )])) as arrow_array::ArrayRef,
-        ),
-        (
-            "extra",
-            Arc::new(arrow_array::StructArray::from(
-                RecordBatch::try_from_iter(vec![
-                    (
-                        "title",
-                        Arc::new(arrow_array::StringArray::from(vec!["Full title"]))
-                            as arrow_array::ArrayRef,
-                    ),
-                    (
-                        "optional",
-                        Arc::new(arrow_array::StringArray::from(vec![None::<&str>]))
-                            as arrow_array::ArrayRef,
-                    ),
-                ])
-                .unwrap(),
-            )) as arrow_array::ArrayRef,
-        ),
-    ])
-    .unwrap();
-    let metadata = Arc::new(ArxivMetadataIndex::try_new(snapshot.clone(), "id").unwrap());
-    let schema = content_schema(&metadata);
+    let schema = content_schema();
     assert_eq!(schema.fields().len(), 10);
-    assert!(!schema.field_with_name("metadata").unwrap().is_nullable());
+    let metadata = schema.field_with_name("metadata").unwrap();
+    assert!(metadata.is_nullable());
     let data_type = schema.field_with_name("data_type").unwrap();
     assert_eq!(data_type.data_type(), &DataType::LargeUtf8);
     assert!(!data_type.is_nullable());
@@ -132,17 +99,14 @@ async fn formats_emit_identical_schemas_and_preserve_content() {
         );
         let manifest_key = format!("{prefix}/arXiv_{prefix}_manifest.xml");
         let (_temp, operator) = temp_fs(&[(&manifest_key, manifest.as_bytes()), (&key, &bytes)]);
-        let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator.clone()))
+        let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
             .records()
-            .content(format, metadata.clone());
+            .content(format);
         let mut reader = records.open(ArxivReadRequest::new(kind)).await.unwrap();
         assert_eq!(reader.metadata().schema, schema);
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(batch.schema(), schema);
-        assert_eq!(
-            batch["metadata"].as_struct(),
-            &arrow_array::StructArray::from(snapshot.clone())
-        );
+        assert_eq!(batch["metadata"].null_count(), batch.num_rows());
         assert_eq!(
             batch["article_id"].as_string::<i64>().value(0),
             "2410.00001"
@@ -159,41 +123,5 @@ async fn formats_emit_identical_schemas_and_preserve_content() {
         };
         assert_eq!(batch["data"].as_binary::<i64>().value(0), expected);
         assert!(reader.next().await.unwrap().is_none());
-        let projected =
-            records
-                .open(ArxivReadRequest::new(kind).with_options(
-                    ReadOptions::default().with_projection(["metadata", "data_type"]),
-                ))
-                .await
-                .unwrap()
-                .next()
-                .await
-                .unwrap()
-                .unwrap();
-        assert_eq!(projected.num_columns(), 2);
-        assert_eq!(
-            projected.column_by_name("metadata"),
-            batch.column_by_name("metadata")
-        );
-
-        let empty = Arc::new(ArxivMetadataIndex::try_new(snapshot.slice(0, 0), "id").unwrap());
-        let missing = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
-            .records()
-            .content(format, empty);
-        let mut reader = missing
-            .open(
-                ArxivReadRequest::new(kind)
-                    .with_options(ReadOptions::default().with_projection(["data"])),
-            )
-            .await
-            .unwrap();
-        assert!(
-            reader
-                .next()
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("no matching metadata")
-        );
     }
 }

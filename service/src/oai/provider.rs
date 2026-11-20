@@ -49,9 +49,8 @@ impl<P: OaiProvider> OaiProviderService<P> {
 
     /// The provider's default Arrow record mapping for `page.records(format)`.
     ///
-    /// Providers normally use standard OAI-PMH header columns. arXiv overrides
-    /// this with its complete arXivRaw record, including license and history.
-    /// Other providers can override `OaiProvider::record_format` as needed.
+    /// Built-in providers use standard OAI-PMH header columns. Custom providers
+    /// can override `OaiProvider::record_format` to define their own mappings.
     pub fn record_format(&self) -> XmlFormat {
         P::record_format()
     }

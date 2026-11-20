@@ -1,6 +1,5 @@
 use super::*;
 use crate::arxiv::{ArxivContentFormat, ArxivKind};
-use arrow_array::cast::AsArray;
 use open_arrow_access_core::{AccessorExt, ByteMetadata, Bytes, Capability, Reader, async_trait};
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_test_support::{MemoryAccessor, fixture};
@@ -60,26 +59,12 @@ async fn a_single_shard_reads_members_concurrently_before_latex_parsing() {
     let bytes = fixture!("arxiv-content", "latex-two.tar").await;
     let source = MemoryAccessor::new(&bytes, 512).with_ranges();
     let observed = source.observations.clone();
-    let metadata = Arc::new(
-        crate::arxiv::ArxivMetadataIndex::try_new(
-            arrow_array::RecordBatch::try_from_iter(vec![(
-                "id",
-                Arc::new(arrow_array::StringArray::from(vec![
-                    "2410.00001",
-                    "2410.00002",
-                ])) as arrow_array::ArrayRef,
-            )])
-            .unwrap(),
-            "id",
-        )
-        .unwrap(),
-    );
     let records = ArxivService::new(GatedSource {
         source,
         gate: Arc::new(Barrier::new(2)),
     })
     .records()
-    .content(ArxivContentFormat::Latex, metadata.clone())
+    .content(ArxivContentFormat::Latex)
     .layer(ParallelReadLayer::new(
         NonZeroUsize::new(2).unwrap(),
         NonZeroUsize::MIN,
@@ -94,17 +79,7 @@ async fn a_single_shard_reads_members_concurrently_before_latex_parsing() {
         .unwrap()
         .unwrap()
     {
-        assert_eq!(batch.schema(), crate::arxiv::content_schema(&metadata));
-        let joined = batch["metadata"]
-            .as_struct()
-            .column_by_name("id")
-            .unwrap()
-            .as_string::<i32>();
-        assert!(
-            joined
-                .iter()
-                .eq(batch["article_id"].as_string::<i64>().iter())
-        );
+        assert_eq!(batch.schema(), crate::arxiv::content_schema());
         rows += batch.num_rows();
     }
     assert_eq!(rows, 2);

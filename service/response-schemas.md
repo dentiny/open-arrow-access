@@ -77,8 +77,8 @@ For byte responses, use `ByteReader::next()` and apply a matching decoder.
 
 PDF, LaTeX and caller-supplied XML shards use one
 [common content schema](arxiv.md#common-pdf--latex--xml-content-schema) through
-`records().content(format, metadata_index)`. `data: LargeBinary` holds content bytes in every
-format. Content always includes the nine content fields plus a non-null `metadata` struct
-with the complete matching snapshot record. A metadata index is required and
-missing matches fail even when projection omits metadata. Raw archive/artifact
-access remains a separate transport contract.
+`records().content(format)`. `data: LargeBinary` holds content bytes in every
+format. Content has ten fields, including nullable `metadata: Struct` with the full
+arXivRaw OAI record schema. Current content readers leave that column null;
+this schema change does not fetch or join metadata. Raw archive/artifact access
+and parsed OAI metadata are separate contracts.
