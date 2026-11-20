@@ -1,7 +1,9 @@
 # Layers
 
-Layers wrap an accessor with `AccessorExt::layer`. They preserve its Rust request
-and reader interfaces; record layers may change the Arrow schema and values.
+Stream layers wrap an accessor with `AccessorExt::layer`. They preserve its Rust
+request and reader interfaces; record layers may change Arrow schema and values.
+`AttachmentFallbackLayer` instead wraps cell accessors with `wrap` and returns a
+single typed attachment cell before any Arrow batch assembly.
 All layers in this crate are always available through `open_arrow_access::layers`.
 Byte decompression layers use the same contract but require [codec features](../decompression/README.md).
 
@@ -9,7 +11,7 @@ Byte decompression layers use the same contract but require [codec features](../
 
 | Layer | Use it for | Key behavior |
 | --- | --- | --- |
-| `AttachmentFallbackLayer` | Select an alternative attachment representation | Defaults to missing-input errors before the first batch; never switches after selection |
+| `AttachmentFallbackLayer` | Choose a typed attachment cell per logical item | Uses the alternate only when that cell is absent; returns one cell, not batches |
 | `MetricsLayer` | Observe byte/record reads | In-memory aggregates by default; optional OpenDAL instrumentation |
 | `SchemaEvolutionLayer` | Add computed columns, remove, rename, or cast top-level columns | Ordered DataFusion Expr / SQL operations; fixed output schema |
 | `LimitLayer` | Keep at most N rows | One budget per open; stops and releases the source at the limit |
@@ -293,35 +295,41 @@ than silently returning a truncated file. Schema must be known from the underlyi
 plan; a missing input required for schema inference cannot be skipped by this
 layer. Surviving partition order and configured executor budgets are preserved.
 
-## Select a fallback attachment representation
+## Select an attachment cell with fallback
 
 ```rust,ignore
-use open_arrow_access_core::AccessorExt;
+use open_arrow_access_core::AttachmentCellAccessor;
 use open_arrow_access_layers::AttachmentFallbackLayer;
 
-let documents = text_source.layer(AttachmentFallbackLayer::new(pdf_source));
-let reader = documents.open(article_request).await?;
+let cells = AttachmentFallbackLayer::new(pdf_source).wrap(latex_source);
+let first = cells.read_cell(first_article).await?;   // Some({ latex bytes, Latex })
+let second = cells.read_cell(second_article).await?; // Some({ PDF bytes, Pdf })
 ```
 
-The layer is independent of providers and formats. Both accessors accept the
-same logical request; each resolves its own format and storage. Configure
-alternate keys or article-version resolution inside those accessors, not in the
-layer. Chain fallback accessors to express more than two candidates.
+`AttachmentCellAccessor::read_cell` returns exactly one `Option<AttachmentCell>`.
+Each cell owns `data: Bytes`, `data_type: AttachmentDataType` and optional source
+identity. Both providers accept the same logical request, including any version
+selection. Providers perform their own format-specific reading and decoding;
+the fallback helper is service-independent and has no Arrow reader/batch path.
+It uses `wrap`, not the stream-oriented `AccessorExt::layer` interface.
 
-By default, only `NotFound` from opening or the first `next()` selects the
-alternative. Use `.when(|error| ...)` to explicitly classify another
-representation-unavailable error. Authentication, permissions, transport and
-decoding errors propagate by default; a successful empty stream is not missing.
+A primary `Some(cell)` is returned unchanged. Empty bytes are an existing cell.
+`None` or a default-classified `NotFound` triggers a lazy alternate read **for
+that item only**. Two missing cells return `None`. Permission, authentication,
+transport and decoding errors propagate; `.when(...)` can explicitly classify
+other primary absence errors. Fallback errors are preserved. Wrap a fallback
+accessor to express ordered choices such as TXT → XML → PDF. Each call has its
+own state, so different rows can choose different representations concurrently.
 
-`open()` probes and buffers the first batch, including an empty batch. Once a
-batch is selected, later failures propagate without switching or restarting.
-This prevents duplicated rows or mixed representations. Metadata is taken from
-the selected reader; metadata inspection must therefore probe selection too.
-Candidates may expose different schemas; this layer does not normalize them.
-For consumers requiring one fixed schema, adapt both candidates before wrapping.
+Arrow assembly happens outside the helper. For arXiv, retain the top-level
+`data: LargeBinary` content column and add a separate top-level
+`data_type: Utf8` column. For example, the first row can hold LaTeX bytes with
+`data_type="latex"`, and the second PDF bytes with `data_type="pdf"`. No Struct
+wrapper is required. This example is a provider integration contract; this
+provider-independent PR does not change the arXiv output schema itself.
 
-Selection applies to **one open request**, not every row in a corpus. Providers
-such as arXiv should expose one article per request and classify a genuinely
-missing representation before their first batch. Place the layer at that
-boundary. It does not implement `ScanPlanner`, infer partition correspondence,
-retry requests, fetch a specific provider, or implement PDF/text conversion.
+Use `cell.data_type.as_str()` for the tag; the Rust enum distinguishes Txt,
+Latex, Pdf, Xml, Html, Binary and a provider-defined Other value. Type tags must
+travel with the selected bytes, not be inferred from the Arrow binary type.
+A dictionary string column is another storage choice for the type tag. The
+helper does not perform text conversion, concatenation or batch-wide fallback.

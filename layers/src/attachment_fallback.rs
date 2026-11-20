@@ -1,43 +1,41 @@
-//! Select an alternative attachment representation before committing to a stream.
+//! Choose one typed attachment cell independently for each logical item.
 use std::sync::Arc;
 
-use futures::{StreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, Error, ErrorKind, Layer, RecordCapability, RecordReader, Result, StreamReader,
-    async_trait, into_stream,
+    AttachmentCell, AttachmentCellAccessor, Error, ErrorKind, Result, async_trait,
 };
 
 type Condition = dyn Fn(&Error) -> bool + Send + Sync;
 
-/// Try another accessor when an attachment representation is unavailable.
+/// Prefer one attachment representation, falling back independently per cell.
 ///
-/// By default only `NotFound` during opening or before the first batch selects
-/// the fallback. Successful empty streams stay empty. Permission, transport and
-/// decoding failures propagate unchanged. [`Self::when`] explicitly overrides
-/// this classification; it does not change the stream commitment boundary.
+/// Primary `Some(cell)` is returned unchanged, including empty binary content.
+/// `None` or, by default, `NotFound` lazily invokes the alternate cell accessor.
+/// Authentication, permissions, transport and decoding errors propagate. Both
+/// absent representations return `None`; errors from the fallback are preserved.
+/// [`Self::when`] changes which primary errors count as representation absence.
 ///
-/// Opening probes one batch and buffers it for the caller. After that batch is
-/// selected, later errors never restart or switch streams: doing so could mix
-/// representations or duplicate rows. Metadata describes the selected reader.
-/// This is selection, not retry, and no schema conversion is performed.
+/// A cell contains its own data type, bytes and optional source identity. One
+/// item's LaTeX cell can therefore be followed by another item's PDF cell. This
+/// helper never opens a record reader, probes a batch, or changes other rows.
+/// Providers resolve identity/version and decode content; callers assemble
+/// selected cells into Arrow rows/batches afterwards.
 ///
-/// Both accessors receive the same logical request. Configure representation,
-/// storage, credentials and request resolution in the accessors themselves.
-/// Compose layers for more than two candidates. Apply at one logical item's
-/// boundary (e.g. one document), not a whole corpus requiring per-item fallback.
-/// This layer does not implement `ScanPlanner` or change partition matching.
+/// Use [`Self::wrap`] rather than `AccessorExt::layer`: the stream-based `Layer`
+/// contract returns readers, while this API returns exactly one optional cell.
+/// Chain cell accessors for more than two representations.
 ///
 /// ```
-/// use open_arrow_access_core::{Accessor, AccessorExt, RecordReader};
+/// use open_arrow_access_core::AttachmentCellAccessor;
 /// use open_arrow_access_layers::{AttachmentFallbackAccessor, AttachmentFallbackLayer};
 ///
 /// fn prefer<A, F>(primary: A, alternate: F) -> AttachmentFallbackAccessor<A, F>
 /// where
-///     A: Accessor<Reader = dyn RecordReader>,
+///     A: AttachmentCellAccessor,
 ///     A::Request: Clone,
-///     F: Accessor<Request = A::Request, Reader = dyn RecordReader>,
+///     F: AttachmentCellAccessor<Request = A::Request>,
 /// {
-///     primary.layer(AttachmentFallbackLayer::new(alternate))
+///     AttachmentFallbackLayer::new(alternate).wrap(primary)
 /// }
 /// ```
 pub struct AttachmentFallbackLayer<F> {
@@ -62,11 +60,24 @@ impl<F> AttachmentFallbackLayer<F> {
         }
     }
 
-    /// Select fallback for a caller-defined, classified unavailability error.
+    /// Classify primary representation-absence errors. `None` always falls back.
     /// The callback may run concurrently and must not block.
     pub fn when(mut self, condition: impl Fn(&Error) -> bool + Send + Sync + 'static) -> Self {
         self.condition = Arc::new(condition);
         self
+    }
+
+    pub fn wrap<A>(&self, primary: A) -> AttachmentFallbackAccessor<A, F>
+    where
+        A: AttachmentCellAccessor,
+        A::Request: Clone,
+        F: AttachmentCellAccessor<Request = A::Request>,
+    {
+        AttachmentFallbackAccessor {
+            primary,
+            fallback: self.fallback.clone(),
+            condition: self.condition.clone(),
+        }
     }
 }
 
@@ -76,69 +87,23 @@ pub struct AttachmentFallbackAccessor<A, F> {
     condition: Arc<Condition>,
 }
 
-impl<A, F> Layer<A> for AttachmentFallbackLayer<F>
-where
-    A: Accessor<Reader = dyn RecordReader>,
-    A::Request: Clone,
-    F: Accessor<Request = A::Request, Reader = dyn RecordReader>,
-{
-    type Layered = AttachmentFallbackAccessor<A, F>;
-
-    fn layer(&self, primary: A) -> Self::Layered {
-        AttachmentFallbackAccessor {
-            primary,
-            fallback: self.fallback.clone(),
-            condition: self.condition.clone(),
-        }
-    }
-}
-
 #[async_trait]
-impl<A, F> Accessor for AttachmentFallbackAccessor<A, F>
+impl<A, F> AttachmentCellAccessor for AttachmentFallbackAccessor<A, F>
 where
-    A: Accessor<Reader = dyn RecordReader>,
+    A: AttachmentCellAccessor,
     A::Request: Clone,
-    F: Accessor<Request = A::Request, Reader = dyn RecordReader>,
+    F: AttachmentCellAccessor<Request = A::Request>,
 {
     type Request = A::Request;
-    type Reader = dyn RecordReader;
 
-    fn capability(&self) -> RecordCapability {
-        let primary = self.primary.capability();
-        let fallback = self.fallback.capability();
-        RecordCapability {
-            read: primary.read && fallback.read,
-            read_with_range: false,
-            read_parallel: primary.read_parallel && fallback.read_parallel,
-            list: false,
-            ordering: primary.ordering.combine(fallback.ordering),
-        }
-    }
-
-    async fn open(&self, request: Self::Request) -> Result<Box<dyn RecordReader>> {
-        let primary = match self.primary.open(request.clone()).await {
-            Ok(reader) => probe(reader).await,
-            Err(error) => Err(error),
-        };
-        match primary {
-            Ok(reader) => Ok(reader),
-            Err(error) if (self.condition)(&error) => {
-                probe(self.fallback.open(request).await?).await
-            }
+    async fn read_cell(&self, request: Self::Request) -> Result<Option<AttachmentCell>> {
+        match self.primary.read_cell(request.clone()).await {
+            Ok(Some(cell)) => Ok(Some(cell)),
+            Ok(None) => self.fallback.read_cell(request).await,
+            Err(error) if (self.condition)(&error) => self.fallback.read_cell(request).await,
             Err(error) => Err(error),
         }
     }
-}
-
-/// Resolve lazy first-read failures while preserving the selected batch exactly once.
-async fn probe(mut reader: Box<dyn RecordReader>) -> Result<Box<dyn RecordReader>> {
-    let Some(first) = reader.next().await? else {
-        return Ok(reader);
-    };
-    let metadata = reader.metadata().clone();
-    let ordering = reader.capability().ordering;
-    let batches = stream::once(async { Ok(first) }).chain(into_stream(reader));
-    Ok(Box::new(StreamReader::records(batches, metadata, ordering)))
 }
 
 #[cfg(test)]

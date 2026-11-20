@@ -1,237 +1,145 @@
 use super::*;
-use arrow_array::{Int32Array, RecordBatch};
-use arrow_schema::{DataType, Field, Schema};
-use open_arrow_access_core::{AccessorExt, OrderRequirement, RecordMetadata, SchemaRef};
-use std::sync::{
-    Mutex,
-    atomic::{AtomicUsize, Ordering},
-};
+use open_arrow_access_core::AttachmentDataType;
+use std::{collections::HashMap, sync::Mutex};
 
 #[derive(Clone)]
-enum Event {
-    Batch(Vec<i32>),
+enum Outcome {
+    Cell(AttachmentCell),
+    Missing,
     Error(ErrorKind),
 }
 
 struct Source {
-    open_error: Option<ErrorKind>,
-    events: Vec<Event>,
-    schema: SchemaRef,
+    outcomes: HashMap<u32, Outcome>,
     requests: Arc<Mutex<Vec<u32>>>,
-    opens: Arc<AtomicUsize>,
-    ordering: OrderRequirement,
 }
 
 impl Source {
-    fn new(events: Vec<Event>) -> Self {
+    fn new(outcomes: impl IntoIterator<Item = (u32, Outcome)>) -> Self {
         Self {
-            open_error: None,
-            events,
-            schema: Arc::new(Schema::new(vec![Field::new(
-                "value",
-                DataType::Int32,
-                false,
-            )])),
+            outcomes: outcomes.into_iter().collect(),
             requests: Arc::default(),
-            opens: Arc::default(),
-            ordering: OrderRequirement::Reorderable,
         }
     }
-
-    fn absent() -> Self {
-        let mut source = Self::new(vec![]);
-        source.open_error = Some(ErrorKind::NotFound);
-        source
-    }
-}
-
-fn failure(kind: ErrorKind) -> Error {
-    Error::new(kind, "source_read", "source failure")
 }
 
 #[async_trait]
-impl Accessor for Source {
+impl AttachmentCellAccessor for Source {
     type Request = u32;
-    type Reader = dyn RecordReader;
 
-    fn capability(&self) -> RecordCapability {
-        RecordCapability::sequential(self.ordering)
-    }
-
-    async fn open(&self, request: u32) -> Result<Box<dyn RecordReader>> {
-        self.opens.fetch_add(1, Ordering::SeqCst);
+    async fn read_cell(&self, request: u32) -> Result<Option<AttachmentCell>> {
         self.requests.lock().unwrap().push(request);
-        if let Some(kind) = self.open_error {
-            return Err(failure(kind));
+        match self.outcomes.get(&request).unwrap_or(&Outcome::Missing) {
+            Outcome::Cell(cell) => Ok(Some(cell.clone())),
+            Outcome::Missing => Ok(None),
+            Outcome::Error(kind) => Err(Error::new(*kind, "read_attachment", "source failure")
+                .with_object(Some(&format!("article/{request}").into()))),
         }
-        let schema = self.schema.clone();
-        let events = self
-            .events
-            .clone()
-            .into_iter()
-            .map(move |event| match event {
-                Event::Batch(values) => Ok(RecordBatch::try_new(
-                    schema.clone(),
-                    vec![Arc::new(Int32Array::from(values))],
-                )
-                .unwrap()),
-                Event::Error(kind) => Err(failure(kind)),
-            });
-        Ok(Box::new(StreamReader::records(
-            stream::iter(events),
-            RecordMetadata {
-                schema: self.schema.clone(),
-                source: None,
-            },
-            self.ordering,
-        )))
     }
 }
 
-async fn values(mut reader: Box<dyn RecordReader>) -> Result<Vec<i32>> {
-    use arrow_array::cast::AsArray;
-    let mut values = Vec::new();
-    while let Some(batch) = reader.next().await? {
-        values.extend(
-            batch
-                .column(0)
-                .as_primitive::<arrow_array::types::Int32Type>()
-                .values(),
-        );
-    }
-    Ok(values)
-}
-
 #[tokio::test]
-async fn primary_success_is_delivered_once_without_opening_fallback() {
-    let fallback = Source::new(vec![Event::Batch(vec![99])]);
-    let opens = fallback.opens.clone();
-    let accessor = Source::new(vec![Event::Batch(vec![1, 2]), Event::Batch(vec![3])])
-        .layer(AttachmentFallbackLayer::new(fallback));
-    assert_eq!(
-        values(accessor.open(7).await.unwrap()).await.unwrap(),
-        [1, 2, 3]
-    );
-    assert_eq!(opens.load(Ordering::SeqCst), 0);
-}
-
-#[rstest::rstest]
-#[case(true)]
-#[case(false)]
-#[tokio::test]
-async fn missing_open_or_first_batch_selects_fallback_and_its_metadata(#[case] at_open: bool) {
-    let primary = if at_open {
-        Source::absent()
-    } else {
-        Source::new(vec![Event::Error(ErrorKind::NotFound)])
-    };
-    let mut fallback = Source::new(vec![Event::Batch(vec![4, 5])]);
-    fallback.schema = Arc::new(Schema::new(vec![Field::new(
-        "alternative",
-        DataType::Int32,
-        false,
-    )]));
-    let schema = fallback.schema.clone();
+async fn rows_independently_keep_latex_or_fall_back_to_pdf() {
+    let latex = AttachmentCell::new(
+        AttachmentDataType::Latex,
+        b"\\documentclass{article}".as_slice(),
+    )
+    .with_source("src/first.tex");
+    let pdf = AttachmentCell::new(AttachmentDataType::Pdf, b"%PDF-1.7\xff".as_slice())
+        .with_source("pdf/second.pdf");
+    let primary = Source::new([(1, Outcome::Cell(latex.clone()))]);
+    let fallback = Source::new([(2, Outcome::Cell(pdf.clone()))]);
     let primary_requests = primary.requests.clone();
     let fallback_requests = fallback.requests.clone();
-    let accessor = primary.layer(AttachmentFallbackLayer::new(fallback));
-    assert_eq!(accessor.metadata(42).await.unwrap().schema, schema);
-    let reader = accessor.open(42).await.unwrap();
-    assert_eq!(reader.metadata().schema, schema);
-    assert_eq!(values(reader).await.unwrap(), [4, 5]);
-    assert_eq!(*primary_requests.lock().unwrap(), [42, 42]);
-    assert_eq!(*fallback_requests.lock().unwrap(), [42, 42]);
+    let cells = AttachmentFallbackLayer::new(fallback).wrap(primary);
+    // Same accessor, different rows; no batch/stream selection is involved.
+    let (first, second) = futures::join!(cells.read_cell(1), cells.read_cell(2));
+    assert_eq!(first.unwrap(), Some(latex));
+    assert_eq!(second.unwrap(), Some(pdf));
+    let mut requested = primary_requests.lock().unwrap().clone();
+    requested.sort();
+    assert_eq!(requested, [1, 2]);
+    assert_eq!(*fallback_requests.lock().unwrap(), [2]);
+}
+
+#[tokio::test]
+async fn existing_empty_text_is_a_cell_not_absence() {
+    let empty = AttachmentCell::new(AttachmentDataType::Txt, b"".as_slice());
+    let primary = Source::new([(1, Outcome::Cell(empty.clone()))]);
+    let fallback = Source::new([(1, Outcome::Error(ErrorKind::Internal))]);
+    let requested = fallback.requests.clone();
+    let cells = AttachmentFallbackLayer::new(fallback).wrap(primary);
+    assert_eq!(cells.read_cell(1).await.unwrap(), Some(empty));
+    assert!(requested.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn absent_cells_and_classified_not_found_try_only_the_alternate() {
+    let primary = Source::new([(1, Outcome::Error(ErrorKind::NotFound))]);
+    let fallback = Source::new([(
+        1,
+        Outcome::Cell(AttachmentCell::new(
+            AttachmentDataType::Pdf,
+            b"pdf".as_slice(),
+        )),
+    )]);
+    let cells = AttachmentFallbackLayer::new(fallback).wrap(primary);
+    assert_eq!(
+        cells.read_cell(1).await.unwrap().unwrap().data_type,
+        AttachmentDataType::Pdf
+    );
+    assert_eq!(cells.read_cell(2).await.unwrap(), None);
 }
 
 #[rstest::rstest]
 #[case(ErrorKind::PermissionDenied)]
 #[case(ErrorKind::Unauthenticated)]
 #[case(ErrorKind::Timeout)]
-#[case(ErrorKind::RateLimited)]
 #[case(ErrorKind::Decode)]
-#[case(ErrorKind::Io)]
 #[tokio::test]
-async fn default_policy_preserves_fatal_errors(#[case] kind: ErrorKind) {
-    for at_open in [true, false] {
-        let mut primary = Source::new(vec![Event::Error(kind)]);
-        primary.open_error = at_open.then_some(kind);
-        let fallback = Source::new(vec![Event::Batch(vec![9])]);
-        let opens = fallback.opens.clone();
-        let accessor = primary.layer(AttachmentFallbackLayer::new(fallback));
-        let error = accessor.open(0).await.err().unwrap();
-        assert_eq!(error.kind(), kind);
-        assert_eq!(error.operation(), "source_read");
-        assert_eq!(opens.load(Ordering::SeqCst), 0);
-    }
+async fn fatal_primary_errors_never_fetch_another_attachment(#[case] kind: ErrorKind) {
+    let primary = Source::new([(1, Outcome::Error(kind))]);
+    let fallback = Source::new([]);
+    let requested = fallback.requests.clone();
+    let cells = AttachmentFallbackLayer::new(fallback).wrap(primary);
+    let error = cells.read_cell(1).await.unwrap_err();
+    assert_eq!(error.kind(), kind);
+    assert_eq!(error.operation(), "read_attachment");
+    assert_eq!(error.object().unwrap().locator(), "article/1");
+    assert!(requested.lock().unwrap().is_empty());
 }
 
-#[rstest::rstest]
-#[case(vec![1])]
-#[case(vec![])]
 #[tokio::test]
-async fn failures_after_any_selected_batch_never_switch(#[case] first: Vec<i32>) {
-    let primary = Source::new(vec![
-        Event::Batch(first.clone()),
-        Event::Error(ErrorKind::NotFound),
+async fn fallback_errors_and_custom_type_tags_are_preserved() {
+    let primary = Source::new([]);
+    let custom = AttachmentCell::new(
+        AttachmentDataType::Other("image/png".into()),
+        b"png".as_slice(),
+    );
+    let fallback = Source::new([
+        (1, Outcome::Error(ErrorKind::PermissionDenied)),
+        (2, Outcome::Cell(custom.clone())),
     ]);
-    let fallback = Source::new(vec![Event::Batch(vec![9])]);
-    let opens = fallback.opens.clone();
-    let accessor = primary.layer(AttachmentFallbackLayer::new(fallback));
-    let mut reader = accessor.open(0).await.unwrap();
-    assert_eq!(
-        reader.next().await.unwrap().unwrap().num_rows(),
-        first.len()
-    );
-    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::NotFound);
-    assert_eq!(opens.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test]
-async fn successful_empty_stream_is_not_missing() {
-    let fallback = Source::new(vec![Event::Batch(vec![9])]);
-    let opens = fallback.opens.clone();
-    let accessor = Source::new(vec![]).layer(AttachmentFallbackLayer::new(fallback));
-    assert!(
-        values(accessor.open(0).await.unwrap())
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(opens.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test]
-async fn explicit_condition_and_chained_candidates_preserve_final_error() {
-    let secondary = Source::absent().layer(AttachmentFallbackLayer::new(Source::new(vec![
-        Event::Batch(vec![8]),
-    ])));
-    let primary = Source::new(vec![Event::Error(ErrorKind::Unsupported)]);
-    let accessor = primary.layer(
-        AttachmentFallbackLayer::new(secondary)
-            .when(|error| error.kind() == ErrorKind::Unsupported),
-    );
-    assert_eq!(values(accessor.open(0).await.unwrap()).await.unwrap(), [8]);
-    let primary = Source::absent();
-    let fallback = Source::new(vec![Event::Error(ErrorKind::PermissionDenied)]);
-    let error = primary
-        .layer(AttachmentFallbackLayer::new(fallback))
-        .open(0)
-        .await
-        .err()
-        .unwrap();
+    let cells = AttachmentFallbackLayer::new(fallback).wrap(primary);
+    let error = cells.read_cell(1).await.unwrap_err();
     assert_eq!(error.kind(), ErrorKind::PermissionDenied);
-    assert_eq!(error.operation(), "source_read");
+    assert_eq!(error.object().unwrap().locator(), "article/1");
+    assert_eq!(cells.read_cell(2).await.unwrap(), Some(custom));
+    assert_eq!(
+        AttachmentDataType::Other("image/png".into()).as_str(),
+        "image/png"
+    );
 }
 
-#[test]
-fn capability_retains_stricter_ordering_without_exposing_discovery() {
-    let primary = Source::new(vec![]);
-    let mut fallback = Source::new(vec![]);
-    fallback.ordering = OrderRequirement::PreserveGlobal;
-    let layer = AttachmentFallbackLayer::new(fallback);
-    let accessor = primary.layer(layer.clone());
-    assert_eq!(
-        accessor.capability(),
-        RecordCapability::sequential(OrderRequirement::PreserveGlobal)
-    );
+#[tokio::test]
+async fn chained_representations_and_explicit_conditions_still_select_one_cell() {
+    let primary = Source::new([(1, Outcome::Error(ErrorKind::Unsupported))]);
+    let xml = Source::new([]);
+    let pdf = AttachmentCell::new(AttachmentDataType::Pdf, b"pdf".as_slice());
+    let pdf_source = Source::new([(1, Outcome::Cell(pdf.clone()))]);
+    let xml_or_pdf = AttachmentFallbackLayer::new(pdf_source).wrap(xml);
+    let layer = AttachmentFallbackLayer::new(xml_or_pdf)
+        .when(|error| error.kind() == ErrorKind::Unsupported);
+    let cells = layer.clone().wrap(primary);
+    assert_eq!(cells.read_cell(1).await.unwrap(), Some(pdf));
 }
