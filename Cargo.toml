@@ -160,5 +160,9 @@ unsafe_code = "forbid"
 workspace = true
 
 [[test]]
+name = "arxiv_xml"
+required-features = ["format-xml"]
+
+[[test]]
 name = "arxiv_documents"
 required-features = ["service-arxiv"]
