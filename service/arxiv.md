@@ -432,12 +432,13 @@ field names, order, Arrow types and nullability:
 | `source_name` | `LargeBinary`, non-null | Inner TeX filename; empty for whole PDF/XML documents |
 | `data` | `LargeBinary`, non-null | PDF bytes, decoded UTF-8 TeX bytes, or original XML bytes |
 | `data_type` | `LargeUtf8`, non-null | Representation of this row's payload: `pdf`, `latex`, or `xml` |
-| `metadata` | `Struct`, nullable | Full arXivRaw OAI record; populated when a typed snapshot is attached |
+| `metadata` | `Struct`, nullable | Full arXivRaw OAI record; automatically populated for every content row |
 
-The content schema has ten fields. `metadata` reuses the complete typed arXivRaw
-OAI record schema, including license and version history. Attach a typed snapshot
-with `content(format).with_metadata(index)?` to fill this column for every row. Without a snapshot it remains null. Content workers
-do not fetch OAI records. `content_schema()` defines the same schema for all
+The content schema has ten fields. `metadata` contains the complete typed arXivRaw
+OAI record, including license and version history. `content(format)` automatically
+fetches and attaches matching metadata; no `with_metadata` call is required.
+The Arrow field remains nullable for schema compatibility, but content readers
+never emit a null outer metadata struct. `content_schema()` is shared by all
 three formats.
 
 ### Exact fields of the content `metadata` struct (0.16.0)
@@ -516,14 +517,12 @@ with no matching entries yields an empty list. The namespace URI selects XML
 fields, while the Arrow names shown above use the fixed `oai`, `arxiv` and `xsi`
 prefixes regardless of the input XML's prefix spelling.
 
-Without an attached snapshot, the entire top-level `metadata` value is null.
-With `content(format).with_metadata(index)?`, each row contains the matching
-complete OAI record. A null parent does not imply that its non-null child fields
-are materialized. Separately harvested typed OAI records have `oai:header` and
-`oai:metadata` as their top-level columns, without the outer content `metadata`
-wrapper. Deleted OAI records retain their header and have null `oai:metadata`.
+Every emitted content row contains the matching complete OAI record. Separately
+harvested typed OAI records have `oai:header` and `oai:metadata` as their top-level
+columns, without the outer content `metadata` wrapper. Deleted OAI records retain
+their header and have null inner `oai:metadata`; the outer struct remains present.
 The legacy raw-PDF snapshot join uses the caller's snapshot schema instead of
-this reserved content schema.
+this fixed content schema.
 
 `data_type` is a separate top-level string column alongside `data`; the two are
 not wrapped in a Struct. It tags each row's binary payload, so consumers need not
@@ -549,55 +548,70 @@ The lower-level `records()` retains raw archive rows, and `article_records()` /
 APIs are distinct from the common content output; conversion integrations
 should select `content(format)` rather than emitting those raw schemas.
 
-## Fill content metadata from a typed snapshot
-
-Harvest with `ArxivMetadataService::inferred_record_format()`, follow all
-continuation tokens needed for your selection, reconcile repeated updates, and
-persist a pinned snapshot. OAI date selectors describe updates, not submission
-months. A single update-day page is generally insufficient for a bulk shard.
-Load the selected snapshot's batches and concatenate them with Arrow's
-`concat_batches`; pass the complete typed OAI schema without adding a top-level
-identifier column:
+## Automatic content metadata
 
 ```rust
-use std::sync::Arc;
-use open_arrow_access::{Accessor, RecordBatch, Result};
+use open_arrow_access::{Accessor, Result};
 use open_arrow_access::service::arxiv::{
-    ArxivContentFormat, ArxivKind, ArxivMetadataIndex, ArxivReadRequest, ArxivService,
+    ArxivContentFormat, ArxivKind, ArxivReadRequest, ArxivService,
 };
 use open_arrow_access::storage::OpenDalAccessor;
 
-async fn read_with_metadata(storage: OpenDalAccessor, snapshot: RecordBatch) -> Result<()> {
-    let index = Arc::new(ArxivMetadataIndex::from_oai_records(snapshot)?);
+async fn read_content(storage: OpenDalAccessor) -> Result<()> {
     let records = ArxivService::new(storage)
         .records()
-        .content(ArxivContentFormat::Pdf)
-        .with_metadata(index)?;
+        .content(ArxivContentFormat::Pdf);
     let mut reader = records.open(
         ArxivReadRequest::new(ArxivKind::Pdf)
             .with_shard("pdf/arXiv_pdf_2410_001.tar"),
     ).await?;
     while let Some(batch) = reader.next().await? {
-        // Full OAI header and arXivRaw fields are present in batch["metadata"].
         assert_eq!(batch["metadata"].null_count(), 0);
     }
     Ok(())
 }
 ```
 
-The same API supports `Latex` and `Xml` with `ArxivKind::Source`.
-One immutable `Arc<ArxivMetadataIndex>` can be shared across formats and parallel
-partitions. Matching uses the OAI header identifier, normalized to the unversioned
-article ID, including legacy slash spelling. All source TeX rows from an article
-receive the same complete record. Original IDs, authors, license, optional nulls,
-set memberships and version history are retained without flattening. A deleted
-record still joins its header, with null `oai:metadata`.
+The same default applies to `Latex` and `Xml` with `ArxivKind::Source`.
+On first use of an article, the accessor requests `GetRecord` with
+`metadataPrefix=arXivRaw` at `https://oaipmh.arxiv.org/oai`. It decodes the complete
+record with the fixed typed mapping and matches both the OAI header and article
+ID. Legacy bulk IDs regain the slash required by OAI. Every TeX row from an
+article receives the same metadata. Deleted records keep their header and null
+inner metadata. Missing, malformed, mismatched and failed responses fail the scan;
+there is no null-metadata fallback, even when metadata is projected away.
 
-Duplicate or null identifiers and incompatible snapshot schemas are rejected.
-Missing article matches fail the scan even when the metadata column is projected
-away, so a partial snapshot cannot silently produce unenriched content. The
+Lookups are lazy: constructing/planning an explicit shard does not fetch metadata.
+A service and its clones share a bounded FIFO cache of 1,024 article records.
+Concurrent requests for a cached/in-flight article reuse one successful result;
+metadata is reused across TeX files and repeated scans. Public arXiv content
+lookups share a process-wide serial request gate with at least three seconds
+between request starts. Default retries also wait at least three seconds and
+honor supported Retry-After delays. Caller-configured transports retain their own
+HTTP policies. Coordinate other API clients and processes separately, as the
+[arXiv limit](https://info.arxiv.org/help/api/tou.html) applies to all your machines.
+A custom OAI mirror/transport can be supplied with
+`ArxivService::with_metadata_connection(connection)`; custom origins have a
+separate serial gate per service. This does not change the bulk-storage root.
+
+Online metadata reflects the latest OAI record, including version history; it is
+not an immutable snapshot of the content's submission version. Large bulk jobs
+can avoid per-article HTTP requests and pin metadata by supplying an existing
+reconciled typed snapshot:
+
+```rust
+let index = std::sync::Arc::new(ArxivMetadataIndex::from_oai_records(snapshot)?);
+let records = service.records().content(format).with_metadata(index)?;
+```
+
+This is an optimization, not a prerequisite for populated metadata. Use
+`ArxivMetadataService::inferred_record_format()` when harvesting snapshot batches;
+follow continuation tokens, reconcile repeated updates and concatenate the
+selected batches. OAI date selectors describe updates, not submission months.
+Duplicate/null IDs and incompatible snapshot schemas are rejected; missing
+snapshot matches fail rather than silently falling back to the network. The
 legacy raw-PDF `records().with_metadata(index)` API continues to support arbitrary
-caller snapshot schemas; the content API requires the fixed typed arXivRaw schema.
+caller snapshot schemas; content snapshots require the fixed typed arXivRaw schema.
 
 ## LaTeX-only bulk output
 
@@ -619,8 +633,8 @@ non-null). Outer and inner physical indices preserve duplicate-name identity.
 `article_id` is the normalized unversioned metadata key; original outer names
 retain version spelling. Modern and legacy bulk IDs are supported.
 
-Metadata is a separate OAI dataset. Attach a preloaded typed snapshot to fill
-the existing `metadata` column; the output schema stays the same.
+Metadata is fetched and attached automatically. A preloaded typed snapshot can
+replace online lookups while retaining the same output schema.
 
 Each article package is buffered while decoding and selecting files. Batches
 respect the row limit and a soft 4 MiB source-payload target; one complete file can exceed

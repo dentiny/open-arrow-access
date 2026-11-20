@@ -1,7 +1,8 @@
 use super::*;
 use crate::arxiv::ArxivKind;
+use crate::common::Connection;
 use arrow_array::{Array, StructArray, types::UInt64Type};
-use open_arrow_access_test_support::fixture;
+use open_arrow_access_test_support::{fixture, http::HttpFixture};
 
 fn raw_batch(name: &str, data: &[u8]) -> Result<RecordBatch> {
     let mut input = RecordBatchBuilder::new(crate::arxiv::record_schema(), None)?;
@@ -104,14 +105,18 @@ async fn formats_preserve_content_and_join_metadata() {
         );
         let manifest_key = format!("{prefix}/arXiv_{prefix}_manifest.xml");
         let (_temp, operator) = temp_fs(&[(&manifest_key, manifest.as_bytes()), (&key, &bytes)]);
+        let http = HttpFixture::new();
+        let connection = metadata_connection(&http, "2410.00001", "metadata-record.xml").await;
         let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
+            .with_metadata_connection(connection)
             .records()
             .content(format);
         let mut reader = records.open(ArxivReadRequest::new(kind)).await.unwrap();
         assert_eq!(reader.metadata().schema, schema);
+        assert!(http.requests().is_empty());
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(batch.schema(), schema);
-        assert_eq!(batch["metadata"].null_count(), batch.num_rows());
+        assert_metadata(&batch, &snapshot, 1);
         assert_eq!(
             batch["article_id"].as_string::<i64>().value(0),
             "2410.00001"
@@ -128,7 +133,6 @@ async fn formats_preserve_content_and_join_metadata() {
         };
         assert_eq!(batch["data"].as_binary::<i64>().value(0), expected);
         assert!(reader.next().await.unwrap().is_none());
-        let records = records.with_metadata(index(snapshot.clone())).unwrap();
         let request = ArxivReadRequest::new(kind).with_month(2410);
         let mut reader = records.open(request.clone()).await.unwrap();
         let enriched = reader.next().await.unwrap().unwrap();
@@ -148,6 +152,11 @@ async fn formats_preserve_content_and_join_metadata() {
             }
             assert!(reader.next().await.unwrap().is_none());
         }
+        assert_eq!(http.requests().len(), 1); // Reopens and projections use the cache.
+        let records = records.with_metadata(index(snapshot.clone())).unwrap();
+        let mut reader = records.open(request).await.unwrap();
+        assert_metadata(&reader.next().await.unwrap().unwrap(), &snapshot, 1);
+        assert_eq!(http.requests().len(), 1); // Snapshots bypass OAI.
         // Missing matches fail even when metadata is projected away.
         let records = records.with_metadata(index(snapshot.slice(2, 1))).unwrap();
         let mut request = ArxivReadRequest::new(kind).with_shard(key);
@@ -155,6 +164,20 @@ async fn formats_preserve_content_and_join_metadata() {
         let mut reader = records.open(request).await.unwrap();
         assert!(reader.next().await.is_err());
     }
+}
+
+async fn metadata_connection(http: &HttpFixture, article: &str, file: &str) -> Connection {
+    let identifier = super::super::id::oai_identifier(article).unwrap();
+    let encoded: String = url::form_urlencoded::byte_serialize(identifier.as_bytes()).collect();
+    let path = format!("/oai?verb=GetRecord&metadataPrefix=arXivRaw&identifier={encoded}");
+    http.respond(
+        &path,
+        http::StatusCode::OK,
+        fixture!("arxiv-content", file).await,
+    );
+    Connection::new(http.endpoint())
+        .unwrap()
+        .with_context(http.context())
 }
 
 async fn oai_snapshot() -> RecordBatch {
@@ -193,7 +216,17 @@ fn assert_metadata(batch: &RecordBatch, snapshot: &RecordBatch, expected_row: us
 #[tokio::test]
 async fn metadata_normalizes_legacy_ids_repeats_tex_rows_and_retains_deletions() {
     let snapshot = oai_snapshot().await;
-    let index = ArxivMetadataIndex::from_oai_records(snapshot.clone()).unwrap();
+    let http = HttpFixture::new();
+    let resolver = super::super::metadata_fetch::MetadataResolver::new(
+        metadata_connection(&http, "hep-th9901001", "metadata-legacy.xml").await,
+    );
+    let (index, same) = futures::try_join!(
+        resolver.get("hep-th9901001"),
+        resolver.get("hep-th/9901001")
+    )
+    .unwrap();
+    assert!(Arc::ptr_eq(&index, &same));
+    assert_eq!(http.requests().len(), 1);
     let batches = read(
         "hep-th/9901001v2.gz",
         &fixture!("arxiv-articles", "source.tar.gz").await,
@@ -209,6 +242,10 @@ async fn metadata_normalizes_legacy_ids_repeats_tex_rows_and_retains_deletions()
         ArxivContentFormat::Pdf,
     )
     .unwrap();
+    let resolver = super::super::metadata_fetch::MetadataResolver::new(
+        metadata_connection(&http, "2410.99999", "metadata-deleted.xml").await,
+    );
+    let index = resolver.get("2410.99999").await.unwrap();
     assert_metadata(&index.attach_content(deleted).unwrap(), &snapshot, 2);
     assert!(snapshot["oai:metadata"].is_null(2));
     let duplicate = arrow_select::concat::concat_batches(
@@ -252,4 +289,30 @@ async fn rejects_null_ids_and_untyped_content_snapshots() {
     );
     let empty = RecordBatch::new_empty(snapshot.schema());
     assert!(ArxivMetadataIndex::from_oai_records(empty).is_ok());
+}
+
+#[tokio::test]
+async fn default_metadata_propagates_failures_even_without_projected_metadata() {
+    use open_arrow_access_storage::OpenDalAccessor;
+    use open_arrow_access_test_support::temp_fs;
+    for file in [
+        "metadata-missing.xml",
+        "metadata-empty.xml",
+        "metadata-incomplete.xml",
+        "metadata-legacy.xml",
+    ] {
+        let http = HttpFixture::new();
+        let connection = metadata_connection(&http, "2410.00001", file).await;
+        let bytes = fixture!("arxiv-content", "pdf.tar").await;
+        let (_temp, operator) = temp_fs(&[("pdf/one.tar", &bytes)]);
+        let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
+            .with_metadata_connection(connection)
+            .records()
+            .content(ArxivContentFormat::Pdf);
+        let mut request = ArxivReadRequest::new(ArxivKind::Pdf).with_shard("pdf/one.tar");
+        request.options.projection = Some(vec![]);
+        let mut reader = records.open(request).await.unwrap();
+        assert!(reader.next().await.is_err(), "{file}");
+        assert_eq!(http.requests().len(), 1);
+    }
 }

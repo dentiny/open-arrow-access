@@ -56,27 +56,43 @@ pub fn content_schema() -> SchemaRef {
         .clone()
 }
 
+#[derive(Clone)]
+enum ContentMetadata {
+    Online(Arc<super::metadata_fetch::MetadataResolver>),
+    Snapshot(Arc<ArxivMetadataIndex>),
+}
+impl ContentMetadata {
+    async fn resolve(&self, article: &str) -> Result<Arc<ArxivMetadataIndex>> {
+        match self {
+            Self::Online(resolver) => resolver.get(article).await,
+            Self::Snapshot(index) => Ok(index.clone()),
+        }
+    }
+}
+
 pub struct ArxivContentRecords<A> {
     format: ArxivContentFormat,
     records: ArxivRecords<A>,
-    metadata: Option<Arc<ArxivMetadataIndex>>,
+    metadata: ContentMetadata,
 }
 impl<A> ArxivRecords<A> {
+    /// Read content with complete OAI metadata, fetched lazily and cached by article ID.
     pub fn content(self, format: ArxivContentFormat) -> ArxivContentRecords<A> {
+        let metadata = ContentMetadata::Online(self.service.metadata.clone());
         ArxivContentRecords {
             records: self,
             format,
-            metadata: None,
+            metadata,
         }
     }
 }
 impl<A> ArxivContentRecords<A> {
-    /// Fill every content row's metadata from a shared typed OAI snapshot.
+    /// Use a shared typed OAI snapshot instead of fetching metadata automatically.
     /// Missing article matches fail the scan, including when metadata is projected
     /// away. No metadata network requests are made by content workers.
     pub fn with_metadata(mut self, metadata: Arc<ArxivMetadataIndex>) -> Result<Self> {
         metadata.validate_content_schema()?;
-        self.metadata = Some(metadata);
+        self.metadata = ContentMetadata::Snapshot(metadata);
         Ok(self)
     }
 }
@@ -134,7 +150,7 @@ fn content_partition(
     format: ArxivContentFormat,
     projection: ResolvedProjection,
     options: ReadOptions,
-    metadata: Option<Arc<ArxivMetadataIndex>>,
+    metadata: ContentMetadata,
 ) -> ScanPartition {
     scan_partition(async move {
         let reader = partition.await?;
@@ -148,16 +164,18 @@ fn content_partition(
                 let options = options.clone();
                 let metadata = metadata.clone();
                 async move {
+                    let article = validation::content_article_id(
+                        batch["entry_name"].as_binary::<i64>().value(0),
+                        format,
+                    )?;
+                    let index = metadata.resolve(&article).await?;
                     let batches = match format {
                         ArxivContentFormat::Latex => expand(&batch, &options).await,
                         _ => Ok(vec![document_batch(&batch, format)?]),
                     }?;
                     batches
                         .into_iter()
-                        .map(|batch| match &metadata {
-                            Some(index) => index.attach_content(batch),
-                            None => Ok(batch),
-                        })
+                        .map(|batch| index.attach_content(batch))
                         .collect::<Result<Vec<_>>>()
                 }
             })

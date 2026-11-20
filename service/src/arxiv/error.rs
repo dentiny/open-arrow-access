@@ -125,3 +125,7 @@ pub(super) fn missing_content_metadata(id: &str) -> Error {
         "article {id} has no matching metadata in the snapshot"
     ))
 }
+
+pub(super) fn invalid_metadata_response() -> Error {
+    decode("expected one complete OAI record matching the requested arXiv article")
+}

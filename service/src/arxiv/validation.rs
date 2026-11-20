@@ -15,6 +15,38 @@ pub(super) fn validate_oai_metadata(batch: &RecordBatch) -> Result<()> {
     validate_metadata_id_column(header["oai:identifier"].as_ref())
 }
 
+pub(super) fn validate_metadata_record_count(count: usize) -> Result<()> {
+    if count != 1 {
+        return Err(error::invalid_metadata_response());
+    }
+    Ok(())
+}
+
+pub(super) fn validate_fetched_metadata(batch: &RecordBatch, article: &str) -> Result<()> {
+    validate_metadata_record_count(batch.num_rows())?;
+    validate_oai_metadata(batch)?;
+    let header = batch["oai:header"].as_struct();
+    let identifier = header["oai:identifier"].as_string::<i32>().value(0);
+    if id::metadata_id(identifier)? != article {
+        return Err(error::invalid_metadata_response());
+    }
+    let status = header["@status"].as_string::<i32>();
+    if !status.is_null(0) && status.value(0) == "deleted" {
+        return Ok(());
+    }
+    let metadata = batch["oai:metadata"].as_struct();
+    let raw = metadata["arxiv:arXivRaw"].as_struct();
+    let raw_id = raw["arxiv:id"].as_string::<i32>();
+    if metadata.is_null(0)
+        || raw.is_null(0)
+        || raw_id.is_null(0)
+        || id::metadata_id(raw_id.value(0))? != article
+    {
+        return Err(error::invalid_metadata_response());
+    }
+    Ok(())
+}
+
 pub(super) fn validate_content_metadata_schema(fields: &Fields) -> Result<()> {
     if fields != crate::arxiv_metadata::schema().arrow_schema().fields() {
         return Err(error::invalid_content_metadata_schema());
