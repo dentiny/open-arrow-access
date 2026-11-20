@@ -1,4 +1,4 @@
-//! AWS OCR page identity and output schema; metadata is declared but not populated.
+//! AWS OCR page identity and records with caller-supplied structured metadata.
 mod accessor;
 pub(super) mod identity;
 

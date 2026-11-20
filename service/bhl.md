@@ -435,7 +435,9 @@ do not silently discard extra columns or infer new types from a sample.
 API JSON/XML has a different field contract and is not silently merged into
 this TSV profile. An API-based enrichment needs its own fully declared mapping
 while preserving the complete source response. If no metadata snapshot is
-available, `metadata` is null and the missing enrichment must be reported.
+available, conversion must fail rather than emit an unpopulated metadata column.
+Missing joins within an acquired snapshot are reported with null singleton
+children or empty relationship lists; the outer metadata struct remains assigned.
 
 
 PDF, JP2 and scandata XML have different row granularity and do not become
