@@ -2,9 +2,7 @@
 use std::num::NonZeroUsize;
 
 use arrow_array::cast::AsArray;
-use open_arrow_access_core::{
-    Accessor, AccessorExt, BinaryDecoder, DocumentAccessor, Error, ErrorKind, Result,
-};
+use open_arrow_access_core::{Accessor, AccessorExt, BinaryDecoder, DocumentAccessor, Result};
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::{
     FileSetAccessor, FileSetRequest,
@@ -15,13 +13,6 @@ use open_arrow_access_storage::OpenDalAccessor;
 #[tokio::main]
 async fn main() -> Result<()> {
     let keys = std::env::args().skip(1).collect::<Vec<_>>();
-    if keys.is_empty() || keys.iter().any(|key| !key.starts_with("ocr/")) {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "bhl_open_data_example",
-            "pass explicit bucket-relative ocr/ page keys; no corpus is listed",
-        ));
-    }
     let source = BhlOpenData::new(OpenDalAccessor::new(open_data_bucket_operator()?));
     let files = source.partition(keys.clone())?;
     let records = FileSetAccessor::new(DocumentAccessor::new(files, BinaryDecoder))

@@ -1,11 +1,10 @@
 //! Select independent objects from BHL's public AWS dataset or a matching mirror.
 use std::sync::Arc;
 
-use open_arrow_access_core::{
-    ByteAccessor, Error, ErrorKind, ListRequest, ObjectRef, Result, list_files,
-};
+use open_arrow_access_core::{ByteAccessor, ListRequest, ObjectRef, Result, list_files};
 use opendal::{Operator, services::S3};
 
+use super::{error, validation};
 use crate::{ResolvedFileSet, file_manifest::FileSpec};
 
 pub const OPEN_DATA_BUCKET_URL: &str = "s3://bhl-open-data/";
@@ -21,7 +20,7 @@ pub fn open_data_bucket_operator() -> Result<Operator> {
             .disable_config_load()
             .skip_signature(),
     )
-    .map_err(|source| invalid("failed to configure public BHL bucket").with_source(source))
+    .map_err(error::configure_open_data)
 }
 
 /// Caller-bound bucket-root storage with explicit, independent file membership.
@@ -60,12 +59,7 @@ impl<A> BhlOpenData<A> {
         objects: impl IntoIterator<Item = impl Into<ObjectRef>>,
     ) -> Result<ResolvedFileSet<Arc<A>, Vec<ObjectRef>>> {
         let objects = objects.into_iter().map(Into::into).collect::<Vec<_>>();
-        if objects.is_empty() {
-            return Err(invalid("empty BHL Open Data partition"));
-        }
-        for object in &objects {
-            validate_key(object.locator(), false)?;
-        }
+        validation::validate_open_data_partition(&objects)?;
         let files = objects.iter().cloned().map(|object| FileSpec {
             name: object.locator().to_owned(),
             object,
@@ -83,39 +77,14 @@ impl<A: ByteAccessor> BhlOpenData<A> {
     /// prefixes for bounded discovery. Use partition() with saved keys on workers
     /// to avoid repeated listing and unrelated object reads.
     pub async fn discover(&self, request: ListRequest) -> Result<Vec<ObjectRef>> {
-        validate_key(request.prefix.locator().trim_end_matches('/'), true)?;
-        let objects = list_files(self.storage.as_ref(), request, |relative| {
-            Ok(!relative.is_empty() && !relative.ends_with('/'))
-        })
+        validation::validate_open_data_prefix(request.prefix.locator())?;
+        let objects = list_files(
+            self.storage.as_ref(),
+            request,
+            validation::select_open_data_file,
+        )
         .await?;
-        for object in &objects {
-            validate_key(object.locator(), false)?;
-        }
+        validation::validate_open_data_objects(&objects)?;
         Ok(objects)
     }
-}
-
-fn validate_key(key: &str, prefix: bool) -> Result<()> {
-    let mut parts = key.split('/');
-    if !matches!(parts.next(), Some("ocr" | "images" | "scandata" | "data"))
-        || key.contains(['\\', '?', '#'])
-        || key.chars().any(char::is_control)
-    {
-        return Err(invalid("expected a bucket-relative BHL Open Data key"));
-    }
-    let mut has_child = false;
-    for part in parts {
-        if matches!(part, "" | "." | "..") {
-            return Err(invalid("BHL Open Data key has an invalid path component"));
-        }
-        has_child = true;
-    }
-    if !prefix && !has_child {
-        return Err(invalid("expected a BHL Open Data object, not a directory"));
-    }
-    Ok(())
-}
-
-fn invalid(message: &str) -> Error {
-    Error::new(ErrorKind::InvalidInput, "bhl_open_data", message)
 }
