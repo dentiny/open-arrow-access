@@ -83,3 +83,10 @@ new `OaiProvider::inferred_record_format` hook. Harvesting full metadata uses
 and reconciling a complete snapshot remains caller-owned.
 
 The [complete nested field reference](arxiv.md#exact-fields-of-the-content-metadata-struct-0160) lists every header, article and version field, its Arrow type and nullability. For these harvested records, omit the outer content `metadata` wrapper shown there.
+
+PDF/LaTeX/XML `records().content(format)` rows include complete metadata by
+default, using lazy OAI `GetRecord` lookups with caching. Callers do not
+need to harvest or attach a snapshot first. For bulk/offline jobs, optionally
+build `ArxivMetadataIndex::from_oai_records(snapshot)` from reconciled typed
+records and use `.content(format).with_metadata(Arc::new(index))?` to bypass online
+lookups. See [automatic content metadata](arxiv.md#automatic-content-metadata).

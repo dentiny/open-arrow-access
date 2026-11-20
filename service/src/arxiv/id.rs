@@ -10,6 +10,18 @@ pub(super) fn metadata_id(id: &str) -> Result<String> {
     Ok(id.replace('/', ""))
 }
 
+/// Restore the slash required by OAI for a legacy bulk identifier.
+pub(super) fn oai_identifier(article: &str) -> Result<String> {
+    let article = metadata_id(article)?;
+    let canonical = if article.as_bytes()[0].is_ascii_digit() {
+        article
+    } else {
+        let (category, number) = article.split_at(article.len() - 7);
+        format!("{category}/{number}")
+    };
+    Ok(format!("oai:arXiv.org:{canonical}"))
+}
+
 pub(super) fn pdf_id(name: &[u8]) -> Result<String> {
     let path = std::str::from_utf8(name).map_err(|_| error::invalid_pdf_entry_encoding())?;
     let name = path.rsplit('/').next().unwrap_or(path);

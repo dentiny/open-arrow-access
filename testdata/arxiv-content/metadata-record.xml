@@ -1,0 +1,28 @@
+<?xml version='1.0' encoding='utf-8'?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/" xmlns:a="http://arxiv.org/OAI/arXivRaw/">
+  <GetRecord>
+    <record>
+      <header>
+        <identifier>oai:arXiv.org:2410.00001</identifier>
+        <datestamp>2026-11-20</datestamp>
+        <setSpec>physics</setSpec>
+      </header>
+      <metadata>
+        <a:arXivRaw>
+          <a:id>2410.00001</a:id>
+          <a:title>Title for 2410.00001</a:title>
+          <a:authors>Author</a:authors>
+          <a:abstract>Abstract</a:abstract>
+          <a:doi>10.1234/example</a:doi>
+          <a:license>CC-BY</a:license>
+          <a:version version="v1">
+            <a:date>2024-10-01</a:date>
+          </a:version>
+          <a:version version="v2">
+            <a:date>2024-10-02</a:date>
+          </a:version>
+        </a:arXivRaw>
+      </metadata>
+    </record>
+  </GetRecord>
+</OAI-PMH>
