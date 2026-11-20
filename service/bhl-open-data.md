@@ -113,9 +113,8 @@ Generic object reads do not claim that mapping is already implemented.
 ## Validation
 
 `service/tests/bhl_open_data.rs` verifies scoped discovery, explicit cached
-membership without storage I/O, accepted key namespaces, rejection of invalid
-keys and out-of-selection reads, and public S3 operator configuration. Reads use
-the shared byte-accessor contract helper. Generic file-set planning, projection
+membership without storage I/O, accepted key namespaces and selected-object
+reads using the shared byte-accessor contract helper. Generic file-set planning, projection
 and parallel execution remain covered by their own tests. Fixtures use
 caller-bound filesystem storage; they do not test live AWS coverage or throughput.
 

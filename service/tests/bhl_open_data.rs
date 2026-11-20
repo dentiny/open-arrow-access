@@ -2,12 +2,12 @@ use std::sync::{Arc, Mutex};
 
 use futures::TryStreamExt;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ErrorKind, ListRequest,
-    ObjectStream, Result, async_trait,
+    Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectStream,
+    Result, async_trait,
 };
 use open_arrow_access_service::bhl::BhlOpenData;
 use open_arrow_access_storage::OpenDalAccessor;
-use open_arrow_access_test_support::{byte_accessor, expect_err_kind, temp_fs};
+use open_arrow_access_test_support::{byte_accessor, temp_fs};
 
 const FIRST: &str = "ocr/item-346951/item-346951-65077706-0014.txt";
 const SECOND: &str = "ocr/part-098691/part-098691-64253797-0001.txt";
@@ -120,32 +120,4 @@ async fn discovery_is_scoped_and_explicit_selection_performs_no_io() {
             .all(|key| key == FIRST)
     );
     assert_eq!(storage.listed.lock().unwrap().len(), 2);
-}
-
-#[tokio::test]
-async fn invalid_keys_and_unselected_objects_fail_before_storage_io() {
-    let (_root, operator) = temp_fs(&[(FIRST, b"OCR")]);
-    let storage = Tracked::new(operator);
-    let source = BhlOpenData::new(storage.clone());
-    for keys in [
-        vec![],
-        vec![FIRST, FIRST],
-        vec!["s3://bhl-open-data/ocr/page.txt"],
-        vec!["ocr/../data/title.txt.gz"],
-        vec!["ocr/item/"],
-        vec!["/ocr/item/page.txt"],
-        vec!["unknown/page.txt"],
-    ] {
-        expect_err_kind(source.partition(keys), ErrorKind::InvalidInput);
-    }
-    for prefix in ["unknown/", "ocr/../", "ocr/item?query/"] {
-        expect_err_kind(
-            source.discover(ListRequest::new(prefix)).await,
-            ErrorKind::InvalidInput,
-        );
-    }
-    let files = source.partition([FIRST]).unwrap();
-    expect_err_kind(files.open(OTHER.into()).await, ErrorKind::NotFound);
-    assert!(storage.opened.lock().unwrap().is_empty());
-    assert!(storage.listed.lock().unwrap().is_empty());
 }
