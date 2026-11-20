@@ -16,6 +16,33 @@ manifests describing each shard. This provider selects shards and opens archive
 entries over caller-configured storage. Bibliographic harvesting is a separate
 [OAI-PMH metadata entry point](arxiv-metadata.md).
 
+## LaTeX/source format and attachments
+
+**arXiv provides author-submitted TeX/LaTeX source as well as PDF.** In the
+bulk hierarchy, `src/` is the source distribution: it is not extracted PDF
+text and is not limited to a lone `.tex` file. Multi-file source submissions
+are packaged with their figures and any included ancillary attachments.
+
+| Part of an article source package | Example files | Meaning |
+| --- | --- | --- |
+| LaTeX source and build inputs | `main.tex`, `references.bib`, `style.sty` | Manuscript text, equations, bibliography and formatting inputs |
+| Paper figures | `figures/plot.png`, `figures/diagram.pdf`, JPEG/EPS files | Submitted image/figure assets referenced by the manuscript |
+| Optional ancillary attachments | `anc/demo.mp4`, `anc/data.csv`, code or extra images | Author-supplied supplementary material; not present for every paper |
+
+Select source TARs with
+`manifest(ArxivKind::Source, Some(2410), byte_options)`, or use
+`ArxivReadRequest::new(ArxivKind::Source).with_month(2410)` for bulk Arrow rows.
+
+The existing bulk reader preserves a whole article package in `data`; it
+does not emit a separate row for each `.tex`, figure or video. The
+[LaTeX and attachment details](#latex-source-packages-figures-and-multimedia-attachments)
+below explain packaging and preservation. Source contents depend on the
+article/version; some submissions have no LaTeX source. External linked assets
+are not automatically downloaded.
+[open-arrow-access #597](https://github.com/dentiny/open-arrow-access/pull/597)
+proposes an explicit one-level source-package expansion API; that proposal is
+separate from the existing bulk-reader behavior described here.
+
 Enable facade feature `service-arxiv`. See [example setup](README.md#example-setup) for dependencies and the async runtime.
 
 ## Request and response
@@ -150,7 +177,11 @@ s3://arxiv/                              # Or a mirror rooted here
 └── src/
     ├── arXiv_src_manifest.xml           # Independent source inventory
     └── arXiv_src_YYMM_NNN.tar
-        └── <article source payload>     # May itself be compressed/packaged
+        └── <article source package>         # Inner package, often .tar.gz
+            ├── main.tex                     # TeX/LaTeX manuscript
+            ├── references.bib
+            ├── figures/plot.png             # Submitted paper figure
+            └── anc/demo.mp4                 # Optional multimedia attachment
 ```
 
 **Month selection filters manifest records; it does not select a month
@@ -203,7 +234,7 @@ are not automatically checked against streamed content. Known archive length
 is checked, but equal length is not a content identity guarantee. Pin a mirror
 snapshot and verify its checksums separately when reproducibility is required.
 
-### Figures and optional multimedia in source packages
+### LaTeX source packages, figures and multimedia attachments
 
 A LaTeX source download is not limited to `.tex` text. For multi-file
 submissions, arXiv packages the source together with the submitted figures
