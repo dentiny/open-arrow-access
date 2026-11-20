@@ -414,3 +414,33 @@ The probe finished in 2.46 s including manifest discovery. No production code
 was changed; native `records()` still uses manifest size and still fails. This
 establishes real PDF-byte access, not a repaired conversion path or sustained
 throughput benchmark.
+
+## LaTeX-only bulk output
+
+`service.records().latex()` accepts `ArxivKind::Source` and retains one lazy
+partition per source TAR. It decodes gzip source payloads, detects TAR packages,
+and emits each UTF-8 `.tex` member outside any `anc/` directory. Images,
+ancillary TeX, videos, bibliography/style files and the original package are
+excluded. Multi-file manuscripts remain separate files; includes are not
+expanded and TeX is not compiled or concatenated. Single files must contain a
+LaTeX document marker. Non-LaTeX sources, packages without eligible TeX,
+invalid UTF-8 and corrupt archives fail the scan; no PDF fallback or silent
+row skipping occurs.
+
+The schema is `article_id: LargeUtf8`, `format: LargeUtf8` (`latex`),
+`shard_uri: LargeUtf8`, `entry_index: UInt64`, `entry_name: LargeBinary`,
+`source_index: UInt64`, `source_name: LargeBinary`, `text: LargeUtf8` (all
+non-null). Outer and inner physical indices preserve duplicate-name identity.
+`article_id` is the normalized unversioned metadata key; original outer names
+retain version spelling. Modern and legacy bulk IDs are supported.
+
+Call `.latex().with_metadata(index)` to attach all cached snapshot fields as a
+non-null `metadata` struct, matching by article ID before projection. Missing
+matches fail. This does not build snapshots or establish historical-version
+metadata matching. Projection, including a zero-column projection, still
+validates source contents and metadata matches.
+
+Each article package is buffered while decoding and selecting files. Batches
+respect the row limit and a soft 4 MiB text target; one complete file can exceed
+that target. Bound active TAR partitions to control resident package memory.
+Existing raw `records()` and general `open_source_package()` output are unchanged.
