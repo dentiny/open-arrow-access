@@ -63,9 +63,8 @@ All selections and projections are validated before storage I/O. Each selected
 representation is one lazy scan partition, emitting one row. Install the usual
 `ParallelReadLayer` for bounded concurrent partitions; plain `open` is sequential.
 An empty selection emits no rows, and duplicate selections remain distinct.
-`max_bytes` is a hard per-response limit (256 MiB by default). Complete responses
-are buffered, even for projections omitting `data`; this is not a cheap remote
-listing API. Source access and request pacing remain caller responsibilities.
+Complete responses are buffered, even for projections omitting `data`; this
+is not a cheap remote listing API. Source access and request pacing remain caller responsibilities.
 Use the official bulk route for whole-corpus acquisition.
 
 ## Expand source packages, including images and multimedia
@@ -180,7 +179,7 @@ compressed member offsets are not directly addressable external blob ranges.
 ## Verification
 
 Deterministic tests cover native routes, lazy partitions, error propagation,
-projection/row counts, IDs and versions, bounded reads, source single files,
+projection/row counts, IDs and versions, original bytes, source single files,
 gzip integrity, TAR limits, duplicate names, binary names and image/video bytes.
 Inputs live in [`testdata/arxiv-articles/`](https://github.com/dentiny/open-arrow-access/blob/feat/arxiv-source-packages/testdata/arxiv-articles/README.md),
 including `anc/` XML, CSV, ZIP and opaque video payloads. Rust tests compare the
