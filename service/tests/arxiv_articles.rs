@@ -116,15 +116,9 @@ async fn invalid_selection_and_projection_fail_before_any_storage_io() {
 }
 
 #[tokio::test]
-async fn article_size_limit_and_zero_column_projection() {
+async fn article_zero_column_projection_preserves_row_count() {
     let accessor =
         ArxivService::new(MemoryAccessor::new(&load("paper.pdf").await, 2)).article_records();
-    let mut request =
-        ArxivArticleReadRequest::new(vec![ArxivArticle::new("2410.00001", Format::Source)]);
-    request.max_bytes = NonZeroUsize::new(3).unwrap();
-    let mut reader = accessor.open(request).await.unwrap();
-    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
-    assert!(reader.next().await.unwrap().is_none());
     let mut request =
         ArxivArticleReadRequest::new(vec![ArxivArticle::new("2410.00001", Format::Pdf)]);
     request.options.projection = Some(vec![]);

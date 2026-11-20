@@ -1,9 +1,9 @@
 //! Opt-in source package expansion; filenames remain metadata, never disk paths.
-use super::{ArxivArticle, ArxivArticleFormat, article_schema, articles::read_bounded};
+use super::{ArxivArticle, ArxivArticleFormat, article_schema, error};
 use futures::stream;
 use open_arrow_access_core::{
     ByteReader, Bytes, ObjectRef, OrderRequirement, ReadOptions, RecordBatchBuilder,
-    RecordMetadata, RecordReader, Result, StreamReader, bytes_reader, into_async_read,
+    RecordMetadata, RecordReader, Result, StreamReader, bytes_reader, into_async_read, read_all,
 };
 use open_arrow_access_decompression::{
     Codec, decoded_reader,
@@ -145,7 +145,7 @@ pub async fn open_source_package(
                             drop(member.reader);
                             continue;
                         }
-                        let data = read_bounded(member.reader, usize::MAX).await?;
+                        let data = read_all(member.reader, "read_arxiv_source_member").await?;
                         bytes = bytes.saturating_add(data.len());
                         builder.push(|row| {
                             row.append("article_id", article_id.as_str())?;
@@ -170,4 +170,28 @@ pub async fn open_source_package(
             )))
         }
     }
+}
+
+async fn read_bounded(mut input: Box<dyn ByteReader>, max_bytes: usize) -> Result<Vec<u8>> {
+    let object = input.metadata().source.clone();
+    let too_large =
+        || error::decode("arXiv payload exceeds configured max_bytes").with_object(object.as_ref());
+    if input
+        .metadata()
+        .content_length
+        .is_some_and(|n| n > max_bytes as u64)
+    {
+        return Err(too_large());
+    }
+    let mut output = Vec::new();
+    while let Some(chunk) = input.next().await? {
+        if chunk.is_empty() {
+            return Err(error::decode("empty arXiv byte chunk"));
+        }
+        if chunk.len() > max_bytes - output.len() {
+            return Err(too_large());
+        }
+        output.extend_from_slice(&chunk);
+    }
+    Ok(output)
 }
