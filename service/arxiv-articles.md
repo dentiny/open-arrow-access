@@ -1,8 +1,12 @@
 # arXiv native representations, source assets and Lance storage
 
-**Implementation:** the article and source-package APIs, Rust example and test
-fixtures described here are introduced by [PR #597](https://github.com/dentiny/open-arrow-access/pull/597).
-The examples require that implementation; this documentation PR adds no runtime code.
+**Implementation:** [PR #597](https://github.com/dentiny/open-arrow-access/pull/597)
+adds PDF/HTML originals and the shared article accessor.
+[PR #598](https://github.com/dentiny/open-arrow-access/pull/598), stacked on #597,
+adds LaTeX/source packages, `anc/` attachments, the Rust example and related fixtures.
+[PR #599](https://github.com/dentiny/open-arrow-access/pull/599) independently tests
+the existing XML reader's original and structured attachment paths.
+Examples require the corresponding implementation; this documentation PR adds no runtime code.
 
 Enable `service-arxiv`. The existing [bulk reader](arxiv.md) selects PDF/source
 TARs from S3 manifests. The APIs here add explicit article PDF, source and HTML
@@ -178,14 +182,15 @@ compressed member offsets are not directly addressable external blob ranges.
 Deterministic tests cover native routes, lazy partitions, error propagation,
 projection/row counts, IDs and versions, bounded reads, source single files,
 gzip integrity, TAR limits, duplicate names, binary names and image/video bytes.
-Inputs live in [`testdata/arxiv-articles/`](https://github.com/dentiny/open-arrow-access/blob/feat/arxiv-article-formats/testdata/arxiv-articles/README.md),
+Inputs live in [`testdata/arxiv-articles/`](https://github.com/dentiny/open-arrow-access/blob/feat/arxiv-source-packages/testdata/arxiv-articles/README.md),
 including `anc/` XML, CSV, ZIP and opaque video payloads. Rust tests compare the
 original bytes and preserve nested archives without recursively expanding them.
 The facade integration test also reads PDF/source/HTML through `CrawlAccessor`.
 
 ```sh
-cargo test -p open-arrow-access-service --features arxiv --test arxiv_articles
+cargo test -p open-arrow-access-service --features arxiv --test arxiv_articles --test arxiv_source_package
 cargo test --features service-arxiv --test arxiv_documents
+cargo test --features format-xml --test arxiv_xml
 ```
 
 A small live probe of `2401.04088v1` returned HTML HTTP 200 (192,348 bytes),

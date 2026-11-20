@@ -276,7 +276,7 @@ The existing bulk reader emits one row per regular member of the **outer**
 TAR. An article package remains intact in `data`, including files within it.
 It does not automatically unpack that package, emit separate asset rows,
 compile LaTeX, associate captions, or fetch external links.
-[open-arrow-access #597](https://github.com/dentiny/open-arrow-access/pull/597)
+[open-arrow-access #598](https://github.com/dentiny/open-arrow-access/pull/598)
 proposes opt-in one-level expansion; it is separate from this bulk-reader
 contract. Retaining a package does not establish that every possible external
 attachment has been acquired.
