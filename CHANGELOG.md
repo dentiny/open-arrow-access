@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Stream arXiv bulk LaTeX package decoding from the existing Arrow buffer, filter attachments before body materialization and yield batches incrementally. Retain EOF integrity checks by draining TAR inputs through the underlying decoder after end markers.
+- Stream arXiv bulk LaTeX package decoding from the existing Arrow buffer, filter attachments before body materialization and yield batches incrementally. Sequential TAR streams always drain their underlying input through EOF after end markers to surface decoder and source errors.
 
 ## 0.16.0 - 2026-11-20
 

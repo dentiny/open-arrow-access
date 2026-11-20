@@ -342,12 +342,39 @@ async fn tar_end_markers_do_not_hide_late_source_errors() {
     let mut archive = TarStream::new(
         source.open("archive".into()).await.unwrap(),
         TarLimits::default(),
-    )
-    .with_eof_validation();
+    );
     for _ in 0..4 {
         drop(archive.next_entry().await.unwrap().unwrap());
     }
     expect_err_kind(archive.next_entry().await, ErrorKind::PermissionDenied);
+    assert!(archive.next_entry().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn cancelled_eof_drain_resumes_without_reparsing_end_markers() {
+    use futures::FutureExt;
+    use open_arrow_access_core::Bytes;
+    use open_arrow_access_decompression::tar::TarStream;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    // All entries and both end markers fit in the first 4 KiB. Hold back
+    // the remaining padding so completion must wait for underlying EOF.
+    let allowed = Arc::new(AtomicUsize::new(8));
+    let input = gated_source(
+        Bytes::from(fixture!("tar", "mixed.tar").await),
+        512,
+        allowed.clone(),
+    );
+    let mut archive = TarStream::new(input, TarLimits::default());
+    for _ in 0..4 {
+        drop(archive.next_entry().await.unwrap().unwrap());
+    }
+    assert!(archive.next_entry().now_or_never().is_none());
+    allowed.store(usize::MAX, Ordering::SeqCst);
+    assert!(archive.next_entry().await.unwrap().is_none());
     assert!(archive.next_entry().await.unwrap().is_none());
 }
 
@@ -481,7 +508,7 @@ async fn sequential_completion_and_malformed_headers_release_source_with_archive
             let _keep = &signal;
             bytes
                 .take()
-                .map_or(Poll::Pending, |bytes| Poll::Ready(Some(Ok(bytes))))
+                .map_or(Poll::Ready(None), |bytes| Poll::Ready(Some(Ok(bytes))))
         });
         let input = Box::new(StreamReader::new(source, ByteMetadata::default()));
         let mut archive = TarStream::new(input, TarLimits::default());

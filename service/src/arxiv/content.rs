@@ -205,8 +205,7 @@ async fn expand(batch: RecordBatch, options: ReadOptions) -> Result<RecordStream
             max_entry_bytes: u64::MAX,
             ..TarLimits::default()
         },
-    )
-    .with_eof_validation();
+    );
     let target = ArxivSourceOptions::default().target_bytes.get();
     Ok(stream::try_unfold((tar, false), move |(mut tar, emitted)| {
         let batch = batch.clone();
