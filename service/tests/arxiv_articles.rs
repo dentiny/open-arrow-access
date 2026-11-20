@@ -11,21 +11,24 @@ async fn load(name: &str) -> Vec<u8> {
     fixture!("arxiv-articles", name).await
 }
 
-#[test]
-fn article_routes_accept_modern_ids_and_versions_without_path_injection() {
-    for id in ["0704.0001", "2410.00001", "2410.00001v2"] {
-        for (format, prefix) in [
-            (Format::Pdf, "pdf"),
-            (Format::Latex, "src"),
-            (Format::Html, "html"),
-        ] {
-            assert_eq!(
-                ArxivArticle::new(id, format).locator().unwrap(),
-                format!("{prefix}/{id}")
-            );
-        }
-    }
-    for id in [
+#[rstest::rstest]
+#[case(Format::Pdf, "pdf")]
+#[case(Format::Latex, "src")]
+#[case(Format::Html, "html")]
+fn article_routes_accept_modern_ids_and_versions(
+    #[values("0704.0001", "2410.00001", "2410.00001v2")] id: &str,
+    #[case] format: Format,
+    #[case] prefix: &str,
+) {
+    assert_eq!(
+        ArxivArticle::new(id, format).locator().unwrap(),
+        format!("{prefix}/{id}")
+    );
+}
+
+#[rstest::rstest]
+fn article_routes_reject_invalid_ids(
+    #[values(
         "",
         "../2410.00001",
         "2410.00001?x=1",
@@ -36,13 +39,11 @@ fn article_routes_accept_modern_ids_and_versions_without_path_injection() {
         "hep-th9901001",
         "hep-th/9901001v1",
         "solv-int/9901001",
-        "2410.00001/extra",
-    ] {
-        assert!(
-            ArxivArticle::new(id, Format::Html).locator().is_err(),
-            "{id}"
-        );
-    }
+        "2410.00001/extra"
+    )]
+    id: &str,
+) {
+    assert!(ArxivArticle::new(id, Format::Html).locator().is_err());
 }
 
 #[tokio::test]
