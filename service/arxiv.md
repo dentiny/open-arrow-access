@@ -206,8 +206,8 @@ is one manifest-selected TAR; a month is a convenient group of those units.
   sequential member bodies; it saves materialization, not download bandwidth.
 - Default TAR limits allow 65,536 headers and 1 GiB per member; callers can use
   `with_tar_limits`. GNU/USTAR regular files and directories are supported;
-  extension headers, links and sparse files are rejected. Real bulk TAR format
-  compatibility still needs a signed upstream sample.
+  extension headers, links and sparse files are rejected. A signed sample confirmed the first shard uses GNU/USTAR headers; this is
+  not full-corpus format validation.
 
 Current `ArxivReadRequest` selects kind/month, not an explicit set of filenames
 or sequence range. Low-level callers can enumerate the manifest and `stream`
@@ -263,8 +263,32 @@ An anonymous GET of the official PDF manifest returned HTTP 403 with
 not evidence that signed access is broken, nor a successful PDF validation.
 Use signed S3 access with requester billing and `us-east-1`. For a PDF-only role,
 select `Pdf`: `Auto` probes `src/` too and deliberately propagates its access
-denial. No signed PDF throughput or full-corpus coverage is claimed here.
+denial. Subsequent signed validation succeeded for the manifest and a 1 MiB range of
+`pdf/arXiv_pdf_2410_001.tar`, with `RequestCharged: requester`. The manifest was
+5,497,601 bytes (ETag `7c7208757bb0657a354ca04a241a8729`) and listed 12,902 PDF
+shards; month 2410 selected 167 shards with a declared total of 24,129 items.
+These are manifest observations, not a verified count of downloaded PDFs.
+
+**A second live-data blocker was reproduced:** the first selected archive's
+manifest `size` is **484,224,805**, but signed S3 HEAD reports **484,352,000**
+bytes. The object's ETag equals manifest MD5 `4914b04c8ae73f8a8f0d7e82749ac3aa`.
+`records().open(ArxivReadRequest::new(ArxivKind::Pdf).with_month(2410))` fails on
+its first batch with `archive length differs from manifest metadata`. The range
+GET itself succeeded and showed a `2410/` directory with `ustar ` TAR magic.
+Thus AWS access works while the current native Arrow path rejects this real
+archive. Establish the upstream size field's meaning and use authoritative
+object identity/integrity metadata before changing validation; do not silently
+disable integrity checks or treat this as proven corruption. No signed bulk
+PDF throughput or full-corpus coverage is claimed here.
 
 References: [official S3 hierarchy and manifest](https://info.arxiv.org/help/bulk_data_s3.html),
 [metadata harvesting](https://info.arxiv.org/help/oa/index.html),
 [parallel read semantics](../docs/parallel-read.md).
+
+For diagnosis only, a low-level `service.stream(&archive, ...)` request with
+`archive.size` replaced by that signed HEAD length read the complete first
+regular member, `2410/2410.00001.pdf`: **5,706,452 bytes**, starting with `%PDF-`.
+The probe finished in 2.46 s including manifest discovery. No production code
+was changed; native `records()` still uses manifest size and still fails. This
+establishes real PDF-byte access, not a repaired conversion path or sustained
+throughput benchmark.
