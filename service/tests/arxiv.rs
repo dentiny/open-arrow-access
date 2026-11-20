@@ -329,3 +329,59 @@ async fn auto_propagates_storage_and_manifest_errors() {
         );
     }
 }
+
+#[tokio::test]
+async fn manifest_payload_sizes_allow_tar_framing_in_stream_index_and_native_scan() {
+    let dir = native_record_fixture();
+    let manifest = dir.path().join("pdf/arXiv_pdf_manifest.xml");
+    // Upstream size is the sum of member payloads, not the padded TAR length.
+    let payload_size = b"%PDF-first-paper".len() + b"%PDF-second-paper".len();
+    let xml = std::fs::read_to_string(&manifest).unwrap().replace(
+        "<size>10240</size>",
+        &format!("<size>{payload_size}</size>"),
+    );
+    std::fs::write(manifest, xml).unwrap();
+    let service = ArxivService::new(OpenDalAccessor::new(fs_operator(dir.path())));
+    let shards = service
+        .manifest(ArxivKind::Pdf, Some(2410), ByteReadOptions::default())
+        .await
+        .unwrap();
+    let archive = service
+        .archive(&shards[0], ByteReadOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        archive
+            .entries()
+            .filter(|e| e.is_file)
+            .map(|e| e.size)
+            .sum::<u64>(),
+        payload_size as u64
+    );
+    let mut reader = service
+        .records()
+        .open(ArxivReadRequest::new(ArxivKind::Pdf).with_month(2410))
+        .await
+        .unwrap();
+    let mut payloads = Vec::new();
+    while let Some(batch) = reader.next().await.unwrap() {
+        payloads.extend(
+            batch["data"]
+                .as_binary::<i64>()
+                .iter()
+                .map(|v| v.unwrap().to_vec()),
+        );
+    }
+    assert_eq!(
+        payloads,
+        [
+            b"%PDF-first-paper".to_vec(),
+            b"%PDF-second-paper".to_vec(),
+            Vec::new()
+        ]
+        .into_iter()
+        .cycle()
+        .take(6)
+        .collect::<Vec<_>>()
+    );
+}

@@ -73,7 +73,10 @@ pub(super) fn validate_archive(archive: &ArxivArchive) -> Result<()> {
 }
 
 pub(super) fn validate_archive_length(archive: &ArxivArchive, length: Option<u64>) -> Result<()> {
-    if length.is_some_and(|length| length != archive.size) {
+    // Upstream manifests can report the sum of member payload sizes, excluding
+    // TAR headers, alignment padding and end blocks. It is a lower bound, not
+    // the object's exact byte length. TAR readers validate the actual framing.
+    if length.is_some_and(|length| length < archive.size) {
         return Err(error::archive_length_mismatch());
     }
     Ok(())

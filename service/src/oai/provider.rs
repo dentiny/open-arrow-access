@@ -18,6 +18,12 @@ pub trait OaiProvider: Clone + std::fmt::Debug + Send + Sync {
     fn record_format() -> XmlFormat {
         super::record_format::default_record_format()
     }
+
+    /// Full record mapping. Providers with a published schema can bind known
+    /// types instead of guessing identifier/scalar types from sampled values.
+    fn inferred_record_format() -> XmlFormat {
+        super::record_format::inferred_record_format()
+    }
 }
 /// Configured OAI-PMH service; marker types add no runtime state.
 #[derive(Clone, Debug)]
@@ -50,15 +56,16 @@ impl<P: OaiProvider> OaiProviderService<P> {
     }
 
     /// Infer all fields beneath each standard OAI-PMH record, including provider
-    /// metadata, using the shared record path and namespace binding.
+    /// metadata, using the provider's mapping when available, otherwise the
+    /// shared record path and namespace binding with sampled inference.
     ///
     /// Unlike [`Self::record_format`], this does not fix the output to protocol
-    /// header columns. The schema depends on the sampled page contents; use an
-    /// explicit XML schema when a stable mapping across pages is required.
-    /// This always selects the standard OAI record envelope, independently of a
-    /// custom [`OaiProvider::record_format`] override.
+    /// header columns. The default schema depends on sampled page contents;
+    /// providers such as arXiv bind a fixed full schema instead. Use an explicit
+    /// XML schema when other providers need stable mappings across pages.
+    /// This is independent of a custom [`OaiProvider::record_format`] override.
     pub fn inferred_record_format(&self) -> XmlFormat {
-        super::record_format::inferred_record_format()
+        P::inferred_record_format()
     }
 
     /// Scan all continuation pages using the provider's default record mapping.
