@@ -431,11 +431,22 @@ field names, order, Arrow types and nullability:
 | `source_index` | `UInt64`, non-null | Inner TeX member index; zero for whole PDF/XML documents |
 | `source_name` | `LargeBinary`, non-null | Inner TeX filename; empty for whole PDF/XML documents |
 | `data` | `LargeBinary`, non-null | PDF bytes, decoded UTF-8 TeX bytes, or original XML bytes |
+| `data_type` | `LargeUtf8`, non-null | Representation of this row's payload: `pdf`, `latex`, or `xml` |
 
-The content schema is fixed at these eight fields. There is no metadata option,
+The content schema is fixed at these nine fields. There is no metadata option,
 metadata struct, or format-specific text column. Harvest OAI metadata separately
 and join by `article_id` downstream when needed. `content_schema()` is the single
 definition for all content formats.
+
+`data_type` is a separate top-level string column alongside `data`; the two are
+not wrapped in a Struct. It tags each row's binary payload, so consumers need not
+infer its representation from the Arrow binary type. The existing `format`
+column remains available. In the current explicit-format readers, both tags
+agree. This schema addition does not enable provider-level cell fallback yet.
+
+Consumers with the previous fixed eight-field schema must accept the appended
+non-null `data_type: LargeUtf8` field. Row identity, byte contents, provenance and
+existing column positions remain unchanged.
 
 PDF uses `kind=pdf`; LaTeX uses `kind=source` and filters attachments. XML reads
 a caller-owned source inventory whose TAR article members end in `.xml`: arXiv does
@@ -465,7 +476,8 @@ row skipping occurs.
 
 The schema is `article_id: LargeUtf8`, `format: LargeUtf8` (`latex`),
 `shard_uri: LargeUtf8`, `entry_index: UInt64`, `entry_name: LargeBinary`,
-`source_index: UInt64`, `source_name: LargeBinary`, `data: LargeBinary` (all
+`source_index: UInt64`, `source_name: LargeBinary`, `data: LargeBinary`,
+`data_type: LargeUtf8` (`latex`) (all
 non-null). Outer and inner physical indices preserve duplicate-name identity.
 `article_id` is the normalized unversioned metadata key; original outer names
 retain version spelling. Modern and legacy bulk IDs are supported.

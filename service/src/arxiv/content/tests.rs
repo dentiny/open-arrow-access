@@ -75,6 +75,10 @@ async fn formats_emit_identical_schemas_and_preserve_content() {
     use open_arrow_access_storage::OpenDalAccessor;
     use open_arrow_access_test_support::temp_fs;
     let schema = content_schema();
+    assert_eq!(schema.fields().len(), 9);
+    let data_type = schema.field_with_name("data_type").unwrap();
+    assert_eq!(data_type.data_type(), &DataType::LargeUtf8);
+    assert!(!data_type.is_nullable());
     for (format, kind, fixture_name) in [
         (ArxivContentFormat::Pdf, ArxivKind::Pdf, "pdf.tar"),
         (ArxivContentFormat::Latex, ArxivKind::Source, "latex.tar"),
@@ -105,6 +109,10 @@ async fn formats_emit_identical_schemas_and_preserve_content() {
             "2410.00001"
         );
         assert_eq!(batch["format"].as_string::<i64>().value(0), format.as_str());
+        assert_eq!(
+            batch["data_type"].as_string::<i64>().value(0),
+            format.as_str()
+        );
         let expected = match format {
             ArxivContentFormat::Pdf => fixture!("arxiv-articles", "paper.pdf").await,
             ArxivContentFormat::Latex => fixture!("arxiv-articles", "main.tex").await,

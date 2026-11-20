@@ -43,6 +43,7 @@ pub fn content_schema() -> SchemaRef {
                 Field::new("source_index", DataType::UInt64, false),
                 Field::new("source_name", DataType::LargeBinary, false),
                 Field::new("data", DataType::LargeBinary, false),
+                Field::new("data_type", DataType::LargeUtf8, false),
             ]))
         })
         .clone()
@@ -210,7 +211,8 @@ fn latex_batch(outer: &RecordBatch, article_id: &str, batch: &RecordBatch) -> Re
             output.append("entry_name", name)?;
             output.append("source_index", indices.value(row))?;
             output.append("source_name", source_name)?;
-            output.append("data", data.value(row))
+            output.append("data", data.value(row))?;
+            output.append("data_type", ArxivContentFormat::Latex.as_str())
         })?;
     }
     builder.finish()
@@ -233,7 +235,8 @@ fn document_batch(batch: &RecordBatch, format: ArxivContentFormat) -> Result<Rec
         row.append("entry_name", name)?;
         row.append("source_index", 0_u64)?;
         row.append("source_name", b"".as_slice())?;
-        row.append("data", batch["data"].as_binary::<i64>().value(0))
+        row.append("data", batch["data"].as_binary::<i64>().value(0))?;
+        row.append("data_type", format.as_str())
     })?;
     builder.finish()
 }

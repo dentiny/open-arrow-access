@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Append non-null `data_type: LargeUtf8` to the shared arXiv PDF/LaTeX/XML content schema, tagging each row's unchanged `data: LargeBinary` payload; retain the existing `format` column. Consumers of the previous eight-field content schema must accept this ninth field.
+
 ## 0.14.1 - 2026-11-20
 
 - Keep TAR indexing futures Send by owning the seek adapter across header-read awaits, fixing compilation of explicit-shard arXiv discovery streams.
