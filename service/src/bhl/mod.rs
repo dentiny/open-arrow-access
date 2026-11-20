@@ -1,8 +1,10 @@
 //! BHL API v3 and its versioned Smithsonian Figshare OCR export.
 mod error;
 mod open_data;
+mod page;
 mod pages;
-pub use pages::{BhlPageAccessor, BhlPageIdentity, page_schema};
+pub use page::{BhlPageRecord, page_schema};
+pub use pages::{BhlPageAccessor, BhlPageIdentity};
 mod resolver;
 mod validation;
 use crate::{

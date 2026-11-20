@@ -178,12 +178,14 @@ metadata/license does not replace per-item rights from BHL tables/API. Record
 missing payloads, blank pages, failed reads and unresolved joins explicitly.
 No new OCR, language/license filtering, normalization or indexing is implied.
 
-## Arrow / Lance schema: one OCR page per row
+## Fixed Arrow / Lance page schema and value assignment
 
-**The AWS page accessor implements the identity/content columns and declares the
-fixed metadata struct below. `metadata` is currently null for every page;
-reading and joining the 13 metadata tables is deferred.** Existing generic binary
-attachments remain available.
+`page_schema()` defines the fixed output types below. `BhlPageRecord::into_batch()`
+assigns every caller-supplied value to its column, including the supplied
+metadata StructArray. Metadata is required and must contain one populated row
+matching the fixed 13-table / 104-field schema; null or mismatched metadata fails.
+This is a record/schema API only: existing readers do not acquire or join
+metadata automatically and are wired separately.
 
 | Column | Arrow type | Nullable | Meaning |
 | --- | --- | --- | --- |
@@ -195,7 +197,7 @@ attachments remain available.
 | `source_path` | `LargeUtf8` | No | Original TAR member path or full AWS object URI |
 | `snapshot_id` | `Utf8` | No | Explicit source snapshot identity, e.g. `figshare-21422193-v24`; AWS uses a caller-assigned frozen-inventory ID |
 | `source_entry_index` | `UInt64` | Yes | Zero-based physical TAR header-entry ordinal, including directory headers in the count; null for individual AWS objects |
-| `metadata` | `Struct` ([complete definition below](#metadata-child-fields-tsv-profile)) | Yes | 13 declared TSV-derived children covering page/item/part/title, authors, identifiers, subjects, names and rights |
+| `metadata` | `Struct` ([complete definition below](#metadata-child-fields-tsv-profile)) | No | 13 declared TSV-derived children covering page/item/part/title, authors, identifiers, subjects, names and rights |
 
 The eight previously proposed content/identity columns are accompanied by
 `source_entry_index` to preserve repeated member names in an archive.
@@ -223,7 +225,7 @@ be reported explicitly rather than coerced to zero.
 
 ### Metadata child fields: TSV profile
 
-This proposal uses the **13 TSV tables actually listed under AWS data/**,
+This fixed schema uses the **13 TSV tables actually listed under AWS data/**,
 not guessed API response fields. All 104 source columns are enumerated below,
 with their original case-sensitive names. Table names become the struct/list
 children. `?` means nullable; list containers and list elements are non-null
@@ -368,7 +370,7 @@ metadata: Struct<
     DOI: LargeUtf8,
     CreationDate: LargeUtf8
   >>
->?
+>
 ```
 
 #### Join scope and cardinality
@@ -568,16 +570,3 @@ Sources: [BHL API v3](https://www.biodiversitylibrary.org/docs/api3.html), [Figs
 
 
 
-
-## AWS page schema API
-
-`BhlPageAccessor::new(storage, snapshot_id)` reads an explicit `FileSetRequest`
-selection with one lazy partition per OCR object. It validates item/part IDs,
-PageID and sequence from the filename, preserves original binary OCR (including
-empty pages), and retains the full source URI and caller-supplied inventory ID.
-Shared scan layers own concurrency; there is no AWS listing during planning.
-
-The Arrow schema is fixed in Rust. Its `metadata` struct declares all 13 children
-and 104 source fields listed above, but this implementation leaves the entire
-struct null. `source_entry_index` is also null for AWS objects. No metadata tables,
-indexes, sidecars, acquisition tools or join logic are introduced here.

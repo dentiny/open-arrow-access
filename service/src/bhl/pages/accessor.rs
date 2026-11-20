@@ -1,21 +1,30 @@
+use super::super::BhlPageRecord;
 use super::{BhlPageIdentity, page_schema};
 use crate::FileSetRequest;
+use arrow_array::StructArray;
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, Capability, OrderRequirement, RecordBatchBuilder,
-    RecordCapability, RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader,
-    async_trait, read_object, scan_partition,
+    Accessor, ByteAccessor, ByteReadRequest, Capability, OrderRequirement, RecordCapability,
+    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait,
+    read_object, scan_partition,
 };
 use std::sync::Arc;
 
-/// One OCR page per row. Metadata fields are declared but remain null until a
-/// separate metadata-join implementation is available. Shared scan layers own concurrency.
+type MetadataProvider = dyn Fn(&BhlPageIdentity) -> Result<StructArray> + Send + Sync;
+
+/// Read selected OCR pages with metadata explicitly supplied by the caller.
+/// Source-table acquisition and joins are not performed by this accessor.
 pub struct BhlPageAccessor<A> {
     storage: Arc<A>,
     snapshot_id: Arc<str>,
+    metadata: Arc<MetadataProvider>,
 }
 impl<A> BhlPageAccessor<A> {
-    pub fn new(storage: A, snapshot_id: impl Into<String>) -> Result<Self> {
+    pub fn new(
+        storage: A,
+        snapshot_id: impl Into<String>,
+        metadata: impl Fn(&BhlPageIdentity) -> Result<StructArray> + Send + Sync + 'static,
+    ) -> Result<Self> {
         let snapshot_id = snapshot_id.into();
         if snapshot_id.trim().is_empty() {
             return Err(super::invalid("BHL pages require a nonempty snapshot_id"));
@@ -23,10 +32,10 @@ impl<A> BhlPageAccessor<A> {
         Ok(Self {
             storage: Arc::new(storage),
             snapshot_id: snapshot_id.into(),
+            metadata: Arc::new(metadata),
         })
     }
 }
-
 #[async_trait]
 impl<A: ByteAccessor + 'static> Accessor for BhlPageAccessor<A> {
     type Request = FileSetRequest;
@@ -44,32 +53,35 @@ impl<A: ByteAccessor + 'static> Accessor for BhlPageAccessor<A> {
         Ok(Box::new(self.plan_scan(request).await?.into_reader()))
     }
 }
-
 #[async_trait]
 impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
     async fn plan_scan(&self, request: FileSetRequest) -> Result<ScanPlan> {
         if request.objects.is_empty() {
             return Err(super::invalid("empty BHL page selection"));
         }
-        let identities = request
+        let prepared = request
             .objects
             .iter()
-            .map(|object| BhlPageIdentity::parse(object.locator()))
+            .map(|object| {
+                let identity = BhlPageIdentity::parse(object.locator())?;
+                let metadata = (self.metadata)(&identity)?;
+                Ok((identity, metadata))
+            })
             .collect::<Result<Vec<_>>>()?;
-        let full = page_schema();
-        let output = request.options.resolve_projection(&full)?.schema;
+        let projection = request.options.resolve_projection(&page_schema())?;
         let metadata = RecordMetadata {
-            schema: output.clone(),
+            schema: projection.schema,
             source: None,
         };
         let partitions = request
             .objects
             .into_iter()
-            .zip(identities)
-            .map(|(object, identity)| {
+            .zip(prepared)
+            .map(|(object, (identity, source_metadata))| {
                 let storage = self.storage.clone();
                 let snapshot = self.snapshot_id.clone();
-                let (full, output, metadata) = (full.clone(), output.clone(), metadata.clone());
+                let indices = projection.indices.clone();
+                let metadata = metadata.clone();
                 scan_partition(async move {
                     let batches = stream::once(async move {
                         let data = read_object(
@@ -78,24 +90,26 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                             "read_bhl_page",
                         )
                         .await?;
-                        RecordBatchBuilder::build_row(full, output, |row| {
-                            row.append("entity_type", identity.entity_type.as_str())?;
-                            row.append("entity_id", identity.entity_id)?;
-                            row.append("page_id", identity.page_id)?;
-                            row.append("sequence", identity.sequence)?;
-                            row.append("data", data.as_slice())?;
-                            row.append(
-                                "source_path",
-                                format!(
-                                    "{}{}",
-                                    super::super::OPEN_DATA_BUCKET_URL,
-                                    object.locator()
-                                )
-                                .as_str(),
-                            )?;
-                            row.append("snapshot_id", snapshot.as_ref())
-                            // Nullable metadata and source_entry_index are left unset (null).
-                        })
+                        let source_path =
+                            format!("{}{}", super::super::OPEN_DATA_BUCKET_URL, object.locator());
+                        let batch = BhlPageRecord {
+                            entity_type: &identity.entity_type,
+                            entity_id: identity.entity_id,
+                            page_id: identity.page_id,
+                            sequence: identity.sequence,
+                            data: &data,
+                            source_path: &source_path,
+                            snapshot_id: &snapshot,
+                            source_entry_index: None,
+                            metadata: source_metadata,
+                        }
+                        .into_batch()?;
+                        match indices {
+                            Some(indices) => batch
+                                .project(&indices)
+                                .map_err(super::super::error::page_record),
+                            None => Ok(batch),
+                        }
                     });
                     Ok(StreamReader::records(
                         batches,

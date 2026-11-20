@@ -41,6 +41,15 @@ fn invalid_open_data(message: &str) -> Error {
     Error::new(ErrorKind::InvalidInput, "bhl_open_data", message)
 }
 
+pub(super) fn page_record(source: arrow_schema::ArrowError) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "bhl_page_record",
+        source.to_string(),
+    )
+    .with_source(source)
+}
+
 pub(super) fn invalid_pages(message: impl Into<String>) -> Error {
     Error::new(ErrorKind::InvalidInput, "bhl_pages", message)
 }

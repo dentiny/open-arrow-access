@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.16.0 - 2026-11-20
+
+- Append nullable `metadata: Struct` to the common arXiv content schema, reusing the full arXivRaw OAI record schema. Current content readers leave the column null; metadata fetching and joining are not part of this schema change.
+
 ## 0.15.0 - 2026-11-20
 
 - Append non-null `data_type: LargeUtf8` to the shared arXiv PDF/LaTeX/XML content schema, tagging each row's unchanged `data: LargeBinary` payload; retain the existing `format` column. Consumers of the previous eight-field content schema must accept this ninth field.

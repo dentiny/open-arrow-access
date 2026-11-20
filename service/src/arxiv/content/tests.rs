@@ -75,7 +75,9 @@ async fn formats_emit_identical_schemas_and_preserve_content() {
     use open_arrow_access_storage::OpenDalAccessor;
     use open_arrow_access_test_support::temp_fs;
     let schema = content_schema();
-    assert_eq!(schema.fields().len(), 9);
+    assert_eq!(schema.fields().len(), 10);
+    let metadata = schema.field_with_name("metadata").unwrap();
+    assert!(metadata.is_nullable());
     let data_type = schema.field_with_name("data_type").unwrap();
     assert_eq!(data_type.data_type(), &DataType::LargeUtf8);
     assert!(!data_type.is_nullable());
@@ -104,6 +106,7 @@ async fn formats_emit_identical_schemas_and_preserve_content() {
         assert_eq!(reader.metadata().schema, schema);
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(batch.schema(), schema);
+        assert_eq!(batch["metadata"].null_count(), batch.num_rows());
         assert_eq!(
             batch["article_id"].as_string::<i64>().value(0),
             "2410.00001"

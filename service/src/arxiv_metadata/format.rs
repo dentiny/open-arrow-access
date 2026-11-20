@@ -5,8 +5,12 @@ use arrow_schema::DataType;
 use open_arrow_access_file_format::xml::{NamespaceBinding, XmlField, XmlFormat, XmlSchema};
 
 pub(super) fn record_format() -> XmlFormat {
+    XmlFormat::new("/oai:OAI-PMH/oai:ListRecords/oai:record").with_schema(schema().clone())
+}
+
+pub(crate) fn schema() -> &'static XmlSchema {
     static SCHEMA: OnceLock<XmlSchema> = OnceLock::new();
-    let schema = SCHEMA.get_or_init(|| {
+    SCHEMA.get_or_init(|| {
         let header = XmlField::structure(
             "oai:header",
             "oai:header",
@@ -83,8 +87,7 @@ pub(super) fn record_format() -> XmlFormat {
             ],
         )
         .expect("valid arXivRaw mapping")
-    });
-    XmlFormat::new("/oai:OAI-PMH/oai:ListRecords/oai:record").with_schema(schema.clone())
+    })
 }
 
 fn text(path: &str) -> XmlField {

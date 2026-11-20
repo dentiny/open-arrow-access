@@ -34,6 +34,7 @@ pub fn content_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
+            let metadata = crate::arxiv_metadata::schema().arrow_schema();
             Arc::new(Schema::new(vec![
                 Field::new("article_id", DataType::LargeUtf8, false),
                 Field::new("format", DataType::LargeUtf8, false),
@@ -44,6 +45,11 @@ pub fn content_schema() -> SchemaRef {
                 Field::new("source_name", DataType::LargeBinary, false),
                 Field::new("data", DataType::LargeBinary, false),
                 Field::new("data_type", DataType::LargeUtf8, false),
+                Field::new(
+                    "metadata",
+                    DataType::Struct(metadata.fields().clone()),
+                    true,
+                ),
             ]))
         })
         .clone()

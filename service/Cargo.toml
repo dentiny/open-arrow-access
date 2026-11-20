@@ -15,7 +15,7 @@ arxiv = [
     "open-arrow-access-decompression/tar",
     "open-arrow-access-decompression/gzip",
 ]
-bhl = ["figshare", "opendal/services-s3", "dep:arrow-schema"]
+bhl = ["figshare", "opendal/services-s3", "dep:arrow-array", "dep:arrow-schema"]
 biorxiv = ["meca", "dep:chrono"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []

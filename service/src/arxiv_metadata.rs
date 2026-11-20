@@ -1,6 +1,8 @@
 //! ArxivMetadata metadata harvesting via the shared OAI-PMH protocol.
 mod format;
 
+pub(crate) use format::schema;
+
 use crate::oai::{OaiProvider, OaiProviderService};
 #[derive(Clone, Debug)]
 pub struct ArxivMetadata;

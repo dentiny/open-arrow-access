@@ -11,7 +11,7 @@ macro_rules! many {
 }
 
 /// Fixed page schema, including the 13-table / 104-field metadata contract.
-/// The current page accessor emits null metadata; no metadata acquisition or join occurs.
+/// Metadata is required and assigned from caller-supplied source values.
 pub fn page_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
@@ -190,7 +190,7 @@ pub fn page_schema() -> SchemaRef {
                 Field::new("source_path", DataType::LargeUtf8, false),
                 Field::new("snapshot_id", DataType::Utf8, false),
                 Field::new("source_entry_index", DataType::UInt64, true),
-                Field::new("metadata", DataType::Struct(metadata.into()), true),
+                Field::new("metadata", DataType::Struct(metadata.into()), false),
             ]))
         })
         .clone()

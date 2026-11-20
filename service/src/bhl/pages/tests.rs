@@ -7,11 +7,21 @@ use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::temp_fs;
 
 #[tokio::test]
-async fn pages_preserve_bytes_identity_null_metadata_and_projection() {
+async fn pages_preserve_bytes_identity_supplied_metadata_and_projection() {
     let item = "ocr/item-000001/item-000001-00000003-0002.txt";
     let part = "ocr/part-000008/part-000008-00000003-0001.txt";
     let (_root, operator) = temp_fs(&[(item, b"\r\n\xff"), (part, b"")]);
-    let pages = BhlPageAccessor::new(OpenDalAccessor::new(operator), "aws-inventory-id").unwrap();
+    let pages = BhlPageAccessor::new(
+        OpenDalAccessor::new(operator),
+        "aws-inventory-id",
+        |identity| {
+            Ok(super::super::page::tests::metadata(
+                &format!("Page {}", identity.page_id),
+                "Source rights",
+            ))
+        },
+    )
+    .unwrap();
     let plan = pages
         .plan_scan(FileSetRequest::new([item, part]))
         .await
@@ -43,9 +53,13 @@ async fn pages_preserve_bytes_identity_null_metadata_and_projection() {
             .downcast_ref::<UInt64Array>()
             .unwrap();
         assert_eq!(id.value(0), if index == 0 { 1 } else { 8 });
-        for name in ["metadata", "source_entry_index"] {
-            assert!(batch.column_by_name(name).unwrap().is_null(0));
-        }
+        assert!(!batch.column_by_name("metadata").unwrap().is_null(0));
+        assert!(
+            batch
+                .column_by_name("source_entry_index")
+                .unwrap()
+                .is_null(0)
+        );
         assert!(reader.next().await.unwrap().is_none());
     }
     let options = ReadOptions::default().with_projection(["metadata", "page_id"]);
