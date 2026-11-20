@@ -84,9 +84,11 @@ on `ArxivKind` must also handle the new `Auto` variant.
 `records().with_metadata(Arc<ArxivMetadataIndex>)` joins a cached metadata
 snapshot to each PDF before emitting Arrow batches. Pass
 `ArxivReadRequest::new(ArxivKind::Pdf)`; source/automatic requests are rejected.
-The output retains the four bulk columns above and adds a non-null `metadata`
+The output retains the four bulk columns listed below and adds a non-null `metadata`
 struct containing **every column** of the snapshot with its original Arrow type.
-Write these batches to one Lance dataset, selecting `data` as the PDF blob column.
+Write these batches to one Lance dataset with the original binary `data` column.
+Lance Blob V2 storage is a separate sink configuration contract; a URL-download
+blob option is not a selector for already-materialized PDF bytes.
 No second metadata table or metadata fetch per PDF is required.
 
 ```rust
@@ -124,3 +126,145 @@ null/duplicate metadata IDs and PDFs without metadata fail rather than silently
 producing incomplete rows. Metadata-only records (for example deleted articles
 without a PDF) do not generate PDF rows. Projection applies after matching;
 shards remain independent scan partitions and share the immutable index.
+
+## File hierarchy and task boundaries
+
+```text
+s3://arxiv/                              # Or a mirror rooted here
+├── pdf/
+│   ├── arXiv_pdf_manifest.xml           # Global XML inventory, not PDF bytes
+│   ├── arXiv_pdf_YYMM_NNN.tar           # One upstream shard
+│   │   ├── YYMM/<article-id>.pdf        # Illustrative member name
+│   │   └── ...                         # Many original PDFs
+│   └── ...                             # Other months/sequences
+└── src/
+    ├── arXiv_src_manifest.xml           # Independent source inventory
+    └── arXiv_src_YYMM_NNN.tar
+        └── <article source payload>     # May itself be compressed/packaged
+```
+
+The outer bulk container is an uncompressed TAR. Source members can contain
+compressed TeX/LaTeX packages; reading the outer TAR does not recursively unpack
+those packages, compile TeX, extract PDF text, or render page images. Preserve
+member names as bytes instead of inventing paths or extracting them to disk.
+PDF and source are different representations: matching month/sequence numbers
+are not a paper join, and `Auto` can ingest both representations.
+
+`YYMM` groups article submission months, with a sequence within each month and
+distribution. It is not a dated immutable release or an OAI update window. For
+example, numeric month `1` selects `0001` (January 2000); retained filenames keep
+the zero padding. Always enumerate actual manifest membership instead of
+assuming contiguous sequences or fixed shard sizes/counts. Upstream describes
+roughly 500 MB TAR chunks; that is an approximate packaging target, not a limit.
+
+The PDF manifest additionally documents `first_item`, `last_item`, `timestamp`
+and `content_md5sum`. `ArxivArchive` currently exposes only the six fields listed
+above, plus the resolved kind; the additional fields are not an index exposed
+by this API. Save the original manifest as provenance. Manifest MD5/item counts
+are not automatically checked against streamed content. Known archive length
+is checked, but equal length is not a content identity guarantee. Pin a mirror
+snapshot and verify its checksums separately when reproducibility is required.
+
+### Arrow row contract
+
+The native `records()` schema, before an optional metadata join, is:
+
+| Column | Arrow type | Meaning |
+| --- | --- | --- |
+| `shard_uri` | Non-null `LargeUtf8` | Manifest filename/key, such as `pdf/arXiv_pdf_2410_001.tar`; not necessarily an absolute URI. |
+| `entry_index` | Non-null `UInt64` | Physical TAR entry index; directory entries can leave gaps. |
+| `entry_name` | Non-null `LargeBinary` | Exact member-name bytes. |
+| `data` | Non-null `LargeBinary` | Complete original regular-file payload. |
+
+One row represents a regular TAR member, not a shard, page, parsed paragraph,
+or guaranteed unique article. Directories do not emit rows. Only the metadata
+join validates PDF filenames and derives article IDs; the raw bulk accessor is
+not a PDF validator. Retain mirror/manifest identity with shard and member index
+for provenance; an article ID alone does not identify an input version.
+
+## Sharding and performance assessment
+
+The abstraction is reusable: caller-owned byte storage → manifest discovery →
+TAR reader → Arrow accessor → shared scan execution. No per-paper HTTP download
+is needed for bulk scans. Compared with PMC inventory rows naming metadata
+objects or Common Crawl segments grouping WARC objects, the natural arXiv unit
+is one manifest-selected TAR; a month is a convenient group of those units.
+
+- `plan_scan` produces one independent partition per selected TAR. Wrap
+  `records()` (or its metadata-joined accessor) in `ParallelReadLayer` to schedule
+  several TARs concurrently. Plain `open` consumes the scan without installing
+  that parallel layer. Entry order inside a TAR remains sequential.
+- Prefer `stream` for complete bulk ingestion: it can return the first member
+  without scanning the whole archive. `archive` first issues ranged header
+  reads across the TAR to build its entry index; use it for selected member
+  reads, not as the default all-PDF path. The index is not persisted/reused
+  automatically across jobs.
+- Arrow batches target 4 MiB of payload by default, with a separate row limit.
+  This is a soft target: each member is buffered in full and can exceed it.
+  Concurrency, queued batches, metadata index, copies during the join, and writer
+  buffers all affect peak memory. Projection without `data` still drains the
+  sequential member bodies; it saves materialization, not download bandwidth.
+- Default TAR limits allow 65,536 headers and 1 GiB per member; callers can use
+  `with_tar_limits`. GNU/USTAR regular files and directories are supported;
+  extension headers, links and sparse files are rejected. Real bulk TAR format
+  compatibility still needs a signed upstream sample.
+
+Current `ArxivReadRequest` selects kind/month, not an explicit set of filenames
+or sequence range. Low-level callers can enumerate the manifest and `stream`
+chosen `ArxivArchive` values, but exact-subset **Arrow scans** need an additional
+selection API (or a caller-prepared mirror manifest). There is no persisted
+per-TAR/member checkpoint or automatic resume from the last emitted row. Row
+sampling does not create disjoint shards. Separate writers/jobs need separate
+destinations and an explicit later assembly policy.
+
+This is a sound bulk-ingestion composition, but not yet evidence of sufficient
+multi-TB throughput. Benchmark a pinned real PDF month with read concurrency
+1/4/8, measuring time to first batch, source bytes/s, PDFs/s, peak RSS, request
+counts/retries and end-to-end sink throughput. Choose concurrency from those
+measurements, including large-member outliers and retry behavior.
+
+## Live validation and metadata readiness (2026-11-19)
+
+At repository commit `300bae8d9b63fb1bc75e8bd2bb8ad549c3c6ba91`, a real
+`ArxivMetadataService::records(Some("2026-11-02"), Some("2026-11-02"), None)`
+request returned **1,300 records**, **3,383,024 XML bytes**, and a continuation
+token. The first curl fetch took 4.56 s; a subsequent library fetch took 0.613 s.
+These are individual metadata requests, potentially cached, not bulk PDF or
+conversion throughput measurements. A November 1 window instead returned
+`noRecordsMatch` with HTTP 200: always inspect the OAI body and continuation.
+
+Reproduction of a metadata decoding failure with that populated page:
+
+```rust
+let page = service.records(Some("2026-11-02"), Some("2026-11-02"), None).await?;
+let mut rows = page.records(service.inferred_record_format())
+    .open(open_arrow_access::ReadRequest::new("records")).await?;
+while let Some(_batch) = rows.next().await? {}
+```
+
+With `Accessor` in scope, this failed at record index 1299: inference selected
+`Float64` for `ns0:id`, then encountered `cond-mat/0604352`. Modern IDs that look
+numeric must remain strings, too. Increasing a sample is not a stable schema
+contract. Use an explicit provider metadata mapping, including string article
+IDs and all required nested fields, and validate across pages. The fixed
+`service.record_format()` decoded all 1,300 protocol-header rows successfully;
+it is not a complete bibliographic snapshot. The inferred envelope also has nested header IDs, not
+the top-level `identifier` expected by the default metadata-index setup.
+
+Metadata acquisition therefore still needs a coordinator that follows tokens,
+paces requests, retains deleted headers/version history, reconciles repeated
+updates, normalizes IDs into a top-level string column and persists a complete,
+stable typed snapshot. An OAI date selects update datestamps, not PDF submission
+month; a single update-day page cannot populate a month's PDF join. The library
+has a continuation harvester, but snapshot construction remains caller-owned.
+
+An anonymous GET of the official PDF manifest returned HTTP 403 with
+`AccessDenied` explicitly requiring authentication for Requester Pays. This is
+not evidence that signed access is broken, nor a successful PDF validation.
+Use signed S3 access with requester billing and `us-east-1`. For a PDF-only role,
+select `Pdf`: `Auto` probes `src/` too and deliberately propagates its access
+denial. No signed PDF throughput or full-corpus coverage is claimed here.
+
+References: [official S3 hierarchy and manifest](https://info.arxiv.org/help/bulk_data_s3.html),
+[metadata harvesting](https://info.arxiv.org/help/oa/index.html),
+[parallel read semantics](../docs/parallel-read.md).
