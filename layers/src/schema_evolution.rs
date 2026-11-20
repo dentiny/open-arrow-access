@@ -161,6 +161,17 @@ impl SchemaEvolutionLayer {
         })
     }
 
+    /// Derive the complete output schema without opening or reading a source.
+    pub fn transform_schema(&self, source: &SchemaRef) -> Result<SchemaRef> {
+        if self.changes.is_empty() {
+            return Ok(source.clone());
+        }
+        Ok(
+            SchemaEvolutionPlan::new(&self.changes, source, &Default::default(), false)?
+                .target_schema,
+        )
+    }
+
     /// Wrap an opened reader with schema evolution based on its actual schema.
     /// All input columns are available; source-projection hints are ignored.
     /// The output schema is fixed before reading data.

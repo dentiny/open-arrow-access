@@ -1,7 +1,10 @@
 use arrow_array::{Array, RecordBatch, cast::AsArray, types::UInt64Type};
 use futures::TryStreamExt;
-use open_arrow_access_core::{Accessor, ReadOptions, ReadRequest, ScanPlanner, into_stream};
+use open_arrow_access_core::{
+    Accessor, AccessorExt, ReadOptions, ReadRequest, ScanPlanner, into_stream,
+};
 use open_arrow_access_file_format::DecodePartitionOptions;
+use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::semantic_scholar::{S2orcV2Accessor, s2orc_v2_schema};
 use open_arrow_access_test_support::{MemoryAccessor, fixture};
 use serde_json::{Value, json};
@@ -34,6 +37,35 @@ async fn normalizes_nested_payloads_without_json_string_columns() {
     let out = batches(&raw, None).await.unwrap();
     let b = &out[0];
     assert_eq!(b.schema(), s2orc_v2_schema());
+    assert_eq!(
+        b.schema()
+            .fields()
+            .iter()
+            .map(|field| field.name().as_str())
+            .collect::<Vec<_>>(),
+        [
+            "corpusid",
+            "openaccessinfo",
+            "title",
+            "authors",
+            "body",
+            "bibliography",
+            "text"
+        ]
+    );
+    assert_eq!(b["text"].as_string::<i64>().value(0), "Hello world");
+    assert!(b["body"].as_struct().column_by_name("text").is_none());
+    assert_eq!(
+        b["bibliography"].as_struct()["text"]
+            .as_string::<i64>()
+            .value(0),
+        "Reference"
+    );
+    let metadata = S2orcV2Accessor::new(MemoryAccessor::new(&raw, 4096))
+        .metadata(ReadRequest::new("part-00000"))
+        .await
+        .unwrap();
+    assert_eq!(metadata.schema, b.schema());
     assert_eq!(b["corpusid"].as_primitive::<UInt64Type>().value(0), 1);
     let annotations = b["body"].as_struct()["annotations"].as_struct();
     let sentence = annotations["sentence"].as_list::<i32>();
@@ -66,26 +98,38 @@ async fn validates_unselected_annotations() {
 #[tokio::test]
 async fn scan_chunks_cover_rows_once_and_match_sequential_schema() {
     let raw = fixture!("semantic-scholar", "s2orc_v2-sample.jsonl").await;
-    let sequential = batches(&raw, None).await.unwrap();
-    let reader = S2orcV2Accessor::new(MemoryAccessor::new(&raw, 4096)).with_partition_options(
-        DecodePartitionOptions {
-            target_bytes: NonZeroUsize::new(64).unwrap(),
-        },
-    );
-    let plan = reader
-        .plan_scan(ReadRequest::new("part-00000"))
-        .await
-        .unwrap();
-    assert!(plan.streaming_discovery);
-    assert_eq!(plan.metadata.schema, s2orc_v2_schema());
-    let planned = into_stream(Box::new(plan.into_reader()))
-        .try_collect::<Vec<_>>()
-        .await
-        .unwrap();
-    let actual = rows(&planned);
-    let expected = rows(&sequential);
-    assert_eq!(actual, expected);
-    assert_eq!(actual.len(), 20);
+    for projection in [None, Some(vec!["text".into()]), Some(vec![])] {
+        let sequential = batches(&raw, projection.clone()).await.unwrap();
+        let reader = S2orcV2Accessor::new(MemoryAccessor::new(&raw, 4096)).with_partition_options(
+            DecodePartitionOptions {
+                target_bytes: NonZeroUsize::new(64).unwrap(),
+            },
+        );
+        let request = ReadRequest::new("part-00000").with_options(ReadOptions {
+            projection,
+            ..Default::default()
+        });
+        let metadata = reader.metadata(request.clone()).await.unwrap();
+        let plan = reader.plan_scan(request.clone()).await.unwrap();
+        assert!(plan.streaming_discovery);
+        assert_eq!(plan.metadata.schema, metadata.schema);
+        let planned = into_stream(Box::new(plan.into_reader()))
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+        assert_eq!(rows(&planned), rows(&sequential));
+        assert_eq!(rows(&planned).len(), 20);
+        let parallel = reader
+            .layer(ParallelReadLayer::new(
+                NonZeroUsize::new(2).unwrap(),
+                NonZeroUsize::MIN,
+            ))
+            .open(request)
+            .await
+            .unwrap();
+        let parallel = into_stream(parallel).try_collect::<Vec<_>>().await.unwrap();
+        assert_eq!(rows(&parallel), rows(&sequential));
+    }
 }
 
 #[tokio::test]
@@ -97,6 +141,7 @@ async fn empty_shards_retain_schema_and_truncated_input_fails() {
     let raw = fixture!("semantic-scholar", "s2orc_v2-minimal.json").await;
     let out = batches(&raw, None).await.unwrap();
     assert!(out[0]["body"].is_null(0));
+    assert!(out[0]["text"].is_null(0));
 }
 
 #[tokio::test]
@@ -120,7 +165,7 @@ async fn decodes_official_public_sample() {
     assert_eq!(authors.as_string::<i32>().value(0), "I. Maremmani");
     let body = first["body"].as_struct();
     assert!(
-        body["text"]
+        first["text"]
             .as_string::<i64>()
             .value(0)
             .starts_with("\nIntroduction\n\nPost-Traumatic Stress Disorder (PTSD)")
@@ -237,5 +282,6 @@ async fn all_annotation_kinds_and_external_ids_have_fixed_types_after_null_rows(
     assert_eq!(out[0].schema(), s2orc_v2_schema());
     assert_eq!(out[0].num_rows(), 2);
     assert!(out[0]["body"].is_null(0));
+    assert!(out[0]["text"].is_null(0));
     assert!(out[0]["body"].is_valid(1));
 }

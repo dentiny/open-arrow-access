@@ -51,7 +51,7 @@ or `abstracts`. A later metadata join would read those datasets separately.
 | --- | --- |
 | `papers` | One paper's graph metadata; no full-body text. It has its own record schema, outside this v2 ingestion contract. |
 | `abstracts` | One paper's abstract where available; a separate record schema, outside this v2 ingestion contract. |
-| `s2orc_v2` | One paper's parsed full text and metadata, with the six top-level fields listed below. |
+| `s2orc_v2` | One paper's parsed full text and metadata, with the seven typed output fields listed below. |
 
 ### Evidence and storage contract
 
@@ -84,14 +84,22 @@ nullability or rule out additional fields.
 | `openaccessinfo` | Object | `Struct`, nullable | Open-access metadata; children below. |
 | `title` | String | `LargeUtf8`, nullable | Paper title. |
 | `authors` | Array of strings | `List<Utf8>`, nullable | Author names, not author-ID objects; retain list order. |
-| `body` | Object | `Struct<text: LargeUtf8, annotations: Struct<...>>`, nullable | Full-body text and typed annotation lists. |
+| `body` | Object | `Struct<annotations: Struct<...>>`, nullable | Typed body annotation lists; body text is moved to `text`. |
 | `bibliography` | Object | `Struct<text: LargeUtf8, annotations: Struct<...>>`, nullable | Bibliographic text and typed annotation lists. |
+| `text` | Upstream `body.text` string | `LargeUtf8`, nullable | Paper body text, appended after `bibliography`. |
 
-All nested children below are nullable in the proposed schema. Keep
-`openaccessinfo`, `body` and `bibliography` as typed structs, or explicitly
-normalize their children to columns such as `openaccessinfo_license`,
-`body_text` and `bibliography_text`. Either representation preserves types;
-do not keep both duplicate representations by default.
+All nested children below are nullable in the fixed schema. The typed reader
+uses `SchemaEvolutionLayer` to move `body.text` into top-level `text` after
+annotation decoding and validation. `body` retains its annotations;
+`bibliography` retains its own text and annotations. Parent nulls propagate to
+`text`, and unchanged body annotation offsets now refer to that top-level text.
+The original body text is not stored a second time.
+
+This is a change from published 0.12.0's six-column typed output. Consumers
+must replace `body.text` reads with `text`, and schema inspection must use the
+same reader version as conversion. The raw byte provider and upstream JSONL
+layout are unchanged. LZ4 is a downstream writer policy on `text`, not a
+reader-side compression or binary conversion.
 
 ### Open-access struct children
 
@@ -112,7 +120,8 @@ finalizing the reader. Do not infer Arrow `Null` as their permanent type.
 
 ### Text and annotation struct children
 
-`body.text` and `bibliography.text` map to `LargeUtf8`. Each annotation
+Upstream `body.text` maps to top-level `text: LargeUtf8`;
+`bibliography.text` remains nested `LargeUtf8`. Each annotation
 field listed below maps to a nullable `List<Span>` after decoding its payload.
 
 | Field path | Public sample evidence |
@@ -426,13 +435,14 @@ connection settings, and replaces any previously configured API key.
 ## Typed S2ORC v2 records
 
 `S2orcV2Accessor::new(decompressed_bytes)` reads one paper per Arrow row with
-`s2orc_v2_schema()`. Nested metadata stays in structs; author names are a list,
-and JSON-encoded annotation arrays are decoded to `List<Struct>`. There is no
-whole-record JSON string column. The byte accessor supplied here must already
+`s2orc_v2_schema()`. Body text is moved to top-level `text`; nested metadata
+stays in structs, author names are a list, and JSON-encoded annotation arrays
+are decoded to `List<Struct>`. There is no whole-record JSON string column. The byte accessor supplied here must already
 expose uncompressed JSONL; the provider download interface still returns original
 bytes.
 
-The reader validates all input columns before projection, preserves null versus
+The reader validates all input columns before body-text extraction and final
+projection, preserves null versus
 empty annotation lists, and implements `ScanPlanner` using the shared JSON
 framer. `with_partition_options` configures the soft decoded-byte chunk target;
 a single complete record may exceed it. Use `ParallelReadLayer` to execute
