@@ -1,5 +1,3 @@
-#![cfg(feature = "format-xml")]
-
 use arrow_array::cast::AsArray;
 use open_arrow_access::{
     Accessor, AttachmentFormat, AttachmentOptions, EmissionPolicy,
