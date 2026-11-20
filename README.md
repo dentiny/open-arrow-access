@@ -188,6 +188,47 @@ Facade and component-crate feature names differ: `format-json` becomes `json` on
 expose the facade's `file_format`, `dataset`, or `decompression` modules; enable
 those facade features when importing them yourself.
 
+## S2ORC v2 output schema
+
+`SemanticScholarService::dataset` discovers compressed shard bytes. After
+explicit gzip decompression, `S2orcV2Accessor` decodes one paper per Arrow row.
+The default reader schema preserves the upstream nested text fields. The
+optional extraction profile below moves only the paper body to a top-level
+`text` column; `bibliography.text` remains the separate reference list.
+
+| Top-level column | Default typed reader | After body-text extraction |
+| --- | --- | --- |
+| `corpusid` | Required `UInt64` | Unchanged |
+| `openaccessinfo` | Nullable `Struct` | Unchanged |
+| `title` | Nullable `LargeUtf8` | Unchanged |
+| `authors` | Nullable `List<Utf8>` | Unchanged |
+| `body` | Nullable `Struct<text: LargeUtf8, annotations: Struct<...>>` | Nullable `Struct<annotations: Struct<...>>` |
+| `bibliography` | Nullable `Struct<text: LargeUtf8, annotations: Struct<...>>` | Unchanged |
+| `text` | Absent | Nullable `LargeUtf8`, appended after `bibliography` |
+
+The optional profile requires the extraction API introduced in
+[PR #588](https://github.com/dentiny/open-arrow-access/pull/588), which is not
+part of the published 0.12.0 API. With a version containing that change:
+
+```rust,ignore
+use open_arrow_access::{AccessorExt, layers::{ColumnEvolution, SchemaEvolutionLayer}};
+
+let records = typed_papers.layer(SchemaEvolutionLayer::try_new(vec![
+    ColumnEvolution::extract_nested_field(["body", "text"], "text"),
+])?);
+```
+
+Extraction removes the original `body.text`, preserves parent nulls and the
+text contents, and leaves body annotation offsets valid against the moved
+`text`. Annotation lists remain typed `List<Struct>` values. Schema inspection
+must use this same transformed accessor to report the seven-column schema.
+
+A downstream sink can request per-column LZ4 for `text` using
+`CompressionSpec::Lz4Raw`; compression is a writer policy and does not change
+its Arrow string type. The access library does not select storage compression.
+See the [Semantic Scholar guide](service/semantic-scholar.md#typed-s2orc-v2-records)
+for the complete nested schema and decoding contract.
+
 ## Common compositions
 
 ```mermaid

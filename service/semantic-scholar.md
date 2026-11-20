@@ -87,11 +87,22 @@ nullability or rule out additional fields.
 | `body` | Object | `Struct<text: LargeUtf8, annotations: Struct<...>>`, nullable | Full-body text and typed annotation lists. |
 | `bibliography` | Object | `Struct<text: LargeUtf8, annotations: Struct<...>>`, nullable | Bibliographic text and typed annotation lists. |
 
-All nested children below are nullable in the proposed schema. Keep
-`openaccessinfo`, `body` and `bibliography` as typed structs, or explicitly
-normalize their children to columns such as `openaccessinfo_license`,
-`body_text` and `bibliography_text`. Either representation preserves types;
-do not keep both duplicate representations by default.
+All nested children below are nullable in the fixed reader schema. The default
+reader keeps `openaccessinfo`, `body` and `bibliography` as typed structs.
+The optional [body-text extraction profile](../README.md#s2orc-v2-output-schema)
+moves `body.text` into a single top-level `text: LargeUtf8` field, removes the
+original nested text, and preserves `body.annotations` and `bibliography`.
+It requires the extraction API from [PR #588](https://github.com/dentiny/open-arrow-access/pull/588);
+published 0.12.0 retains the default six-column schema.
+
+After extraction the ordered top-level columns are `corpusid`, `openaccessinfo`,
+`title`, `authors`, `body`, `bibliography`, `text`. The transformed `body` type is
+`Struct<annotations: Struct<...>>`; the bibliography still contains its own
+`text` and annotations. Null parents produce null top-level text. The text is
+not rewritten, so body annotation offsets still refer to the same contents now
+stored in `text`. Use the transformed accessor for both metadata/schema
+inspection and reads. LZ4 belongs to the downstream writer's per-column policy;
+it does not turn the Arrow string into a binary value.
 
 ### Open-access struct children
 
