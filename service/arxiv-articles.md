@@ -3,7 +3,7 @@
 **Implementation:** [PR #597](https://github.com/dentiny/open-arrow-access/pull/597)
 adds PDF/HTML originals and the shared article accessor.
 [PR #598](https://github.com/dentiny/open-arrow-access/pull/598), stacked on #597,
-adds LaTeX/source packages, `anc/` attachments, the Rust example and related fixtures.
+adds LaTeX/source packages, `anc/` attachments and related fixtures.
 [PR #599](https://github.com/dentiny/open-arrow-access/pull/599) independently tests
 the existing XML reader's original and structured attachment paths.
 Examples require the corresponding implementation; this documentation PR adds no runtime code.
@@ -198,10 +198,3 @@ source HTTP 200 (`application/gzip`, 2,878,415 bytes), and PDF HTTP 206 for a
 emitted **17 regular files**, including `main.tex`, PNG/JPEG/PDF figures and
 bibliography/style files; its directory entry was skipped. This sample does
 not establish whole-corpus format support, S3 permissions or bulk throughput.
-
-To inspect a downloaded gzip-TAR package without disk extraction:
-
-```sh
-cargo run -p open-arrow-access-service --features arxiv \
-  --example arxiv_source_package -- /path/to/source.tar.gz 2401.04088v1
-```
