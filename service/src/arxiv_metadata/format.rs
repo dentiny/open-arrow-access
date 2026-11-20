@@ -8,6 +8,10 @@ pub(super) fn record_format() -> XmlFormat {
     XmlFormat::new("/oai:OAI-PMH/oai:ListRecords/oai:record").with_schema(schema().clone())
 }
 
+pub(crate) fn single_record_format() -> XmlFormat {
+    XmlFormat::new("/oai:OAI-PMH/oai:GetRecord/oai:record").with_schema(schema().clone())
+}
+
 pub(crate) fn schema() -> &'static XmlSchema {
     static SCHEMA: OnceLock<XmlSchema> = OnceLock::new();
     SCHEMA.get_or_init(|| {

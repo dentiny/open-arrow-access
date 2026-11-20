@@ -1,8 +1,65 @@
-use arrow_array::{Array, RecordBatch};
+use arrow_array::{Array, RecordBatch, cast::AsArray};
 use arrow_schema::DataType;
 use open_arrow_access_core::Result;
 
-use super::{ArxivArchive, ArxivContentFormat, ArxivKind, ArxivSourcePackaging, error, id};
+use super::{
+    ArxivArchive, ArxivContentFormat, ArxivKind, ArxivMetadataIndex, ArxivSourcePackaging, error,
+    id,
+};
+
+pub(super) fn validate_oai_metadata(batch: &RecordBatch) -> Result<()> {
+    if batch.schema().as_ref() != crate::arxiv_metadata::schema().arrow_schema().as_ref() {
+        return Err(error::invalid_oai_metadata_schema());
+    }
+    let header = batch["oai:header"].as_struct();
+    if header.null_count() != 0 {
+        return Err(error::null_metadata_id());
+    }
+    validate_metadata_id_column(header["oai:identifier"].as_ref())
+}
+
+pub(super) fn validate_metadata_record_count(count: usize) -> Result<()> {
+    if count != 1 {
+        return Err(error::invalid_metadata_response());
+    }
+    Ok(())
+}
+
+pub(super) fn validate_fetched_metadata(batch: &RecordBatch, article: &str) -> Result<()> {
+    validate_metadata_record_count(batch.num_rows())?;
+    validate_oai_metadata(batch)?;
+    let header = batch["oai:header"].as_struct();
+    let identifier = header["oai:identifier"].as_string::<i32>().value(0);
+    if id::metadata_id(identifier)? != article {
+        return Err(error::invalid_metadata_response());
+    }
+    let status = header["@status"].as_string::<i32>();
+    if !status.is_null(0) && status.value(0) == "deleted" {
+        return Ok(());
+    }
+    let metadata = batch["oai:metadata"].as_struct();
+    let raw = metadata["arxiv:arXivRaw"].as_struct();
+    let raw_id = raw["arxiv:id"].as_string::<i32>();
+    if metadata.is_null(0)
+        || raw.is_null(0)
+        || raw_id.is_null(0)
+        || id::metadata_id(raw_id.value(0))? != article
+    {
+        return Err(error::invalid_metadata_response());
+    }
+    Ok(())
+}
+
+pub(super) fn validate_content_schema(metadata: &ArxivMetadataIndex) -> Result<()> {
+    if metadata.rows.fields() != crate::arxiv_metadata::schema().arrow_schema().fields() {
+        return Err(error::invalid_content_metadata_schema());
+    }
+    Ok(())
+}
+
+pub(super) fn validate_content_metadata_match(row: Option<u64>, id: &str) -> Result<u64> {
+    row.ok_or_else(|| error::missing_content_metadata(id))
+}
 
 pub(super) fn validate_unique_metadata_id(previous: Option<u64>) -> Result<()> {
     if previous.is_some() {

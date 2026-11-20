@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+  <GetRecord>
+    <record>
+      <header>
+        <identifier>oai:arXiv.org:2410.00001</identifier>
+        <datestamp>2026-11-20</datestamp>
+        <setSpec>physics</setSpec>
+      </header>
+      <metadata />
+    </record>
+  </GetRecord>
+</OAI-PMH>
