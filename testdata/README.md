@@ -15,6 +15,7 @@ the owning component tests. Most samples are project-authored; the
 | Providers | [Hugging Face](huggingface/README.md), [PMC](pmc/README.md), [Gutenberg](gutenberg/README.md), [Common Crawl](commoncrawl/README.md), [CourtListener](courtlistener/README.md) |
 | Provider XML | [XML envelopes](xml-metadata/README.md) |
 | XML original and structured reads | [arXiv XML attachment](arxiv-xml/README.md) |
+| Original documents and attachments | [arXiv articles](arxiv-articles/README.md) |
 
 `openstax/book.zip` is a project-authored minimal GitHub source ZIP containing
 one CNXML module; it verifies provider-to-ZIP composition without upstream book

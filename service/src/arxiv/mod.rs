@@ -1,12 +1,19 @@
-//! arXiv bulk-manifest discovery over caller-configured byte storage.
+//! arXiv bulk discovery, native article representations and source-package assets.
 
+mod articles;
 mod error;
+pub use articles::{
+    ArxivArticle, ArxivArticleFormat, ArxivArticleReadRequest, ArxivArticles, article_schema,
+};
+mod source_package;
+pub use source_package::{ArxivSourceOptions, ArxivSourcePackaging, open_source_package};
 mod id;
 mod manifest;
 mod metadata;
 pub use metadata::{ArxivMetadataIndex, ArxivPdfRecords};
 mod records;
 pub use records::{ArxivReadRequest, ArxivRecords, record_schema};
+mod tar_records;
 mod validation;
 
 use open_arrow_access_core::{
@@ -65,8 +72,6 @@ pub struct ArxivArchive {
     /// One-based TAR chunk number within `month` for the selected `kind`.
     /// Maps to manifest `seq_num` and the filename suffix, e.g. `_003.tar`.
     pub sequence: u32,
-    /// Manifest-reported size. Upstream may report the sum of member payload
-    /// bytes without TAR framing; do not use this as the exact object length.
     pub size: u64,
     pub num_items: u64,
     pub checksum: String,

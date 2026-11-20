@@ -13,6 +13,7 @@ arxiv = [
     "dep:arrow-select",
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/tar",
+    "open-arrow-access-decompression/gzip",
 ]
 bhl = ["figshare"]
 biorxiv = ["meca", "dep:chrono"]
@@ -242,3 +243,11 @@ required-features = ["regulations"]
 [[test]]
 name = "oai_harvest"
 required-features = ["oai"]
+
+[[test]]
+name = "arxiv_articles"
+required-features = ["arxiv"]
+
+[[test]]
+name = "arxiv_source_package"
+required-features = ["arxiv"]
