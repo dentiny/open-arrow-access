@@ -446,13 +446,12 @@ ItemID when `entity_type=part`.
 
 ## Current open-arrow-access support
 
-**AWS partition implementation:** [PR #613](https://github.com/dentiny/open-arrow-access/pull/613)
+**AWS partition support (0.14.2):** [PR #613](https://github.com/dentiny/open-arrow-access/pull/613)
 adds `BhlOpenData::discover(ListRequest)`, `partition(keys)` and an anonymous
 bucket-root operator. The explicit selection composes with the existing native
 file-set planner and shared parallel executor, with one object per partition
-and no worker-side corpus listing. The change is tested, but not yet merged or
-published as a crate release. See its
-[implementation guide](https://github.com/dentiny/open-arrow-access/blob/feat/bhl-aws-open-data-partitions/service/bhl-open-data.md)
+and no worker-side corpus listing. The implementation is merged and included
+in the 0.14.2 release. See the [implementation guide](bhl-open-data.md)
 for usage and exact boundaries. It does not implement the proposed page-metadata
 join/schema above or establish AWS/Figshare equivalence.
 
@@ -465,7 +464,7 @@ lazy original byte downloads; they do not implement a page-per-row OCR decoder.
 | `bulk_export(Some(version))` | Delegates to Figshare article 21422193; returns original filenames and complete parsed article metadata, no BHL key |
 | `get(operation, parameters)` | API v3 JSON metadata, key required |
 | `item(id)` | Resolves optional text/pdf/images links for one item |
-| AWS object access | Existing OpenDAL storage reads individual objects; PR #613 adds scoped discovery and explicit object partitions over it, without a joined page-schema decoder |
+| AWS object access | BhlOpenData provides scoped discovery and explicit object partitions over OpenDAL storage in 0.14.2, without a joined page-schema decoder |
 | Generic format/planning tools | Reusable byte, decompression, archive and explicit file-set machinery; not automatic BHL inventory/joins or derived sharding |
 
 `RemoteFiles` listing enumerates attachments, not pages inside an archive.
