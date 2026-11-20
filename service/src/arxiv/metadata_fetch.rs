@@ -1,8 +1,5 @@
 //! Lazy, shared OAI lookups for the default content metadata path.
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use futures::{TryStreamExt, lock::Mutex};
 use open_arrow_access_core::{Accessor, ReadRequest, Result, into_stream};
@@ -13,8 +10,6 @@ use crate::{
     common::Connection,
     oai::{OaiPage, OaiProvider, OaiService},
 };
-
-const CACHE_SIZE: usize = 1024;
 
 #[derive(Default)]
 pub(super) struct MetadataResolver {
@@ -27,7 +22,6 @@ struct State {
     /// Maps normalized, unversioned article IDs (legacy IDs omit the slash)
     /// to shared indexes containing each article's complete typed OAI record.
     cache: HashMap<String, Arc<ArxivMetadataIndex>>,
-    order: VecDeque<String>,
 }
 
 impl State {
@@ -36,15 +30,6 @@ impl State {
             self.connection = Some(Connection::new(ArxivMetadata::ORIGIN)?);
         }
         Ok(self.connection.as_ref().unwrap())
-    }
-
-    fn insert(&mut self, key: String, index: Arc<ArxivMetadataIndex>) {
-        if self.cache.len() == CACHE_SIZE {
-            let oldest = self.order.pop_front().unwrap();
-            self.cache.remove(&oldest);
-        }
-        self.order.push_back(key.clone());
-        self.cache.insert(key, index);
     }
 }
 
@@ -74,7 +59,7 @@ impl MetadataResolver {
         }
         let page = fetch_metadata(state.connection()?, &key).await?;
         let index = Arc::new(decode_metadata(page, &key).await?);
-        state.insert(key, index.clone());
+        state.cache.insert(key, index.clone());
         Ok(index)
     }
 }

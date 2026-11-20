@@ -566,7 +566,7 @@ legacy IDs regain the OAI slash, and every TeX row receives the complete record.
 Deleted records retain their header with null inner metadata. Missing, malformed,
 mismatched and failed responses fail the scan, even if metadata is projected away.
 
-Services and their clones share a 1,024-record FIFO cache, including concurrent
+Services and their clones share an article metadata cache, including concurrent
 lookups for the same article. The resolver uses the shared `Connection` directly;
 request pacing, retry and timeout policies are caller-owned. Configure the
 connection/transport to follow the [arXiv rate limit](https://info.arxiv.org/help/api/tou.html),
