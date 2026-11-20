@@ -109,8 +109,7 @@ async fn read_source(input: Box<dyn ByteReader>) -> Result<()> {
 Choose packaging explicitly: `Tar`, `GzipTar`, `Single { name }` or
 `GzipSingle { name }`. A gzipped lone TeX file is not assumed to be a TAR.
 `Single` also preserves native PDF/PostScript/etc. fallbacks. The decoded package
-is buffered with a hard `max_decoded_bytes` limit (default 256 MiB); gzip checks
-run through EOF before rows are emitted. This catches CRC errors, truncated
+is buffered in full; gzip checks run through EOF before rows are emitted. This catches CRC errors, truncated
 trailers and trailing garbage. Budget decoder/package memory per active task.
 
 For TARs, regular files emit rows and directories are skipped; byte names,
