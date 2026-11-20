@@ -1,4 +1,4 @@
-use arrow_array::{Array, RecordBatch};
+use arrow_array::Array;
 use arrow_schema::DataType;
 use open_arrow_access_core::Result;
 
@@ -174,7 +174,7 @@ pub(super) fn is_tex(name: &[u8]) -> Result<bool> {
     Ok(!parts.iter().any(|part| part.eq_ignore_ascii_case("anc"))
         && name.to_ascii_lowercase().ends_with(".tex"))
 }
-fn is_tar(data: &[u8]) -> bool {
+pub(super) fn is_tar(data: &[u8]) -> bool {
     if data.len() < 512 {
         return false;
     }
@@ -245,14 +245,5 @@ pub(super) fn source_packaging(data: &[u8]) -> Result<ArxivSourcePackaging> {
 
 pub(super) fn validate_latex_bytes(data: &[u8]) -> Result<()> {
     std::str::from_utf8(data).map_err(|_| error::decode("LaTeX member is not UTF-8"))?;
-    Ok(())
-}
-
-pub(super) fn validate_latex_files(batches: &[RecordBatch]) -> Result<()> {
-    if batches.is_empty() {
-        return Err(error::decode(
-            "source package contains no non-ancillary LaTeX files",
-        ));
-    }
     Ok(())
 }

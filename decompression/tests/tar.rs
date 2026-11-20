@@ -335,6 +335,23 @@ async fn cancelled_sequential_header_and_skip_resume_from_persistent_progress() 
 }
 
 #[tokio::test]
+async fn tar_end_markers_do_not_hide_late_source_errors() {
+    use open_arrow_access_decompression::tar::TarStream;
+    let bytes = fixture!("tar", "mixed.tar").await;
+    let source = MemoryAccessor::new(&bytes, 512).with_failure(4096, ErrorKind::PermissionDenied);
+    let mut archive = TarStream::new(
+        source.open("archive".into()).await.unwrap(),
+        TarLimits::default(),
+    )
+    .with_eof_validation();
+    for _ in 0..4 {
+        drop(archive.next_entry().await.unwrap().unwrap());
+    }
+    expect_err_kind(archive.next_entry().await, ErrorKind::PermissionDenied);
+    assert!(archive.next_entry().await.unwrap().is_none());
+}
+
+#[tokio::test]
 async fn sequential_body_source_errors_and_truncation_terminate_archive() {
     use open_arrow_access_decompression::tar::TarStream;
 

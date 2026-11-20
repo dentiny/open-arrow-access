@@ -30,6 +30,7 @@ pub struct TarStream {
     active: Weak<()>,
     limits: TarLimits,
     metadata: ByteMetadata,
+    validate_eof: bool,
 }
 
 struct State {
@@ -60,7 +61,16 @@ impl TarStream {
             active: Weak::new(),
             limits,
             metadata,
+            validate_eof: false,
         }
+    }
+
+    /// Drain input after TAR end markers to surface decoder checksum/trailer
+    /// errors. Callers must consume the archive through EOF for this validation;
+    /// the default stops at TAR end markers without waiting for underlying EOF.
+    pub fn with_eof_validation(mut self) -> Self {
+        self.validate_eof = true;
+        self
     }
 
     /// Advance by one header and return a lazy, bounded sequential body reader.
@@ -73,7 +83,7 @@ impl TarStream {
         if state.payload != 0 && self.active.upgrade().is_some() {
             return Err(active_entry());
         }
-        let entry = match state.next_header(&self.limits).await {
+        let entry = match state.next_header(&self.limits, self.validate_eof).await {
             Ok(entry) => entry,
             Err(error) => {
                 state.finish();
@@ -141,7 +151,11 @@ impl State {
         Ok(self.pending.split_to(limit.min(self.pending.len())))
     }
 
-    async fn next_header(&mut self, limits: &TarLimits) -> Result<Option<TarEntry>> {
+    async fn next_header(
+        &mut self,
+        limits: &TarLimits,
+        validate_eof: bool,
+    ) -> Result<Option<TarEntry>> {
         while self.payload != 0 {
             let bytes = self
                 .take(self.payload.min(usize::MAX as u64) as usize)
@@ -161,6 +175,15 @@ impl State {
             if self.zero_block {
                 if !zero {
                     return Err(decode("TAR archive requires two zero end blocks"));
+                }
+                // Finish the underlying decoder too: its checksum/trailer may
+                // follow the TAR end markers or trailing archive padding.
+                if validate_eof {
+                    while let Some(bytes) = self.input.next().await {
+                        if bytes?.is_empty() {
+                            return Err(empty_chunk("read_tar"));
+                        }
+                    }
                 }
                 self.finish();
                 return Ok(None);

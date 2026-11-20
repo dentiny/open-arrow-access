@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Stream arXiv bulk LaTeX package decoding from the existing Arrow buffer, filter attachments before body materialization and yield batches incrementally. Retain EOF integrity checks by draining TAR inputs through the underlying decoder after end markers.
+
 ## 0.16.0 - 2026-11-20
 
 - Append nullable `metadata: Struct` to the common arXiv content schema, reusing the full arXivRaw OAI record schema. Current content readers leave the column null; metadata fetching and joining are not part of this schema change.
