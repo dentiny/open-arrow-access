@@ -13,6 +13,7 @@ arxiv = [
     "dep:arrow-select",
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/tar",
+    "open-arrow-access-decompression/gzip",
 ]
 bhl = ["figshare"]
 biorxiv = ["meca", "dep:chrono"]
@@ -100,6 +101,8 @@ url.workspace = true
 arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
+flate2.workspace = true
+tar.workspace = true
 more-asserts.workspace = true
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = [
     "csv",
@@ -242,3 +245,11 @@ required-features = ["regulations"]
 [[test]]
 name = "oai_harvest"
 required-features = ["oai"]
+
+[[test]]
+name = "arxiv_articles"
+required-features = ["arxiv"]
+
+[[example]]
+name = "arxiv_source_package"
+required-features = ["arxiv"]
