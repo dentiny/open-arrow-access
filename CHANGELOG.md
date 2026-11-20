@@ -1,10 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 - 2026-11-19
 
 - Accept arXiv manifest sizes that count member payloads without TAR framing; retain lower-bound length and TAR structural/truncation validation.
 - Bind arXivRaw metadata to its published string/struct/list schema, preserving modern and legacy IDs and stable optional/version fields instead of sampled numeric inference. Full-record output uses stable `arxiv:` field prefixes; protocol-header-only mapping remains unchanged.
 - Add an overridable full-record mapping hook for OAI providers, keeping sampled inference as the default for other providers.
+
+- Read original arXiv PDF and HTML articles, and expand LaTeX source packages and ancillary attachments.
+- Reduce S2ORC span parsing allocations with a strict serde visitor and direct consumption of validated spans.
+- Document arXiv bulk file hierarchy, sharding, and validation gaps.
+- Release all 8 public workspace crates at 0.13.0 with matching internal dependency requirements.
 
 ## 0.12.1 - 2026-11-19
 
