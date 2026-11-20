@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.14.0 - 2026-11-20
+
+- Add a common, fixed eight-column arXiv content schema for PDF, LaTeX and XML, with all content emitted as `data: LargeBinary`; keep metadata as a separate data source.
+- Extract LaTeX source members without attachments, preserving article identity and outer/inner source positions and rejecting unsupported non-LaTeX inputs.
+- Accept one explicit relative TAR shard without manifest discovery or listing.
+- Plan individual members within an explicit shard as independent scan partitions so the crawl executor can read and parse them concurrently under its existing concurrency limit. TAR header indexing remains sequential before output begins.
+- Add caller-supplied byte-source length hints to avoid repeated metadata requests, and expose validated TAR member ranges. `ByteReadRequest` struct literals must include the new `content_length` field; constructor-based callers remain compatible.
+- Release all 8 public workspace crates at 0.14.0 with matching internal dependency requirements.
+
 ## 0.13.0 - 2026-11-19
 
 - Accept arXiv manifest sizes that count member payloads without TAR framing; retain lower-bound length and TAR structural/truncation validation.
