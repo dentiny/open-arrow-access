@@ -2,7 +2,7 @@ use arrow_array::Array;
 use arrow_schema::DataType;
 use open_arrow_access_core::Result;
 
-use super::{ArxivArchive, ArxivKind, error};
+use super::{ArxivArchive, ArxivContentFormat, ArxivKind, error};
 
 pub(super) fn validate_unique_metadata_id(previous: Option<u64>) -> Result<()> {
     if previous.is_some() {
@@ -137,4 +137,14 @@ pub(super) fn validate_metadata_id(id: &str) -> Result<()> {
         return Err(error::invalid_unversioned_metadata_id());
     }
     Ok(())
+}
+
+pub(super) fn validate_content_kind(format: ArxivContentFormat, kind: ArxivKind) -> Result<()> {
+    match (format, kind) {
+        (ArxivContentFormat::Pdf, ArxivKind::Pdf)
+        | (ArxivContentFormat::Latex | ArxivContentFormat::Xml, ArxivKind::Source) => Ok(()),
+        _ => Err(error::invalid(
+            "PDF content requires kind=pdf; LaTeX/XML content requires kind=source",
+        )),
+    }
 }

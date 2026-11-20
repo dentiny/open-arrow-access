@@ -1,4 +1,5 @@
 use super::*;
+use crate::arxiv::ArxivKind;
 use arrow_array::{ArrayRef, StringArray, types::UInt64Type};
 use open_arrow_access_test_support::fixture;
 

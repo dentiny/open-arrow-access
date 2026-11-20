@@ -1,7 +1,7 @@
 //! Common binary-content rows for PDF, attachment-free LaTeX, and supplied XML shards.
 use super::{
-    ArxivKind, ArxivMetadataIndex, ArxivReadRequest, ArxivRecords, ArxivSourceOptions,
-    ArxivSourcePackaging, error, id, open_source_package,
+    ArxivMetadataIndex, ArxivReadRequest, ArxivRecords, ArxivSourceOptions, ArxivSourcePackaging,
+    error, id, open_source_package,
 };
 use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
@@ -49,12 +49,6 @@ pub fn content_schema() -> SchemaRef {
         .clone()
 }
 
-/// Compatibility alias for callers using `.latex()`.
-pub type ArxivLatexRecords<A> = ArxivContentRecords<A>;
-pub fn latex_schema() -> SchemaRef {
-    content_schema()
-}
-
 pub struct ArxivContentRecords<A> {
     format: ArxivContentFormat,
     records: ArxivRecords<A>,
@@ -67,13 +61,6 @@ impl<A> ArxivRecords<A> {
             metadata: None,
             format,
         }
-    }
-
-    /// Expand source packages to UTF-8 `.tex` files outside `anc/`. Each file is
-    /// a row; no concatenation, compilation, include expansion or PDF fallback.
-    /// Sources without TeX, invalid UTF-8 and corrupt archives fail the scan.
-    pub fn latex(self) -> ArxivLatexRecords<A> {
-        self.content(ArxivContentFormat::Latex)
     }
 }
 impl<A> ArxivContentRecords<A> {
@@ -100,20 +87,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
     for ArxivContentRecords<A>
 {
     async fn plan_scan(&self, mut request: Self::Request) -> Result<ScanPlan> {
-        match self.format {
-            ArxivContentFormat::Latex if request.kind != ArxivKind::Source => {
-                return Err(error::invalid("LaTeX content requires kind=source"));
-            }
-            ArxivContentFormat::Pdf if request.kind != ArxivKind::Pdf => {
-                return Err(error::invalid("PDF content requires kind=pdf"));
-            }
-            ArxivContentFormat::Xml if request.kind != ArxivKind::Source => {
-                return Err(error::invalid(
-                    "XML content requires a caller-owned source inventory",
-                ));
-            }
-            _ => {}
-        }
+        super::validation::validate_content_kind(self.format, request.kind)?;
         let schema = self
             .metadata
             .as_ref()
