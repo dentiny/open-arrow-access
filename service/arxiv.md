@@ -203,6 +203,45 @@ are not automatically checked against streamed content. Known archive length
 is checked, but equal length is not a content identity guarantee. Pin a mirror
 snapshot and verify its checksums separately when reproducibility is required.
 
+### Figures and optional multimedia in source packages
+
+A LaTeX source download is not limited to `.tex` text. For multi-file
+submissions, arXiv packages the source together with the submitted figures
+(for example, PNG, JPEG, PDF or EPS files). Authors may also supply optional
+ancillary material under `anc/`, including extra images, movies, data and
+code. arXiv documents that ancillary files are included in the complete article
+source download. Their presence and contents depend on the submission and
+article version; not every article has LaTeX source or multimedia attachments.
+
+For example, a multi-file article source payload inside an outer bulk TAR
+could contain the following (illustrative, not a required layout):
+
+```text
+arXiv_src_2410_001.tar              # Outer bulk shard: many article payloads
+└── <article source package>       # Inner package, often .tar.gz
+    ├── main.tex
+    ├── references.bib
+    ├── figures/
+    │   ├── architecture.pdf
+    │   └── results.png
+    └── anc/                      # Optional author-supplied attachments
+        ├── demo.mp4
+        └── data.csv
+```
+
+The current bulk reader emits each regular member of the **outer** TAR as one
+row with its complete original payload in `data`. When that payload is a
+compressed article package, any included figures and attachments remain inside
+those bytes. The reader does not recursively unpack the package, resolve
+LaTeX figure references, or emit separate image/video rows. Asset extraction
+and associations with text/captions require a downstream step. Resources
+referenced only by external links are not fetched automatically. This describes
+preservation of files present in the payload, not verified completeness of
+ancillary material across the S3 corpus.
+
+See arXiv's [source download description](https://info.arxiv.org/help/config_browser.html#source)
+and [ancillary-file packaging and download rules](https://info.arxiv.org/help/ancillary_files.html).
+
 ### Arrow row contract
 
 The native `records()` schema, before an optional metadata join, is:
