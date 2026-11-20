@@ -1,9 +1,9 @@
 use super::*;
 use crate::arxiv::ArxivKind;
-use arrow_array::types::UInt64Type;
+use arrow_array::{Array, StructArray, types::UInt64Type};
 use open_arrow_access_test_support::fixture;
 
-async fn read(name: &str, data: &[u8]) -> Result<Vec<RecordBatch>> {
+fn raw_batch(name: &str, data: &[u8]) -> Result<RecordBatch> {
     let mut input = RecordBatchBuilder::new(crate::arxiv::record_schema(), None)?;
     input.push(|row| {
         row.append("shard_uri", "src/arXiv_src_2410_001.tar")?;
@@ -11,8 +11,12 @@ async fn read(name: &str, data: &[u8]) -> Result<Vec<RecordBatch>> {
         row.append("entry_name", name.as_bytes())?;
         row.append("data", data)
     })?;
+    input.finish()
+}
+
+async fn read(name: &str, data: &[u8]) -> Result<Vec<RecordBatch>> {
     expand(
-        &input.finish()?,
+        &raw_batch(name, data)?,
         &ReadOptions::default().with_batch_size(std::num::NonZeroUsize::MIN),
     )
     .await
@@ -71,10 +75,11 @@ async fn accepts_legacy_single_sources_and_rejects_non_latex() {
 }
 
 #[tokio::test]
-async fn formats_emit_identical_schemas_and_preserve_content() {
+async fn formats_preserve_content_and_join_metadata() {
     use open_arrow_access_storage::OpenDalAccessor;
     use open_arrow_access_test_support::temp_fs;
     let schema = content_schema();
+    let snapshot = oai_snapshot().await;
     assert_eq!(schema.fields().len(), 10);
     let metadata = schema.field_with_name("metadata").unwrap();
     assert!(metadata.is_nullable());
@@ -123,20 +128,40 @@ async fn formats_emit_identical_schemas_and_preserve_content() {
         };
         assert_eq!(batch["data"].as_binary::<i64>().value(0), expected);
         assert!(reader.next().await.unwrap().is_none());
-        let index = Arc::new(ArxivMetadataIndex::from_oai_records(oai_snapshot().await).unwrap());
-        let records = records.with_metadata(index).unwrap();
-        let mut reader = records
-            .open(ArxivReadRequest::new(kind).with_month(2410))
-            .await
-            .unwrap();
-        let batch = reader.next().await.unwrap().unwrap();
-        assert_eq!(batch["metadata"].null_count(), 0);
+        let records = records.with_metadata(index(snapshot.clone())).unwrap();
+        let request = ArxivReadRequest::new(kind).with_month(2410);
+        let mut reader = records.open(request.clone()).await.unwrap();
+        let enriched = reader.next().await.unwrap().unwrap();
+        assert_eq!(enriched["data"].as_ref(), batch["data"].as_ref());
+        assert_metadata(&enriched, &snapshot, 1);
         assert!(reader.next().await.unwrap().is_none());
+        // Reordered and empty projections still preserve row counts.
+        for columns in [vec!["metadata".into(), "article_id".into()], vec![]] {
+            let mut request = request.clone();
+            request.options.projection = Some(columns.clone());
+            let mut reader = records.open(request).await.unwrap();
+            let batch = reader.next().await.unwrap().unwrap();
+            assert_eq!(batch.num_rows(), 1);
+            assert_eq!(batch.num_columns(), columns.len());
+            if !columns.is_empty() {
+                assert_metadata(&batch, &snapshot, 1);
+            }
+            assert!(reader.next().await.unwrap().is_none());
+        }
+        // Missing matches fail even when metadata is projected away.
+        let records = records.with_metadata(index(snapshot.slice(2, 1))).unwrap();
+        let mut request = ArxivReadRequest::new(kind).with_shard(key);
+        request.options.projection = Some(vec![]);
+        let mut reader = records.open(request).await.unwrap();
+        assert!(reader.next().await.is_err());
     }
 }
 
 async fn oai_snapshot() -> RecordBatch {
-    use crate::{arxiv_metadata::ArxivMetadataService, oai::OaiPage};
+    use crate::{
+        arxiv_metadata::ArxivMetadata,
+        oai::{OaiPage, OaiProvider},
+    };
     use open_arrow_access_core::ReadRequest;
     use open_arrow_access_test_support::format::collect_batches;
     let page = OaiPage {
@@ -145,107 +170,28 @@ async fn oai_snapshot() -> RecordBatch {
         resumption_token: None,
     };
     collect_batches(
-        &page.records(
-            ArxivMetadataService::new()
-                .unwrap()
-                .inferred_record_format(),
-        ),
+        &page.records(ArxivMetadata::inferred_record_format()),
         ReadRequest::new("metadata"),
     )
     .await
     .remove(0)
 }
 
-#[tokio::test]
-async fn content_fills_full_metadata_for_all_formats_and_projections() {
-    use arrow_array::{Array, StructArray};
-    use open_arrow_access_storage::OpenDalAccessor;
-    use open_arrow_access_test_support::temp_fs;
-    // Deliberately reverse snapshot order relative to content, including a legacy ID.
-    let snapshot = oai_snapshot().await;
-    let index = Arc::new(ArxivMetadataIndex::from_oai_records(snapshot.clone()).unwrap());
-    let expected = StructArray::from(snapshot).slice(1, 1);
-    for (format, kind, file, key) in [
-        (
-            ArxivContentFormat::Pdf,
-            ArxivKind::Pdf,
-            "pdf.tar",
-            "pdf/test.tar",
-        ),
-        (
-            ArxivContentFormat::Latex,
-            ArxivKind::Source,
-            "latex.tar",
-            "src/test.tar",
-        ),
-        (
-            ArxivContentFormat::Xml,
-            ArxivKind::Source,
-            "xml.tar",
-            "src/test.tar",
-        ),
-    ] {
-        let bytes = fixture!("arxiv-content", file).await;
-        let (_temp, operator) = temp_fs(&[(key, &bytes)]);
-        let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
-            .records()
-            .content(format)
-            .with_metadata(index.clone())
-            .unwrap();
-        for projection in [
-            None,
-            Some(vec!["metadata".to_owned(), "article_id".to_owned()]),
-            Some(vec![]),
-        ] {
-            let mut request = ArxivReadRequest::new(kind).with_shard(key);
-            request.options.projection = projection.clone();
-            let mut reader = records.open(request).await.unwrap();
-            let mut rows = 0;
-            while let Some(batch) = reader.next().await.unwrap() {
-                rows += batch.num_rows();
-                if projection.as_ref().is_none_or(|p| !p.is_empty()) {
-                    let metadata = batch["metadata"].as_struct();
-                    assert_eq!(metadata.null_count(), 0);
-                    for row in 0..batch.num_rows() {
-                        assert_eq!(metadata.slice(row, 1), expected);
-                    }
-                    if projection.is_none() {
-                        let expected_bytes = match format {
-                            ArxivContentFormat::Pdf => {
-                                fixture!("arxiv-articles", "paper.pdf").await
-                            }
-                            ArxivContentFormat::Latex => {
-                                fixture!("arxiv-articles", "main.tex").await
-                            }
-                            ArxivContentFormat::Xml => fixture!("arxiv-xml", "article.xml").await,
-                        };
-                        assert_eq!(batch["data"].as_binary::<i64>().value(0), expected_bytes);
-                    }
-                }
-            }
-            assert_eq!(rows, 1);
-        }
-        // A missing match must also fail if the caller omits metadata entirely.
-        let missing = Arc::new(
-            ArxivMetadataIndex::from_oai_records(oai_snapshot().await.slice(2, 1)).unwrap(),
-        );
-        let bytes = fixture!("arxiv-content", file).await;
-        let (_temp, operator) = temp_fs(&[(key, &bytes)]);
-        let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
-            .records()
-            .content(format)
-            .with_metadata(missing)
-            .unwrap();
-        let mut request = ArxivReadRequest::new(kind).with_shard(key);
-        request.options.projection = Some(vec![]);
-        let mut reader = records.open(request).await.unwrap();
-        assert!(reader.next().await.is_err());
+fn index(snapshot: RecordBatch) -> Arc<ArxivMetadataIndex> {
+    Arc::new(ArxivMetadataIndex::from_oai_records(snapshot).unwrap())
+}
+
+fn assert_metadata(batch: &RecordBatch, snapshot: &RecordBatch, expected_row: usize) {
+    let expected = StructArray::from(snapshot.clone()).slice(expected_row, 1);
+    let metadata = batch["metadata"].as_struct();
+    assert_eq!(metadata.null_count(), 0);
+    for row in 0..batch.num_rows() {
+        assert_eq!(metadata.slice(row, 1), expected);
     }
 }
 
 #[tokio::test]
 async fn metadata_normalizes_legacy_ids_repeats_tex_rows_and_retains_deletions() {
-    use arrow_array::{Array, StructArray};
     let snapshot = oai_snapshot().await;
     let index = ArxivMetadataIndex::from_oai_records(snapshot.clone()).unwrap();
     let batches = read(
@@ -254,39 +200,17 @@ async fn metadata_normalizes_legacy_ids_repeats_tex_rows_and_retains_deletions()
     )
     .await
     .unwrap();
-    let mut rows = 0;
+    assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
     for batch in batches {
-        let batch = index.attach_content(batch).unwrap();
-        rows += batch.num_rows();
-        for row in 0..batch.num_rows() {
-            assert_eq!(
-                batch["metadata"].as_struct().slice(row, 1),
-                StructArray::from(snapshot.clone()).slice(0, 1)
-            );
-        }
+        assert_metadata(&index.attach_content(batch).unwrap(), &snapshot, 0);
     }
-    assert_eq!(rows, 2);
-    let mut input = RecordBatchBuilder::new(crate::arxiv::record_schema(), None).unwrap();
-    input
-        .push(|row| {
-            row.append("shard_uri", "pdf/test.tar")?;
-            row.append("entry_index", 0_u64)?;
-            row.append("entry_name", b"2410/2410.99999.pdf".as_slice())?;
-            row.append("data", b"%PDF".as_slice())
-        })
-        .unwrap();
-    let batch = index
-        .attach_content(document_batch(&input.finish().unwrap(), ArxivContentFormat::Pdf).unwrap())
-        .unwrap();
-    let metadata = batch["metadata"].as_struct();
-    assert!(!metadata.is_null(0));
-    assert!(metadata["oai:metadata"].is_null(0));
-    assert_eq!(
-        metadata["oai:header"].as_struct()["@status"]
-            .as_string::<i32>()
-            .value(0),
-        "deleted"
-    );
+    let deleted = document_batch(
+        &raw_batch("2410/2410.99999.pdf", b"%PDF").unwrap(),
+        ArxivContentFormat::Pdf,
+    )
+    .unwrap();
+    assert_metadata(&index.attach_content(deleted).unwrap(), &snapshot, 2);
+    assert!(snapshot["oai:metadata"].is_null(2));
     let duplicate = arrow_select::concat::concat_batches(
         &snapshot.schema(),
         &[snapshot.slice(1, 1), snapshot.slice(1, 1)],
@@ -299,7 +223,7 @@ async fn metadata_normalizes_legacy_ids_repeats_tex_rows_and_retains_deletions()
 
 #[tokio::test]
 async fn rejects_null_ids_and_untyped_content_snapshots() {
-    use arrow_array::{ArrayRef, StringArray, StructArray};
+    use arrow_array::{ArrayRef, StringArray};
     use open_arrow_access_storage::OpenDalAccessor;
     use open_arrow_access_test_support::temp_fs;
     let snapshot = oai_snapshot().await;
