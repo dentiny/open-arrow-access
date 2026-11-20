@@ -53,7 +53,12 @@ pmc = [
     "open-arrow-access-decompression/gzip",
 ]
 regulations = []
-semantic-scholar = ["dep:arrow-array", "dep:arrow-schema", "open-arrow-access-file-format/json"]
+semantic-scholar = [
+    "dep:arrow-array",
+    "dep:arrow-schema",
+    "open-arrow-access-file-format/json",
+    "dep:open-arrow-access-layers",
+]
 uspto = []
 warc = ["open-arrow-access-file-format/warc"]
 zenodo = []
@@ -76,6 +81,7 @@ futures.workspace = true
 http.workspace = true
 httpdate = "1"
 open-arrow-access-core.workspace = true
+open-arrow-access-layers = { workspace = true, optional = true }
 open-arrow-access-dataset.workspace = true
 open-arrow-access-decompression = { workspace = true, optional = true }
 open-arrow-access-file-format.workspace = true

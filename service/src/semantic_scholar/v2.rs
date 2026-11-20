@@ -8,12 +8,14 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ReadRequest, RecordCapability, RecordMetadata, RecordReader,
     ResolvedProjection, Result, ScanPlan, ScanPlanner, StreamReader, async_trait, into_stream,
+    map_record_reader,
 };
 use open_arrow_access_file_format::{DecodePartitionOptions, json::JsonAccessor};
 pub use schema::s2orc_v2_schema;
 
 /// Streaming typed reader. Input must already be decompressed JSONL.
-/// All fields are decoded and validated before top-level projection. Native scan
+/// Body text is moved to top-level `text`; `body` retains its annotations.
+/// All fields are decoded and validated before extraction/projection. Native scan
 /// planning retains the JSON framer's bounded chunks and parallel decode units.
 pub struct S2orcV2Accessor<A> {
     input: JsonAccessor<A>,
@@ -54,7 +56,7 @@ impl<A: ByteAccessor + 'static> Accessor for S2orcV2Accessor<A> {
     async fn open(&self, mut request: ReadRequest) -> Result<Box<dyn RecordReader>> {
         let projection = request.options.resolve_projection(&s2orc_v2_schema())?;
         request.options.projection = None;
-        Ok(convert_reader(self.input.open(request).await?, projection))
+        convert_reader(self.input.open(request).await?, projection)
     }
 }
 
@@ -69,7 +71,7 @@ impl<A: ByteAccessor + 'static> ScanPlanner for S2orcV2Accessor<A> {
             .partitions
             .map_ok(move |open| {
                 let projection = projection.clone();
-                async move { Ok(convert_reader(open.await?, projection)) }.boxed()
+                async move { convert_reader(open.await?, projection) }.boxed()
             })
             .boxed();
         Ok(plan)
@@ -79,17 +81,24 @@ impl<A: ByteAccessor + 'static> ScanPlanner for S2orcV2Accessor<A> {
 fn convert_reader(
     reader: Box<dyn RecordReader>,
     projection: ResolvedProjection,
-) -> Box<dyn RecordReader> {
+) -> Result<Box<dyn RecordReader>> {
     let mut metadata = reader.metadata().clone();
-    metadata.schema = projection.schema;
+    metadata.schema = schema::decoded_schema();
     let object = metadata.source.clone();
     let ordering = reader.capability().ordering;
     let batches = into_stream(reader).map(move |batch| {
-        let batch = decode::batch(batch?).map_err(|error| error.with_object(object.as_ref()))?;
-        match &projection.indices {
+        decode::batch(batch?).map_err(|error| error.with_object(object.as_ref()))
+    });
+    let decoded = Box::new(StreamReader::records(batches, metadata, ordering));
+    let evolved = schema::evolution().wrap_reader(decoded)?;
+    let capability = evolved.capability();
+    Ok(Box::new(map_record_reader(
+        evolved,
+        projection.schema,
+        capability,
+        move |batch| match &projection.indices {
             Some(indices) => batch.project(indices).map_err(error::arrow_error),
             None => Ok(batch),
-        }
-    });
-    Box::new(StreamReader::records(batches, metadata, ordering))
+        },
+    )))
 }
