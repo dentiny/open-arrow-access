@@ -167,6 +167,7 @@ async fn duckdb_pages_preserve_order_metadata_reports_and_projection() {
         assert_eq!(batch.schema().field(0).name(), "metadata");
         assert_eq!(batch.schema().field(1).name(), "page_id");
     }
+    assert_eq!(observations.requests.lock().unwrap().len(), 4);
 }
 
 #[tokio::test]

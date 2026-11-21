@@ -138,6 +138,12 @@ shared scan executor. `with_schema_metadata` retains caller provenance in the
 plan and emitted batch schemas. The joined constructor attaches metadata provenance automatically and calls the
 caller's report hook before each OCR read.
 
+Page projections are resolved before reading. Omitting `data` performs zero OCR
+object opens/downloads and constructs only the selected page columns. An empty
+projection still emits one row per selected page. Selecting `data` preserves the
+original bytes, byte I/O options and storage failures. DuckDB loading and its
+request-level join behavior are unchanged.
+
 ## DuckDB metadata joins
 
 Enable `service-bhl` and load `BhlMetadata::load(storage).await` once.

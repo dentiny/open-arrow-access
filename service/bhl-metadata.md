@@ -98,5 +98,7 @@ they are not accumulated into schema metadata.
 
 Sequential reads follow request order, including duplicates. The scan remains
 reorderable for callers explicitly using unordered/parallel execution layers.
-Projection retains the current page-reader behavior: it projects the constructed
-record and does not yet skip OCR reads for metadata-only selections.
+Projection constructs only selected page columns. Requests without `data`
+perform no OCR object opens/downloads; zero-column projections still retain one
+row per selected page. Selecting `data` keeps its original bytes and I/O options.
+The loaded source tables and request-level DuckDB join remain unchanged.

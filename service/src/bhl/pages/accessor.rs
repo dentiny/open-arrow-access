@@ -25,6 +25,7 @@ enum MetadataSource {
 }
 
 /// Read selected OCR pages with caller-supplied or DuckDB-joined metadata.
+/// Projections without `data` skip OCR reads; empty projections keep one row.
 pub struct BhlPageAccessor<A> {
     storage: Arc<A>,
     snapshot_id: Arc<str>,
@@ -130,7 +131,6 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                 snapshot.clone(),
                 page,
                 request.byte_options,
-                projection.indices.clone(),
                 partition_metadata.clone(),
             )
         };
@@ -172,7 +172,6 @@ fn page_partition<A: ByteAccessor + 'static>(
     snapshot: Arc<str>,
     page: BhlPageMetadata,
     byte_options: ByteReadOptions,
-    indices: Option<Vec<usize>>,
     metadata: RecordMetadata,
 ) -> ScanPartition {
     scan_partition(async move {
@@ -181,7 +180,6 @@ fn page_partition<A: ByteAccessor + 'static>(
             snapshot,
             page,
             byte_options,
-            indices,
             metadata.schema.clone(),
         ));
         Ok(StreamReader::records(
@@ -197,21 +195,24 @@ async fn read_page_batch<A: ByteAccessor>(
     snapshot: Arc<str>,
     page: BhlPageMetadata,
     byte_options: ByteReadOptions,
-    indices: Option<Vec<usize>>,
     output_schema: SchemaRef,
 ) -> Result<RecordBatch> {
-    let data = read_object(
-        storage.as_ref(),
-        ByteReadRequest::new(page.object.clone()).with_options(byte_options),
-        "read_bhl_page",
-    )
-    .await?;
+    let data = if output_schema.field_with_name("data").is_ok() {
+        read_object(
+            storage.as_ref(),
+            ByteReadRequest::new(page.object.clone()).with_options(byte_options),
+            "read_bhl_page",
+        )
+        .await?
+    } else {
+        Default::default()
+    };
     let source_path = format!(
         "{}{}",
         super::super::OPEN_DATA_BUCKET_URL,
         page.object.locator()
     );
-    let batch = BhlPageRecord {
+    BhlPageRecord {
         entity_type: &page.identity.entity_type,
         entity_id: page.identity.entity_id,
         page_id: page.identity.page_id,
@@ -222,17 +223,5 @@ async fn read_page_batch<A: ByteAccessor>(
         source_entry_index: None,
         metadata: page.metadata,
     }
-    .into_batch()?;
-    let batch = match indices {
-        Some(indices) => batch
-            .project(&indices)
-            .map_err(super::super::error::page_record)?,
-        None => batch,
-    };
-    open_arrow_access_core::record_batch_with_rows(
-        output_schema,
-        batch.columns().to_vec(),
-        batch.num_rows(),
-    )
-    .map_err(super::super::error::page_record)
+    .into_projected_batch(output_schema)
 }
