@@ -1,8 +1,10 @@
+use futures::stream;
 use std::sync::Arc;
 
 use crate::{
     Accessor, ByteAccessor, ByteReadRequest, OrderRequirement, ReadRequest, RecordCapability,
-    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, async_trait,
+    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait,
+    scan_partition,
 };
 
 use super::{ArchiveOptions, reader::open_reader, validation};
@@ -45,8 +47,11 @@ use super::{ArchiveOptions, reader::open_reader, validation};
 /// Like `CrawlAccessor`, this is an integrated accessor. It is not a `Layer<A>`
 /// implementation: bytes-to-records changes the reader/request interface. Record
 /// layers can wrap its output, or pass it to `CrawlAccessor::files` with ordered
-/// emission to process multiple archives. Its one native partition per object
-/// leaves scheduling and concurrency to the crawl executor.
+/// emission to process multiple archives. Native partitions own complete output
+/// batches, allowing record processing to overlap sequential archive discovery
+/// under the executor's resident partition budget. Row/byte batching is retained.
+/// A single archive is read once; multiple archives use file-level scheduling
+/// through `CrawlAccessor::files`, sharing the same concurrency window.
 ///
 /// ```no_run
 /// use open_arrow_access::{
@@ -111,9 +116,29 @@ impl ScanPlanner for ArchiveAccessor {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let metadata = self.metadata(request.clone()).await?;
         let accessor = self.clone();
-        Ok(ScanPlan::new(
-            metadata,
-            vec![Box::pin(async move { accessor.open(request).await })],
-        ))
+        let output = metadata.clone();
+        let partitions = stream::try_unfold(None::<Box<dyn RecordReader>>, move |reader| {
+            let accessor = accessor.clone();
+            let request = request.clone();
+            let output = output.clone();
+            async move {
+                let mut reader = match reader {
+                    Some(reader) => reader,
+                    None => accessor.open(request).await?,
+                };
+                let Some(batch) = reader.next().await? else {
+                    return Ok(None);
+                };
+                let partition = scan_partition(async move {
+                    Ok(StreamReader::records(
+                        stream::iter([Ok(batch)]),
+                        output,
+                        OrderRequirement::PreserveGlobal,
+                    ))
+                });
+                Ok(Some((partition, Some(reader))))
+            }
+        });
+        Ok(ScanPlan::from_stream(metadata, partitions).with_streaming_discovery())
     }
 }
