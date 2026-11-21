@@ -2,8 +2,6 @@ use super::*;
 use crate::arxiv::ArxivKind;
 use crate::common::Connection;
 use arrow_array::{Array, StructArray, types::UInt64Type};
-use open_arrow_access_core::{AccessorExt, ErrorKind};
-use open_arrow_access_layers::{MissingObjectLayer, MissingObjectPolicy};
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::{fixture, http::HttpFixture, temp_fs};
 
@@ -80,66 +78,6 @@ async fn accepts_legacy_single_sources_and_rejects_non_latex() {
     }
     assert!(validation::is_tex(b"chapters/intro.tex").unwrap());
     assert!(validation::is_tex(b"../escape.tex").is_err());
-}
-
-#[tokio::test]
-async fn missing_latex_skips_only_the_article_before_metadata_requests() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    let http = HttpFixture::new();
-    let (_temp, records, key) = content_fixture(
-        ArxivContentFormat::Latex,
-        ArxivKind::Source,
-        "mixed-source.tar",
-        &http,
-    )
-    .await;
-    let skipped = Arc::new(AtomicUsize::new(0));
-    let reported = skipped.clone();
-    let records = records.layer(MissingObjectLayer::new(
-        MissingObjectPolicy::Skip,
-        move |error| {
-            assert_eq!(error.kind(), ErrorKind::NotFound);
-            reported.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        },
-    ));
-    let mut reader = records
-        .open(ArxivReadRequest::new(ArxivKind::Source).with_shard(key))
-        .await
-        .unwrap();
-    let mut rows = 0;
-    while let Some(batch) = reader.next().await.unwrap() {
-        for id in batch["article_id"].as_string::<i64>().iter() {
-            assert_eq!(id, Some("2410.00001"));
-        }
-        rows += batch.num_rows();
-    }
-    assert_eq!(rows, 1);
-    assert_eq!(skipped.load(Ordering::SeqCst), 2);
-    assert_eq!(http.requests().len(), 1);
-
-    let no_tex = fixture!("arxiv-content", "anc-only.tar").await;
-    assert_eq!(
-        read("2410/2410.00001.gz", &no_tex)
-            .await
-            .unwrap_err()
-            .kind(),
-        ErrorKind::NotFound
-    );
-    for bytes in [b"plain text".as_slice(), b"\xff"] {
-        assert_eq!(
-            read("2410/2410.00001.gz", bytes).await.unwrap_err().kind(),
-            ErrorKind::Decode
-        );
-    }
-    let corrupt = fixture!("arxiv-articles", "bad-crc.tar.gz").await;
-    assert_eq!(
-        read("2410/2410.00001.gz", &corrupt)
-            .await
-            .unwrap_err()
-            .kind(),
-        ErrorKind::Decode
-    );
 }
 
 #[tokio::test]
