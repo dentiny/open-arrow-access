@@ -172,3 +172,86 @@ async fn snapshot_record_plans_preserve_validation_order_and_quoted_csv() {
         ["nc", "minnag", "arizsuper", "nc", "minnag", "arizsuper"]
     );
 }
+
+#[test]
+fn typed_arrow_contract_preserves_entity_types_and_nullability() {
+    use arrow_schema::TimeUnit;
+    use open_arrow_access_service::courtlistener::CourtListenerSchemas;
+    let schemas = CourtListenerSchemas::default();
+    let output = schemas.schema();
+    assert_eq!(
+        output
+            .fields()
+            .iter()
+            .map(|f| f.name().as_str())
+            .collect::<Vec<_>>(),
+        [
+            "snapshot_date",
+            "opinion",
+            "cluster",
+            "docket",
+            "court",
+            "provenance"
+        ]
+    );
+    for (name, count, nullable) in [
+        ("opinion", 22, false),
+        ("cluster", 36, true),
+        ("docket", 54, true),
+        ("court", 20, true),
+    ] {
+        let field = output.field_with_name(name).unwrap();
+        assert_eq!(field.is_nullable(), nullable);
+        let DataType::Struct(children) = field.data_type() else {
+            panic!("entity must be a struct");
+        };
+        assert_eq!(children.len(), count);
+        assert!(
+            !children
+                .iter()
+                .find(|f| f.name() == "id")
+                .unwrap()
+                .is_nullable()
+        );
+    }
+    let opinion = Schema::new(schemas.opinion);
+    let court = Schema::new(schemas.court);
+    let docket = Schema::new(schemas.docket);
+    for name in ["date_created", "date_modified"] {
+        let f = opinion.field_with_name(name).unwrap();
+        assert_eq!(
+            f.data_type(),
+            &DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into()))
+        );
+        assert!(!f.is_nullable());
+    }
+    assert_eq!(
+        opinion.field_with_name("page_count").unwrap().data_type(),
+        &DataType::UInt64
+    );
+    assert!(opinion.field_with_name("page_count").unwrap().is_nullable());
+    assert_eq!(
+        opinion.field_with_name("per_curiam").unwrap().data_type(),
+        &DataType::Boolean
+    );
+    assert_eq!(
+        opinion.field_with_name("cluster_id").unwrap().data_type(),
+        &DataType::Int64
+    );
+    assert_eq!(
+        court.field_with_name("id").unwrap().data_type(),
+        &DataType::Utf8
+    );
+    assert_eq!(
+        court.field_with_name("position").unwrap().data_type(),
+        &DataType::Float64
+    );
+    assert_eq!(
+        docket.field_with_name("court_id").unwrap().data_type(),
+        &DataType::Utf8
+    );
+    assert_eq!(
+        docket.field_with_name("date_filed").unwrap().data_type(),
+        &DataType::Date32
+    );
+}
