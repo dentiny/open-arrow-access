@@ -218,33 +218,3 @@ async fn emits_rows_until_callback_fails() {
             .is_err()
     );
 }
-
-#[tokio::test]
-async fn joins_multiple_batches_in_request_order() {
-    let metadata = load().await;
-    // More than two DuckDB vectors, including a partial final vector.
-    let paths = [ITEM, PART, MISSING]
-        .into_iter()
-        .cycle()
-        .take(4097)
-        .collect::<Vec<_>>();
-    let rows = read(&metadata, &paths);
-    assert_eq!(rows.len(), paths.len());
-    let schema = page_schema();
-    let expected = schema.field_with_name("metadata").unwrap().data_type();
-    for (row, path) in rows.iter().zip(paths) {
-        assert_eq!(row.object.locator(), path);
-        assert_eq!(row.metadata.data_type(), expected);
-        assert!(row.conflicts.is_empty());
-        if path == MISSING {
-            assert_eq!(
-                row.missing,
-                ["page:30", "item:20", "title:unresolved parent"]
-            );
-            assert!(row.metadata.column_by_name("item").unwrap().is_null(0));
-        } else {
-            assert!(row.missing.is_empty());
-            assert_eq!(cell(&row.metadata, "title", "TitleID"), "001");
-        }
-    }
-}

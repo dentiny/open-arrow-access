@@ -62,8 +62,6 @@ pub(super) fn for_each(
     let mut statement = connection
         .prepare(include_str!("join.sql"))
         .map_err(error::duckdb)?;
-    // Start streaming, then use the fallible step API: the older binding's
-    // Arrow iterator panics on fetch errors instead of returning them.
     let _ = statement.stream_arrow([]).map_err(error::duckdb)?;
     let mut emitted = 0;
     while let Some(batch) = statement.step().map_err(error::duckdb)? {
