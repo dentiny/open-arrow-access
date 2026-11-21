@@ -1,6 +1,7 @@
 //! Stream a shard once and hand owned article payloads to the shared executor.
 use super::{
-    ArxivArchive, ArxivReadRequest, ArxivRecords, ArxivService, record_schema, validation,
+    ArxivArchive, ArxivReadRequest, ArxivRecords, ArxivService, record_schema,
+    records::SelectedArchive, validation,
 };
 use futures::stream;
 use open_arrow_access_core::{
@@ -49,7 +50,10 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
             request,
             archives
                 .into_iter()
-                .map(|archive| (archive.filename.clone(), Some(archive)))
+                .map(|archive| SelectedArchive {
+                    source: archive.filename.clone(),
+                    manifest: Some(archive),
+                })
                 .collect(),
         )
     }

@@ -91,6 +91,12 @@ pub struct ArxivRecords<A> {
     pub(super) service: Arc<ArxivService<A>>,
 }
 
+/// A selected TAR source and its optional manifest constraints.
+pub(super) struct SelectedArchive {
+    pub source: String,
+    pub manifest: Option<super::ArxivArchive>,
+}
+
 impl<A> ArxivService<A> {
     pub fn records(self) -> ArxivRecords<A> {
         ArxivRecords {
@@ -145,13 +151,19 @@ where
         request.options.resolve_projection(&record_schema())?;
         let archives = if let Some(shard) = &request.shard {
             super::validation::validate_shard(shard, request.month)?;
-            vec![(shard.clone(), /* manifest_archive= */ None)]
+            vec![SelectedArchive {
+                source: shard.clone(),
+                manifest: None,
+            }]
         } else {
             self.service
                 .manifest(request.kind, request.month, request.byte_options)
                 .await?
                 .into_iter()
-                .map(|archive| (archive.filename.clone(), Some(archive)))
+                .map(|archive| SelectedArchive {
+                    source: archive.filename.clone(),
+                    manifest: Some(archive),
+                })
                 .collect()
         };
         self.plan_selected_archives(request, archives)
@@ -162,7 +174,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
     pub(super) fn plan_selected_archives(
         &self,
         request: ArxivReadRequest,
-        archives: Vec<(String, Option<super::ArxivArchive>)>,
+        archives: Vec<SelectedArchive>,
     ) -> Result<ScanPlan> {
         let schema = request.options.resolve_projection(&record_schema())?.schema;
         let metadata = RecordMetadata {
@@ -170,12 +182,13 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
             source: None,
         };
         let service = self.service.clone();
-        let partitions = archives.into_iter().map(move |(source, archive)| {
+        let partitions = archives.into_iter().map(move |selected| {
+            let SelectedArchive { source, manifest } = selected;
             let service = service.clone();
             let request = request.clone();
             let schema = schema.clone();
             scan_partition(async move {
-                let tar = if let Some(archive) = archive {
+                let tar = if let Some(archive) = manifest {
                     service.stream(&archive, request.byte_options).await?
                 } else {
                     let input = service
