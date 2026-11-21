@@ -4,12 +4,12 @@ use super::super::{
 };
 use super::{BhlPageIdentity, page_schema};
 use crate::FileSetRequest;
-use arrow_array::StructArray;
+use arrow_array::{RecordBatch, StructArray};
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Capability, OrderRequirement,
     RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner,
-    StreamReader, async_trait, read_object, scan_partition,
+    SchemaRef, StreamReader, async_trait, read_object, scan_partition,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -176,48 +176,63 @@ fn page_partition<A: ByteAccessor + 'static>(
     metadata: RecordMetadata,
 ) -> ScanPartition {
     scan_partition(async move {
-        let output_schema = metadata.schema.clone();
-        let batches = stream::once(async move {
-            let data = read_object(
-                storage.as_ref(),
-                ByteReadRequest::new(page.object.clone()).with_options(byte_options),
-                "read_bhl_page",
-            )
-            .await?;
-            let source_path = format!(
-                "{}{}",
-                super::super::OPEN_DATA_BUCKET_URL,
-                page.object.locator()
-            );
-            let batch = BhlPageRecord {
-                entity_type: &page.identity.entity_type,
-                entity_id: page.identity.entity_id,
-                page_id: page.identity.page_id,
-                sequence: page.identity.sequence,
-                data: &data,
-                source_path: &source_path,
-                snapshot_id: &snapshot,
-                source_entry_index: None,
-                metadata: page.metadata,
-            }
-            .into_batch()?;
-            let batch = match indices {
-                Some(indices) => batch
-                    .project(&indices)
-                    .map_err(super::super::error::page_record)?,
-                None => batch,
-            };
-            open_arrow_access_core::record_batch_with_rows(
-                output_schema,
-                batch.columns().to_vec(),
-                batch.num_rows(),
-            )
-            .map_err(super::super::error::page_record)
-        });
+        let batches = stream::once(read_page_batch(
+            storage,
+            snapshot,
+            page,
+            byte_options,
+            indices,
+            metadata.schema.clone(),
+        ));
         Ok(StreamReader::records(
             batches,
             metadata,
             OrderRequirement::Reorderable,
         ))
     })
+}
+
+async fn read_page_batch<A: ByteAccessor>(
+    storage: Arc<A>,
+    snapshot: Arc<str>,
+    page: BhlPageMetadata,
+    byte_options: ByteReadOptions,
+    indices: Option<Vec<usize>>,
+    output_schema: SchemaRef,
+) -> Result<RecordBatch> {
+    let data = read_object(
+        storage.as_ref(),
+        ByteReadRequest::new(page.object.clone()).with_options(byte_options),
+        "read_bhl_page",
+    )
+    .await?;
+    let source_path = format!(
+        "{}{}",
+        super::super::OPEN_DATA_BUCKET_URL,
+        page.object.locator()
+    );
+    let batch = BhlPageRecord {
+        entity_type: &page.identity.entity_type,
+        entity_id: page.identity.entity_id,
+        page_id: page.identity.page_id,
+        sequence: page.identity.sequence,
+        data: &data,
+        source_path: &source_path,
+        snapshot_id: &snapshot,
+        source_entry_index: None,
+        metadata: page.metadata,
+    }
+    .into_batch()?;
+    let batch = match indices {
+        Some(indices) => batch
+            .project(&indices)
+            .map_err(super::super::error::page_record)?,
+        None => batch,
+    };
+    open_arrow_access_core::record_batch_with_rows(
+        output_schema,
+        batch.columns().to_vec(),
+        batch.num_rows(),
+    )
+    .map_err(super::super::error::page_record)
 }
