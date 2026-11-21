@@ -7,3 +7,34 @@ pub(super) fn invalid() -> Error {
         "expected a lowercase table name and a valid YYYY-MM-DD date (bulk-data/<table>-<date>.csv.bz2)",
     )
 }
+
+pub(super) fn records_error(message: impl Into<String>) -> Error {
+    Error::new(ErrorKind::Decode, "courtlistener_records", message)
+}
+pub(super) fn invalid_value(context: &str, field: &arrow_schema::Field) -> Error {
+    records_error(format!(
+        "{context} field {}: invalid {}",
+        field.name(),
+        field.data_type()
+    ))
+}
+pub(super) fn schema_error(message: &str) -> Error {
+    Error::new(ErrorKind::InvalidInput, "courtlistener_schema", message)
+}
+pub(super) fn invalid_dialect() -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "courtlistener_copy",
+        "invalid COPY quote/escape character",
+    )
+}
+pub(super) fn copy_error(object: &str, ordinal: u64, message: impl std::fmt::Display) -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "courtlistener_copy",
+        format!("{object} record {ordinal}: {message}"),
+    )
+}
+pub(super) fn arrow_error(e: arrow_schema::ArrowError) -> Error {
+    records_error(e.to_string())
+}

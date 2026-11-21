@@ -1,5 +1,6 @@
 //! Streaming PostgreSQL COPY CSV framing, retaining quoted-empty vs unquoted NULL.
-use open_arrow_access_core::{ByteReader, Bytes, Error, ErrorKind, Result};
+use super::error::copy_error;
+use open_arrow_access_core::{ByteReader, Bytes, Result};
 
 /// PostgreSQL COPY quoting contract for a pinned export (not inferred from content).
 #[derive(Clone, Copy, Debug)]
@@ -13,20 +14,6 @@ impl Default for CourtListenerCopyDialect {
             quote: b'"',
             escape: b'\\',
         }
-    }
-}
-impl CourtListenerCopyDialect {
-    pub(crate) fn validate(self) -> Result<()> {
-        for byte in [self.quote, self.escape] {
-            if !byte.is_ascii_graphic() || matches!(byte, b',' | b'\r' | b'\n') {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "courtlistener_copy",
-                    "invalid COPY quote/escape character",
-                ));
-            }
-        }
-        Ok(())
     }
 }
 
@@ -61,20 +48,13 @@ impl CopyCsv {
             ordinal: 0,
         }
     }
-    fn error(&self, message: impl std::fmt::Display) -> Error {
-        Error::new(
-            ErrorKind::Decode,
-            "courtlistener_copy",
-            format!("{} record {}: {message}", self.object, self.ordinal),
-        )
-    }
     async fn byte(&mut self) -> Result<Option<u8>> {
         while self.offset == self.chunk.len() {
             let Some(chunk) = self.reader.next().await? else {
                 return Ok(None);
             };
             if chunk.is_empty() {
-                return Err(self.error("empty input chunk"));
+                return Err(copy_error(&self.object, self.ordinal, "empty input chunk"));
             }
             self.chunk = chunk;
             self.offset = 0;
@@ -101,13 +81,21 @@ impl CopyCsv {
             }
             let Some(b) = byte else {
                 if inside || escaped {
-                    return Err(self.error("unterminated quoted field"));
+                    return Err(copy_error(
+                        &self.object,
+                        self.ordinal,
+                        "unterminated quoted field",
+                    ));
                 }
                 if size == 0 {
                     return Ok(None);
                 }
                 if fields.len() >= self.max_fields {
-                    return Err(self.error("too many CSV columns"));
+                    return Err(copy_error(
+                        &self.object,
+                        self.ordinal,
+                        "too many CSV columns",
+                    ));
                 }
                 fields.push(self.field(field, quoted)?);
                 self.ordinal += 1;
@@ -115,7 +103,11 @@ impl CopyCsv {
             };
             size += 1;
             if size > self.limit {
-                return Err(self.error("record exceeds max_record_bytes"));
+                return Err(copy_error(
+                    &self.object,
+                    self.ordinal,
+                    "record exceeds max_record_bytes",
+                ));
             }
             if inside {
                 if escaped {
@@ -136,7 +128,11 @@ impl CopyCsv {
                 continue;
             }
             if matches!(b, b',' | b'\n' | b'\r') && fields.len() >= self.max_fields {
-                return Err(self.error("too many CSV columns"));
+                return Err(copy_error(
+                    &self.object,
+                    self.ordinal,
+                    "too many CSV columns",
+                ));
             }
             match b {
                 b',' => {
@@ -159,8 +155,20 @@ impl CopyCsv {
                     quoted = true;
                     inside = true;
                 }
-                _ if after => return Err(self.error("characters after closing quote")),
-                b if b == self.dialect.quote => return Err(self.error("quote in unquoted field")),
+                _ if after => {
+                    return Err(copy_error(
+                        &self.object,
+                        self.ordinal,
+                        "characters after closing quote",
+                    ));
+                }
+                b if b == self.dialect.quote => {
+                    return Err(copy_error(
+                        &self.object,
+                        self.ordinal,
+                        "quote in unquoted field",
+                    ));
+                }
                 _ => field.push(b),
             }
         }
@@ -169,7 +177,9 @@ impl CopyCsv {
         if raw.is_empty() && !quoted {
             return Ok(None);
         }
-        String::from_utf8(raw).map(Some).map_err(|e| self.error(e))
+        String::from_utf8(raw)
+            .map(Some)
+            .map_err(|e| copy_error(&self.object, self.ordinal, e))
     }
 }
 
