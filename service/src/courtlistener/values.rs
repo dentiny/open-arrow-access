@@ -1,48 +1,15 @@
-//! Arrow owns scalar conversion and array construction; this module only checks COPY semantics.
-use arrow_array::{Array, ArrayRef, Float64Array, StringArray};
+//! Arrow scalar conversion and array construction.
+use super::{
+    error::invalid_value,
+    valdiation::{validate_array, validate_values},
+};
+use arrow_array::{ArrayRef, StringArray};
 use arrow_cast::{CastOptions, cast_with_options};
-use arrow_schema::{DataType, Field};
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use arrow_schema::Field;
+use open_arrow_access_core::Result;
 
 pub(super) fn cast(input: &StringArray, field: &Field, context: &str) -> Result<ArrayRef> {
-    let invalid = || {
-        error(format!(
-            "{context} field {}: invalid {}",
-            field.name(),
-            field.data_type()
-        ))
-    };
-    for value in input.iter().flatten() {
-        let valid = match field.data_type() {
-            DataType::Boolean => matches!(value, "t" | "f"),
-            DataType::Int16 | DataType::Int32 | DataType::Int64 => {
-                digits(value.strip_prefix('-').unwrap_or(value))
-            }
-            DataType::UInt64 => digits(value),
-            DataType::Date32 => {
-                value.len() == 10 && value.as_bytes()[4] == b'-' && value.as_bytes()[7] == b'-'
-            }
-            DataType::Timestamp(_, _) => {
-                let time = value.get(11..).unwrap_or("");
-                let has_zone = time.ends_with('Z') || time.contains(['+', '-']);
-                let precision = time.split_once('.').is_none_or(|(_, fraction)| {
-                    !fraction
-                        .bytes()
-                        .take_while(u8::is_ascii_digit)
-                        .skip(6)
-                        .any(|b| b != b'0')
-                });
-                has_zone && precision
-            }
-            _ => true,
-        };
-        if !valid
-            || (field.data_type() != &DataType::Utf8 && value.trim() != value)
-            || (field.name() == "id" && value.is_empty())
-        {
-            return Err(invalid());
-        }
-    }
+    validate_values(input, field, context)?;
     let output = cast_with_options(
         input,
         field.data_type(),
@@ -51,29 +18,16 @@ pub(super) fn cast(input: &StringArray, field: &Field, context: &str) -> Result<
             ..Default::default()
         },
     )
-    .map_err(|e| invalid().with_source(e))?;
-    if !field.is_nullable() && output.null_count() != 0 {
-        return Err(invalid());
-    }
-    if let Some(floats) = output.as_any().downcast_ref::<Float64Array>()
-        && floats.iter().flatten().any(|v| !v.is_finite())
-    {
-        return Err(invalid());
-    }
+    .map_err(|e| invalid_value(context, field).with_source(e))?;
+    validate_array(output.as_ref(), field, context)?;
     Ok(output)
-}
-fn digits(s: &str) -> bool {
-    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
-}
-pub(super) fn error(message: impl Into<String>) -> Error {
-    Error::new(ErrorKind::Decode, "courtlistener_records", message)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow_array::{TimestampMicrosecondArray, UInt64Array};
-    use arrow_schema::TimeUnit;
+    use arrow_array::{Array, TimestampMicrosecondArray, UInt64Array};
+    use arrow_schema::{DataType, TimeUnit};
     #[test]
     fn arrow_cast_is_strict_and_preserves_copy_types_and_timestamp_precision() {
         let ts = Field::new(

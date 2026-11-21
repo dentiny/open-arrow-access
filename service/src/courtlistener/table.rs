@@ -2,8 +2,9 @@
 use super::{
     CourtListenerBulkAccessor, CourtListenerSchemas,
     copy_csv::{CopyCsv, CourtListenerCopyDialect},
-    validation::parse_object,
-    values::{self, error},
+    error::arrow_error,
+    valdiation::{parse_object, validate_columns, validate_header},
+    values,
 };
 use arrow_array::{RecordBatch, StringArray};
 use arrow_schema::{Schema, SchemaRef};
@@ -93,12 +94,11 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerTableAccessor<A> {
             .iter()
             .map(|f| Some(f.name().clone()))
             .collect::<Vec<_>>();
-        if input.row().await?.as_ref() != Some(&expected) {
-            return Err(error(format!(
-                "{}: missing or mismatched CourtListener CSV header",
-                request.object.locator()
-            )));
-        }
+        validate_header(
+            input.row().await?.as_ref(),
+            &expected,
+            request.object.locator(),
+        )?;
         input.ordinal = 0;
         let metadata = RecordMetadata {
             schema: projection.schema.clone(),
@@ -157,13 +157,12 @@ impl TableState {
             let Some(row) = self.input.row().await? else {
                 break;
             };
-            if row.len() != self.schema.fields().len() {
-                return Err(error(format!(
-                    "{} record {}: CSV column count differs from pinned schema",
-                    self.input.object,
-                    self.input.ordinal - 1
-                )));
-            }
+            validate_columns(
+                row.len(),
+                self.schema.fields().len(),
+                &self.input.object,
+                self.input.ordinal - 1,
+            )?;
             bytes += row.iter().flatten().map(String::len).sum::<usize>();
             rows.push(row);
         }
@@ -186,6 +185,6 @@ impl TableState {
             .collect::<Result<Vec<_>>>()?;
         RecordBatch::try_new(self.schema.clone(), columns)
             .map(Some)
-            .map_err(|e| error(e.to_string()))
+            .map_err(arrow_error)
     }
 }
