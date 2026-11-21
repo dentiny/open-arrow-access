@@ -160,5 +160,5 @@ steps, feature wiring, and examples.
 
 
 
-BHL also supports optional [`service-bhl-metadata`](bhl-metadata.md) for
-embedded DuckDB joins over the 13 AWS gzip TSV metadata tables.
+BHL includes [embedded DuckDB metadata joins](bhl-metadata.md) over the
+13 AWS gzip TSV tables whenever `service-bhl` is enabled.

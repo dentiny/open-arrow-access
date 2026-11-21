@@ -1,6 +1,5 @@
 //! BHL AWS Open Data objects and page records.
 mod error;
-#[cfg(feature = "bhl-metadata")]
 pub mod metadata;
 mod open_data;
 mod page;

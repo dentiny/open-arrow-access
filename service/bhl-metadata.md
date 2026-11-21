@@ -1,6 +1,7 @@
 # BHL metadata joins with embedded DuckDB
 
-Enable `service-bhl-metadata`. The implementation uses the bundled Rust DuckDB
+Metadata is included with `service-bhl` (service-crate feature `bhl`).
+The implementation uses the bundled Rust DuckDB
 binding, on the 1.10506 patch line to match the workspace's Arrow 58 types.
 
 The first version has three steps:

@@ -15,9 +15,10 @@ arxiv = [
     "open-arrow-access-decompression/tar",
     "open-arrow-access-decompression/gzip",
 ]
-bhl = ["opendal/services-s3", "dep:arrow-array", "dep:arrow-schema"]
-bhl-metadata = [
-    "bhl",
+bhl = [
+    "opendal/services-s3",
+    "dep:arrow-array",
+    "dep:arrow-schema",
     "dep:duckdb",
     "dep:arrow-cast",
     "dep:sha2",
