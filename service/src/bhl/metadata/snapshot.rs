@@ -4,6 +4,15 @@ use duckdb::{Config, Connection, params};
 use open_arrow_access_core::{ByteAccessor, Result};
 use std::{path::Path, sync::Mutex};
 
+fn open_read_only(path: impl AsRef<Path>) -> Result<Connection> {
+    let config = Config::default()
+        .with("enable_external_file_cache", "false")
+        .map_err(error::duckdb)?
+        .with("access_mode", "READ_ONLY")
+        .map_err(error::duckdb)?;
+    Connection::open_with_flags(path, config).map_err(error::duckdb)
+}
+
 impl BhlMetadata {
     /// Import directly into a persistent database for reuse by separate page jobs.
     /// Publish only after all data and provenance are committed and the database
@@ -60,12 +69,7 @@ impl BhlMetadata {
     /// Open the persistent database read-only, without acquiring any AWS tables.
     /// Temporary per-query selections remain private to cloned connections.
     pub fn open_snapshot(path: impl AsRef<Path>) -> Result<Self> {
-        let config = Config::default()
-            .with("enable_external_file_cache", "false")
-            .map_err(error::duckdb)?
-            .with("access_mode", "READ_ONLY")
-            .map_err(error::duckdb)?;
-        let connection = Connection::open_with_flags(path, config).map_err(error::duckdb)?;
+        let connection = open_read_only(path)?;
         let info = validation::snapshot(&connection)?;
         Ok(Self {
             connection: Mutex::new(connection),
