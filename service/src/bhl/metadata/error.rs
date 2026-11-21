@@ -18,11 +18,11 @@ pub(super) fn task(source: tokio::task::JoinError) -> Error {
     Error::new(ErrorKind::Internal, "bhl_metadata", source.to_string()).with_source(source)
 }
 
-pub(super) fn snapshot_io(source: std::io::Error) -> Error {
+pub(super) fn database_io(source: std::io::Error) -> Error {
     Error::new(
         ErrorKind::Io,
-        "bhl_metadata_snapshot",
-        "metadata snapshot I/O failed",
+        "bhl_metadata_database",
+        "metadata database I/O failed",
     )
     .with_source(source)
 }

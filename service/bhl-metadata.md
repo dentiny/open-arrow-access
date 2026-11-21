@@ -133,16 +133,16 @@ use connection-local temporary tables, without a separate in-memory database,
 source-data copy or forwarding views.
 
 ```rust,ignore
-BhlMetadata::prepare_snapshot(storage.clone(), "bhl-metadata.duckdb").await?;
+BhlMetadata::create(storage.clone(), "bhl-metadata.duckdb").await?;
 // Distribute this exact file to the workers, or place it on a shared filesystem.
-let metadata = Arc::new(BhlMetadata::open_snapshot("bhl-metadata.duckdb")?);
+let metadata = Arc::new(BhlMetadata::open("bhl-metadata.duckdb")?);
 let pages = BhlPageAccessor::from_metadata(storage, snapshot_id, metadata, report)?;
 ```
 
-`prepare_snapshot` imports into a temporary database on the destination filesystem,
+`create` imports into a temporary database on the destination filesystem,
 commits data/provenance, checkpoints and closes the database, then atomically
 publishes the file without overwriting an existing path. Workers directly open
-it with DuckDB's `READ_ONLY` access mode. `open_snapshot` validates the format
+it with DuckDB's `READ_ONLY` access mode. `open` validates the format
 version, all source table schemas and row counts, and retains source fingerprints.
 
 Source freshness, acquisition consistency, storage and distribution are

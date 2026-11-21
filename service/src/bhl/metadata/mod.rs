@@ -1,7 +1,7 @@
 //! Direct AWS TSV acquisition and populated page metadata joins.
+mod database;
 mod error;
 mod join;
-mod snapshot;
 mod source;
 mod stream;
 mod validation;
