@@ -15,11 +15,6 @@ use std::sync::Arc;
 pub(super) const TABLES: [&str; 4] = ["opinions", "opinion-clusters", "dockets", "courts"];
 pub(super) const ORDINAL: &str = "__courtlistener_ordinal";
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| task_error("courtlistener_duckdb_task", e))?
-}
 fn quoted(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
@@ -106,11 +101,12 @@ async fn import_table<A: ByteAccessor + 'static>(
     let mut ordinal = 0;
     while let Some(batch) = reader.next().await? {
         let count = batch.num_rows() as u64;
-        connection = blocking(move || {
+        connection = tokio::task::spawn_blocking(move || -> Result<_> {
             append(&connection, table, batch, ordinal)?;
             Ok(connection)
         })
-        .await?;
+        .await
+        .map_err(|e| task_error("courtlistener_duckdb_task", e))??;
         ordinal += count;
     }
     Ok(())
@@ -125,7 +121,9 @@ pub(super) async fn ingest<A: ByteAccessor + 'static>(
     let source = CourtListenerTableAccessor::new(storage)
         .with_schemas(schemas.clone())?
         .with_dialect(dialect)?;
-    let database = blocking(move || Database::new(&schemas)).await?;
+    let database = tokio::task::spawn_blocking(move || Database::new(&schemas))
+        .await
+        .map_err(|e| task_error("courtlistener_duckdb_task", e))??;
     let mut imports = Vec::new();
     for (i, table) in TABLES.iter().enumerate() {
         let connection = database.connection.try_clone().map_err(db_error)?;
@@ -141,9 +139,10 @@ pub(super) async fn ingest<A: ByteAccessor + 'static>(
     for imported in join_all(imports).await {
         imported?;
     }
-    blocking(move || {
+    tokio::task::spawn_blocking(move || -> Result<_> {
         validate_keys(&database.connection, &TABLES)?;
         Ok(database)
     })
     .await
+    .map_err(|e| task_error("courtlistener_duckdb_task", e))?
 }
