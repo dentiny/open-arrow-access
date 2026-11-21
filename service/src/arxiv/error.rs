@@ -8,6 +8,14 @@ pub(super) fn decode(message: &str) -> Error {
     Error::new(ErrorKind::Decode, "resolve_arxiv", message)
 }
 
+pub(super) fn missing_latex() -> Error {
+    Error::new(
+        ErrorKind::NotFound,
+        "read_arxiv_latex",
+        "article has no non-ancillary LaTeX source",
+    )
+}
+
 pub(super) fn xml_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
     decode("invalid arXiv bulk manifest XML").with_source(error)
 }

@@ -417,6 +417,13 @@ throughput benchmark.
 
 ## Common PDF / LaTeX / XML content schema
 
+For LaTeX content, PDF/PostScript-only articles and valid packages with no
+non-ancillary TeX return `ErrorKind::NotFound` before metadata is fetched or
+any row is emitted. A caller may apply `MissingObjectLayer` with an explicit
+skip reporter to continue with the next article. Default reads still fail.
+Malformed sources, invalid UTF-8 TeX and gzip/TAR integrity errors remain fatal;
+missing metadata is not treated as missing LaTeX. No PDF fallback is enabled.
+
 Use `records().content(ArxivContentFormat::Pdf | Latex | Xml)` for the
 conversion-facing content contract. All three formats emit exactly the same
 field names, order, Arrow types and nullability:

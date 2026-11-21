@@ -26,8 +26,6 @@ impl AsRef<[u8]> for ArticleBytes {
 /// header before choosing a single-file or archive reader. TAR batches are
 /// emitted incrementally; consume the stream through EOF to catch trailer errors.
 pub(super) async fn read(batch: RecordBatch, options: ReadOptions) -> Result<RecordStream> {
-    let name = batch["entry_name"].as_binary::<i64>().value(0);
-    let article_id = validation::content_article_id(name, ArxivContentFormat::Latex)?;
     let (mut input, source) = latex_input(&batch);
     // Inspect only one TAR header, then replay it into the streaming parser.
     let mut prefix = Vec::with_capacity(validation::TAR_HEADER_SIZE);
@@ -37,8 +35,10 @@ pub(super) async fn read(batch: RecordBatch, options: ReadOptions) -> Result<Rec
         .await
         .map_err(|e| error::decode("invalid source package").with_source(e))?;
     if !validation::is_tar(&prefix) {
-        return expand_single_latex(input, prefix, &batch, &article_id).await;
+        return expand_single_latex(input, prefix, &batch).await;
     }
+    let name = batch["entry_name"].as_binary::<i64>().value(0);
+    let article_id = validation::content_article_id(name, ArxivContentFormat::Latex)?;
     let input = decoded_reader(
         Cursor::new(prefix).chain(input),
         ByteMetadata {
@@ -83,15 +83,23 @@ async fn expand_single_latex(
     mut input: DecodedInput,
     mut data: Vec<u8>,
     batch: &RecordBatch,
-    article_id: &str,
 ) -> Result<RecordStream> {
     input
         .read_to_end(&mut data)
         .await
         .map_err(|e| error::decode("invalid source package").with_source(e))?;
+    // Drain the decoder first so a corrupt gzip is never classified as missing.
+    if data.starts_with(b"%PDF-") || data.starts_with(b"%!PS") {
+        let (_, source) = latex_input(batch);
+        return Err(error::missing_latex().with_object(source.as_ref()));
+    }
     validation::source_packaging(&data)?;
+    let article_id = validation::content_article_id(
+        batch["entry_name"].as_binary::<i64>().value(0),
+        ArxivContentFormat::Latex,
+    )?;
     let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
-    append_latex(&mut builder, batch, article_id, 0, b"main.tex", &data)?;
+    append_latex(&mut builder, batch, &article_id, 0, b"main.tex", &data)?;
     Ok(stream::iter([builder.finish()]).boxed())
 }
 
@@ -109,16 +117,15 @@ fn expand_tar_latex(
         let article_id = article_id.clone();
         let options = options.clone();
         async move {
-            let batch = read_latex_batch(&mut tar, &batch, &article_id, &options).await?;
-            if batch.num_rows() == 0 {
+            let output = read_latex_batch(&mut tar, &batch, &article_id, &options).await?;
+            if output.num_rows() == 0 {
                 if !emitted {
-                    return Err(error::decode(
-                        "source package contains no non-ancillary LaTeX files",
-                    ));
+                    let (_, source) = latex_input(&batch);
+                    return Err(error::missing_latex().with_object(source.as_ref()));
                 }
                 Ok(None)
             } else {
-                Ok(Some((batch, (tar, true))))
+                Ok(Some((output, (tar, true))))
             }
         }
     })

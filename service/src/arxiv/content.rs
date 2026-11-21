@@ -175,15 +175,19 @@ async fn content_batches(
     options: ReadOptions,
     metadata: ContentMetadata,
 ) -> Result<RecordStream> {
-    let article =
-        validation::content_article_id(batch["entry_name"].as_binary::<i64>().value(0), format)?;
-    let index = metadata.resolve(&article).await?;
-    let batches = match format {
+    let entry_name = batch["entry_name"].as_binary::<i64>().clone();
+    let mut batches = match format {
         ArxivContentFormat::Pdf => super::pdf::read(batch)?,
         ArxivContentFormat::Latex => super::latex::read(batch, options).await?,
         ArxivContentFormat::Xml => super::xml::read(batch)?,
     };
-    Ok(batches
+    // Establish content availability before requesting metadata. A missing
+    // representation must reach the partition policy before any rows are emitted.
+    let first = batches.next().await.transpose()?;
+    let article = validation::content_article_id(entry_name.value(0), format)?;
+    let index = metadata.resolve(&article).await?;
+    Ok(futures::stream::iter(first.into_iter().map(Ok))
+        .chain(batches)
         .map(move |batch| index.attach_content(batch?))
         .boxed())
 }
