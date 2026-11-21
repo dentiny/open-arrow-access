@@ -141,10 +141,12 @@ async fn inventory_jobs_preserve_scope_and_workers_need_no_listing() {
         .inventory("fixture-snapshot", BhlOcrScope::All)
         .await
         .unwrap();
-    let saved =
-        BhlInventory::read_json(fixture!("bhl-inventory", "inventory.json").await.as_slice())
-            .unwrap();
-    assert_eq!(inventory.objects(), saved.objects());
+    let json = fixture!("bhl-inventory", "inventory.json").await;
+    let saved: BhlInventory = serde_json::from_slice(&json).unwrap();
+    assert_eq!(
+        serde_json::to_value(&inventory).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(&json).unwrap()
+    );
     assert_eq!(*storage.listed.lock().unwrap(), ["ocr/"]);
     assert!(storage.opened.lock().unwrap().is_empty());
     for (scope, count) in [(BhlOcrScope::Items, 2), (BhlOcrScope::Parts, 1)] {
@@ -163,15 +165,14 @@ async fn inventory_jobs_preserve_scope_and_workers_need_no_listing() {
         assert_eq!(job.index(), index);
         assert_eq!(job.snapshot_id(), "fixture-snapshot");
         assert!(job.objects().len() <= 2);
-        let mut bytes = Vec::new();
-        job.write_json(&mut bytes).unwrap();
-        let loaded = BhlPageJob::read_json(bytes.as_slice()).unwrap();
+        let bytes = serde_json::to_vec(&job).unwrap();
+        let loaded: BhlPageJob = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(loaded.objects(), job.objects());
         all_keys.extend_from_slice(loaded.objects());
     }
     assert_eq!(all_keys, saved.objects());
-    let job =
-        BhlPageJob::read_json(fixture!("bhl-inventory", "job.json").await.as_slice()).unwrap();
+    let job: BhlPageJob =
+        serde_json::from_slice(&fixture!("bhl-inventory", "job.json").await).unwrap();
     assert_eq!(job.index(), 1);
     assert_eq!(
         job.request().objects,
@@ -199,7 +200,10 @@ async fn saved_inventory_and_job_validation_rejects_inconsistent_work() {
         "unknown-field.json",
     ] {
         assert!(
-            BhlInventory::read_json(fixture!("bhl-inventory", file).await.as_slice()).is_err(),
+            serde_json::from_slice::<BhlInventory>(
+                fixture!("bhl-inventory", file).await.as_slice()
+            )
+            .is_err(),
             "{file}"
         );
     }
@@ -209,7 +213,8 @@ async fn saved_inventory_and_job_validation_rejects_inconsistent_work() {
         "bad-job-overflow.json",
     ] {
         assert!(
-            BhlPageJob::read_json(fixture!("bhl-inventory", file).await.as_slice()).is_err(),
+            serde_json::from_slice::<BhlPageJob>(fixture!("bhl-inventory", file).await.as_slice())
+                .is_err(),
             "{file}"
         );
     }

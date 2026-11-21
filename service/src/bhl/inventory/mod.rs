@@ -1,11 +1,11 @@
 //! Frozen AWS OCR membership and count-bounded, self-contained worker jobs.
 mod validation;
 
-use super::{BhlOpenData, BhlPageIdentity, error};
+use super::{BhlOpenData, BhlPageIdentity};
 use crate::FileSetRequest;
 use open_arrow_access_core::{ByteAccessor, ListRequest, Result};
 use serde::{Deserialize, Serialize};
-use std::{io, num::NonZeroUsize};
+use std::num::NonZeroUsize;
 
 const VERSION: u32 = 1;
 
@@ -40,8 +40,20 @@ struct InventoryDocument {
 
 /// Sorted object membership captured by a coordinator. The caller's snapshot ID
 /// identifies this inventory, not an immutable S3 object-version snapshot.
-#[derive(Clone, Debug)]
+/// Deserialization validates the saved membership without listing source objects.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "InventoryDocument")]
 pub struct BhlInventory(InventoryDocument);
+
+impl TryFrom<InventoryDocument> for BhlInventory {
+    type Error = open_arrow_access_core::Error;
+
+    fn try_from(document: InventoryDocument) -> Result<Self> {
+        validation::header(document.version, &document.snapshot_id)?;
+        validation::objects(document.scope, &document.objects)?;
+        Ok(Self(document))
+    }
+}
 
 impl BhlInventory {
     /// Freeze explicitly selected OCR keys. Reject duplicates, including keys
@@ -53,14 +65,13 @@ impl BhlInventory {
     ) -> Result<Self> {
         let mut objects = objects.into_iter().map(Into::into).collect::<Vec<_>>();
         objects.sort();
-        let inventory = Self(InventoryDocument {
+        InventoryDocument {
             version: VERSION,
             snapshot_id: snapshot_id.into(),
             scope,
             objects,
-        });
-        inventory.validate()?;
-        Ok(inventory)
+        }
+        .try_into()
     }
 
     pub fn snapshot_id(&self) -> &str {
@@ -73,19 +84,6 @@ impl BhlInventory {
 
     pub fn objects(&self) -> &[String] {
         &self.0.objects
-    }
-
-    /// Load saved membership without listing or opening source objects.
-    pub fn read_json(reader: impl io::Read) -> Result<Self> {
-        let inventory = Self(serde_json::from_reader(reader).map_err(error::inventory_json)?);
-        inventory.validate()?;
-        Ok(inventory)
-    }
-
-    /// Persist the complete inventory once. The caller controls atomic file
-    /// publication and must not reuse its snapshot ID for changed membership.
-    pub fn write_json(&self, writer: impl io::Write) -> Result<()> {
-        serde_json::to_writer(writer, &self.0).map_err(error::inventory_json)
     }
 
     /// Generate disjoint chunks lazily in canonical key order. Persist each job
@@ -107,11 +105,6 @@ impl BhlInventory {
                 })
             })
     }
-
-    fn validate(&self) -> Result<()> {
-        validation::header(self.0.version, &self.0.snapshot_id)?;
-        validation::objects(self.0.scope, &self.0.objects)
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -128,8 +121,21 @@ struct JobDocument {
 
 /// One independently persisted worker selection. Its logical identity is the
 /// tuple (snapshot_id, pages_per_job, index). Keep sizing fixed within a run.
-#[derive(Clone, Debug)]
+/// Deserialization validates its header, object keys and chunk sizing.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(try_from = "JobDocument")]
 pub struct BhlPageJob(JobDocument);
+
+impl TryFrom<JobDocument> for BhlPageJob {
+    type Error = open_arrow_access_core::Error;
+
+    fn try_from(document: JobDocument) -> Result<Self> {
+        validation::header(document.version, &document.snapshot_id)?;
+        validation::objects(document.scope, &document.objects)?;
+        validation::job(&document)?;
+        Ok(Self(document))
+    }
+}
 
 impl BhlPageJob {
     pub fn snapshot_id(&self) -> &str {
@@ -150,18 +156,6 @@ impl BhlPageJob {
 
     pub fn objects(&self) -> &[String] {
         &self.0.objects
-    }
-
-    pub fn read_json(reader: impl io::Read) -> Result<Self> {
-        let job = Self(serde_json::from_reader(reader).map_err(error::inventory_json)?);
-        validation::header(job.0.version, &job.0.snapshot_id)?;
-        validation::objects(job.0.scope, &job.0.objects)?;
-        validation::job(&job.0)?;
-        Ok(job)
-    }
-
-    pub fn write_json(&self, writer: impl io::Write) -> Result<()> {
-        serde_json::to_writer(writer, &self.0).map_err(error::inventory_json)
     }
 
     /// Pass to BhlPageAccessor (configured with this job's snapshot ID) and the

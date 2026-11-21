@@ -167,18 +167,18 @@ use open_arrow_access_storage::OpenDalAccessor;
 async fn coordinator() -> Result<(), Box<dyn std::error::Error>> {
     let source = BhlOpenData::new(OpenDalAccessor::new(open_data_bucket_operator()?));
     let inventory = source.inventory("bhl-run-2026-11-20", BhlOcrScope::Items).await?;
-    inventory.write_json(File::create("inventory.json")?)?;
+    serde_json::to_writer(File::create("inventory.json")?, &inventory)?;
 
     // Retries can load this saved inventory instead of listing AWS again.
-    let saved = BhlInventory::read_json(File::open("inventory.json")?)?;
+    let saved: BhlInventory = serde_json::from_reader(File::open("inventory.json")?)?;
     for job in saved.jobs(NonZeroUsize::new(1_000).unwrap()) {
-        job.write_json(File::create(format!("job-{:06}.json", job.index()))?)?;
+        serde_json::to_writer(File::create(format!("job-{:06}.json", job.index()))?, &job)?;
     }
     Ok(())
 }
 
 fn worker_selection() -> Result<(), Box<dyn std::error::Error>> {
-    let job = BhlPageJob::read_json(File::open("job-000000.json")?)?;
+    let job: BhlPageJob = serde_json::from_reader(File::open("job-000000.json")?)?;
     let source = BhlOpenData::new(OpenDalAccessor::new(open_data_bucket_operator()?));
     let files = source.partition(job.objects().iter().cloned())?;
     // Use `files` with a byte/format reader, or pass `job.request()` to a
@@ -188,7 +188,8 @@ fn worker_selection() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Both saved formats are strict version-1 JSON. Inventory stores snapshot ID,
+Both types implement `Serialize` and validated `Deserialize`, so callers can
+use standard serde APIs. The JSON format remains strict version 1. Inventory stores snapshot ID,
 namespace scope and sorted keys. Each job additionally stores the inventory page
 count, page limit and zero-based chunk index, plus only that job's keys. Jobs are
 generated lazily as disjoint consecutive chunks; the last can be shorter, and an
