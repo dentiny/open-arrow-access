@@ -2,8 +2,12 @@
 
 ## Unreleased
 
+## 0.18.2 - 2026-11-21
+
 - Use DuckDB bindings 1.10506.1 for BHL metadata joins, sharing Arrow 58 with the workspace instead of compiling a second Arrow major.
 - Consume joined Arrow batches directly, removing the in-memory IPC serialization bridge and its two direct IPC dependencies; retain streaming error propagation through the fallible batch-step API.
+
+- Release all eight public workspace crates at 0.18.2 with aligned internal dependency requirements.
 
 ## 0.18.1 - 2026-11-20
 
