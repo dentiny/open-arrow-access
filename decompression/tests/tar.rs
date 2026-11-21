@@ -464,7 +464,7 @@ async fn sequential_completion_and_malformed_headers_release_source_with_archive
             let _keep = &signal;
             bytes
                 .take()
-                .map_or(Poll::Pending, |bytes| Poll::Ready(Some(Ok(bytes))))
+                .map_or(Poll::Ready(None), |bytes| Poll::Ready(Some(Ok(bytes))))
         });
         let input = Box::new(StreamReader::new(source, ByteMetadata::default()));
         let mut archive = TarStream::new(input, TarLimits::default());

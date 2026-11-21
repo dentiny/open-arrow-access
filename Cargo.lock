@@ -2835,6 +2835,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "datafusion",
+ "futures",
  "open-arrow-access-core",
  "open-arrow-access-dataset",
  "open-arrow-access-decompression",
