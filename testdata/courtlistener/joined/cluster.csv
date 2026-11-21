@@ -1,0 +1,4 @@
+id,date_created,date_modified,judges,date_filed,date_filed_is_approximate,slug,case_name_short,case_name,case_name_full,scdb_id,scdb_decision_direction,scdb_votes_majority,scdb_votes_minority,source,procedural_history,attorneys,nature_of_suit,posture,syllabus,headnotes,summary,disposition,history,other_dates,cross_reference,correction,citation_count,precedential_status,date_blocked,blocked,filepath_json_harvard,filepath_pdf_harvard,docket_id,arguments,headmatter
+"10","2026-09-30 00:00:00+00","2026-09-30 00:00:00+00","","2026-09-29","f",,"","","","",,,,"","","","","","","","","","","","","","0","",,"f","","","20","",""
+"11","2026-09-30 00:00:00+00","2026-09-30 00:00:00+00","","2026-09-30","f",,"","","","",,,,"","","","","","","","","","","","","","0","",,"f","","","99","",""
+"12","2026-09-30 00:00:00+00","2026-09-30 00:00:00+00","","2026-09-30","f",,"","","","",,,,"","","","","","","","","","","","","","0","",,"f","","","21","",""

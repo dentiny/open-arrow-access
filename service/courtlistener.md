@@ -73,6 +73,84 @@ row count (capped at 1024); one row may exceed that target. `ScanPlanner` expose
 explicit file-set composition. It does not split one bzip2 file into row ranges,
 join source tables, discover output destinations or write a Lance dataset.
 
+## One joined stream per date
+
+Enable facade feature `service-courtlistener` (or service-crate feature
+`courtlistener`). This includes the single-table and DuckDB joined readers.
+
+`CourtListenerDatePartitionAccessor` reads same-date opinions, opinion-clusters, dockets
+and courts. Left joins preserve one row per opinion; missing relationships
+produce null structs instead of dropping opinions. The six output fields are
+`snapshot_date`, `opinion`, `cluster`, `docket`, `court` and `provenance`. Source
+fields and types match `CourtListenerSchemas::schema()` and the design in #617.
+Duplicate primary keys fail, preventing accidental multiplication of opinions.
+Metadata inspection validates the date, schema and projection without storage I/O
+or importing tables. Each complete date is a lazy native scan partition. Caller orchestration runs
+dates independently and sends each date stream to one Lance destination.
+
+### Usage and limits
+
+```rust,no_run
+use std::num::NonZeroUsize;
+use open_arrow_access::{Accessor, ReadRequest, Result};
+use open_arrow_access::service::courtlistener::CourtListenerDatePartitionAccessor;
+use open_arrow_access::storage::OpenDalAccessor;
+
+async fn read_date(storage: OpenDalAccessor) -> Result<()> {
+    let source = CourtListenerDatePartitionAccessor::new(
+        storage,
+        "s3://com-courtlistener-storage",
+    )?;
+    let mut rows = source.open(ReadRequest::new("2026-09-30")
+        .with_batch_size(NonZeroUsize::new(1024).unwrap())).await?;
+    while let Some(batch) = rows.next().await? {
+        // Feed this complete nested batch to the one Lance writer for this date.
+        println!("{} opinion rows", batch.num_rows());
+    }
+    Ok(())
+}
+```
+
+The source root is provenance supplied by the caller and must correspond to the
+configured storage root. Unknown/reordered headers fail rather than dropping
+fields. Use `CourtListenerSchemas` and `with_schemas` for reviewed historical
+header/type variants; the library does not fetch/execute SQL or infer historical
+schemas. All four tables are validated even when output projection omits them.
+Missing/empty required files, duplicate IDs, malformed COPY records and typed
+conversion failures are terminal. All primary keys are checked after import and
+before starting the join query; callers must consume through EOF to observe query errors.
+
+The reader follows BHL metadata's two stages. First, it imports the four typed
+table streams concurrently into one temporary DuckDB database, with a cloned
+connection per table and Arrow appenders. Each table is imported in one
+transaction, avoiding a commit for every input batch. It awaits every importer, including
+when one fails. It checks key uniqueness with SQL,
+then executes one left-join query and streams Arrow result batches out with
+DuckDB's `stream_arrow`/`step` API, following the existing BHL integration.
+It does not perform per-opinion key lookups or collect the full query result in
+Rust. A temporary directory holds the imported database and join/sort spill
+files until the query finishes, then removes them automatically.
+DuckDB uses its default memory and thread settings. Scratch usage scales with
+the imported date and any join/sort spill. All four inputs are imported before query output starts.
+
+Output uses a bounded one-batch channel from a blocking DuckDB query worker.
+Dropping the reader closes that channel. The worker exits when it observes the
+closed channel and releases the database and temporary directory; an in-flight
+DuckDB operation finishes before cleanup. EOF and query failures are terminal, with
+worker failures propagated to the reader. Source-producing tasks are not spawned.
+
+Input batches target 8 MiB; individual CSV records have no byte limit.
+DuckDB controls its result chunk size; emitted slices respect the requested row
+target without copying arrays. A large record/result chunk may
+exceed byte targets. Original per-table record ordinals are imported alongside
+the data, and SQL orders the result by opinion ordinal. This global sort may
+spill to disk and delays the first output batch; streaming bounds client-side
+output buffering, not the work needed to join and sort. This is not a hard
+whole-process memory cap or a range-readable source. The reader does not provide
+cross-run checkpoints, automatic historical schema migration, a durable manifest,
+source hash verification, orphan-count reports or a production Lance commit.
+Those acquisition/publication validations remain explicit caller work.
+
 ## Usage and results
 
 ```rust

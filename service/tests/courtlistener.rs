@@ -1,13 +1,23 @@
 use std::{num::NonZeroUsize, sync::Arc};
 
+use arrow_array::{
+    Array, BooleanArray, Float64Array, Int16Array, Int64Array, StringArray, StructArray,
+    TimestampMicrosecondArray, UInt64Array,
+};
 use arrow_schema::{DataType, Field, Schema};
+use arrow_select::concat::concat_batches;
+use futures::AsyncWriteExt;
 use open_arrow_access_core::{
-    Accessor, AccessorExt, ByteReadOptions, ByteReadRequest, ErrorKind, Result, ScanPlanner,
+    Accessor, AccessorExt, ByteReadOptions, ByteReadRequest, ErrorKind, ReadRequest, RecordReader,
+    Result, ScanPlanner,
 };
 use open_arrow_access_dataset::file_set::FileSetRequest;
 use open_arrow_access_file_format::csv::{CsvFileFormat, CsvFormat};
 use open_arrow_access_layers::ParallelReadLayer;
-use open_arrow_access_service::courtlistener::{CourtListenerBulkAccessor, CourtListenerSnapshot};
+use open_arrow_access_service::courtlistener::{
+    CourtListenerBulkAccessor, CourtListenerDatePartitionAccessor, CourtListenerSnapshot,
+    CourtListenerTableAccessor,
+};
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::{MemoryAccessor, collect_bytes, fixture, fs_operator};
 
@@ -173,11 +183,6 @@ async fn snapshot_record_plans_preserve_validation_order_and_quoted_csv() {
     );
 }
 
-use arrow_array::{Array, Float64Array, Int16Array, StringArray, TimestampMicrosecondArray};
-use futures::AsyncWriteExt;
-use open_arrow_access_core::ReadRequest;
-use open_arrow_access_service::courtlistener::CourtListenerTableAccessor;
-
 async fn write_bz(root: &std::path::Path, table: &str, data: &str) {
     let mut encoder = async_compression::futures::write::BzEncoder::new(Vec::new());
     encoder.write_all(data.as_bytes()).await.unwrap();
@@ -286,5 +291,307 @@ async fn typed_table_plans_are_lazy_and_reject_drift_and_invalid_values() -> Res
     let mut reader = source.open(req.with_projection(["id"])).await?;
     assert!(reader.next().await.is_err());
     assert!(reader.next().await?.is_none());
+    Ok(())
+}
+
+const JOIN_FIXTURES: [(&str, &str); 4] = [
+    (
+        "opinions",
+        include_str!("../../testdata/courtlistener/joined/opinion.csv"),
+    ),
+    (
+        "opinion-clusters",
+        include_str!("../../testdata/courtlistener/joined/cluster.csv"),
+    ),
+    (
+        "dockets",
+        include_str!("../../testdata/courtlistener/joined/docket.csv"),
+    ),
+    (
+        "courts",
+        include_str!("../../testdata/courtlistener/joined/court.csv"),
+    ),
+];
+
+async fn joined_fixture() -> (
+    tempfile::TempDir,
+    CourtListenerDatePartitionAccessor<OpenDalAccessor>,
+) {
+    let root = tempfile::tempdir().unwrap();
+    tokio::fs::create_dir(root.path().join("bulk-data"))
+        .await
+        .unwrap();
+    for (table, data) in JOIN_FIXTURES {
+        write_bz(root.path(), table, data).await;
+    }
+    let source = CourtListenerDatePartitionAccessor::new(
+        OpenDalAccessor::new(fs_operator(root.path())),
+        "s3://com-courtlistener-storage",
+    )
+    .unwrap();
+    (root, source)
+}
+async fn consume(mut reader: Box<dyn RecordReader>) -> Result<usize> {
+    let mut count = 0;
+    while let Some(batch) = reader.next().await? {
+        count += batch.num_rows();
+    }
+    Ok(count)
+}
+fn child<'a, T: Array + 'static>(s: &'a StructArray, name: &str) -> &'a T {
+    s.column_by_name(name)
+        .unwrap()
+        .as_any()
+        .downcast_ref::<T>()
+        .unwrap()
+}
+#[tokio::test]
+async fn joined_date_has_typed_nested_rows_null_joins_and_exact_provenance() -> Result<()> {
+    let (_root, source) = joined_fixture().await;
+    let mut reader = source.open(ReadRequest::new("2026-09-30")).await?;
+    let schema = reader.metadata().schema.clone();
+    assert_eq!(schema.fields().len(), 6);
+    let mut batches = Vec::new();
+    while let Some(batch) = reader.next().await? {
+        batches.push(batch);
+    }
+    let batch = concat_batches(&schema, &batches).unwrap();
+    assert_eq!(batch.num_rows(), 5);
+    let opinion = batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .unwrap();
+    assert_eq!(opinion.num_columns(), 22);
+    assert_eq!(
+        child::<Int64Array>(opinion, "id").values(),
+        &[1, 2, 3, 4, 5]
+    );
+    assert_eq!(child::<UInt64Array>(opinion, "page_count").value(0), 12);
+    assert!(child::<UInt64Array>(opinion, "page_count").is_null(1));
+    assert!(child::<BooleanArray>(opinion, "per_curiam").value(0));
+    assert_eq!(
+        child::<StringArray>(opinion, "plain_text").value(0),
+        "line1\nline2 \"quoted\" \\ slash"
+    );
+    let times = child::<TimestampMicrosecondArray>(opinion, "date_created");
+    assert_eq!(times.value(0) - times.value(1), 123456);
+    let urls = child::<StringArray>(opinion, "download_url");
+    assert!(urls.is_null(0));
+    assert!(!urls.is_null(1));
+    assert_eq!(urls.value(1), "");
+    let cluster = batch
+        .column(2)
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .unwrap();
+    let docket = batch
+        .column(3)
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .unwrap();
+    let court = batch
+        .column(4)
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .unwrap();
+    assert!(cluster.is_null(1));
+    assert!(!cluster.is_null(2));
+    assert!(docket.is_null(1));
+    assert!(docket.is_null(2));
+    assert!(!docket.is_null(3));
+    assert!(court.is_null(3));
+    assert_eq!(child::<StringArray>(court, "id").value(0), "001");
+    assert_eq!(child::<StringArray>(court, "fjc_court_id").value(0), "003");
+    assert_eq!(child::<Float64Array>(court, "position").value(0), 1.5);
+    assert_eq!(child::<Int64Array>(cluster, "id").value(4), 10);
+    let provenance = batch
+        .column(5)
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .unwrap();
+    assert_eq!(
+        child::<UInt64Array>(provenance, "opinion_record_index").values(),
+        &[0, 1, 2, 3, 4]
+    );
+    assert!(child::<UInt64Array>(provenance, "cluster_record_index").is_null(1));
+    assert_eq!(
+        child::<UInt64Array>(provenance, "cluster_record_index").value(4),
+        0
+    );
+    assert_eq!(
+        child::<StringArray>(provenance, "courts_source_uri").value(0),
+        "s3://com-courtlistener-storage/bulk-data/courts-2026-09-30.csv.bz2"
+    );
+    assert!(reader.next().await?.is_none());
+    assert!(reader.next().await?.is_none());
+    Ok(())
+}
+#[tokio::test]
+async fn date_planning_is_lazy_and_projection_does_not_skip_validation() -> Result<()> {
+    let (root, source) = joined_fixture().await;
+    let missing = ReadRequest::new("2026-06-30");
+    assert_eq!(
+        source
+            .plan_scan(missing.clone())
+            .await?
+            .partitions
+            .size_hint()
+            .0,
+        1
+    );
+    let metadata = source
+        .metadata(missing.clone().with_projection(["court", "opinion"]))
+        .await?;
+    assert_eq!(metadata.schema.field(0).name(), "court");
+    assert_eq!(metadata.schema.field(1).name(), "opinion");
+    assert!(
+        source
+            .metadata(ReadRequest::new("2026-02-30"))
+            .await
+            .is_err()
+    );
+    assert!(
+        source
+            .metadata(missing.clone().with_projection(["unknown"]))
+            .await
+            .is_err()
+    );
+    assert!(source.open(missing).await.is_err());
+    let request = ReadRequest::new("2026-09-30")
+        .with_batch_size(NonZeroUsize::MIN)
+        .with_projection(["court", "opinion"]);
+    let plan = source.plan_scan(request.clone()).await?;
+    assert_eq!(plan.partitions.size_hint().0, 1);
+    let mut reader = source.open(request).await?;
+    let batch = reader.next().await?.unwrap();
+    assert_eq!(batch.num_rows(), 1);
+    assert_eq!(batch.schema().field(0).name(), "court");
+    drop(reader);
+    assert_eq!(
+        consume(
+            source
+                .open(ReadRequest::new("2026-09-30").with_projection(Vec::<String>::new()))
+                .await?
+        )
+        .await?,
+        5
+    );
+    write_bz(
+        root.path(),
+        "courts",
+        &JOIN_FIXTURES[3].1.replace("\"1.5\"", "\"NaN\""),
+    )
+    .await;
+    assert!(
+        source
+            .open(ReadRequest::new("2026-09-30").with_projection(["opinion"]))
+            .await
+            .is_err()
+    );
+    tokio::fs::remove_file(root.path().join("bulk-data/courts-2026-09-30.csv.bz2"))
+        .await
+        .unwrap();
+    assert!(source.open(ReadRequest::new("2026-09-30")).await.is_err());
+    assert!(
+        source
+            .open(ReadRequest::new("../2026-09-30"))
+            .await
+            .is_err()
+    );
+    assert!(
+        source
+            .open(ReadRequest::new("2026-09-30").with_projection(["unknown"]))
+            .await
+            .is_err()
+    );
+    Ok(())
+}
+#[tokio::test]
+async fn duplicate_ids_header_drift_bad_counts_and_empty_exports_fail() {
+    for (table, raw) in JOIN_FIXTURES {
+        let (root, source) = joined_fixture().await;
+        let duplicate = raw.split_once('\n').unwrap().1;
+        write_bz(root.path(), table, &format!("{raw}{duplicate}")).await;
+        assert!(
+            source.open(ReadRequest::new("2026-09-30")).await.is_err(),
+            "duplicate IDs in {table} must fail before returning a reader"
+        );
+    }
+    for raw in [
+        JOIN_FIXTURES[0].1.replace("\"12\"", "\"-1\""),
+        JOIN_FIXTURES[0].1.replacen("id,", "unknown,", 1),
+        String::new(),
+    ] {
+        let (root, source) = joined_fixture().await;
+        write_bz(root.path(), "opinions", &raw).await;
+        assert!(source.open(ReadRequest::new("2026-09-30")).await.is_err());
+    }
+}
+
+#[tokio::test]
+async fn joined_output_preserves_input_order_and_ordinals_across_batches() -> Result<()> {
+    let (root, source) = joined_fixture().await;
+    let (header, _) = JOIN_FIXTURES[0].1.split_once('\n').unwrap();
+    let row = JOIN_FIXTURES[0].1.lines().last().unwrap();
+    let mut raw = format!("{header}\n");
+    // Cross the typed reader's 1024-row boundary; IDs deliberately oppose input order.
+    let rows = 2051;
+    for id in (1..=rows).rev() {
+        raw.push_str(&row.replacen("\"5\",", &format!("\"{id}\","), 1));
+        raw.push('\n');
+    }
+    write_bz(root.path(), "opinions", &raw).await;
+    let mut reader = source
+        .open(
+            ReadRequest::new("2026-09-30")
+                .with_projection(["provenance", "opinion"])
+                .with_batch_size(NonZeroUsize::new(128).unwrap()),
+        )
+        .await?;
+    let mut seen = 0;
+    while let Some(batch) = reader.next().await? {
+        assert!(batch.num_rows() > 0 && batch.num_rows() <= 128);
+        assert_eq!(batch.schema(), reader.metadata().schema);
+        let provenance = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        let opinion = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        for index in 0..batch.num_rows() {
+            assert_eq!(
+                child::<UInt64Array>(provenance, "opinion_record_index").value(index),
+                seen as u64
+            );
+            assert_eq!(
+                child::<Int64Array>(opinion, "id").value(index),
+                (rows - seen) as i64
+            );
+            seen += 1;
+        }
+    }
+    assert_eq!(seen, rows);
+    assert!(reader.next().await?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn header_only_opinions_produce_empty_joined_stream() -> Result<()> {
+    let (root, source) = joined_fixture().await;
+    let header = JOIN_FIXTURES[0].1.split_once('\n').unwrap().0;
+    write_bz(root.path(), "opinions", &format!("{header}\n")).await;
+    for projection in [vec!["opinion"], vec![]] {
+        let request = ReadRequest::new("2026-09-30").with_projection(projection);
+        let metadata = source.metadata(request.clone()).await?;
+        let mut reader = source.open(request).await?;
+        assert_eq!(reader.metadata().schema, metadata.schema);
+        assert!(reader.next().await?.is_none());
+        assert!(reader.next().await?.is_none());
+    }
     Ok(())
 }
