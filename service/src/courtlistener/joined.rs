@@ -13,21 +13,18 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, OrderRequirement, ReadRequest, RecordCapability, RecordMetadata,
     RecordReader, Result, ScanPlan, ScanPlanner, async_trait, record_stream_reader,
 };
-use std::{num::NonZeroUsize, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tokio::{sync::mpsc, task::JoinHandle};
 
 const TABLES: [&str; 4] = ["opinions", "opinion-clusters", "dockets", "courts"];
 pub(super) const ORDINAL: &str = "__courtlistener_ordinal";
 
-/// Caller-owned scratch, resource limits and provenance for one date conversion.
+/// Caller-owned scratch and provenance for one date conversion.
 #[derive(Clone, Debug)]
 pub struct CourtListenerJoinOptions {
     pub source_root: String,
     pub scratch_directory: PathBuf,
     pub dialect: CourtListenerCopyDialect,
-    /// DuckDB operator memory budget; not a whole-process RSS cap.
-    pub memory_limit: NonZeroUsize,
-    pub threads: NonZeroUsize,
 }
 impl CourtListenerJoinOptions {
     pub fn new(source_root: impl Into<String>, scratch_directory: PathBuf) -> Self {
@@ -35,8 +32,6 @@ impl CourtListenerJoinOptions {
             source_root: source_root.into(),
             scratch_directory,
             dialect: Default::default(),
-            memory_limit: NonZeroUsize::new(1024 * 1024 * 1024).unwrap(),
-            threads: NonZeroUsize::new(4).unwrap(),
         }
     }
 }
@@ -103,10 +98,6 @@ impl Database {
     fn new(options: CourtListenerJoinOptions, schemas: &CourtListenerSchemas) -> Result<Self> {
         let directory = tempfile::tempdir_in(options.scratch_directory).map_err(scratch_error)?;
         let config = Config::default()
-            .with("memory_limit", format!("{}B", options.memory_limit))
-            .map_err(db_error)?
-            .with("threads", options.threads.to_string())
-            .map_err(db_error)?
             .with(
                 "temp_directory",
                 directory.path().join("spill").to_string_lossy(),

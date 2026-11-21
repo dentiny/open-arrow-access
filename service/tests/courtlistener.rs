@@ -334,8 +334,6 @@ mod joined {
                 source_root: "s3://com-courtlistener-storage".into(),
                 scratch_directory: scratch.path().into(),
                 dialect: Default::default(),
-                memory_limit: NonZeroUsize::new(256 * 1024 * 1024).unwrap(),
-                threads: NonZeroUsize::MIN,
             },
         )
         .unwrap();

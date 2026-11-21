@@ -102,8 +102,6 @@ async fn read_date(storage: OpenDalAccessor, scratch: PathBuf) -> Result<()> {
         source_root: "s3://com-courtlistener-storage".into(),
         scratch_directory: scratch, // existing directory on caller-owned disk
         dialect: Default::default(), // current COPY quote/escape rules
-        memory_limit: NonZeroUsize::new(1024 * 1024 * 1024).unwrap(),
-        threads: NonZeroUsize::new(4).unwrap(),
     })?;
     let mut rows = source.open(ReadRequest::new("2026-09-30")
         .with_batch_size(NonZeroUsize::new(1024).unwrap())).await?;
@@ -130,9 +128,8 @@ then executes one left-join query and streams Arrow result batches out with
 DuckDB's `stream_arrow`/`step` API, following the existing BHL integration.
 It does not perform per-opinion key lookups or collect the full query result in
 Rust. The database and spill files live under the caller's scratch directory;
-`memory_limit` and `threads` configure DuckDB. The memory limit controls engine
-operators, not whole-process RSS. Scratch usage scales with the imported date
-and any join/sort spill. All four inputs are imported before query output starts.
+DuckDB uses its default memory and thread settings. Scratch usage scales with
+the imported date and any join/sort spill. All four inputs are imported before query output starts.
 
 Output uses a bounded one-batch channel from a blocking DuckDB query worker.
 Dropping the reader closes that channel and interrupts the query. The worker
