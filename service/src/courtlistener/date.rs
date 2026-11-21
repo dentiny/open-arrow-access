@@ -15,6 +15,8 @@ use std::sync::Arc;
 /// A YYYY-MM-DD locator imports the four inputs and exposes one joined Arrow stream.
 pub struct CourtListenerDateAccessor<A> {
     storage: Arc<A>,
+    /// URI prefix recorded in provenance, e.g. `s3://com-courtlistener-storage`.
+    /// Actual reads use `storage`; this value only identifies the source objects.
     source_root: String,
     dialect: CourtListenerCopyDialect,
     schemas: CourtListenerSchemas,
@@ -30,6 +32,7 @@ impl<A> Clone for CourtListenerDateAccessor<A> {
     }
 }
 impl<A> CourtListenerDateAccessor<A> {
+    /// `source_root` prefixes bulk object paths in provenance; it does not configure storage.
     pub fn new(storage: A, source_root: impl Into<String>) -> Result<Self> {
         let source_root = source_root.into();
         validate_source_root(&source_root)?;
