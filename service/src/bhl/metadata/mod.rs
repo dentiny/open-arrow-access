@@ -1,6 +1,7 @@
 //! Direct AWS TSV acquisition and populated page metadata joins.
 mod error;
 mod join;
+mod snapshot;
 mod source;
 mod stream;
 use super::{BhlPageIdentity, page_schema};
