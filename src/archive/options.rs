@@ -25,6 +25,9 @@ pub struct ArchiveOptions {
     /// Soft selected-payload target, independent of the request's row-count target.
     /// A complete member can exceed this budget.
     pub target_bytes: NonZeroUsize,
+    /// Header predicate for regular TAR members, evaluated before buffering bodies.
+    /// Defaults to accepting all files; `false` skips a member and errors abort
+    /// the reader. Shared across clones; unused for `ArchiveFormat::Single`.
     pub(super) filter: Arc<EntryFilter>,
 }
 
