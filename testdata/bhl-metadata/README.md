@@ -16,3 +16,8 @@ and must fail exact header validation. Other files use their table's AWS name.
 `title-invalid-key.txt.gz` has a nonnumeric TitleID and must fail loading.
 Tests load these committed gzip files. SQL-specific tests also extend the loaded
 fixture tables to check independent relation aggregation and conflicting parents.
+
+item-multi-title.txt.gz and title-multi-title.txt.gz extend the base fixtures
+with a second TitleID associated with the same ItemID. They model the real
+AWS item-table relationship discovered for ItemID 62861, without copied source
+records. Both files use deterministic gzip mtime=0.

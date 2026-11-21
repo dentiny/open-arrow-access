@@ -136,7 +136,7 @@ or unlisted extension struct replaces these declared columns.
 
 ```text
 metadata: Struct<
-  title: Struct<
+  title: List<Struct<
     TitleID: LargeUtf8,
     MARCBibID: LargeUtf8,
     MARCLeader: LargeUtf8,
@@ -150,8 +150,8 @@ metadata: Struct<
     TL2Author: LargeUtf8,
     TitleURL: LargeUtf8,
     CreationDate: LargeUtf8
-  >?,
-  item: Struct<
+  >>,
+  item: List<Struct<
     ItemID: LargeUtf8,
     TitleID: LargeUtf8,
     ThumbnailPageID: LargeUtf8,
@@ -172,7 +172,7 @@ metadata: Struct<
     RightsStatement: LargeUtf8,
     LicenseType: LargeUtf8,
     RightsHolder: LargeUtf8
-  >?,
+  >>,
   page: Struct<
     PageID: LargeUtf8,
     ItemID: LargeUtf8,
@@ -274,8 +274,8 @@ metadata: Struct<
 | Child | Rows attached to the OCR page |
 | --- | --- |
 | `page` | `page.PageID = page_id`; at most one source row |
-| `item` | For item OCR, `item.ItemID = entity_id`; for part OCR, resolve the parent using `part.ItemID` and compare the page/partpage relationship |
-| `title` | `title.TitleID = item.TitleID` for the resolved item |
+| `item` | All source rows for the resolved ItemID, retaining each TitleID association in source order; part OCR resolves its parent through part/page relationships |
+| `title` | All source title rows referenced by any selected item association, in source order |
 | `part` | For part OCR only, `part.PartID = entity_id`; null for an item-namespace row |
 | `partpage` | For part OCR, all rows matching the selected PartID and PageID; empty for an item-namespace row |
 | `creator` | All creator rows for the resolved TitleID |
@@ -294,9 +294,13 @@ the source filename, preserving and reporting disagreements.
 
 Preserve all matching relation rows and their source order in lists, including
 duplicates. Do not use an arbitrary first creator, first subject or first
-identifier. Duplicate matches for a supposedly single-row title/item/page/part
-join are an explicit schema/data validation failure, not permission to pick one.
-A missing join leaves that child null and is recorded in the reconciliation
+identifier. An ItemID can occur in multiple item rows with different TitleID
+associations. `metadata.item` and `metadata.title` are non-null lists of complete
+source records in source order; related authors/subjects/identifiers cover all
+associated titles without multiplying OCR rows. This revises their former
+nullable singleton-struct contract. TitleID, PageID and PartID source collisions
+remain validation failures; no arbitrary first item/title is selected.
+A missing join leaves a singleton child null or a relationship list empty and is recorded in the reconciliation
 report; it never drops the OCR page. A valid empty relationship yields an empty
 list. Failed table acquisition must not be reported as an empty relationship.
 

@@ -15,36 +15,39 @@ WITH parents AS (
         ORDER BY __ordinal LIMIT 1
     ) pp ON true
 ), base AS (
-    SELECT p.*, i.__record AS item, t.__record AS title,
-        bhl_id(i.TitleID) AS title_id,
+    SELECT p.*,
+        (SELECT coalesce(list(i.__record ORDER BY i.__ordinal), [])
+         FROM bhl_item i WHERE i.__key = p.parent_id) AS item,
+        (SELECT coalesce(list(t.__record ORDER BY t.__ordinal), [])
+         FROM bhl_title t WHERE EXISTS (
+             SELECT 1 FROM bhl_item i WHERE i.__key = p.parent_id
+               AND bhl_id(i.TitleID) = t.__key)) AS title,
         CASE WHEN p.parent_id IS NULL THEN 'None'
              ELSE format('Some({})', p.parent_id) END AS parent_repr
     FROM parents p
-    LEFT JOIN bhl_item i ON i.__key = p.parent_id
-    LEFT JOIN bhl_title t ON t.__key = bhl_id(i.TitleID)
 ), joined AS (
     SELECT b.*,
         (SELECT coalesce(list(r.__record ORDER BY r.__ordinal), [])
          FROM bhl_partpage r WHERE b.entity_type = 'part'
          AND r.__key = b.entity_id AND bhl_id(r.PageID) = b.page_id) AS partpage,
         (SELECT coalesce(list(r.__record ORDER BY r.__ordinal), [])
-         FROM bhl_creator r WHERE r.__key = b.title_id) AS creator,
+         FROM bhl_creator r WHERE r.__key IN (SELECT bhl_id(i.TitleID) FROM bhl_item i WHERE i.__key = b.parent_id)) AS creator,
         (SELECT coalesce(list(r.__record ORDER BY r.__ordinal), [])
          FROM bhl_partcreator r WHERE b.entity_type = 'part'
          AND r.__key = b.entity_id) AS partcreator,
         (SELECT coalesce(list(r.__record ORDER BY r.__ordinal), [])
          FROM bhl_creatoridentifier r WHERE EXISTS (
              SELECT 1 FROM bhl_creator c
-             WHERE c.__key = b.title_id AND bhl_id(c.CreatorID) = r.__key
+             WHERE c.__key IN (SELECT bhl_id(i.TitleID) FROM bhl_item i WHERE i.__key = b.parent_id) AND bhl_id(c.CreatorID) = r.__key
              UNION ALL
              SELECT 1 FROM bhl_partcreator c
              WHERE b.entity_type = 'part' AND c.__key = b.entity_id
                AND bhl_id(c.CreatorID) = r.__key
          )) AS creatoridentifier,
         (SELECT coalesce(list(r.__record ORDER BY r.__ordinal), [])
-         FROM bhl_subject r WHERE r.__key = b.title_id) AS subject,
+         FROM bhl_subject r WHERE r.__key IN (SELECT bhl_id(i.TitleID) FROM bhl_item i WHERE i.__key = b.parent_id)) AS subject,
         (SELECT coalesce(list(r.__record ORDER BY r.__ordinal), [])
-         FROM bhl_titleidentifier r WHERE r.__key = b.title_id) AS titleidentifier,
+         FROM bhl_titleidentifier r WHERE r.__key IN (SELECT bhl_id(i.TitleID) FROM bhl_item i WHERE i.__key = b.parent_id)) AS titleidentifier,
         (SELECT coalesce(list(r.__record ORDER BY r.__ordinal), [])
          FROM bhl_partidentifier r WHERE b.entity_type = 'part'
          AND r.__key = b.entity_id) AS partidentifier,
@@ -52,7 +55,7 @@ WITH parents AS (
          FROM bhl_pagename r WHERE r.__key = b.page_id) AS pagename,
         (SELECT coalesce(list(r.__record ORDER BY r.__ordinal), [])
          FROM bhl_doi r WHERE
-             (lower(r.EntityType) = 'title' AND r.__key = b.title_id)
+             (lower(r.EntityType) = 'title' AND r.__key IN (SELECT bhl_id(i.TitleID) FROM bhl_item i WHERE i.__key = b.parent_id))
           OR (lower(r.EntityType) = 'item' AND r.__key = b.parent_id)
           OR (lower(r.EntityType) = 'page' AND r.__key = b.page_id)
           OR (lower(r.EntityType) = 'part' AND b.entity_type = 'part'
@@ -97,15 +100,19 @@ SELECT request_id,
         titleidentifier := titleidentifier, partcreator := partcreator,
         partidentifier := partidentifier, pagename := pagename, doi := doi
     ) AS metadata,
-    list_filter([
+    list_concat(list_filter([
         CASE WHEN page IS NULL THEN format('page:{}', page_id) END,
         CASE WHEN entity_type = 'part' AND part IS NULL
              THEN format('part:{}', entity_id) END,
         CASE WHEN entity_type = 'part' AND len(partpage) = 0
              THEN format('partpage:{}:{}', entity_id, page_id) END,
-        CASE WHEN item IS NULL THEN 'item:' || coalesce(parent_id::VARCHAR, 'unresolved parent') END,
-        CASE WHEN title IS NULL THEN 'title:' || coalesce(title_id::VARCHAR, 'unresolved parent') END
-    ], lambda value: value IS NOT NULL) AS missing,
+        CASE WHEN len(item) = 0 THEN 'item:' || coalesce(parent_id::VARCHAR, 'unresolved parent') END
+    ], lambda value: value IS NOT NULL),
+        CASE WHEN len(item) = 0 THEN ['title:unresolved parent'] ELSE [] END,
+        (SELECT coalesce(list('title:' || coalesce(bhl_id(i.TitleID)::VARCHAR, 'unresolved parent') ORDER BY i.__ordinal), [])
+         FROM bhl_item i LEFT JOIN bhl_title t ON t.__key = bhl_id(i.TitleID)
+         WHERE i.__key = joined.parent_id AND t.__key IS NULL)
+    ) AS missing,
     conflicts
 FROM joined
 ORDER BY request_id
