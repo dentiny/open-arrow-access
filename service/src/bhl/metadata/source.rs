@@ -6,21 +6,21 @@ use futures::future::join_all;
 use open_arrow_access_core::{Accessor, AccessorExt, ByteAccessor, ReadRequest, Result};
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
 use open_arrow_access_file_format::csv::{CsvAccessor, CsvFormat};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
 };
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SourceInfo {
     pub path: String,
     pub rows: u64,
     /// Hash of decoded lexical cell rows, not compressed bytes or AWS versions.
     pub sha256: String,
 }
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct BhlMetadataInfo {
     /// Canonical AWS dataset root URI (`s3://bhl-open-data/`).
     /// This identifies the upstream dataset even when loading from a mirror;
@@ -33,7 +33,7 @@ pub struct BhlMetadataInfo {
     pub sources: BTreeMap<String, SourceInfo>,
 }
 
-/// All 13 AWS metadata tables in one in-memory DuckDB database.
+/// All 13 AWS metadata tables in one in-memory or persistent DuckDB database.
 pub struct BhlMetadata {
     pub info: BhlMetadataInfo,
     pub(super) connection: Mutex<Connection>,
@@ -188,6 +188,13 @@ impl BhlMetadata {
             .with("enable_external_file_cache", "false")
             .map_err(error::duckdb)?;
         let connection = Connection::open_in_memory_with_flags(config).map_err(error::duckdb)?;
+        Self::import(storage, connection).await
+    }
+
+    pub(super) async fn import<A: ByteAccessor + 'static>(
+        storage: A,
+        connection: Connection,
+    ) -> Result<Self> {
         connection
             .execute_batch(
                 "CREATE MACRO bhl_id(value) AS CASE

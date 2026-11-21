@@ -1,8 +1,10 @@
 //! Direct AWS TSV acquisition and populated page metadata joins.
+mod database;
 mod error;
 mod join;
 mod source;
 mod stream;
+mod validation;
 use super::{BhlPageIdentity, page_schema};
 use arrow_array::StructArray;
 use arrow_schema::{DataType, Fields};

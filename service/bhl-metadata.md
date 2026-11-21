@@ -40,10 +40,10 @@ their original object/identity, and preserve repeated requests. Each query has
 a separate connection and request table. Use `BhlPageAccessor::from_metadata`
 to combine these results with OCR bytes as shown below. Lance writing remains the caller's responsibility.
 
-V1 assumes sufficient memory for the loaded tables and query intermediates.
-There are no memory-limit options, disk-backed database, checkpoint, temporary
-workspace or temporary-directory settings. DuckDB uses its default resource
-settings, with `enable_external_file_cache=false` explicitly set.
+The in-memory `load` path assumes sufficient memory for the loaded tables and
+query intermediates. Prepared metadata can instead use the persistent database
+described below. DuckDB uses its default resource settings, with
+`enable_external_file_cache=false` explicitly set.
 
 `metadata.item` and `metadata.title` are now non-null lists, retaining every
 item/title association in source order while emitting one OCR row per request.
@@ -124,3 +124,28 @@ existing runtime; all 13 import tasks are joined before returning.
 Request-level page selections also use Arrow appends, in batches of up to 8,192
 identities. Request ordinals retain input order and duplicate selections; the
 selection appender flushes once before the join query runs.
+
+## Reuse one persistent metadata database across page jobs
+
+A coordinator imports the 13 TSV tables directly into a persistent DuckDB
+file. Independent processes open that file read-only. Per-query page selections
+use connection-local temporary tables, without a separate in-memory database,
+source-data copy or forwarding views.
+
+```rust,ignore
+BhlMetadata::create(storage.clone(), "bhl-metadata.duckdb").await?;
+// Distribute this exact file to the workers, or place it on a shared filesystem.
+let metadata = Arc::new(BhlMetadata::open("bhl-metadata.duckdb")?);
+let pages = BhlPageAccessor::from_metadata(storage, snapshot_id, metadata, report)?;
+```
+
+`create` imports into a temporary database on the destination filesystem,
+commits data/provenance, checkpoints and closes the database, then atomically
+publishes the file without overwriting an existing path. Workers directly open
+it with DuckDB's `READ_ONLY` access mode. `open` validates the format
+version, all source table schemas and row counts, and retains source fingerprints.
+
+Source freshness, acquisition consistency, storage and distribution are
+caller-owned. Use a compatible DuckDB storage version. Existing `load` behavior
+remains an in-memory import; conversion-service job wiring remains a consumer
+adoption step after this API is released.

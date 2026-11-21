@@ -273,3 +273,45 @@ async fn emits_rows_until_callback_fails() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn databases_reopen_read_only_without_source_access_and_keep_provenance() {
+    let (root, storage) = source("title.txt.gz").await;
+    let metadata = BhlMetadata::load(storage.clone()).await.unwrap();
+    let expected = read(&metadata, &[ITEM, PART]);
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("database'quoted.duckdb");
+    BhlMetadata::create(storage.clone(), &path).await.unwrap();
+    assert!(BhlMetadata::create(storage, &path).await.is_err());
+    let fingerprint = metadata.info.fingerprint.clone();
+    drop(metadata);
+    drop(root); // Reopening and queries cannot fall back to the TSV inputs.
+    let database = BhlMetadata::open(&path).unwrap();
+    assert_eq!(database.info.fingerprint, fingerprint);
+    let other = BhlMetadata::open(&path).unwrap();
+    assert_eq!(read(&other, &[ITEM]).len(), 1);
+    drop(other);
+    let actual = read(&database, &[ITEM, PART]);
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.iter().zip(&expected) {
+        assert_eq!(actual.metadata, expected.metadata);
+        assert_eq!(actual.missing, expected.missing);
+        assert_eq!(actual.conflicts, expected.conflicts);
+    }
+    assert!(
+        database
+            .connection
+            .lock()
+            .unwrap()
+            .execute_batch("DELETE FROM main.item")
+            .is_err()
+    );
+    assert_eq!(read(&database, &[ITEM, ITEM]).len(), 2);
+    drop(database);
+    {
+        let db = duckdb::Connection::open(&path).unwrap();
+        db.execute_batch("UPDATE __bhl_metadata SET version = 999")
+            .unwrap();
+    }
+    assert!(BhlMetadata::open(&path).is_err());
+}
