@@ -87,7 +87,8 @@ and snapshot ID. Metadata fingerprints/source counts are attached automatically;
 
 The DuckDB worker feeds a capacity-one channel; Rust does not collect joined
 page metadata for the whole request. Dropping discovery/the reader closes the
-channel and interrupts the private query connection. Query failures propagate
+channel. SQL is not interrupted; the producer exits when it next tries to emit
+a row or completes the query. Query failures propagate
 through the reader, while report callback failures stop before the rejected
 page's OCR read. Accepted pages with missing joins retain null children and
 still emit their OCR record. Reports are delivered to the caller callback;
