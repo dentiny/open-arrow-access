@@ -4,6 +4,8 @@ use crate::{OuterCompression, Result, decompression::tar::TarEntry};
 
 type EntryFilter = dyn Fn(&TarEntry) -> Result<bool> + Send + Sync;
 
+const DEFAULT_TARGET_BYTES: NonZeroUsize = NonZeroUsize::new(4 * 1024 * 1024).unwrap();
+
 /// Interpretation of the bytes after outer decompression. Selection is explicit:
 /// a gzip object can contain either a TAR archive or one ordinary file.
 #[derive(Clone, Debug)]
@@ -36,7 +38,7 @@ impl ArchiveOptions {
         Self {
             format,
             outer_compression: OuterCompression::Auto,
-            target_bytes: NonZeroUsize::new(4 * 1024 * 1024).unwrap(),
+            target_bytes: DEFAULT_TARGET_BYTES,
             filter: Arc::new(|_| Ok(true)),
         }
     }
