@@ -9,24 +9,20 @@ use std::{num::NonZeroUsize, sync::atomic::Ordering};
 
 async fn manifest_service(
     http: &HttpFixture,
-    count: usize,
-    size: u64,
 ) -> ArxivService<open_arrow_access_storage::OpenDalAccessor> {
     let bytes = fixture!("arxiv-content", "latex-two.tar").await;
-    let mut manifest = String::from("<arXivSRC>");
-    // The other month must be filtered without opening its TAR.
-    for (month, sequence) in (1..=count)
-        .map(|sequence| (2410, sequence))
-        .chain([(2411, 1)])
-    {
-        let key = format!("src/arXiv_src_{month}_{sequence:03}.tar");
-        manifest.push_str(&format!("<file><filename>{key}</filename><yymm>{month}</yymm><seq_num>{sequence}</seq_num><size>{size}</size><num_items>2</num_items><md5sum>00000000000000000000000000000000</md5sum></file>"));
-        if month == 2410 {
-            http.file(&format!("/{key}"), bytes.clone());
-        }
+    http.file(
+        "/src/arXiv_src_manifest.xml",
+        fixture!("arxiv-content", "source-manifest.xml").await,
+    );
+    for key in [
+        "/src/arXiv_src_2410_001.tar",
+        "/src/arXiv_src_2411_001.tar",
+        "/src/arXiv_src_2411_002.tar",
+        "/src/arXiv_src_2412_001.tar",
+    ] {
+        http.file(key, bytes.clone());
     }
-    manifest.push_str("</arXivSRC>");
-    http.file("/src/arXiv_src_manifest.xml", manifest.into_bytes());
     let operator =
         opendal::Operator::new(opendal_service_http::Http::default().endpoint(http.endpoint()))
             .unwrap()
@@ -38,14 +34,14 @@ async fn manifest_service(
 #[tokio::test]
 async fn manifest_content_splits_single_tar_but_keeps_multiple_tars_independent() {
     use open_arrow_access_core::ScanPlanner;
-    for count in [0, 1, 2] {
+    for (month, count) in [(2409, 0), (2410, 1), (2411, 2)] {
         let http = HttpFixture::new();
-        let records = manifest_service(&http, count, 1)
+        let records = manifest_service(&http)
             .await
             .records()
             .content(ArxivContentFormat::Latex);
         let mut plan = records
-            .plan_scan(ArxivReadRequest::new(ArxivKind::Source).with_month(2410))
+            .plan_scan(ArxivReadRequest::new(ArxivKind::Source).with_month(month))
             .await
             .unwrap();
         assert_eq!(plan.streaming_discovery, count == 1);
@@ -73,7 +69,7 @@ async fn manifest_content_splits_single_tar_but_keeps_multiple_tars_independent(
             }
         );
         for sequence in 1..=count {
-            let key = format!("/src/arXiv_src_2410_{sequence:03}.tar");
+            let key = format!("/src/arXiv_src_{month}_{sequence:03}.tar");
             assert_eq!(
                 http.requests()
                     .iter()
@@ -88,8 +84,7 @@ async fn manifest_content_splits_single_tar_but_keeps_multiple_tars_independent(
 #[tokio::test]
 async fn manifest_article_discovery_retains_length_validation() {
     let http = HttpFixture::new();
-    let size = fixture!("arxiv-content", "latex-two.tar").await.len() as u64 + 1;
-    let records = manifest_service(&http, 1, size)
+    let records = manifest_service(&http)
         .await
         .records()
         .content(ArxivContentFormat::Latex)
@@ -98,7 +93,7 @@ async fn manifest_article_discovery_retains_length_validation() {
             NonZeroUsize::MIN,
         ));
     let mut reader = records
-        .open(ArxivReadRequest::new(ArxivKind::Source).with_month(2410))
+        .open(ArxivReadRequest::new(ArxivKind::Source).with_month(2412))
         .await
         .unwrap();
     let error = reader.next().await.unwrap_err();
