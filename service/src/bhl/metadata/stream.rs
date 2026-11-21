@@ -12,9 +12,9 @@ use std::{
 use tokio::{sync::mpsc, task::JoinHandle};
 
 // DuckDB's cursor borrows its connection. Keep both on the same blocking worker
-// and hand rows to async partition discovery without collecting the query result.
+// and hand rows to async partition discovery with non-blocking sends.
 struct Query {
-    receiver: mpsc::Receiver<BhlPageMetadata>,
+    receiver: mpsc::UnboundedReceiver<BhlPageMetadata>,
     worker: JoinHandle<Result<()>>,
     finished: bool,
 }
@@ -22,11 +22,11 @@ struct Query {
 impl Query {
     fn new(metadata: &BhlMetadata, keys: Vec<ObjectRef>) -> Result<Self> {
         let connection = metadata.query_connection()?;
-        let (sender, receiver) = mpsc::channel(1);
+        let (sender, receiver) = mpsc::unbounded_channel();
         let worker = tokio::task::spawn_blocking(move || {
             join::for_each(&connection, &keys, |page| {
                 sender
-                    .blocking_send(page)
+                    .send(page)
                     .map_err(|_| error::invalid("page reader dropped"))
             })
         });

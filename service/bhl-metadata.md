@@ -85,8 +85,9 @@ and snapshot ID. Metadata fingerprints/source counts are attached automatically;
 `with_schema_metadata` merges additional caller provenance. The existing
 `BhlPageAccessor::new` still accepts a custom metadata provider.
 
-The DuckDB worker feeds a capacity-one channel; Rust does not collect joined
-page metadata for the whole request. Dropping discovery/the reader closes the
+The DuckDB worker emits rows into an unbounded channel with non-blocking sends.
+Pending rows can accumulate if OCR reading is slower than the query, consistent
+with V1's sufficient-memory assumption. Dropping discovery/the reader closes the
 channel. SQL is not interrupted; the producer exits when it next tries to emit
 a row or completes the query. Query failures propagate
 through the reader, while report callback failures stop before the rejected
