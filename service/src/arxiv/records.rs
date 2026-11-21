@@ -142,7 +142,7 @@ where
     A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,
 {
     async fn plan_scan(&self, request: ArxivReadRequest) -> Result<ScanPlan> {
-        let schema = request.options.resolve_projection(&record_schema())?.schema;
+        request.options.resolve_projection(&record_schema())?;
         let archives = if let Some(shard) = &request.shard {
             super::validation::validate_shard(shard, request.month)?;
             vec![(shard.clone(), /* manifest_archive= */ None)]
@@ -154,6 +154,17 @@ where
                 .map(|archive| (archive.filename.clone(), Some(archive)))
                 .collect()
         };
+        self.plan_selected_archives(request, archives)
+    }
+}
+
+impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> ArxivRecords<A> {
+    pub(super) fn plan_selected_archives(
+        &self,
+        request: ArxivReadRequest,
+        archives: Vec<(String, Option<super::ArxivArchive>)>,
+    ) -> Result<ScanPlan> {
+        let schema = request.options.resolve_projection(&record_schema())?.schema;
         let metadata = RecordMetadata {
             schema: schema.clone(),
             source: None,
