@@ -31,8 +31,7 @@ directly, remove the `service-` prefix. Common Crawl shares `service-warc`.
 | OAPEN | `service-oapen` | Book metadata via OAI-PMH and selected hosted book bytes | [OAPEN](oapen.md) |
 | HathiTrust | `service-hathifiles` | Full/update Hathifiles catalogue exports | [Hathifiles](hathifiles.md) |
 | OpenStax | `service-openstax` | Commit-pinned textbook source ZIP archives | [OpenStax](openstax.md) |
-| BHL | `service-bhl` | Item links and OCR export bytes; Figshare/AWS hierarchy and sharding limits | [BHL](bhl.md) |
-| BHL AWS Open Data | `service-bhl` | Explicit object partitions over public S3 or caller-owned mirrors | [AWS partitions](bhl-open-data.md) |
+| BHL AWS Open Data | `service-bhl` | AWS object partitions and page records with supplied metadata | [AWS partitions](bhl-open-data.md) |
 | Common Crawl | `service-warc` | Crawl/segment WARC membership and separately composed record reads | [Common Crawl](commoncrawl.md) |
 | CourtListener | `service-courtlistener` | Dated bulk table exports as decompressed CSV bytes | [CourtListener](courtlistener.md) |
 | Federal Register | `service-federal-register` | Rule/notice metadata and advertised document representations | [Federal Register](federal-register.md) |
@@ -105,7 +104,7 @@ flowchart TD
 | --- | --- | --- |
 | Caller supplies storage | PMC, Gutenberg, CourtListener, arXiv bulk | Operator root, endpoint, region, credentials, requester-pays settings |
 | Provider constructs storage | Hugging Face, Zenodo, Dataverse, Internet Archive | Provider ID/version/revision and supported endpoint/token options |
-| API metadata plus advertised download URLs | Figshare, BHL, GovInfo, bioRxiv, LoC, OpenStax, Semantic Scholar, USPTO, Regulations.gov | Provider configuration and optional custom `Connection` |
+| API metadata plus advertised download URLs | Figshare, GovInfo, bioRxiv, LoC, OpenStax, Semantic Scholar, USPTO, Regulations.gov | Provider configuration and optional custom `Connection` |
 | Already-open archive input | MECA | Ranged byte reader with known length |
 
 OpenDAL supplies storage I/O and the HTTP transport used by `Connection`.

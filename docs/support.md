@@ -125,7 +125,7 @@ and release metadata with your downstream corpus manifest.
 | OpenStax | `service-openstax` | Repository discovery and commit-pinned source archive bytes | [Guide](../service/openstax.md) |
 | Figshare | `service-figshare` | Article/version metadata and original-file bytes | [Guide](../service/figshare.md) |
 | Semantic Scholar | `service-semantic-scholar` | Release-pinned dataset partitions as original bytes | [Guide](../service/semantic-scholar.md) |
-| Biodiversity Heritage Library | `service-bhl` | Versioned bulk OCR files; API metadata and advertised file bytes | [Guide](../service/bhl.md) |
+| Biodiversity Heritage Library | `service-bhl` | AWS Open Data object partitions and page records with supplied metadata | [Guide](../service/bhl.md) |
 | Library of Congress | `service-library-of-congress` | Search/item metadata and advertised resource bytes | [Guide](../service/library-of-congress.md) |
 | USPTO | `service-uspto` | Bulk-product discovery, metadata, and original-file bytes | [Guide](../service/uspto.md) |
 | Federal Register | `service-federal-register` | Search/document metadata and original document bytes | [Guide](../service/federal-register.md) |
