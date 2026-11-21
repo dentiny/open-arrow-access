@@ -4,6 +4,8 @@ use arrow_array::{Array, ArrayRef, ListArray, RecordBatch, StringArray, StructAr
 use open_arrow_access_core::{ObjectRef, Result};
 use std::sync::Arc;
 
+const SELECTION_BATCH_SIZE: usize = 8192;
+
 fn strings(column: &dyn Array, row: usize) -> Result<Vec<String>> {
     let list = column
         .as_any()
@@ -44,7 +46,7 @@ pub(super) fn for_each(
             .appender("bhl_selection")
             .map_err(error::duckdb)?;
         let mut offset = 0u64;
-        for objects in keys.chunks(8192) {
+        for objects in keys.chunks(SELECTION_BATCH_SIZE) {
             let identities = objects
                 .iter()
                 .map(|object| BhlPageIdentity::parse(object.locator()))
