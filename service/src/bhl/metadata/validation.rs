@@ -13,20 +13,16 @@ pub(super) fn snapshot_destination(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn snapshot(connection: &Connection) -> Result<BhlMetadataInfo> {
-    let (count, version, info): (u64, u64, String) = connection
-        .query_row(
-            "SELECT count(*), min(version), min(info) FROM main.__bhl_snapshot",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .map_err(error::duckdb)?;
+pub(super) fn snapshot_header(count: u64, version: u64) -> Result<()> {
     if count != 1 || version != SNAPSHOT_VERSION {
         return Err(error::invalid(
             "unsupported BHL metadata snapshot version/header",
         ));
     }
-    let info: BhlMetadataInfo = serde_json::from_str(&info).map_err(error::json)?;
+    Ok(())
+}
+
+pub(super) fn snapshot_sources(connection: &Connection, info: &BhlMetadataInfo) -> Result<()> {
     let tables = tables();
     if info.sources.len() != tables.len() {
         return Err(error::invalid("incomplete snapshot source manifest"));
@@ -61,5 +57,5 @@ pub(super) fn snapshot(connection: &Connection) -> Result<BhlMetadataInfo> {
             return Err(error::invalid("snapshot source row count mismatch"));
         }
     }
-    Ok(info)
+    Ok(())
 }

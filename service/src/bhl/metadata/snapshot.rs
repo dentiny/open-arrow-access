@@ -1,5 +1,5 @@
 //! Explicit, immutable metadata reuse across independently scheduled page jobs.
-use super::{BhlMetadata, error, validation};
+use super::{BhlMetadata, BhlMetadataInfo, error, validation};
 use duckdb::{Config, Connection, params};
 use open_arrow_access_core::{ByteAccessor, Result};
 use std::{path::Path, sync::Mutex};
@@ -11,6 +11,18 @@ fn open_read_only(path: impl AsRef<Path>) -> Result<Connection> {
         .with("access_mode", "READ_ONLY")
         .map_err(error::duckdb)?;
     Connection::open_with_flags(path, config).map_err(error::duckdb)
+}
+
+fn read_info(connection: &Connection) -> Result<BhlMetadataInfo> {
+    let (count, version, info): (u64, u64, String) = connection
+        .query_row(
+            "SELECT count(*), min(version), min(info) FROM main.__bhl_snapshot",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(error::duckdb)?;
+    validation::snapshot_header(count, version)?;
+    serde_json::from_str(&info).map_err(error::json)
 }
 
 impl BhlMetadata {
@@ -70,7 +82,8 @@ impl BhlMetadata {
     /// Temporary per-query selections remain private to cloned connections.
     pub fn open_snapshot(path: impl AsRef<Path>) -> Result<Self> {
         let connection = open_read_only(path)?;
-        let info = validation::snapshot(&connection)?;
+        let info = read_info(&connection)?;
+        validation::snapshot_sources(&connection, &info)?;
         Ok(Self {
             connection: Mutex::new(connection),
             info,
