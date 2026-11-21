@@ -109,3 +109,11 @@ Projection constructs only selected page columns. Requests without `data`
 perform no OCR object opens/downloads; zero-column projections still retain one
 row per selected page. Selecting `data` keeps its original bytes and I/O options.
 The loaded source tables and request-level DuckDB join remain unchanged.
+
+Metadata import sends decoded Arrow batches directly through DuckDB's Arrow
+appender. Each table keeps one appender and explicitly flushes once at EOF.
+It retains lexical-row SHA-256 hashing and source ordinals; no source rows are
+filtered or reinterpreted. This removes per-cell owned String/Value creation,
+per-row appender calls, and per-batch appender recreation/flush. Each table
+uses one blocking importer while its asynchronous byte reader runs on the
+existing runtime; all 13 import tasks are joined before returning.
