@@ -1,23 +1,16 @@
 //! Import typed Arrow batches into DuckDB, SQL-join a date, stream Arrow results.
 use super::{
     CourtListenerCopyDialect, CourtListenerSchemas, CourtListenerSnapshot,
-    CourtListenerTableAccessor,
-    error::{arrow_error, db_error, scratch_error, task_error},
-    valdiation::{validate_join_options, validate_join_schema, validate_keys},
+    query::query,
+    source::{TABLES, ingest},
+    valdiation::{validate_join_options, validate_join_schema},
 };
-use arrow_array::{ArrayRef, RecordBatch, UInt64Array};
-use arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
-use duckdb::{Config, Connection, InterruptHandle, params};
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, OrderRequirement, ReadRequest, RecordCapability, RecordMetadata,
     RecordReader, Result, ScanPlan, ScanPlanner, async_trait, record_stream_reader,
 };
 use std::{path::PathBuf, sync::Arc};
-use tokio::{sync::mpsc, task::JoinHandle};
-
-const TABLES: [&str; 4] = ["opinions", "opinion-clusters", "dockets", "courts"];
-pub(super) const ORDINAL: &str = "__courtlistener_ordinal";
 
 /// Caller-owned scratch and provenance for one date conversion.
 #[derive(Clone, Debug)]
@@ -68,108 +61,6 @@ impl<A> CourtListenerDateAccessor<A> {
         &self.schemas
     }
 }
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
-    tokio::task::spawn_blocking(f)
-        .await
-        .map_err(|e| task_error("courtlistener_duckdb_task", e))?
-}
-fn quoted(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
-}
-fn sql_type(dtype: &DataType) -> &'static str {
-    match dtype {
-        DataType::Utf8 => "VARCHAR",
-        DataType::Boolean => "BOOLEAN",
-        DataType::Int16 => "SMALLINT",
-        DataType::Int32 => "INTEGER",
-        DataType::Int64 => "BIGINT",
-        DataType::UInt64 => "UBIGINT",
-        DataType::Float64 => "DOUBLE",
-        DataType::Date32 => "DATE",
-        DataType::Timestamp(TimeUnit::Microsecond, _) => "TIMESTAMPTZ",
-        _ => unreachable!("validated schemas"),
-    }
-}
-struct Database {
-    connection: Connection,
-    _directory: tempfile::TempDir,
-}
-impl Database {
-    fn new(options: CourtListenerJoinOptions, schemas: &CourtListenerSchemas) -> Result<Self> {
-        let directory = tempfile::tempdir_in(options.scratch_directory).map_err(scratch_error)?;
-        let config = Config::default()
-            .with(
-                "temp_directory",
-                directory.path().join("spill").to_string_lossy(),
-            )
-            .map_err(db_error)?;
-        let connection =
-            Connection::open_with_flags(directory.path().join("snapshot.duckdb"), config)
-                .map_err(db_error)?;
-        for (i, fields) in schemas.tables().iter().enumerate() {
-            let columns = fields
-                .iter()
-                .map(|f| {
-                    format!(
-                        "{} {}{}",
-                        quoted(f.name()),
-                        sql_type(f.data_type()),
-                        if f.is_nullable() { "" } else { " NOT NULL" }
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(",");
-            connection
-                .execute_batch(&format!(
-                    "CREATE TABLE cl_{i} ({columns}, {} UBIGINT NOT NULL)",
-                    quoted(ORDINAL)
-                ))
-                .map_err(db_error)?;
-        }
-        Ok(Self {
-            connection,
-            _directory: directory,
-        })
-    }
-    fn append(&self, table: usize, batch: RecordBatch, ordinal: u64) -> Result<()> {
-        let count = batch.num_rows();
-        let mut fields = batch.schema().fields().to_vec();
-        fields.push(Arc::new(Field::new(ORDINAL, DataType::UInt64, false)));
-        let mut arrays = batch.columns().to_vec();
-        arrays.push(Arc::new(UInt64Array::from_iter_values(
-            ordinal..ordinal + count as u64,
-        )));
-        let batch =
-            RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).map_err(arrow_error)?;
-        let mut appender = self
-            .connection
-            .appender(&format!("cl_{table}"))
-            .map_err(db_error)?;
-        appender.append_record_batch(batch).map_err(db_error)?;
-        appender.flush().map_err(db_error)
-    }
-}
-
-fn query_sql(schemas: &CourtListenerSchemas) -> String {
-    let entity = |i: usize, alias: &str| {
-        let fields = schemas.tables()[i]
-            .iter()
-            .map(|f| format!("{} := {alias}.{}", quoted(f.name()), quoted(f.name())))
-            .collect::<Vec<_>>()
-            .join(",");
-        let value = format!("struct_pack({fields})");
-        if i == 0 {
-            value
-        } else {
-            format!("CASE WHEN {alias}.id IS NULL THEN NULL ELSE {value} END")
-        }
-    };
-    format!("SELECT CAST($1 AS DATE) AS snapshot_date, {} AS opinion, {} AS cluster, {} AS docket, {} AS court,
-        struct_pack(opinions_source_uri := CAST($2 AS VARCHAR), clusters_source_uri := CAST($3 AS VARCHAR), dockets_source_uri := CAST($4 AS VARCHAR), courts_source_uri := CAST($5 AS VARCHAR),
-        opinion_record_index := o.{ORDINAL},cluster_record_index := c.{ORDINAL},docket_record_index := d.{ORDINAL},court_record_index := k.{ORDINAL}) AS provenance
-        FROM cl_0 o LEFT JOIN cl_1 c ON o.cluster_id=c.id LEFT JOIN cl_2 d ON c.docket_id=d.id LEFT JOIN cl_3 k ON d.court_id=k.id ORDER BY o.{ORDINAL}",entity(0,"o"),entity(1,"c"),entity(2,"d"),entity(3,"k"))
-}
-
 #[async_trait]
 impl<A: ByteAccessor + 'static> Accessor for CourtListenerDateAccessor<A> {
     type Request = ReadRequest;
@@ -183,51 +74,31 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerDateAccessor<A> {
         let schema = self.schemas.schema();
         let projection = request.options.resolve_projection(&schema)?;
         let day = request.object.locator().to_owned();
-        let options = self.options.clone();
-        let schemas = self.schemas.clone();
-        let mut database = blocking(move || Database::new(options, &schemas)).await?;
-        let source = CourtListenerTableAccessor::new(self.storage.clone())
-            .with_schemas(self.schemas.clone())?
-            .with_dialect(self.options.dialect)?;
-        let mut uris = Vec::new();
-        for (i, table) in TABLES.iter().enumerate() {
-            let object = CourtListenerSnapshot::new(*table, request.object.locator())?.object();
-            uris.push(format!(
-                "{}/{}",
-                self.options.source_root.trim_end_matches('/'),
-                object.locator()
-            ));
-            let mut reader = source
-                .open(ReadRequest::new(object).with_byte_options(request.byte_options))
-                .await?;
-            let mut ordinal = 0;
-            while let Some(batch) = reader.next().await? {
-                let count = batch.num_rows() as u64;
-                database = blocking(move || {
-                    database.append(i, batch, ordinal)?;
-                    Ok(database)
-                })
-                .await?;
-                ordinal += count;
-            }
-        }
-        database = blocking(move || {
-            validate_keys(&database.connection, &TABLES)?;
-            Ok(database)
-        })
+        let database = ingest(
+            self.storage.clone(),
+            self.options.clone(),
+            self.schemas.clone(),
+            &request,
+        )
         .await?;
-        let interrupt = database.connection.interrupt_handle();
-        let state = QueryState {
-            database: Some(database),
-            receiver: None,
-            task: None,
-            interrupt,
-            schema,
-            sql: query_sql(&self.schemas),
+        let uris = TABLES
+            .iter()
+            .map(|table| {
+                let object = CourtListenerSnapshot::new(*table, &day)?.object();
+                Ok(format!(
+                    "{}/{}",
+                    self.options.source_root.trim_end_matches('/'),
+                    object.locator()
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let state = query(
+            database,
+            &self.schemas,
             day,
             uris,
-            batch_size: request.options.batch_size.get(),
-        };
+            request.options.batch_size.get(),
+        );
         let stream = stream::try_unfold(state, |mut state| async move {
             let Some(batch) = state.next().await? else {
                 return Ok(None);
@@ -264,80 +135,5 @@ impl<A: ByteAccessor + 'static> ScanPlanner for CourtListenerDateAccessor<A> {
         )
         .with_ordering(OrderRequirement::PreserveGlobal)
         .with_file_streams())
-    }
-}
-
-struct QueryState {
-    database: Option<Database>,
-    receiver: Option<mpsc::Receiver<RecordBatch>>,
-    task: Option<JoinHandle<Result<()>>>,
-    interrupt: Arc<InterruptHandle>,
-    schema: SchemaRef,
-    sql: String,
-    day: String,
-    uris: Vec<String>,
-    batch_size: usize,
-}
-impl QueryState {
-    async fn next(&mut self) -> Result<Option<RecordBatch>> {
-        if let Some(database) = self.database.take() {
-            let (sender, receiver) = mpsc::channel(1);
-            self.receiver = Some(receiver);
-            let sql = self.sql.clone();
-            let schema = self.schema.clone();
-            let uris = self.uris.clone();
-            let day = self.day.clone();
-            let batch_size = self.batch_size;
-            self.task = Some(tokio::task::spawn_blocking(move || {
-                if sender.is_closed() {
-                    return Ok(());
-                }
-                let mut statement = database.connection.prepare(&sql).map_err(db_error)?;
-                let _ = statement
-                    .stream_arrow(params![day, &uris[0], &uris[1], &uris[2], &uris[3]])
-                    .map_err(db_error)?;
-                while !sender.is_closed() {
-                    let Some(batch) = statement.step().map_err(db_error)? else {
-                        break;
-                    };
-                    let batch = RecordBatch::from(&batch);
-                    let columns = batch
-                        .columns()
-                        .iter()
-                        .zip(schema.fields())
-                        .map(|(array, field)| {
-                            arrow_cast::cast(array, field.data_type()).map_err(arrow_error)
-                        })
-                        .collect::<Result<Vec<ArrayRef>>>()?;
-                    let batch =
-                        RecordBatch::try_new(schema.clone(), columns).map_err(arrow_error)?;
-                    for offset in (0..batch.num_rows()).step_by(batch_size) {
-                        if sender
-                            .blocking_send(
-                                batch.slice(offset, batch_size.min(batch.num_rows() - offset)),
-                            )
-                            .is_err()
-                        {
-                            return Ok(());
-                        }
-                    }
-                }
-                Ok(())
-            }));
-        }
-        if let Some(batch) = self.receiver.as_mut().expect("query started").recv().await {
-            return Ok(Some(batch));
-        }
-        if let Some(task) = self.task.take() {
-            task.await
-                .map_err(|e| task_error("courtlistener_query_task", e))??;
-        }
-        Ok(None)
-    }
-}
-impl Drop for QueryState {
-    fn drop(&mut self) {
-        self.receiver.take();
-        self.interrupt.interrupt();
     }
 }

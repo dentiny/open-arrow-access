@@ -5,6 +5,8 @@
 mod copy_csv;
 mod error;
 mod joined;
+mod query;
+mod source;
 pub use joined::{CourtListenerDateAccessor, CourtListenerJoinOptions};
 mod object;
 mod schema;

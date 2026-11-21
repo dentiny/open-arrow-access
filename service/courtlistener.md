@@ -119,11 +119,13 @@ fields. Use `CourtListenerSchemas` and `with_schemas` for reviewed historical
 header/type variants; the library does not fetch/execute SQL or infer historical
 schemas. All four tables are validated even when output projection omits them.
 Missing/empty required files, duplicate IDs, malformed COPY records and typed
-conversion failures are terminal. Primary-key validation for opinions continues
-while streaming; callers must consume through EOF before accepting a dataset.
+conversion failures are terminal. All primary keys are checked after import and
+before starting the join query; callers must consume through EOF to observe query errors.
 
-The reader imports the four validated typed table streams into a temporary
-DuckDB database, using DuckDB's Arrow appender. It checks key uniqueness with SQL,
+The reader follows BHL metadata's two stages. First, it imports the four typed
+table streams concurrently into one temporary DuckDB database, with a cloned
+connection per table and Arrow appenders. It awaits every importer, including
+when one fails. It checks key uniqueness with SQL,
 then executes one left-join query and streams Arrow result batches out with
 DuckDB's `stream_arrow`/`step` API, following the existing BHL integration.
 It does not perform per-opinion key lookups or collect the full query result in
