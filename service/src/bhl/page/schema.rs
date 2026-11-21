@@ -19,7 +19,7 @@ pub fn page_schema() -> SchemaRef {
             let metadata = vec![
                 Field::new(
                     "title",
-                    record!(
+                    many!(
                         "TitleID",
                         "MARCBibID",
                         "MARCLeader",
@@ -34,11 +34,11 @@ pub fn page_schema() -> SchemaRef {
                         "TitleURL",
                         "CreationDate"
                     ),
-                    true,
+                    false,
                 ),
                 Field::new(
                     "item",
-                    record!(
+                    many!(
                         "ItemID",
                         "TitleID",
                         "ThumbnailPageID",
@@ -60,7 +60,7 @@ pub fn page_schema() -> SchemaRef {
                         "LicenseType",
                         "RightsHolder"
                     ),
-                    true,
+                    false,
                 ),
                 Field::new(
                     "page",
