@@ -3,11 +3,11 @@
 //! with the consumer. See the service README for public S3 configuration.
 
 mod copy_csv;
+mod date;
 mod error;
-mod joined;
 mod query;
 mod source;
-pub use joined::CourtListenerDateAccessor;
+pub use date::CourtListenerDateAccessor;
 mod object;
 mod schema;
 mod table;

@@ -1,4 +1,4 @@
-//! Import typed Arrow batches into DuckDB, SQL-join a date, stream Arrow results.
+//! Date accessor composing parallel table ingestion and streaming SQL results.
 use super::{
     CourtListenerCopyDialect, CourtListenerSchemas, CourtListenerSnapshot,
     query::query,
