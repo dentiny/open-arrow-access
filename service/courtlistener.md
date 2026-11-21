@@ -75,9 +75,8 @@ join source tables, discover output destinations or write a Lance dataset.
 
 ## One joined stream per date
 
-Enable facade feature `service-courtlistener-joined` (or service-crate feature
-`courtlistener-joined`). The existing `service-courtlistener` single-table API
-does not pull in DuckDB.
+Enable facade feature `service-courtlistener` (or service-crate feature
+`courtlistener`). This includes the single-table and DuckDB joined readers.
 
 `CourtListenerDateAccessor` reads same-date opinions, opinion-clusters, dockets
 and courts. Left joins preserve one row per opinion; missing relationships

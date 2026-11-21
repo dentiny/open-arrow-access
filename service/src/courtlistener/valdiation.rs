@@ -1,4 +1,3 @@
-#[cfg(feature = "courtlistener-joined")]
 use super::error::db_error;
 use super::{
     CourtListenerCopyDialect, CourtListenerSchemas,
@@ -191,7 +190,6 @@ pub(super) fn validate_columns(
     Ok(())
 }
 
-#[cfg(feature = "courtlistener-joined")]
 pub(super) fn validate_keys(connection: &duckdb::Connection, tables: &[&str]) -> Result<()> {
     for (i, table) in tables.iter().enumerate() {
         let duplicate = connection.query_row(
@@ -208,7 +206,6 @@ pub(super) fn validate_keys(connection: &duckdb::Connection, tables: &[&str]) ->
     Ok(())
 }
 
-#[cfg(feature = "courtlistener-joined")]
 pub(super) fn validate_join_options(options: &super::CourtListenerJoinOptions) -> Result<()> {
     options.dialect.validate()?;
     if options.source_root.is_empty() {
@@ -216,7 +213,6 @@ pub(super) fn validate_join_options(options: &super::CourtListenerJoinOptions) -
     }
     Ok(())
 }
-#[cfg(feature = "courtlistener-joined")]
 pub(super) fn validate_join_schema(schemas: &CourtListenerSchemas) -> Result<()> {
     schemas.validate()?;
     if schemas

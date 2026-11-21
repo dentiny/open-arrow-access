@@ -289,7 +289,6 @@ async fn typed_table_plans_are_lazy_and_reject_drift_and_invalid_values() -> Res
     Ok(())
 }
 
-#[cfg(feature = "courtlistener-joined")]
 mod joined {
     use super::*;
     const JOIN_FIXTURES: [(&str, &str); 4] = [

@@ -34,12 +34,8 @@ courtlistener = [
     "dep:arrow-array",
     "dep:arrow-schema",
     "dep:arrow-cast",
-]
-courtlistener-joined = [
-    "courtlistener",
     "dep:duckdb",
     "duckdb/appender-arrow",
-    "dep:arrow-cast",
     "dep:tempfile",
     "tokio/rt",
     "tokio/sync",
