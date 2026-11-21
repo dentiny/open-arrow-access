@@ -12,7 +12,7 @@ use open_arrow_access_core::{ByteReader, Result, StreamReader};
 
 use crate::archive::{ArchiveSource, DEFAULT_MAX_ENTRY_BYTES};
 use error::{decode, missing_entry};
-use validation::{BLOCK_SIZE, entry_end, parse_entry};
+use validation::{BLOCK_SIZE, entry_end, is_long_name, long_name, parse_entry};
 
 const DEFAULT_MAX_ENTRIES: usize = 65_536;
 
@@ -43,8 +43,8 @@ pub struct TarEntry {
 
 /// One opened source and its cached entry headers. Inspection reads header blocks
 /// and skips bodies using exact ranges; there is one header request per entry.
-/// Supports regular GNU/USTAR files and directories. Extension headers, sparse
-/// files and links are explicitly unsupported. Compressed TAR requires a separate
+/// Supports regular GNU/USTAR files, directories and GNU long-name metadata.
+/// Other extension headers, sparse files and links remain unsupported. Compressed TAR requires a separate
 /// ranged representation; a sequential gzip decoder cannot supply this input.
 #[derive(Clone)]
 pub struct TarArchive {
@@ -65,12 +65,17 @@ impl TarArchive {
         let input = source.input.clone();
         let mut offset = 0;
         let mut entries = Vec::new();
+        let mut headers = 0;
+        let mut pending_name = None;
         loop {
             if input.content_length().saturating_sub(offset) < BLOCK_SIZE {
                 return Err(decode("TAR archive has no complete end marker"));
             }
             let bytes = input.read_range(offset..offset + BLOCK_SIZE).await?;
             if bytes.iter().all(|byte| *byte == 0) {
+                if pending_name.is_some() {
+                    return Err(decode("GNU long name has no following entry"));
+                }
                 if input.content_length().saturating_sub(offset) < 2 * BLOCK_SIZE
                     || !input
                         .read_range(offset + BLOCK_SIZE..offset + 2 * BLOCK_SIZE)
@@ -82,9 +87,23 @@ impl TarArchive {
                 }
                 break;
             }
-            let entry = parse_entry(&bytes, entries.len(), &limits)?;
+            let mut entry = parse_entry(&bytes, headers, &limits)?;
+            headers += 1;
             let start = offset + BLOCK_SIZE;
             offset = entry_end(start, entry.size, input.content_length())?;
+            if is_long_name(&bytes) {
+                if pending_name.is_some() {
+                    return Err(decode("consecutive GNU long names"));
+                }
+                pending_name = Some(long_name(
+                    input.read_range(start..start + entry.size).await?.to_vec(),
+                )?);
+                continue;
+            }
+            if let Some(name) = pending_name.take() {
+                entry.name = name;
+            }
+            entry.index = entries.len();
             entries.push((entry, start));
         }
         Ok(Self {
