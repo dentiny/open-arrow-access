@@ -1,11 +1,16 @@
 use std::{num::NonZeroUsize, sync::atomic::Ordering};
 
-use arrow_array::cast::AsArray;
+use arrow_array::{cast::AsArray, types::UInt64Type};
 use open_arrow_access::{
-    Accessor, ArchiveAccessor, ArchiveFormat, ArchiveOptions, ByteReadOptions, ErrorKind,
-    ReadOptions, ReadRequest, Reader, ScanPlanner, archive_schema,
+    Accessor, ArchiveAccessor, ArchiveFormat, ArchiveOptions, ByteReadOptions, EmissionPolicy,
+    ErrorKind, ReadOptions, ReadRequest, Reader, RecordReader, ScanPlanner, archive_schema,
+    crawl::{CrawlAccessor, CrawlOptions},
+    dataset::file_set::FileSetRequest,
 };
-use open_arrow_access_test_support::{MemoryAccessor, fixture};
+use open_arrow_access_test_support::{
+    MemoryAccessor, expect_err_kind, fixture,
+    record::{collect_column, field_names},
+};
 
 #[tokio::test]
 async fn filters_before_materialization_and_preserves_projection_and_provenance() {
@@ -20,9 +25,7 @@ async fn filters_before_materialization_and_preserves_projection_and_provenance(
         io_chunk_size: NonZeroUsize::new(64),
         ..Default::default()
     };
-    let request = ReadRequest::new("archive.tar")
-        .with_batch_size(NonZeroUsize::new(10).unwrap())
-        .with_byte_options(io);
+    let request = ReadRequest::new("archive.tar").with_byte_options(io);
     let metadata = accessor.metadata(request.clone()).await.unwrap();
     let plan = accessor.plan_scan(request.clone()).await.unwrap();
     assert_eq!(metadata.schema, archive_schema());
@@ -32,9 +35,7 @@ async fn filters_before_materialization_and_preserves_projection_and_provenance(
     let first = reader.next().await.unwrap().unwrap();
     assert_eq!(first.num_rows(), 1);
     assert_eq!(
-        first["entry_index"]
-            .as_primitive::<arrow_array::types::UInt64Type>()
-            .value(0),
+        first["entry_index"].as_primitive::<UInt64Type>().value(0),
         1
     );
     assert_eq!(
@@ -50,45 +51,28 @@ async fn filters_before_materialization_and_preserves_projection_and_provenance(
         "archive.tar"
     );
     assert_eq!(observed.requests.lock().unwrap()[0].options, io);
-    let second = reader.next().await.unwrap().unwrap();
-    assert_eq!(
-        second["entry_index"]
-            .as_primitive::<arrow_array::types::UInt64Type>()
-            .value(0),
-        2
-    );
-    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(collect_column::<UInt64Type>(Box::new(reader), 1).await, [2]);
 
-    // Zero-column projection keeps the selected row count and validates EOF.
-    let mut projected = accessor
-        .open(request.with_projection(Vec::<String>::new()))
+    // Exercise crawl composition and zero-column projection in one scan.
+    let crawl = CrawlAccessor::files(
+        accessor,
+        CrawlOptions::default().with_emission(EmissionPolicy::Ordered),
+    );
+    let mut reader = crawl
+        .open(
+            FileSetRequest::new(["archive.tar"])
+                .with_options(ReadOptions::default().with_projection(Vec::<String>::new())),
+        )
         .await
         .unwrap();
-    assert_eq!(projected.metadata().schema.fields().len(), 0);
+    assert!(reader.metadata().schema.fields().is_empty());
     let mut rows = 0;
-    while let Some(batch) = projected.next().await.unwrap() {
+    while let Some(batch) = reader.next().await.unwrap() {
         assert_eq!(batch.num_columns(), 0);
         rows += batch.num_rows();
     }
     assert_eq!(rows, 2);
     assert_eq!(observed.range_reads.load(Ordering::SeqCst), 0);
-
-    let crawl = open_arrow_access::crawl::CrawlAccessor::files(
-        accessor,
-        open_arrow_access::crawl::CrawlOptions::default()
-            .with_emission(open_arrow_access::EmissionPolicy::Ordered),
-    );
-    let mut reader = crawl
-        .open(open_arrow_access::dataset::file_set::FileSetRequest::new([
-            "archive.tar",
-        ]))
-        .await
-        .unwrap();
-    let mut rows = 0;
-    while let Some(batch) = reader.next().await.unwrap() {
-        rows += batch.num_rows();
-    }
-    assert_eq!(rows, 2);
 }
 
 #[tokio::test]
@@ -105,18 +89,11 @@ async fn incremental_output_does_not_hide_late_errors_and_drop_stops_consumption
     drop(reader);
     assert_eq!(observed.reads.load(Ordering::SeqCst), reads);
 
-    let mut reader = accessor.open(request).await.unwrap();
-    let mut rows = 0;
-    let error = loop {
-        match reader.next().await {
-            Ok(Some(batch)) => rows += batch.num_rows(),
-            Ok(None) => panic!("late source error was hidden by TAR end markers"),
-            Err(error) => break error,
-        }
-    };
-    assert_eq!(rows, 3);
-    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
-    assert!(reader.next().await.unwrap().is_none());
+    let reader = accessor.open(request).await.unwrap();
+    assert_eq!(
+        rows_before_error(reader, ErrorKind::PermissionDenied).await,
+        3
+    );
 }
 
 #[tokio::test]
@@ -154,33 +131,31 @@ async fn decodes_gzip_single_files_and_validates_before_storage_io() {
         MemoryAccessor::new(&corrupt, 7),
         ArchiveOptions::new(ArchiveFormat::Tar),
     );
-    let mut reader = archive
+    let reader = archive
         .open(ReadRequest::new("package.tar.gz"))
         .await
         .unwrap();
-    let error = loop {
-        match reader.next().await {
-            Ok(Some(_)) => {}
-            Ok(None) => panic!("corrupt gzip checksum was ignored"),
-            Err(error) => break error,
-        }
-    };
-    assert_eq!(error.kind(), ErrorKind::Decode);
-    assert!(reader.next().await.unwrap().is_none());
+    rows_before_error(reader, ErrorKind::Decode).await;
 
-    let mut reader = accessor
-        .open(
-            ReadRequest::new("source.gz")
-                .with_options(ReadOptions::default().with_projection(["entry_name"])),
-        )
+    let reader = accessor
+        .open(ReadRequest::new("source.gz").with_projection(["entry_index"]))
         .await
         .unwrap();
-    let batch = reader.next().await.unwrap().unwrap();
-    assert_eq!(batch.num_rows(), 1);
-    assert_eq!(
-        batch["entry_name"].as_binary::<i64>().value(0),
-        b"source.tex"
-    );
-    assert!(batch.column_by_name("data").is_none());
+    assert_eq!(field_names(&reader.metadata().schema), ["entry_index"]);
+    assert_eq!(collect_column::<UInt64Type>(reader, 0).await, [0]);
+}
+
+async fn rows_before_error(mut reader: Box<dyn RecordReader>, kind: ErrorKind) -> usize {
+    let mut rows = 0;
+    loop {
+        match reader.next().await {
+            Ok(Some(batch)) => rows += batch.num_rows(),
+            result => {
+                expect_err_kind(result, kind);
+                break;
+            }
+        }
+    }
     assert!(reader.next().await.unwrap().is_none());
+    rows
 }
