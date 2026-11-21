@@ -3,6 +3,8 @@
 //! with the consumer. See the service README for public S3 configuration.
 
 mod error;
+mod schema;
+pub use schema::CourtListenerSchemas;
 mod validation;
 
 use std::sync::Arc;

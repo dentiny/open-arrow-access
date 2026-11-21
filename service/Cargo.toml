@@ -28,7 +28,7 @@ bhl = [
     "open-arrow-access-file-format/csv",
 ]
 biorxiv = ["meca", "dep:chrono"]
-courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
+courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2", "dep:arrow-schema"]
 dataverse = []
 default = []
 doab = ["oai"]
