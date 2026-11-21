@@ -36,7 +36,7 @@ pub(super) fn copy_error(object: &str, ordinal: u64, message: impl std::fmt::Dis
     )
 }
 pub(super) fn arrow_error(e: arrow_schema::ArrowError) -> Error {
-    records_error(e.to_string())
+    records_error(e.to_string()).with_source(e)
 }
 
 pub(super) fn db_error(e: duckdb::Error) -> Error {

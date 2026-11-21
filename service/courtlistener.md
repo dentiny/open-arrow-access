@@ -84,7 +84,8 @@ produce null structs instead of dropping opinions. The six output fields are
 `snapshot_date`, `opinion`, `cluster`, `docket`, `court` and `provenance`. Source
 fields and types match `CourtListenerSchemas::schema()` and the design in #617.
 Duplicate primary keys fail, preventing accidental multiplication of opinions.
-Each complete date is a lazy native scan partition. Caller orchestration runs
+Metadata inspection validates the date, schema and projection without storage I/O
+or importing tables. Each complete date is a lazy native scan partition. Caller orchestration runs
 dates independently and sends each date stream to one Lance destination.
 
 ### Usage and limits
@@ -121,7 +122,8 @@ before starting the join query; callers must consume through EOF to observe quer
 
 The reader follows BHL metadata's two stages. First, it imports the four typed
 table streams concurrently into one temporary DuckDB database, with a cloned
-connection per table and Arrow appenders. It awaits every importer, including
+connection per table and Arrow appenders. Each table is imported in one
+transaction, avoiding a commit for every input batch. It awaits every importer, including
 when one fails. It checks key uniqueness with SQL,
 then executes one left-join query and streams Arrow result batches out with
 DuckDB's `stream_arrow`/`step` API, following the existing BHL integration.
@@ -141,7 +143,9 @@ Input batches target 8 MiB; individual CSV records have no byte limit.
 DuckDB controls its result chunk size; emitted slices respect the requested row
 target without copying arrays. A large record/result chunk may
 exceed byte targets. Original per-table record ordinals are imported alongside
-the data, and SQL orders the result by opinion ordinal. This is not a hard
+the data, and SQL orders the result by opinion ordinal. This global sort may
+spill to disk and delays the first output batch; streaming bounds client-side
+output buffering, not the work needed to join and sort. This is not a hard
 whole-process memory cap or a range-readable source. The reader does not provide
 cross-run checkpoints, automatic historical schema migration, a durable manifest,
 source hash verification, orphan-count reports or a production Lance commit.

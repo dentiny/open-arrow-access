@@ -5,6 +5,7 @@ use arrow_array::{
     TimestampMicrosecondArray, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
+use arrow_select::concat::concat_batches;
 use futures::AsyncWriteExt;
 use open_arrow_access_core::{
     Accessor, AccessorExt, ByteReadOptions, ByteReadRequest, ErrorKind, ReadRequest, RecordReader,
@@ -350,7 +351,11 @@ async fn joined_date_has_typed_nested_rows_null_joins_and_exact_provenance() -> 
     let mut reader = source.open(ReadRequest::new("2026-09-30")).await?;
     let schema = reader.metadata().schema.clone();
     assert_eq!(schema.fields().len(), 6);
-    let batch = reader.next().await?.unwrap();
+    let mut batches = Vec::new();
+    while let Some(batch) = reader.next().await? {
+        batches.push(batch);
+    }
+    let batch = concat_batches(&schema, &batches).unwrap();
     assert_eq!(batch.num_rows(), 5);
     let opinion = batch
         .column(1)
@@ -435,6 +440,23 @@ async fn date_planning_is_lazy_and_projection_does_not_skip_validation() -> Resu
             .0,
         1
     );
+    let metadata = source
+        .metadata(missing.clone().with_projection(["court", "opinion"]))
+        .await?;
+    assert_eq!(metadata.schema.field(0).name(), "court");
+    assert_eq!(metadata.schema.field(1).name(), "opinion");
+    assert!(
+        source
+            .metadata(ReadRequest::new("2026-02-30"))
+            .await
+            .is_err()
+    );
+    assert!(
+        source
+            .metadata(missing.clone().with_projection(["unknown"]))
+            .await
+            .is_err()
+    );
     assert!(source.open(missing).await.is_err());
     let request = ReadRequest::new("2026-09-30")
         .with_batch_size(NonZeroUsize::MIN)
@@ -491,9 +513,10 @@ async fn duplicate_ids_header_drift_bad_counts_and_empty_exports_fail() {
         let (root, source) = joined_fixture().await;
         let duplicate = raw.split_once('\n').unwrap().1;
         write_bz(root.path(), table, &format!("{raw}{duplicate}")).await;
-        if let Ok(reader) = source.open(ReadRequest::new("2026-09-30")).await {
-            assert!(consume(reader).await.is_err());
-        }
+        assert!(
+            source.open(ReadRequest::new("2026-09-30")).await.is_err(),
+            "duplicate IDs in {table} must fail before returning a reader"
+        );
     }
     for raw in [
         JOIN_FIXTURES[0].1.replace("\"12\"", "\"-1\""),
@@ -502,9 +525,73 @@ async fn duplicate_ids_header_drift_bad_counts_and_empty_exports_fail() {
     ] {
         let (root, source) = joined_fixture().await;
         write_bz(root.path(), "opinions", &raw).await;
-        if let Ok(mut reader) = source.open(ReadRequest::new("2026-09-30")).await {
-            assert!(reader.next().await.is_err());
-            assert!(reader.next().await.unwrap().is_none());
+        assert!(source.open(ReadRequest::new("2026-09-30")).await.is_err());
+    }
+}
+
+#[tokio::test]
+async fn joined_output_preserves_input_order_and_ordinals_across_batches() -> Result<()> {
+    let (root, source) = joined_fixture().await;
+    let (header, _) = JOIN_FIXTURES[0].1.split_once('\n').unwrap();
+    let row = JOIN_FIXTURES[0].1.lines().last().unwrap();
+    let mut raw = format!("{header}\n");
+    // Cross the typed reader's 1024-row boundary; IDs deliberately oppose input order.
+    let rows = 2051;
+    for id in (1..=rows).rev() {
+        raw.push_str(&row.replacen("\"5\",", &format!("\"{id}\","), 1));
+        raw.push('\n');
+    }
+    write_bz(root.path(), "opinions", &raw).await;
+    let mut reader = source
+        .open(
+            ReadRequest::new("2026-09-30")
+                .with_projection(["provenance", "opinion"])
+                .with_batch_size(NonZeroUsize::new(128).unwrap()),
+        )
+        .await?;
+    let mut seen = 0;
+    while let Some(batch) = reader.next().await? {
+        assert!(batch.num_rows() > 0 && batch.num_rows() <= 128);
+        assert_eq!(batch.schema(), reader.metadata().schema);
+        let provenance = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        let opinion = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        for index in 0..batch.num_rows() {
+            assert_eq!(
+                child::<UInt64Array>(provenance, "opinion_record_index").value(index),
+                seen as u64
+            );
+            assert_eq!(
+                child::<Int64Array>(opinion, "id").value(index),
+                (rows - seen) as i64
+            );
+            seen += 1;
         }
     }
+    assert_eq!(seen, rows);
+    assert!(reader.next().await?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn header_only_opinions_produce_empty_joined_stream() -> Result<()> {
+    let (root, source) = joined_fixture().await;
+    let header = JOIN_FIXTURES[0].1.split_once('\n').unwrap().0;
+    write_bz(root.path(), "opinions", &format!("{header}\n")).await;
+    for projection in [vec!["opinion"], vec![]] {
+        let request = ReadRequest::new("2026-09-30").with_projection(projection);
+        let metadata = source.metadata(request.clone()).await?;
+        let mut reader = source.open(request).await?;
+        assert_eq!(reader.metadata().schema, metadata.schema);
+        assert!(reader.next().await?.is_none());
+        assert!(reader.next().await?.is_none());
+    }
+    Ok(())
 }

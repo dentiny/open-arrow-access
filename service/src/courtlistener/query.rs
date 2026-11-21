@@ -5,6 +5,7 @@ use super::{
     ingest::{Database, ORDINAL},
 };
 use arrow_array::{ArrayRef, RecordBatch};
+use arrow_cast::{CastOptions, cast_with_options};
 use duckdb::params;
 use open_arrow_access_core::Result;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -26,10 +27,14 @@ fn query_sql(schemas: &CourtListenerSchemas) -> String {
             format!("CASE WHEN {alias}.id IS NULL THEN NULL ELSE {value} END")
         }
     };
-    format!("SELECT CAST($1 AS DATE) AS snapshot_date, {} AS opinion, {} AS cluster, {} AS docket, {} AS court,
-        struct_pack(opinions_source_uri := CAST($2 AS VARCHAR), clusters_source_uri := CAST($3 AS VARCHAR), dockets_source_uri := CAST($4 AS VARCHAR), courts_source_uri := CAST($5 AS VARCHAR),
-        opinion_record_index := o.{ORDINAL},cluster_record_index := c.{ORDINAL},docket_record_index := d.{ORDINAL},court_record_index := k.{ORDINAL}) AS provenance
-        FROM cl_0 o LEFT JOIN cl_1 c ON o.cluster_id=c.id LEFT JOIN cl_2 d ON c.docket_id=d.id LEFT JOIN cl_3 k ON d.court_id=k.id ORDER BY o.{ORDINAL}",entity(0,"o"),entity(1,"c"),entity(2,"d"),entity(3,"k"))
+    format!(
+        include_str!("join.sql"),
+        opinion = entity(0, "o"),
+        cluster = entity(1, "c"),
+        docket = entity(2, "d"),
+        court = entity(3, "k"),
+        ordinal = ORDINAL,
+    )
 }
 
 pub(super) fn query(
@@ -62,7 +67,15 @@ pub(super) fn query(
                 .iter()
                 .zip(schema.fields())
                 .map(|(array, field)| {
-                    arrow_cast::cast(array, field.data_type()).map_err(arrow_error)
+                    cast_with_options(
+                        array,
+                        field.data_type(),
+                        &CastOptions {
+                            safe: false,
+                            ..Default::default()
+                        },
+                    )
+                    .map_err(arrow_error)
                 })
                 .collect::<Result<Vec<ArrayRef>>>()?;
             let batch = RecordBatch::try_new(schema.clone(), columns).map_err(arrow_error)?;

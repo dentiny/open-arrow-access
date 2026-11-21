@@ -61,11 +61,20 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerDateAccessor<A> {
     fn capability(&self) -> RecordCapability {
         RecordCapability::sequential(OrderRequirement::PreserveGlobal)
     }
-    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
+    async fn metadata(&self, request: ReadRequest) -> Result<RecordMetadata> {
         CourtListenerSnapshot::new("opinions", request.object.locator())?;
-        self.schemas.validate()?;
-        let schema = self.schemas.schema();
-        let projection = request.options.resolve_projection(&schema)?;
+        validate_join_schema(&self.schemas)?;
+        Ok(RecordMetadata {
+            schema: request
+                .options
+                .resolve_projection(&self.schemas.schema())?
+                .schema,
+            source: Some(request.object),
+        })
+    }
+    async fn open(&self, request: ReadRequest) -> Result<Box<dyn RecordReader>> {
+        let metadata = self.metadata(request.clone()).await?;
+        let projection = request.options.resolve_projection(&self.schemas.schema())?;
         let day = request.object.locator().to_owned();
         let database = ingest(
             self.storage.clone(),
@@ -98,10 +107,6 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerDateAccessor<A> {
             };
             Ok(Some((batch, state)))
         });
-        let metadata = RecordMetadata {
-            schema: projection.schema,
-            source: Some(request.object),
-        };
         Ok(Box::new(record_stream_reader(
             stream,
             metadata,
@@ -113,14 +118,7 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerDateAccessor<A> {
 #[async_trait]
 impl<A: ByteAccessor + 'static> ScanPlanner for CourtListenerDateAccessor<A> {
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
-        CourtListenerSnapshot::new("opinions", request.object.locator())?;
-        let metadata = RecordMetadata {
-            schema: request
-                .options
-                .resolve_projection(&self.schemas.schema())?
-                .schema,
-            source: Some(request.object.clone()),
-        };
+        let metadata = self.metadata(request.clone()).await?;
         let source = self.clone();
         Ok(ScanPlan::new(
             metadata,

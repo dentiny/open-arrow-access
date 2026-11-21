@@ -112,13 +112,24 @@ async fn import_table<A: ByteAccessor + 'static>(
     table: usize,
 ) -> Result<()> {
     let mut reader = source.open(request).await?;
+    // One transaction per table avoids committing every small input batch.
+    connection = tokio::task::spawn_blocking(move || -> Result<_> {
+        connection
+            .execute_batch("BEGIN TRANSACTION")
+            .map_err(db_error)?;
+        Ok(connection)
+    })
+    .await
+    .map_err(|e| task_error("courtlistener_duckdb_task", e))??;
     let mut ordinal = 0;
     while let Some(batch) = reader.next().await? {
         let count = batch.num_rows() as u64;
         connection = append(connection, table, batch, ordinal).await?;
         ordinal += count;
     }
-    Ok(())
+    tokio::task::spawn_blocking(move || connection.execute_batch("COMMIT").map_err(db_error))
+        .await
+        .map_err(|e| task_error("courtlistener_duckdb_task", e))?
 }
 
 pub(super) async fn ingest<A: ByteAccessor + 'static>(
