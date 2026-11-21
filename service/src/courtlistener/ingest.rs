@@ -78,20 +78,32 @@ impl Database {
         })
     }
 }
-fn append(connection: &Connection, table: usize, batch: RecordBatch, ordinal: u64) -> Result<()> {
-    let count = batch.num_rows();
-    let mut fields = batch.schema().fields().to_vec();
-    fields.push(Arc::new(Field::new(ORDINAL, DataType::UInt64, false)));
-    let mut arrays = batch.columns().to_vec();
-    arrays.push(Arc::new(UInt64Array::from_iter_values(
-        ordinal..ordinal + count as u64,
-    )));
-    let batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).map_err(arrow_error)?;
-    let mut appender = connection
-        .appender(&format!("cl_{table}"))
-        .map_err(db_error)?;
-    appender.append_record_batch(batch).map_err(db_error)?;
-    appender.flush().map_err(db_error)
+async fn append(
+    connection: Connection,
+    table: usize,
+    batch: RecordBatch,
+    ordinal: u64,
+) -> Result<Connection> {
+    tokio::task::spawn_blocking(move || -> Result<_> {
+        let count = batch.num_rows();
+        let mut fields = batch.schema().fields().to_vec();
+        fields.push(Arc::new(Field::new(ORDINAL, DataType::UInt64, false)));
+        let mut arrays = batch.columns().to_vec();
+        arrays.push(Arc::new(UInt64Array::from_iter_values(
+            ordinal..ordinal + count as u64,
+        )));
+        let batch =
+            RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).map_err(arrow_error)?;
+        let mut appender = connection
+            .appender(&format!("cl_{table}"))
+            .map_err(db_error)?;
+        appender.append_record_batch(batch).map_err(db_error)?;
+        appender.flush().map_err(db_error)?;
+        drop(appender);
+        Ok(connection)
+    })
+    .await
+    .map_err(|e| task_error("courtlistener_duckdb_task", e))?
 }
 async fn import_table<A: ByteAccessor + 'static>(
     mut connection: Connection,
@@ -103,12 +115,7 @@ async fn import_table<A: ByteAccessor + 'static>(
     let mut ordinal = 0;
     while let Some(batch) = reader.next().await? {
         let count = batch.num_rows() as u64;
-        connection = tokio::task::spawn_blocking(move || -> Result<_> {
-            append(&connection, table, batch, ordinal)?;
-            Ok(connection)
-        })
-        .await
-        .map_err(|e| task_error("courtlistener_duckdb_task", e))??;
+        connection = append(connection, table, batch, ordinal).await?;
         ordinal += count;
     }
     Ok(())
