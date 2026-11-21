@@ -3,7 +3,7 @@ use arrow_array::{Array, new_null_array};
 use arrow_schema::{DataType, Schema};
 use open_arrow_access_core::RecordBatchBuilder;
 
-fn metadata(title: &str, rights: &str) -> StructArray {
+pub(in crate::bhl) fn metadata(title: &str, rights: &str) -> StructArray {
     let field = page_schema().field_with_name("metadata").unwrap().clone();
     let DataType::Struct(tables) = field.data_type() else {
         panic!("expected struct")

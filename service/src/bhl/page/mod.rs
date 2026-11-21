@@ -45,4 +45,4 @@ impl BhlPageRecord<'_> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
