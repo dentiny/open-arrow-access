@@ -594,8 +594,9 @@ The legacy raw-PDF join still accepts arbitrary caller snapshot schemas.
 
 ## LaTeX-only bulk output
 
-`service.records().content(ArxivContentFormat::Latex)` accepts `ArxivKind::Source` and retains one lazy
-partition per source TAR. It decodes gzip source payloads, detects TAR packages,
+`service.records().content(ArxivContentFormat::Latex)` accepts `ArxivKind::Source`.
+It uses article partitions for a single selected TAR and file partitions for
+multiple TARs, as described below. It decodes gzip source payloads, detects TAR packages,
 and emits each UTF-8 `.tex` member outside any `anc/` directory. Images,
 ancillary TeX, videos, bibliography/style files and the original package are
 excluded. Multi-file manuscripts remain separate files; includes are not
@@ -622,7 +623,7 @@ are consumed without constructing attachment rows. Selected TeX files are built
 directly into output batches and yielded incrementally, without buffering the
 complete decoded package or collecting all article batches first. Batches respect
 the row limit and a soft 4 MiB selected-TeX target; one complete TeX file can exceed
-that target. Single-file LaTeX remains one complete cell. Bound active article
+that target. Single-file LaTeX remains one complete cell. Bound active scan
 partitions to control resident package and TeX memory.
 
 Consumers must read through EOF before committing output: gzip checksum,
@@ -648,14 +649,21 @@ MD5 and membership cannot be checked when the manifest is intentionally bypassed
 
 ## Parallel content reads inside a single shard
 
-For `records().content(format)` with an explicit shard, `open_sequential` and
-`TarStream` read one input and yield an owned partition per regular article.
+For `records().content(format)` with an explicit shard or exactly one
+manifest-selected TAR, `TarStream` reads one input and yields an owned partition
+per regular article. Explicit shards use `open_sequential`; manifest selection
+keeps the normal storage open and manifest payload-size validation. Month filters
+apply before choosing the partition strategy. Zero selected TARs yield no partitions;
+multiple TARs retain independent file partitions for concurrent input reads.
 There is no upfront header index or per-article storage reopen. The first article
 can be processed before later headers arrive; physical entry indices and names
 are preserved.
 
 `CrawlAccessor` / `ParallelReadLayer` bounds resident articles and overlaps their
-processing with subsequent reads. `read_concurrency` controls article processing;
+processing with subsequent reads. For a single TAR, `read_concurrency` controls
+article processing; multiple TARs use the same window for file processing.
+Online OAI metadata lookups retain their existing serialized cache behavior;
+this change introduces no new metadata request concurrency.
 `io_concurrency` and `io_chunk_size` are forwarded for backend-managed I/O.
 Supported HTTP backends can reuse one GET; explicit splitting options may use
 chunked/concurrent requests. Consume partitions incrementally: collecting their
@@ -663,6 +671,6 @@ openers would retain all article payloads. Shared-stream discovery is marked for
 the existing multi-file planner budget; plain accessor `open()` is sequential.
 
 Later malformed headers or storage errors remain fatal. Consume through EOF
-before committing results. Raw scans, month scans and random-access `TarArchive`
-are unchanged. Compressed article buffering, inner-package expansion and
-non-TeX policy remain separate work.
+before committing results. Raw scans and random-access `TarArchive` are unchanged.
+Outer article payloads remain buffered; LaTeX package decoding and selected-file
+output use the streaming handler described above. Non-TeX source policy is unchanged.

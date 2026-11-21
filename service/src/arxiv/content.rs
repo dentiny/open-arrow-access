@@ -118,7 +118,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
         request.options.batch_size = std::num::NonZeroUsize::MIN;
         let mut plan = match request.shard.clone() {
             Some(shard) => self.records.plan_shard_entries(shard, request)?,
-            None => self.records.plan_scan(request).await?,
+            None => self.records.plan_manifest_entries(request).await?,
         };
         plan.metadata.schema = projection.schema.clone();
         let format = self.format;

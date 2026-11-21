@@ -5,6 +5,12 @@ No downloaded paper or credentials; all header timestamps are zero.
 latex-two.tar wraps the existing main.tex.gz fixture twice with distinct IDs,
 for the gated concurrent-member read regression.
 
+source-manifest.xml selects zero shards for 2409, one for 2410 and two for 2411.
+Each selected object serves latex-two.tar. The 2412 row deliberately declares a
+3073-byte payload lower bound, exceeding that fixture's 3072-byte object length,
+to exercise manifest-length validation. Other rows use a valid one-byte lower
+bound. Checksums are synthetic placeholders and are not verified by the reader.
+
 large-attachments-bad-crc.tar.gz preserves arxiv-articles/source.tar entries,
 with 2 MiB of zero padding added to figures/a.png, 4 MiB to anc/demo.mp4,
 and 128 KiB after the TAR end markers. Gzip mtime is zero; bit 0 of the gzip
