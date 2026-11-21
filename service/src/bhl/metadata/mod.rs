@@ -86,7 +86,7 @@ impl BhlMetadata {
         emit: impl FnMut(BhlPageMetadata) -> Result<()>,
     ) -> Result<()> {
         let connection = self.query_connection()?;
-        join::for_each(&connection, keys, emit, || false)
+        join::for_each(&connection, keys, emit)
     }
 
     fn query_connection(&self) -> Result<duckdb::Connection> {

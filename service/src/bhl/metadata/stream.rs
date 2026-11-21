@@ -26,16 +26,11 @@ impl Query {
         let interrupt = connection.interrupt_handle();
         let (sender, receiver) = mpsc::channel(1);
         let worker = tokio::task::spawn_blocking(move || {
-            join::for_each(
-                &connection,
-                &keys,
-                |page| {
-                    sender
-                        .blocking_send(page)
-                        .map_err(|_| error::invalid("page reader dropped"))
-                },
-                || sender.is_closed(),
-            )
+            join::for_each(&connection, &keys, |page| {
+                sender
+                    .blocking_send(page)
+                    .map_err(|_| error::invalid("page reader dropped"))
+            })
         });
         Ok(Self {
             receiver,

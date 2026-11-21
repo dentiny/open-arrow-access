@@ -29,7 +29,6 @@ pub(super) fn for_each(
     connection: &duckdb::Connection,
     keys: &[ObjectRef],
     mut emit: impl FnMut(BhlPageMetadata) -> Result<()>,
-    cancelled: impl Fn() -> bool,
 ) -> Result<()> {
     if keys.is_empty() {
         return Ok(());
@@ -64,15 +63,9 @@ pub(super) fn for_each(
     let mut statement = connection
         .prepare(include_str!("join.sql"))
         .map_err(error::duckdb)?;
-    if cancelled() {
-        return Ok(());
-    }
     let mut batches = statement.stream_arrow([]).map_err(error::duckdb)?;
     let mut emitted = 0;
     loop {
-        if cancelled() {
-            return Ok(());
-        }
         // The Arrow-58-compatible binding panics on fetch failures.
         let batch = catch_unwind(AssertUnwindSafe(|| batches.next())).map_err(|_| {
             Error::new(
