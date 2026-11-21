@@ -34,6 +34,8 @@ fn sql_type(dtype: &DataType) -> &'static str {
 }
 pub(super) struct Database {
     pub connection: Connection,
+    /// Owns the temporary database and spill directory until the query finishes.
+    /// Dropping this guard removes the directory and its files.
     _directory: tempfile::TempDir,
 }
 impl Database {
