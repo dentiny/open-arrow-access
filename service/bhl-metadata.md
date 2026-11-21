@@ -7,6 +7,12 @@ internally. Each joined metadata batch is serialized through Arrow IPC and
 imported into the public Arrow 58 schema, adding an in-memory serialization step.
 OCR payload bytes do not pass through this conversion.
 
+DuckDB processing uses native scalar, `STRUCT`, and `LIST` types for this fixed
+schema. Dynamic or heterogeneous values must use `VARIANT`, never the SQL `JSON`
+type, including query intermediates. Do not encode records as JSON for joins or
+aggregation. Rust JSON serialization of source fingerprints and Arrow schema
+provenance does not create DuckDB `JSON` values.
+
 The first version has three steps:
 
 1. `BhlMetadata::load(storage).await` imports all 13 AWS `data/*.txt.gz` tables

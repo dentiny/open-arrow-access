@@ -72,6 +72,41 @@ fn read(metadata: &BhlMetadata, paths: &[&str]) -> Vec<BhlPageMetadata> {
 }
 
 #[tokio::test]
+async fn duckdb_processing_keeps_native_types_without_json() {
+    let metadata = load().await;
+    let connection = metadata.query_connection().unwrap();
+    let json_type = regex::Regex::new(r"\bJSON\b").unwrap();
+    // Inspect source tables and record views, including nested field types.
+    for table in tables() {
+        for name in [table.name.clone(), format!("bhl_{}", table.name)] {
+            let mut statement = connection.prepare(&format!("DESCRIBE {name}")).unwrap();
+            let types = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap();
+            for data_type in types {
+                let data_type = data_type.unwrap();
+                assert!(!json_type.is_match(&data_type), "{name}: {data_type}");
+            }
+        }
+    }
+    // Execute the real join, then inspect its SQL types before Arrow conversion
+    // can erase logical type information (JSON can otherwise look like text).
+    join::for_each(&connection, &[ObjectRef::new(ITEM)], |_| Ok(())).unwrap();
+    let mut statement = connection
+        .prepare(&format!("DESCRIBE {}", include_str!("join.sql")))
+        .unwrap();
+    let types = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(types[1].starts_with("STRUCT("), "{types:?}");
+    for data_type in types {
+        assert!(!json_type.is_match(&data_type), "{data_type}");
+    }
+}
+
+#[tokio::test]
 async fn joins_pages_and_preserves_source_values_and_relation_order() {
     let metadata = load().await;
     // Multiple independent relations, duplicate creators, and source ordinals
