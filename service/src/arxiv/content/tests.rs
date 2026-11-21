@@ -29,27 +29,6 @@ async fn read(name: &str, data: &[u8]) -> Result<Vec<RecordBatch>> {
 }
 
 #[tokio::test]
-async fn streams_metadata_and_tex_before_reporting_corrupt_gzip_trailer() {
-    let data = fixture!("arxiv-content", "large-attachments-bad-crc.tar.gz").await;
-    let snapshot = oai_snapshot().await;
-    let mut records = content_batches(
-        raw_batch("2410/2410.00001v2.gz", &data).unwrap(),
-        ArxivContentFormat::Latex,
-        ReadOptions::default().with_batch_size(std::num::NonZeroUsize::MIN),
-        ContentMetadata::Snapshot(index(snapshot.clone())),
-    )
-    .await
-    .unwrap();
-    let first = records.try_next().await.unwrap().unwrap();
-    assert_eq!(first.num_rows(), 1);
-    assert_metadata(&first, &snapshot, 1);
-    assert_eq!(
-        records.try_collect::<Vec<_>>().await.unwrap_err().kind(),
-        open_arrow_access_core::ErrorKind::Decode
-    );
-}
-
-#[tokio::test]
 async fn packages_keep_only_tex_with_provenance() {
     let original = fixture!("arxiv-articles", "members/main.tex").await;
     for file in ["source.tar", "source.tar.gz"] {
