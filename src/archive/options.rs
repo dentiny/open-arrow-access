@@ -1,9 +1,6 @@
 use std::{num::NonZeroUsize, sync::Arc};
 
-use crate::{
-    OuterCompression, Result,
-    decompression::tar::{TarEntry, TarLimits},
-};
+use crate::{OuterCompression, Result, decompression::tar::TarEntry};
 
 type EntryFilter = dyn Fn(&TarEntry) -> Result<bool> + Send + Sync;
 
@@ -17,7 +14,7 @@ pub enum ArchiveFormat {
     Single { name: Vec<u8> },
 }
 
-/// Package format, resource limits and member selection shared by independent opens.
+/// Package format and member selection shared by independent opens.
 #[derive(Clone)]
 pub struct ArchiveOptions {
     /// Explicit container interpretation after decompression; no magic-byte sniffing.
@@ -25,10 +22,8 @@ pub struct ArchiveOptions {
     /// Defaults to suffix-based decoding through `AutoDecompressionLayer`.
     /// Select `None` when the supplied byte accessor already decodes compression.
     pub outer_compression: OuterCompression,
-    /// TAR header/member limits; `max_entry_bytes` also bounds a single-file body.
-    pub limits: TarLimits,
     /// Soft selected-payload target, independent of the request's row-count target.
-    /// A complete member can exceed this budget, up to `limits.max_entry_bytes`.
+    /// A complete member can exceed this budget.
     pub target_bytes: NonZeroUsize,
     pub(super) filter: Arc<EntryFilter>,
 }
@@ -38,7 +33,6 @@ impl ArchiveOptions {
         Self {
             format,
             outer_compression: OuterCompression::Auto,
-            limits: TarLimits::default(),
             target_bytes: NonZeroUsize::new(4 * 1024 * 1024).unwrap(),
             filter: Arc::new(|_| Ok(true)),
         }

@@ -182,7 +182,7 @@ Configure `with_entry_filter` to select members before buffering their bodies;
 use `ArchiveFormat::Single { name }` for a lone file. The default outer decoder
 uses object suffixes; format selection is explicit. Read through EOF to finish
 decoder integrity checks. The [Rust API documentation](src/archive/accessor.rs)
-describes limits, projection, error timing and composition with `CrawlAccessor`.
+describes projection, batching, error timing and composition with `CrawlAccessor`.
 
 Always-available layers include schema evolution with SQL/Expr computed columns, sampling, row limits,
 parallel reads, and unordered emission. See the

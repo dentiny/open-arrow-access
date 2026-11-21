@@ -4,9 +4,9 @@ use arrow_schema::{DataType, Field};
 use futures::stream;
 
 use crate::{
-    ByteReader, Error, ErrorKind, OrderRequirement, ReadOptions, RecordBatch, RecordBatchBuilder,
-    RecordMetadata, RecordReader, Result, Schema, SchemaRef, StreamReader,
-    decompression::tar::TarStream,
+    ByteReader, OrderRequirement, ReadOptions, RecordBatch, RecordBatchBuilder, RecordMetadata,
+    RecordReader, Result, Schema, SchemaRef, StreamReader,
+    decompression::tar::{TarLimits, TarStream},
 };
 
 use super::{ArchiveFormat, ArchiveOptions};
@@ -44,15 +44,20 @@ pub(super) fn open_reader(
         ArchiveFormat::Single { name } => {
             let name = name.clone();
             Box::pin(stream::once(async move {
-                let data =
-                    read_payload(input, options.limits.max_entry_bytes, include_data).await?;
+                let data = read_payload(input, include_data).await?;
                 let mut builder = RecordBatchBuilder::new(archive_schema(), read.projection)?;
                 append_member(&mut builder, &source, 0, &name, &data)?;
                 builder.finish()
             }))
         }
         ArchiveFormat::Tar => {
-            let tar = TarStream::new(input, options.limits.clone());
+            let tar = TarStream::new(
+                input,
+                TarLimits {
+                    max_entries: usize::MAX,
+                    max_entry_bytes: u64::MAX,
+                },
+            );
             Box::pin(stream::try_unfold(tar, move |mut tar| {
                 let source = source.clone();
                 let read = read.clone();
@@ -92,8 +97,7 @@ async fn read_tar_batch(
             drop(member.reader);
             continue;
         }
-        let data =
-            read_payload(member.reader, options.limits.max_entry_bytes, include_data).await?;
+        let data = read_payload(member.reader, include_data).await?;
         bytes = bytes.saturating_add(member.entry.size);
         append_member(
             &mut builder,
@@ -110,37 +114,18 @@ async fn read_tar_batch(
     }
 }
 
-/// Enforce the decoded file limit even when the payload column is projected out.
-async fn read_payload(
-    mut input: Box<dyn ByteReader>,
-    limit: u64,
-    materialize: bool,
-) -> Result<Vec<u8>> {
+/// Consume through EOF, retaining payload bytes only when selected.
+async fn read_payload(mut input: Box<dyn ByteReader>, materialize: bool) -> Result<Vec<u8>> {
     let mut data = Vec::new();
-    let mut bytes = 0u64;
     while let Some(chunk) = input.next().await? {
         if chunk.is_empty() {
             return Err(crate::empty_chunk("read_archive"));
-        }
-        bytes = bytes
-            .checked_add(chunk.len() as u64)
-            .ok_or_else(file_too_large)?;
-        if bytes > limit {
-            return Err(file_too_large());
         }
         if materialize {
             data.extend_from_slice(&chunk);
         }
     }
     Ok(data)
-}
-
-fn file_too_large() -> Error {
-    Error::new(
-        ErrorKind::ResourceExhausted,
-        "read_archive",
-        "decoded member exceeds max_entry_bytes",
-    )
 }
 
 fn append_member(

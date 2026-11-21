@@ -168,11 +168,6 @@ async fn decodes_gzip_single_files_and_validates_before_storage_io() {
     assert_eq!(error.kind(), ErrorKind::Decode);
     assert!(reader.next().await.unwrap().is_none());
 
-    let mut options = ArchiveOptions::new(ArchiveFormat::Single {
-        name: b"source.tex".to_vec(),
-    });
-    options.limits.max_entry_bytes = 1;
-    let accessor = ArchiveAccessor::new(MemoryAccessor::new(&bytes, 7), options);
     let mut reader = accessor
         .open(
             ReadRequest::new("source.gz")
@@ -180,9 +175,12 @@ async fn decodes_gzip_single_files_and_validates_before_storage_io() {
         )
         .await
         .unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(batch.num_rows(), 1);
     assert_eq!(
-        reader.next().await.unwrap_err().kind(),
-        ErrorKind::ResourceExhausted
+        batch["entry_name"].as_binary::<i64>().value(0),
+        b"source.tex"
     );
+    assert!(batch.column_by_name("data").is_none());
     assert!(reader.next().await.unwrap().is_none());
 }
