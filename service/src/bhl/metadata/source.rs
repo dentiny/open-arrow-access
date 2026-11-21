@@ -24,6 +24,9 @@ pub struct SourceInfo {
 pub struct BhlMetadataInfo {
     pub source_root: String,
     pub fingerprint: String,
+    /// Imported source tables keyed by table name (e.g. `title` or `page`).
+    /// Each entry records the canonical AWS object URI, imported row count,
+    /// and SHA-256 fingerprint of the decoded lexical cells.
     pub sources: BTreeMap<String, SourceInfo>,
 }
 
