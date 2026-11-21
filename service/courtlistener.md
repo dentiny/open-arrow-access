@@ -85,9 +85,9 @@ LEFT JOIN courts k ON d.court_id = k.id
 
 These SQL names are logical aliases for the selected CSV objects. Require
 nonempty unique `id` values in all four inputs and reject duplicate join keys
-before publication, so the joins cannot multiply opinion rows. Compare the
-validated source identifiers exactly; do not infer numeric types or trim/coerce
-keys. A null/empty or unmatched foreign key yields a null related struct and an
+before publication, so the joins cannot multiply opinion rows. Compare join keys using the explicit types below: numeric opinion/cluster/
+docket IDs use exact checked integer parsing, while court IDs remain exact
+strings. Reject lossy conversions and do not trim or case-fold textual keys. A null/empty or unmatched foreign key yields a null related struct and an
 orphan count. If `cluster` is missing, `docket` and `court` are null; if `docket`
 is missing, `court` is null. A present related row remains a present struct even
 if some of its fields are null. Shared clusters/dockets/courts are repeated in
@@ -119,154 +119,189 @@ The example below lists every field observed in bounded reads of the four
 field nullability are separate: `cluster.id` is required when `cluster` exists,
 but `cluster` itself may be null after a missing foreign-key match.
 
-All source fields initially use `Utf8` to preserve source spelling; source `id`
-is required and every other source field is nullable. Dates, booleans, numeric
-values and any encoded array values stay strings, with SQL typing/normalization
-left to a separately versioned contract. Preserve unquoted NULL versus quoted
-empty string and escaped/multiline text. A string schema does not establish
-correct COPY parsing: quote-aware NULL and backslash-escape behavior must be
-verified before production.
+Types and source-field nullability are derived from the actual companion
+[`schema-2026-09-30.sql`](https://com-courtlistener-storage.s3.us-west-2.amazonaws.com/bulk-data/schema-2026-09-30.sql),
+restricted to the columns present in each CSV header. The SQL schema contains
+additional database columns that are not exported; do not manufacture them as
+null output fields. These are the explicit conversion rules:
+
+| Source/semantic field | Arrow/Lance output | Conversion policy |
+| --- | --- | --- |
+| `timestamp with time zone` | `Timestamp(Microsecond, UTC)` | Parse offsets, normalize the instant to UTC and retain microsecond precision; never truncate to a date |
+| SQL `date` | `Date32` | Parse a calendar date without assigning a time or timezone |
+| SQL `boolean` | `Boolean` | Parse PostgreSQL COPY `t`/`f` exactly; NULL stays NULL only for nullable fields |
+| Integer primary/foreign identifiers (`id`, `*_id`) | `Int64` | Widen SQL integer IDs; retain nullable foreign keys and validate referential key types |
+| SQL `smallint` | `Int16` | Preserve signed numeric codes/IDs unless listed as a semantic count below |
+| Other SQL `integer` | `Int32` | Preserve signed category/code values rather than treating all integers as counts |
+| `page_count`, `citation_count`, `scdb_votes_majority`, `scdb_votes_minority`, `view_count`, `ia_upload_failure_count` | `UInt64` | Explicit semantic overrides for nonnegative counts; reject negatives, fractions and overflow |
+| SQL `double precision` (`court.position`) | `Float64` | Preserve the numeric ordering value; reject non-finite values under this contract |
+| SQL text/varchar | `Utf8` | Preserve text and textual identifiers/codes, including leading zeros; do not guess types from names |
+
+In particular, `court.id`, `docket.court_id`, `docket.appeal_from_id`,
+`court.parent_court_id`, `court.fjc_court_id`, `docket.pacer_case_id` and
+`docket.federal_dn_office_code` remain strings. Court identifiers must not be
+converted to integer IDs. `docket.source` and `docket.docket_number_source`
+are numeric codes, while `cluster.source` and `opinion.type` are text codes.
+`cluster.other_dates` remains free text despite its name.
+
+Child `?` markers below follow the selected SQL column's NULL constraint, even
+inside nullable parent structs. A missing join yields a null parent, not a
+fabricated struct with nulls in required children. An exported empty string is
+valid for required text; do not conflate it with SQL NULL.
+
+Parse with PostgreSQL COPY CSV semantics: header, quoted fields, backslash
+escapes, embedded newlines, and **unquoted NULL versus quoted empty string**.
+Do not trim/normalize text or silently cast invalid values to null. Reject NULL
+in required fields; empty strings in typed non-text fields are conversion errors.
+Reject malformed/out-of-range dates, timezone-free timestamps, fractional or
+overflowing integers, invalid booleans and negative counts. Timestamp conversion
+must not discard precision beyond microseconds: fail such inputs pending an
+explicit precision policy. Preserve the original source object and record
+ordinal in error diagnostics. Record the failed date task without publishing a
+partial dataset as complete; do not drop bad rows. These parser/type guarantees
+still require implementation and verification; configuring all-string CSV
+inference does not implement this contract.
 
 ```text
 snapshot_date: Date32                       # required; selected export date
 opinion: Struct<
-  id: Utf8
-  date_created: Utf8?
-  date_modified: Utf8?
-  author_str: Utf8?
-  per_curiam: Utf8?
-  joined_by_str: Utf8?
-  type: Utf8?
-  sha1: Utf8?
-  page_count: Utf8?
+  id: Int64
+  date_created: Timestamp(Microsecond, UTC)
+  date_modified: Timestamp(Microsecond, UTC)
+  author_str: Utf8
+  per_curiam: Boolean
+  joined_by_str: Utf8
+  type: Utf8
+  sha1: Utf8
+  page_count: UInt64?
   download_url: Utf8?
-  local_path: Utf8?
-  plain_text: Utf8?
-  html: Utf8?
-  html_lawbox: Utf8?
-  html_columbia: Utf8?
-  html_anon_2020: Utf8?
-  xml_harvard: Utf8?
-  xml_scan: Utf8?
-  html_with_citations: Utf8?
-  extracted_by_ocr: Utf8?
-  author_id: Utf8?
-  cluster_id: Utf8?
+  local_path: Utf8
+  plain_text: Utf8
+  html: Utf8
+  html_lawbox: Utf8
+  html_columbia: Utf8
+  html_anon_2020: Utf8
+  xml_harvard: Utf8
+  xml_scan: Utf8
+  html_with_citations: Utf8
+  extracted_by_ocr: Boolean
+  author_id: Int64?
+  cluster_id: Int64
 >
 cluster: Struct?<
-  id: Utf8
-  date_created: Utf8?
-  date_modified: Utf8?
-  judges: Utf8?
-  date_filed: Utf8?
-  date_filed_is_approximate: Utf8?
+  id: Int64
+  date_created: Timestamp(Microsecond, UTC)
+  date_modified: Timestamp(Microsecond, UTC)
+  judges: Utf8
+  date_filed: Date32
+  date_filed_is_approximate: Boolean
   slug: Utf8?
-  case_name_short: Utf8?
-  case_name: Utf8?
-  case_name_full: Utf8?
-  scdb_id: Utf8?
-  scdb_decision_direction: Utf8?
-  scdb_votes_majority: Utf8?
-  scdb_votes_minority: Utf8?
-  source: Utf8?
-  procedural_history: Utf8?
-  attorneys: Utf8?
-  nature_of_suit: Utf8?
-  posture: Utf8?
-  syllabus: Utf8?
-  headnotes: Utf8?
-  summary: Utf8?
-  disposition: Utf8?
-  history: Utf8?
-  other_dates: Utf8?
-  cross_reference: Utf8?
-  correction: Utf8?
-  citation_count: Utf8?
-  precedential_status: Utf8?
-  date_blocked: Utf8?
-  blocked: Utf8?
-  filepath_json_harvard: Utf8?
-  filepath_pdf_harvard: Utf8?
-  docket_id: Utf8?
-  arguments: Utf8?
-  headmatter: Utf8?
+  case_name_short: Utf8
+  case_name: Utf8
+  case_name_full: Utf8
+  scdb_id: Utf8
+  scdb_decision_direction: Int32?
+  scdb_votes_majority: UInt64?
+  scdb_votes_minority: UInt64?
+  source: Utf8
+  procedural_history: Utf8
+  attorneys: Utf8
+  nature_of_suit: Utf8
+  posture: Utf8
+  syllabus: Utf8
+  headnotes: Utf8
+  summary: Utf8
+  disposition: Utf8
+  history: Utf8
+  other_dates: Utf8
+  cross_reference: Utf8
+  correction: Utf8
+  citation_count: UInt64
+  precedential_status: Utf8
+  date_blocked: Date32?
+  blocked: Boolean
+  filepath_json_harvard: Utf8
+  filepath_pdf_harvard: Utf8
+  docket_id: Int64
+  arguments: Utf8
+  headmatter: Utf8
 >
 docket: Struct?<
-  id: Utf8
-  date_created: Utf8?
-  date_modified: Utf8?
-  source: Utf8?
-  appeal_from_str: Utf8?
-  assigned_to_str: Utf8?
-  referred_to_str: Utf8?
-  panel_str: Utf8?
-  date_last_index: Utf8?
-  date_cert_granted: Utf8?
-  date_cert_denied: Utf8?
-  date_argued: Utf8?
-  date_reargued: Utf8?
-  date_reargument_denied: Utf8?
-  date_filed: Utf8?
-  date_terminated: Utf8?
-  date_last_filing: Utf8?
-  case_name_short: Utf8?
-  case_name: Utf8?
-  case_name_full: Utf8?
-  slug: Utf8?
+  id: Int64
+  date_created: Timestamp(Microsecond, UTC)
+  date_modified: Timestamp(Microsecond, UTC)
+  source: Int16
+  appeal_from_str: Utf8
+  assigned_to_str: Utf8
+  referred_to_str: Utf8
+  panel_str: Utf8
+  date_last_index: Timestamp(Microsecond, UTC)?
+  date_cert_granted: Date32?
+  date_cert_denied: Date32?
+  date_argued: Date32?
+  date_reargued: Date32?
+  date_reargument_denied: Date32?
+  date_filed: Date32?
+  date_terminated: Date32?
+  date_last_filing: Date32?
+  case_name_short: Utf8
+  case_name: Utf8
+  case_name_full: Utf8
+  slug: Utf8
   docket_number: Utf8?
-  docket_number_core: Utf8?
+  docket_number_core: Utf8
   pacer_case_id: Utf8?
-  cause: Utf8?
-  nature_of_suit: Utf8?
-  jury_demand: Utf8?
-  jurisdiction_type: Utf8?
-  appellate_fee_status: Utf8?
-  appellate_case_type_information: Utf8?
-  mdl_status: Utf8?
-  filepath_local: Utf8?
-  filepath_ia: Utf8?
-  filepath_ia_json: Utf8?
-  ia_upload_failure_count: Utf8?
-  ia_needs_upload: Utf8?
-  ia_date_first_change: Utf8?
-  view_count: Utf8?
-  date_blocked: Utf8?
-  blocked: Utf8?
+  cause: Utf8
+  nature_of_suit: Utf8
+  jury_demand: Utf8
+  jurisdiction_type: Utf8
+  appellate_fee_status: Utf8
+  appellate_case_type_information: Utf8
+  mdl_status: Utf8
+  filepath_local: Utf8
+  filepath_ia: Utf8
+  filepath_ia_json: Utf8
+  ia_upload_failure_count: UInt64?
+  ia_needs_upload: Boolean?
+  ia_date_first_change: Timestamp(Microsecond, UTC)?
+  view_count: UInt64
+  date_blocked: Date32?
+  blocked: Boolean
   appeal_from_id: Utf8?
-  assigned_to_id: Utf8?
-  court_id: Utf8?
-  idb_data_id: Utf8?
-  originating_court_information_id: Utf8?
-  referred_to_id: Utf8?
-  federal_dn_case_type: Utf8?
-  federal_dn_office_code: Utf8?
-  federal_dn_judge_initials_assigned: Utf8?
-  federal_dn_judge_initials_referred: Utf8?
-  federal_defendant_number: Utf8?
-  parent_docket_id: Utf8?
-  docket_number_raw: Utf8?
-  docket_number_source: Utf8?
+  assigned_to_id: Int64?
+  court_id: Utf8
+  idb_data_id: Int64?
+  originating_court_information_id: Int64?
+  referred_to_id: Int64?
+  federal_dn_case_type: Utf8
+  federal_dn_office_code: Utf8
+  federal_dn_judge_initials_assigned: Utf8
+  federal_dn_judge_initials_referred: Utf8
+  federal_defendant_number: Int16?
+  parent_docket_id: Int64?
+  docket_number_raw: Utf8
+  docket_number_source: Int16
 >
 court: Struct?<
   id: Utf8
-  pacer_court_id: Utf8?
-  pacer_has_rss_feed: Utf8?
-  pacer_rss_entry_types: Utf8?
-  date_last_pacer_contact: Utf8?
-  fjc_court_id: Utf8?
-  date_modified: Utf8?
-  in_use: Utf8?
-  has_opinion_scraper: Utf8?
-  has_oral_argument_scraper: Utf8?
-  position: Utf8?
-  citation_string: Utf8?
-  short_name: Utf8?
-  full_name: Utf8?
-  url: Utf8?
-  start_date: Utf8?
-  end_date: Utf8?
-  jurisdiction: Utf8?
-  notes: Utf8?
+  pacer_court_id: Int16?
+  pacer_has_rss_feed: Boolean?
+  pacer_rss_entry_types: Utf8
+  date_last_pacer_contact: Timestamp(Microsecond, UTC)?
+  fjc_court_id: Utf8
+  date_modified: Timestamp(Microsecond, UTC)
+  in_use: Boolean
+  has_opinion_scraper: Boolean
+  has_oral_argument_scraper: Boolean
+  position: Float64
+  citation_string: Utf8
+  short_name: Utf8
+  full_name: Utf8
+  url: Utf8
+  start_date: Date32?
+  end_date: Date32?
+  jurisdiction: Utf8
+  notes: Utf8
   parent_court_id: Utf8?
 >
 provenance: Struct<                        # required
@@ -290,12 +325,16 @@ provenance once per acquisition rather than duplicating them in every row.
 
 For this observed header, `opinion` has 22 children, `cluster` 36, `docket` 54
 and `court` 20. The top level has six fields: `snapshot_date`, the four entity
-structs and `provenance`. Every source field remains inside its source struct;
+structs and `provenance`. Every exported source field remains inside its source
+struct;
 identically named fields such as `id` and `date_modified` do not collide. No
 source columns are silently omitted or replaced with only extracted text.
 
-Historical dates must record and validate their actual headers. Do not assume
-all 36 candidate opinions dates match this schema. A changed header must be
+Historical dates must record and validate their actual headers and source SQL
+types/nullability. The mapping above is pinned to the observed 2026-09-30 export,
+not a blanket assertion that every historical database schema was identical.
+Do not assume all 36 candidate opinions dates match this schema. A changed
+header, source type or NULL constraint must be
 reviewed and represented in the corresponding struct with a recorded schema
 fingerprint; fail on unapproved drift rather than silently dropping fields.
 Combining historical datasets later requires an explicit schema-union/migration
@@ -358,15 +397,22 @@ Validate outputs by reopening them and checking schema/provenance and counts.
 A date shard is complete only when its one joined output is validated. Check
 left-join row-count preservation, unique opinion IDs, every nullable struct and
 its provenance index, and orphan/unreferenced-row counts. Report upstream empty
-exports separately from successful conversions.
+exports separately from successful conversions. Validate each type family,
+integer bounds and negative-count rejection, timezone-offset/microsecond
+round-trips, required versus nullable fields, booleans and numeric/text join-key
+compatibility. Invalid typed values fail the date task instead of becoming null
+or disappearing from row counts.
 
 This design was checked against provider code, the record-planning test,
 publisher references, a full public prefix listing and a bounded 2 MiB range
 read of the latest opinions file plus bounded reads (at most 1 MiB per object)
-of all four join inputs. These decoded the 22/36/54/20-column source headers;
+of all four join inputs. These decoded the 22/36/54/20-column source headers.
+The 555,339-byte same-date SQL schema was fetched to verify every documented
+source type and NULL constraint;
 the empty historical opinions export was separately read and decompressed.
 No full CSV parse, corpus conversion, parallel benchmark or production deployment
-was performed. The proposed nested schema, joins, provenance and orchestration still require
+was performed. The proposed nested schema, joins, provenance and orchestration
+still require
 conversion-layer implementation/verification.
 
 - [Bulk data documentation](https://wiki.free.law/c/courtlistener/help/api/bulk-data/bulk-legal-data)
