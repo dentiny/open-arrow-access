@@ -2,8 +2,8 @@ use super::{BhlPageMetadata, error};
 use crate::bhl::{BhlPageIdentity, page_schema};
 use arrow_array::{Array, ListArray, StringArray, StructArray, UInt64Array};
 use duckdb::params;
-use open_arrow_access_core::{Error, ErrorKind, ObjectRef, Result};
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use open_arrow_access_core::{ObjectRef, Result};
+use std::io::Cursor;
 
 fn strings(column: &dyn Array, row: usize) -> Result<Vec<String>> {
     let list = column
@@ -63,20 +63,10 @@ pub(super) fn for_each(
     let mut statement = connection
         .prepare(include_str!("join.sql"))
         .map_err(error::duckdb)?;
-    let mut batches = statement.stream_arrow([]).map_err(error::duckdb)?;
+    let batches = statement.stream_arrow([]).map_err(error::duckdb)?;
     let mut emitted = 0;
-    loop {
-        // The Arrow-58-compatible binding panics on fetch failures.
-        let batch = catch_unwind(AssertUnwindSafe(|| batches.next())).map_err(|_| {
-            Error::new(
-                ErrorKind::Internal,
-                "bhl_metadata_duckdb",
-                "DuckDB Arrow fetch failed",
-            )
-        })?;
-        let Some(batch) = batch else {
-            break;
-        };
+    for batch in batches {
+        let batch = workspace_batch(batch.map_err(error::duckdb)?)?;
         let indices = batch
             .column(0)
             .as_any()
@@ -109,4 +99,24 @@ pub(super) fn for_each(
         return Err(error::invalid("unexpected joined page count"));
     }
     Ok(())
+}
+
+// The Arrow IPC wire format bridges DuckDB's Arrow major to our public Arrow 58
+// schema without unsafe code. Only joined metadata batches pass through here.
+fn workspace_batch(
+    batch: duckdb::arrow::record_batch::RecordBatch,
+) -> Result<arrow_array::RecordBatch> {
+    let mut bytes = Vec::new();
+    {
+        let mut writer =
+            arrow_ipc_duckdb::writer::StreamWriter::try_new(&mut bytes, &batch.schema())
+                .map_err(error::arrow)?;
+        writer.write(&batch).map_err(error::arrow)?;
+        writer.finish().map_err(error::arrow)?;
+    }
+    arrow_ipc::reader::StreamReader::try_new(Cursor::new(bytes), None)
+        .map_err(error::arrow)?
+        .next()
+        .ok_or_else(|| error::invalid("missing joined metadata batch"))?
+        .map_err(error::arrow)
 }
