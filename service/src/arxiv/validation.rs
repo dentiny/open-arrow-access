@@ -61,6 +61,9 @@ pub(super) fn validate_content_metadata_match(row: Option<u64>, id: &str) -> Res
     row.ok_or_else(|| error::missing_content_metadata(id))
 }
 
+/// TAR headers occupy one fixed 512-byte block.
+pub(super) const TAR_HEADER_SIZE: usize = 512;
+
 pub(super) fn validate_unique_metadata_id(previous: Option<u64>) -> Result<()> {
     if previous.is_some() {
         return Err(error::duplicate_metadata_id());
@@ -231,8 +234,8 @@ pub(super) fn is_tex(name: &[u8]) -> Result<bool> {
     Ok(!parts.iter().any(|part| part.eq_ignore_ascii_case("anc"))
         && name.to_ascii_lowercase().ends_with(".tex"))
 }
-fn is_tar(data: &[u8]) -> bool {
-    if data.len() < 512 {
+pub(super) fn is_tar(data: &[u8]) -> bool {
+    if data.len() < TAR_HEADER_SIZE {
         return false;
     }
     if &data[257..262] == b"ustar" {
@@ -241,7 +244,7 @@ fn is_tar(data: &[u8]) -> bool {
     let checksum = std::str::from_utf8(&data[148..156])
         .ok()
         .and_then(|s| u64::from_str_radix(s.trim_matches(['\0', ' ']), 8).ok());
-    let sum: u64 = data[..512]
+    let sum: u64 = data[..TAR_HEADER_SIZE]
         .iter()
         .enumerate()
         .map(|(i, &v)| {
@@ -302,14 +305,5 @@ pub(super) fn source_packaging(data: &[u8]) -> Result<ArxivSourcePackaging> {
 
 pub(super) fn validate_latex_bytes(data: &[u8]) -> Result<()> {
     std::str::from_utf8(data).map_err(|_| error::decode("LaTeX member is not UTF-8"))?;
-    Ok(())
-}
-
-pub(super) fn validate_latex_files(batches: &[RecordBatch]) -> Result<()> {
-    if batches.is_empty() {
-        return Err(error::decode(
-            "source package contains no non-ancillary LaTeX files",
-        ));
-    }
     Ok(())
 }

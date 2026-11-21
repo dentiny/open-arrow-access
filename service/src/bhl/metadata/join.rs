@@ -1,190 +1,112 @@
-use super::{
-    error::Result,
-    index::{BhlMetadataIndex as Store, BhlMetadataRow as Row},
-    tables,
-};
+use super::{BhlPageMetadata, error};
 use crate::bhl::{BhlPageIdentity, page_schema};
-use arrow_array::StructArray;
-use arrow_schema::Schema;
-use open_arrow_access_core::RecordBatchBuilder;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use arrow_array::{Array, ListArray, StringArray, StructArray, UInt64Array};
+use duckdb::params;
+use open_arrow_access_core::{Error, ErrorKind, ObjectRef, Result};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
-fn id(row: Option<&Row>, field: &str) -> Option<u64> {
-    row?.values.get(field)?.parse().ok().filter(|n| *n > 0)
-}
-fn same(row: &Row, field: &str, value: u64) -> bool {
-    id(Some(row), field) == Some(value)
-}
-fn singleton(
-    store: &mut Store,
-    table: &str,
-    key: Option<u64>,
-    missing: &mut Vec<String>,
-) -> Result<Vec<Row>> {
-    let rows = store.rows(table, key)?;
-    if rows.is_empty() {
-        missing.push(format!(
-            "{table}:{}",
-            key.map(|n| n.to_string())
-                .unwrap_or_else(|| "unresolved parent".into())
-        ));
-    }
-    Ok(rows)
-}
-fn ordered_union(
-    store: &mut Store,
-    table: &str,
-    ids: impl IntoIterator<Item = u64>,
-) -> Result<Vec<Row>> {
-    let mut rows = BTreeMap::new();
-    for key in ids.into_iter().collect::<BTreeSet<_>>() {
-        for row in store.rows(table, Some(key))? {
-            rows.insert(row.ordinal, row);
-        }
-    }
-    Ok(rows.into_values().collect())
-}
-pub(super) fn page(
-    store: &mut Store,
-    key: &BhlPageIdentity,
-) -> Result<(StructArray, Vec<String>, Vec<String>)> {
-    let mut missing = Vec::new();
-    let mut conflicts = Vec::new();
-    let page = singleton(store, "page", Some(key.page_id), &mut missing)?;
-    let is_part = key.entity_type == "part";
-    let part = if is_part {
-        singleton(store, "part", Some(key.entity_id), &mut missing)?
-    } else {
-        vec![]
-    };
-    let partpage = if is_part {
-        store
-            .rows("partpage", Some(key.entity_id))?
-            .into_iter()
-            .filter(|row| same(row, "PageID", key.page_id))
-            .collect::<Vec<_>>()
-    } else {
-        vec![]
-    };
-    if is_part && partpage.is_empty() {
-        missing.push(format!("partpage:{}:{}", key.entity_id, key.page_id));
-    }
-    let parent = if is_part {
-        id(part.first(), "ItemID")
-            .or_else(|| id(partpage.first(), "ItemID"))
-            .or_else(|| id(page.first(), "ItemID"))
-    } else {
-        Some(key.entity_id)
-    };
-    for (name, rows) in [("page", &page), ("part", &part), ("partpage", &partpage)] {
-        for row in rows {
-            if let Some(other) = id(Some(row), "ItemID")
-                && Some(other) != parent
-            {
-                conflicts.push(format!("{name}.ItemID={other}, selected item={parent:?}"));
-            }
-        }
-    }
-    let sequence_rows = if is_part { &partpage } else { &page };
-    for row in sequence_rows {
-        if let Some(sequence) = id(Some(row), "SequenceOrder")
-            && sequence != key.sequence
-        {
-            conflicts.push(format!(
-                "SequenceOrder={sequence}, filename sequence={}",
-                key.sequence
-            ));
-        }
-    }
-    let item = singleton(store, "item", parent, &mut missing)?;
-    let title_id = id(item.first(), "TitleID");
-    let title = singleton(store, "title", title_id, &mut missing)?;
-    let creator = store.rows("creator", title_id)?;
-    let partcreator = store.rows("partcreator", is_part.then_some(key.entity_id))?;
-    let creatoridentifier = ordered_union(
-        store,
-        "creatoridentifier",
-        creator
-            .iter()
-            .chain(&partcreator)
-            .filter_map(|r| id(Some(r), "CreatorID")),
-    )?;
-    let mut doi = BTreeMap::new();
-    for (kind, value) in [
-        ("Title", title_id),
-        ("Item", parent),
-        ("Page", Some(key.page_id)),
-        ("Part", is_part.then_some(key.entity_id)),
-    ] {
-        for row in store.rows("doi", value)? {
-            if row.values["EntityType"].eq_ignore_ascii_case(kind) {
-                doi.insert(row.ordinal, row);
-            }
-        }
-    }
-    let mut selected = BTreeMap::from([
-        ("title", title),
-        ("item", item),
-        ("page", page),
-        ("part", part),
-        ("partpage", partpage),
-        ("creator", creator),
-        ("partcreator", partcreator),
-        ("creatoridentifier", creatoridentifier),
-        ("subject", store.rows("subject", title_id)?),
-        ("titleidentifier", store.rows("titleidentifier", title_id)?),
-        (
-            "partidentifier",
-            store.rows("partidentifier", is_part.then_some(key.entity_id))?,
-        ),
-        ("pagename", store.rows("pagename", Some(key.page_id))?),
-        ("doi", doi.into_values().collect()),
-    ]);
-    let field = page_schema()
-        .field_with_name("metadata")
-        .expect("fixed metadata")
-        .clone();
-    let mut builder = RecordBatchBuilder::new(Arc::new(Schema::new(vec![field])), None)?;
-    builder.push(|row| {
-        row.append_struct("metadata", |row| {
-            for table in tables() {
-                let rows = selected
-                    .remove(table.name.as_str())
-                    .expect("all tables selected");
-                if table.single {
-                    if let Some(source) = rows.first() {
-                        row.append_struct(&table.name, |record| {
-                            for field in &table.fields {
-                                record
-                                    .append(field.name(), source.values[field.name()].as_str())?;
-                            }
-                            Ok(())
-                        })?;
-                    }
-                } else {
-                    row.append_structs(&table.name, rows, |record, source| {
-                        for field in &table.fields {
-                            record.append(field.name(), source.values[field.name()].as_str())?;
-                        }
-                        Ok(())
-                    })?;
-                }
-            }
-            Ok(())
+fn strings(column: &dyn Array, row: usize) -> Result<Vec<String>> {
+    let list = column
+        .as_any()
+        .downcast_ref::<ListArray>()
+        .ok_or_else(|| error::invalid("expected a reconciliation list"))?;
+    let values = list.value(row);
+    let values = values
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .ok_or_else(|| error::invalid("expected reconciliation strings"))?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .map(str::to_owned)
+                .ok_or_else(|| error::invalid("null reconciliation message"))
         })
-    })?;
-    let batch = builder.finish()?;
-    Ok((
-        batch
+        .collect()
+}
+
+pub(super) fn for_each(
+    connection: &duckdb::Connection,
+    keys: &[ObjectRef],
+    mut emit: impl FnMut(BhlPageMetadata) -> Result<()>,
+) -> Result<()> {
+    if keys.is_empty() {
+        return Ok(());
+    }
+    connection
+        .execute_batch(
+            "CREATE TEMP TABLE bhl_selection (
+         request_id UBIGINT, entity_type VARCHAR, entity_id UBIGINT,
+         page_id UBIGINT, sequence UBIGINT);",
+        )
+        .map_err(error::duckdb)?;
+    {
+        let mut appender = connection
+            .appender("bhl_selection")
+            .map_err(error::duckdb)?;
+        for (index, object) in keys.iter().enumerate() {
+            let key = BhlPageIdentity::parse(object.locator())?;
+            appender
+                .append_row(params![
+                    index as u64,
+                    key.entity_type,
+                    key.entity_id,
+                    key.page_id,
+                    key.sequence
+                ])
+                .map_err(error::duckdb)?;
+        }
+        appender.flush().map_err(error::duckdb)?;
+    }
+    let schema = page_schema();
+    let field = schema.field_with_name("metadata").expect("fixed metadata");
+    let mut statement = connection
+        .prepare(include_str!("join.sql"))
+        .map_err(error::duckdb)?;
+    let mut batches = statement.stream_arrow([]).map_err(error::duckdb)?;
+    let mut emitted = 0;
+    loop {
+        // The Arrow-58-compatible binding panics on fetch failures.
+        let batch = catch_unwind(AssertUnwindSafe(|| batches.next())).map_err(|_| {
+            Error::new(
+                ErrorKind::Internal,
+                "bhl_metadata_duckdb",
+                "DuckDB Arrow fetch failed",
+            )
+        })?;
+        let Some(batch) = batch else {
+            break;
+        };
+        let indices = batch
             .column(0)
             .as_any()
+            .downcast_ref::<UInt64Array>()
+            .ok_or_else(|| error::invalid("expected request IDs"))?;
+        // Match the fixed nested LargeUtf8/nullability contract.
+        let metadata =
+            arrow_cast::cast(batch.column(1), field.data_type()).map_err(error::arrow)?;
+        let metadata = metadata
+            .as_any()
             .downcast_ref::<StructArray>()
-            .expect("metadata struct")
-            .clone(),
-        missing,
-        conflicts,
-    ))
+            .ok_or_else(|| error::invalid("expected metadata struct"))?;
+        for row in 0..batch.num_rows() {
+            let index = usize::try_from(indices.value(row))
+                .map_err(|_| error::invalid("request ID overflow"))?;
+            let object = keys
+                .get(index)
+                .ok_or_else(|| error::invalid("unknown request ID"))?;
+            emit(BhlPageMetadata {
+                identity: BhlPageIdentity::parse(object.locator())?,
+                object: object.clone(),
+                metadata: metadata.slice(row, 1),
+                missing: strings(batch.column(2).as_ref(), row)?,
+                conflicts: strings(batch.column(3).as_ref(), row)?,
+            })?;
+            emitted += 1;
+        }
+    }
+    if emitted != keys.len() {
+        return Err(error::invalid("unexpected joined page count"));
+    }
+    Ok(())
 }

@@ -79,15 +79,33 @@ impl SemanticScholarService {
         let release = self.release(release).await?;
         let release_id = text(release.value(), "release_id")?.to_owned();
         let doc = self.dataset_manifest(&release_id, dataset).await?;
-        let files = parser::parse_dataset_files(doc.value(), dataset)?;
-        self.connection.files(
-            files,
+        self.files_from_manifest(
+            dataset,
             DatasetMetadata {
                 release_id,
                 release,
                 dataset: doc,
             },
         )
+    }
+
+    /// Bind previously fetched metadata to lazy downloads without any API request.
+    /// Revalidates the pinned release identity, dataset identity and signed URLs;
+    /// URLs are retained byte-for-byte. The caller owns freshness and credential
+    /// provenance of imported metadata; binding does not renew expired URLs.
+    pub fn files_from_manifest(
+        &self,
+        dataset: &str,
+        metadata: DatasetMetadata,
+    ) -> Result<RemoteFiles<DatasetMetadata>> {
+        if metadata.release_id.is_empty() || metadata.release_id == "latest" || dataset.is_empty() {
+            return Err(crate::common::invalid(
+                "file binding requires a resolved release ID and dataset name",
+            ));
+        }
+        validation::validate_release(metadata.release.value(), &metadata.release_id)?;
+        let files = parser::parse_dataset_files(metadata.dataset.value(), dataset)?;
+        self.connection.files(files, metadata)
     }
 
     /// Return one incremental diff manifest, preserving update and deletion semantics.

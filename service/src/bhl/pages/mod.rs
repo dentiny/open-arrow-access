@@ -8,6 +8,6 @@ pub use accessor::BhlPageAccessor;
 pub use identity::BhlPageIdentity;
 
 #[cfg(test)]
-mod metadata_tests;
+mod projection_tests;
 #[cfg(test)]
 mod tests;

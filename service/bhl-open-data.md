@@ -20,7 +20,6 @@ The complete source layout and item/part exceptions are documented in the
 [official README](https://bhl-open-data.s3.amazonaws.com/README.html) and
 [special cases](https://github.com/gbhl/bhl-open-data/blob/main/NOTES.md).
 The AWS data set has independent objects, not an official balanced shard list.
-Do not conflate this layout with the single Figshare TAR.bz2 export.
 
 `open_data_bucket_operator()` constructs an anonymous bucket-root S3 operator in
 `us-east-2` with ambient credential loading disabled and signing skipped.
@@ -105,48 +104,10 @@ objects. Raw bytes remain unchanged, including blank/empty pages and invalid
 UTF-8. The merged binary output has only `data`; keys remain in the bound
 inventory/per-partition reader metadata, not an invented provenance column.
 
-Generic object reads remain a byte-access layer. For structured page conversion,
-enable `service-bhl-metadata`: `bhl::metadata::prepare(storage, source_root, path)`
-streams all 13 `data/*.txt.gz` TSV tables into one SQLite snapshot on local/shared
-storage. Headers must match the fixed 104-field schema, cells remain lexical
-strings, and duplicate numeric singleton IDs fail preparation. Completed tables
-can resume after interruption; use one preparer per output path. Publication is
-exclusive and an existing completed snapshot is never overwritten.
-
-Prepare once, then give each job the same absolute worker-visible path and
-`BhlMetadataInfo.fingerprint`. `BhlPageMetadata::load(path, fingerprint, objects)`
-does indexed lookups only for the selected OCR pages. Run this synchronous local
-I/O on a blocking worker. Pass `move |identity| metadata.get(identity)` to
-`BhlPageAccessor::new` and attach `metadata.schema_metadata()` using
-`with_schema_metadata` before moving the provider into the closure.
-
-Item pages join page/item/title; part pages additionally join part and matching
-partpage, resolving the parent item from part, partpage, then page. Related
-authors, identifiers, subjects, names and DOI rows retain source order and
-duplicates. DOI joins use both entity type and numeric ID. Original rights are
-preserved independently on item and part. Missing singleton rows become null
-children and missing relation rows become empty lists, while the outer metadata
-struct is always assigned. Missing joins and parent/sequence conflicts appear in
-`bhl.metadata.reconciliation`; rows and OCR bytes are retained.
-
-The snapshot records all source paths, counts and SHA-256 hashes of canonical
-JSON cell rows, plus a combined fingerprint. These are decoded-content hashes,
-not compressed-object hashes or AWS version IDs. Acquisition spans a time
-window, including resumed tables; it does not promise an atomic AWS export.
-Keep the published SQLite file immutable and accessible at the identical path on
-every worker. Jobs fail on missing/incomplete snapshots or fingerprint mismatch.
-
-Page projections resolve before OCR reads. Selecting `page_id`, metadata or other
-columns without `data` performs no OCR object opens or body downloads; only the
-selected Arrow columns are built. An empty projection preserves one row per page.
-Selecting `data` retains original bytes, storage I/O options and read failures.
-
-`BhlPageAccessor` calls its metadata provider once on the first read of each
-partition. Planning, opening the accessor or opening an unpolled partition do not
-invoke it. Shared scan layers bound these calls by the resident partition window,
-including completed queues awaiting consumption. Dropping a reader leaves
-unstarted partitions untouched. Provider failures surface when that partition is
-read, before its OCR body is opened. The provider retains its synchronous API.
+This is the AWS partition/byte-access layer, not the proposed fully joined BHL
+page schema. Parsed page IDs, source/snapshot columns and the complete metadata
+struct require a separate record mapping/enrichment step before Lance writes.
+Generic object reads do not claim that mapping is already implemented.
 
 ## Validation
 
@@ -160,7 +121,7 @@ A bounded live smoke check also read exactly two public AWS OCR objects through
 the anonymous operator and parallel file-set path: item 346951 / page 65077706 /
 sequence 14 and item 21356 / page 2839616 / sequence 127. It returned two rows
 and 5,659 original bytes without listing the corpus. This verifies those reads,
-not complete AWS/Figshare equivalence or sustained throughput. The standalone
+not complete AWS coverage or sustained throughput. The standalone
 smoke-check example used for that validation has since been removed.
 
 See [BHL service](bhl.md), [resolved file sets](remote-files.md) and
@@ -170,9 +131,25 @@ See [BHL service](bhl.md), [resolved file sets](remote-files.md) and
 
 With `service-bhl`, `BhlPageAccessor::new(storage, snapshot_id, provider)` maps
 selected item/part OCR filenames to the fixed `page_schema()` and assigns the
-provider's one-row metadata StructArray. The caller supplies metadata; this
-reader does not acquire TSV tables or join bibliographic records. Invalid keys,
+provider's one-row metadata StructArray. This constructor accepts supplied metadata. Use `BhlPageAccessor::from_metadata`
+to read OCR pages with DuckDB-joined metadata. Invalid keys,
 provider errors and schema mismatches fail explicitly. Native partitions use the
 shared scan executor. `with_schema_metadata` retains caller provenance in the
-plan and emitted batch schemas. This API is the reader foundation for separate
-TSV-index and metadata-join changes.
+plan and emitted batch schemas. The joined constructor attaches metadata provenance automatically and calls the
+caller's report hook before each OCR read.
+
+Page projections are resolved before reading. Omitting `data` performs zero OCR
+object opens/downloads and constructs only the selected page columns. An empty
+projection still emits one row per selected page. Selecting `data` preserves the
+original bytes, byte I/O options and storage failures. DuckDB loading and its
+request-level join behavior are unchanged.
+
+## DuckDB metadata joins
+
+Enable `service-bhl` and load `BhlMetadata::load(storage).await` once.
+The 13 AWS gzip TSV tables are imported concurrently into in-memory DuckDB
+tables. `metadata.for_each(&page_keys, emit)` runs one join SQL and emits each
+page's metadata immediately, matching the fixed Arrow/Lance schema. The first
+version assumes sufficient memory, configures no temporary directory, and
+explicitly disables DuckDB's external file cache. See the
+[metadata guide](bhl-metadata.md) for usage and the integrated OCR reader.

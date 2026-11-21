@@ -509,3 +509,13 @@ before I/O; resolve aliases through `release` first. It validates dataset identi
 and partition URL string types, while download-URL validation remains part of
 file binding. Neither method downloads dataset content. Existing `dataset()`
 continues to compose release resolution, manifest acquisition and file binding.
+
+
+`files_from_manifest(dataset_name, DatasetMetadata { release_id, release, dataset })`
+binds existing documents to a lazy file namespace with no API or content requests.
+It revalidates both identities, requires a concrete release ID, validates download
+URLs, retains unknown metadata and preserves signed URL bytes. This supports
+caller-managed brokers, snapshots and caches without duplicating provider parsing.
+Imported documents remain caller-owned: this does not authenticate their provenance,
+refresh their signatures or prove that the dataset belongs to a given release
+beyond the identities actually present in the provider documents.

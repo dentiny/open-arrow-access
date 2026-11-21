@@ -1,20 +1,16 @@
-//! One immutable, indexed metadata snapshot shared by page conversion jobs.
-//! Preparation streams the 13 public gzip TSVs once. Job lookup reads selected
-//! IDs only; it never rescans the source corpus or invents a null metadata column.
+//! Direct AWS TSV acquisition and populated page metadata joins.
 mod error;
-mod index;
 mod join;
+mod source;
+mod stream;
 use super::{BhlPageIdentity, page_schema};
 use arrow_array::StructArray;
 use arrow_schema::{DataType, Fields};
-pub use index::{BhlMetadataIndex, BhlMetadataInfo, BhlMetadataRow, SourceInfo};
-use open_arrow_access_core::{ByteAccessor, ObjectRef, Result};
-use serde::Serialize;
-use std::{
-    collections::{BTreeMap, HashMap, hash_map::Entry},
-    path::Path,
-};
+use open_arrow_access_core::{ObjectRef, Result};
+pub use source::{BhlMetadata, BhlMetadataInfo, SourceInfo};
+use std::{collections::HashMap, sync::Arc};
 
+#[derive(Clone)]
 struct Table {
     name: String,
     fields: Fields,
@@ -66,71 +62,48 @@ fn tables() -> Vec<Table> {
         .collect()
 }
 
-/// Prepare one immutable local/NFS snapshot, resuming committed source tables.
-/// `storage` is rooted above the AWS `data/` objects (or a matching pinned mirror).
-/// The completed output is published exclusively; existing snapshots are never overwritten.
-/// Keep this file on shared worker storage and pass its fingerprint with each job.
-pub async fn prepare<A: ByteAccessor + 'static>(
-    storage: A,
-    source_root: &str,
-    output: &Path,
-) -> Result<BhlMetadataInfo> {
-    index::prepare(storage, source_root, output)
-        .await
-        .map_err(Into::into)
-}
-/// Inspect the completed read-only snapshot without fetching source tables.
-pub fn inspect(path: &Path) -> Result<BhlMetadataInfo> {
-    BhlMetadataIndex::open(path).map(|store| store.info)
-}
-
-#[derive(Default, Serialize)]
-pub struct BhlMetadataReport {
-    pub missing: BTreeMap<String, Vec<String>>,
-    pub conflicts: BTreeMap<String, Vec<String>>,
-}
-/// Selected, populated Arrow metadata with provenance and explicit join-gap reports.
+/// One joined page, emitted without collecting the full query result in Rust.
 pub struct BhlPageMetadata {
-    rows: HashMap<BhlPageIdentity, StructArray>,
-    pub info: BhlMetadataInfo,
-    pub report: BhlMetadataReport,
+    pub identity: BhlPageIdentity,
+    pub object: ObjectRef,
+    pub metadata: StructArray,
+    /// Required join targets not found for this page, e.g. `item:7` or
+    /// `title:unresolved parent`. Missing singleton children are null; the page
+    /// is still emitted. Empty optional relationships are not reported here.
+    pub missing: Vec<String>,
+    /// Parent ItemID disagreements or page SequenceOrder mismatches with the
+    /// OCR filename. Part page sequences are checked against `partpage`.
+    /// These messages accompany the emitted page; callers decide how to handle them.
+    pub conflicts: Vec<String>,
 }
-impl BhlPageMetadata {
-    /// Indexed local/NFS I/O. Call from a blocking worker, not a Tokio reactor.
-    /// Both the preparation format and caller's expected fingerprint are checked.
-    pub fn load(path: &Path, fingerprint: &str, keys: &[ObjectRef]) -> Result<Self> {
-        let mut store = BhlMetadataIndex::open(path)?;
-        if store.info.fingerprint != fingerprint {
-            return Err(error::invalid("metadata snapshot fingerprint mismatch").into());
-        }
-        let mut rows = HashMap::new();
-        let mut report = BhlMetadataReport::default();
-        for key in keys {
-            let identity = BhlPageIdentity::parse(key.locator())?;
-            if let Entry::Vacant(entry) = rows.entry(identity) {
-                let (metadata, missing, conflicts) = join::page(&mut store, entry.key())
-                    .map_err(open_arrow_access_core::Error::from)?;
-                if !missing.is_empty() {
-                    report.missing.insert(key.locator().into(), missing);
-                }
-                if !conflicts.is_empty() {
-                    report.conflicts.insert(key.locator().into(), conflicts);
-                }
-                entry.insert(metadata);
-            }
-        }
-        Ok(Self {
-            rows,
-            info: store.info,
-            report,
-        })
+impl BhlMetadata {
+    /// Execute one join query and emit each selected page to the callback.
+    /// This is synchronous; call from a blocking worker in async applications.
+    /// Returning an error from the callback stops emission immediately.
+    pub fn for_each(
+        &self,
+        keys: &[ObjectRef],
+        emit: impl FnMut(BhlPageMetadata) -> Result<()>,
+    ) -> Result<()> {
+        let connection = self.query_connection()?;
+        join::for_each(&connection, keys, emit)
     }
-    pub fn get(&self, identity: &BhlPageIdentity) -> Result<StructArray> {
-        self.rows
-            .get(identity)
-            .cloned()
-            .ok_or_else(|| error::invalid("page is outside metadata selection").into())
+
+    fn query_connection(&self) -> Result<duckdb::Connection> {
+        self.connection
+            .lock()
+            .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?
+            .try_clone()
+            .map_err(error::duckdb)
     }
+
+    pub(in crate::bhl) fn stream(
+        self: Arc<Self>,
+        keys: Vec<ObjectRef>,
+    ) -> futures::stream::BoxStream<'static, Result<BhlPageMetadata>> {
+        stream::pages(self, keys)
+    }
+
     pub fn schema_metadata(&self) -> Result<HashMap<String, String>> {
         Ok(HashMap::from([
             (
@@ -139,17 +112,10 @@ impl BhlPageMetadata {
             ),
             (
                 "bhl.metadata.sources".into(),
-                serde_json::to_string(&self.info.sources).map_err(error::Error::from)?,
-            ),
-            (
-                "bhl.metadata.reconciliation".into(),
-                serde_json::to_string(&self.report).map_err(error::Error::from)?,
+                serde_json::to_string(&self.info.sources).map_err(error::json)?,
             ),
         ]))
     }
 }
 #[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-mod index_tests;
+pub(in crate::bhl) mod tests;
