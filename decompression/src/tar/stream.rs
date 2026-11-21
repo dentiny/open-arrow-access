@@ -43,7 +43,6 @@ struct State {
     padding: u64,
     index: usize,
     headers: usize,
-    name_bytes: Option<Vec<u8>>,
     pending_name: Option<Vec<u8>>,
     zero_block: bool,
     finished: bool,
@@ -61,7 +60,6 @@ impl TarStream {
                 padding: 0,
                 index: 0,
                 headers: 0,
-                name_bytes: None,
                 pending_name: None,
                 zero_block: false,
                 finished: false,
@@ -132,7 +130,6 @@ impl State {
         self.finished = true;
         self.pending = Bytes::new();
         self.header.clear();
-        self.name_bytes = None;
         self.pending_name = None;
         self.input = Box::pin(stream::empty());
     }
@@ -159,16 +156,13 @@ impl State {
                     .take(self.payload.min(usize::MAX as u64) as usize)
                     .await?;
                 self.payload -= bytes.len() as u64;
-                if let Some(name) = &mut self.name_bytes {
+                if let Some(name) = &mut self.pending_name {
                     name.extend_from_slice(&bytes);
                 }
             }
             while self.padding != 0 {
                 let bytes = self.take(self.padding as usize).await?;
                 self.padding -= bytes.len() as u64;
-            }
-            if let Some(name) = self.name_bytes.take() {
-                self.pending_name = Some(long_name(name)?);
             }
             while self.header.len() != BLOCK_SIZE as usize {
                 let bytes = self.take(BLOCK_SIZE as usize - self.header.len()).await?;
@@ -207,11 +201,11 @@ impl State {
                 if self.pending_name.is_some() {
                     return Err(decode("consecutive GNU long names"));
                 }
-                self.name_bytes = Some(Vec::new());
+                self.pending_name = Some(Vec::new());
                 continue;
             }
             if let Some(name) = self.pending_name.take() {
-                entry.name = name;
+                entry.name = long_name(name)?;
             }
             entry.index = self.index;
             self.index += 1;
