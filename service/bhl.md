@@ -88,8 +88,10 @@ No new OCR, language/license filtering, normalization or indexing is implied.
 assigns every caller-supplied value to its column, including the supplied
 metadata StructArray. Metadata is required and must contain one populated row
 matching the fixed 13-table / 104-field schema; null or mismatched metadata fails.
-This is a record/schema API only: existing readers do not acquire or join
-metadata automatically and are wired separately.
+The optional `service-bhl-metadata` feature acquires the 13 gzip TSV tables
+and uses embedded DuckDB SQL to populate this schema for selected pages. See
+the [DuckDB metadata guide](bhl-metadata.md) for usage and resource requirements.
+The page-record API also accepts caller-provided metadata matching this schema.
 
 | Column | Arrow type | Nullable | Meaning |
 | --- | --- | --- | --- |
@@ -340,7 +342,8 @@ Enable facade feature `service-bhl`. BHL source access is limited to AWS Open Da
 | `BhlPageAccessor` | Read selected AWS OCR pages and assign caller-supplied metadata to the fixed page schema |
 | `BhlPageRecord::into_batch()` | Assign and validate one complete page record, including metadata |
 
-Automatic corpus inventory grouping and TSV metadata joins are separate work.
+Automatic corpus inventory grouping remains separate work. The optional
+`service-bhl-metadata` feature provides [DuckDB TSV joins](bhl-metadata.md).
 See the [AWS implementation guide](bhl-open-data.md) for usage, source boundaries
 and offline validation. Caller-bound storage retains the AWS key layout and lets
 unit tests use local fixtures without live S3 access.

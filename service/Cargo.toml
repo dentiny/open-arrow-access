@@ -16,6 +16,17 @@ arxiv = [
     "open-arrow-access-decompression/gzip",
 ]
 bhl = ["opendal/services-s3", "dep:arrow-array", "dep:arrow-schema"]
+bhl-metadata = [
+    "bhl",
+    "dep:duckdb",
+    "dep:tempfile",
+    "dep:arrow-cast",
+    "dep:sha2",
+    "dep:regex",
+    "dep:open-arrow-access-decompression",
+    "open-arrow-access-decompression/gzip",
+    "open-arrow-access-file-format/csv",
+]
 biorxiv = ["meca", "dep:chrono"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
@@ -73,6 +84,13 @@ format-xml = [
 oai = ["format-xml"]
 
 [dependencies]
+# This DuckDB binding line uses Arrow 58, matching the workspace contract.
+duckdb = { version = "~1.10506.0", default-features = false, features = ["bundled"], optional = true }
+tempfile = { workspace = true, optional = true }
+arrow-cast = { workspace = true, optional = true }
+sha2 = { version = "0.11", optional = true }
+regex = { workspace = true, optional = true }
+
 arrow-array = { workspace = true, optional = true }
 arrow-json = { workspace = true, optional = true }
 arrow-select = { workspace = true, optional = true }

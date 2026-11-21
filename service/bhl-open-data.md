@@ -137,3 +137,12 @@ provider errors and schema mismatches fail explicitly. Native partitions use the
 shared scan executor. `with_schema_metadata` retains caller provenance in the
 plan and emitted batch schemas. This API is the reader foundation for separate
 TSV metadata acquisition and join changes.
+
+## DuckDB metadata joins
+
+Enable `service-bhl-metadata`, load `BhlMetadata::load(storage).await` once,
+and use `metadata.select(&page_keys)` to supply populated metadata to
+`BhlPageAccessor`. The 13 AWS gzip TSV tables are streamed into temporary,
+disk-backed DuckDB storage. SQL performs the joins, ordered relation aggregation
+and reconciliation; the fixed Arrow/Lance page schema is unchanged. See the
+[metadata guide](bhl-metadata.md) for memory/disk settings, usage and provenance.
