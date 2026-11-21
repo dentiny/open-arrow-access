@@ -11,6 +11,7 @@ use duckdb::{Config, Connection};
 use futures::future::join_all;
 use open_arrow_access_core::{Accessor, ByteAccessor, ReadRequest, Result};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 pub(super) const TABLES: [&str; 4] = ["opinions", "opinion-clusters", "dockets", "courts"];
 pub(super) const ORDINAL: &str = "__courtlistener_ordinal";
@@ -78,55 +79,55 @@ impl Database {
         })
     }
 }
-async fn append(
-    connection: Connection,
-    table: usize,
-    batch: RecordBatch,
-    ordinal: u64,
-) -> Result<Connection> {
-    tokio::task::spawn_blocking(move || -> Result<_> {
-        let count = batch.num_rows();
-        let mut fields = batch.schema().fields().to_vec();
-        fields.push(Arc::new(Field::new(ORDINAL, DataType::UInt64, false)));
-        let mut arrays = batch.columns().to_vec();
-        arrays.push(Arc::new(UInt64Array::from_iter_values(
-            ordinal..ordinal + count as u64,
-        )));
-        let batch =
-            RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).map_err(arrow_error)?;
-        let mut appender = connection
-            .appender(&format!("cl_{table}"))
-            .map_err(db_error)?;
-        appender.append_record_batch(batch).map_err(db_error)?;
-        appender.flush().map_err(db_error)?;
-        drop(appender);
-        Ok(connection)
-    })
-    .await
-    .map_err(|e| task_error("courtlistener_duckdb_task", e))?
-}
 async fn import_table<A: ByteAccessor + 'static>(
-    mut connection: Connection,
+    connection: Connection,
     source: CourtListenerTableAccessor<Arc<A>>,
     request: ReadRequest,
     table: usize,
 ) -> Result<()> {
     let mut reader = source.open(request).await?;
-    // One transaction per table avoids committing every small input batch.
-    connection = tokio::task::spawn_blocking(move || -> Result<_> {
+    // Bound read-ahead while one blocking importer owns the table's appender.
+    let (sender, mut receiver) = mpsc::channel::<RecordBatch>(1);
+    let task = tokio::task::spawn_blocking(move || -> Result<_> {
         connection
             .execute_batch("BEGIN TRANSACTION")
             .map_err(db_error)?;
+        let mut appender = connection
+            .appender(&format!("cl_{table}"))
+            .map_err(db_error)?;
+        let mut ordinal = 0u64;
+        while let Some(batch) = receiver.blocking_recv() {
+            let end = ordinal + batch.num_rows() as u64;
+            let mut fields = batch.schema().fields().to_vec();
+            fields.push(Arc::new(Field::new(ORDINAL, DataType::UInt64, false)));
+            let mut arrays = batch.columns().to_vec();
+            arrays.push(Arc::new(UInt64Array::from_iter_values(ordinal..end)));
+            let batch =
+                RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).map_err(arrow_error)?;
+            appender.append_record_batch(batch).map_err(db_error)?;
+            ordinal = end;
+        }
+        // Appender::drop suppresses write errors; flush explicitly once per table.
+        appender.flush().map_err(db_error)?;
+        drop(appender);
         Ok(connection)
-    })
-    .await
-    .map_err(|e| task_error("courtlistener_duckdb_task", e))??;
-    let mut ordinal = 0;
-    while let Some(batch) = reader.next().await? {
-        let count = batch.num_rows() as u64;
-        connection = append(connection, table, batch, ordinal).await?;
-        ordinal += count;
+    });
+    let read_result = async {
+        while let Some(batch) = reader.next().await? {
+            if sender.send(batch).await.is_err() {
+                break;
+            }
+        }
+        Ok::<_, open_arrow_access_core::Error>(())
     }
+    .await;
+    drop(sender);
+    // Join the importer even on read failure, and commit only after both succeed.
+    let imported = task
+        .await
+        .map_err(|e| task_error("courtlistener_duckdb_task", e))?;
+    read_result?;
+    let connection = imported?;
     tokio::task::spawn_blocking(move || connection.execute_batch("COMMIT").map_err(db_error))
         .await
         .map_err(|e| task_error("courtlistener_duckdb_task", e))?
