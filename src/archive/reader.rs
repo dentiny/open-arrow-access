@@ -9,7 +9,7 @@ use crate::{
     decompression::tar::{TarLimits, TarStream},
 };
 
-use super::{ArchiveFormat, ArchiveOptions};
+use super::{ArchiveFormat, ArchiveOptions, validation};
 
 /// Fixed, provider-independent schema for selected archive members.
 /// Names and contents are raw binary; `source_uri` is the caller's object locator.
@@ -118,9 +118,7 @@ async fn read_tar_batch(
 async fn read_payload(mut input: Box<dyn ByteReader>, materialize: bool) -> Result<Vec<u8>> {
     let mut data = Vec::new();
     while let Some(chunk) = input.next().await? {
-        if chunk.is_empty() {
-            return Err(crate::empty_chunk("read_archive"));
-        }
+        validation::validate_chunk(&chunk)?;
         if materialize {
             data.extend_from_slice(&chunk);
         }

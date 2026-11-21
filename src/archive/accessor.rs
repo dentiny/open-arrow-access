@@ -5,7 +5,7 @@ use crate::{
     RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, async_trait,
 };
 
-use super::{ArchiveOptions, archive_schema, reader::open_reader};
+use super::{ArchiveOptions, reader::open_reader, validation};
 
 /// Integrated package expansion from a byte accessor to an Arrow record accessor.
 ///
@@ -13,7 +13,7 @@ use super::{ArchiveOptions, archive_schema, reader::open_reader};
 ///
 /// One `ReadRequest` selects one source object. The configured outer compression
 /// is decoded first; the explicit `ArchiveFormat` then selects TAR traversal or
-/// one complete file. Every selected file becomes one row in [`archive_schema`]:
+/// one complete file. Every selected file becomes one row in [`super::archive_schema`]:
 /// `source_uri: LargeUtf8`, `entry_index: UInt64`, `entry_name: LargeBinary`, and
 /// `data: LargeBinary`, all non-null. `source_uri` is the requested object locator;
 /// TAR indices preserve physical header order, including skipped directories and
@@ -89,10 +89,7 @@ impl Accessor for ArchiveAccessor {
 
     async fn metadata(&self, request: ReadRequest) -> Result<RecordMetadata> {
         Ok(RecordMetadata {
-            schema: request
-                .options
-                .resolve_projection(&archive_schema())?
-                .schema,
+            schema: validation::projected_schema(&request.options)?,
             source: Some(request.object),
         })
     }

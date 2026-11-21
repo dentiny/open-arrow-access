@@ -8,8 +8,10 @@
 //! nested archives. Member names and payload bytes remain opaque.
 
 mod accessor;
+mod error;
 mod options;
 mod reader;
+mod validation;
 
 pub use accessor::ArchiveAccessor;
 pub use options::{ArchiveFormat, ArchiveOptions};
