@@ -20,6 +20,8 @@ bhl = [
     "dep:arrow-array",
     "dep:arrow-schema",
     "dep:duckdb",
+    "dep:arrow-ipc",
+    "dep:arrow-ipc-duckdb",
     "dep:arrow-cast",
     "dep:sha2",
     "dep:regex",
@@ -84,8 +86,10 @@ format-xml = [
 oai = ["format-xml"]
 
 [dependencies]
-# This DuckDB binding line uses Arrow 58, matching the workspace contract.
-duckdb = { version = "~1.10506.0", default-features = false, features = ["bundled"], optional = true }
+# These DuckDB binding lines use Arrow 60; BHL imports batches into Arrow 58 via IPC.
+duckdb = { version = ">=1.20000.1, <1.20002", default-features = false, features = ["bundled"], optional = true }
+arrow-ipc = { version = "58", default-features = false, optional = true }
+arrow-ipc-duckdb = { package = "arrow-ipc", version = "60", default-features = false, optional = true }
 arrow-cast = { workspace = true, optional = true }
 sha2 = { version = "0.11", optional = true }
 regex = { workspace = true, optional = true }

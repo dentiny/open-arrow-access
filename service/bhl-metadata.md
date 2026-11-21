@@ -1,8 +1,11 @@
 # BHL metadata joins with embedded DuckDB
 
 Metadata is included with `service-bhl` (service-crate feature `bhl`).
-The implementation uses the bundled Rust DuckDB
-binding, on the 1.10506 patch line to match the workspace's Arrow 58 types.
+The implementation uses the bundled Rust DuckDB binding, supporting 1.20000.1
+through 1.20001.x; the lockfile selects 1.20001.0. These bindings use Arrow 60
+internally. Each joined metadata batch is serialized through Arrow IPC and
+imported into the public Arrow 58 schema, adding an in-memory serialization step.
+OCR payload bytes do not pass through this conversion.
 
 The first version has three steps:
 

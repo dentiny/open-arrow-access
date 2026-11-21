@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.18.1 - 2026-11-20
+
+- Support newer DuckDB Rust bindings (1.20000.1 through 1.20001.x), locking to 1.20001.0 and resolving native-library dependency conflicts with downstream workspaces.
+- Bridge DuckDB's internal Arrow 60 metadata batches through in-memory Arrow IPC into the unchanged public Arrow 58 schema; OCR payloads retain their existing path.
+- Propagate DuckDB streaming errors directly through the binding's fallible iterator.
+- Release all eight public workspace crates at 0.18.1 with aligned internal dependency requirements.
+
 ## 0.18.0 - 2026-11-20
 
 - Connect the BHL OCR page reader to DuckDB-joined metadata for explicitly selected item/part pages, preserving source provenance and exposing missing/conflicting metadata through a caller report callback.

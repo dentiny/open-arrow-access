@@ -11,7 +11,7 @@ pub(super) fn json(source: serde_json::Error) -> Error {
 pub(super) fn duckdb(source: duckdb::Error) -> Error {
     Error::new(ErrorKind::Io, "bhl_metadata_duckdb", source.to_string()).with_source(source)
 }
-pub(super) fn arrow(source: arrow_schema::ArrowError) -> Error {
+pub(super) fn arrow(source: impl std::error::Error + Send + Sync + 'static) -> Error {
     Error::new(ErrorKind::Decode, "bhl_metadata_arrow", source.to_string()).with_source(source)
 }
 pub(super) fn task(source: tokio::task::JoinError) -> Error {
