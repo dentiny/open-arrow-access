@@ -108,3 +108,4 @@ SELECT request_id,
     ], lambda value: value IS NOT NULL) AS missing,
     conflicts
 FROM joined
+ORDER BY request_id

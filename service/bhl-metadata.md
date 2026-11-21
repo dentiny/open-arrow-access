@@ -32,11 +32,10 @@ metadata.for_each(&page_keys, |page| {
 ```
 
 `for_each` is synchronous; async applications can run it on a blocking worker.
-Callback errors stop emission immediately. Query order is unspecified; each
-row includes its original object/identity, and repeated requests remain repeated
-rows. Each query has a separate connection and request table. OCR acquisition
-and Lance writing remain the caller's responsibility; the emitted StructArray
-is compatible with `BhlPageAccessor`/`BhlPageRecord`.
+Callback errors stop emission immediately. Rows follow request order, include
+their original object/identity, and preserve repeated requests. Each query has
+a separate connection and request table. Use `BhlPageAccessor::from_metadata`
+to combine these results with OCR bytes as shown below. Lance writing remains the caller's responsibility.
 
 V1 assumes sufficient memory for the loaded tables and query intermediates.
 There are no memory-limit options, disk-backed database, checkpoint, temporary
@@ -53,3 +52,51 @@ page rather than silently dropping it. Callers decide which rows to publish.
 `info` and `schema_metadata()` retain source paths, row counts and decoded-cell
 SHA-256 fingerprints. They do not identify an atomic AWS snapshot or compressed
 object versions. Use pinned storage when reproducible acquisition is required.
+
+## Read OCR pages with joined metadata
+
+```rust,ignore
+use std::sync::Arc;
+use open_arrow_access_core::Accessor;
+use open_arrow_access_service::{FileSetRequest, bhl::{BhlPageAccessor, metadata::BhlMetadata}};
+
+let metadata = Arc::new(BhlMetadata::load(metadata_storage).await?);
+let pages = BhlPageAccessor::from_metadata(
+    ocr_storage,
+    snapshot_id,
+    metadata, // Reuse this loaded value across jobs/readers.
+    |page| {
+        // Inspect/store page.missing and page.conflicts here.
+        // Ok(()) retains this page; Err stops the scan before its OCR read.
+        Ok(())
+    },
+)?;
+let mut reader = pages.open(FileSetRequest::new(page_keys)).await?;
+while let Some(batch) = reader.next().await? {
+    emit(batch)?;
+}
+```
+
+The reader runs one join SQL for the entire request when consumption begins.
+Each selected metadata row becomes one independent OCR partition under the
+shared scan executor. One-row batches retain the fixed nine-column page schema,
+original binary/empty OCR bytes, caller byte I/O options, source object identity
+and snapshot ID. Metadata fingerprints/source counts are attached automatically;
+`with_schema_metadata` merges additional caller provenance. The existing
+`BhlPageAccessor::new` still accepts a custom metadata provider.
+
+On first read, the caller's thread executes the synchronous DuckDB query and
+buffers metadata for the selected request in a Vec. OCR partitions then consume
+those rows. The reader uses no query worker, channel or `spawn_blocking`; the
+SQL call occupies the current thread until it finishes. V1 assumes enough
+memory for the request's metadata as well as the loaded source tables.
+
+Query failures propagate through the reader. Report callback failures stop
+before that page's OCR read. Accepted pages with missing joins retain null
+children and still emit their OCR record. Reports go to the caller callback;
+they are not accumulated into schema metadata.
+
+Sequential reads follow request order, including duplicates. The scan remains
+reorderable for callers explicitly using unordered/parallel execution layers.
+Projection retains the current page-reader behavior: it projects the constructed
+record and does not yet skip OCR reads for metadata-only selections.
