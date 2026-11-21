@@ -6,20 +6,9 @@ use std::path::Path;
 
 pub(super) const SNAPSHOT_VERSION: u64 = 1;
 
-pub(super) fn snapshot_path(path: &Path) -> Result<&str> {
-    path.to_str()
-        .ok_or_else(|| error::invalid("snapshot path must be UTF-8"))
-}
-
-pub(super) fn completed_import(connection: &Connection) -> Result<()> {
-    let imported: usize = connection.query_row(
-        "SELECT count(*) FROM information_schema.tables WHERE table_catalog = current_database() AND table_schema = 'main' AND table_type = 'BASE TABLE'",
-        [], |row| row.get(0),
-    ).map_err(error::duckdb)?;
-    if imported != tables().len() {
-        return Err(error::invalid(
-            "save_snapshot requires a completed source import",
-        ));
+pub(super) fn snapshot_destination(path: &Path) -> Result<()> {
+    if path.try_exists().map_err(error::snapshot_io)? {
+        return Err(error::invalid("snapshot path already exists"));
     }
     Ok(())
 }
@@ -27,7 +16,7 @@ pub(super) fn completed_import(connection: &Connection) -> Result<()> {
 pub(super) fn snapshot(connection: &Connection) -> Result<BhlMetadataInfo> {
     let (count, version, info): (u64, u64, String) = connection
         .query_row(
-            "SELECT count(*), min(version), min(info) FROM bhl_source.__bhl_snapshot",
+            "SELECT count(*), min(version), min(info) FROM main.__bhl_snapshot",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -44,7 +33,7 @@ pub(super) fn snapshot(connection: &Connection) -> Result<BhlMetadataInfo> {
     }
     for table in tables {
         let mut query = connection
-            .prepare(&format!("DESCRIBE bhl_source.\"{}\"", table.name))
+            .prepare(&format!("DESCRIBE main.\"{}\"", table.name))
             .map_err(error::duckdb)?;
         let actual = query
             .query_map([], |row| {
@@ -63,7 +52,7 @@ pub(super) fn snapshot(connection: &Connection) -> Result<BhlMetadataInfo> {
         }
         let rows: u64 = connection
             .query_row(
-                &format!("SELECT count(*) FROM bhl_source.\"{}\"", table.name),
+                &format!("SELECT count(*) FROM main.\"{}\"", table.name),
                 [],
                 |row| row.get(0),
             )

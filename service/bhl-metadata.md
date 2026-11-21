@@ -40,10 +40,10 @@ their original object/identity, and preserve repeated requests. Each query has
 a separate connection and request table. Use `BhlPageAccessor::from_metadata`
 to combine these results with OCR bytes as shown below. Lance writing remains the caller's responsibility.
 
-V1 assumes sufficient memory for the loaded tables and query intermediates.
-There are no memory-limit options, disk-backed database, checkpoint, temporary
-workspace or temporary-directory settings. DuckDB uses its default resource
-settings, with `enable_external_file_cache=false` explicitly set.
+The in-memory `load` path assumes sufficient memory for the loaded tables and
+query intermediates. Prepared metadata can instead use the persistent database
+described below. DuckDB uses its default resource settings, with
+`enable_external_file_cache=false` explicitly set.
 
 `metadata.item` and `metadata.title` are now non-null lists, retaining every
 item/title association in source order while emitting one OCR row per request.
@@ -125,27 +125,27 @@ Request-level page selections also use Arrow appends, in batches of up to 8,192
 identities. Request ordinals retain input order and duplicate selections; the
 selection appender flushes once before the join query runs.
 
-## Reuse one explicit metadata snapshot across page jobs
+## Reuse one persistent metadata database across page jobs
 
-A coordinator can import the 13 TSV tables once, then publish a completed
-DuckDB snapshot. Independent processes open it read-only and keep their page
-selections in private in-memory workspaces; they do not re-download/re-parse
-TSVs or copy all metadata into another in-memory database.
+A coordinator imports the 13 TSV tables directly into a persistent DuckDB
+file. Independent processes open that file read-only. Per-query page selections
+use connection-local temporary tables, without a separate in-memory database,
+source-data copy or forwarding views.
 
 ```rust,ignore
-let metadata = BhlMetadata::load(storage).await?;
-metadata.save_snapshot("bhl-metadata.duckdb")?;
+BhlMetadata::prepare_snapshot(storage.clone(), "bhl-metadata.duckdb").await?;
 // Distribute this exact file to the workers, or place it on a shared filesystem.
 let metadata = Arc::new(BhlMetadata::open_snapshot("bhl-metadata.duckdb")?);
 let pages = BhlPageAccessor::from_metadata(storage, snapshot_id, metadata, report)?;
 ```
 
-`save_snapshot` requires a completed import, stages on the destination filesystem,
-commits data/provenance, detaches it and atomically publishes without overwrite.
-`open_snapshot` validates the format version, all table schemas and row counts,
-and retains source fingerprints. A saved source snapshot cannot be re-exported
-through the query workspace. Source freshness, acquisition consistency, storage
-and distribution are caller-owned: this is opt-in reuse, not an automatic cache
-of the mutable public bucket. Use a compatible DuckDB storage version. Existing
-`load` behavior is unchanged; conversion-service job wiring remains a consumer
+`prepare_snapshot` imports into a temporary database on the destination filesystem,
+commits data/provenance, checkpoints and closes the database, then atomically
+publishes the file without overwriting an existing path. Workers directly open
+it with DuckDB's `READ_ONLY` access mode. `open_snapshot` validates the format
+version, all source table schemas and row counts, and retains source fingerprints.
+
+Source freshness, acquisition consistency, storage and distribution are
+caller-owned. Use a compatible DuckDB storage version. Existing `load` behavior
+remains an in-memory import; conversion-service job wiring remains a consumer
 adoption step after this API is released.

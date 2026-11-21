@@ -33,7 +33,7 @@ pub struct BhlMetadataInfo {
     pub sources: BTreeMap<String, SourceInfo>,
 }
 
-/// All 13 AWS metadata tables in one in-memory DuckDB database.
+/// All 13 AWS metadata tables in one in-memory or persistent DuckDB database.
 pub struct BhlMetadata {
     pub info: BhlMetadataInfo,
     pub(super) connection: Mutex<Connection>,
@@ -188,6 +188,13 @@ impl BhlMetadata {
             .with("enable_external_file_cache", "false")
             .map_err(error::duckdb)?;
         let connection = Connection::open_in_memory_with_flags(config).map_err(error::duckdb)?;
+        Self::import(storage, connection).await
+    }
+
+    pub(super) async fn import<A: ByteAccessor + 'static>(
+        storage: A,
+        connection: Connection,
+    ) -> Result<Self> {
         connection
             .execute_batch(
                 "CREATE MACRO bhl_id(value) AS CASE

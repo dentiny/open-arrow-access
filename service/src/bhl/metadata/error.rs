@@ -26,3 +26,7 @@ pub(super) fn snapshot_io(source: std::io::Error) -> Error {
     )
     .with_source(source)
 }
+
+pub(super) fn metadata_lock<T>(_: std::sync::PoisonError<T>) -> Error {
+    invalid("metadata connection lock poisoned")
+}

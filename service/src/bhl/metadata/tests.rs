@@ -277,12 +277,14 @@ async fn emits_rows_until_callback_fails() {
 #[tokio::test]
 async fn snapshots_reopen_read_only_without_source_access_and_keep_provenance() {
     let (root, storage) = source("title.txt.gz").await;
-    let metadata = BhlMetadata::load(storage).await.unwrap();
+    let metadata = BhlMetadata::load(storage.clone()).await.unwrap();
     let expected = read(&metadata, &[ITEM, PART]);
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("snapshot'quoted.duckdb");
-    metadata.save_snapshot(&path).unwrap();
-    assert!(metadata.save_snapshot(&path).is_err());
+    BhlMetadata::prepare_snapshot(storage.clone(), &path)
+        .await
+        .unwrap();
+    assert!(BhlMetadata::prepare_snapshot(storage, &path).await.is_err());
     let fingerprint = metadata.info.fingerprint.clone();
     drop(metadata);
     drop(root); // Reopening and queries cannot fall back to the TSV inputs.
@@ -291,12 +293,8 @@ async fn snapshots_reopen_read_only_without_source_access_and_keep_provenance() 
     let other = BhlMetadata::open_snapshot(&path).unwrap();
     assert_eq!(read(&other, &[ITEM]).len(), 1);
     drop(other);
-    assert!(
-        snapshot
-            .save_snapshot(directory.path().join("copy.duckdb"))
-            .is_err()
-    );
     let actual = read(&snapshot, &[ITEM, PART]);
+    assert_eq!(actual.len(), expected.len());
     for (actual, expected) in actual.iter().zip(&expected) {
         assert_eq!(actual.metadata, expected.metadata);
         assert_eq!(actual.missing, expected.missing);
@@ -307,9 +305,10 @@ async fn snapshots_reopen_read_only_without_source_access_and_keep_provenance() 
             .connection
             .lock()
             .unwrap()
-            .execute_batch("DELETE FROM bhl_source.item")
+            .execute_batch("DELETE FROM main.item")
             .is_err()
     );
+    assert_eq!(read(&snapshot, &[ITEM, ITEM]).len(), 2);
     drop(snapshot);
     {
         let db = duckdb::Connection::open(&path).unwrap();
