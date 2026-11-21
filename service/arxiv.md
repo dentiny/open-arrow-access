@@ -543,6 +543,12 @@ manifest is introduced. XML bytes are retained without projecting document-speci
 the common schema. PDF/XML bytes are whole outer members; LaTeX files are
 expanded from their source package. Both identities remain explicit.
 
+Content handling is split into `arxiv/pdf/`, `arxiv/xml/` and `arxiv/latex/`.
+Each directory owns its format reader. The shared `content.rs` dispatches to
+these readers and handles the common schema, projection, metadata join and
+partition scheduling. PDF and XML readers preserve whole member bytes; the
+LaTeX reader streams source-package expansion and filters ancillary files.
+
 The lower-level `records()` retains raw archive rows, and `article_records()` /
 `open_source_package()` retain their artifact-byte contracts. Those transport
 APIs are distinct from the common content output; conversion integrations

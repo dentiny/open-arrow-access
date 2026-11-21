@@ -19,7 +19,7 @@ fn raw_batch(name: &str, data: &[u8]) -> Result<RecordBatch> {
 }
 
 async fn read(name: &str, data: &[u8]) -> Result<Vec<RecordBatch>> {
-    expand(
+    crate::arxiv::latex::read(
         raw_batch(name, data)?,
         ReadOptions::default().with_batch_size(std::num::NonZeroUsize::MIN),
     )
