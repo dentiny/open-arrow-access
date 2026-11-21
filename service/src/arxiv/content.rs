@@ -1,18 +1,14 @@
 //! Common binary-content rows for PDF, attachment-free LaTeX, and supplied XML shards.
-use super::{
-    ArxivMetadataIndex, ArxivReadRequest, ArxivRecords, ArxivSourceOptions, error,
-    open_source_package, validation,
-};
+use super::{ArxivMetadataIndex, ArxivReadRequest, ArxivRecords, validation};
 use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
-use futures::{StreamExt, TryStreamExt, stream};
+use futures::{StreamExt, TryStreamExt};
 use open_arrow_access_core::{
-    Accessor, ByteReadRequest, ByteReader, Bytes, ObjectRef, ReadOptions, RecordBatch,
-    RecordBatchBuilder, RecordCapability, RecordMetadata, RecordReader, ResolvedProjection, Result,
-    ScanPartition, ScanPlan, ScanPlanner, SchemaRef, async_trait, bytes_reader, into_async_read,
-    into_stream, record_stream_reader, scan_partition,
+    Accessor, ByteReadRequest, ByteReader, ReadOptions, RecordBatch, RecordBatchBuilder,
+    RecordCapability, RecordMetadata, RecordReader, RecordStream, ResolvedProjection, Result,
+    ScanPartition, ScanPlan, ScanPlanner, SchemaRef, async_trait, into_stream,
+    record_stream_reader, scan_partition,
 };
-use open_arrow_access_decompression::{Codec, gzip::Gzip};
 use std::sync::{Arc, OnceLock};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -122,7 +118,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
         request.options.batch_size = std::num::NonZeroUsize::MIN;
         let mut plan = match request.shard.clone() {
             Some(shard) => self.records.plan_shard_entries(shard, request)?,
-            None => self.records.plan_scan(request).await?,
+            None => self.records.plan_manifest_entries(request).await?,
         };
         plan.metadata.schema = projection.schema.clone();
         let format = self.format;
@@ -163,7 +159,6 @@ fn content_partition(
             .and_then(move |batch| {
                 content_batches(batch, format, options.clone(), metadata.clone())
             })
-            .map_ok(|batches| stream::iter(batches.into_iter().map(Ok)))
             .try_flatten();
         Ok(record_stream_reader(
             batches,
@@ -179,102 +174,24 @@ async fn content_batches(
     format: ArxivContentFormat,
     options: ReadOptions,
     metadata: ContentMetadata,
-) -> Result<Vec<RecordBatch>> {
+) -> Result<RecordStream> {
     let article =
         validation::content_article_id(batch["entry_name"].as_binary::<i64>().value(0), format)?;
     let index = metadata.resolve(&article).await?;
     let batches = match format {
-        ArxivContentFormat::Latex => expand(&batch, &options).await?,
-        _ => vec![document_batch(&batch, format)?],
+        ArxivContentFormat::Pdf => super::pdf::read(batch)?,
+        ArxivContentFormat::Latex => super::latex::read(batch, options).await?,
+        ArxivContentFormat::Xml => super::xml::read(batch)?,
     };
-    batches
-        .into_iter()
-        .map(|batch| index.attach_content(batch))
-        .collect()
+    Ok(batches
+        .map(move |batch| index.attach_content(batch?))
+        .boxed())
 }
 
-async fn expand(batch: &RecordBatch, options: &ReadOptions) -> Result<Vec<RecordBatch>> {
-    let name = batch["entry_name"].as_binary::<i64>().value(0);
-    let article_id = validation::content_article_id(name, ArxivContentFormat::Latex)?;
-    let shard = batch["shard_uri"].as_string::<i64>().value(0);
-    let outer_index = batch["entry_index"]
-        .as_primitive::<arrow_array::types::UInt64Type>()
-        .value(0);
-    let mut data = batch["data"].as_binary::<i64>().value(0).to_vec();
-    if data.starts_with(&[0x1f, 0x8b]) {
-        use futures::AsyncReadExt;
-        let input = bytes_reader(Bytes::from(data), None);
-        let mut decoder = Gzip.decoder(Box::pin(into_async_read(
-            Box::new(input),
-            "decode_arxiv_latex",
-        )));
-        data = Vec::new();
-        decoder
-            .read_to_end(&mut data)
-            .await
-            .map_err(|e| error::decode("invalid gzip source package").with_source(e))?;
-    }
-    let packaging = validation::source_packaging(&data)?;
-    let input = bytes_reader(
-        Bytes::from(data),
-        Some(ObjectRef::new(format!("{shard}#entry={outer_index}"))),
-    );
-    let mut reader = open_source_package(
-        Box::new(input),
-        &article_id,
-        packaging,
-        ArxivSourceOptions {
-            options: ReadOptions {
-                projection: None,
-                ..options.clone()
-            },
-            ..ArxivSourceOptions::default()
-        },
-    )
-    .await?;
-    let mut batches = Vec::new();
-    while let Some(member_batch) = reader.next().await? {
-        let batch = latex_batch(batch, &article_id, &member_batch)?;
-        if batch.num_rows() != 0 {
-            batches.push(batch);
-        }
-    }
-    validation::validate_latex_files(&batches)?;
-    Ok(batches)
-}
-
-fn latex_batch(outer: &RecordBatch, article_id: &str, batch: &RecordBatch) -> Result<RecordBatch> {
-    let shard = outer["shard_uri"].as_string::<i64>().value(0);
-    let outer_index = outer["entry_index"]
-        .as_primitive::<arrow_array::types::UInt64Type>()
-        .value(0);
-    let name = outer["entry_name"].as_binary::<i64>().value(0);
-    let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
-    let names = batch["entry_name"].as_binary::<i64>();
-    let data = batch["data"].as_binary::<i64>();
-    let indices = batch["entry_index"].as_primitive::<arrow_array::types::UInt64Type>();
-    for row in 0..batch.num_rows() {
-        let source_name = names.value(row);
-        if !validation::is_tex(source_name)? {
-            continue;
-        }
-        validation::validate_latex_bytes(data.value(row))?;
-        builder.push(|output| {
-            output.append("article_id", article_id)?;
-            output.append("format", "latex")?;
-            output.append("shard_uri", shard)?;
-            output.append("entry_index", outer_index)?;
-            output.append("entry_name", name)?;
-            output.append("source_index", indices.value(row))?;
-            output.append("source_name", source_name)?;
-            output.append("data", data.value(row))?;
-            output.append("data_type", ArxivContentFormat::Latex.as_str())
-        })?;
-    }
-    builder.finish()
-}
-
-fn document_batch(batch: &RecordBatch, format: ArxivContentFormat) -> Result<RecordBatch> {
+pub(super) fn document_batch(
+    batch: &RecordBatch,
+    format: ArxivContentFormat,
+) -> Result<RecordBatch> {
     let name = batch["entry_name"].as_binary::<i64>().value(0);
     let id = validation::content_article_id(name, format)?;
     let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
