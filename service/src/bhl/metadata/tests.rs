@@ -29,7 +29,7 @@ async fn source(title: &str) -> (tempfile::TempDir, OpenDalAccessor) {
     (root, OpenDalAccessor::new(operator))
 }
 
-async fn load() -> BhlMetadata {
+pub(in crate::bhl) async fn load() -> BhlMetadata {
     let (_root, storage) = source("title.txt.gz").await;
     BhlMetadata::load(storage).await.unwrap()
 }

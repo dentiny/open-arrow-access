@@ -2,12 +2,13 @@
 mod error;
 mod join;
 mod source;
+mod stream;
 use super::{BhlPageIdentity, page_schema};
 use arrow_array::StructArray;
 use arrow_schema::{DataType, Fields};
 use open_arrow_access_core::{ObjectRef, Result};
 pub use source::{BhlMetadata, BhlMetadataInfo, SourceInfo};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Clone)]
 struct Table {
@@ -84,7 +85,23 @@ impl BhlMetadata {
         keys: &[ObjectRef],
         emit: impl FnMut(BhlPageMetadata) -> Result<()>,
     ) -> Result<()> {
-        join::for_each(self, keys, emit)
+        let connection = self.query_connection()?;
+        join::for_each(&connection, keys, emit, || false)
+    }
+
+    fn query_connection(&self) -> Result<duckdb::Connection> {
+        self.connection
+            .lock()
+            .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?
+            .try_clone()
+            .map_err(error::duckdb)
+    }
+
+    pub(in crate::bhl) fn stream(
+        self: Arc<Self>,
+        keys: Vec<ObjectRef>,
+    ) -> futures::stream::BoxStream<'static, Result<BhlPageMetadata>> {
+        stream::pages(self, keys)
     }
 
     pub fn schema_metadata(&self) -> Result<HashMap<String, String>> {
@@ -101,4 +118,4 @@ impl BhlMetadata {
     }
 }
 #[cfg(test)]
-mod tests;
+pub(in crate::bhl) mod tests;

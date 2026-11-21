@@ -131,12 +131,12 @@ See [BHL service](bhl.md), [resolved file sets](remote-files.md) and
 
 With `service-bhl`, `BhlPageAccessor::new(storage, snapshot_id, provider)` maps
 selected item/part OCR filenames to the fixed `page_schema()` and assigns the
-provider's one-row metadata StructArray. The caller supplies metadata; this
-reader does not acquire TSV tables or join bibliographic records. Invalid keys,
+provider's one-row metadata StructArray. This constructor accepts supplied metadata. Use `BhlPageAccessor::from_metadata`
+to stream joined DuckDB metadata into the same page reader. Invalid keys,
 provider errors and schema mismatches fail explicitly. Native partitions use the
 shared scan executor. `with_schema_metadata` retains caller provenance in the
-plan and emitted batch schemas. This API is the reader foundation for separate
-TSV metadata acquisition and join changes.
+plan and emitted batch schemas. The joined constructor attaches metadata provenance automatically and calls the
+caller's report hook before each OCR read.
 
 ## DuckDB metadata joins
 
@@ -146,4 +146,4 @@ tables. `metadata.for_each(&page_keys, emit)` runs one join SQL and emits each
 page's metadata immediately, matching the fixed Arrow/Lance schema. The first
 version assumes sufficient memory, configures no temporary directory, and
 explicitly disables DuckDB's external file cache. See the
-[metadata guide](bhl-metadata.md) for usage and source semantics.
+[metadata guide](bhl-metadata.md) for usage and the integrated OCR reader.

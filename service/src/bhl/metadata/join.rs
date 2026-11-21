@@ -1,4 +1,4 @@
-use super::{BhlMetadata, BhlPageMetadata, error};
+use super::{BhlPageMetadata, error};
 use crate::bhl::{BhlPageIdentity, page_schema};
 use arrow_array::{Array, ListArray, StringArray, StructArray, UInt64Array};
 use duckdb::params;
@@ -26,20 +26,14 @@ fn strings(column: &dyn Array, row: usize) -> Result<Vec<String>> {
 }
 
 pub(super) fn for_each(
-    store: &BhlMetadata,
+    connection: &duckdb::Connection,
     keys: &[ObjectRef],
     mut emit: impl FnMut(BhlPageMetadata) -> Result<()>,
+    cancelled: impl Fn() -> bool,
 ) -> Result<()> {
     if keys.is_empty() {
         return Ok(());
     }
-    // A fresh connection shares the loaded tables but has its own request table.
-    let connection = store
-        .connection
-        .lock()
-        .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?
-        .try_clone()
-        .map_err(error::duckdb)?;
     connection
         .execute_batch(
             "CREATE TEMP TABLE bhl_selection (
@@ -70,9 +64,15 @@ pub(super) fn for_each(
     let mut statement = connection
         .prepare(include_str!("join.sql"))
         .map_err(error::duckdb)?;
+    if cancelled() {
+        return Ok(());
+    }
     let mut batches = statement.stream_arrow([]).map_err(error::duckdb)?;
     let mut emitted = 0;
     loop {
+        if cancelled() {
+            return Ok(());
+        }
         // The Arrow-58-compatible binding panics on fetch failures.
         let batch = catch_unwind(AssertUnwindSafe(|| batches.next())).map_err(|_| {
             Error::new(

@@ -1,23 +1,34 @@
-use super::super::BhlPageRecord;
+use super::super::{
+    BhlPageRecord,
+    metadata::{BhlMetadata, BhlPageMetadata},
+};
 use super::{BhlPageIdentity, page_schema};
 use crate::FileSetRequest;
 use arrow_array::StructArray;
-use futures::stream;
+use futures::{StreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, ByteReadRequest, Capability, OrderRequirement, RecordCapability,
-    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, StreamReader, async_trait,
-    read_object, scan_partition,
+    Accessor, ByteAccessor, ByteReadOptions, ByteReadRequest, Capability, OrderRequirement,
+    RecordCapability, RecordMetadata, RecordReader, Result, ScanPartition, ScanPlan, ScanPlanner,
+    StreamReader, async_trait, read_object, scan_partition,
 };
 use std::{collections::HashMap, sync::Arc};
 
 type MetadataProvider = dyn Fn(&BhlPageIdentity) -> Result<StructArray> + Send + Sync;
+type MetadataReport = dyn Fn(&BhlPageMetadata) -> Result<()> + Send + Sync;
 
-/// Read selected OCR pages with metadata explicitly supplied by the caller.
-/// Source-table acquisition and joins are not performed by this accessor.
+enum MetadataSource {
+    Provider(Arc<MetadataProvider>),
+    DuckDb {
+        metadata: Arc<BhlMetadata>,
+        report: Arc<MetadataReport>,
+    },
+}
+
+/// Read selected OCR pages with caller-supplied or DuckDB-joined metadata.
 pub struct BhlPageAccessor<A> {
     storage: Arc<A>,
     snapshot_id: Arc<str>,
-    metadata: Arc<MetadataProvider>,
+    metadata: MetadataSource,
     schema_metadata: HashMap<String, String>,
 }
 impl<A> BhlPageAccessor<A> {
@@ -26,20 +37,50 @@ impl<A> BhlPageAccessor<A> {
         snapshot_id: impl Into<String>,
         metadata: impl Fn(&BhlPageIdentity) -> Result<StructArray> + Send + Sync + 'static,
     ) -> Result<Self> {
-        let snapshot_id = snapshot_id.into();
+        Self::build(
+            storage,
+            snapshot_id.into(),
+            MetadataSource::Provider(Arc::new(metadata)),
+        )
+    }
+
+    /// Use the loaded DuckDB tables: execute one join per request and stream
+    /// each resulting page into an independent OCR read partition.
+    /// `report` sees each page's missing/conflicting joins before its OCR read;
+    /// return an error to stop the scan, or Ok(()) to retain the page.
+    pub fn from_metadata(
+        storage: A,
+        snapshot_id: impl Into<String>,
+        metadata: Arc<BhlMetadata>,
+        report: impl Fn(&BhlPageMetadata) -> Result<()> + Send + Sync + 'static,
+    ) -> Result<Self> {
+        let provenance = metadata.schema_metadata()?;
+        Ok(Self::build(
+            storage,
+            snapshot_id.into(),
+            MetadataSource::DuckDb {
+                metadata,
+                report: Arc::new(report),
+            },
+        )?
+        .with_schema_metadata(provenance))
+    }
+
+    fn build(storage: A, snapshot_id: String, metadata: MetadataSource) -> Result<Self> {
         if snapshot_id.trim().is_empty() {
             return Err(super::invalid("BHL pages require a nonempty snapshot_id"));
         }
         Ok(Self {
             storage: Arc::new(storage),
             snapshot_id: snapshot_id.into(),
-            metadata: Arc::new(metadata),
+            metadata,
             schema_metadata: HashMap::new(),
         })
     }
-    /// Attach metadata snapshot provenance and reconciliation to emitted batches.
+
+    /// Merge caller provenance into the emitted batch schemas.
     pub fn with_schema_metadata(mut self, metadata: HashMap<String, String>) -> Self {
-        self.schema_metadata = metadata;
+        self.schema_metadata.extend(metadata);
         self
     }
 }
@@ -66,15 +107,9 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
         if request.objects.is_empty() {
             return Err(super::invalid("empty BHL page selection"));
         }
-        let prepared = request
-            .objects
-            .iter()
-            .map(|object| {
-                let identity = BhlPageIdentity::parse(object.locator())?;
-                let metadata = (self.metadata)(&identity)?;
-                Ok((identity, metadata))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        for object in &request.objects {
+            BhlPageIdentity::parse(object.locator())?;
+        }
         let schema = Arc::new(
             page_schema()
                 .as_ref()
@@ -82,63 +117,107 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                 .with_metadata(self.schema_metadata.clone()),
         );
         let projection = request.options.resolve_projection(&schema)?;
-        let metadata = RecordMetadata {
+        let output = RecordMetadata {
             schema: projection.schema,
             source: None,
         };
-        let partitions = request
-            .objects
-            .into_iter()
-            .zip(prepared)
-            .map(|(object, (identity, source_metadata))| {
-                let storage = self.storage.clone();
-                let snapshot = self.snapshot_id.clone();
-                let indices = projection.indices.clone();
-                let metadata = metadata.clone();
-                scan_partition(async move {
-                    let output_schema = metadata.schema.clone();
-                    let batches = stream::once(async move {
-                        let data = read_object(
-                            storage.as_ref(),
-                            ByteReadRequest::new(object.clone()).with_options(request.byte_options),
-                            "read_bhl_page",
-                        )
-                        .await?;
-                        let source_path =
-                            format!("{}{}", super::super::OPEN_DATA_BUCKET_URL, object.locator());
-                        let batch = BhlPageRecord {
-                            entity_type: &identity.entity_type,
-                            entity_id: identity.entity_id,
-                            page_id: identity.page_id,
-                            sequence: identity.sequence,
-                            data: &data,
-                            source_path: &source_path,
-                            snapshot_id: &snapshot,
-                            source_entry_index: None,
-                            metadata: source_metadata,
-                        }
-                        .into_batch()?;
-                        let batch = match indices {
-                            Some(indices) => batch
-                                .project(&indices)
-                                .map_err(super::super::error::page_record),
-                            None => Ok(batch),
-                        }?;
-                        open_arrow_access_core::record_batch_with_rows(
-                            output_schema,
-                            batch.columns().to_vec(),
-                            batch.num_rows(),
-                        )
-                        .map_err(super::super::error::page_record)
-                    });
-                    Ok(StreamReader::records(
-                        batches,
-                        metadata,
-                        OrderRequirement::Reorderable,
-                    ))
-                })
-            })
-            .collect();
-        Ok(ScanPlan::new(metadata, partitions).with_ordering(OrderRequirement::Reorderable))
+        let storage = self.storage.clone();
+        let snapshot = self.snapshot_id.clone();
+        let partition_metadata = output.clone();
+        let partition = move |page| {
+            page_partition(
+                storage.clone(),
+                snapshot.clone(),
+                page,
+                request.byte_options,
+                projection.indices.clone(),
+                partition_metadata.clone(),
+            )
+        };
+        let plan = match &self.metadata {
+            MetadataSource::Provider(provider) => {
+                let pages = request
+                    .objects
+                    .into_iter()
+                    .map(|object| {
+                        let identity = BhlPageIdentity::parse(object.locator())?;
+                        let metadata = provider(&identity)?;
+                        Ok(BhlPageMetadata {
+                            identity,
+                            object,
+                            metadata,
+                            missing: vec![],
+                            conflicts: vec![],
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                ScanPlan::from_iter(output, pages.into_iter().map(partition))
+            }
+            MetadataSource::DuckDb { metadata, report } => {
+                let report = report.clone();
+                let partitions = metadata.clone().stream(request.objects).map(move |page| {
+                    let page = page?;
+                    report(&page)?;
+                    Ok(partition(page))
+                });
+                ScanPlan::from_stream(output, partitions).with_streaming_discovery()
+            }
+        };
+        Ok(plan.with_ordering(OrderRequirement::Reorderable))
     }
+}
+
+fn page_partition<A: ByteAccessor + 'static>(
+    storage: Arc<A>,
+    snapshot: Arc<str>,
+    page: BhlPageMetadata,
+    byte_options: ByteReadOptions,
+    indices: Option<Vec<usize>>,
+    metadata: RecordMetadata,
+) -> ScanPartition {
+    scan_partition(async move {
+        let output_schema = metadata.schema.clone();
+        let batches = stream::once(async move {
+            let data = read_object(
+                storage.as_ref(),
+                ByteReadRequest::new(page.object.clone()).with_options(byte_options),
+                "read_bhl_page",
+            )
+            .await?;
+            let source_path = format!(
+                "{}{}",
+                super::super::OPEN_DATA_BUCKET_URL,
+                page.object.locator()
+            );
+            let batch = BhlPageRecord {
+                entity_type: &page.identity.entity_type,
+                entity_id: page.identity.entity_id,
+                page_id: page.identity.page_id,
+                sequence: page.identity.sequence,
+                data: &data,
+                source_path: &source_path,
+                snapshot_id: &snapshot,
+                source_entry_index: None,
+                metadata: page.metadata,
+            }
+            .into_batch()?;
+            let batch = match indices {
+                Some(indices) => batch
+                    .project(&indices)
+                    .map_err(super::super::error::page_record)?,
+                None => batch,
+            };
+            open_arrow_access_core::record_batch_with_rows(
+                output_schema,
+                batch.columns().to_vec(),
+                batch.num_rows(),
+            )
+            .map_err(super::super::error::page_record)
+        });
+        Ok(StreamReader::records(
+            batches,
+            metadata,
+            OrderRequirement::Reorderable,
+        ))
+    })
 }
