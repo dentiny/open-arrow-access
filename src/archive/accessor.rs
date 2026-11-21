@@ -27,8 +27,9 @@ use super::{ArchiveOptions, reader::open_reader, validation};
 /// I/O. Opening forwards the request's byte options to `open_sequential`; header
 /// reads, decompression and output begin when the reader is consumed. Request
 /// projection and batch size apply to the final member rows, not storage reads.
-/// Excluded members and projected-out payloads are drained without body-sized
-/// buffers. Selected payloads remain complete binary cells. The byte target is
+/// Excluded members are drained without body-sized buffers. Selected files are
+/// always buffered in full before row construction, even when `data` is projected
+/// out. Projection controls output columns. The byte target is
 /// soft: one large selected file may exceed it. Codec state, upstream chunks and
 /// caller-retained batches are additional memory costs; there is no background
 /// producer or per-archive collection of all output batches.

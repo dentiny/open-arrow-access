@@ -35,16 +35,11 @@ pub(super) fn open_reader(
     options: Arc<ArchiveOptions>,
 ) -> Result<Box<dyn RecordReader>> {
     let source = metadata.source.as_ref().unwrap().locator().to_owned();
-    let include_data = metadata
-        .schema
-        .fields()
-        .iter()
-        .any(|field| field.name() == "data");
     let batches: crate::RecordStream = match &options.format {
         ArchiveFormat::Single { name } => {
             let name = name.clone();
             Box::pin(stream::once(async move {
-                let data = read_payload(input, include_data).await?;
+                let data = read_payload(input).await?;
                 let mut builder = RecordBatchBuilder::new(archive_schema(), read.projection)?;
                 append_member(&mut builder, &source, 0, &name, &data)?;
                 builder.finish()
@@ -63,8 +58,7 @@ pub(super) fn open_reader(
                 let read = read.clone();
                 let options = options.clone();
                 async move {
-                    let batch =
-                        read_tar_batch(&mut tar, &source, &read, &options, include_data).await?;
+                    let batch = read_tar_batch(&mut tar, &source, &read, &options).await?;
                     Ok(batch.map(|batch| (batch, tar)))
                 }
             }))
@@ -83,7 +77,6 @@ async fn read_tar_batch(
     source: &str,
     read: &ReadOptions,
     options: &ArchiveOptions,
-    include_data: bool,
 ) -> Result<Option<RecordBatch>> {
     let mut builder = RecordBatchBuilder::new(archive_schema(), read.projection.clone())?;
     let mut bytes = 0u64;
@@ -97,7 +90,7 @@ async fn read_tar_batch(
             drop(member.reader);
             continue;
         }
-        let data = read_payload(member.reader, include_data).await?;
+        let data = read_payload(member.reader).await?;
         bytes = bytes.saturating_add(member.entry.size);
         append_member(
             &mut builder,
@@ -114,14 +107,12 @@ async fn read_tar_batch(
     }
 }
 
-/// Consume through EOF, retaining payload bytes only when selected.
-async fn read_payload(mut input: Box<dyn ByteReader>, materialize: bool) -> Result<Vec<u8>> {
+/// Consume through EOF and collect the complete original payload.
+async fn read_payload(mut input: Box<dyn ByteReader>) -> Result<Vec<u8>> {
     let mut data = Vec::new();
     while let Some(chunk) = input.next().await? {
         validation::validate_chunk(&chunk)?;
-        if materialize {
-            data.extend_from_slice(&chunk);
-        }
+        data.extend_from_slice(&chunk);
     }
     Ok(data)
 }
