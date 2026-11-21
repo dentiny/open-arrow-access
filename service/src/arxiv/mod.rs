@@ -1,6 +1,9 @@
 //! arXiv bulk discovery, native article representations and source-package assets.
 
 mod content;
+mod latex;
+mod pdf;
+mod xml;
 pub use content::{ArxivContentFormat, ArxivContentRecords, content_schema};
 mod articles;
 mod error;

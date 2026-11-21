@@ -543,6 +543,12 @@ manifest is introduced. XML bytes are retained without projecting document-speci
 the common schema. PDF/XML bytes are whole outer members; LaTeX files are
 expanded from their source package. Both identities remain explicit.
 
+Content handling is split into `arxiv/pdf/`, `arxiv/xml/` and `arxiv/latex/`.
+Each directory owns its format reader. The shared `content.rs` dispatches to
+these readers and handles the common schema, projection, metadata join and
+partition scheduling. PDF and XML readers preserve whole member bytes; the
+LaTeX reader streams source-package expansion and filters ancillary files.
+
 The lower-level `records()` retains raw archive rows, and `article_records()` /
 `open_source_package()` retain their artifact-byte contracts. Those transport
 APIs are distinct from the common content output; conversion integrations
@@ -610,9 +616,20 @@ retain version spelling. Modern and legacy bulk IDs are supported.
 Metadata is fetched and attached automatically. A preloaded typed snapshot can
 replace online lookups while retaining the same output schema.
 
-Each article package is buffered while decoding and selecting files. Batches
-respect the row limit and a soft 4 MiB source-payload target; one complete file can exceed
-that target. Bound active partitions to control resident package memory.
+The outer reader still buffers each compressed article package. The LaTeX
+content reader shares that Arrow buffer, streams gzip/TAR decoding, and rejects
+attachments by name before reading their bodies into a buffer. Excluded members
+are consumed without constructing attachment rows. Selected TeX files are built
+directly into output batches and yielded incrementally, without buffering the
+complete decoded package or collecting all article batches first. Batches respect
+the row limit and a soft 4 MiB selected-TeX target; one complete TeX file can exceed
+that target. Single-file LaTeX remains one complete cell. Bound active scan
+partitions to control resident package and TeX memory.
+
+Consumers must read through EOF before committing output: gzip checksum,
+truncation and trailing-data errors can follow earlier content batches. The TAR
+stream drains its underlying input after the end markers so decoder trailer
+checks are not bypassed. Dropping a reader early cancels further consumption.
 Existing raw `records()` and general `open_source_package()` output are unchanged.
 
 
@@ -655,5 +672,5 @@ the existing multi-file planner budget; plain accessor `open()` is sequential.
 
 Later malformed headers or storage errors remain fatal. Consume through EOF
 before committing results. Raw scans and random-access `TarArchive` are unchanged.
-Compressed article buffering, inner-package expansion and
-non-TeX policy remain separate work.
+Outer article payloads remain buffered; LaTeX package decoding and selected-file
+output use the streaming handler described above. Non-TeX source policy is unchanged.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Stream arXiv bulk LaTeX package decoding from the existing Arrow buffer, filter attachments before body materialization and yield batches incrementally while retaining automatic metadata enrichment.
+
 - Add the always-available integrated `ArchiveAccessor` for provider-independent TAR/single-file expansion, outer decompression, header filtering and incremental binary member batches. Sequential TAR completion drains the underlying input through EOF to surface decoder and source errors.
 
 - Stream explicit arXiv content shards once and yield owned article partitions incrementally, removing upfront header-range indexing and per-article storage reopens while overlapping input reads with bounded article processing.
