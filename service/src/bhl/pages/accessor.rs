@@ -16,6 +16,8 @@ type MetadataProvider = dyn Fn(&BhlPageIdentity) -> Result<StructArray> + Send +
 /// Source-table acquisition and joins are not performed by this accessor.
 /// Projections that omit `data` perform no OCR storage reads and construct only
 /// selected output columns. An empty projection still emits one row per page.
+/// Metadata providers run on the first read of each partition, under the scan
+/// executor's concurrency and buffering budget, never during planning/opening.
 pub struct BhlPageAccessor<A> {
     storage: Arc<A>,
     snapshot_id: Arc<str>,
@@ -76,14 +78,10 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
         );
         let projection = request.options.resolve_projection(&schema)?;
         let needs_data = projection.schema.field_with_name("data").is_ok();
-        let prepared = request
+        let identities = request
             .objects
             .iter()
-            .map(|object| {
-                let identity = BhlPageIdentity::parse(object.locator())?;
-                let metadata = (self.metadata)(&identity)?;
-                Ok((identity, metadata))
-            })
+            .map(|object| BhlPageIdentity::parse(object.locator()))
             .collect::<Result<Vec<_>>>()?;
         let metadata = RecordMetadata {
             schema: projection.schema,
@@ -92,14 +90,16 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
         let partitions = request
             .objects
             .into_iter()
-            .zip(prepared)
-            .map(|(object, (identity, source_metadata))| {
+            .zip(identities)
+            .map(|(object, identity)| {
                 let storage = self.storage.clone();
                 let snapshot = self.snapshot_id.clone();
                 let metadata = metadata.clone();
+                let provider = self.metadata.clone();
                 scan_partition(async move {
                     let output_schema = metadata.schema.clone();
                     let batches = stream::once(async move {
+                        let source_metadata = provider(&identity)?;
                         let data = if needs_data {
                             read_object(
                                 storage.as_ref(),

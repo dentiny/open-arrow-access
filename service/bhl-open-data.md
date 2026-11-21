@@ -141,6 +141,13 @@ columns without `data` performs no OCR object opens or body downloads; only the
 selected Arrow columns are built. An empty projection preserves one row per page.
 Selecting `data` retains original bytes, storage I/O options and read failures.
 
+`BhlPageAccessor` calls its metadata provider once on the first read of each
+partition. Planning, opening the accessor or opening an unpolled partition do not
+invoke it. Shared scan layers bound these calls by the resident partition window,
+including completed queues awaiting consumption. Dropping a reader leaves
+unstarted partitions untouched. Provider failures surface when that partition is
+read, before its OCR body is opened. The provider retains its synchronous API.
+
 ## Validation
 
 `service/tests/bhl_open_data.rs` verifies scoped discovery, explicit cached
