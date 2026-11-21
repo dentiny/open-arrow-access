@@ -334,7 +334,6 @@ mod joined {
             CourtListenerJoinOptions {
                 source_root: "s3://com-courtlistener-storage".into(),
                 scratch_directory: scratch.path().into(),
-                max_record_bytes: NonZeroUsize::new(1024 * 1024).unwrap(),
                 dialect: Default::default(),
                 memory_limit: NonZeroUsize::new(256 * 1024 * 1024).unwrap(),
                 threads: NonZeroUsize::MIN,

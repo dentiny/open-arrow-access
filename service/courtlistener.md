@@ -102,7 +102,6 @@ async fn read_date(storage: OpenDalAccessor, scratch: PathBuf) -> Result<()> {
     let source = CourtListenerDateAccessor::new(storage, CourtListenerJoinOptions {
         source_root: "s3://com-courtlistener-storage".into(),
         scratch_directory: scratch, // existing directory on caller-owned disk
-        max_record_bytes: NonZeroUsize::new(64 * 1024 * 1024).unwrap(),
         dialect: Default::default(), // current COPY quote/escape rules
         memory_limit: NonZeroUsize::new(1024 * 1024 * 1024).unwrap(),
         threads: NonZeroUsize::new(4).unwrap(),
@@ -142,9 +141,9 @@ then releases the database and temporary directory; cleanup may finish after
 an in-flight native operation exits. EOF and query failures are terminal, with
 worker failures propagated to the reader. Source-producing tasks are not spawned.
 
-Input batches target 8 MiB, and `max_record_bytes` limits each logical CSV record.
+Input batches target 8 MiB; individual CSV records have no byte limit.
 DuckDB controls its result chunk size; emitted slices respect the requested row
-target without copying arrays. A permitted oversized record/result chunk may
+target without copying arrays. A large record/result chunk may
 exceed byte targets. Original per-table record ordinals are imported alongside
 the data, and SQL orders the result by opinion ordinal. This is not a hard
 whole-process memory cap or a range-readable source. The reader does not provide

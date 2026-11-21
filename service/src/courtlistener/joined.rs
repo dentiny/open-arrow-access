@@ -24,7 +24,6 @@ pub(super) const ORDINAL: &str = "__courtlistener_ordinal";
 pub struct CourtListenerJoinOptions {
     pub source_root: String,
     pub scratch_directory: PathBuf,
-    pub max_record_bytes: NonZeroUsize,
     pub dialect: CourtListenerCopyDialect,
     /// DuckDB operator memory budget; not a whole-process RSS cap.
     pub memory_limit: NonZeroUsize,
@@ -35,7 +34,6 @@ impl CourtListenerJoinOptions {
         Self {
             source_root: source_root.into(),
             scratch_directory,
-            max_record_bytes: NonZeroUsize::new(64 * 1024 * 1024).unwrap(),
             dialect: Default::default(),
             memory_limit: NonZeroUsize::new(1024 * 1024 * 1024).unwrap(),
             threads: NonZeroUsize::new(4).unwrap(),
@@ -199,8 +197,7 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerDateAccessor<A> {
         let mut database = blocking(move || Database::new(options, &schemas)).await?;
         let source = CourtListenerTableAccessor::new(self.storage.clone())
             .with_schemas(self.schemas.clone())?
-            .with_dialect(self.options.dialect)?
-            .with_max_record_bytes(self.options.max_record_bytes);
+            .with_dialect(self.options.dialect)?;
         let mut uris = Vec::new();
         for (i, table) in TABLES.iter().enumerate() {
             let object = CourtListenerSnapshot::new(*table, request.object.locator())?.object();
