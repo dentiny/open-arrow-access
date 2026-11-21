@@ -13,13 +13,12 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, OrderRequirement, ReadRequest, RecordCapability,
     RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, async_trait, record_stream_reader,
 };
-use std::{num::NonZeroUsize, sync::Arc};
+use std::sync::Arc;
 
 /// Typed COPY CSV reader. Its object locator selects one exact table/date CSV.bz2.
 pub struct CourtListenerTableAccessor<A> {
     bulk: CourtListenerBulkAccessor<A>,
     schemas: CourtListenerSchemas,
-    max_record_bytes: NonZeroUsize,
     dialect: CourtListenerCopyDialect,
 }
 impl<A> Clone for CourtListenerTableAccessor<A> {
@@ -27,7 +26,6 @@ impl<A> Clone for CourtListenerTableAccessor<A> {
         Self {
             bulk: self.bulk.clone(),
             schemas: self.schemas.clone(),
-            max_record_bytes: self.max_record_bytes,
             dialect: self.dialect,
         }
     }
@@ -37,7 +35,6 @@ impl<A> CourtListenerTableAccessor<A> {
         Self {
             bulk: CourtListenerBulkAccessor::new(storage),
             schemas: CourtListenerSchemas::default(),
-            max_record_bytes: NonZeroUsize::new(64 * 1024 * 1024).unwrap(),
             dialect: CourtListenerCopyDialect::default(),
         }
     }
@@ -45,10 +42,6 @@ impl<A> CourtListenerTableAccessor<A> {
         schemas.validate()?;
         self.schemas = schemas;
         Ok(self)
-    }
-    pub fn with_max_record_bytes(mut self, limit: NonZeroUsize) -> Self {
-        self.max_record_bytes = limit;
-        self
     }
     /// Select a reviewed historical COPY quote/escape pair.
     pub fn with_dialect(mut self, dialect: CourtListenerCopyDialect) -> Result<Self> {
@@ -85,7 +78,6 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerTableAccessor<A> {
         let mut input = CopyCsv::new(
             reader,
             request.object.locator().into(),
-            self.max_record_bytes.get(),
             schema.fields().len(),
             self.dialect,
         );

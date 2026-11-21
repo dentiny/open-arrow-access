@@ -29,5 +29,5 @@ bytes; the [fixture policy](../README.md) covers new cases and fault injection.
 
 `copy-csv/` contains synthetic parser inputs for quoted empty strings versus
 unquoted NULLs, CRLF and multiline fields, backslash and doubled-quote escapes,
-malformed quoting, and record size limits. Preserve their exact bytes, including
+and malformed quoting. Preserve their exact bytes, including
 line endings and missing final newlines. Tests read them with `include_bytes!`.

@@ -68,11 +68,8 @@ when projected away. EOF/errors are terminal; no background producer is spawned.
 
 Historical header/type variants require an explicit reviewed `with_schemas`
 contract; this reader does not download or execute source SQL. Input storage
-still supplies the compressed bytes. `with_max_record_bytes` defaults to 64 MiB
-per CSV record, including the header, and prevents unbounded record buffering.
-Batches target 8 MiB and at most the requested row count (capped at 1024); one
-oversized permitted row may exceed that target. These are not process memory
-limits. `ScanPlanner` exposes one lazy partition per input object, suitable for
+still supplies the compressed bytes. Batches target 8 MiB and at most the requested
+row count (capped at 1024); one row may exceed that target. `ScanPlanner` exposes one lazy partition per input object, suitable for
 explicit file-set composition. It does not split one bzip2 file into row ranges,
 join source tables, discover output destinations or write a Lance dataset.
 
