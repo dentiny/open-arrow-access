@@ -156,6 +156,11 @@ at 1 GiB each. CRC/decoded-length checks finish at EOF.
 | `TarStream::new(input, limits)` | Sequential bytes, including gzip-decoded `.tar.gz` | One physical-order scan; consume/drop the current body before advancing |
 | `TarArchive::open(input, limits).await` | Exact ranges and known length | Inspect headers once and independently open selected entries |
 
+`TarStream` drains its underlying input through EOF after the TAR end markers
+before reporting completion, surfacing decoder checksum/trailer and source errors.
+Callers must consume the archive through EOF to complete those checks; dropping
+it early cancels further consumption.
+
 TAR supports regular GNU/USTAR files and directories; links, sparse files, and
 extension headers are unsupported. Default limits are 65,536 entries and 1 GiB
 per entry. Ranged inspection issues a header request per entry. Selected TAR

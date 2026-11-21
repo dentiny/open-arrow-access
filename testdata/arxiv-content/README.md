@@ -5,6 +5,11 @@ No downloaded paper or credentials; all header timestamps are zero.
 latex-two.tar wraps the existing main.tex.gz fixture twice with distinct IDs,
 for the gated concurrent-member read regression.
 
+large-attachments-bad-crc.tar.gz preserves arxiv-articles/source.tar entries,
+with 2 MiB of zero padding added to figures/a.png, 4 MiB to anc/demo.mp4,
+and 128 KiB after the TAR end markers. Gzip mtime is zero; bit 0 of the gzip
+CRC trailer is flipped. It verifies that TeX output precedes a trailer error.
+
 metadata.xml is a synthetic OAI-PMH page for content enrichment tests. It contains
 three records in order: legacy hep-th/9901001, modern 2410.00001, and deleted
 2410.99999. Active records include a title, authors, abstract, DOI, license and
