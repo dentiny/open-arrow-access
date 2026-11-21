@@ -5,8 +5,8 @@
 mod copy_csv;
 mod date;
 mod error;
+mod ingest;
 mod query;
-mod source;
 pub use date::CourtListenerDateAccessor;
 mod object;
 mod schema;

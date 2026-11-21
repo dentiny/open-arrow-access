@@ -1,8 +1,8 @@
 //! Date accessor composing parallel table ingestion and streaming SQL results.
 use super::{
     CourtListenerCopyDialect, CourtListenerSchemas, CourtListenerSnapshot,
+    ingest::{TABLES, ingest},
     query::query,
-    source::{TABLES, ingest},
     valdiation::{validate_join_schema, validate_source_root},
 };
 use futures::stream;

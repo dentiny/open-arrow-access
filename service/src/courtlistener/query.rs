@@ -2,7 +2,7 @@
 use super::{
     CourtListenerSchemas,
     error::{arrow_error, db_error, task_error},
-    source::{Database, ORDINAL},
+    ingest::{Database, ORDINAL},
 };
 use arrow_array::{ArrayRef, RecordBatch};
 use duckdb::params;

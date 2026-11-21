@@ -217,7 +217,7 @@ pub(super) fn validate_join_schema(schemas: &CourtListenerSchemas) -> Result<()>
     if schemas
         .tables()
         .iter()
-        .any(|fields| fields.iter().any(|f| f.name() == super::source::ORDINAL))
+        .any(|fields| fields.iter().any(|f| f.name() == super::ingest::ORDINAL))
     {
         return Err(records_error("source field collides with reserved ordinal"));
     }
