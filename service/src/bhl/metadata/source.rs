@@ -22,6 +22,9 @@ pub struct SourceInfo {
 }
 #[derive(Clone, Serialize)]
 pub struct BhlMetadataInfo {
+    /// Canonical AWS dataset root URI (`s3://bhl-open-data/`).
+    /// This identifies the upstream dataset even when loading from a mirror;
+    /// it is not the caller's storage location or an immutable snapshot ID.
     pub source_root: String,
     pub fingerprint: String,
     /// Imported source tables keyed by table name (e.g. `title` or `page`).
