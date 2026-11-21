@@ -4,6 +4,7 @@ mod join;
 mod snapshot;
 mod source;
 mod stream;
+mod validation;
 use super::{BhlPageIdentity, page_schema};
 use arrow_array::StructArray;
 use arrow_schema::{DataType, Fields};

@@ -17,3 +17,12 @@ pub(super) fn arrow(source: impl std::error::Error + Send + Sync + 'static) -> E
 pub(super) fn task(source: tokio::task::JoinError) -> Error {
     Error::new(ErrorKind::Internal, "bhl_metadata", source.to_string()).with_source(source)
 }
+
+pub(super) fn snapshot_io(source: std::io::Error) -> Error {
+    Error::new(
+        ErrorKind::Io,
+        "bhl_metadata_snapshot",
+        "metadata snapshot I/O failed",
+    )
+    .with_source(source)
+}
