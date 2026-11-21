@@ -11,41 +11,37 @@ Enable facade feature `service-courtlistener`. See [example setup](README.md#exa
 
 ## Date shards and input membership
 
-For historical ingestion, **one export date is one application shard**. Each
-shard writes a separate Lance dataset for each selected table. Different dates
-are independent conversion/retry units even though their records overlap:
-these are full historical snapshots, not disjoint portions of one snapshot.
+For historical ingestion, **one export date is one application shard and one
+joined Lance dataset**. Different dates are independent conversion/retry units
+even though their records overlap: these are full historical snapshots, not
+disjoint portions of one snapshot.
 
-The default text-corpus scope is `opinions` only. A date shard reads exactly:
+Each date shard requires these four same-date CSV inputs:
 
-```text
-s3://com-courtlistener-storage/bulk-data/opinions-<date>.csv.bz2
-```
+| Input under `s3://com-courtlistener-storage/bulk-data/` | Role in each output row |
+| --- | --- |
+| `opinions-<date>.csv.bz2` | Driving table; one opinion becomes one output row |
+| `opinion-clusters-<date>.csv.bz2` | Nested `cluster`, matched by `opinions.cluster_id = opinion-clusters.id` |
+| `dockets-<date>.csv.bz2` | Nested `docket`, matched by `opinion-clusters.docket_id = dockets.id` |
+| `courts-<date>.csv.bz2` | Nested `court`, matched by `dockets.court_id = courts.id` |
 
-The associated SQL schema and a frozen acquisition manifest are provenance
-artifacts, not additional opinion rows. Record the actual available SQL key;
+The associated SQL schema and frozen acquisition manifest are provenance
+artifacts, not output rows. Record the actual available SQL key;
 `schema_object()` constructs a same-date candidate but does not discover or
 fetch it. Some historical CSV/SQL dates differ. If no verified companion exists,
 record that explicitly rather than silently borrowing another date's schema.
-No PDF, audio, embedding download, HTML asset fetch or metadata join is implied.
-The opinion CSV's text/HTML/XML columns are retained as exported.
+No PDF, audio, embedding download or HTML asset fetch is implied. Preserve every
+exported source column in its corresponding struct, including the opinion's
+text/HTML/XML representations. Other bulk tables are outside this opinion-centric
+contract; this output is not a lossless database dump of all 33 tables.
 
-An optional relational scope selects an explicit table allowlist for the date:
-
-| Input | Role | Independent output |
-| --- | --- | --- |
-| `opinions-<date>.csv.bz2` | Opinion records and exported content representations | `opinions.lance` |
-| `opinion-clusters-<date>.csv.bz2` | Opinion group/case metadata | `opinion-clusters.lance` |
-| `dockets-<date>.csv.bz2` | Docket metadata | `dockets.lance` |
-| `courts-<date>.csv.bz2` | Court metadata | `courts.lance` |
-| Other explicitly selected dated CSVs | Their own table entities | `<table>.lance` |
-| Verified companion `schema-*.sql` | Source SQL types and export provenance | Retained artifact, no Lance rows |
-
-Discover actual keys rather than generating an assumed complete date/table grid.
-Missing required tables fail that shard's completion check; optional tables are
-reported as absent. Different table schemas must not be combined into one
-strict-schema scan. Same-date tables were exported while the database was live,
-so report missing cross-table references instead of silently dropping records.
+Freeze actual date/table membership rather than assuming every opinions date
+has the other three inputs. A missing required file prevents the joined shard
+from completing; do not silently substitute another date or downgrade to an
+opinions-only output. An empty opinions export is reported and skipped. The 36
+nonempty opinions dates below are candidates, not 36 verified complete four-table
+bundles. Same-date tables were exported while the database was live, so missing
+individual foreign-key matches are allowed and reported under the join rules.
 
 ### Observed historical inventory
 
@@ -63,87 +59,248 @@ its opinions object alone is 55,252,643,429 bytes. This is CSV export size, not
 uncompressed/Lance size or the size of referenced external documents. Freeze a
 new inventory before execution; these observations are not permanent counts.
 
-## Lance dataset organization
+## Lance dataset organization and join rules
 
 Proposed application output, not an automatic accessor behavior:
 
 ```text
 <destination>/courtlistener/<acquisition-id>/
   manifest.json
-  2026-06-30/
-    opinions.lance/
-    provenance/                       # selected SQL, header and validation report
-  2026-09-30/
-    opinions.lance/
-    opinion-clusters.lance/            # optional relational scope
-    dockets.lance/                     # optional relational scope
-    courts.lance/                      # optional relational scope
-    provenance/
+  2026-06-30.lance/
+  2026-09-30.lance/
+  provenance/
+    2026-06-30/                      # selected SQL, headers and validation report
+    2026-09-30/
 ```
 
-For opinions-only scope, one date produces one dataset. For relational scope,
-a date is a task group containing one independent dataset/job per table; a
-directory holding several datasets is not itself a Lance dataset. Publish the
-group complete only after every required table passes validation. Do not append
-historical dates into the latest dataset or join the tables during raw ingestion.
-Use `opinions.cluster_id -> opinion-clusters.id`,
-`opinion-clusters.docket_id -> dockets.id` and `dockets.court_id -> courts.id`
-for a separate, explicitly requested derived join.
+There is exactly **one published Lance dataset per date**, with opinions as the
+driving table. Join the other three tables by left joins in this order:
 
-Manifest entries pin date, table, exact source URI, compressed size, ETag/version
-when available, downloaded-byte SHA-256, actual SQL companion, header/schema
-fingerprint, parser contract version and destination. ETag is an object validator,
-not necessarily a content hash. Reuse frozen membership for retries. A changed
-source object or schema creates a new acquisition instead of overwriting a
-completed dataset. Record final row counts and completion/error status per entry.
+```sql
+opinions o
+LEFT JOIN opinion_clusters c ON o.cluster_id = c.id
+LEFT JOIN dockets d ON c.docket_id = d.id
+LEFT JOIN courts k ON d.court_id = k.id
+```
 
-## Proposed raw Lance schema
+These SQL names are logical aliases for the selected CSV objects. Require
+nonempty unique `id` values in all four inputs and reject duplicate join keys
+before publication, so the joins cannot multiply opinion rows. Compare the
+validated source identifiers exactly; do not infer numeric types or trim/coerce
+keys. A null/empty or unmatched foreign key yields a null related struct and an
+orphan count. If `cluster` is missing, `docket` and `court` are null; if `docket`
+is missing, `court` is null. A present related row remains a present struct even
+if some of its fields are null. Shared clusters/dockets/courts are repeated in
+each opinion that references them. Unreferenced related rows are counted in the
+validation report but do not create extra opinion rows.
 
-The provider supplies **no fixed Arrow or Lance schema**. The following is the
-proposed conversion-layer contract; it is not an implemented typed provider API.
+Use bounded-memory joins: stage/index related tables in caller-owned temporary
+storage or use a join engine with spilling; do not assume the docket/cluster
+maps fit in memory. Stream opinions through those joins into Arrow batches and
+one Lance writer. Temporary join artifacts are implementation details, not
+additional published Lance datasets. Run different dates concurrently with
+separate destinations, and bound aggregate CPU/memory/I/O. Record output row
+count equal to the parsed opinions row count before marking a date complete.
 
-Use one row per complete CSV record, preserve every header column and its order,
-and represent source values as nullable `Utf8` initially. Preserve unquoted NULL
-versus quoted empty string, original numeric spelling and text/HTML/XML contents;
-do not infer SQL types or choose a preferred content representation during raw
-ingestion. Correct PostgreSQL COPY escaping and quote-aware NULL handling must
-be verified in the parser before production; an all-strings schema alone does
-not establish those semantics.
+Manifest entries pin all four exact source URIs, export date, compressed sizes,
+ETag/version when available, downloaded-byte SHA-256, actual SQL companion,
+per-table header/schema fingerprints, parser/join contract version and the one
+destination. ETag is an object validator, not necessarily a content hash. Reuse
+frozen inputs for retries. Changed source bytes/schema create a new acquisition
+instead of overwriting a completed dataset. Publish completion only after the
+joined output has been reopened and validated.
 
-The actual header read from the 2026-09-30 opinions object defines these **22
-source columns**, all `Utf8?` in this proposed raw schema:
+## Proposed joined Lance schema
+
+The provider supplies **no fixed Arrow or Lance schema**. This is a proposed
+conversion-layer contract, not an implemented provider schema or join API.
+The example below lists every field observed in bounded reads of the four
+2026-09-30 CSV headers. `?` means nullable. Parent struct nullability and child
+field nullability are separate: `cluster.id` is required when `cluster` exists,
+but `cluster` itself may be null after a missing foreign-key match.
+
+All source fields initially use `Utf8` to preserve source spelling; source `id`
+is required and every other source field is nullable. Dates, booleans, numeric
+values and any encoded array values stay strings, with SQL typing/normalization
+left to a separately versioned contract. Preserve unquoted NULL versus quoted
+empty string and escaped/multiline text. A string schema does not establish
+correct COPY parsing: quote-aware NULL and backslash-escape behavior must be
+verified before production.
 
 ```text
-id, date_created, date_modified, author_str, per_curiam, joined_by_str,
-type, sha1, page_count, download_url, local_path,
-plain_text, html, html_lawbox, html_columbia, html_anon_2020,
-xml_harvard, xml_scan, html_with_citations, extracted_by_ocr,
-author_id, cluster_id
+snapshot_date: Date32                       # required; selected export date
+opinion: Struct<
+  id: Utf8
+  date_created: Utf8?
+  date_modified: Utf8?
+  author_str: Utf8?
+  per_curiam: Utf8?
+  joined_by_str: Utf8?
+  type: Utf8?
+  sha1: Utf8?
+  page_count: Utf8?
+  download_url: Utf8?
+  local_path: Utf8?
+  plain_text: Utf8?
+  html: Utf8?
+  html_lawbox: Utf8?
+  html_columbia: Utf8?
+  html_anon_2020: Utf8?
+  xml_harvard: Utf8?
+  xml_scan: Utf8?
+  html_with_citations: Utf8?
+  extracted_by_ocr: Utf8?
+  author_id: Utf8?
+  cluster_id: Utf8?
+>
+cluster: Struct?<
+  id: Utf8
+  date_created: Utf8?
+  date_modified: Utf8?
+  judges: Utf8?
+  date_filed: Utf8?
+  date_filed_is_approximate: Utf8?
+  slug: Utf8?
+  case_name_short: Utf8?
+  case_name: Utf8?
+  case_name_full: Utf8?
+  scdb_id: Utf8?
+  scdb_decision_direction: Utf8?
+  scdb_votes_majority: Utf8?
+  scdb_votes_minority: Utf8?
+  source: Utf8?
+  procedural_history: Utf8?
+  attorneys: Utf8?
+  nature_of_suit: Utf8?
+  posture: Utf8?
+  syllabus: Utf8?
+  headnotes: Utf8?
+  summary: Utf8?
+  disposition: Utf8?
+  history: Utf8?
+  other_dates: Utf8?
+  cross_reference: Utf8?
+  correction: Utf8?
+  citation_count: Utf8?
+  precedential_status: Utf8?
+  date_blocked: Utf8?
+  blocked: Utf8?
+  filepath_json_harvard: Utf8?
+  filepath_pdf_harvard: Utf8?
+  docket_id: Utf8?
+  arguments: Utf8?
+  headmatter: Utf8?
+>
+docket: Struct?<
+  id: Utf8
+  date_created: Utf8?
+  date_modified: Utf8?
+  source: Utf8?
+  appeal_from_str: Utf8?
+  assigned_to_str: Utf8?
+  referred_to_str: Utf8?
+  panel_str: Utf8?
+  date_last_index: Utf8?
+  date_cert_granted: Utf8?
+  date_cert_denied: Utf8?
+  date_argued: Utf8?
+  date_reargued: Utf8?
+  date_reargument_denied: Utf8?
+  date_filed: Utf8?
+  date_terminated: Utf8?
+  date_last_filing: Utf8?
+  case_name_short: Utf8?
+  case_name: Utf8?
+  case_name_full: Utf8?
+  slug: Utf8?
+  docket_number: Utf8?
+  docket_number_core: Utf8?
+  pacer_case_id: Utf8?
+  cause: Utf8?
+  nature_of_suit: Utf8?
+  jury_demand: Utf8?
+  jurisdiction_type: Utf8?
+  appellate_fee_status: Utf8?
+  appellate_case_type_information: Utf8?
+  mdl_status: Utf8?
+  filepath_local: Utf8?
+  filepath_ia: Utf8?
+  filepath_ia_json: Utf8?
+  ia_upload_failure_count: Utf8?
+  ia_needs_upload: Utf8?
+  ia_date_first_change: Utf8?
+  view_count: Utf8?
+  date_blocked: Utf8?
+  blocked: Utf8?
+  appeal_from_id: Utf8?
+  assigned_to_id: Utf8?
+  court_id: Utf8?
+  idb_data_id: Utf8?
+  originating_court_information_id: Utf8?
+  referred_to_id: Utf8?
+  federal_dn_case_type: Utf8?
+  federal_dn_office_code: Utf8?
+  federal_dn_judge_initials_assigned: Utf8?
+  federal_dn_judge_initials_referred: Utf8?
+  federal_defendant_number: Utf8?
+  parent_docket_id: Utf8?
+  docket_number_raw: Utf8?
+  docket_number_source: Utf8?
+>
+court: Struct?<
+  id: Utf8
+  pacer_court_id: Utf8?
+  pacer_has_rss_feed: Utf8?
+  pacer_rss_entry_types: Utf8?
+  date_last_pacer_contact: Utf8?
+  fjc_court_id: Utf8?
+  date_modified: Utf8?
+  in_use: Utf8?
+  has_opinion_scraper: Utf8?
+  has_oral_argument_scraper: Utf8?
+  position: Utf8?
+  citation_string: Utf8?
+  short_name: Utf8?
+  full_name: Utf8?
+  url: Utf8?
+  start_date: Utf8?
+  end_date: Utf8?
+  jurisdiction: Utf8?
+  notes: Utf8?
+  parent_court_id: Utf8?
+>
+provenance: Struct<                        # required
+  opinions_source_uri: Utf8
+  clusters_source_uri: Utf8
+  dockets_source_uri: Utf8
+  courts_source_uri: Utf8
+  opinion_record_index: UInt64
+  cluster_record_index: UInt64?
+  docket_record_index: UInt64?
+  court_record_index: UInt64?
+>
 ```
 
-Append four required provenance columns, for **26 output columns** for this header:
+All provenance URIs identify the four pinned original CSV.bz2 objects, even when
+a related row is unmatched. Record indexes are zero-based logical CSV record
+ordinals excluding headers, assigned before joining; a nullable index is null
+exactly when its related struct is null. They do not depend on parallel batch
+arrival order. The manifest records hashes, parser/schema version and SQL
+provenance once per acquisition rather than duplicating them in every row.
 
-| Column | Arrow/Lance type | Meaning |
-| --- | --- | --- |
-| `_courtlistener_snapshot_date` | `Date32`, non-null | Export date parsed from the selected filename |
-| `_courtlistener_table` | `Utf8`, non-null | `opinions`, or the selected table name |
-| `_courtlistener_source_uri` | `Utf8`, non-null | Exact original CSV.bz2 object URI |
-| `_courtlistener_record_index` | `UInt64`, non-null | Zero-based logical CSV record ordinal, excluding the header |
+For this observed header, `opinion` has 22 children, `cluster` 36, `docket` 54
+and `court` 20. The top level has six fields: `snapshot_date`, the four entity
+structs and `provenance`. Every source field remains inside its source struct;
+identically named fields such as `id` and `date_modified` do not collide. No
+source columns are silently omitted or replaced with only extracted text.
 
-Reserve this provenance prefix and reject collisions. Each other table follows
-the same rule: its own complete header as nullable strings, plus these four
-columns. Do not invent a shared schema for courts, dockets and opinions. Capture
-the actual historical header per date: do not assume all 36 opinions exports
-have the 2026-09-30 columns. A changed header gets a distinct recorded schema
-fingerprint and must be reviewed rather than silently dropping fields. Combining
-dates later requires an explicit schema-union/migration policy.
-
-Validate non-null/nonempty and unique `id` where the table's source contract
-establishes a primary key. Across dates, identity includes snapshot date and
-table; `id` alone is not unique across historical datasets. The record ordinal
-tracks source position and must not depend on parallel batch arrival order.
-Typed SQL mappings or normalized/joined training schemas are separate derived
-outputs with explicit conversion and failure rules.
+Historical dates must record and validate their actual headers. Do not assume
+all 36 candidate opinions dates match this schema. A changed header must be
+reviewed and represented in the corresponding struct with a recorded schema
+fingerprint; fail on unapproved drift rather than silently dropping fields.
+Combining historical datasets later requires an explicit schema-union/migration
+policy. Row identity within one date is `opinion.id`; across acquisitions/dates
+include acquisition identity and `snapshot_date`.
 
 ## Current library support and execution
 
@@ -154,17 +311,17 @@ outputs with explicit conversion and failure rules.
 | Decode one selected object | `open(ByteReadRequest)` streams decoded CSV bytes through Bzip2 |
 | Partition selected dates of a compatible table schema | `records(format)` wraps a caller-supplied CSV format in `FileSetAccessor`; an explicit `FileSetRequest` has one file partition per selected object |
 | Execute those file partitions concurrently | Shared `ParallelReadLayer`, with independent reader/decoder state per file |
-| Date task groups and independent output datasets | Application planner/job orchestration; not supplied by the accessor |
+| One joined dataset per date | Application planner, four-table left joins and Lance writer; not supplied by the accessor |
 | Frozen inventory, empty-export policy and provenance columns | Application conversion work; not automatic |
 | Table/date-specific schema and COPY CSV semantics | Explicit caller/parser contract, not a fixed provider schema |
 
 Thus existing library primitives support date-file partitioning, but there is no
 CourtListener-specific `shard=date` request or end-to-end date-to-Lance planner.
-For independent destination datasets, submit one conversion per selected
-`(table, date)` and use job-level concurrency. A single parallel file-set scan
-merges records into one reader; it does **not** route dates to separate datasets.
-Only combine files in such a scan when their schemas are compatible and that
-combined output is explicitly desired.
+Submit one joined conversion task per date, reading all four required table
+objects and producing one destination. Separate table reads can execute
+concurrently within that task, but must feed the join rather than publish four
+datasets. A parallel file-set scan alone neither joins different tables nor
+routes dates to separate outputs; retain one schema per source-table scan.
 
 A conceptual selection using existing public types is:
 
@@ -177,8 +334,8 @@ let records = snapshots.records(csv_format); // caller-defined schema and dialec
 let plan = records.plan_scan(files).await?;
 ```
 
-This illustrates APIs only; it is not a complete converter and does not attach
-provenance or create Lance outputs. See the existing
+This illustrates same-table file partitioning only; it does not implement the
+four-table join, provenance generation or one-dataset-per-date output. See the existing
 [record-planning test](tests/courtlistener.rs) and
 [parallel-reading guide](../docs/parallel-read.md).
 
@@ -198,16 +355,19 @@ A new date adds a separate historical dataset; it does not replace or append to
 an older date's output. Reconcile source record count, emitted rows, unique
 primary keys where applicable, NULL/empty round-trips and escaped multiline text.
 Validate outputs by reopening them and checking schema/provenance and counts.
-A date group is complete only when its required outputs are complete; report
-upstream empty exports separately from successful conversions.
+A date shard is complete only when its one joined output is validated. Check
+left-join row-count preservation, unique opinion IDs, every nullable struct and
+its provenance index, and orphan/unreferenced-row counts. Report upstream empty
+exports separately from successful conversions.
 
 This design was checked against provider code, the record-planning test,
 publisher references, a full public prefix listing and a bounded 2 MiB range
-read of the latest opinions file. The range read decoded its 22-column header;
+read of the latest opinions file plus bounded reads (at most 1 MiB per object)
+of all four join inputs. These decoded the 22/36/54/20-column source headers;
 the empty historical opinions export was separately read and decompressed.
 No full CSV parse, corpus conversion, parallel benchmark or production deployment
-was performed. The proposed provenance columns, schema and orchestration still
-require conversion-layer implementation/verification.
+was performed. The proposed nested schema, joins, provenance and orchestration still require
+conversion-layer implementation/verification.
 
 - [Bulk data documentation](https://wiki.free.law/c/courtlistener/help/api/bulk-data/bulk-legal-data)
 - [Bulk object browser](https://com-courtlistener-storage.s3-us-west-2.amazonaws.com/list.html?prefix=bulk-data/)
