@@ -140,9 +140,10 @@ TSV metadata acquisition and join changes.
 
 ## DuckDB metadata joins
 
-Enable `service-bhl-metadata`, load `BhlMetadata::load(storage).await` once,
-and use `metadata.select(&page_keys)` to supply populated metadata to
-`BhlPageAccessor`. The 13 AWS gzip TSV tables are streamed into temporary,
-disk-backed DuckDB storage. SQL performs the joins, ordered relation aggregation
-and reconciliation; the fixed Arrow/Lance page schema is unchanged. See the
-[metadata guide](bhl-metadata.md) for memory/disk settings, usage and provenance.
+Enable `service-bhl-metadata` and load `BhlMetadata::load(storage).await` once.
+The 13 AWS gzip TSV tables are imported concurrently into in-memory DuckDB
+tables. `metadata.for_each(&page_keys, emit)` runs one join SQL and emits each
+page's metadata immediately, matching the fixed Arrow/Lance schema. The first
+version assumes sufficient memory, configures no temporary directory, and
+explicitly disables DuckDB's external file cache. See the
+[metadata guide](bhl-metadata.md) for usage and source semantics.

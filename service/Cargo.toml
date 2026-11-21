@@ -19,7 +19,6 @@ bhl = ["opendal/services-s3", "dep:arrow-array", "dep:arrow-schema"]
 bhl-metadata = [
     "bhl",
     "dep:duckdb",
-    "dep:tempfile",
     "dep:arrow-cast",
     "dep:sha2",
     "dep:regex",
@@ -86,7 +85,6 @@ oai = ["format-xml"]
 [dependencies]
 # This DuckDB binding line uses Arrow 58, matching the workspace contract.
 duckdb = { version = "~1.10506.0", default-features = false, features = ["bundled"], optional = true }
-tempfile = { workspace = true, optional = true }
 arrow-cast = { workspace = true, optional = true }
 sha2 = { version = "0.11", optional = true }
 regex = { workspace = true, optional = true }

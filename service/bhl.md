@@ -90,7 +90,7 @@ metadata StructArray. Metadata is required and must contain one populated row
 matching the fixed 13-table / 104-field schema; null or mismatched metadata fails.
 The optional `service-bhl-metadata` feature acquires the 13 gzip TSV tables
 and uses embedded DuckDB SQL to populate this schema for selected pages. See
-the [DuckDB metadata guide](bhl-metadata.md) for usage and resource requirements.
+the [DuckDB metadata guide](bhl-metadata.md) for usage and the in-memory V1 assumption.
 The page-record API also accepts caller-provided metadata matching this schema.
 
 | Column | Arrow type | Nullable | Meaning |

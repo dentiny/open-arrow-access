@@ -38,75 +38,86 @@ fn cell<'a>(metadata: &'a StructArray, table: &str, field: &str) -> &'a str {
         .unwrap()
         .value(0)
 }
+fn collect(metadata: &BhlMetadata, paths: &[&str]) -> Vec<BhlPageMetadata> {
+    let mut rows = Vec::new();
+    metadata
+        .for_each(
+            &paths
+                .iter()
+                .map(|path| ObjectRef::new(*path))
+                .collect::<Vec<_>>(),
+            |row| {
+                rows.push(row);
+                Ok(())
+            },
+        )
+        .unwrap();
+    rows
+}
+
 #[tokio::test]
-async fn joins_direct_tsv_metadata_preserves_rights_and_reports_gaps() {
+async fn imports_all_tables_and_emits_fixed_schema_with_lexical_values_rights_and_gaps() {
     let (root, storage) = source("title.txt.gz").await;
     let metadata = BhlMetadata::load(storage).await.unwrap();
-    drop(root); // Selections query the database and never refetch TSVs.
+    drop(root); // The join only reads imported tables.
     assert_eq!(metadata.info.sources.len(), 13);
     assert_eq!(metadata.info.sources["title"].rows, 1);
-    let keys = [
-        "ocr/item-2/item-2-3-5.txt",
-        "ocr/part-8/part-8-3-1.txt",
-        "ocr/item-20/item-20-30-1.txt",
-    ]
-    .map(ObjectRef::new);
-    let selected = metadata.select(&keys).unwrap();
-    assert!(selected.report.conflicts.is_empty());
-    assert_eq!(selected.report.missing.len(), 1);
-    for key in &keys[..2] {
-        let row = selected
-            .get(&BhlPageIdentity::parse(key.locator()).unwrap())
-            .unwrap();
-        assert!(!row.is_null(0));
+    let rows = collect(
+        &metadata,
+        &[
+            "ocr/item-2/item-2-3-5.txt",
+            "ocr/part-8/part-8-3-1.txt",
+            "ocr/item-20/item-20-30-1.txt",
+        ],
+    );
+    assert_eq!(rows.len(), 3);
+    for row in rows.iter().filter(|row| row.identity.page_id == 3) {
+        assert!(row.missing.is_empty());
+        assert!(row.conflicts.is_empty());
+        assert!(!row.metadata.is_null(0));
         assert_eq!(
-            row.data_type(),
+            row.metadata.data_type(),
             page_schema()
                 .field_with_name("metadata")
                 .unwrap()
                 .data_type()
         );
-        assert_eq!(cell(&row, "title", "TitleID"), "001");
-        assert_eq!(cell(&row, "title", "FullTitle"), "Original \"title\" 遗传");
-        assert_eq!(cell(&row, "title", "ShortTitle"), "");
-        assert_eq!(cell(&row, "item", "RightsStatement"), "Source rights");
-        for (table, count) in [("creatoridentifier", 2), ("doi", 1)] {
-            let values = row
-                .column_by_name(table)
-                .unwrap()
-                .as_any()
-                .downcast_ref::<ListArray>()
-                .unwrap();
-            assert_eq!(values.value_length(0), count);
-        }
+        assert_eq!(cell(&row.metadata, "title", "TitleID"), "001");
+        assert_eq!(
+            cell(&row.metadata, "title", "FullTitle"),
+            "Original \"title\" 遗传"
+        );
+        assert_eq!(cell(&row.metadata, "title", "ShortTitle"), "");
+        assert_eq!(
+            cell(&row.metadata, "item", "RightsStatement"),
+            "Source rights"
+        );
+        assert_eq!(
+            relation_cells(&row.metadata, "creatoridentifier", "IdentifierValue"),
+            ["same", "same"]
+        );
+        assert_eq!(relation_cells(&row.metadata, "doi", "DOI"), ["title DOI"]);
     }
-    let part = selected
-        .get(&BhlPageIdentity::parse(keys[1].locator()).unwrap())
+    let part = rows
+        .iter()
+        .find(|row| row.identity.entity_type == "part")
         .unwrap();
-    assert_eq!(cell(&part, "part", "RightsStatement"), "Part rights");
-    let missing = selected
-        .get(&BhlPageIdentity::parse(keys[2].locator()).unwrap())
-        .unwrap();
-    assert!(!missing.is_null(0));
-    assert!(missing.column_by_name("item").unwrap().is_null(0));
-    let conflict = [ObjectRef::new("ocr/item-2/item-2-3-99.txt")];
     assert_eq!(
-        metadata.select(&conflict).unwrap().report.conflicts.len(),
-        1
+        cell(&part.metadata, "part", "RightsStatement"),
+        "Part rights"
     );
-    assert!(
-        selected
-            .get(&BhlPageIdentity::parse(conflict[0].locator()).unwrap())
-            .is_err()
-    );
+    let missing = rows.iter().find(|row| row.identity.page_id == 30).unwrap();
+    assert!(!missing.missing.is_empty());
+    assert!(!missing.metadata.is_null(0));
+    assert!(missing.metadata.column_by_name("item").unwrap().is_null(0));
     assert_eq!(
-        selected.schema_metadata().unwrap()["bhl.metadata.fingerprint"],
+        metadata.schema_metadata().unwrap()["bhl.metadata.fingerprint"],
         metadata.info.fingerprint
     );
 }
 
 #[tokio::test]
-async fn rejects_duplicate_numeric_singletons_changed_headers_and_missing_tables() {
+async fn rejects_duplicate_numeric_singletons_changed_headers_invalid_keys_and_missing_tables() {
     for title in [
         "title-duplicate.txt.gz",
         "title-bad-header.txt.gz",
@@ -124,21 +135,23 @@ async fn rejects_duplicate_numeric_singletons_changed_headers_and_missing_tables
 }
 
 #[tokio::test]
-async fn assigns_joined_values_to_page_records() {
+async fn emitted_metadata_assigns_to_actual_page_records() {
     use crate::{FileSetRequest, bhl::BhlPageAccessor};
     use open_arrow_access_test_support::MemoryAccessor;
     let (_root, storage) = source("title.txt.gz").await;
     let metadata = BhlMetadata::load(storage).await.unwrap();
     let key = "ocr/item-2/item-2-3-5.txt";
-    let selected = metadata.select(&[ObjectRef::new(key)]).unwrap();
-    let provenance = selected.schema_metadata().unwrap();
+    let row = collect(&metadata, &[key]).pop().unwrap();
     let pages = BhlPageAccessor::new(
         MemoryAccessor::new(b"original OCR", 64),
         "fixture-aws",
-        move |id| selected.get(id),
+        move |id| {
+            assert_eq!(id, &row.identity);
+            Ok(row.metadata.clone())
+        },
     )
     .unwrap()
-    .with_schema_metadata(provenance);
+    .with_schema_metadata(metadata.schema_metadata().unwrap());
     let mut reader = pages.open(FileSetRequest::new([key])).await.unwrap();
     let batch = reader.next().await.unwrap().unwrap();
     let metadata = batch["metadata"]
@@ -177,8 +190,6 @@ fn relation_cells(metadata: &StructArray, table: &str, field: &str) -> Vec<Strin
 async fn sql_aggregates_relations_without_multiplying_or_reordering_source_rows() {
     let (_root, storage) = source("title.txt.gz").await;
     let metadata = BhlMetadata::load(storage).await.unwrap();
-    // Extend the loaded fixture to exercise multiple independent 1:N relations.
-    // Ordinals deliberately disagree with insertion order and lexical sorting.
     metadata
         .connection
         .lock()
@@ -192,29 +203,31 @@ async fn sql_aggregates_relations_without_multiplying_or_reordering_source_rows(
          INSERT INTO partpage VALUES (8, 2, '8', '3', '2', '1', '');",
         )
         .unwrap();
-    let keys = [ObjectRef::new("ocr/part-8/part-8-3-1.txt")];
-    let selected = metadata.select(&keys).unwrap();
-    let row = selected
-        .get(&BhlPageIdentity::parse(keys[0].locator()).unwrap())
+    let row = collect(&metadata, &["ocr/part-8/part-8-3-1.txt"])
+        .pop()
         .unwrap();
     assert_eq!(
-        relation_cells(&row, "creator", "CreatorID"),
+        relation_cells(&row.metadata, "creator", "CreatorID"),
         ["9", "9", "10"]
     );
-    // A creator appearing twice and in both creator tables must not duplicate
-    // the same identifier source row. Actual duplicate source rows survive.
     assert_eq!(
-        relation_cells(&row, "creatoridentifier", "IdentifierValue"),
+        relation_cells(&row.metadata, "creatoridentifier", "IdentifierValue"),
         ["same", "same", "other"]
     );
-    assert_eq!(relation_cells(&row, "subject", "Subject"), ["a", "z"]);
-    assert_eq!(relation_cells(&row, "partpage", "PageID"), ["3", "3"]);
-    assert!(selected.report.missing.is_empty());
-    assert!(selected.report.conflicts.is_empty());
+    assert_eq!(
+        relation_cells(&row.metadata, "subject", "Subject"),
+        ["a", "z"]
+    );
+    assert_eq!(
+        relation_cells(&row.metadata, "partpage", "PageID"),
+        ["3", "3"]
+    );
+    assert!(row.missing.is_empty());
+    assert!(row.conflicts.is_empty());
 }
 
 #[tokio::test]
-async fn sql_reports_all_parent_and_partpage_sequence_conflicts_and_falls_back() {
+async fn sql_reports_parent_and_partpage_sequence_conflicts_and_falls_back() {
     let (_root, storage) = source("title.txt.gz").await;
     let metadata = BhlMetadata::load(storage).await.unwrap();
     metadata
@@ -227,9 +240,9 @@ async fn sql_reports_all_parent_and_partpage_sequence_conflicts_and_falls_back()
         )
         .unwrap();
     let path = "ocr/part-8/part-8-3-1.txt";
-    let selected = metadata.select(&[ObjectRef::new(path)]).unwrap();
+    let row = collect(&metadata, &[path]).pop().unwrap();
     assert_eq!(
-        selected.report.conflicts[path],
+        row.conflicts,
         [
             "page.ItemID=2, selected item=Some(7)",
             "partpage.ItemID=2, selected item=Some(7)",
@@ -237,66 +250,56 @@ async fn sql_reports_all_parent_and_partpage_sequence_conflicts_and_falls_back()
             "SequenceOrder=2, filename sequence=1",
         ]
     );
-    assert_eq!(
-        selected.report.missing[path],
-        ["item:7", "title:unresolved parent"]
-    );
-    // A missing part falls back to the first matching partpage parent.
+    assert_eq!(row.missing, ["item:7", "title:unresolved parent"]);
     metadata
         .connection
         .lock()
         .unwrap()
         .execute_batch("DELETE FROM part;")
         .unwrap();
-    let selected = metadata.select(&[ObjectRef::new(path)]).unwrap();
-    let row = selected
-        .get(&BhlPageIdentity::parse(path).unwrap())
-        .unwrap();
-    assert_eq!(cell(&row, "item", "ItemID"), "2");
-    assert_eq!(selected.report.missing[path], ["part:8"]);
+    let row = collect(&metadata, &[path]).pop().unwrap();
+    assert_eq!(cell(&row.metadata, "item", "ItemID"), "2");
+    assert_eq!(row.missing, ["part:8"]);
 }
 
 #[tokio::test]
-async fn disk_database_is_temporary_and_selections_are_independent_and_shareable() {
+async fn disables_external_cache_and_emits_incrementally_with_independent_queries() {
     let (_root, storage) = source("title.txt.gz").await;
-    let parent = tempfile::tempdir().unwrap();
-    let metadata = BhlMetadata::load_with_options(
-        storage,
-        BhlMetadataOptions {
-            memory_limit: "64MB".into(),
-            temporary_directory: Some(parent.path().to_owned()),
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 1);
-    let key = ObjectRef::new("ocr/item-2/item-2-3-5.txt");
-    let keys = [key.clone(), key.clone()];
-    let selected = metadata.select(&keys).unwrap();
-    assert_eq!(selected.rows.len(), 1);
-    assert!(metadata.select(&[]).unwrap().rows.is_empty());
-    assert!(metadata.select(&[ObjectRef::new("invalid")]).is_err());
+    let metadata = BhlMetadata::load(storage).await.unwrap();
+    let cached: bool = metadata
+        .connection
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT current_setting('enable_external_file_cache')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!cached);
+    let paths = ["ocr/item-2/item-2-3-5.txt", "ocr/part-8/part-8-3-1.txt"];
+    let keys = paths.map(ObjectRef::new);
+    let mut emitted = 0;
+    let error = metadata
+        .for_each(&keys, |_| {
+            emitted += 1;
+            Err(error::invalid("stop sink"))
+        })
+        .unwrap_err();
+    assert_eq!(error.to_string(), "bhl_metadata: stop sink");
+    assert_eq!(emitted, 1);
+    assert_eq!(collect(&metadata, &paths).len(), 2); // A failed sink leaves no request state.
+    assert_eq!(collect(&metadata, &[paths[0], paths[0]]).len(), 2);
+    assert!(metadata.for_each(&[], |_| panic!("empty query")).is_ok());
+    assert!(
+        metadata
+            .for_each(&[ObjectRef::new("invalid")], |_| panic!("invalid key"))
+            .is_err()
+    );
     std::thread::scope(|scope| {
         for _ in 0..2 {
             let metadata = &metadata;
-            let key = &key;
-            scope.spawn(move || {
-                assert!(
-                    metadata
-                        .select(std::slice::from_ref(key))
-                        .unwrap()
-                        .report
-                        .missing
-                        .is_empty()
-                );
-            });
+            scope.spawn(move || assert_eq!(collect(metadata, &paths).len(), 2));
         }
     });
-    drop(metadata);
-    assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
-    // Selected Arrow buffers are independent of the connection/directory.
-    let row = selected
-        .get(&BhlPageIdentity::parse(key.locator()).unwrap())
-        .unwrap();
-    assert_eq!(cell(&row, "item", "ItemID"), "2");
 }

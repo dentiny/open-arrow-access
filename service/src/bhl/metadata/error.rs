@@ -11,9 +11,6 @@ pub(super) fn json(source: serde_json::Error) -> Error {
 pub(super) fn duckdb(source: duckdb::Error) -> Error {
     Error::new(ErrorKind::Io, "bhl_metadata_duckdb", source.to_string()).with_source(source)
 }
-pub(super) fn io(source: std::io::Error) -> Error {
-    Error::new(ErrorKind::Io, "bhl_metadata", source.to_string()).with_source(source)
-}
 pub(super) fn arrow(source: arrow_schema::ArrowError) -> Error {
     Error::new(ErrorKind::Decode, "bhl_metadata_arrow", source.to_string()).with_source(source)
 }

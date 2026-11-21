@@ -1,14 +1,9 @@
-use super::{BhlMetadata, BhlMetadataReport, error};
+use super::{BhlMetadata, BhlPageMetadata, error};
 use crate::bhl::{BhlPageIdentity, page_schema};
 use arrow_array::{Array, ListArray, StringArray, StructArray, UInt64Array};
 use duckdb::params;
-use open_arrow_access_core::{Error, ErrorKind, Result};
-use std::{
-    collections::HashMap,
-    panic::{AssertUnwindSafe, catch_unwind},
-};
-
-type SelectedRows = HashMap<BhlPageIdentity, StructArray>;
+use open_arrow_access_core::{Error, ErrorKind, ObjectRef, Result};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 fn strings(column: &dyn Array, row: usize) -> Result<Vec<String>> {
     let list = column
@@ -30,30 +25,34 @@ fn strings(column: &dyn Array, row: usize) -> Result<Vec<String>> {
         .collect()
 }
 
-pub(super) fn select(
+pub(super) fn for_each(
     store: &BhlMetadata,
-    keys: &[(String, BhlPageIdentity)],
-) -> Result<(SelectedRows, BhlMetadataReport)> {
-    let mut rows = HashMap::new();
-    let mut report = BhlMetadataReport::default();
+    keys: &[ObjectRef],
+    mut emit: impl FnMut(BhlPageMetadata) -> Result<()>,
+) -> Result<()> {
     if keys.is_empty() {
-        return Ok((rows, report));
+        return Ok(());
     }
-    let mut connection = store
+    // A fresh connection shares the loaded tables but has its own request table.
+    let connection = store
         .connection
         .lock()
-        .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?;
-    // The request table is private to this serialized transaction. Rollback on
-    // any query/conversion failure keeps subsequent selections independent.
-    let transaction = connection.transaction().map_err(error::duckdb)?;
-    transaction
-        .execute_batch("DELETE FROM bhl_selection;")
+        .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?
+        .try_clone()
+        .map_err(error::duckdb)?;
+    connection
+        .execute_batch(
+            "CREATE TEMP TABLE bhl_selection (
+         request_id UBIGINT, entity_type VARCHAR, entity_id UBIGINT,
+         page_id UBIGINT, sequence UBIGINT);",
+        )
         .map_err(error::duckdb)?;
     {
-        let mut appender = transaction
+        let mut appender = connection
             .appender("bhl_selection")
             .map_err(error::duckdb)?;
-        for (index, (_, key)) in keys.iter().enumerate() {
+        for (index, object) in keys.iter().enumerate() {
+            let key = BhlPageIdentity::parse(object.locator())?;
             appender
                 .append_row(params![
                     index as u64,
@@ -66,68 +65,55 @@ pub(super) fn select(
         }
         appender.flush().map_err(error::duckdb)?;
     }
-    {
-        let mut statement = transaction
-            .prepare(include_str!("join.sql"))
-            .map_err(error::duckdb)?;
-        let mut batches = statement.stream_arrow([]).map_err(error::duckdb)?;
-        loop {
-            // The Arrow-58-compatible binding reports fetch/conversion failures
-            // by panic; translate those into this API's explicit error channel.
-            let batch = catch_unwind(AssertUnwindSafe(|| batches.next())).map_err(|_| {
-                Error::new(
-                    ErrorKind::Internal,
-                    "bhl_metadata_duckdb",
-                    "DuckDB Arrow fetch failed",
-                )
+    let schema = page_schema();
+    let field = schema.field_with_name("metadata").expect("fixed metadata");
+    let mut statement = connection
+        .prepare(include_str!("join.sql"))
+        .map_err(error::duckdb)?;
+    let mut batches = statement.stream_arrow([]).map_err(error::duckdb)?;
+    let mut emitted = 0;
+    loop {
+        // The Arrow-58-compatible binding panics on fetch failures.
+        let batch = catch_unwind(AssertUnwindSafe(|| batches.next())).map_err(|_| {
+            Error::new(
+                ErrorKind::Internal,
+                "bhl_metadata_duckdb",
+                "DuckDB Arrow fetch failed",
+            )
+        })?;
+        let Some(batch) = batch else {
+            break;
+        };
+        let indices = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .ok_or_else(|| error::invalid("expected request IDs"))?;
+        // Match the fixed nested LargeUtf8/nullability contract.
+        let metadata =
+            arrow_cast::cast(batch.column(1), field.data_type()).map_err(error::arrow)?;
+        let metadata = metadata
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .ok_or_else(|| error::invalid("expected metadata struct"))?;
+        for row in 0..batch.num_rows() {
+            let index = usize::try_from(indices.value(row))
+                .map_err(|_| error::invalid("request ID overflow"))?;
+            let object = keys
+                .get(index)
+                .ok_or_else(|| error::invalid("unknown request ID"))?;
+            emit(BhlPageMetadata {
+                identity: BhlPageIdentity::parse(object.locator())?,
+                object: object.clone(),
+                metadata: metadata.slice(row, 1),
+                missing: strings(batch.column(2).as_ref(), row)?,
+                conflicts: strings(batch.column(3).as_ref(), row)?,
             })?;
-            let Some(batch) = batch else {
-                break;
-            };
-            let indices = batch
-                .column(0)
-                .as_any()
-                .downcast_ref::<UInt64Array>()
-                .ok_or_else(|| error::invalid("expected request IDs"))?;
-            let schema = page_schema();
-            let field = schema.field_with_name("metadata").expect("fixed metadata");
-            // DuckDB exports VARCHAR as Utf8 and nullable children. Cast the
-            // nested result to the existing LargeUtf8/nullability contract.
-            let metadata =
-                arrow_cast::cast(batch.column(1), field.data_type()).map_err(error::arrow)?;
-            let metadata = metadata
-                .as_any()
-                .downcast_ref::<StructArray>()
-                .ok_or_else(|| error::invalid("expected metadata struct"))?;
-            for row in 0..batch.num_rows() {
-                let index = usize::try_from(indices.value(row))
-                    .map_err(|_| error::invalid("request ID overflow"))?;
-                let (path, identity) = keys
-                    .get(index)
-                    .ok_or_else(|| error::invalid("unknown request ID"))?;
-                let missing = strings(batch.column(2).as_ref(), row)?;
-                let conflicts = strings(batch.column(3).as_ref(), row)?;
-                if !missing.is_empty() {
-                    report.missing.insert(path.clone(), missing);
-                }
-                if !conflicts.is_empty() {
-                    report.conflicts.insert(path.clone(), conflicts);
-                }
-                if rows
-                    .insert(identity.clone(), metadata.slice(row, 1))
-                    .is_some()
-                {
-                    return Err(error::invalid("DuckDB returned a duplicate selected page"));
-                }
-            }
+            emitted += 1;
         }
     }
-    if rows.len() != keys.len() {
-        return Err(error::invalid("DuckDB omitted selected pages"));
+    if emitted != keys.len() {
+        return Err(error::invalid("unexpected joined page count"));
     }
-    transaction
-        .execute_batch("DELETE FROM bhl_selection;")
-        .map_err(error::duckdb)?;
-    transaction.commit().map_err(error::duckdb)?;
-    Ok((rows, report))
+    Ok(())
 }

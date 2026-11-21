@@ -6,9 +6,8 @@ use super::{BhlPageIdentity, page_schema};
 use arrow_array::StructArray;
 use arrow_schema::{DataType, Fields};
 use open_arrow_access_core::{ObjectRef, Result};
-use serde::Serialize;
-pub use source::{BhlMetadata, BhlMetadataInfo, BhlMetadataOptions, SourceInfo};
-use std::collections::{BTreeMap, HashMap, HashSet};
+pub use source::{BhlMetadata, BhlMetadataInfo, SourceInfo};
+use std::collections::HashMap;
 
 #[derive(Clone)]
 struct Table {
@@ -62,44 +61,26 @@ fn tables() -> Vec<Table> {
         .collect()
 }
 
-#[derive(Default, Serialize)]
-pub struct BhlMetadataReport {
-    pub missing: BTreeMap<String, Vec<String>>,
-    pub conflicts: BTreeMap<String, Vec<String>>,
-}
-/// Selected, populated Arrow metadata with provenance and explicit join-gap reports.
+/// One joined page, emitted without collecting the full query result in Rust.
 pub struct BhlPageMetadata {
-    rows: HashMap<BhlPageIdentity, StructArray>,
-    pub info: BhlMetadataInfo,
-    pub report: BhlMetadataReport,
+    pub identity: BhlPageIdentity,
+    pub object: ObjectRef,
+    pub metadata: StructArray,
+    pub missing: Vec<String>,
+    pub conflicts: Vec<String>,
 }
 impl BhlMetadata {
-    /// Join selected OCR page identities using a set-based DuckDB query.
-    /// Gaps/conflicts are retained in the report; the outer metadata is populated.
-    pub fn select(&self, keys: &[ObjectRef]) -> Result<BhlPageMetadata> {
-        let mut seen = HashSet::new();
-        let mut selected = Vec::new();
-        for key in keys {
-            let identity = BhlPageIdentity::parse(key.locator())?;
-            if seen.insert(identity.clone()) {
-                selected.push((key.locator().to_owned(), identity));
-            }
-        }
-        let (rows, report) = join::select(self, &selected)?;
-        Ok(BhlPageMetadata {
-            rows,
-            info: self.info.clone(),
-            report,
-        })
+    /// Execute one join query and emit each selected page to the callback.
+    /// This is synchronous; call from a blocking worker in async applications.
+    /// Returning an error from the callback stops emission immediately.
+    pub fn for_each(
+        &self,
+        keys: &[ObjectRef],
+        emit: impl FnMut(BhlPageMetadata) -> Result<()>,
+    ) -> Result<()> {
+        join::for_each(self, keys, emit)
     }
-}
-impl BhlPageMetadata {
-    pub fn get(&self, identity: &BhlPageIdentity) -> Result<StructArray> {
-        self.rows
-            .get(identity)
-            .cloned()
-            .ok_or_else(|| error::invalid("page is outside metadata selection"))
-    }
+
     pub fn schema_metadata(&self) -> Result<HashMap<String, String>> {
         Ok(HashMap::from([
             (
@@ -109,10 +90,6 @@ impl BhlPageMetadata {
             (
                 "bhl.metadata.sources".into(),
                 serde_json::to_string(&self.info.sources).map_err(error::json)?,
-            ),
-            (
-                "bhl.metadata.reconciliation".into(),
-                serde_json::to_string(&self.report).map_err(error::json)?,
             ),
         ]))
     }
