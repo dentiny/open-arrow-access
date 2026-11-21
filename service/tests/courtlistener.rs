@@ -15,7 +15,7 @@ use open_arrow_access_dataset::file_set::FileSetRequest;
 use open_arrow_access_file_format::csv::{CsvFileFormat, CsvFormat};
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::courtlistener::{
-    CourtListenerBulkAccessor, CourtListenerDateAccessor, CourtListenerSnapshot,
+    CourtListenerBulkAccessor, CourtListenerDatePartitionAccessor, CourtListenerSnapshot,
     CourtListenerTableAccessor,
 };
 use open_arrow_access_storage::OpenDalAccessor;
@@ -315,7 +315,7 @@ const JOIN_FIXTURES: [(&str, &str); 4] = [
 
 async fn joined_fixture() -> (
     tempfile::TempDir,
-    CourtListenerDateAccessor<OpenDalAccessor>,
+    CourtListenerDatePartitionAccessor<OpenDalAccessor>,
 ) {
     let root = tempfile::tempdir().unwrap();
     tokio::fs::create_dir(root.path().join("bulk-data"))
@@ -324,7 +324,7 @@ async fn joined_fixture() -> (
     for (table, data) in JOIN_FIXTURES {
         write_bz(root.path(), table, data).await;
     }
-    let source = CourtListenerDateAccessor::new(
+    let source = CourtListenerDatePartitionAccessor::new(
         OpenDalAccessor::new(fs_operator(root.path())),
         "s3://com-courtlistener-storage",
     )

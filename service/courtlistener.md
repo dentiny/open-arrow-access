@@ -78,7 +78,7 @@ join source tables, discover output destinations or write a Lance dataset.
 Enable facade feature `service-courtlistener` (or service-crate feature
 `courtlistener`). This includes the single-table and DuckDB joined readers.
 
-`CourtListenerDateAccessor` reads same-date opinions, opinion-clusters, dockets
+`CourtListenerDatePartitionAccessor` reads same-date opinions, opinion-clusters, dockets
 and courts. Left joins preserve one row per opinion; missing relationships
 produce null structs instead of dropping opinions. The six output fields are
 `snapshot_date`, `opinion`, `cluster`, `docket`, `court` and `provenance`. Source
@@ -93,11 +93,11 @@ dates independently and sends each date stream to one Lance destination.
 ```rust,no_run
 use std::num::NonZeroUsize;
 use open_arrow_access::{Accessor, ReadRequest, Result};
-use open_arrow_access::service::courtlistener::CourtListenerDateAccessor;
+use open_arrow_access::service::courtlistener::CourtListenerDatePartitionAccessor;
 use open_arrow_access::storage::OpenDalAccessor;
 
 async fn read_date(storage: OpenDalAccessor) -> Result<()> {
-    let source = CourtListenerDateAccessor::new(
+    let source = CourtListenerDatePartitionAccessor::new(
         storage,
         "s3://com-courtlistener-storage",
     )?;

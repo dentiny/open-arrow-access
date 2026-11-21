@@ -7,7 +7,7 @@ mod date;
 mod error;
 mod ingest;
 mod query;
-pub use date::CourtListenerDateAccessor;
+pub use date::CourtListenerDatePartitionAccessor;
 mod object;
 mod schema;
 mod table;
