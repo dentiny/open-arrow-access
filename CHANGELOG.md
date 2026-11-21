@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.19.0 - 2026-11-21
+
+- Add CourtListener's joined Arrow schema with typed timestamps, dates, counts and nested opinion, cluster, docket, court and provenance structs.
+- Add strict streaming COPY CSV table readers that preserve unquoted NULLs, quoted empty strings, multiline fields and explicit historical dialects.
+- Add `CourtListenerDatePartitionAccessor`: import four same-date tables concurrently into a temporary DuckDB database, join with SQL, and stream one row per opinion with source order and provenance.
+- Keep metadata inspection and scan planning free of storage I/O; import each source table in one transaction and reject duplicate keys before querying.
+- Document date partitioning and caller-managed publication of one Lance dataset per date.
+- Release all eight public workspace crates at 0.19.0 with aligned internal dependency requirements.
+
 ## 0.18.2 - 2026-11-21
 
 - Use DuckDB bindings 1.10506.1 for BHL metadata joins, sharing Arrow 58 with the workspace instead of compiling a second Arrow major.
