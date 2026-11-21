@@ -22,7 +22,6 @@ pub(super) struct CopyCsv {
     chunk: Bytes,
     offset: usize,
     skip_lf: bool,
-    limit: usize,
     max_fields: usize,
     dialect: CourtListenerCopyDialect,
     pub object: String,
@@ -32,7 +31,6 @@ impl CopyCsv {
     pub fn new(
         reader: Box<dyn ByteReader>,
         object: String,
-        limit: usize,
         max_fields: usize,
         dialect: CourtListenerCopyDialect,
     ) -> Self {
@@ -41,7 +39,6 @@ impl CopyCsv {
             chunk: Bytes::new(),
             offset: 0,
             skip_lf: false,
-            limit,
             max_fields,
             dialect,
             object,
@@ -70,7 +67,7 @@ impl CopyCsv {
         let mut inside = false;
         let mut after = false;
         let mut escaped = false;
-        let mut size = 0;
+        let mut started = false;
         loop {
             let byte = self.byte().await?;
             if self.skip_lf {
@@ -87,7 +84,7 @@ impl CopyCsv {
                         "unterminated quoted field",
                     ));
                 }
-                if size == 0 {
+                if !started {
                     return Ok(None);
                 }
                 if fields.len() >= self.max_fields {
@@ -101,14 +98,7 @@ impl CopyCsv {
                 self.ordinal += 1;
                 return Ok(Some(fields));
             };
-            size += 1;
-            if size > self.limit {
-                return Err(copy_error(
-                    &self.object,
-                    self.ordinal,
-                    "record exceeds max_record_bytes",
-                ));
-            }
+            started = true;
             if inside {
                 if escaped {
                     // COPY ESCAPE applies only to the quote and escape characters.
@@ -188,24 +178,22 @@ mod tests {
     use super::*;
     use open_arrow_access_core::Accessor;
     use open_arrow_access_test_support::MemoryAccessor;
-    async fn parser(raw: &[u8], limit: usize) -> CopyCsv {
+    async fn parser(raw: &[u8]) -> CopyCsv {
         CopyCsv::new(
             MemoryAccessor::new(raw, 1)
                 .open("test.csv".into())
                 .await
                 .unwrap(),
             "test.csv".into(),
-            limit,
             4,
             CourtListenerCopyDialect::default(),
         )
     }
     #[tokio::test]
     async fn copy_quoting_nulls_crlf_and_multiline_survive_one_byte_chunks() {
-        let mut csv = parser(
-            include_bytes!("../../../testdata/courtlistener/copy-csv/quoting-nulls-multiline.csv"),
-            1024,
-        )
+        let mut csv = parser(include_bytes!(
+            "../../../testdata/courtlistener/copy-csv/quoting-nulls-multiline.csv"
+        ))
         .await;
         assert_eq!(
             csv.row().await.unwrap().unwrap(),
@@ -229,10 +217,9 @@ mod tests {
     }
     #[tokio::test]
     async fn explicit_historical_dialects_support_backticks_and_doubled_quotes() {
-        let mut csv = parser(
-            include_bytes!("../../../testdata/courtlistener/copy-csv/backtick-escape.csv"),
-            1024,
-        )
+        let mut csv = parser(include_bytes!(
+            "../../../testdata/courtlistener/copy-csv/backtick-escape.csv"
+        ))
         .await;
         csv.dialect = CourtListenerCopyDialect {
             quote: b'`',
@@ -242,10 +229,9 @@ mod tests {
             csv.row().await.unwrap().unwrap(),
             vec![Some("a`b".into()), Some("".into())]
         );
-        let mut csv = parser(
-            include_bytes!("../../../testdata/courtlistener/copy-csv/doubled-quotes.csv"),
-            1024,
-        )
+        let mut csv = parser(include_bytes!(
+            "../../../testdata/courtlistener/copy-csv/doubled-quotes.csv"
+        ))
         .await;
         csv.dialect = CourtListenerCopyDialect {
             quote: b'"',
@@ -262,7 +248,7 @@ mod tests {
         );
     }
     #[tokio::test]
-    async fn malformed_and_oversized_records_fail() {
+    async fn malformed_records_fail() {
         for raw in [
             include_bytes!("../../../testdata/courtlistener/copy-csv/unterminated-quote.csv")
                 .as_slice(),
@@ -271,17 +257,7 @@ mod tests {
             include_bytes!("../../../testdata/courtlistener/copy-csv/unquoted-quote.csv")
                 .as_slice(),
         ] {
-            assert!(parser(raw, 1024).await.row().await.is_err());
+            assert!(parser(raw).await.row().await.is_err());
         }
-        assert!(
-            parser(
-                include_bytes!("../../../testdata/courtlistener/copy-csv/oversized-record.csv"),
-                4
-            )
-            .await
-            .row()
-            .await
-            .is_err()
-        );
     }
 }
