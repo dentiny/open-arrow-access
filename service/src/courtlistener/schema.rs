@@ -2,7 +2,8 @@
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
 use std::sync::{Arc, OnceLock};
 
-/// Per-table schemas, in CSV header order. Historical variants must be supplied explicitly.
+/// Field definitions for the four entities in one joined output schema.
+/// Source-column order and historical variants must be supplied explicitly.
 #[derive(Clone, Debug)]
 pub struct CourtListenerSchemas {
     pub opinion: Fields,
