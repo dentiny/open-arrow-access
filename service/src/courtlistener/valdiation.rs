@@ -1,3 +1,5 @@
+#[cfg(feature = "courtlistener-joined")]
+use super::error::db_error;
 use super::{
     CourtListenerCopyDialect, CourtListenerSchemas,
     error::{invalid_dialect, invalid_value, records_error, schema_error},
@@ -200,6 +202,44 @@ pub(super) fn validate_columns(
         return Err(records_error(format!(
             "{object} record {ordinal}: CSV column count differs from pinned schema"
         )));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "courtlistener-joined")]
+pub(super) fn validate_keys(connection: &duckdb::Connection, tables: &[&str]) -> Result<()> {
+    for (i, table) in tables.iter().enumerate() {
+        let duplicate = connection.query_row(
+            &format!("SELECT 1 FROM cl_{i} GROUP BY id HAVING count(*)>1 LIMIT 1"),
+            [],
+            |row| row.get::<_, i32>(0),
+        );
+        match duplicate {
+            Ok(_) => return Err(records_error(format!("duplicate primary key in {table}"))),
+            Err(duckdb::Error::QueryReturnedNoRows) => {}
+            Err(e) => return Err(db_error(e)),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "courtlistener-joined")]
+pub(super) fn validate_join_options(options: &super::CourtListenerJoinOptions) -> Result<()> {
+    options.dialect.validate()?;
+    if options.source_root.is_empty() {
+        return Err(invalid());
+    }
+    Ok(())
+}
+#[cfg(feature = "courtlistener-joined")]
+pub(super) fn validate_join_schema(schemas: &CourtListenerSchemas) -> Result<()> {
+    schemas.validate()?;
+    if schemas
+        .tables()
+        .iter()
+        .any(|fields| fields.iter().any(|f| f.name() == super::joined::ORDINAL))
+    {
+        return Err(records_error("source field collides with reserved ordinal"));
     }
     Ok(())
 }

@@ -38,3 +38,18 @@ pub(super) fn copy_error(object: &str, ordinal: u64, message: impl std::fmt::Dis
 pub(super) fn arrow_error(e: arrow_schema::ArrowError) -> Error {
     records_error(e.to_string())
 }
+
+#[cfg(feature = "courtlistener-joined")]
+pub(super) fn db_error(e: duckdb::Error) -> Error {
+    Error::new(ErrorKind::Io, "courtlistener_duckdb", e.to_string()).with_source(e)
+}
+
+#[cfg(feature = "courtlistener-joined")]
+pub(super) fn scratch_error(e: std::io::Error) -> Error {
+    Error::new(ErrorKind::Io, "courtlistener_scratch", e.to_string()).with_source(e)
+}
+
+#[cfg(feature = "courtlistener-joined")]
+pub(super) fn task_error(context: &'static str, e: tokio::task::JoinError) -> Error {
+    Error::new(ErrorKind::Internal, context, e.to_string()).with_source(e)
+}

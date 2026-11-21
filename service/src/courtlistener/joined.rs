@@ -1,21 +1,23 @@
 //! Import typed Arrow batches into DuckDB, SQL-join a date, stream Arrow results.
 use super::{
     CourtListenerCopyDialect, CourtListenerSchemas, CourtListenerSnapshot,
-    CourtListenerTableAccessor, values::error,
+    CourtListenerTableAccessor,
+    error::{arrow_error, db_error, scratch_error, task_error},
+    valdiation::{validate_join_options, validate_join_schema, validate_keys},
 };
 use arrow_array::{ArrayRef, RecordBatch, UInt64Array};
 use arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use duckdb::{Config, Connection, InterruptHandle, params};
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, Error, ErrorKind, OrderRequirement, ReadRequest, RecordCapability,
-    RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, async_trait, record_stream_reader,
+    Accessor, ByteAccessor, OrderRequirement, ReadRequest, RecordCapability, RecordMetadata,
+    RecordReader, Result, ScanPlan, ScanPlanner, async_trait, record_stream_reader,
 };
 use std::{num::NonZeroUsize, path::PathBuf, sync::Arc};
 use tokio::{sync::mpsc, task::JoinHandle};
 
 const TABLES: [&str; 4] = ["opinions", "opinion-clusters", "dockets", "courts"];
-const ORDINAL: &str = "__courtlistener_ordinal";
+pub(super) const ORDINAL: &str = "__courtlistener_ordinal";
 
 /// Caller-owned scratch, resource limits and provenance for one date conversion.
 #[derive(Clone, Debug)]
@@ -57,10 +59,7 @@ impl<A> Clone for CourtListenerDateAccessor<A> {
 }
 impl<A> CourtListenerDateAccessor<A> {
     pub fn new(storage: A, options: CourtListenerJoinOptions) -> Result<Self> {
-        options.dialect.validate()?;
-        if options.source_root.is_empty() {
-            return Err(super::error::invalid());
-        }
+        validate_join_options(&options)?;
         Ok(Self {
             storage: Arc::new(storage),
             options,
@@ -68,14 +67,7 @@ impl<A> CourtListenerDateAccessor<A> {
         })
     }
     pub fn with_schemas(mut self, schemas: CourtListenerSchemas) -> Result<Self> {
-        schemas.validate()?;
-        if schemas
-            .tables()
-            .iter()
-            .any(|fields| fields.iter().any(|f| f.name() == ORDINAL))
-        {
-            return Err(error("source field collides with reserved ordinal"));
-        }
+        validate_join_schema(&schemas)?;
         self.schemas = schemas;
         Ok(self)
     }
@@ -83,18 +75,10 @@ impl<A> CourtListenerDateAccessor<A> {
         &self.schemas
     }
 }
-fn db_error(e: duckdb::Error) -> Error {
-    Error::new(ErrorKind::Io, "courtlistener_duckdb", e.to_string()).with_source(e)
-}
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
-    tokio::task::spawn_blocking(f).await.map_err(|e| {
-        Error::new(
-            ErrorKind::Internal,
-            "courtlistener_duckdb_task",
-            e.to_string(),
-        )
-        .with_source(e)
-    })?
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| task_error("courtlistener_duckdb_task", e))?
 }
 fn quoted(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
@@ -119,9 +103,7 @@ struct Database {
 }
 impl Database {
     fn new(options: CourtListenerJoinOptions, schemas: &CourtListenerSchemas) -> Result<Self> {
-        let directory = tempfile::tempdir_in(options.scratch_directory).map_err(|e| {
-            Error::new(ErrorKind::Io, "courtlistener_scratch", e.to_string()).with_source(e)
-        })?;
+        let directory = tempfile::tempdir_in(options.scratch_directory).map_err(scratch_error)?;
         let config = Config::default()
             .with("memory_limit", format!("{}B", options.memory_limit))
             .map_err(db_error)?
@@ -168,29 +150,14 @@ impl Database {
         arrays.push(Arc::new(UInt64Array::from_iter_values(
             ordinal..ordinal + count as u64,
         )));
-        let batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays)
-            .map_err(|e| error(e.to_string()))?;
+        let batch =
+            RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).map_err(arrow_error)?;
         let mut appender = self
             .connection
             .appender(&format!("cl_{table}"))
             .map_err(db_error)?;
         appender.append_record_batch(batch).map_err(db_error)?;
         appender.flush().map_err(db_error)
-    }
-    fn validate_keys(&self) -> Result<()> {
-        for (i, table) in TABLES.iter().enumerate() {
-            let duplicate = self.connection.query_row(
-                &format!("SELECT 1 FROM cl_{i} GROUP BY id HAVING count(*)>1 LIMIT 1"),
-                [],
-                |row| row.get::<_, i32>(0),
-            );
-            match duplicate {
-                Ok(_) => return Err(error(format!("duplicate primary key in {table}"))),
-                Err(duckdb::Error::QueryReturnedNoRows) => {}
-                Err(e) => return Err(db_error(e)),
-            }
-        }
-        Ok(())
     }
 }
 
@@ -257,7 +224,7 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerDateAccessor<A> {
             }
         }
         database = blocking(move || {
-            database.validate_keys()?;
+            validate_keys(&database.connection, &TABLES)?;
             Ok(database)
         })
         .await?;
@@ -351,12 +318,11 @@ impl QueryState {
                         .iter()
                         .zip(schema.fields())
                         .map(|(array, field)| {
-                            arrow_cast::cast(array, field.data_type())
-                                .map_err(|e| error(e.to_string()))
+                            arrow_cast::cast(array, field.data_type()).map_err(arrow_error)
                         })
                         .collect::<Result<Vec<ArrayRef>>>()?;
-                    let batch = RecordBatch::try_new(schema.clone(), columns)
-                        .map_err(|e| error(e.to_string()))?;
+                    let batch =
+                        RecordBatch::try_new(schema.clone(), columns).map_err(arrow_error)?;
                     for offset in (0..batch.num_rows()).step_by(batch_size) {
                         if sender
                             .blocking_send(
@@ -375,14 +341,8 @@ impl QueryState {
             return Ok(Some(batch));
         }
         if let Some(task) = self.task.take() {
-            task.await.map_err(|e| {
-                Error::new(
-                    ErrorKind::Internal,
-                    "courtlistener_query_task",
-                    e.to_string(),
-                )
-                .with_source(e)
-            })??;
+            task.await
+                .map_err(|e| task_error("courtlistener_query_task", e))??;
         }
         Ok(None)
     }
