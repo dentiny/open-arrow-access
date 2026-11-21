@@ -1,21 +1,4 @@
-use crate::common::decode;
 use open_arrow_access_core::{Error, ErrorKind};
-
-pub(super) fn unauthorized() -> open_arrow_access_core::Error {
-    Error::new(
-        ErrorKind::PermissionDenied,
-        "resolve_bhl",
-        "BHL API key is unauthorized",
-    )
-}
-
-pub(super) fn api_error() -> Error {
-    decode("BHL returned an API error")
-}
-
-pub(super) fn item_identity_mismatch() -> Error {
-    decode("BHL item identity mismatch")
-}
 
 pub(super) fn configure_open_data(source: opendal::Error) -> Error {
     invalid_open_data("failed to configure public BHL bucket").with_source(source)

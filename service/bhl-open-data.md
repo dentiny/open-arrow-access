@@ -20,7 +20,6 @@ The complete source layout and item/part exceptions are documented in the
 [official README](https://bhl-open-data.s3.amazonaws.com/README.html) and
 [special cases](https://github.com/gbhl/bhl-open-data/blob/main/NOTES.md).
 The AWS data set has independent objects, not an official balanced shard list.
-Do not conflate this layout with the single Figshare TAR.bz2 export.
 
 `open_data_bucket_operator()` constructs an anonymous bucket-root S3 operator in
 `us-east-2` with ambient credential loading disabled and signing skipped.
@@ -122,7 +121,7 @@ A bounded live smoke check also read exactly two public AWS OCR objects through
 the anonymous operator and parallel file-set path: item 346951 / page 65077706 /
 sequence 14 and item 21356 / page 2839616 / sequence 127. It returned two rows
 and 5,659 original bytes without listing the corpus. This verifies those reads,
-not complete AWS/Figshare equivalence or sustained throughput. The standalone
+not complete AWS coverage or sustained throughput. The standalone
 smoke-check example used for that validation has since been removed.
 
 See [BHL service](bhl.md), [resolved file sets](remote-files.md) and
@@ -137,4 +136,4 @@ reader does not acquire TSV tables or join bibliographic records. Invalid keys,
 provider errors and schema mismatches fail explicitly. Native partitions use the
 shared scan executor. `with_schema_metadata` retains caller provenance in the
 plan and emitted batch schemas. This API is the reader foundation for separate
-TSV-index and metadata-join changes.
+TSV metadata acquisition and join changes.
