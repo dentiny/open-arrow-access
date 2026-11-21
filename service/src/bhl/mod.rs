@@ -1,5 +1,10 @@
 //! BHL API v3 and its versioned Smithsonian Figshare OCR export.
 mod error;
+mod open_data;
+mod page;
+mod pages;
+pub use page::{BhlPageRecord, page_schema};
+pub use pages::{BhlPageAccessor, BhlPageIdentity};
 mod resolver;
 mod validation;
 use crate::{
@@ -7,6 +12,7 @@ use crate::{
     figshare::FigshareService,
 };
 use open_arrow_access_core::Result;
+pub use open_data::{BhlOpenData, OPEN_DATA_BUCKET_URL, open_data_bucket_operator};
 use std::num::{NonZeroU32, NonZeroU64};
 #[derive(Clone, Copy, Debug)]
 pub enum BhlOperation {

@@ -55,3 +55,10 @@ pub(super) fn parse_entry(
         is_file: header.entry_type().is_file(),
     })
 }
+
+pub(super) fn validate_regular_entry(entry: &super::TarEntry) -> Result<()> {
+    if !entry.is_file {
+        return Err(unsupported("TAR directory entries have no file reader"));
+    }
+    Ok(())
+}

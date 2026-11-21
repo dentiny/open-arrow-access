@@ -3,6 +3,7 @@
 mod accessor;
 mod async_read;
 mod async_seek;
+mod attachment_cell;
 mod binary;
 mod bound_source;
 mod byte_position;
@@ -38,6 +39,7 @@ mod validation;
 pub use accessor::{Accessor, ByteAccessor, ObjectStream};
 pub use async_read::into_async_read;
 pub use async_seek::{SeekableInput, into_async_seek};
+pub use attachment_cell::{AttachmentCell, AttachmentCellAccessor, AttachmentDataType};
 pub use binary::BinaryDecoder;
 pub use bound_source::BoundSource;
 pub use byte_position::BytePosition;

@@ -385,3 +385,58 @@ async fn manifest_payload_sizes_allow_tar_framing_in_stream_index_and_native_sca
         .collect::<Vec<_>>()
     );
 }
+
+#[tokio::test]
+async fn explicit_shard_validates_selection_and_reads_only_that_object() {
+    use futures::TryStreamExt;
+    let bytes = fixture!("arxiv", "pdf/arXiv_pdf_2410_001.tar").await;
+    let source = MemoryAccessor::new(&bytes, 512);
+    let observed = source.observations.clone();
+    let records = ArxivService::new(source).records();
+    for shard in [
+        "../other.tar",
+        "/absolute.tar",
+        "s3://bucket/shard.tar",
+        "part.tar?x=1",
+        "part.tar.gz",
+        "",
+    ] {
+        assert!(
+            records
+                .plan_scan(ArxivReadRequest::new(ArxivKind::Source).with_shard(shard))
+                .await
+                .is_err()
+        );
+    }
+    assert!(
+        records
+            .plan_scan(
+                ArxivReadRequest::new(ArxivKind::Source)
+                    .with_shard("src/one.tar")
+                    .with_month(2410)
+            )
+            .await
+            .is_err()
+    );
+    assert!(observed.requests.lock().unwrap().is_empty());
+    let shard = "pdf/arXiv_pdf_2410_001.tar";
+    let plan = records
+        .plan_scan(ArxivReadRequest::new(ArxivKind::Pdf).with_shard(shard))
+        .await
+        .unwrap();
+    let mut partitions = plan.partitions.try_collect::<Vec<_>>().await.unwrap();
+    assert_eq!(partitions.len(), 1);
+    assert!(observed.requests.lock().unwrap().is_empty());
+    let mut reader = partitions.pop().unwrap().await.unwrap();
+    while let Some(batch) = reader.next().await.unwrap() {
+        assert!(
+            batch["shard_uri"]
+                .as_string::<i64>()
+                .iter()
+                .all(|value| value == Some(shard))
+        );
+    }
+    let requests = observed.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].object.locator(), shard);
+}

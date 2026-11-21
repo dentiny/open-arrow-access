@@ -71,3 +71,16 @@ Pass an opened record reader from a provider guide. The example reports actual
 field names, Arrow types, nullability and first-batch row count. It does not
 invent columns such as repository IDs or attach file contents to metadata rows.
 For byte responses, use `ByteReader::next()` and apply a matching decoder.
+
+
+### arXiv content formats
+
+PDF, LaTeX and caller-supplied XML shards use one
+[common content schema](arxiv.md#common-pdf--latex--xml-content-schema) through
+`records().content(format)`. `data: LargeBinary` holds content bytes in every
+format. Content has ten fields, including nullable `metadata: Struct` with the full
+arXivRaw OAI record schema. Current content readers leave that column null;
+this schema change does not fetch or join metadata. See the
+[complete metadata field reference](arxiv.md#exact-fields-of-the-content-metadata-struct-0160)
+for all nested fields, types and nullability. Raw archive/artifact access
+and parsed OAI metadata are separate contracts.

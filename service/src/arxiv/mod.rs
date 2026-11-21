@@ -1,5 +1,10 @@
 //! arXiv bulk discovery, native article representations and source-package assets.
 
+mod content;
+mod latex;
+mod pdf;
+mod xml;
+pub use content::{ArxivContentFormat, ArxivContentRecords, content_schema};
 mod articles;
 mod error;
 pub use articles::{
@@ -10,8 +15,10 @@ pub use source_package::{ArxivSourceOptions, ArxivSourcePackaging, open_source_p
 mod id;
 mod manifest;
 mod metadata;
+mod metadata_fetch;
 pub use metadata::{ArxivMetadataIndex, ArxivPdfRecords};
 mod records;
+mod shard_records;
 pub use records::{ArxivReadRequest, ArxivRecords, record_schema};
 mod tar_records;
 mod validation;
@@ -78,11 +85,13 @@ pub struct ArxivArchive {
 }
 
 /// Read an arXiv bulk mirror rooted above `pdf/` and `src/`.
-/// Callers configure credentials, region and S3 requester-pays; no listing or API calls are needed.
+/// Callers configure credentials, region and S3 requester-pays. Raw archive reads
+/// need no API calls; content scans additionally fetch OAI metadata by default.
 #[derive(Clone, Debug)]
 pub struct ArxivService<A> {
     storage: A,
     tar_limits: TarLimits,
+    metadata: std::sync::Arc<metadata_fetch::MetadataResolver>,
 }
 
 impl<A> ArxivService<A> {
@@ -90,7 +99,15 @@ impl<A> ArxivService<A> {
         Self {
             storage,
             tar_limits: TarLimits::default(),
+            metadata: Default::default(),
         }
+    }
+
+    /// Override the default OAI metadata connection (for a mirror or custom transport).
+    /// Content scans always enrich metadata; this changes only where it is fetched.
+    pub fn with_metadata_connection(mut self, connection: crate::common::Connection) -> Self {
+        self.metadata = std::sync::Arc::new(metadata_fetch::MetadataResolver::new(connection));
+        self
     }
 
     pub fn with_tar_limits(mut self, limits: TarLimits) -> Self {

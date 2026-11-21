@@ -1,5 +1,5 @@
 //! Opt-in source package expansion; filenames remain metadata, never disk paths.
-use super::{ArxivArticle, ArxivArticleFormat, article_schema, tar_records::read_tar_batch};
+use super::{article_schema, tar_records::read_tar_batch};
 use futures::stream;
 use open_arrow_access_core::{
     ByteReader, Bytes, ObjectRef, OrderRequirement, ReadOptions, RecordBatchBuilder,
@@ -60,7 +60,7 @@ pub async fn open_source_package(
     options: ArxivSourceOptions,
 ) -> Result<Box<dyn RecordReader>> {
     let article_id = article_id.into();
-    ArxivArticle::new(&article_id, ArxivArticleFormat::Latex).locator()?;
+    super::id::pdf_id(format!("{article_id}.pdf").as_bytes())?;
     let schema = options
         .options
         .resolve_projection(&article_schema())?

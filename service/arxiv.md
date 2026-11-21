@@ -414,3 +414,263 @@ The probe finished in 2.46 s including manifest discovery. No production code
 was changed; native `records()` still uses manifest size and still fails. This
 establishes real PDF-byte access, not a repaired conversion path or sustained
 throughput benchmark.
+
+## Common PDF / LaTeX / XML content schema
+
+Use `records().content(ArxivContentFormat::Pdf | Latex | Xml)` for the
+conversion-facing content contract. All three formats emit exactly the same
+field names, order, Arrow types and nullability:
+
+| Field | Arrow type | Meaning |
+| --- | --- | --- |
+| `article_id` | `LargeUtf8`, non-null | Normalized unversioned article ID |
+| `format` | `LargeUtf8`, non-null | `pdf`, `latex`, or `xml` |
+| `shard_uri` | `LargeUtf8`, non-null | Selected outer TAR locator |
+| `entry_index` | `UInt64`, non-null | Physical outer member index |
+| `entry_name` | `LargeBinary`, non-null | Original outer filename including version spelling |
+| `source_index` | `UInt64`, non-null | Inner TeX member index; zero for whole PDF/XML documents |
+| `source_name` | `LargeBinary`, non-null | Inner TeX filename; empty for whole PDF/XML documents |
+| `data` | `LargeBinary`, non-null | PDF bytes, decoded UTF-8 TeX bytes, or original XML bytes |
+| `data_type` | `LargeUtf8`, non-null | Representation of this row's payload: `pdf`, `latex`, or `xml` |
+| `metadata` | `Struct`, nullable | Full arXivRaw OAI record; automatically populated for every content row |
+
+The content schema has ten fields. `metadata` contains the complete typed arXivRaw
+OAI record, including license and version history. `content(format)` automatically
+fetches and attaches matching metadata; no `with_metadata` call is required.
+The Arrow field remains nullable for schema compatibility, but content readers
+never emit a null outer metadata struct. `content_schema()` is shared by all
+three formats.
+
+### Exact fields of the content `metadata` struct (0.16.0)
+
+`metadata` contains the **whole OAI record**, including its header; it is not a
+flat article struct. The literal Arrow field names retain namespace prefixes,
+colons, hyphens and attribute markers. The following tree lists every field in
+schema order. `?` means nullable; a field without `?` is non-null when its parent
+struct or list element exists.
+
+```text
+metadata: Struct?
+├── oai:header: Struct
+│   ├── oai:identifier: Utf8?
+│   ├── oai:datestamp: Utf8?
+│   ├── @status: Utf8?
+│   └── oai:setSpec: List<Utf8?>?
+└── oai:metadata: Struct?
+    └── arxiv:arXivRaw: Struct?
+        ├── arxiv:id: Utf8?
+        ├── arxiv:submitter: Utf8?
+        ├── arxiv:title: Utf8?
+        ├── arxiv:authors: Utf8?
+        ├── arxiv:categories: Utf8?
+        ├── arxiv:comments: Utf8?
+        ├── arxiv:proxy: Utf8?
+        ├── arxiv:report-no: Utf8?
+        ├── arxiv:acm-class: Utf8?
+        ├── arxiv:msc-class: Utf8?
+        ├── arxiv:journal-ref: Utf8?
+        ├── arxiv:doi: Utf8?
+        ├── arxiv:license: Utf8?
+        ├── arxiv:abstract: Utf8?
+        ├── @xsi:schemaLocation: Utf8?
+        └── arxiv:version: List<item: Struct>?
+            ├── @version: Utf8?
+            ├── arxiv:date: Utf8?
+            ├── arxiv:size: Utf8?
+            └── arxiv:source_type: Utf8?
+```
+
+The `oai:setSpec` list's Arrow item field is named `oai:setSpec` and is
+nullable. The `arxiv:version` list's item field is named `item` and is a
+non-null struct; all four fields inside each version are nullable.
+
+| Field / parent | Meaning |
+| --- | --- |
+| `oai:header.oai:identifier` | OAI record identifier, distinct from the article's `arxiv:id` |
+| `oai:header.oai:datestamp` | OAI record datestamp used for harvesting updates |
+| `oai:header.@status` | OAI header status, such as `deleted`, when supplied |
+| `oai:header.oai:setSpec` | Repeated OAI set memberships |
+| `arxiv:id` under `oai:metadata.arxiv:arXivRaw` | Article identifier retained as text, including leading zeros or legacy spelling |
+| `arxiv:submitter` | Submitter text |
+| `arxiv:title` | Article title |
+| `arxiv:authors` | Original author text; not a list of normalized author objects |
+| `arxiv:categories` | Original category text; not a list of category objects |
+| `arxiv:comments` | Author comments |
+| `arxiv:proxy` | Proxy submission text |
+| `arxiv:report-no` | Report number text |
+| `arxiv:acm-class` | ACM classification text |
+| `arxiv:msc-class` | Mathematics Subject Classification text |
+| `arxiv:journal-ref` | Journal reference text |
+| `arxiv:doi` | DOI text; not a normalized DOI list |
+| `arxiv:license` | License value supplied by arXiv |
+| `arxiv:abstract` | Abstract text |
+| `@xsi:schemaLocation` | XML schema-location attribute on `arxiv:arXivRaw` |
+| `arxiv:version[].@version` | Version label supplied in the XML attribute |
+| `arxiv:version[].arxiv:date` | Original version date text |
+| `arxiv:version[].arxiv:size` | Original version size text; not parsed as a numeric byte count |
+| `arxiv:version[].arxiv:source_type` | Original version source-type text |
+
+All scalar values above are Arrow **`Utf8`**, not `LargeUtf8`, numeric, date or
+list values. Missing optional scalar values are null. Set memberships and
+version history retain list types even with one entry; an existing container
+with no matching entries yields an empty list. The namespace URI selects XML
+fields, while the Arrow names shown above use the fixed `oai`, `arxiv` and `xsi`
+prefixes regardless of the input XML's prefix spelling.
+
+Every emitted content row contains the matching complete OAI record. Separately
+harvested typed OAI records have `oai:header` and `oai:metadata` as their top-level
+columns, without the outer content `metadata` wrapper. Deleted OAI records retain
+their header and have null inner `oai:metadata`; the outer struct remains present.
+The legacy raw-PDF snapshot join uses the caller's snapshot schema instead of
+this fixed content schema.
+
+`data_type` is a separate top-level string column alongside `data`; the two are
+not wrapped in a Struct. It tags each row's binary payload, so consumers need not
+infer its representation from the Arrow binary type. The existing `format`
+column remains available. In the current explicit-format readers, both tags
+agree. This schema addition does not enable provider-level cell fallback yet.
+
+Consumers with the previous fixed eight-field schema must accept the appended
+non-null `data_type: LargeUtf8` field. Row identity, byte contents, provenance and
+existing column positions remain unchanged.
+
+PDF uses `kind=pdf`; LaTeX uses `kind=source` and filters attachments. XML reads
+a caller-owned source inventory whose TAR article members end in `.xml`: arXiv does
+not expose an official XML full-text bulk manifest, and this reader does not
+synthesize XML from PDF/TeX or treat OAI bibliographic metadata as full text.
+The XML mirror uses the existing source-inventory layout; no new provider
+manifest is introduced. XML bytes are retained without projecting document-specific XML fields into
+the common schema. PDF/XML bytes are whole outer members; LaTeX files are
+expanded from their source package. Both identities remain explicit.
+
+Content handling is split into `arxiv/pdf/`, `arxiv/xml/` and `arxiv/latex/`.
+Each directory owns its format reader. The shared `content.rs` dispatches to
+these readers and handles the common schema, projection, metadata join and
+partition scheduling. PDF and XML readers preserve whole member bytes; the
+LaTeX reader streams source-package expansion and filters ancillary files.
+
+The lower-level `records()` retains raw archive rows, and `article_records()` /
+`open_source_package()` retain their artifact-byte contracts. Those transport
+APIs are distinct from the common content output; conversion integrations
+should select `content(format)` rather than emitting those raw schemas.
+
+## Automatic content metadata
+
+```rust
+let records = ArxivService::new(storage).records().content(ArxivContentFormat::Pdf);
+let mut reader = records.open(
+    ArxivReadRequest::new(ArxivKind::Pdf).with_shard("pdf/arXiv_pdf_2410_001.tar"),
+).await?;
+while let Some(batch) = reader.next().await? {
+    assert_eq!(batch["metadata"].null_count(), 0);
+}
+```
+
+PDF, LaTeX and XML content automatically request matching `arXivRaw` metadata
+via OAI `GetRecord`. No `with_metadata` call is required. Lookups are lazy;
+legacy IDs regain the OAI slash, and every TeX row receives the complete record.
+Deleted records retain their header with null inner metadata. Missing, malformed,
+mismatched and failed responses fail the scan, even if metadata is projected away.
+
+Services and their clones share an article metadata cache, including concurrent
+lookups for the same article. The resolver uses the shared `Connection` directly;
+request pacing, retry and timeout policies are caller-owned. Configure the
+connection/transport to follow the [arXiv rate limit](https://info.arxiv.org/help/api/tou.html),
+and pass it with `ArxivService::with_metadata_connection(connection)`.
+
+Online metadata is the latest OAI record, including version history. For bulk or
+offline jobs, a reconciled typed snapshot pins metadata and avoids per-article HTTP:
+
+```rust
+let index = std::sync::Arc::new(ArxivMetadataIndex::from_oai_records(snapshot)?);
+let records = service.records().content(format).with_metadata(index)?;
+```
+
+Harvest snapshot batches with `ArxivMetadataService::inferred_record_format()`,
+follow continuation tokens, reconcile updates and concatenate selected batches.
+OAI dates select updates, not submission months. Duplicate/null IDs and incompatible
+schemas are rejected; missing snapshot matches fail without network fallback.
+The legacy raw-PDF join still accepts arbitrary caller snapshot schemas.
+
+## LaTeX-only bulk output
+
+`service.records().content(ArxivContentFormat::Latex)` accepts `ArxivKind::Source`.
+It uses article partitions for a single selected TAR and file partitions for
+multiple TARs, as described below. It decodes gzip source payloads, detects TAR packages,
+and emits each UTF-8 `.tex` member outside any `anc/` directory. Images,
+ancillary TeX, videos, bibliography/style files and the original package are
+excluded. Multi-file manuscripts remain separate files; includes are not
+expanded and TeX is not compiled or concatenated. Single files must contain a
+LaTeX document marker. Non-LaTeX sources, packages without eligible TeX,
+invalid UTF-8 and corrupt archives fail the scan; no PDF fallback or silent
+row skipping occurs.
+
+The schema is `article_id: LargeUtf8`, `format: LargeUtf8` (`latex`),
+`shard_uri: LargeUtf8`, `entry_index: UInt64`, `entry_name: LargeBinary`,
+`source_index: UInt64`, `source_name: LargeBinary`, `data: LargeBinary`,
+`data_type: LargeUtf8` (`latex`) (all
+non-null). Outer and inner physical indices preserve duplicate-name identity.
+`article_id` is the normalized unversioned metadata key; original outer names
+retain version spelling. Modern and legacy bulk IDs are supported.
+
+Metadata is fetched and attached automatically. A preloaded typed snapshot can
+replace online lookups while retaining the same output schema.
+
+The outer reader still buffers each compressed article package. The LaTeX
+content reader shares that Arrow buffer, streams gzip/TAR decoding, and rejects
+attachments by name before reading their bodies into a buffer. Excluded members
+are consumed without constructing attachment rows. Selected TeX files are built
+directly into output batches and yielded incrementally, without buffering the
+complete decoded package or collecting all article batches first. Batches respect
+the row limit and a soft 4 MiB selected-TeX target; one complete TeX file can exceed
+that target. Single-file LaTeX remains one complete cell. Bound active scan
+partitions to control resident package and TeX memory.
+
+Consumers must read through EOF before committing output: gzip checksum,
+truncation and trailing-data errors can follow earlier content batches. The TAR
+stream drains its underlying input after the end markers so decoder trailer
+checks are not bypassed. Dropping a reader early cancels further consumption.
+Existing raw `records()` and general `open_source_package()` output are unchanged.
+
+
+## Explicit single-shard jobs
+
+`ArxivReadRequest::new(kind).with_shard("src/arXiv_src_2410_001.tar")`
+selects exactly one uncompressed TAR key relative to the service storage root.
+Raw archive planning creates one lazy shard partition with no manifest requests
+or listing. Content planning uses the member partitions described below; every
+reader still addresses only the selected object. Content and
+metadata wrappers forward the same request. Month and shard
+selectors cannot be combined; invalid/absolute/traversing keys are rejected
+before I/O. A caller-owned XML TAR can use this path without inventing an
+upstream XML distribution manifest. Keep storage credentials on the service,
+not in the shard key. TAR structural/length checks still apply; manifest size,
+MD5 and membership cannot be checked when the manifest is intentionally bypassed.
+
+## Parallel content reads inside a single shard
+
+For `records().content(format)` with an explicit shard or exactly one
+manifest-selected TAR, `TarStream` reads one input and yields an owned partition
+per regular article. Explicit shards use `open_sequential`; manifest selection
+keeps the normal storage open and manifest payload-size validation. Month filters
+apply before choosing the partition strategy. Zero selected TARs yield no partitions;
+multiple TARs retain independent file partitions for concurrent input reads.
+There is no upfront header index or per-article storage reopen. The first article
+can be processed before later headers arrive; physical entry indices and names
+are preserved.
+
+`CrawlAccessor` / `ParallelReadLayer` bounds resident articles and overlaps their
+processing with subsequent reads. For a single TAR, `read_concurrency` controls
+article processing; multiple TARs use the same window for file processing.
+Online OAI metadata lookups retain their existing serialized cache behavior;
+this change introduces no new metadata request concurrency.
+`io_concurrency` and `io_chunk_size` are forwarded for backend-managed I/O.
+Supported HTTP backends can reuse one GET; explicit splitting options may use
+chunked/concurrent requests. Consume partitions incrementally: collecting their
+openers would retain all article payloads. Shared-stream discovery is marked for
+the existing multi-file planner budget; plain accessor `open()` is sequential.
+
+Later malformed headers or storage errors remain fatal. Consume through EOF
+before committing results. Raw scans and random-access `TarArchive` are unchanged.
+Outer article payloads remain buffered; LaTeX package decoding and selected-file
+output use the streaming handler described above. Non-TeX source policy is unchanged.

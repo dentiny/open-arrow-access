@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+- Stream arXiv bulk LaTeX package decoding from the existing Arrow buffer, filter attachments before body materialization and yield batches incrementally while retaining automatic metadata enrichment.
+
+- Add the always-available integrated `ArchiveAccessor` for provider-independent TAR/single-file expansion, outer decompression, header filtering and incremental binary member batches. Sequential TAR completion drains the underlying input through EOF to surface decoder and source errors.
+
+- Stream explicit arXiv content shards once and yield owned article partitions incrementally, removing upfront header-range indexing and per-article storage reopens while overlapping input reads with bounded article processing.
+
+## 0.16.0 - 2026-11-20
+
+- Append nullable `metadata: Struct` to the common arXiv content schema, reusing the full arXivRaw OAI record schema. Current content readers leave the column null; metadata fetching and joining are not part of this schema change.
+
+## 0.15.0 - 2026-11-20
+
+- Append non-null `data_type: LargeUtf8` to the shared arXiv PDF/LaTeX/XML content schema, tagging each row's unchanged `data: LargeBinary` payload; retain the existing `format` column. Consumers of the previous eight-field content schema must accept this ninth field.
+
+- Add provider-independent typed attachment cells and `AttachmentFallbackLayer` for per-cell primary/fallback selection; arXiv provider wiring remains separate.
+- Expose pinned Semantic Scholar dataset manifests and their native file entries.
+- Release all 8 public workspace crates at 0.15.0 with matching internal dependency requirements.
+
+## 0.14.1 - 2026-11-20
+
+- Keep TAR indexing futures Send by owning the seek adapter across header-read awaits, fixing compilation of explicit-shard arXiv discovery streams.
+- Release all 8 public workspace crates at 0.14.1 with matching internal dependency requirements.
+
+## 0.14.0 - 2026-11-20
+
+- Add a common, fixed eight-column arXiv content schema for PDF, LaTeX and XML, with all content emitted as `data: LargeBinary`; keep metadata as a separate data source.
+- Extract LaTeX source members without attachments, preserving article identity and outer/inner source positions and rejecting unsupported non-LaTeX inputs.
+- Accept one explicit relative TAR shard without manifest discovery or listing.
+- Plan individual members within an explicit shard as independent scan partitions so the crawl executor can read and parse them concurrently under its existing concurrency limit. TAR header indexing remains sequential before output begins.
+- Add caller-supplied byte-source length hints to avoid repeated metadata requests, and expose validated TAR member ranges. `ByteReadRequest` struct literals must include the new `content_length` field; constructor-based callers remain compatible.
+- Release all 8 public workspace crates at 0.14.0 with matching internal dependency requirements.
+
 ## 0.13.0 - 2026-11-19
 
 - Accept arXiv manifest sizes that count member payloads without TAR framing; retain lower-bound length and TAR structural/truncation validation.

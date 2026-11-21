@@ -1,7 +1,9 @@
 # Layers
 
-Layers wrap an accessor with `AccessorExt::layer`. They preserve its Rust request
-and reader interfaces; record layers may change the Arrow schema and values.
+Stream layers wrap an accessor with `AccessorExt::layer`. They preserve its Rust
+request and reader interfaces; record layers may change Arrow schema and values.
+`AttachmentFallbackLayer` instead wraps cell accessors with `wrap` and returns a
+single typed attachment cell before any Arrow batch assembly.
 All layers in this crate are always available through `open_arrow_access::layers`.
 Byte decompression layers use the same contract but require [codec features](../decompression/README.md).
 
@@ -9,6 +11,7 @@ Byte decompression layers use the same contract but require [codec features](../
 
 | Layer | Use it for | Key behavior |
 | --- | --- | --- |
+| `AttachmentFallbackLayer` | Choose a typed attachment cell per logical item | Uses the alternate only when that cell is absent; returns one cell, not batches |
 | `MetricsLayer` | Observe byte/record reads | In-memory aggregates by default; optional OpenDAL instrumentation |
 | `SchemaEvolutionLayer` | Add computed columns, remove, rename, or cast top-level columns | Ordered DataFusion Expr / SQL operations; fixed output schema |
 | `LimitLayer` | Keep at most N rows | One budget per open; stops and releases the source at the limit |
@@ -291,3 +294,42 @@ manifest) remain fatal. A partition that already emitted rows also fails rather
 than silently returning a truncated file. Schema must be known from the underlying
 plan; a missing input required for schema inference cannot be skipped by this
 layer. Surviving partition order and configured executor budgets are preserved.
+
+## Select an attachment cell with fallback
+
+```rust,ignore
+use open_arrow_access_core::AttachmentCellAccessor;
+use open_arrow_access_layers::AttachmentFallbackLayer;
+
+let cells = AttachmentFallbackLayer::new(pdf_source).wrap(latex_source);
+let first = cells.read_cell(first_article).await?;   // Some({ latex bytes, Latex })
+let second = cells.read_cell(second_article).await?; // Some({ PDF bytes, Pdf })
+```
+
+`AttachmentCellAccessor::read_cell` returns exactly one `Option<AttachmentCell>`.
+Each cell owns `data: Bytes`, `data_type: AttachmentDataType` and optional source
+identity. Both providers accept the same logical request, including any version
+selection. Providers perform their own format-specific reading and decoding;
+the fallback helper is service-independent and has no Arrow reader/batch path.
+It uses `wrap`, not the stream-oriented `AccessorExt::layer` interface.
+
+A primary `Some(cell)` is returned unchanged. Empty bytes are an existing cell.
+`None` or a default-classified `NotFound` triggers a lazy alternate read **for
+that item only**. Two missing cells return `None`. Permission, authentication,
+transport and decoding errors propagate; `.when(...)` can explicitly classify
+other primary absence errors. Fallback errors are preserved. Wrap a fallback
+accessor to express ordered choices such as TXT → XML → PDF. Each call has its
+own state, so different rows can choose different representations concurrently.
+
+Arrow assembly happens outside the helper. For arXiv, retain the top-level
+`data: LargeBinary` content column and add a separate top-level
+`data_type: Utf8` column. For example, the first row can hold LaTeX bytes with
+`data_type="latex"`, and the second PDF bytes with `data_type="pdf"`. No Struct
+wrapper is required. This example is a provider integration contract; this
+provider-independent PR does not change the arXiv output schema itself.
+
+Use `cell.data_type.as_str()` for the tag; the Rust enum distinguishes Txt,
+Latex, Pdf, Xml, Html, Binary and a provider-defined Other value. Type tags must
+travel with the selected bytes, not be inferred from the Arrow binary type.
+A dictionary string column is another storage choice for the type tag. The
+helper does not perform text conversion, concatenation or batch-wide fallback.

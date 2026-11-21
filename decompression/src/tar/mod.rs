@@ -11,7 +11,7 @@ use futures::stream::try_unfold;
 use open_arrow_access_core::{ByteReader, Result, StreamReader};
 
 use crate::archive::{ArchiveSource, DEFAULT_MAX_ENTRY_BYTES};
-use error::{decode, missing_entry, unsupported};
+use error::{decode, missing_entry};
 use validation::{BLOCK_SIZE, entry_end, parse_entry};
 
 const DEFAULT_MAX_ENTRIES: usize = 65_536;
@@ -61,7 +61,8 @@ impl TarArchive {
     }
 
     async fn inspect(source: ArchiveSource, limits: TarLimits) -> Result<Self> {
-        let input = &source.input;
+        // Own the adapter across awaits: its buffered reader is Send, not Sync.
+        let input = source.input.clone();
         let mut offset = 0;
         let mut entries = Vec::new();
         loop {
@@ -96,6 +97,20 @@ impl TarArchive {
         self.entries.iter().map(|(entry, _)| entry)
     }
 
+    /// Whole-object length captured while indexing this fixed TAR input.
+    pub fn content_length(&self) -> u64 {
+        self.source.input.content_length()
+    }
+
+    /// Validated payload range for a regular member. Callers can use independent
+    /// source readers to fetch these ranges concurrently without sharing the
+    /// seek adapter's lock. Preserve the indexed object identity/version.
+    pub fn entry_range(&self, index: usize) -> Result<std::ops::Range<u64>> {
+        let (entry, start) = self.entries.get(index).ok_or_else(missing_entry)?;
+        validation::validate_regular_entry(entry)?;
+        Ok(*start..*start + entry.size)
+    }
+
     /// Create a bounded sequential reader without reopening storage or reparsing
     /// headers. Each reader owns its cursor and can outlive this archive.
     pub fn open_entry(
@@ -104,9 +119,7 @@ impl TarArchive {
         chunk_size: NonZeroUsize,
     ) -> Result<Box<dyn ByteReader>> {
         let (entry, start) = self.entries.get(index).ok_or_else(missing_entry)?;
-        if !entry.is_file {
-            return Err(unsupported("TAR directory entries have no file reader"));
-        }
+        validation::validate_regular_entry(entry)?;
         let mut metadata = self.source.metadata.clone();
         metadata.content_length = Some(entry.size);
         let input = self.source.input.clone();
