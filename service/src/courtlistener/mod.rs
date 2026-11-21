@@ -4,6 +4,7 @@
 
 mod copy_csv;
 mod error;
+mod object;
 mod schema;
 mod table;
 mod valdiation;
@@ -14,7 +15,8 @@ pub use table::CourtListenerTableAccessor;
 
 use std::sync::Arc;
 
-use valdiation::{parse_object, validate_snapshot, validate_table};
+use object::{SnapshotObject, parse_object};
+use valdiation::{validate_snapshot, validate_table};
 
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectRef,
@@ -95,8 +97,7 @@ impl<A: ByteAccessor> CourtListenerBulkAccessor<A> {
         Ok(objects
             .into_iter()
             .filter_map(|object| {
-                let valdiation::SnapshotObject { table: name, date } =
-                    parse_object(object.locator())?;
+                let SnapshotObject { table: name, date } = parse_object(object.locator())?;
                 (name == table).then(|| CourtListenerSnapshot {
                     table: name.into(),
                     date: date.into(),

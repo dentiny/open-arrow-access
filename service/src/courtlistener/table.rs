@@ -3,7 +3,8 @@ use super::{
     CourtListenerBulkAccessor, CourtListenerSchemas,
     copy_csv::{CopyCsv, CourtListenerCopyDialect},
     error::arrow_error,
-    valdiation::{parse_object, validate_columns, validate_header},
+    object::parse_object,
+    valdiation::{validate_columns, validate_header},
     values,
 };
 use arrow_array::{RecordBatch, StringArray};

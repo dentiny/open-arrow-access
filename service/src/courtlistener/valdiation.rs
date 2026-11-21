@@ -27,21 +27,6 @@ pub(super) fn validate_table(table: &str) -> Result<()> {
     Ok(())
 }
 
-pub(super) struct SnapshotObject<'a> {
-    pub table: &'a str,
-    pub date: &'a str,
-}
-
-pub(super) fn parse_object(locator: &str) -> Option<SnapshotObject<'_>> {
-    let stem = locator
-        .strip_prefix("bulk-data/")?
-        .strip_suffix(".csv.bz2")?;
-    let (table, date) = stem.split_at_checked(stem.len().checked_sub(11)?)?;
-    let date = date.strip_prefix('-')?;
-    validate_snapshot(table, date).ok()?;
-    Some(SnapshotObject { table, date })
-}
-
 fn is_valid_date(date: &str) -> bool {
     let bytes = date.as_bytes();
     if bytes.len() != 10
