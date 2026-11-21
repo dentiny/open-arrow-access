@@ -1,6 +1,6 @@
 //! Schema contract pinned to the exported 2026-09-30 headers and companion SQL.
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// Per-table schemas, in CSV header order. Historical variants must be supplied explicitly.
 #[derive(Clone, Debug)]
@@ -12,6 +12,12 @@ pub struct CourtListenerSchemas {
 }
 impl Default for CourtListenerSchemas {
     fn default() -> Self {
+        static DEFAULTS: OnceLock<CourtListenerSchemas> = OnceLock::new();
+        DEFAULTS.get_or_init(Self::build_default).clone()
+    }
+}
+impl CourtListenerSchemas {
+    fn build_default() -> Self {
         Self {
             opinion: vec![
                 Field::new("id", DataType::Int64, false),
@@ -201,8 +207,52 @@ impl Default for CourtListenerSchemas {
     }
 }
 impl CourtListenerSchemas {
+    /// Table schemas in opinions, clusters, dockets, courts order.
+    /// Default allocations are shared; explicitly replaced historical fields stay isolated.
+    pub fn table_schemas(&self) -> [SchemaRef; 4] {
+        static TABLES: OnceLock<[SchemaRef; 4]> = OnceLock::new();
+        let defaults = Self::default();
+        let fields = [&self.opinion, &self.cluster, &self.docket, &self.court];
+        let default_fields = [
+            &defaults.opinion,
+            &defaults.cluster,
+            &defaults.docket,
+            &defaults.court,
+        ];
+        let cached = TABLES.get_or_init(|| {
+            std::array::from_fn(|i| Arc::new(Schema::new((*default_fields[i]).clone())))
+        });
+        std::array::from_fn(|i| {
+            if same_fields(fields[i], default_fields[i]) {
+                cached[i].clone()
+            } else {
+                Arc::new(Schema::new((*fields[i]).clone()))
+            }
+        })
+    }
     /// Fixed nested output schema: one row per opinion, with nullable related structs.
+    /// Default callers share one allocation; historical overrides never enter that cache.
     pub fn schema(&self) -> SchemaRef {
+        static JOINED: OnceLock<SchemaRef> = OnceLock::new();
+        let defaults = Self::default();
+        let fields = [&self.opinion, &self.cluster, &self.docket, &self.court];
+        let default_fields = [
+            &defaults.opinion,
+            &defaults.cluster,
+            &defaults.docket,
+            &defaults.court,
+        ];
+        if fields
+            .into_iter()
+            .zip(default_fields)
+            .all(|(a, b)| same_fields(a, b))
+        {
+            JOINED.get_or_init(|| self.build_schema()).clone()
+        } else {
+            self.build_schema()
+        }
+    }
+    fn build_schema(&self) -> SchemaRef {
         Arc::new(Schema::new(vec![
             Field::new("snapshot_date", DataType::Date32, false),
             Field::new("opinion", DataType::Struct(self.opinion.clone()), false),
@@ -228,4 +278,8 @@ impl CourtListenerSchemas {
             ),
         ]))
     }
+}
+
+fn same_fields(a: &Fields, b: &Fields) -> bool {
+    std::ptr::eq(a.as_ref(), b.as_ref())
 }

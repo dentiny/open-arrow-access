@@ -255,3 +255,37 @@ fn typed_arrow_contract_preserves_entity_types_and_nullability() {
         &DataType::Date32
     );
 }
+
+#[test]
+fn default_schemas_share_once_lock_allocations_without_caching_historical_overrides() {
+    use open_arrow_access_service::courtlistener::CourtListenerSchemas;
+    let defaults = CourtListenerSchemas::default();
+    let another = CourtListenerSchemas::default();
+    assert!(std::ptr::eq(
+        defaults.opinion.as_ref(),
+        another.opinion.as_ref()
+    ));
+    assert!(Arc::ptr_eq(&defaults.schema(), &another.schema()));
+    let tables = defaults.table_schemas();
+    for (a, b) in tables.iter().zip(another.table_schemas()) {
+        assert!(Arc::ptr_eq(a, &b));
+    }
+    let mut historical = defaults.clone();
+    let mut fields = historical.opinion.to_vec();
+    fields.push(Arc::new(Field::new(
+        "historical_extra",
+        DataType::Utf8,
+        true,
+    )));
+    historical.opinion = fields.into();
+    let custom = historical.schema();
+    assert!(!Arc::ptr_eq(&custom, &defaults.schema()));
+    let DataType::Struct(children) = custom.field_with_name("opinion").unwrap().data_type() else {
+        panic!("opinion struct");
+    };
+    assert_eq!(children.len(), 23);
+    let custom_tables = historical.table_schemas();
+    assert!(!Arc::ptr_eq(&custom_tables[0], &tables[0]));
+    assert!(Arc::ptr_eq(&custom_tables[1], &tables[1]));
+    assert_eq!(defaults.table_schemas()[0].fields().len(), 22);
+}
