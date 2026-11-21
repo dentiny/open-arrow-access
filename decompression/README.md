@@ -164,8 +164,8 @@ it early cancels further consumption.
 TAR supports regular GNU/USTAR files, directories, and bounded GNU long-name
 metadata (up to 64 KiB including its NUL terminator). Long-name headers apply
 to the next returned entry and do not create content rows. Links, sparse files,
-and other extension headers remain unsupported. Default limits are 65,536 entries and 1 GiB
-per entry. Ranged inspection issues a header request per entry. Selected TAR
+and other extension headers remain unsupported. Default limits are 65,536 entries
+and 1 GiB per entry. Ranged inspection issues a header request per entry. Selected TAR
 and ZIP member readers remain sequential. Names are raw metadata; these APIs
 perform no filesystem extraction or recursive expansion.
 

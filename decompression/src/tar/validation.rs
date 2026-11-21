@@ -32,14 +32,14 @@ pub(super) fn is_long_name(bytes: &[u8]) -> bool {
         .is_gnu_longname()
 }
 
-pub(super) fn long_name(bytes: Vec<u8>) -> Result<Vec<u8>> {
-    let Some(name) = bytes.strip_suffix(&[0]) else {
+pub(super) fn long_name(mut bytes: Vec<u8>) -> Result<Vec<u8>> {
+    if bytes.pop() != Some(0) {
         return Err(decode("GNU long name must end with NUL"));
-    };
-    if name.is_empty() || name.contains(&0) {
+    }
+    if bytes.is_empty() || bytes.contains(&0) {
         return Err(decode("invalid GNU long name"));
     }
-    Ok(name.to_vec())
+    Ok(bytes)
 }
 
 pub(super) fn entry_end(start: u64, size: u64, archive_len: u64) -> Result<u64> {

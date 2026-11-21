@@ -44,8 +44,9 @@ pub struct TarEntry {
 /// One opened source and its cached entry headers. Inspection reads header blocks
 /// and skips bodies using exact ranges; there is one header request per entry.
 /// Supports regular GNU/USTAR files, directories and GNU long-name metadata.
-/// Other extension headers, sparse files and links remain unsupported. Compressed TAR requires a separate
-/// ranged representation; a sequential gzip decoder cannot supply this input.
+/// Other extension headers, sparse files and links remain unsupported. Compressed
+/// TAR requires a separate ranged representation; a sequential gzip decoder cannot
+/// supply this input.
 #[derive(Clone)]
 pub struct TarArchive {
     source: ArchiveSource,

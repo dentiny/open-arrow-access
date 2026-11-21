@@ -513,6 +513,36 @@ async fn gnu_long_names_match_in_indexed_and_sequential_reads() {
 }
 
 #[tokio::test]
+async fn cancelled_gnu_long_name_reads_resume() {
+    use futures::FutureExt;
+    use open_arrow_access_core::Bytes;
+    use open_arrow_access_decompression::tar::TarStream;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    let allowed = Arc::new(AtomicUsize::new(6));
+    let input = gated_source(
+        Bytes::from(fixture!("tar", "gnu-longname.tar").await),
+        100,
+        allowed.clone(),
+    );
+    let mut archive = TarStream::new(input, TarLimits::default());
+    // Cancel during the name payload, its padding, and the following header.
+    for chunks in [6, 7, 11] {
+        allowed.store(chunks, Ordering::SeqCst);
+        assert!(archive.next_entry().now_or_never().is_none());
+    }
+    allowed.store(usize::MAX, Ordering::SeqCst);
+    let mut member = archive.next_entry().await.unwrap().unwrap();
+    assert_eq!(member.entry.index, 0);
+    assert_eq!(member.entry.name, vec![b'x'; 120]);
+    assert_eq!(collect_bytes(member.reader.as_mut()).await.unwrap(), b"x");
+    assert!(archive.next_entry().await.unwrap().is_none());
+}
+
+#[tokio::test]
 async fn malformed_or_unbounded_gnu_names_fail_in_both_readers() {
     use open_arrow_access_decompression::tar::TarStream;
     let original = fixture!("tar", "gnu-longname.tar").await;
