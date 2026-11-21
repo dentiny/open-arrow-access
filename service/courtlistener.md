@@ -132,9 +132,9 @@ DuckDB uses its default memory and thread settings. Scratch usage scales with
 the imported date and any join/sort spill. All four inputs are imported before query output starts.
 
 Output uses a bounded one-batch channel from a blocking DuckDB query worker.
-Dropping the reader closes that channel and interrupts the query. The worker
-then releases the database and temporary directory; cleanup may finish after
-an in-flight native operation exits. EOF and query failures are terminal, with
+Dropping the reader closes that channel. The worker exits when it observes the
+closed channel and releases the database and temporary directory; an in-flight
+DuckDB operation finishes before cleanup. EOF and query failures are terminal, with
 worker failures propagated to the reader. Source-producing tasks are not spawned.
 
 Input batches target 8 MiB; individual CSV records have no byte limit.

@@ -5,9 +5,8 @@ use super::{
     source::{Database, ORDINAL},
 };
 use arrow_array::{ArrayRef, RecordBatch};
-use duckdb::{InterruptHandle, params};
+use duckdb::params;
 use open_arrow_access_core::Result;
-use std::sync::Arc;
 use tokio::{sync::mpsc, task::JoinHandle};
 
 fn quoted(name: &str) -> String {
@@ -40,7 +39,6 @@ pub(super) fn query(
     uris: Vec<String>,
     batch_size: usize,
 ) -> QueryState {
-    let interrupt = database.connection.interrupt_handle();
     let schema = schemas.schema();
     let sql = query_sql(schemas);
     let (sender, receiver) = mpsc::channel(1);
@@ -82,14 +80,12 @@ pub(super) fn query(
     QueryState {
         receiver,
         task: Some(task),
-        interrupt,
     }
 }
 
 pub(super) struct QueryState {
     receiver: mpsc::Receiver<RecordBatch>,
     task: Option<JoinHandle<Result<()>>>,
-    interrupt: Arc<InterruptHandle>,
 }
 impl QueryState {
     pub async fn next(&mut self) -> Result<Option<RecordBatch>> {
@@ -101,11 +97,5 @@ impl QueryState {
                 .map_err(|e| task_error("courtlistener_query_task", e))??;
         }
         Ok(None)
-    }
-}
-impl Drop for QueryState {
-    fn drop(&mut self) {
-        self.receiver.close();
-        self.interrupt.interrupt();
     }
 }
