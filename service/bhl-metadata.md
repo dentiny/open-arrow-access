@@ -112,8 +112,11 @@ The loaded source tables and request-level DuckDB join remain unchanged.
 
 Metadata import sends decoded Arrow batches directly through DuckDB's Arrow
 appender. Each table keeps one appender and explicitly flushes once at EOF.
-It retains lexical-row SHA-256 hashing and source ordinals; no source rows are
-filtered or reinterpreted. This removes per-cell owned String/Value creation,
+It retains lexical-row SHA-256 hashing and source order; no source rows are
+filtered or reinterpreted. Source tables store only the lexical columns, so
+decoded batches are appended without adding key or ordinal arrays. Views expose
+the table's `rowid` for ordering and calculate numeric join keys from the original
+ID columns with `bhl_id`. This removes per-cell owned String/Value creation,
 per-row appender calls, and per-batch appender recreation/flush. Each table
 uses one blocking importer while its asynchronous byte reader runs on the
 existing runtime; all 13 import tasks are joined before returning.

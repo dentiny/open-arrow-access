@@ -1,5 +1,5 @@
 use super::{error, tables};
-use arrow_array::{Array, ArrayRef, RecordBatch, StringArray, UInt64Array};
+use arrow_array::{Array, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use duckdb::{Config, Connection};
 use futures::future::join_all;
@@ -65,7 +65,7 @@ async fn import_table(
         .join(", ");
     connection
         .execute_batch(&format!(
-            "CREATE TABLE {} (__key UBIGINT NOT NULL, __ordinal UBIGINT NOT NULL, {columns});",
+            "CREATE TABLE {} ({columns});",
             quoted(&table.name)
         ))
         .map_err(error::duckdb)?;
@@ -104,8 +104,6 @@ async fn import_table(
                         .ok_or_else(|| error::invalid("expected lexical metadata cells"))
                 })
                 .collect::<Result<Vec<_>>>()?;
-            let start = count;
-            let mut keys = Vec::with_capacity(batch.num_rows());
             for row in 0..batch.num_rows() {
                 let cells = columns
                     .iter()
@@ -116,24 +114,12 @@ async fn import_table(
                         Ok(column.value(row))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                keys.push(super::super::pages::identity::number(cells[key_column])?);
+                super::super::pages::identity::number(cells[key_column])?;
                 // Preserve the decoded lexical-row fingerprint exactly.
                 hash.update(serde_json::to_vec(&cells).map_err(error::json)?);
                 hash.update(b"\n");
                 count += 1;
             }
-            let mut fields = vec![
-                Field::new("__key", DataType::UInt64, false),
-                Field::new("__ordinal", DataType::UInt64, false),
-            ];
-            fields.extend(batch.schema().fields().iter().map(|f| f.as_ref().clone()));
-            let mut values: Vec<ArrayRef> = vec![
-                Arc::new(UInt64Array::from(keys)),
-                Arc::new(UInt64Array::from_iter_values(start..count)),
-            ];
-            values.extend(batch.columns().iter().cloned());
-            let batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), values)
-                .map_err(error::arrow)?;
             appender.append_record_batch(batch).map_err(error::duckdb)?;
         }
         // Appender::drop suppresses write errors; flush once, explicitly.
@@ -144,10 +130,11 @@ async fn import_table(
     .await
     .map_err(error::task)??;
     tokio::task::spawn_blocking(move || {
+        let key = quoted(table.fields[table.key].name());
         if table.single {
             let duplicate = connection.query_row(
                 &format!(
-                    "SELECT __key FROM {} GROUP BY __key HAVING count(*) > 1 LIMIT 1",
+                    "SELECT bhl_id({key}) AS numeric_key FROM {} GROUP BY numeric_key HAVING count(*) > 1 LIMIT 1",
                     quoted(&table.name)
                 ),
                 [],
@@ -175,7 +162,7 @@ async fn import_table(
             .join(", ");
         connection
             .execute_batch(&format!(
-                "CREATE VIEW bhl_{} AS SELECT *, struct_pack({fields}) AS __record FROM {};",
+                "CREATE VIEW bhl_{} AS SELECT *, rowid, bhl_id({key}) AS __key, struct_pack({fields}) AS __record FROM {};",
                 table.name,
                 quoted(&table.name)
             ))

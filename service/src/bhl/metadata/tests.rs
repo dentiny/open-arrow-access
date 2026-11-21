@@ -78,19 +78,19 @@ fn read(metadata: &BhlMetadata, paths: &[&str]) -> Vec<BhlPageMetadata> {
 #[tokio::test]
 async fn joins_pages_and_preserves_source_values_and_relation_order() {
     let metadata = load().await;
-    // Multiple independent relations, duplicate creators, and source ordinals
-    // that differ from insertion order catch multiplication and ordering bugs.
+    // Multiple independent relations and duplicate creators catch multiplication
+    // bugs; insertion order must survive the joins and list aggregations.
     metadata
         .connection
         .lock()
         .unwrap()
         .execute_batch(
-            "INSERT INTO creator VALUES (1, 2, '1', '10', 'Author', 'Second', '');
-         INSERT INTO creator VALUES (1, 1, '1', '9', '', '', '');
-         INSERT INTO creatoridentifier VALUES (10, 2, '10', '', 'other', '');
-         INSERT INTO subject VALUES (1, 2, '1', 'z', '');
-         INSERT INTO subject VALUES (1, 1, '1', 'a', '');
-         INSERT INTO partpage VALUES (8, 2, '8', '3', '2', '1', '');",
+            "INSERT INTO creator VALUES ('1', '9', '', '', '');
+         INSERT INTO creator VALUES ('1', '10', 'Author', 'Second', '');
+         INSERT INTO creatoridentifier VALUES ('10', '', 'other', '');
+         INSERT INTO subject VALUES ('1', 'a', '');
+         INSERT INTO subject VALUES ('1', 'z', '');
+         INSERT INTO partpage VALUES ('8', '3', '2', '1', '');",
         )
         .unwrap();
     let rows = read(&metadata, &[ITEM, PART, MISSING]);
@@ -171,10 +171,10 @@ async fn item_title_associations_preserve_all_records_without_multiplying_pages(
         .lock()
         .unwrap()
         .execute_batch(
-            "INSERT INTO subject VALUES (1, 0, '1', 'first subject', '');
-         INSERT INTO subject VALUES (42, 1, '42', 'second subject', '');
-         INSERT INTO creator VALUES (1, 1, '1', '9', '', '', '');
-         INSERT INTO creator VALUES (42, 1, '42', '10', 'Author', 'Other author', '');",
+            "INSERT INTO subject VALUES ('1', 'first subject', '');
+         INSERT INTO subject VALUES ('42', 'second subject', '');
+         INSERT INTO creator VALUES ('1', '9', '', '', '');
+         INSERT INTO creator VALUES ('42', '10', 'Author', 'Other author', '');",
         )
         .unwrap();
     let rows = read(&metadata, &[ITEM, PART]);
@@ -201,7 +201,7 @@ async fn item_title_associations_preserve_all_records_without_multiplying_pages(
         .connection
         .lock()
         .unwrap()
-        .execute_batch("DELETE FROM title WHERE __key = 42")
+        .execute_batch("DELETE FROM title WHERE bhl_id(TitleID) = 42")
         .unwrap();
     assert_eq!(read(&metadata, &[ITEM])[0].missing, ["title:42"]);
 }
@@ -215,7 +215,7 @@ async fn reports_conflicts_and_falls_back_to_partpage_parent() {
         .unwrap()
         .execute_batch(
             "UPDATE part SET ItemID = '7';
-         INSERT INTO partpage VALUES (8, 1, '8', '3', '9', '2', '');",
+         INSERT INTO partpage VALUES ('8', '3', '9', '2', '');",
         )
         .unwrap();
     let row = read(&metadata, &[PART]).pop().unwrap();
