@@ -339,7 +339,7 @@ Enable facade feature `service-bhl`. BHL source access is limited to AWS Open Da
 | `open_data_bucket_operator()` | Anonymous, bucket-root S3 storage for bhl-open-data in us-east-2 |
 | `BhlOpenData::discover(ListRequest)` | Scoped object discovery, without downloading bodies |
 | `BhlOpenData::partition(keys)` | Explicit independent object membership for native file-set planning |
-| `BhlPageAccessor` | Read OCR pages with supplied metadata (`new`) or streaming DuckDB joins (`from_metadata`) |
+| `BhlPageAccessor` | Read OCR pages with supplied metadata (`new`) or DuckDB-joined metadata (`from_metadata`) |
 | `BhlPageRecord::into_batch()` | Assign and validate one complete page record, including metadata |
 
 Automatic corpus inventory grouping remains separate work. BHL includes

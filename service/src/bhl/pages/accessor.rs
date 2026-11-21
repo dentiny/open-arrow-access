@@ -44,8 +44,8 @@ impl<A> BhlPageAccessor<A> {
         )
     }
 
-    /// Use the loaded DuckDB tables: execute one join per request and stream
-    /// each resulting page into an independent OCR read partition.
+    /// Execute one synchronous join per request on first read, buffer its
+    /// metadata rows, then create independent OCR read partitions.
     /// `report` sees each page's missing/conflicting joins before its OCR read;
     /// return an error to stop the scan, or Ok(()) to retain the page.
     pub fn from_metadata(

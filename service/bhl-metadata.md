@@ -78,21 +78,22 @@ while let Some(batch) = reader.next().await? {
 ```
 
 The reader runs one join SQL for the entire request when consumption begins.
-Each emitted metadata row becomes one independent OCR partition under the
+Each selected metadata row becomes one independent OCR partition under the
 shared scan executor. One-row batches retain the fixed nine-column page schema,
 original binary/empty OCR bytes, caller byte I/O options, source object identity
 and snapshot ID. Metadata fingerprints/source counts are attached automatically;
 `with_schema_metadata` merges additional caller provenance. The existing
 `BhlPageAccessor::new` still accepts a custom metadata provider.
 
-The DuckDB worker emits rows into an unbounded channel with non-blocking sends.
-Pending rows can accumulate if OCR reading is slower than the query, consistent
-with V1's sufficient-memory assumption. Dropping discovery/the reader closes the
-channel. SQL is not interrupted; the producer exits when it next tries to emit
-a row or completes the query. Query failures propagate
-through the reader, while report callback failures stop before the rejected
-page's OCR read. Accepted pages with missing joins retain null children and
-still emit their OCR record. Reports are delivered to the caller callback;
+On first read, the caller's thread executes the synchronous DuckDB query and
+buffers metadata for the selected request in a Vec. OCR partitions then consume
+those rows. The reader uses no query worker, channel or `spawn_blocking`; the
+SQL call occupies the current thread until it finishes. V1 assumes enough
+memory for the request's metadata as well as the loaded source tables.
+
+Query failures propagate through the reader. Report callback failures stop
+before that page's OCR read. Accepted pages with missing joins retain null
+children and still emit their OCR record. Reports go to the caller callback;
 they are not accumulated into schema metadata.
 
 Sequential reads follow request order, including duplicates. The scan remains
