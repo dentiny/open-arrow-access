@@ -54,7 +54,9 @@ async fn read_opinions(storage: OpenDalAccessor) -> Result<()> {
 }
 ```
 
-Timestamps become UTC microsecond values, dates become `Date32`, booleans and
+Scalar conversion uses Arrow strict casts (`safe=false`), with COPY-specific
+boolean/precision checks; no JSON intermediate rows or custom typed-array
+builders are used. Timestamps become UTC microsecond values, dates become `Date32`, booleans and
 numeric IDs/codes/counts use explicit numeric types, and text identifiers such
 as court IDs retain leading zeros. The parser distinguishes unquoted NULL from
 quoted empty strings and supports COPY backslash escaping and multiline fields.
