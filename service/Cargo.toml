@@ -15,8 +15,8 @@ arxiv = [
     "open-arrow-access-decompression/tar",
     "open-arrow-access-decompression/gzip",
 ]
-bhl = [ "opendal/services-s3", "dep:arrow-array", "dep:arrow-schema"]
-bhl-metadata = ["bhl", "dep:rusqlite", "dep:sha2", "dep:regex", "dep:thiserror", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip", "open-arrow-access-file-format/csv"]
+bhl = ["opendal/services-s3", "dep:arrow-array", "dep:arrow-schema"]
+bhl-metadata = ["bhl", "dep:sha2", "dep:regex", "dep:open-arrow-access-decompression", "open-arrow-access-decompression/gzip", "open-arrow-access-file-format/csv"]
 biorxiv = ["meca", "dep:chrono"]
 courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2"]
 dataverse = []
@@ -74,10 +74,8 @@ format-xml = [
 oai = ["format-xml"]
 
 [dependencies]
-rusqlite = { version = "0.37", default-features = false, features = ["bundled"], optional = true }
 sha2 = { version = "0.11", optional = true }
 regex = { workspace = true, optional = true }
-thiserror = { workspace = true, optional = true }
 
 arrow-array = { workspace = true, optional = true }
 arrow-json = { workspace = true, optional = true }
@@ -107,7 +105,6 @@ url.workspace = true
 arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
-flate2.workspace = true
 more-asserts.workspace = true
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = [
     "csv",

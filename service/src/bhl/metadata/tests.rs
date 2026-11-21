@@ -1,118 +1,28 @@
 use super::*;
 use arrow_array::{Array, LargeStringArray, ListArray};
-use flate2::{Compression, write::GzEncoder};
+use open_arrow_access_core::{Accessor, ErrorKind};
 use open_arrow_access_storage::OpenDalAccessor;
-use open_arrow_access_test_support::temp_fs;
-use std::{collections::BTreeMap, io::Write};
+use open_arrow_access_test_support::{fixture, temp_fs};
 
-async fn fixture() -> (tempfile::TempDir, std::path::PathBuf, BhlMetadataInfo) {
-    let rows: BTreeMap<&str, Vec<Vec<(&str, &str)>>> = BTreeMap::from([
-        (
-            "title",
-            vec![vec![
-                ("TitleID", "001"),
-                ("FullTitle", "Original \"title\" 遗传"),
-            ]],
-        ),
-        (
-            "item",
-            vec![vec![
-                ("ItemID", "2"),
-                ("TitleID", "1"),
-                ("RightsStatement", "Source rights"),
-            ]],
-        ),
-        (
-            "page",
-            vec![vec![
-                ("PageID", "3"),
-                ("ItemID", "2"),
-                ("SequenceOrder", "5"),
-            ]],
-        ),
-        (
-            "part",
-            vec![vec![
-                ("PartID", "8"),
-                ("ItemID", "2"),
-                ("SequenceOrder", "900"),
-                ("RightsStatement", "Part rights"),
-            ]],
-        ),
-        (
-            "partpage",
-            vec![vec![
-                ("PartID", "8"),
-                ("PageID", "3"),
-                ("ItemID", "2"),
-                ("SequenceOrder", "1"),
-            ]],
-        ),
-        ("creator", vec![vec![("TitleID", "1"), ("CreatorID", "9")]]),
-        (
-            "partcreator",
-            vec![vec![("PartID", "8"), ("CreatorID", "9")]],
-        ),
-        (
-            "creatoridentifier",
-            vec![
-                vec![("CreatorID", "9"), ("IdentifierValue", "same")],
-                vec![("CreatorID", "9"), ("IdentifierValue", "same")],
-            ],
-        ),
-        (
-            "doi",
-            vec![
-                vec![
-                    ("EntityType", "Title"),
-                    ("EntityID", "1"),
-                    ("DOI", "title DOI"),
-                ],
-                vec![
-                    ("EntityType", "Part"),
-                    ("EntityID", "1"),
-                    ("DOI", "wrong entity"),
-                ],
-            ],
-        ),
-    ]);
-    let files = tables()
-        .into_iter()
-        .map(|table| {
-            let mut content = table
-                .fields
-                .iter()
-                .map(|f| f.name().as_str())
-                .collect::<Vec<_>>()
-                .join("\t")
-                + "\n";
-            for row in rows.get(table.name.as_str()).into_iter().flatten() {
-                let values = row.iter().copied().collect::<BTreeMap<_, _>>();
-                content += &(table
-                    .fields
-                    .iter()
-                    .map(|f| values.get(f.name().as_str()).copied().unwrap_or(""))
-                    .collect::<Vec<_>>()
-                    .join("\t")
-                    + "\n");
-            }
-            let mut gzip = GzEncoder::new(Vec::new(), Compression::fast());
-            gzip.write_all(content.as_bytes()).unwrap();
-            (
-                format!("data/{}.txt.gz", table.name),
-                gzip.finish().unwrap(),
-            )
-        })
-        .collect::<Vec<_>>();
+async fn source(title: &str) -> (tempfile::TempDir, OpenDalAccessor) {
+    let mut files = Vec::new();
+    for table in tables() {
+        let filename = if table.name == "title" {
+            title.to_owned()
+        } else {
+            format!("{}.txt.gz", table.name)
+        };
+        files.push((
+            format!("data/{}.txt.gz", table.name),
+            fixture!("bhl-metadata", &filename).await,
+        ));
+    }
     let borrowed = files
         .iter()
-        .map(|(p, b)| (p.as_str(), b.as_slice()))
+        .map(|(key, bytes)| (key.as_str(), bytes.as_slice()))
         .collect::<Vec<_>>();
-    let (_source, operator) = temp_fs(&borrowed);
-    let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("metadata.sqlite");
-    let info = prepare(OpenDalAccessor::new(operator), "s3://bhl-open-data/", &path).await;
-    (root, path, info.unwrap())
+    let (root, operator) = temp_fs(&borrowed);
+    (root, OpenDalAccessor::new(operator))
 }
 fn cell<'a>(metadata: &'a StructArray, table: &str, field: &str) -> &'a str {
     metadata
@@ -129,44 +39,39 @@ fn cell<'a>(metadata: &'a StructArray, table: &str, field: &str) -> &'a str {
         .value(0)
 }
 #[tokio::test]
-async fn joins_indexed_metadata_preserves_rights_and_reports_gaps() {
-    let (_root, path, info) = fixture().await;
-    assert_eq!(inspect(&path).unwrap().fingerprint, info.fingerprint);
-    assert_eq!(info.sources.len(), 13);
+async fn joins_direct_tsv_metadata_preserves_rights_and_reports_gaps() {
+    let (root, storage) = source("title.txt.gz").await;
+    let metadata = BhlMetadata::load(storage).await.unwrap();
+    drop(root); // Selections use retained source rows and never refetch TSVs.
+    assert_eq!(metadata.info.sources.len(), 13);
+    assert_eq!(metadata.info.sources["title"].rows, 1);
     let keys = [
         "ocr/item-2/item-2-3-5.txt",
         "ocr/part-8/part-8-3-1.txt",
         "ocr/item-20/item-20-30-1.txt",
     ]
     .map(ObjectRef::new);
-    let selected = BhlPageMetadata::load(&path, &info.fingerprint, &keys).unwrap();
+    let selected = metadata.select(&keys).unwrap();
     assert!(selected.report.conflicts.is_empty());
     assert_eq!(selected.report.missing.len(), 1);
     for key in &keys[..2] {
-        let metadata = selected
+        let row = selected
             .get(&BhlPageIdentity::parse(key.locator()).unwrap())
             .unwrap();
-        assert!(!metadata.is_null(0));
-        assert_eq!(cell(&metadata, "title", "TitleID"), "001");
-        assert_eq!(
-            cell(&metadata, "title", "FullTitle"),
-            "Original \"title\" 遗传"
-        );
-        assert_eq!(cell(&metadata, "item", "RightsStatement"), "Source rights");
-        let identifiers = metadata
-            .column_by_name("creatoridentifier")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<ListArray>()
-            .unwrap();
-        assert_eq!(identifiers.value_length(0), 2);
-        let doi = metadata
-            .column_by_name("doi")
-            .unwrap()
-            .as_any()
-            .downcast_ref::<ListArray>()
-            .unwrap();
-        assert_eq!(doi.value_length(0), 1);
+        assert!(!row.is_null(0));
+        assert_eq!(cell(&row, "title", "TitleID"), "001");
+        assert_eq!(cell(&row, "title", "FullTitle"), "Original \"title\" 遗传");
+        assert_eq!(cell(&row, "title", "ShortTitle"), "");
+        assert_eq!(cell(&row, "item", "RightsStatement"), "Source rights");
+        for (table, count) in [("creatoridentifier", 2), ("doi", 1)] {
+            let values = row
+                .column_by_name(table)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<ListArray>()
+                .unwrap();
+            assert_eq!(values.value_length(0), count);
+        }
     }
     let part = selected
         .get(&BhlPageIdentity::parse(keys[1].locator()).unwrap())
@@ -177,16 +82,62 @@ async fn joins_indexed_metadata_preserves_rights_and_reports_gaps() {
         .unwrap();
     assert!(!missing.is_null(0));
     assert!(missing.column_by_name("item").unwrap().is_null(0));
-    assert!(BhlPageMetadata::load(&path, "wrong", &keys).is_err());
     let conflict = [ObjectRef::new("ocr/item-2/item-2-3-99.txt")];
-    let selected = BhlPageMetadata::load(&path, &info.fingerprint, &conflict).unwrap();
-    assert_eq!(selected.report.conflicts.len(), 1);
-    assert!(
-        BhlPageMetadata::load(
-            &path.with_file_name("missing.sqlite"),
-            &info.fingerprint,
-            &keys
-        )
-        .is_err()
+    assert_eq!(
+        metadata.select(&conflict).unwrap().report.conflicts.len(),
+        1
     );
+    assert!(
+        selected
+            .get(&BhlPageIdentity::parse(conflict[0].locator()).unwrap())
+            .is_err()
+    );
+    assert_eq!(
+        selected.schema_metadata().unwrap()["bhl.metadata.fingerprint"],
+        metadata.info.fingerprint
+    );
+}
+
+#[tokio::test]
+async fn rejects_duplicate_numeric_singletons_changed_headers_and_missing_tables() {
+    for title in ["title-duplicate.txt.gz", "title-bad-header.txt.gz"] {
+        let (_root, storage) = source(title).await;
+        assert!(BhlMetadata::load(storage).await.is_err(), "{title}");
+    }
+    let (_root, operator) = temp_fs(&[]);
+    let error = BhlMetadata::load(OpenDalAccessor::new(operator))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::NotFound);
+}
+
+#[tokio::test]
+async fn assigns_joined_values_to_page_records() {
+    use crate::{FileSetRequest, bhl::BhlPageAccessor};
+    use open_arrow_access_test_support::MemoryAccessor;
+    let (_root, storage) = source("title.txt.gz").await;
+    let metadata = BhlMetadata::load(storage).await.unwrap();
+    let key = "ocr/item-2/item-2-3-5.txt";
+    let selected = metadata.select(&[ObjectRef::new(key)]).unwrap();
+    let provenance = selected.schema_metadata().unwrap();
+    let pages = BhlPageAccessor::new(
+        MemoryAccessor::new(b"original OCR", 64),
+        "fixture-aws",
+        move |id| selected.get(id),
+    )
+    .unwrap()
+    .with_schema_metadata(provenance);
+    let mut reader = pages.open(FileSetRequest::new([key])).await.unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    let metadata = batch["metadata"]
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .unwrap();
+    assert_eq!(
+        cell(metadata, "title", "FullTitle"),
+        "Original \"title\" 遗传"
+    );
+    assert_eq!(cell(metadata, "item", "RightsStatement"), "Source rights");
+    assert!(reader.next().await.unwrap().is_none());
 }

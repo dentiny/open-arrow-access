@@ -1,12 +1,11 @@
 use super::{
-    error::Result,
-    index::{BhlMetadataIndex as Store, BhlMetadataRow as Row},
+    source::{BhlMetadata as Store, Row},
     tables,
 };
 use crate::bhl::{BhlPageIdentity, page_schema};
 use arrow_array::StructArray;
 use arrow_schema::Schema;
-use open_arrow_access_core::RecordBatchBuilder;
+use open_arrow_access_core::{RecordBatchBuilder, Result};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -19,7 +18,7 @@ fn same(row: &Row, field: &str, value: u64) -> bool {
     id(Some(row), field) == Some(value)
 }
 fn singleton(
-    store: &mut Store,
+    store: &Store,
     table: &str,
     key: Option<u64>,
     missing: &mut Vec<String>,
@@ -35,7 +34,7 @@ fn singleton(
     Ok(rows)
 }
 fn ordered_union(
-    store: &mut Store,
+    store: &Store,
     table: &str,
     ids: impl IntoIterator<Item = u64>,
 ) -> Result<Vec<Row>> {
@@ -48,7 +47,7 @@ fn ordered_union(
     Ok(rows.into_values().collect())
 }
 pub(super) fn page(
-    store: &mut Store,
+    store: &Store,
     key: &BhlPageIdentity,
 ) -> Result<(StructArray, Vec<String>, Vec<String>)> {
     let mut missing = Vec::new();

@@ -1,19 +1,14 @@
-//! One immutable, indexed metadata snapshot shared by page conversion jobs.
-//! Preparation streams the 13 public gzip TSVs once. Job lookup reads selected
-//! IDs only; it never rescans the source corpus or invents a null metadata column.
+//! Direct AWS TSV acquisition and populated page metadata joins.
 mod error;
-mod index;
 mod join;
+mod source;
 use super::{BhlPageIdentity, page_schema};
 use arrow_array::StructArray;
 use arrow_schema::{DataType, Fields};
-pub use index::{BhlMetadataIndex, BhlMetadataInfo, BhlMetadataRow, SourceInfo};
-use open_arrow_access_core::{ByteAccessor, ObjectRef, Result};
+use open_arrow_access_core::{ObjectRef, Result};
 use serde::Serialize;
-use std::{
-    collections::{BTreeMap, HashMap, hash_map::Entry},
-    path::Path,
-};
+pub use source::{BhlMetadata, BhlMetadataInfo, SourceInfo};
+use std::collections::{BTreeMap, HashMap, hash_map::Entry};
 
 struct Table {
     name: String,
@@ -66,24 +61,6 @@ fn tables() -> Vec<Table> {
         .collect()
 }
 
-/// Prepare one immutable local/NFS snapshot, resuming committed source tables.
-/// `storage` is rooted above the AWS `data/` objects (or a matching pinned mirror).
-/// The completed output is published exclusively; existing snapshots are never overwritten.
-/// Keep this file on shared worker storage and pass its fingerprint with each job.
-pub async fn prepare<A: ByteAccessor + 'static>(
-    storage: A,
-    source_root: &str,
-    output: &Path,
-) -> Result<BhlMetadataInfo> {
-    index::prepare(storage, source_root, output)
-        .await
-        .map_err(Into::into)
-}
-/// Inspect the completed read-only snapshot without fetching source tables.
-pub fn inspect(path: &Path) -> Result<BhlMetadataInfo> {
-    BhlMetadataIndex::open(path).map(|store| store.info)
-}
-
 #[derive(Default, Serialize)]
 pub struct BhlMetadataReport {
     pub missing: BTreeMap<String, Vec<String>>,
@@ -95,21 +72,16 @@ pub struct BhlPageMetadata {
     pub info: BhlMetadataInfo,
     pub report: BhlMetadataReport,
 }
-impl BhlPageMetadata {
-    /// Indexed local/NFS I/O. Call from a blocking worker, not a Tokio reactor.
-    /// Both the preparation format and caller's expected fingerprint are checked.
-    pub fn load(path: &Path, fingerprint: &str, keys: &[ObjectRef]) -> Result<Self> {
-        let mut store = BhlMetadataIndex::open(path)?;
-        if store.info.fingerprint != fingerprint {
-            return Err(error::invalid("metadata snapshot fingerprint mismatch").into());
-        }
+impl BhlMetadata {
+    /// Join selected OCR page identities from the already-loaded AWS source rows.
+    /// Gaps/conflicts are retained in the report; the outer metadata is populated.
+    pub fn select(&self, keys: &[ObjectRef]) -> Result<BhlPageMetadata> {
         let mut rows = HashMap::new();
         let mut report = BhlMetadataReport::default();
         for key in keys {
             let identity = BhlPageIdentity::parse(key.locator())?;
             if let Entry::Vacant(entry) = rows.entry(identity) {
-                let (metadata, missing, conflicts) = join::page(&mut store, entry.key())
-                    .map_err(open_arrow_access_core::Error::from)?;
+                let (metadata, missing, conflicts) = join::page(self, entry.key())?;
                 if !missing.is_empty() {
                     report.missing.insert(key.locator().into(), missing);
                 }
@@ -119,17 +91,19 @@ impl BhlPageMetadata {
                 entry.insert(metadata);
             }
         }
-        Ok(Self {
+        Ok(BhlPageMetadata {
             rows,
-            info: store.info,
+            info: self.info.clone(),
             report,
         })
     }
+}
+impl BhlPageMetadata {
     pub fn get(&self, identity: &BhlPageIdentity) -> Result<StructArray> {
         self.rows
             .get(identity)
             .cloned()
-            .ok_or_else(|| error::invalid("page is outside metadata selection").into())
+            .ok_or_else(|| error::invalid("page is outside metadata selection"))
     }
     pub fn schema_metadata(&self) -> Result<HashMap<String, String>> {
         Ok(HashMap::from([
@@ -139,17 +113,14 @@ impl BhlPageMetadata {
             ),
             (
                 "bhl.metadata.sources".into(),
-                serde_json::to_string(&self.info.sources).map_err(error::Error::from)?,
+                serde_json::to_string(&self.info.sources).map_err(error::json)?,
             ),
             (
                 "bhl.metadata.reconciliation".into(),
-                serde_json::to_string(&self.report).map_err(error::Error::from)?,
+                serde_json::to_string(&self.report).map_err(error::json)?,
             ),
         ]))
     }
 }
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod index_tests;

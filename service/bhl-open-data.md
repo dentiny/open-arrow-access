@@ -104,36 +104,10 @@ objects. Raw bytes remain unchanged, including blank/empty pages and invalid
 UTF-8. The merged binary output has only `data`; keys remain in the bound
 inventory/per-partition reader metadata, not an invented provenance column.
 
-Generic object reads remain a byte-access layer. For structured page conversion,
-enable `service-bhl-metadata`: `bhl::metadata::prepare(storage, source_root, path)`
-streams all 13 `data/*.txt.gz` TSV tables into one SQLite snapshot on local/shared
-storage. Headers must match the fixed 104-field schema, cells remain lexical
-strings, and duplicate numeric singleton IDs fail preparation. Completed tables
-can resume after interruption; use one preparer per output path. Publication is
-exclusive and an existing completed snapshot is never overwritten.
-
-Prepare once, then give each job the same absolute worker-visible path and
-`BhlMetadataInfo.fingerprint`. `BhlPageMetadata::load(path, fingerprint, objects)`
-does indexed lookups only for the selected OCR pages. Run this synchronous local
-I/O on a blocking worker. Pass `move |identity| metadata.get(identity)` to
-`BhlPageAccessor::new` and attach `metadata.schema_metadata()` using
-`with_schema_metadata` before moving the provider into the closure.
-
-Item pages join page/item/title; part pages additionally join part and matching
-partpage, resolving the parent item from part, partpage, then page. Related
-authors, identifiers, subjects, names and DOI rows retain source order and
-duplicates. DOI joins use both entity type and numeric ID. Original rights are
-preserved independently on item and part. Missing singleton rows become null
-children and missing relation rows become empty lists, while the outer metadata
-struct is always assigned. Missing joins and parent/sequence conflicts appear in
-`bhl.metadata.reconciliation`; rows and OCR bytes are retained.
-
-The snapshot records all source paths, counts and SHA-256 hashes of canonical
-JSON cell rows, plus a combined fingerprint. These are decoded-content hashes,
-not compressed-object hashes or AWS version IDs. Acquisition spans a time
-window, including resumed tables; it does not promise an atomic AWS export.
-Keep the published SQLite file immutable and accessible at the identical path on
-every worker. Jobs fail on missing/incomplete snapshots or fingerprint mismatch.
+This is the AWS partition/byte-access layer, not the proposed fully joined BHL
+page schema. Parsed page IDs, source/snapshot columns and the complete metadata
+struct require a separate record mapping/enrichment step before Lance writes.
+Generic object reads do not claim that mapping is already implemented.
 
 ## Validation
 
@@ -163,3 +137,19 @@ provider errors and schema mismatches fail explicitly. Native partitions use the
 shared scan executor. `with_schema_metadata` retains caller provenance in the
 plan and emitted batch schemas. This API is the reader foundation for separate
 TSV metadata acquisition and join changes.
+
+## Direct TSV metadata joins
+
+Enable `service-bhl-metadata` and load `BhlMetadata::load(storage).await` once
+from bucket-root storage. It streams the 13 AWS gzip TSV tables into in-memory
+lookup maps, preserving lexical cells and rejecting changed headers or duplicate
+singleton IDs. There is no database or persisted index. Retained source rows must
+fit memory; reuse the loaded value across page selections/jobs.
+
+`metadata.select(&page_keys)` joins page/item/title/part and related fields into
+the required metadata StructArray. Pass `move |identity| selected.get(identity)`
+to the page reader, attaching `selected.schema_metadata()` before moving the
+selection into the provider. Missing joins and conflicting parents/sequences are
+reported in reconciliation metadata while retaining the OCR page. Item and part
+rights remain separate. See [direct metadata joins](bhl-metadata.md) for the
+complete contract, provenance and memory requirements.
