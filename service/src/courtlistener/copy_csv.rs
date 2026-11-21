@@ -203,7 +203,7 @@ mod tests {
     #[tokio::test]
     async fn copy_quoting_nulls_crlf_and_multiline_survive_one_byte_chunks() {
         let mut csv = parser(
-            b"a,b,c,d\r\n,\"\",\"line1\nline2\",\"quote\\\" and slash\\\\\"\r\n",
+            include_bytes!("../../../testdata/courtlistener/copy-csv/quoting-nulls-multiline.csv"),
             1024,
         )
         .await;
@@ -229,7 +229,11 @@ mod tests {
     }
     #[tokio::test]
     async fn explicit_historical_dialects_support_backticks_and_doubled_quotes() {
-        let mut csv = parser(b"`a\\`b`,``\n", 1024).await;
+        let mut csv = parser(
+            include_bytes!("../../../testdata/courtlistener/copy-csv/backtick-escape.csv"),
+            1024,
+        )
+        .await;
         csv.dialect = CourtListenerCopyDialect {
             quote: b'`',
             escape: b'\\',
@@ -238,7 +242,11 @@ mod tests {
             csv.row().await.unwrap().unwrap(),
             vec![Some("a`b".into()), Some("".into())]
         );
-        let mut csv = parser(b"\"a\"\"b\"", 1024).await;
+        let mut csv = parser(
+            include_bytes!("../../../testdata/courtlistener/copy-csv/doubled-quotes.csv"),
+            1024,
+        )
+        .await;
         csv.dialect = CourtListenerCopyDialect {
             quote: b'"',
             escape: b'"',
@@ -256,12 +264,24 @@ mod tests {
     #[tokio::test]
     async fn malformed_and_oversized_records_fail() {
         for raw in [
-            b"\"unterminated".as_slice(),
-            b"\"closed\"garbage\n",
-            b"a\"b\n",
+            include_bytes!("../../../testdata/courtlistener/copy-csv/unterminated-quote.csv")
+                .as_slice(),
+            include_bytes!("../../../testdata/courtlistener/copy-csv/characters-after-quote.csv")
+                .as_slice(),
+            include_bytes!("../../../testdata/courtlistener/copy-csv/unquoted-quote.csv")
+                .as_slice(),
         ] {
             assert!(parser(raw, 1024).await.row().await.is_err());
         }
-        assert!(parser(b"abcdefgh\n", 4).await.row().await.is_err());
+        assert!(
+            parser(
+                include_bytes!("../../../testdata/courtlistener/copy-csv/oversized-record.csv"),
+                4
+            )
+            .await
+            .row()
+            .await
+            .is_err()
+        );
     }
 }

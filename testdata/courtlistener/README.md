@@ -24,3 +24,10 @@ cargo test --locked -p open-arrow-access-service --no-default-features --feature
 
 Read fixtures directly or through the shared memory accessor. Preserve exact
 bytes; the [fixture policy](../README.md) covers new cases and fault injection.
+
+## COPY CSV parser fixtures
+
+`copy-csv/` contains synthetic parser inputs for quoted empty strings versus
+unquoted NULLs, CRLF and multiline fields, backslash and doubled-quote escapes,
+malformed quoting, and record size limits. Preserve their exact bytes, including
+line endings and missing final newlines. Tests read them with `include_bytes!`.
