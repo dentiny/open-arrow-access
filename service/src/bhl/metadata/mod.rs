@@ -30,13 +30,13 @@ fn tables() -> Vec<Table> {
     children
         .iter()
         .map(|child| {
-            let (fields, single) = match child.data_type() {
-                DataType::Struct(fields) => (fields.clone(), true),
+            let fields = match child.data_type() {
+                DataType::Struct(fields) => fields.clone(),
                 DataType::List(element) => {
                     let DataType::Struct(fields) = element.data_type() else {
                         unreachable!()
                     };
-                    (fields.clone(), false)
+                    fields.clone()
                 }
                 _ => unreachable!(),
             };
@@ -57,7 +57,7 @@ fn tables() -> Vec<Table> {
                 name: child.name().clone(),
                 fields,
                 key,
-                single,
+                single: matches!(child.name().as_str(), "title" | "page" | "part"),
             }
         })
         .collect()

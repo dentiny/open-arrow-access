@@ -1,7 +1,7 @@
 use super::{error, tables};
 use arrow_array::{Array, StringArray};
 use arrow_schema::{DataType, Field, Schema};
-use duckdb::{Config, Connection, appender_params_from_iter, types::Value};
+use duckdb::{Config, Connection};
 use futures::future::join_all;
 use open_arrow_access_core::{Accessor, AccessorExt, ByteAccessor, ReadRequest, Result};
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
@@ -53,7 +53,7 @@ fn quoted(name: &str) -> String {
 }
 
 async fn import_table(
-    mut connection: Connection,
+    connection: Connection,
     input: Arc<dyn ByteAccessor>,
     table: super::Table,
 ) -> Result<(String, SourceInfo)> {
@@ -65,7 +65,7 @@ async fn import_table(
         .join(", ");
     connection
         .execute_batch(&format!(
-            "CREATE TABLE {} (__key UBIGINT NOT NULL, __ordinal UBIGINT NOT NULL, {columns});",
+            "CREATE TABLE {} ({columns});",
             quoted(&table.name)
         ))
         .map_err(error::duckdb)?;
@@ -85,13 +85,15 @@ async fn import_table(
     let csv = CsvAccessor::new(input, schema).with_format(format);
     let path = format!("data/{}.txt.gz", table.name);
     let mut reader = csv.open(ReadRequest::new(path.clone())).await?;
-    let mut count = 0u64;
-    let mut hash = Sha256::new();
-    while let Some(batch) = reader.next().await? {
-        let name = table.name.clone();
-        let key_column = table.key;
-        (connection, count, hash) = tokio::task::spawn_blocking(move || {
-            let mut appender = connection.appender(&name).map_err(error::duckdb)?;
+    let import_name = table.name.clone();
+    let key_column = table.key;
+    let (connection, count, hash) = tokio::task::spawn_blocking(move || {
+        let mut count = 0u64;
+        let mut hash = Sha256::new();
+        let mut appender = connection.appender(&import_name).map_err(error::duckdb)?;
+        // Keep one appender for the table. Network reads remain asynchronous on
+        // the runtime while this blocking importer owns DuckDB's native state.
+        while let Some(batch) = futures::executor::block_on(reader.next())? {
             let columns = batch
                 .columns()
                 .iter()
@@ -112,30 +114,27 @@ async fn import_table(
                         Ok(column.value(row))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let key = super::super::pages::identity::number(cells[key_column])?;
+                super::super::pages::identity::number(cells[key_column])?;
+                // Preserve the decoded lexical-row fingerprint exactly.
                 hash.update(serde_json::to_vec(&cells).map_err(error::json)?);
                 hash.update(b"\n");
-                let values = [Value::UBigInt(key), Value::UBigInt(count)]
-                    .into_iter()
-                    .chain(cells.into_iter().map(|cell| Value::Text(cell.into())));
-                appender
-                    .append_row(appender_params_from_iter(values))
-                    .map_err(error::duckdb)?;
                 count += 1;
             }
-            // Flush explicitly: Appender::drop suppresses write errors.
-            appender.flush().map_err(error::duckdb)?;
-            drop(appender);
-            Ok::<_, open_arrow_access_core::Error>((connection, count, hash))
-        })
-        .await
-        .map_err(error::task)??;
-    }
+            appender.append_record_batch(batch).map_err(error::duckdb)?;
+        }
+        // Appender::drop suppresses write errors; flush once, explicitly.
+        appender.flush().map_err(error::duckdb)?;
+        drop(appender);
+        Ok::<_, open_arrow_access_core::Error>((connection, count, hash))
+    })
+    .await
+    .map_err(error::task)??;
     tokio::task::spawn_blocking(move || {
+        let key = quoted(table.fields[table.key].name());
         if table.single {
             let duplicate = connection.query_row(
                 &format!(
-                    "SELECT __key FROM {} GROUP BY __key HAVING count(*) > 1 LIMIT 1",
+                    "SELECT bhl_id({key}) AS numeric_key FROM {} GROUP BY numeric_key HAVING count(*) > 1 LIMIT 1",
                     quoted(&table.name)
                 ),
                 [],
@@ -163,7 +162,7 @@ async fn import_table(
             .join(", ");
         connection
             .execute_batch(&format!(
-                "CREATE VIEW bhl_{} AS SELECT *, struct_pack({fields}) AS __record FROM {};",
+                "CREATE VIEW bhl_{} AS SELECT *, rowid, bhl_id({key}) AS __key, struct_pack({fields}) AS __record FROM {};",
                 table.name,
                 quoted(&table.name)
             ))

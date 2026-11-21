@@ -134,16 +134,11 @@ impl BhlMetadata {
                 .map_err(error::duckdb)?
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .map_err(error::duckdb)?;
-            let mut expected = vec![
-                ("__key".to_owned(), "UBIGINT".to_owned()),
-                ("__ordinal".to_owned(), "UBIGINT".to_owned()),
-            ];
-            expected.extend(
-                table
-                    .fields
-                    .iter()
-                    .map(|field| (field.name().clone(), "VARCHAR".to_owned())),
-            );
+            let expected = table
+                .fields
+                .iter()
+                .map(|field| (field.name().clone(), "VARCHAR".to_owned()))
+                .collect::<Vec<_>>();
             if actual != expected || !info.sources.contains_key(&table.name) {
                 return Err(error::invalid("snapshot source schema mismatch"));
             }

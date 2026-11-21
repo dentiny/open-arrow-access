@@ -532,8 +532,10 @@ before starting the join query; callers must consume through EOF to observe quer
 
 The reader follows BHL metadata's two stages. First, it imports the four typed
 table streams concurrently into one temporary DuckDB database, with a cloned
-connection per table and Arrow appenders. Each table is imported in one
-transaction, avoiding a commit for every input batch. It awaits every importer, including
+connection per table and Arrow appenders. Each table keeps one appender and
+flushes once after input ends. A bounded one-batch channel connects asynchronous
+reads to the blocking importer. Each table is imported in one transaction,
+committed only after reading and appending both succeed. It awaits every importer, including
 when one fails. It checks key uniqueness with SQL,
 then executes one left-join query and streams Arrow result batches out with
 DuckDB's `stream_arrow`/`step` API, following the existing BHL integration.

@@ -34,7 +34,10 @@ pub(in crate::bhl) async fn load() -> BhlMetadata {
     BhlMetadata::load(storage).await.unwrap()
 }
 
-fn cell<'a>(row: &'a StructArray, table: &str, field: &str) -> &'a str {
+fn cell(row: &StructArray, table: &str, field: &str) -> String {
+    if matches!(table, "item" | "title") {
+        return list(row, table, field).remove(0);
+    }
     row.column_by_name(table)
         .unwrap()
         .as_struct()
@@ -42,6 +45,7 @@ fn cell<'a>(row: &'a StructArray, table: &str, field: &str) -> &'a str {
         .unwrap()
         .as_string::<i64>()
         .value(0)
+        .to_owned()
 }
 
 fn list(row: &StructArray, table: &str, field: &str) -> Vec<String> {
@@ -74,19 +78,19 @@ fn read(metadata: &BhlMetadata, paths: &[&str]) -> Vec<BhlPageMetadata> {
 #[tokio::test]
 async fn joins_pages_and_preserves_source_values_and_relation_order() {
     let metadata = load().await;
-    // Multiple independent relations, duplicate creators, and source ordinals
-    // that differ from insertion order catch multiplication and ordering bugs.
+    // Multiple independent relations and duplicate creators catch multiplication
+    // bugs; insertion order must survive the joins and list aggregations.
     metadata
         .connection
         .lock()
         .unwrap()
         .execute_batch(
-            "INSERT INTO creator VALUES (1, 2, '1', '10', 'Author', 'Second', '');
-         INSERT INTO creator VALUES (1, 1, '1', '9', '', '', '');
-         INSERT INTO creatoridentifier VALUES (10, 2, '10', '', 'other', '');
-         INSERT INTO subject VALUES (1, 2, '1', 'z', '');
-         INSERT INTO subject VALUES (1, 1, '1', 'a', '');
-         INSERT INTO partpage VALUES (8, 2, '8', '3', '2', '1', '');",
+            "INSERT INTO creator VALUES ('1', '9', '', '', '');
+         INSERT INTO creator VALUES ('1', '10', 'Author', 'Second', '');
+         INSERT INTO creatoridentifier VALUES ('10', '', 'other', '');
+         INSERT INTO subject VALUES ('1', 'a', '');
+         INSERT INTO subject VALUES ('1', 'z', '');
+         INSERT INTO partpage VALUES ('8', '3', '2', '1', '');",
         )
         .unwrap();
     let rows = read(&metadata, &[ITEM, PART, MISSING]);
@@ -108,7 +112,7 @@ async fn joins_pages_and_preserves_source_values_and_relation_order() {
                 page.missing,
                 ["page:30", "item:20", "title:unresolved parent"]
             );
-            assert!(row.column_by_name("item").unwrap().is_null(0));
+            assert!(list(row, "item", "ItemID").is_empty());
             continue;
         }
         assert!(page.missing.is_empty());
@@ -152,6 +156,57 @@ async fn rejects_invalid_sources() {
 }
 
 #[tokio::test]
+async fn item_title_associations_preserve_all_records_without_multiplying_pages() {
+    let (root, storage) = source("title.txt.gz").await;
+    for table in ["item", "title"] {
+        std::fs::write(
+            root.path().join(format!("data/{table}.txt.gz")),
+            fixture!("bhl-metadata", &format!("{table}-multi-title.txt.gz")).await,
+        )
+        .unwrap();
+    }
+    let metadata = BhlMetadata::load(storage).await.unwrap();
+    metadata
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO subject VALUES ('1', 'first subject', '');
+         INSERT INTO subject VALUES ('42', 'second subject', '');
+         INSERT INTO creator VALUES ('1', '9', '', '', '');
+         INSERT INTO creator VALUES ('42', '10', 'Author', 'Other author', '');",
+        )
+        .unwrap();
+    let rows = read(&metadata, &[ITEM, PART]);
+    assert_eq!(rows.len(), 2);
+    for page in rows {
+        assert!(page.missing.is_empty());
+        assert!(page.conflicts.is_empty());
+        assert_eq!(list(&page.metadata, "item", "TitleID"), ["1", "42"]);
+        assert_eq!(list(&page.metadata, "title", "TitleID"), ["001", "42"]);
+        assert_eq!(
+            list(&page.metadata, "item", "RightsStatement"),
+            ["Source rights", "Source rights"]
+        );
+        assert_eq!(
+            list(&page.metadata, "subject", "Subject"),
+            ["first subject", "second subject"]
+        );
+        assert_eq!(
+            list(&page.metadata, "creator", "CreatorID"),
+            ["9", "9", "10"]
+        );
+    }
+    metadata
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch("DELETE FROM title WHERE bhl_id(TitleID) = 42")
+        .unwrap();
+    assert_eq!(read(&metadata, &[ITEM])[0].missing, ["title:42"]);
+}
+
+#[tokio::test]
 async fn reports_conflicts_and_falls_back_to_partpage_parent() {
     let metadata = load().await;
     metadata
@@ -160,7 +215,7 @@ async fn reports_conflicts_and_falls_back_to_partpage_parent() {
         .unwrap()
         .execute_batch(
             "UPDATE part SET ItemID = '7';
-         INSERT INTO partpage VALUES (8, 1, '8', '3', '9', '2', '');",
+         INSERT INTO partpage VALUES ('8', '3', '9', '2', '');",
         )
         .unwrap();
     let row = read(&metadata, &[PART]).pop().unwrap();

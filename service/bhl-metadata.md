@@ -45,10 +45,14 @@ There are no memory-limit options, disk-backed database, checkpoint, temporary
 workspace or temporary-directory settings. DuckDB uses its default resource
 settings, with `enable_external_file_cache=false` explicitly set.
 
-The fixed schema and source semantics are unchanged: preserve original lexical
+`metadata.item` and `metadata.title` are now non-null lists, retaining every
+item/title association in source order while emitting one OCR row per request.
+Consumers of the previous singleton structs must accept these list fields.
+The 13 source tables and 104 lexical source columns remain unchanged:
+ preserve original lexical
 IDs, empty strings, quotes, Unicode, relation duplicates/order, and separate
 item/part rights. DOI matches entity type and ID. Part page sequences use
-partpage. Invalid headers/keys, missing tables and singleton numeric collisions
+partpage. Invalid headers/keys, missing tables and title/page/part numeric collisions
 fail loading. Missing joins and parent/sequence conflicts accompany each emitted
 page rather than silently dropping it. Callers decide which rows to publish.
 
@@ -105,6 +109,21 @@ Projection constructs only selected page columns. Requests without `data`
 perform no OCR object opens/downloads; zero-column projections still retain one
 row per selected page. Selecting `data` keeps its original bytes and I/O options.
 The loaded source tables and request-level DuckDB join remain unchanged.
+
+Metadata import sends decoded Arrow batches directly through DuckDB's Arrow
+appender. Each table keeps one appender and explicitly flushes once at EOF.
+It retains lexical-row SHA-256 hashing and source order; no source rows are
+filtered or reinterpreted. Source tables store only the lexical columns, so
+decoded batches are appended without adding key or ordinal arrays. Views expose
+the table's `rowid` for ordering and calculate numeric join keys from the original
+ID columns with `bhl_id`. This removes per-cell owned String/Value creation,
+per-row appender calls, and per-batch appender recreation/flush. Each table
+uses one blocking importer while its asynchronous byte reader runs on the
+existing runtime; all 13 import tasks are joined before returning.
+
+Request-level page selections also use Arrow appends, in batches of up to 8,192
+identities. Request ordinals retain input order and duplicate selections; the
+selection appender flushes once before the join query runs.
 
 ## Reuse one explicit metadata snapshot across page jobs
 
