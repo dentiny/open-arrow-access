@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.18.0 - 2026-11-20
+
+- Connect the BHL OCR page reader to DuckDB-joined metadata for explicitly selected item/part pages, preserving source provenance and exposing missing/conflicting metadata through a caller report callback.
+- Honor BHL page projections: skip OCR downloads when `data` is omitted, construct only selected columns, and preserve row counts for empty projections.
+- Release all eight public workspace crates at 0.18.0 with aligned internal dependency requirements.
+
 ## 0.17.0 - 2026-11-20
 
 - Stream arXiv bulk LaTeX package decoding from the existing Arrow buffer, filter attachments before body materialization and yield batches incrementally while retaining automatic metadata enrichment.
