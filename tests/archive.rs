@@ -82,16 +82,20 @@ async fn incremental_output_does_not_hide_late_errors_and_drop_stops_consumption
     let observed = source.observations.clone();
     let accessor = ArchiveAccessor::new(source, ArchiveOptions::new(ArchiveFormat::Tar));
     let request = ReadRequest::new("archive.tar").with_batch_size(NonZeroUsize::MIN);
-    let mut reader = accessor.open(request.clone()).await.unwrap();
+    let mut reader = accessor
+        .plan_scan(request.clone())
+        .await
+        .unwrap()
+        .into_reader();
     assert_eq!(observed.reads.load(Ordering::SeqCst), 0);
     assert!(reader.next().await.unwrap().is_some());
     let reads = observed.reads.load(Ordering::SeqCst);
     drop(reader);
     assert_eq!(observed.reads.load(Ordering::SeqCst), reads);
 
-    let reader = accessor.open(request).await.unwrap();
+    let reader = accessor.plan_scan(request).await.unwrap().into_reader();
     assert_eq!(
-        rows_before_error(reader, ErrorKind::PermissionDenied).await,
+        rows_before_error(Box::new(reader), ErrorKind::PermissionDenied).await,
         3
     );
 }

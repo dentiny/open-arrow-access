@@ -178,8 +178,11 @@ Enabling a feature compiles an API; construct the accessor/layer to use it.
 `ArchiveAccessor::new(bytes, ArchiveOptions::new(ArchiveFormat::Tar))` combines
 outer decompression, header filtering and incremental member batching. Output
 contains `source_uri`, `entry_index`, `entry_name` and unchanged binary `data`.
-Configure `with_entry_filter` to select members before buffering their bodies;
-use `ArchiveFormat::Single { name }` for a lone file. The default outer decoder
+Configure `with_entry_filter` to select members before buffering their bodies.
+Native batch partitions allow record layers to process batches concurrently
+while the archive is read sequentially once, using `ParallelReadLayer` or
+`CrawlAccessor`. Row and soft byte batch targets still apply.
+Use `ArchiveFormat::Single { name }` for a lone file. The default outer decoder
 uses object suffixes; format selection is explicit. Read through EOF to finish
 decoder integrity checks. The [Rust API documentation](src/archive/accessor.rs)
 describes projection, batching, error timing and composition with `CrawlAccessor`.
