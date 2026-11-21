@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "snapshot_id": "fixture-snapshot",
+  "scope": "all",
+  "inventory_pages": 3,
+  "pages_per_job": 2,
+  "index": 1,
+  "objects": ["ocr/part-098691/part-098691-65077706-0001.txt"]
+}

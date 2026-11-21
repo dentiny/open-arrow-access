@@ -1,5 +1,7 @@
 //! BHL AWS Open Data objects and page records.
 mod error;
+mod inventory;
+pub use inventory::{BhlInventory, BhlOcrScope, BhlPageJob};
 mod open_data;
 mod page;
 mod pages;

@@ -137,3 +137,66 @@ provider errors and schema mismatches fail explicitly. Native partitions use the
 shared scan executor. `with_schema_metadata` retains caller provenance in the
 plan and emitted batch schemas. This API is the reader foundation for separate
 TSV metadata acquisition and join changes.
+
+## Persist a corpus inventory and distribute jobs
+
+`BhlOpenData::inventory(snapshot_id, scope)` recursively lists `ocr/` once and
+freezes valid OCR keys into canonical lexical order. Choose `BhlOcrScope::Items`,
+`Parts` or explicitly `All`. Item and part OCR may represent the same PageID;
+`All` keeps both namespace identities and makes no claim of page deduplication.
+The inventory rejects duplicate keys and duplicate normalized identities caused
+by different zero padding. Images, scandata and TSV objects are not OCR jobs.
+
+```rust,no_run
+use std::{fs::File, num::NonZeroUsize};
+use open_arrow_access_service::bhl::{
+    BhlInventory, BhlOcrScope, BhlOpenData, BhlPageJob, open_data_bucket_operator,
+};
+use open_arrow_access_storage::OpenDalAccessor;
+
+async fn coordinator() -> Result<(), Box<dyn std::error::Error>> {
+    let source = BhlOpenData::new(OpenDalAccessor::new(open_data_bucket_operator()?));
+    let inventory = source.inventory("bhl-run-2026-11-20", BhlOcrScope::Items).await?;
+    inventory.write_json(File::create("inventory.json")?)?;
+
+    // Retries can load this saved inventory instead of listing AWS again.
+    let saved = BhlInventory::read_json(File::open("inventory.json")?)?;
+    for job in saved.jobs(NonZeroUsize::new(1_000).unwrap()) {
+        job.write_json(File::create(format!("job-{:06}.json", job.index()))?)?;
+    }
+    Ok(())
+}
+
+fn worker_selection() -> Result<(), Box<dyn std::error::Error>> {
+    let job = BhlPageJob::read_json(File::open("job-000000.json")?)?;
+    let source = BhlOpenData::new(OpenDalAccessor::new(open_data_bucket_operator()?));
+    let files = source.partition(job.objects().iter().cloned())?;
+    // Use `files` with a byte/format reader, or pass `job.request()` to a
+    // BhlPageAccessor configured with job.snapshot_id() and supplied metadata.
+    Ok(())
+}
+```
+
+Both saved formats are strict version-1 JSON. Inventory stores snapshot ID,
+namespace scope and sorted keys. Each job additionally stores the inventory page
+count, page limit and zero-based chunk index, plus only that job's keys. Jobs are
+generated lazily as disjoint consecutive chunks; the last can be shorter, and an
+empty inventory produces none. Loading a job validates its key identities and
+scope, index arithmetic and expected chunk length without reading the inventory.
+
+A job is identified by `(snapshot_id, pages_per_job, index)`. Keep the inventory
+and sizing unchanged while recording completed jobs and retrying failed jobs.
+A standalone job validates its structure but cannot independently prove its keys
+belong to the saved inventory, or prove completeness/disjointness of files mixed
+from other runs. Jobs generated from one inventory have those membership guarantees. Use one trusted coordinator's job set. Caller-assigned snapshot IDs
+freeze membership, not S3 bytes: listing is live and no object-version/checksum
+snapshot is created. Publish inventory/job files atomically using the caller's
+storage policy and avoid overwriting a published run with different membership.
+
+Coordinator memory is proportional to key count; individual job generation and
+worker selection are count-bounded. There are no body downloads or per-page
+HEAD/length probes during inventory planning, and no corpus listing on workers.
+Job keys are directly available as `job.request().objects` for metadata selection;
+load and share the AWS TSV metadata once per worker process, then supply the
+selected mapping to the existing page accessor. Metadata acquisition and joins
+are separate from this inventory implementation.

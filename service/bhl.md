@@ -337,10 +337,11 @@ Enable facade feature `service-bhl`. BHL source access is limited to AWS Open Da
 | `open_data_bucket_operator()` | Anonymous, bucket-root S3 storage for bhl-open-data in us-east-2 |
 | `BhlOpenData::discover(ListRequest)` | Scoped object discovery, without downloading bodies |
 | `BhlOpenData::partition(keys)` | Explicit independent object membership for native file-set planning |
+| `BhlOpenData::inventory(snapshot_id, scope)` | Freeze OCR membership and persist count-bounded worker jobs |
 | `BhlPageAccessor` | Read selected AWS OCR pages and assign caller-supplied metadata to the fixed page schema |
 | `BhlPageRecord::into_batch()` | Assign and validate one complete page record, including metadata |
 
-Automatic corpus inventory grouping and TSV metadata joins are separate work.
+TSV metadata acquisition and joins are separate work.
 See the [AWS implementation guide](bhl-open-data.md) for usage, source boundaries
 and offline validation. Caller-bound storage retains the AWS key layout and lets
 unit tests use local fixtures without live S3 access.

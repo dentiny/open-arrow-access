@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "snapshot_id": "fixture-snapshot",
+  "scope": "all",
+  "objects": [
+    "ocr/item-021356/item-021356-02839616-0127.txt",
+    "ocr/item-346951/item-346951-65077706-0014.txt",
+    "ocr/part-098691/part-098691-65077706-0001.txt"
+  ]
+}

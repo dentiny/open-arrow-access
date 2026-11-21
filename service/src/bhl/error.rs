@@ -36,3 +36,16 @@ pub(super) fn page_record(source: arrow_schema::ArrowError) -> Error {
 pub(super) fn invalid_pages(message: impl Into<String>) -> Error {
     Error::new(ErrorKind::InvalidInput, "bhl_pages", message)
 }
+
+pub(super) fn inventory(message: impl Into<String>) -> Error {
+    Error::new(ErrorKind::InvalidInput, "bhl_inventory", message)
+}
+
+pub(super) fn inventory_json(source: serde_json::Error) -> Error {
+    let kind = if source.is_io() {
+        ErrorKind::Io
+    } else {
+        ErrorKind::Decode
+    };
+    Error::new(kind, "bhl_inventory", source.to_string()).with_source(source)
+}
