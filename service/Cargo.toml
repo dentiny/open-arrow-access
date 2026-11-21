@@ -36,6 +36,15 @@ courtlistener = [
     "dep:arrow-schema",
     "dep:arrow-buffer",
 ]
+courtlistener-joined = [
+    "courtlistener",
+    "dep:duckdb",
+    "duckdb/appender-arrow",
+    "dep:arrow-cast",
+    "dep:tempfile",
+    "tokio/rt",
+    "tokio/sync",
+]
 dataverse = []
 default = []
 doab = ["oai"]
@@ -91,6 +100,7 @@ format-xml = [
 oai = ["format-xml"]
 
 [dependencies]
+tempfile = { workspace = true, optional = true }
 arrow-buffer = { workspace = true, optional = true }
 # Keep DuckDB on the Arrow 58 binding line used by the public workspace.
 duckdb = { version = "1.10506.1", default-features = false, features = ["bundled"], optional = true }

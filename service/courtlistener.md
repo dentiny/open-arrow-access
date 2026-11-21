@@ -74,6 +74,85 @@ limits. `ScanPlanner` exposes one lazy partition per input object, suitable for
 explicit file-set composition. It does not split one bzip2 file into row ranges,
 join source tables, discover output destinations or write a Lance dataset.
 
+## One joined stream per date
+
+Enable facade feature `service-courtlistener-joined` (or service-crate feature
+`courtlistener-joined`). The existing `service-courtlistener` single-table API
+does not pull in DuckDB.
+
+`CourtListenerDateAccessor` reads same-date opinions, opinion-clusters, dockets
+and courts. Left joins preserve one row per opinion; missing relationships
+produce null structs instead of dropping opinions. The six output fields are
+`snapshot_date`, `opinion`, `cluster`, `docket`, `court` and `provenance`. Source
+fields and types match `CourtListenerSchemas::schema()` and the design in #617.
+Duplicate primary keys fail, preventing accidental multiplication of opinions.
+Each complete date is a lazy native scan partition. Caller orchestration runs
+dates independently and sends each date stream to one Lance destination.
+
+### Usage and limits
+
+```rust,no_run
+use std::{num::NonZeroUsize, path::PathBuf};
+use open_arrow_access::{Accessor, ReadRequest, Result};
+use open_arrow_access::service::courtlistener::{
+    CourtListenerDateAccessor, CourtListenerJoinOptions,
+};
+use open_arrow_access::storage::OpenDalAccessor;
+
+async fn read_date(storage: OpenDalAccessor, scratch: PathBuf) -> Result<()> {
+    let source = CourtListenerDateAccessor::new(storage, CourtListenerJoinOptions {
+        source_root: "s3://com-courtlistener-storage".into(),
+        scratch_directory: scratch, // existing directory on caller-owned disk
+        max_record_bytes: NonZeroUsize::new(64 * 1024 * 1024).unwrap(),
+        dialect: Default::default(), // current COPY quote/escape rules
+        memory_limit: NonZeroUsize::new(1024 * 1024 * 1024).unwrap(),
+        threads: NonZeroUsize::new(4).unwrap(),
+    })?;
+    let mut rows = source.open(ReadRequest::new("2026-09-30")
+        .with_batch_size(NonZeroUsize::new(1024).unwrap())).await?;
+    while let Some(batch) = rows.next().await? {
+        // Feed this complete nested batch to the one Lance writer for this date.
+        println!("{} opinion rows", batch.num_rows());
+    }
+    Ok(())
+}
+```
+
+The source root is provenance supplied by the caller and must correspond to the
+configured storage root. Unknown/reordered headers fail rather than dropping
+fields. Use `CourtListenerSchemas` and `with_schemas` for reviewed historical
+header/type variants; the library does not fetch/execute SQL or infer historical
+schemas. All four tables are validated even when output projection omits them.
+Missing/empty required files, duplicate IDs, malformed COPY records and typed
+conversion failures are terminal. Primary-key validation for opinions continues
+while streaming; callers must consume through EOF before accepting a dataset.
+
+The reader imports the four validated typed table streams into a temporary
+DuckDB database, using DuckDB's Arrow appender. It checks key uniqueness with SQL,
+then executes one left-join query and streams Arrow result batches out with
+DuckDB's `stream_arrow`/`step` API, following the existing BHL integration.
+It does not perform per-opinion key lookups or collect the full query result in
+Rust. The database and spill files live under the caller's scratch directory;
+`memory_limit` and `threads` configure DuckDB. The memory limit controls engine
+operators, not whole-process RSS. Scratch usage scales with the imported date
+and any join/sort spill. All four inputs are imported before query output starts.
+
+Output uses a bounded one-batch channel from a blocking DuckDB query worker.
+Dropping the reader closes that channel and interrupts the query. The worker
+then releases the database and temporary directory; cleanup may finish after
+an in-flight native operation exits. EOF and query failures are terminal, with
+worker failures propagated to the reader. Source-producing tasks are not spawned.
+
+Input batches target 8 MiB, and `max_record_bytes` limits each logical CSV record.
+DuckDB controls its result chunk size; emitted slices respect the requested row
+target without copying arrays. A permitted oversized record/result chunk may
+exceed byte targets. Original per-table record ordinals are imported alongside
+the data, and SQL orders the result by opinion ordinal. This is not a hard
+whole-process memory cap or a range-readable source. The reader does not provide
+cross-run checkpoints, automatic historical schema migration, a durable manifest,
+source hash verification, orphan-count reports or a production Lance commit.
+Those acquisition/publication validations remain explicit caller work.
+
 ## Usage and results
 
 ```rust

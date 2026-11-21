@@ -339,3 +339,227 @@ async fn typed_table_plans_are_lazy_and_reject_drift_and_invalid_values() -> Res
     assert!(reader.next().await?.is_none());
     Ok(())
 }
+
+#[cfg(feature = "courtlistener-joined")]
+mod joined {
+    use super::*;
+    use arrow_array::{Float64Array, StructArray};
+    use open_arrow_access_core::RecordReader;
+    use open_arrow_access_service::courtlistener::{
+        CourtListenerDateAccessor, CourtListenerJoinOptions,
+    };
+    async fn joined_fixture() -> (
+        tempfile::TempDir,
+        tempfile::TempDir,
+        CourtListenerDateAccessor<OpenDalAccessor>,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        tokio::fs::create_dir(root.path().join("bulk-data"))
+            .await
+            .unwrap();
+        for (table, data) in JOIN_FIXTURES {
+            write_bz(root.path(), table, data).await;
+        }
+        let source = CourtListenerDateAccessor::new(
+            OpenDalAccessor::new(fs_operator(root.path())),
+            CourtListenerJoinOptions {
+                source_root: "s3://com-courtlistener-storage".into(),
+                scratch_directory: scratch.path().into(),
+                max_record_bytes: NonZeroUsize::new(1024 * 1024).unwrap(),
+                dialect: Default::default(),
+                memory_limit: NonZeroUsize::new(256 * 1024 * 1024).unwrap(),
+                threads: NonZeroUsize::MIN,
+            },
+        )
+        .unwrap();
+        (root, scratch, source)
+    }
+    async fn consume(mut reader: Box<dyn RecordReader>) -> Result<usize> {
+        let mut count = 0;
+        while let Some(batch) = reader.next().await? {
+            count += batch.num_rows();
+        }
+        Ok(count)
+    }
+    fn child<'a, T: Array + 'static>(s: &'a StructArray, name: &str) -> &'a T {
+        s.column_by_name(name)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<T>()
+            .unwrap()
+    }
+    #[tokio::test]
+    async fn joined_date_has_typed_nested_rows_null_joins_and_exact_provenance() -> Result<()> {
+        let (_root, scratch, source) = joined_fixture().await;
+        let mut reader = source.open(ReadRequest::new("2026-09-30")).await?;
+        let schema = reader.metadata().schema.clone();
+        assert_eq!(schema.fields().len(), 6);
+        let batch = reader.next().await?.unwrap();
+        assert_eq!(batch.num_rows(), 5);
+        let opinion = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        assert_eq!(opinion.num_columns(), 22);
+        assert_eq!(
+            child::<Int64Array>(opinion, "id").values(),
+            &[1, 2, 3, 4, 5]
+        );
+        assert_eq!(child::<UInt64Array>(opinion, "page_count").value(0), 12);
+        assert!(child::<UInt64Array>(opinion, "page_count").is_null(1));
+        assert!(child::<BooleanArray>(opinion, "per_curiam").value(0));
+        assert_eq!(
+            child::<StringArray>(opinion, "plain_text").value(0),
+            "line1\nline2 \"quoted\" \\ slash"
+        );
+        let times = child::<TimestampMicrosecondArray>(opinion, "date_created");
+        assert_eq!(times.value(0) - times.value(1), 123456);
+        let urls = child::<StringArray>(opinion, "download_url");
+        assert!(urls.is_null(0));
+        assert!(!urls.is_null(1));
+        assert_eq!(urls.value(1), "");
+        let cluster = batch
+            .column(2)
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        let docket = batch
+            .column(3)
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        let court = batch
+            .column(4)
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        assert!(cluster.is_null(1));
+        assert!(!cluster.is_null(2));
+        assert!(docket.is_null(1));
+        assert!(docket.is_null(2));
+        assert!(!docket.is_null(3));
+        assert!(court.is_null(3));
+        assert_eq!(child::<StringArray>(court, "id").value(0), "001");
+        assert_eq!(child::<StringArray>(court, "fjc_court_id").value(0), "003");
+        assert_eq!(child::<Float64Array>(court, "position").value(0), 1.5);
+        assert_eq!(child::<Int64Array>(cluster, "id").value(4), 10);
+        let provenance = batch
+            .column(5)
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .unwrap();
+        assert_eq!(
+            child::<UInt64Array>(provenance, "opinion_record_index").values(),
+            &[0, 1, 2, 3, 4]
+        );
+        assert!(child::<UInt64Array>(provenance, "cluster_record_index").is_null(1));
+        assert_eq!(
+            child::<UInt64Array>(provenance, "cluster_record_index").value(4),
+            0
+        );
+        assert_eq!(
+            child::<StringArray>(provenance, "courts_source_uri").value(0),
+            "s3://com-courtlistener-storage/bulk-data/courts-2026-09-30.csv.bz2"
+        );
+        assert!(reader.next().await?.is_none());
+        assert!(reader.next().await?.is_none());
+        assert_eq!(std::fs::read_dir(scratch.path()).unwrap().count(), 0);
+        Ok(())
+    }
+    #[tokio::test]
+    async fn date_planning_is_lazy_and_projection_does_not_skip_validation() -> Result<()> {
+        let (root, scratch, source) = joined_fixture().await;
+        let missing = ReadRequest::new("2026-06-30");
+        assert_eq!(
+            source
+                .plan_scan(missing.clone())
+                .await?
+                .partitions
+                .size_hint()
+                .0,
+            1
+        );
+        assert!(source.open(missing).await.is_err());
+        let request = ReadRequest::new("2026-09-30")
+            .with_batch_size(NonZeroUsize::MIN)
+            .with_projection(["court", "opinion"]);
+        let plan = source.plan_scan(request.clone()).await?;
+        assert_eq!(plan.partitions.size_hint().0, 1);
+        let mut reader = source.open(request).await?;
+        let batch = reader.next().await?.unwrap();
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(batch.schema().field(0).name(), "court");
+        drop(reader);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while std::fs::read_dir(scratch.path()).unwrap().count() != 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            consume(
+                source
+                    .open(ReadRequest::new("2026-09-30").with_projection(Vec::<String>::new()))
+                    .await?
+            )
+            .await?,
+            5
+        );
+        write_bz(
+            root.path(),
+            "courts",
+            &JOIN_FIXTURES[3].1.replace("\"1.5\"", "\"NaN\""),
+        )
+        .await;
+        assert!(
+            source
+                .open(ReadRequest::new("2026-09-30").with_projection(["opinion"]))
+                .await
+                .is_err()
+        );
+        tokio::fs::remove_file(root.path().join("bulk-data/courts-2026-09-30.csv.bz2"))
+            .await
+            .unwrap();
+        assert!(source.open(ReadRequest::new("2026-09-30")).await.is_err());
+        assert!(
+            source
+                .open(ReadRequest::new("../2026-09-30"))
+                .await
+                .is_err()
+        );
+        assert!(
+            source
+                .open(ReadRequest::new("2026-09-30").with_projection(["unknown"]))
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
+    #[tokio::test]
+    async fn duplicate_ids_header_drift_bad_counts_and_empty_exports_fail() {
+        for (table, raw) in JOIN_FIXTURES {
+            let (root, _scratch, source) = joined_fixture().await;
+            let duplicate = raw.split_once('\n').unwrap().1;
+            write_bz(root.path(), table, &format!("{raw}{duplicate}")).await;
+            if let Ok(reader) = source.open(ReadRequest::new("2026-09-30")).await {
+                assert!(consume(reader).await.is_err());
+            }
+        }
+        for raw in [
+            JOIN_FIXTURES[0].1.replace("\"12\"", "\"-1\""),
+            JOIN_FIXTURES[0].1.replacen("id,", "unknown,", 1),
+            String::new(),
+        ] {
+            let (root, scratch, source) = joined_fixture().await;
+            write_bz(root.path(), "opinions", &raw).await;
+            if let Ok(mut reader) = source.open(ReadRequest::new("2026-09-30")).await {
+                assert!(reader.next().await.is_err());
+                assert!(reader.next().await.unwrap().is_none());
+            }
+            assert_eq!(std::fs::read_dir(scratch.path()).unwrap().count(), 0);
+        }
+    }
+}

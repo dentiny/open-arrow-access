@@ -4,6 +4,10 @@
 
 mod copy_csv;
 mod error;
+#[cfg(feature = "courtlistener-joined")]
+mod joined;
+#[cfg(feature = "courtlistener-joined")]
+pub use joined::{CourtListenerDateAccessor, CourtListenerJoinOptions};
 mod schema;
 mod table;
 mod validation;
