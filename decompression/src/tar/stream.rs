@@ -25,6 +25,9 @@ pub struct TarEntryReader {
 /// consumed or dropped before advancing. Dropped bodies are drained on the next
 /// call. No range requests or upfront header index are required. Partial header
 /// and skip progress survive cancellation; a cancelled body read must be dropped.
+/// After TAR end markers, input is drained through EOF to surface underlying
+/// decoder checksum/trailer and source errors before reporting archive completion.
+/// Dropping the archive early does not drain the remaining input.
 pub struct TarStream {
     state: Arc<Mutex<State>>,
     active: Weak<()>,
@@ -161,6 +164,13 @@ impl State {
             if self.zero_block {
                 if !zero {
                     return Err(decode("TAR archive requires two zero end blocks"));
+                }
+                // Finish the underlying decoder too: its checksum/trailer may
+                // follow the TAR end markers or trailing archive padding.
+                while let Some(bytes) = self.input.next().await {
+                    if bytes?.is_empty() {
+                        return Err(empty_chunk("read_tar"));
+                    }
                 }
                 self.finish();
                 return Ok(None);
