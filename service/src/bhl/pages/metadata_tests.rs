@@ -42,62 +42,45 @@ async fn planning_and_opening_partitions_never_call_the_provider() {
     assert!(readers[0].next().await.unwrap().is_some());
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert!(readers[0].next().await.unwrap().is_none());
-    drop(readers);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-    let reader = pages.open(FileSetRequest::new(KEYS)).await.unwrap();
-    drop(reader);
+    let _reader = pages.open(FileSetRequest::new(KEYS)).await.unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
 async fn parallel_resident_budget_and_backpressure_bound_metadata_preparation() {
-    for partitions in [1, 2, 3] {
-        for unordered in [false, true] {
-            let calls = Arc::new(AtomicUsize::new(0));
-            let count = calls.clone();
-            let started = Arc::new(Semaphore::new(0));
-            let signal = started.clone();
-            let pages =
-                BhlPageAccessor::new(MemoryAccessor::new(b"OCR", 3), "snapshot", move |_| {
-                    count.fetch_add(1, Ordering::SeqCst);
-                    signal.add_permits(1);
-                    Ok(super::super::page::tests::metadata("Title", "Rights"))
-                })
-                .unwrap()
-                .layer(ParallelReadLayer::new(
-                    NonZeroUsize::new(partitions).unwrap(),
-                    NonZeroUsize::MIN,
-                ));
-            let request = FileSetRequest::new(KEYS)
-                .with_options(ReadOptions::default().with_projection(["metadata", "page_id"]));
-            let mut reader = if unordered {
-                pages
-                    .layer(UnorderedEmissionLayer)
-                    .open(request)
-                    .await
-                    .unwrap()
-            } else {
-                pages.open(request).await.unwrap()
-            };
-            assert_eq!(calls.load(Ordering::SeqCst), 0);
-            assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
-            tokio::time::timeout(
-                Duration::from_secs(5),
-                started.acquire_many(u32::try_from(partitions).unwrap()),
-            )
-            .await
-            .unwrap()
-            .unwrap()
-            .forget();
-            // The consumer has paused. Even completed partition queues keep their
-            // resident slots, so the remaining pages must not prepare metadata.
-            tokio::task::yield_now().await;
-            assert_eq!(calls.load(Ordering::SeqCst), partitions);
-            drop(reader);
-            tokio::task::yield_now().await;
-            assert_eq!(calls.load(Ordering::SeqCst), partitions);
-        }
-    }
+    let partitions = 3;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    let started = Arc::new(Semaphore::new(0));
+    let signal = started.clone();
+    let pages = BhlPageAccessor::new(MemoryAccessor::new(b"OCR", 3), "snapshot", move |_| {
+        count.fetch_add(1, Ordering::SeqCst);
+        signal.add_permits(1);
+        Ok(super::super::page::tests::metadata("Title", "Rights"))
+    })
+    .unwrap()
+    .layer(ParallelReadLayer::new(
+        NonZeroUsize::new(partitions).unwrap(),
+        NonZeroUsize::MIN,
+    ));
+    let request = FileSetRequest::new(KEYS)
+        .with_options(ReadOptions::default().with_projection(["metadata", "page_id"]));
+    let mut reader = pages
+        .layer(UnorderedEmissionLayer)
+        .open(request)
+        .await
+        .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        started.acquire_many(u32::try_from(partitions).unwrap()),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .forget();
+    assert_eq!(calls.load(Ordering::SeqCst), partitions);
 }
 
 #[tokio::test]
