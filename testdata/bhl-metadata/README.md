@@ -16,3 +16,7 @@ and must fail exact header validation. Other files use their table's AWS name.
 `title-invalid-key.txt.gz` has a nonnumeric TitleID and must fail loading.
 Tests load these committed gzip files. SQL-specific tests also extend the loaded
 fixture tables to check independent relation aggregation and conflicting parents.
+
+subject-many.txt.gz has 9,001 ordered synthetic relation rows, crossing the
+8,192-row decoder batch boundary. It exercises batched import, quote/Unicode
+preservation, source ordinals and the stable decoded lexical-row fingerprint.

@@ -1,7 +1,7 @@
 use super::{error, tables};
-use arrow_array::{Array, StringArray};
+use arrow_array::{Array, ArrayRef, RecordBatch, StringArray, UInt64Array};
 use arrow_schema::{DataType, Field, Schema};
-use duckdb::{Config, Connection, appender_params_from_iter, types::Value};
+use duckdb::{Config, Connection};
 use futures::future::join_all;
 use open_arrow_access_core::{Accessor, AccessorExt, ByteAccessor, ReadRequest, Result};
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
@@ -53,7 +53,7 @@ fn quoted(name: &str) -> String {
 }
 
 async fn import_table(
-    mut connection: Connection,
+    connection: Connection,
     input: Arc<dyn ByteAccessor>,
     table: super::Table,
 ) -> Result<(String, SourceInfo)> {
@@ -85,13 +85,15 @@ async fn import_table(
     let csv = CsvAccessor::new(input, schema).with_format(format);
     let path = format!("data/{}.txt.gz", table.name);
     let mut reader = csv.open(ReadRequest::new(path.clone())).await?;
-    let mut count = 0u64;
-    let mut hash = Sha256::new();
-    while let Some(batch) = reader.next().await? {
-        let name = table.name.clone();
-        let key_column = table.key;
-        (connection, count, hash) = tokio::task::spawn_blocking(move || {
-            let mut appender = connection.appender(&name).map_err(error::duckdb)?;
+    let import_name = table.name.clone();
+    let key_column = table.key;
+    let (connection, count, hash) = tokio::task::spawn_blocking(move || {
+        let mut count = 0u64;
+        let mut hash = Sha256::new();
+        let mut appender = connection.appender(&import_name).map_err(error::duckdb)?;
+        // Keep one appender for the table. Network reads remain asynchronous on
+        // the runtime while this blocking importer owns DuckDB's native state.
+        while let Some(batch) = futures::executor::block_on(reader.next())? {
             let columns = batch
                 .columns()
                 .iter()
@@ -102,6 +104,8 @@ async fn import_table(
                         .ok_or_else(|| error::invalid("expected lexical metadata cells"))
                 })
                 .collect::<Result<Vec<_>>>()?;
+            let start = count;
+            let mut keys = Vec::with_capacity(batch.num_rows());
             for row in 0..batch.num_rows() {
                 let cells = columns
                     .iter()
@@ -112,25 +116,33 @@ async fn import_table(
                         Ok(column.value(row))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let key = super::super::pages::identity::number(cells[key_column])?;
+                keys.push(super::super::pages::identity::number(cells[key_column])?);
+                // Preserve the decoded lexical-row fingerprint exactly.
                 hash.update(serde_json::to_vec(&cells).map_err(error::json)?);
                 hash.update(b"\n");
-                let values = [Value::UBigInt(key), Value::UBigInt(count)]
-                    .into_iter()
-                    .chain(cells.into_iter().map(|cell| Value::Text(cell.into())));
-                appender
-                    .append_row(appender_params_from_iter(values))
-                    .map_err(error::duckdb)?;
                 count += 1;
             }
-            // Flush explicitly: Appender::drop suppresses write errors.
-            appender.flush().map_err(error::duckdb)?;
-            drop(appender);
-            Ok::<_, open_arrow_access_core::Error>((connection, count, hash))
-        })
-        .await
-        .map_err(error::task)??;
-    }
+            let mut fields = vec![
+                Field::new("__key", DataType::UInt64, false),
+                Field::new("__ordinal", DataType::UInt64, false),
+            ];
+            fields.extend(batch.schema().fields().iter().map(|f| f.as_ref().clone()));
+            let mut values: Vec<ArrayRef> = vec![
+                Arc::new(UInt64Array::from(keys)),
+                Arc::new(UInt64Array::from_iter_values(start..count)),
+            ];
+            values.extend(batch.columns().iter().cloned());
+            let batch = RecordBatch::try_new(Arc::new(Schema::new(fields)), values)
+                .map_err(error::arrow)?;
+            appender.append_record_batch(batch).map_err(error::duckdb)?;
+        }
+        // Appender::drop suppresses write errors; flush once, explicitly.
+        appender.flush().map_err(error::duckdb)?;
+        drop(appender);
+        Ok::<_, open_arrow_access_core::Error>((connection, count, hash))
+    })
+    .await
+    .map_err(error::task)??;
     tokio::task::spawn_blocking(move || {
         if table.single {
             let duplicate = connection.query_row(

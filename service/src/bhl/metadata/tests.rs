@@ -218,3 +218,24 @@ async fn emits_rows_until_callback_fails() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn batch_import_preserves_ordinals_and_fingerprint_across_batches() {
+    let (root, storage) = source("title.txt.gz").await;
+    std::fs::write(
+        root.path().join("data/subject.txt.gz"),
+        fixture!("bhl-metadata", "subject-many.txt.gz").await,
+    )
+    .unwrap();
+    let metadata = BhlMetadata::load(storage).await.unwrap();
+    assert_eq!(metadata.info.sources["subject"].rows, 9001);
+    assert_eq!(
+        metadata.info.sources["subject"].sha256,
+        "46fb7a06c684f495073832249afc0a87fb1ed90df62c2efe949c60f48a5b9591"
+    );
+    let row = read(&metadata, &[ITEM]).pop().unwrap();
+    let subjects = list(&row.metadata, "subject", "Subject");
+    assert_eq!(subjects.len(), 9001);
+    assert_eq!(subjects[0], "row 00000 \"遗传\"");
+    assert_eq!(subjects[9000], "row 09000 \"遗传\"");
+}
