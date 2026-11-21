@@ -168,8 +168,8 @@ Enabling a feature compiles an API; construct the accessor/layer to use it.
 | CSV/TSV, JSON/JSONL, Parquet, XML, ATIF, WARC | `format-csv`, `format-json`, `format-parquet`, `format-xml`, `format-atif`, `format-warc` |
 | Additional Parquet page codecs | `format-parquet-zstd`, `format-parquet-lz4`, `format-parquet-gzip`, `format-parquet-brotli` (each also enables Parquet; Snappy is included in `format-parquet`) |
 | Compressed byte streams | `decompression-gzip`, `decompression-bz2`, `decompression-lz4`, `decompression-zstd` |
-| Archive members (low-level) | `decompression-zip`, `decompression-tar` |
-| Integrated TAR/single-file expansion into binary member rows | `archive` (includes TAR and gzip) |
+| Archive members (low-level) | TAR always available; ZIP through `decompression-zip` |
+| Integrated TAR/single-file expansion into binary member rows | Always available, including TAR and gzip |
 | Directory or explicit file-set reads | Always available; enable the selected `format-*` reader |
 | A provider | `service-<name>`; see the [complete service table](service/README.md#choose-a-service) |
 | Core contracts, storage, shared service HTTP utilities, record layers | Always available; no extra facade feature |
