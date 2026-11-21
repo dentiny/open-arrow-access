@@ -10,7 +10,7 @@ use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use duckdb::{Config, Connection};
 use futures::future::join_all;
 use open_arrow_access_core::{Accessor, ByteAccessor, ReadRequest, Result};
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 pub(super) const TABLES: [&str; 4] = ["opinions", "opinion-clusters", "dockets", "courts"];
 pub(super) const ORDINAL: &str = "__courtlistener_ordinal";
@@ -42,8 +42,10 @@ pub(super) struct Database {
     _directory: tempfile::TempDir,
 }
 impl Database {
-    fn new(scratch_directory: PathBuf, schemas: &CourtListenerSchemas) -> Result<Self> {
-        let directory = tempfile::tempdir_in(scratch_directory).map_err(scratch_error)?;
+    fn new(schemas: &CourtListenerSchemas) -> Result<Self> {
+        // Store imported tables and DuckDB join/sort spill files on temporary disk.
+        // Database owns the directory through query completion; dropping it removes the files.
+        let directory = tempfile::tempdir().map_err(scratch_error)?;
         let config = Config::default()
             .with(
                 "temp_directory",
@@ -116,7 +118,6 @@ async fn import_table<A: ByteAccessor + 'static>(
 
 pub(super) async fn ingest<A: ByteAccessor + 'static>(
     storage: Arc<A>,
-    scratch_directory: PathBuf,
     dialect: CourtListenerCopyDialect,
     schemas: CourtListenerSchemas,
     request: &ReadRequest,
@@ -124,7 +125,7 @@ pub(super) async fn ingest<A: ByteAccessor + 'static>(
     let source = CourtListenerTableAccessor::new(storage)
         .with_schemas(schemas.clone())?
         .with_dialect(dialect)?;
-    let database = blocking(move || Database::new(scratch_directory, &schemas)).await?;
+    let database = blocking(move || Database::new(&schemas)).await?;
     let mut imports = Vec::new();
     for (i, table) in TABLES.iter().enumerate() {
         let connection = database.connection.try_clone().map_err(db_error)?;

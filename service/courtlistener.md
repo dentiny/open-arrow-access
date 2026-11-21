@@ -90,16 +90,15 @@ dates independently and sends each date stream to one Lance destination.
 ### Usage and limits
 
 ```rust,no_run
-use std::{num::NonZeroUsize, path::PathBuf};
+use std::num::NonZeroUsize;
 use open_arrow_access::{Accessor, ReadRequest, Result};
 use open_arrow_access::service::courtlistener::CourtListenerDateAccessor;
 use open_arrow_access::storage::OpenDalAccessor;
 
-async fn read_date(storage: OpenDalAccessor, scratch: PathBuf) -> Result<()> {
+async fn read_date(storage: OpenDalAccessor) -> Result<()> {
     let source = CourtListenerDateAccessor::new(
         storage,
         "s3://com-courtlistener-storage",
-        scratch, // existing directory on caller-owned disk
     )?;
     let mut rows = source.open(ReadRequest::new("2026-09-30")
         .with_batch_size(NonZeroUsize::new(1024).unwrap())).await?;
@@ -127,7 +126,8 @@ when one fails. It checks key uniqueness with SQL,
 then executes one left-join query and streams Arrow result batches out with
 DuckDB's `stream_arrow`/`step` API, following the existing BHL integration.
 It does not perform per-opinion key lookups or collect the full query result in
-Rust. The database and spill files live under the caller's scratch directory;
+Rust. A temporary directory holds the imported database and join/sort spill
+files until the query finishes, then removes them automatically.
 DuckDB uses its default memory and thread settings. Scratch usage scales with
 the imported date and any join/sort spill. All four inputs are imported before query output starts.
 

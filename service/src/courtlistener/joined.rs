@@ -10,13 +10,12 @@ use open_arrow_access_core::{
     Accessor, ByteAccessor, OrderRequirement, ReadRequest, RecordCapability, RecordMetadata,
     RecordReader, Result, ScanPlan, ScanPlanner, async_trait, record_stream_reader,
 };
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 /// A YYYY-MM-DD locator imports the four inputs and exposes one joined Arrow stream.
 pub struct CourtListenerDateAccessor<A> {
     storage: Arc<A>,
     source_root: String,
-    scratch_directory: PathBuf,
     dialect: CourtListenerCopyDialect,
     schemas: CourtListenerSchemas,
 }
@@ -25,24 +24,18 @@ impl<A> Clone for CourtListenerDateAccessor<A> {
         Self {
             storage: self.storage.clone(),
             source_root: self.source_root.clone(),
-            scratch_directory: self.scratch_directory.clone(),
             dialect: self.dialect,
             schemas: self.schemas.clone(),
         }
     }
 }
 impl<A> CourtListenerDateAccessor<A> {
-    pub fn new(
-        storage: A,
-        source_root: impl Into<String>,
-        scratch_directory: PathBuf,
-    ) -> Result<Self> {
+    pub fn new(storage: A, source_root: impl Into<String>) -> Result<Self> {
         let source_root = source_root.into();
         validate_source_root(&source_root)?;
         Ok(Self {
             storage: Arc::new(storage),
             source_root,
-            scratch_directory,
             dialect: Default::default(),
             schemas: Default::default(),
         })
@@ -76,7 +69,6 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerDateAccessor<A> {
         let day = request.object.locator().to_owned();
         let database = ingest(
             self.storage.clone(),
-            self.scratch_directory.clone(),
             self.dialect,
             self.schemas.clone(),
             &request,

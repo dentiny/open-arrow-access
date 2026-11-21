@@ -315,11 +315,9 @@ mod joined {
     use open_arrow_access_service::courtlistener::CourtListenerDateAccessor;
     async fn joined_fixture() -> (
         tempfile::TempDir,
-        tempfile::TempDir,
         CourtListenerDateAccessor<OpenDalAccessor>,
     ) {
         let root = tempfile::tempdir().unwrap();
-        let scratch = tempfile::tempdir().unwrap();
         tokio::fs::create_dir(root.path().join("bulk-data"))
             .await
             .unwrap();
@@ -329,10 +327,9 @@ mod joined {
         let source = CourtListenerDateAccessor::new(
             OpenDalAccessor::new(fs_operator(root.path())),
             "s3://com-courtlistener-storage",
-            scratch.path().into(),
         )
         .unwrap();
-        (root, scratch, source)
+        (root, source)
     }
     async fn consume(mut reader: Box<dyn RecordReader>) -> Result<usize> {
         let mut count = 0;
@@ -350,7 +347,7 @@ mod joined {
     }
     #[tokio::test]
     async fn joined_date_has_typed_nested_rows_null_joins_and_exact_provenance() -> Result<()> {
-        let (_root, scratch, source) = joined_fixture().await;
+        let (_root, source) = joined_fixture().await;
         let mut reader = source.open(ReadRequest::new("2026-09-30")).await?;
         let schema = reader.metadata().schema.clone();
         assert_eq!(schema.fields().len(), 6);
@@ -424,12 +421,11 @@ mod joined {
         );
         assert!(reader.next().await?.is_none());
         assert!(reader.next().await?.is_none());
-        assert_eq!(std::fs::read_dir(scratch.path()).unwrap().count(), 0);
         Ok(())
     }
     #[tokio::test]
     async fn date_planning_is_lazy_and_projection_does_not_skip_validation() -> Result<()> {
-        let (root, scratch, source) = joined_fixture().await;
+        let (root, source) = joined_fixture().await;
         let missing = ReadRequest::new("2026-06-30");
         assert_eq!(
             source
@@ -451,13 +447,6 @@ mod joined {
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(batch.schema().field(0).name(), "court");
         drop(reader);
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while std::fs::read_dir(scratch.path()).unwrap().count() != 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-            }
-        })
-        .await
-        .unwrap();
         assert_eq!(
             consume(
                 source
@@ -500,7 +489,7 @@ mod joined {
     #[tokio::test]
     async fn duplicate_ids_header_drift_bad_counts_and_empty_exports_fail() {
         for (table, raw) in JOIN_FIXTURES {
-            let (root, _scratch, source) = joined_fixture().await;
+            let (root, source) = joined_fixture().await;
             let duplicate = raw.split_once('\n').unwrap().1;
             write_bz(root.path(), table, &format!("{raw}{duplicate}")).await;
             if let Ok(reader) = source.open(ReadRequest::new("2026-09-30")).await {
@@ -512,13 +501,12 @@ mod joined {
             JOIN_FIXTURES[0].1.replacen("id,", "unknown,", 1),
             String::new(),
         ] {
-            let (root, scratch, source) = joined_fixture().await;
+            let (root, source) = joined_fixture().await;
             write_bz(root.path(), "opinions", &raw).await;
             if let Ok(mut reader) = source.open(ReadRequest::new("2026-09-30")).await {
                 assert!(reader.next().await.is_err());
                 assert!(reader.next().await.unwrap().is_none());
             }
-            assert_eq!(std::fs::read_dir(scratch.path()).unwrap().count(), 0);
         }
     }
 }
