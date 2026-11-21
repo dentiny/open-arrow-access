@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Pin BHL metadata joins to DuckDB bindings 1.10506.1, sharing Arrow 58 with the workspace instead of compiling a second Arrow major.
+- Consume joined Arrow batches directly, removing the in-memory IPC serialization bridge and its two direct IPC dependencies; retain streaming error propagation through the fallible batch-step API.
+
 ## 0.18.1 - 2026-11-20
 
 - Support newer DuckDB Rust bindings (1.20000.1 through 1.20001.x), locking to 1.20001.0 and resolving native-library dependency conflicts with downstream workspaces.
