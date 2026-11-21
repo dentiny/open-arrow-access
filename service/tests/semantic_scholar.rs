@@ -99,3 +99,39 @@ async fn fetches_only_the_pinned_dataset_manifest_and_validates_it() {
         ErrorKind::Decode
     );
 }
+
+#[test]
+fn binds_existing_manifests_without_api_requests_and_revalidates_identity() {
+    use open_arrow_access_service::{common::ApiDocument, semantic_scholar::DatasetMetadata};
+    fn metadata(release_id: &str, dataset: &str, url: &str) -> DatasetMetadata {
+        DatasetMetadata {
+            release_id: release_id.into(),
+            release: ApiDocument::from_bytes(Bytes::from_static(
+                br#"{"release_id":"2026-10-27","datasets":["s2orc_v2"]}"#,
+            ))
+            .unwrap(),
+            dataset: ApiDocument::from_bytes(Bytes::from(
+                serde_json::to_vec(
+                    &serde_json::json!({"name":dataset,"files":[url],"unknown":"retained"}),
+                )
+                .unwrap(),
+            ))
+            .unwrap(),
+        }
+    }
+    let service = SemanticScholarService::new("fixture-key").unwrap();
+    let url = "https://download.invalid/part?signature=a%2Bb%2F";
+    let files = service
+        .files_from_manifest("s2orc_v2", metadata("2026-10-27", "s2orc_v2", url))
+        .unwrap();
+    assert_eq!(files.metadata().dataset.value()["files"][0], url);
+    assert_eq!(files.metadata().dataset.value()["unknown"], "retained");
+    for invalid in [
+        metadata("latest", "s2orc_v2", url),
+        metadata("2026-10-28", "s2orc_v2", url),
+        metadata("2026-10-27", "other", url),
+        metadata("2026-10-27", "s2orc_v2", "file:///private/data"),
+    ] {
+        assert!(service.files_from_manifest("s2orc_v2", invalid).is_err());
+    }
+}
