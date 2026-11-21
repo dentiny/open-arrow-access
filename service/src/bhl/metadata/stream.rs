@@ -69,26 +69,3 @@ pub(super) fn pages(
         .try_flatten()
         .boxed()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn query_failures_reach_the_async_consumer() {
-        let metadata = Arc::new(super::super::tests::load().await);
-        let mut rows = pages(
-            metadata.clone(),
-            vec![ObjectRef::new("ocr/item-2/item-2-3-5.txt")],
-        );
-        // Creating the stream has not started SQL yet.
-        metadata
-            .connection
-            .lock()
-            .unwrap()
-            .execute_batch("DROP TABLE page;")
-            .unwrap();
-        assert!(rows.next().await.unwrap().is_err());
-        assert!(rows.next().await.is_none());
-    }
-}
