@@ -8,8 +8,9 @@ The first version has three steps:
 
 1. `BhlMetadata::load(storage).await` imports all 13 AWS `data/*.txt.gz` tables
    concurrently into one in-memory DuckDB database. Each table has its own
-   connection and blocking worker; the existing gzip/TSV reader handles source
-   I/O, exact headers and lexical string preservation.
+   connection. The import futures run concurrently with async source I/O; only
+   synchronous DuckDB batch writes and table finalization use blocking workers.
+   The existing gzip/TSV reader validates headers and preserves lexical strings.
 2. `for_each` executes one [join SQL](src/bhl/metadata/join.sql) for the requested
    page identities. DuckDB performs joins, parent resolution and ordered list
    aggregation, without multiplying independent 1:N relations.
