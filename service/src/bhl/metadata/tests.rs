@@ -218,3 +218,48 @@ async fn emits_rows_until_callback_fails() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn snapshots_reopen_read_only_without_source_access_and_keep_provenance() {
+    let (root, storage) = source("title.txt.gz").await;
+    let metadata = BhlMetadata::load(storage).await.unwrap();
+    let expected = read(&metadata, &[ITEM, PART]);
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("snapshot'quoted.duckdb");
+    metadata.save_snapshot(&path).unwrap();
+    assert!(metadata.save_snapshot(&path).is_err());
+    let fingerprint = metadata.info.fingerprint.clone();
+    drop(metadata);
+    drop(root); // Reopening and queries cannot fall back to the TSV inputs.
+    let snapshot = BhlMetadata::open_snapshot(&path).unwrap();
+    assert_eq!(snapshot.info.fingerprint, fingerprint);
+    let other = BhlMetadata::open_snapshot(&path).unwrap();
+    assert_eq!(read(&other, &[ITEM]).len(), 1);
+    drop(other);
+    assert!(
+        snapshot
+            .save_snapshot(directory.path().join("copy.duckdb"))
+            .is_err()
+    );
+    let actual = read(&snapshot, &[ITEM, PART]);
+    for (actual, expected) in actual.iter().zip(&expected) {
+        assert_eq!(actual.metadata, expected.metadata);
+        assert_eq!(actual.missing, expected.missing);
+        assert_eq!(actual.conflicts, expected.conflicts);
+    }
+    assert!(
+        snapshot
+            .connection
+            .lock()
+            .unwrap()
+            .execute_batch("DELETE FROM bhl_source.item")
+            .is_err()
+    );
+    drop(snapshot);
+    {
+        let db = duckdb::Connection::open(&path).unwrap();
+        db.execute_batch("UPDATE __bhl_snapshot SET version = 999")
+            .unwrap();
+    }
+    assert!(BhlMetadata::open_snapshot(&path).is_err());
+}

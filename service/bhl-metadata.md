@@ -105,3 +105,28 @@ Projection constructs only selected page columns. Requests without `data`
 perform no OCR object opens/downloads; zero-column projections still retain one
 row per selected page. Selecting `data` keeps its original bytes and I/O options.
 The loaded source tables and request-level DuckDB join remain unchanged.
+
+## Reuse one explicit metadata snapshot across page jobs
+
+A coordinator can import the 13 TSV tables once, then publish a completed
+DuckDB snapshot. Independent processes open it read-only and keep their page
+selections in private in-memory workspaces; they do not re-download/re-parse
+TSVs or copy all metadata into another in-memory database.
+
+```rust,ignore
+let metadata = BhlMetadata::load(storage).await?;
+metadata.save_snapshot("bhl-metadata.duckdb")?;
+// Distribute this exact file to the workers, or place it on a shared filesystem.
+let metadata = Arc::new(BhlMetadata::open_snapshot("bhl-metadata.duckdb")?);
+let pages = BhlPageAccessor::from_metadata(storage, snapshot_id, metadata, report)?;
+```
+
+`save_snapshot` requires a completed import, stages on the destination filesystem,
+commits data/provenance, detaches it and atomically publishes without overwrite.
+`open_snapshot` validates the format version, all table schemas and row counts,
+and retains source fingerprints. A saved source snapshot cannot be re-exported
+through the query workspace. Source freshness, acquisition consistency, storage
+and distribution are caller-owned: this is opt-in reuse, not an automatic cache
+of the mutable public bucket. Use a compatible DuckDB storage version. Existing
+`load` behavior is unchanged; conversion-service job wiring remains a consumer
+adoption step after this API is released.
