@@ -66,7 +66,13 @@ pub struct BhlPageMetadata {
     pub identity: BhlPageIdentity,
     pub object: ObjectRef,
     pub metadata: StructArray,
+    /// Required join targets not found for this page, e.g. `item:7` or
+    /// `title:unresolved parent`. Missing singleton children are null; the page
+    /// is still emitted. Empty optional relationships are not reported here.
     pub missing: Vec<String>,
+    /// Parent ItemID disagreements or page SequenceOrder mismatches with the
+    /// OCR filename. Part page sequences are checked against `partpage`.
+    /// These messages accompany the emitted page; callers decide how to handle them.
     pub conflicts: Vec<String>,
 }
 impl BhlMetadata {
