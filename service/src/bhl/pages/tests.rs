@@ -122,12 +122,21 @@ async fn duckdb_pages_preserve_order_metadata_reports_and_projection() {
         assert_eq!(batch["data"].as_binary::<i64>().value(0), b"\r\n\xff");
         let joined = batch["metadata"].as_struct();
         if id == 20 {
-            assert!(joined.column_by_name("item").unwrap().is_null(0));
+            assert_eq!(
+                joined
+                    .column_by_name("item")
+                    .unwrap()
+                    .as_list::<i32>()
+                    .value_length(0),
+                0
+            );
         } else {
             assert_eq!(
                 joined
                     .column_by_name("title")
                     .unwrap()
+                    .as_list::<i32>()
+                    .value(0)
                     .as_struct()
                     .column_by_name("TitleID")
                     .unwrap()

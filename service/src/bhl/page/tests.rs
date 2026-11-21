@@ -1,5 +1,5 @@
 use super::*;
-use arrow_array::{Array, new_null_array};
+use arrow_array::{Array, cast::AsArray, new_null_array};
 use arrow_schema::{DataType, Schema};
 use open_arrow_access_core::RecordBatchBuilder;
 
@@ -26,8 +26,22 @@ pub(in crate::bhl) fn metadata(title: &str, rights: &str) -> StructArray {
                             }
                             Ok(())
                         })?;
-                    } else {
-                        row.append_structs(table.name(), std::iter::empty::<()>(), |_, ()| Ok(()))?;
+                    } else if let DataType::List(element) = table.data_type() {
+                        let DataType::Struct(fields) = element.data_type() else {
+                            unreachable!()
+                        };
+                        let count = usize::from(matches!(table.name().as_str(), "item" | "title"));
+                        row.append_structs(table.name(), 0..count, |row, _| {
+                            for field in fields {
+                                let value = match (table.name().as_str(), field.name().as_str()) {
+                                    ("title", "FullTitle") => title,
+                                    ("item", "RightsStatement") => rights,
+                                    _ => "",
+                                };
+                                row.append(field.name(), value)?;
+                            }
+                            Ok(())
+                        })?;
                     }
                 }
                 Ok(())
@@ -72,12 +86,12 @@ fn assigns_actual_metadata_and_original_payload() {
             .unwrap();
         assert_eq!(actual, &input);
         assert!(!actual.is_null(0));
-        let title_array = actual
+        let titles = actual
             .column_by_name("title")
             .unwrap()
-            .as_any()
-            .downcast_ref::<StructArray>()
-            .unwrap();
+            .as_list::<i32>()
+            .value(0);
+        let title_array = titles.as_struct();
         assert_eq!(
             title_array
                 .column_by_name("FullTitle")

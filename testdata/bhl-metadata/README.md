@@ -20,3 +20,8 @@ fixture tables to check independent relation aggregation and conflicting parents
 subject-many.txt.gz has 9,001 ordered synthetic relation rows, crossing the
 8,192-row decoder batch boundary. It exercises batched import, quote/Unicode
 preservation, source ordinals and the stable decoded lexical-row fingerprint.
+
+item-multi-title.txt.gz and title-multi-title.txt.gz extend the base fixtures
+with a second TitleID associated with the same ItemID. They model the real
+AWS item-table relationship discovered for ItemID 62861, without copied source
+records. Both files use deterministic gzip mtime=0.
