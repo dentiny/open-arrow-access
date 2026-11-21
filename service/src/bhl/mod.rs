@@ -1,5 +1,6 @@
 //! BHL AWS Open Data objects and page records.
 mod error;
+pub mod metadata;
 mod open_data;
 mod page;
 mod pages;

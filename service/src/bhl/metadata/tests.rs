@@ -1,0 +1,220 @@
+use super::*;
+use arrow_array::{Array, cast::AsArray};
+use open_arrow_access_core::ErrorKind;
+use open_arrow_access_storage::OpenDalAccessor;
+use open_arrow_access_test_support::{fixture, temp_fs};
+
+const ITEM: &str = "ocr/item-2/item-2-3-5.txt";
+const PART: &str = "ocr/part-8/part-8-3-1.txt";
+const MISSING: &str = "ocr/item-20/item-20-30-1.txt";
+
+async fn source(title: &str) -> (tempfile::TempDir, OpenDalAccessor) {
+    let mut files = Vec::new();
+    for table in tables() {
+        let filename = if table.name == "title" {
+            title.to_owned()
+        } else {
+            format!("{}.txt.gz", table.name)
+        };
+        files.push((
+            format!("data/{}.txt.gz", table.name),
+            fixture!("bhl-metadata", &filename).await,
+        ));
+    }
+    let files = files
+        .iter()
+        .map(|(key, bytes)| (key.as_str(), bytes.as_slice()))
+        .collect::<Vec<_>>();
+    let (root, operator) = temp_fs(&files);
+    (root, OpenDalAccessor::new(operator))
+}
+
+async fn load() -> BhlMetadata {
+    let (_root, storage) = source("title.txt.gz").await;
+    BhlMetadata::load(storage).await.unwrap()
+}
+
+fn cell<'a>(row: &'a StructArray, table: &str, field: &str) -> &'a str {
+    row.column_by_name(table)
+        .unwrap()
+        .as_struct()
+        .column_by_name(field)
+        .unwrap()
+        .as_string::<i64>()
+        .value(0)
+}
+
+fn list(row: &StructArray, table: &str, field: &str) -> Vec<String> {
+    let values = row.column_by_name(table).unwrap().as_list::<i32>().value(0);
+    values
+        .as_struct()
+        .column_by_name(field)
+        .unwrap()
+        .as_string::<i64>()
+        .iter()
+        .map(|value| value.unwrap().to_owned())
+        .collect()
+}
+
+fn read(metadata: &BhlMetadata, paths: &[&str]) -> Vec<BhlPageMetadata> {
+    let keys = paths
+        .iter()
+        .map(|path| ObjectRef::new(*path))
+        .collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    metadata
+        .for_each(&keys, |row| {
+            rows.push(row);
+            Ok(())
+        })
+        .unwrap();
+    rows
+}
+
+#[tokio::test]
+async fn joins_pages_and_preserves_source_values_and_relation_order() {
+    let metadata = load().await;
+    // Multiple independent relations, duplicate creators, and source ordinals
+    // that differ from insertion order catch multiplication and ordering bugs.
+    metadata
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO creator VALUES (1, 2, '1', '10', 'Author', 'Second', '');
+         INSERT INTO creator VALUES (1, 1, '1', '9', '', '', '');
+         INSERT INTO creatoridentifier VALUES (10, 2, '10', '', 'other', '');
+         INSERT INTO subject VALUES (1, 2, '1', 'z', '');
+         INSERT INTO subject VALUES (1, 1, '1', 'a', '');
+         INSERT INTO partpage VALUES (8, 2, '8', '3', '2', '1', '');",
+        )
+        .unwrap();
+    let rows = read(&metadata, &[ITEM, PART, MISSING]);
+    assert_eq!(metadata.info.sources.len(), 13);
+    assert_eq!(rows.len(), 3);
+    for page in rows {
+        let row = &page.metadata;
+        assert_eq!(
+            row.data_type(),
+            page_schema()
+                .field_with_name("metadata")
+                .unwrap()
+                .data_type()
+        );
+        assert!(!row.is_null(0));
+        assert!(page.conflicts.is_empty());
+        if page.object.locator() == MISSING {
+            assert_eq!(
+                page.missing,
+                ["page:30", "item:20", "title:unresolved parent"]
+            );
+            assert!(row.column_by_name("item").unwrap().is_null(0));
+            continue;
+        }
+        assert!(page.missing.is_empty());
+        assert_eq!(cell(row, "title", "TitleID"), "001");
+        assert_eq!(cell(row, "title", "FullTitle"), "Original \"title\" 遗传");
+        assert_eq!(cell(row, "title", "ShortTitle"), "");
+        assert_eq!(cell(row, "item", "RightsStatement"), "Source rights");
+        assert_eq!(list(row, "creator", "CreatorID"), ["9", "9", "10"]);
+        assert_eq!(
+            list(row, "creatoridentifier", "IdentifierValue"),
+            ["same", "same", "other"]
+        );
+        assert_eq!(list(row, "subject", "Subject"), ["a", "z"]);
+        assert_eq!(list(row, "doi", "DOI"), ["title DOI"]);
+        if page.object.locator() == PART {
+            assert_eq!(cell(row, "part", "RightsStatement"), "Part rights");
+            assert_eq!(list(row, "partpage", "PageID"), ["3", "3"]);
+        } else {
+            assert!(row.column_by_name("part").unwrap().is_null(0));
+            assert!(list(row, "partpage", "PageID").is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn rejects_invalid_sources() {
+    for title in [
+        "title-duplicate.txt.gz",
+        "title-bad-header.txt.gz",
+        "title-invalid-key.txt.gz",
+    ] {
+        let (_root, storage) = source(title).await;
+        assert!(BhlMetadata::load(storage).await.is_err(), "{title}");
+    }
+    let (_root, operator) = temp_fs(&[]);
+    let error = BhlMetadata::load(OpenDalAccessor::new(operator))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), ErrorKind::NotFound);
+}
+
+#[tokio::test]
+async fn reports_conflicts_and_falls_back_to_partpage_parent() {
+    let metadata = load().await;
+    metadata
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "UPDATE part SET ItemID = '7';
+         INSERT INTO partpage VALUES (8, 1, '8', '3', '9', '2', '');",
+        )
+        .unwrap();
+    let row = read(&metadata, &[PART]).pop().unwrap();
+    assert_eq!(
+        row.conflicts,
+        [
+            "page.ItemID=2, selected item=Some(7)",
+            "partpage.ItemID=2, selected item=Some(7)",
+            "partpage.ItemID=9, selected item=Some(7)",
+            "SequenceOrder=2, filename sequence=1",
+        ]
+    );
+    assert_eq!(row.missing, ["item:7", "title:unresolved parent"]);
+    metadata
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch("DELETE FROM part;")
+        .unwrap();
+    let row = read(&metadata, &[PART]).pop().unwrap();
+    assert_eq!(cell(&row.metadata, "item", "ItemID"), "2");
+    assert_eq!(row.missing, ["part:8"]);
+}
+
+#[tokio::test]
+async fn emits_rows_until_callback_fails() {
+    let metadata = load().await;
+    let cached: bool = metadata
+        .connection
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT current_setting('enable_external_file_cache')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!cached);
+    let mut emitted = 0;
+    let error = metadata
+        .for_each(&[ITEM, PART].map(ObjectRef::new), |_| {
+            emitted += 1;
+            Err(error::invalid("stop sink"))
+        })
+        .unwrap_err();
+    assert_eq!(error.to_string(), "bhl_metadata: stop sink");
+    assert_eq!(emitted, 1);
+    // Subsequent queries are independent, and duplicate requests stay duplicated.
+    assert_eq!(read(&metadata, &[ITEM, PART]).len(), 2);
+    assert_eq!(read(&metadata, &[ITEM, ITEM]).len(), 2);
+    assert!(metadata.for_each(&[], |_| panic!("empty query")).is_ok());
+    assert!(
+        metadata
+            .for_each(&[ObjectRef::new("invalid")], |_| panic!("invalid key"))
+            .is_err()
+    );
+}

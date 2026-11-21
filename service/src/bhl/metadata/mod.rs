@@ -1,0 +1,104 @@
+//! Direct AWS TSV acquisition and populated page metadata joins.
+mod error;
+mod join;
+mod source;
+use super::{BhlPageIdentity, page_schema};
+use arrow_array::StructArray;
+use arrow_schema::{DataType, Fields};
+use open_arrow_access_core::{ObjectRef, Result};
+pub use source::{BhlMetadata, BhlMetadataInfo, SourceInfo};
+use std::collections::HashMap;
+
+#[derive(Clone)]
+struct Table {
+    name: String,
+    fields: Fields,
+    key: usize,
+    single: bool,
+}
+fn tables() -> Vec<Table> {
+    let schema = page_schema();
+    let DataType::Struct(children) = schema
+        .field_with_name("metadata")
+        .expect("fixed schema")
+        .data_type()
+    else {
+        unreachable!()
+    };
+    children
+        .iter()
+        .map(|child| {
+            let (fields, single) = match child.data_type() {
+                DataType::Struct(fields) => (fields.clone(), true),
+                DataType::List(element) => {
+                    let DataType::Struct(fields) = element.data_type() else {
+                        unreachable!()
+                    };
+                    (fields.clone(), false)
+                }
+                _ => unreachable!(),
+            };
+            let key = match child.name().as_str() {
+                "title" | "creator" | "subject" | "titleidentifier" => "TitleID",
+                "item" => "ItemID",
+                "page" | "pagename" => "PageID",
+                "part" | "partpage" | "partcreator" | "partidentifier" => "PartID",
+                "creatoridentifier" => "CreatorID",
+                "doi" => "EntityID",
+                _ => unreachable!(),
+            };
+            let key = fields
+                .iter()
+                .position(|field| field.name() == key)
+                .expect("fixed join key");
+            Table {
+                name: child.name().clone(),
+                fields,
+                key,
+                single,
+            }
+        })
+        .collect()
+}
+
+/// One joined page, emitted without collecting the full query result in Rust.
+pub struct BhlPageMetadata {
+    pub identity: BhlPageIdentity,
+    pub object: ObjectRef,
+    pub metadata: StructArray,
+    /// Required join targets not found for this page, e.g. `item:7` or
+    /// `title:unresolved parent`. Missing singleton children are null; the page
+    /// is still emitted. Empty optional relationships are not reported here.
+    pub missing: Vec<String>,
+    /// Parent ItemID disagreements or page SequenceOrder mismatches with the
+    /// OCR filename. Part page sequences are checked against `partpage`.
+    /// These messages accompany the emitted page; callers decide how to handle them.
+    pub conflicts: Vec<String>,
+}
+impl BhlMetadata {
+    /// Execute one join query and emit each selected page to the callback.
+    /// This is synchronous; call from a blocking worker in async applications.
+    /// Returning an error from the callback stops emission immediately.
+    pub fn for_each(
+        &self,
+        keys: &[ObjectRef],
+        emit: impl FnMut(BhlPageMetadata) -> Result<()>,
+    ) -> Result<()> {
+        join::for_each(self, keys, emit)
+    }
+
+    pub fn schema_metadata(&self) -> Result<HashMap<String, String>> {
+        Ok(HashMap::from([
+            (
+                "bhl.metadata.fingerprint".into(),
+                self.info.fingerprint.clone(),
+            ),
+            (
+                "bhl.metadata.sources".into(),
+                serde_json::to_string(&self.info.sources).map_err(error::json)?,
+            ),
+        ]))
+    }
+}
+#[cfg(test)]
+mod tests;
