@@ -131,12 +131,22 @@ See [BHL service](bhl.md), [resolved file sets](remote-files.md) and
 
 With `service-bhl`, `BhlPageAccessor::new(storage, snapshot_id, provider)` maps
 selected item/part OCR filenames to the fixed `page_schema()` and assigns the
-provider's one-row metadata StructArray. The caller supplies metadata; this
-reader does not acquire TSV tables or join bibliographic records. Invalid keys,
+provider's one-row metadata StructArray. This constructor accepts supplied metadata. Use `BhlPageAccessor::from_metadata`
+to read OCR pages with DuckDB-joined metadata. Invalid keys,
 provider errors and schema mismatches fail explicitly. Native partitions use the
 shared scan executor. `with_schema_metadata` retains caller provenance in the
-plan and emitted batch schemas. This API is the reader foundation for separate
-TSV metadata acquisition and join changes.
+plan and emitted batch schemas. The joined constructor attaches metadata provenance automatically and calls the
+caller's report hook before each OCR read.
+
+## DuckDB metadata joins
+
+Enable `service-bhl` and load `BhlMetadata::load(storage).await` once.
+The 13 AWS gzip TSV tables are imported concurrently into in-memory DuckDB
+tables. `metadata.for_each(&page_keys, emit)` runs one join SQL and emits each
+page's metadata immediately, matching the fixed Arrow/Lance schema. The first
+version assumes sufficient memory, configures no temporary directory, and
+explicitly disables DuckDB's external file cache. See the
+[metadata guide](bhl-metadata.md) for usage and the integrated OCR reader.
 
 ## Persist a corpus inventory and distribute jobs
 
@@ -172,7 +182,8 @@ fn worker_selection() -> Result<(), Box<dyn std::error::Error>> {
     let source = BhlOpenData::new(OpenDalAccessor::new(open_data_bucket_operator()?));
     let files = source.partition(job.objects().iter().cloned())?;
     // Use `files` with a byte/format reader, or pass `job.request()` to a
-    // BhlPageAccessor configured with job.snapshot_id() and supplied metadata.
+    // BhlPageAccessor::from_metadata configured with job.snapshot_id() and
+    // a shared, loaded DuckDB metadata value.
     Ok(())
 }
 ```
@@ -196,7 +207,7 @@ storage policy and avoid overwriting a published run with different membership.
 Coordinator memory is proportional to key count; individual job generation and
 worker selection are count-bounded. There are no body downloads or per-page
 HEAD/length probes during inventory planning, and no corpus listing on workers.
-Job keys are directly available as `job.request().objects` for metadata selection;
-load and share the AWS TSV metadata once per worker process, then supply the
-selected mapping to the existing page accessor. Metadata acquisition and joins
-are separate from this inventory implementation.
+Load and share `Arc<BhlMetadata>` once per worker process. Create a
+`BhlPageAccessor::from_metadata` with `job.snapshot_id()` and that shared value,
+then read `job.request()` to join the selected pages and acquire their OCR.
+Inventory discovery and job generation do not acquire metadata tables.

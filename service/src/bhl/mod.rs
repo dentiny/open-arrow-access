@@ -2,6 +2,7 @@
 mod error;
 mod inventory;
 pub use inventory::{BhlInventory, BhlOcrScope, BhlPageJob};
+pub mod metadata;
 mod open_data;
 mod page;
 mod pages;
