@@ -77,7 +77,7 @@ async fn inspects_headers_once_and_streams_independent_selected_entries() {
 
 #[tokio::test]
 async fn accepts_empty_and_gnu_archives() {
-    for (name, count) in [("empty.tar", 0), ("gnu.tar", 1)] {
+    for (name, count) in [("empty.tar", 0), ("gnu.tar", 1), ("gnu-longname.tar", 1)] {
         let source = source(name).await;
         let archive = TarArchive::open(
             source.open("archive".into()).await.unwrap(),
@@ -99,7 +99,6 @@ async fn rejects_malformed_and_unsupported_archives() {
         ("one-zero-block.tar", ErrorKind::Decode),
         ("link.tar", ErrorKind::Unsupported),
         ("pax.tar", ErrorKind::Unsupported),
-        ("gnu-longname.tar", ErrorKind::Unsupported),
     ] {
         let source = source(name).await;
         let error = TarArchive::open(
@@ -483,4 +482,121 @@ async fn sequential_completion_and_malformed_headers_release_source_with_archive
         assert!(dropped.load(Ordering::SeqCst));
         assert!(archive.next_entry().await.unwrap().is_none());
     }
+}
+
+#[tokio::test]
+async fn gnu_long_names_match_in_indexed_and_sequential_reads() {
+    use open_arrow_access_decompression::tar::TarStream;
+    let input = source("gnu-longname.tar").await;
+    let indexed = TarArchive::open(
+        input.open("archive".into()).await.unwrap(),
+        TarLimits::default(),
+    )
+    .await
+    .unwrap();
+    let mut streamed = TarStream::new(
+        input.open("archive".into()).await.unwrap(),
+        TarLimits::default(),
+    );
+    let mut member = streamed.next_entry().await.unwrap().unwrap();
+    assert_eq!(&member.entry, indexed.entries().next().unwrap());
+    assert_eq!(member.entry.index, 0);
+    assert_eq!(member.entry.name, vec![b'x'; 120]);
+    assert_eq!(collect_bytes(member.reader.as_mut()).await.unwrap(), b"x");
+    assert!(streamed.next_entry().await.unwrap().is_none());
+    assert_eq!(
+        collect_bytes(indexed.open_entry(0, NonZeroUsize::MIN).unwrap().as_mut())
+            .await
+            .unwrap(),
+        b"x"
+    );
+}
+
+#[tokio::test]
+async fn cancelled_gnu_long_name_reads_resume() {
+    use futures::FutureExt;
+    use open_arrow_access_core::Bytes;
+    use open_arrow_access_decompression::tar::TarStream;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    let allowed = Arc::new(AtomicUsize::new(6));
+    let input = gated_source(
+        Bytes::from(fixture!("tar", "gnu-longname.tar").await),
+        100,
+        allowed.clone(),
+    );
+    let mut archive = TarStream::new(input, TarLimits::default());
+    // Cancel during the name payload, its padding, and the following header.
+    for chunks in [6, 7, 11] {
+        allowed.store(chunks, Ordering::SeqCst);
+        assert!(archive.next_entry().now_or_never().is_none());
+    }
+    allowed.store(usize::MAX, Ordering::SeqCst);
+    let mut member = archive.next_entry().await.unwrap().unwrap();
+    assert_eq!(member.entry.index, 0);
+    assert_eq!(member.entry.name, vec![b'x'; 120]);
+    assert_eq!(collect_bytes(member.reader.as_mut()).await.unwrap(), b"x");
+    assert!(archive.next_entry().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn malformed_or_unbounded_gnu_names_fail_in_both_readers() {
+    use open_arrow_access_decompression::tar::TarStream;
+    let original = fixture!("tar", "gnu-longname.tar").await;
+    let mut unterminated = original.clone();
+    unterminated[512 + 120] = b'x';
+    let mut orphan = original[..1024].to_vec();
+    orphan.extend_from_slice(&[0; 1024]);
+    let mut consecutive = original[..1024].to_vec();
+    consecutive.extend_from_slice(&original);
+    for bytes in [unterminated, orphan, consecutive] {
+        let input = MemoryAccessor::new(&bytes, 7).with_ranges();
+        expect_err_kind(
+            TarArchive::open(
+                input.open("archive".into()).await.unwrap(),
+                TarLimits::default(),
+            )
+            .await,
+            ErrorKind::Decode,
+        );
+        let mut stream = TarStream::new(
+            input.open("archive".into()).await.unwrap(),
+            TarLimits::default(),
+        );
+        expect_err_kind(stream.next_entry().await, ErrorKind::Decode);
+        assert!(stream.next_entry().await.unwrap().is_none());
+    }
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(tar::EntryType::GNULongName);
+    header.set_size(64 * 1024 + 1);
+    header.set_cksum();
+    let oversized = MemoryAccessor::new(header.as_bytes(), 7).with_ranges();
+    expect_err_kind(
+        TarArchive::open(
+            oversized.open("archive".into()).await.unwrap(),
+            TarLimits::default(),
+        )
+        .await,
+        ErrorKind::Unsupported,
+    );
+    let mut stream = TarStream::new(
+        oversized.open("archive".into()).await.unwrap(),
+        TarLimits::default(),
+    );
+    expect_err_kind(stream.next_entry().await, ErrorKind::Unsupported);
+    // Metadata headers count against the total header budget too.
+    let input = source("gnu-longname.tar").await;
+    let limits = TarLimits {
+        max_entries: 1,
+        ..Default::default()
+    };
+    expect_err_kind(
+        TarArchive::open(input.open("archive".into()).await.unwrap(), limits.clone()).await,
+        ErrorKind::Unsupported,
+    );
+    let mut stream = TarStream::new(input.open("archive".into()).await.unwrap(), limits);
+    expect_err_kind(stream.next_entry().await, ErrorKind::Unsupported);
 }
