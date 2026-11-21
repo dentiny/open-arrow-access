@@ -1,9 +1,13 @@
 use super::*;
 use crate::arxiv::ArxivKind;
-use arrow_array::types::UInt64Type;
-use open_arrow_access_test_support::fixture;
+use crate::common::Connection;
+use arrow_array::{Array, StructArray, types::UInt64Type};
+use open_arrow_access_storage::OpenDalAccessor;
+use open_arrow_access_test_support::{fixture, http::HttpFixture, temp_fs};
 
-fn input(name: &str, data: &[u8]) -> Result<RecordBatch> {
+type TestContent = ArxivContentRecords<OpenDalAccessor>;
+
+fn raw_batch(name: &str, data: &[u8]) -> Result<RecordBatch> {
     let mut input = RecordBatchBuilder::new(crate::arxiv::record_schema(), None)?;
     input.push(|row| {
         row.append("shard_uri", "src/arXiv_src_2410_001.tar")?;
@@ -16,7 +20,7 @@ fn input(name: &str, data: &[u8]) -> Result<RecordBatch> {
 
 async fn read(name: &str, data: &[u8]) -> Result<Vec<RecordBatch>> {
     expand(
-        input(name, data)?,
+        raw_batch(name, data)?,
         ReadOptions::default().with_batch_size(std::num::NonZeroUsize::MIN),
     )
     .await?
@@ -25,15 +29,20 @@ async fn read(name: &str, data: &[u8]) -> Result<Vec<RecordBatch>> {
 }
 
 #[tokio::test]
-async fn streams_tex_before_reporting_corrupt_gzip_trailer() {
+async fn streams_metadata_and_tex_before_reporting_corrupt_gzip_trailer() {
     let data = fixture!("arxiv-content", "large-attachments-bad-crc.tar.gz").await;
-    let mut records = expand(
-        input("2410/2410.00001v2.gz", &data).unwrap(),
+    let snapshot = oai_snapshot().await;
+    let mut records = content_batches(
+        raw_batch("2410/2410.00001v2.gz", &data).unwrap(),
+        ArxivContentFormat::Latex,
         ReadOptions::default().with_batch_size(std::num::NonZeroUsize::MIN),
+        ContentMetadata::Snapshot(index(snapshot.clone())),
     )
     .await
     .unwrap();
-    assert_eq!(records.try_next().await.unwrap().unwrap().num_rows(), 1);
+    let first = records.try_next().await.unwrap().unwrap();
+    assert_eq!(first.num_rows(), 1);
+    assert_metadata(&first, &snapshot, 1);
     assert_eq!(
         records.try_collect::<Vec<_>>().await.unwrap_err().kind(),
         open_arrow_access_core::ErrorKind::Decode
@@ -93,10 +102,9 @@ async fn accepts_legacy_single_sources_and_rejects_non_latex() {
 }
 
 #[tokio::test]
-async fn formats_emit_identical_schemas_and_preserve_content() {
-    use open_arrow_access_storage::OpenDalAccessor;
-    use open_arrow_access_test_support::temp_fs;
+async fn formats_preserve_content_and_join_metadata() {
     let schema = content_schema();
+    let snapshot = oai_snapshot().await;
     assert_eq!(schema.fields().len(), 10);
     let metadata = schema.field_with_name("metadata").unwrap();
     assert!(metadata.is_nullable());
@@ -108,42 +116,237 @@ async fn formats_emit_identical_schemas_and_preserve_content() {
         (ArxivContentFormat::Latex, ArxivKind::Source, "latex.tar"),
         (ArxivContentFormat::Xml, ArxivKind::Source, "xml.tar"),
     ] {
-        let bytes = fixture!("arxiv-content", fixture_name).await;
-        let (prefix, root) = if kind == ArxivKind::Pdf {
-            ("pdf", "arXivPDF")
-        } else {
-            ("src", "arXivSRC")
-        };
-        let key = format!("{prefix}/arXiv_{prefix}_2410_001.tar");
-        let manifest = format!(
-            "<{root}><file><filename>{key}</filename><md5sum>00000000000000000000000000000000</md5sum><num_items>1</num_items><seq_num>1</seq_num><size>{}</size><timestamp>2024-10-31 00:00:00</timestamp><yymm>2410</yymm></file></{root}>",
-            bytes.len()
-        );
-        let manifest_key = format!("{prefix}/arXiv_{prefix}_manifest.xml");
-        let (_temp, operator) = temp_fs(&[(&manifest_key, manifest.as_bytes()), (&key, &bytes)]);
-        let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
-            .records()
-            .content(format);
+        let http = HttpFixture::new();
+        let (_temp, records, key) = content_fixture(format, kind, fixture_name, &http).await;
         let mut reader = records.open(ArxivReadRequest::new(kind)).await.unwrap();
         assert_eq!(reader.metadata().schema, schema);
+        assert!(http.requests().is_empty());
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(batch.schema(), schema);
-        assert_eq!(batch["metadata"].null_count(), batch.num_rows());
-        assert_eq!(
-            batch["article_id"].as_string::<i64>().value(0),
-            "2410.00001"
-        );
-        assert_eq!(batch["format"].as_string::<i64>().value(0), format.as_str());
-        assert_eq!(
-            batch["data_type"].as_string::<i64>().value(0),
-            format.as_str()
-        );
-        let expected = match format {
-            ArxivContentFormat::Pdf => fixture!("arxiv-articles", "paper.pdf").await,
-            ArxivContentFormat::Latex => fixture!("arxiv-articles", "main.tex").await,
-            ArxivContentFormat::Xml => fixture!("arxiv-xml", "article.xml").await,
-        };
-        assert_eq!(batch["data"].as_binary::<i64>().value(0), expected);
+        assert_metadata(&batch, &snapshot, 1);
+        assert_content(&batch, format).await;
         assert!(reader.next().await.unwrap().is_none());
+        let request = ArxivReadRequest::new(kind).with_month(2410);
+        // Reordered and empty projections still preserve row counts.
+        for columns in [vec!["metadata".into(), "article_id".into()], vec![]] {
+            let mut request = request.clone();
+            request.options.projection = Some(columns.clone());
+            let batch = read_one(&records, request).await;
+            assert_eq!(batch.num_columns(), columns.len());
+            if !columns.is_empty() {
+                assert_metadata(&batch, &snapshot, 1);
+            }
+        }
+        assert_eq!(http.requests().len(), 1); // Reopens and projections use the cache.
+        let records = records.with_metadata(index(snapshot.clone())).unwrap();
+        assert_metadata(&read_one(&records, request).await, &snapshot, 1);
+        assert_eq!(http.requests().len(), 1); // Snapshots bypass OAI.
+        // Missing matches fail even when metadata is projected away.
+        let records = records.with_metadata(index(snapshot.slice(2, 1))).unwrap();
+        let mut request = ArxivReadRequest::new(kind).with_shard(key);
+        request.options.projection = Some(vec![]);
+        let mut reader = records.open(request).await.unwrap();
+        assert!(reader.next().await.is_err());
+    }
+}
+
+async fn content_fixture(
+    format: ArxivContentFormat,
+    kind: ArxivKind,
+    fixture_name: &str,
+    http: &HttpFixture,
+) -> (tempfile::TempDir, TestContent, String) {
+    let bytes = fixture!("arxiv-content", fixture_name).await;
+    let (prefix, root) = if kind == ArxivKind::Pdf {
+        ("pdf", "arXivPDF")
+    } else {
+        ("src", "arXivSRC")
+    };
+    let key = format!("{prefix}/arXiv_{prefix}_2410_001.tar");
+    let manifest = format!(
+        "<{root}><file><filename>{key}</filename><md5sum>00000000000000000000000000000000</md5sum><num_items>1</num_items><seq_num>1</seq_num><size>{}</size><timestamp>2024-10-31 00:00:00</timestamp><yymm>2410</yymm></file></{root}>",
+        bytes.len()
+    );
+    let manifest_key = format!("{prefix}/arXiv_{prefix}_manifest.xml");
+    let (temp, operator) = temp_fs(&[(&manifest_key, manifest.as_bytes()), (&key, &bytes)]);
+    let connection = metadata_connection(http, "2410.00001", "metadata-record.xml").await;
+    let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
+        .with_metadata_connection(connection)
+        .records()
+        .content(format);
+    (temp, records, key)
+}
+
+async fn read_one(records: &TestContent, request: ArxivReadRequest) -> RecordBatch {
+    let mut reader = records.open(request).await.unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(batch.schema(), reader.metadata().schema);
+    assert_eq!(batch.num_rows(), 1);
+    assert!(reader.next().await.unwrap().is_none());
+    batch
+}
+
+async fn assert_content(batch: &RecordBatch, format: ArxivContentFormat) {
+    assert_eq!(
+        batch["article_id"].as_string::<i64>().value(0),
+        "2410.00001"
+    );
+    assert_eq!(batch["format"].as_string::<i64>().value(0), format.as_str());
+    assert_eq!(
+        batch["data_type"].as_string::<i64>().value(0),
+        format.as_str()
+    );
+    let expected = match format {
+        ArxivContentFormat::Pdf => fixture!("arxiv-articles", "paper.pdf").await,
+        ArxivContentFormat::Latex => fixture!("arxiv-articles", "main.tex").await,
+        ArxivContentFormat::Xml => fixture!("arxiv-xml", "article.xml").await,
+    };
+    assert_eq!(batch["data"].as_binary::<i64>().value(0), expected);
+}
+
+async fn metadata_connection(http: &HttpFixture, article: &str, file: &str) -> Connection {
+    let identifier = super::super::id::oai_identifier(article).unwrap();
+    let encoded: String = url::form_urlencoded::byte_serialize(identifier.as_bytes()).collect();
+    let path = format!("/oai?verb=GetRecord&metadataPrefix=arXivRaw&identifier={encoded}");
+    http.respond(
+        &path,
+        http::StatusCode::OK,
+        fixture!("arxiv-content", file).await,
+    );
+    Connection::new(http.endpoint())
+        .unwrap()
+        .with_context(http.context())
+}
+
+async fn oai_snapshot() -> RecordBatch {
+    use crate::{
+        arxiv_metadata::ArxivMetadata,
+        oai::{OaiPage, OaiProvider},
+    };
+    use open_arrow_access_core::ReadRequest;
+    use open_arrow_access_test_support::format::collect_batches;
+    let page = OaiPage {
+        bytes: fixture!("arxiv-content", "metadata.xml").await.into(),
+        record_count: 3,
+        resumption_token: None,
+    };
+    collect_batches(
+        &page.records(ArxivMetadata::inferred_record_format()),
+        ReadRequest::new("metadata"),
+    )
+    .await
+    .remove(0)
+}
+
+fn index(snapshot: RecordBatch) -> Arc<ArxivMetadataIndex> {
+    Arc::new(ArxivMetadataIndex::from_oai_records(snapshot).unwrap())
+}
+
+fn assert_metadata(batch: &RecordBatch, snapshot: &RecordBatch, expected_row: usize) {
+    let expected = StructArray::from(snapshot.clone()).slice(expected_row, 1);
+    let metadata = batch["metadata"].as_struct();
+    assert_eq!(metadata.null_count(), 0);
+    for row in 0..batch.num_rows() {
+        assert_eq!(metadata.slice(row, 1), expected);
+    }
+}
+
+#[tokio::test]
+async fn metadata_normalizes_legacy_ids_repeats_tex_rows_and_retains_deletions() {
+    let snapshot = oai_snapshot().await;
+    let http = HttpFixture::new();
+    let resolver = super::super::metadata_fetch::MetadataResolver::new(
+        metadata_connection(&http, "hep-th9901001", "metadata-legacy.xml").await,
+    );
+    let (index, same) = futures::try_join!(
+        resolver.get("hep-th9901001"),
+        resolver.get("hep-th/9901001")
+    )
+    .unwrap();
+    assert!(Arc::ptr_eq(&index, &same));
+    assert_eq!(http.requests().len(), 1);
+    let batches = read(
+        "hep-th/9901001v2.gz",
+        &fixture!("arxiv-articles", "source.tar.gz").await,
+    )
+    .await
+    .unwrap();
+    assert_eq!(batches.iter().map(RecordBatch::num_rows).sum::<usize>(), 2);
+    for batch in batches {
+        assert_metadata(&index.attach_content(batch).unwrap(), &snapshot, 0);
+    }
+    let deleted = document_batch(
+        &raw_batch("2410/2410.99999.pdf", b"%PDF").unwrap(),
+        ArxivContentFormat::Pdf,
+    )
+    .unwrap();
+    let resolver = super::super::metadata_fetch::MetadataResolver::new(
+        metadata_connection(&http, "2410.99999", "metadata-deleted.xml").await,
+    );
+    let index = resolver.get("2410.99999").await.unwrap();
+    assert_metadata(&index.attach_content(deleted).unwrap(), &snapshot, 2);
+    assert!(snapshot["oai:metadata"].is_null(2));
+    let duplicate = arrow_select::concat::concat_batches(
+        &snapshot.schema(),
+        &[snapshot.slice(1, 1), snapshot.slice(1, 1)],
+    )
+    .unwrap();
+    assert!(ArxivMetadataIndex::from_oai_records(duplicate).is_err());
+    let empty = RecordBatch::new_empty(crate::arxiv::record_schema());
+    assert!(ArxivMetadataIndex::from_oai_records(empty).is_err());
+}
+
+#[tokio::test]
+async fn rejects_null_ids_and_untyped_content_snapshots() {
+    use arrow_array::{ArrayRef, StringArray};
+    let snapshot = oai_snapshot().await;
+    let header = snapshot["oai:header"].as_struct();
+    let mut header_columns = header.columns().to_vec();
+    header_columns[0] = Arc::new(StringArray::from(vec![None::<&str>; snapshot.num_rows()]));
+    let header = StructArray::new(header.fields().clone(), header_columns, None);
+    let mut columns = snapshot.columns().to_vec();
+    columns[0] = Arc::new(header);
+    let invalid = RecordBatch::try_new(snapshot.schema(), columns).unwrap();
+    assert!(ArxivMetadataIndex::from_oai_records(invalid).is_err());
+    // Older raw-PDF indexes remain usable there, but cannot change the fixed content schema.
+    let flat = RecordBatch::try_from_iter(vec![(
+        "identifier",
+        Arc::new(StringArray::from(vec!["2410.00001"])) as ArrayRef,
+    )])
+    .unwrap();
+    let index = Arc::new(ArxivMetadataIndex::try_new(flat, "identifier").unwrap());
+    let (_temp, operator) = temp_fs(&[]);
+    assert!(
+        crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
+            .records()
+            .content(ArxivContentFormat::Pdf)
+            .with_metadata(index)
+            .is_err()
+    );
+    let empty = RecordBatch::new_empty(snapshot.schema());
+    assert!(ArxivMetadataIndex::from_oai_records(empty).is_ok());
+}
+
+#[tokio::test]
+async fn default_metadata_propagates_failures_even_without_projected_metadata() {
+    for file in [
+        "metadata-missing.xml",
+        "metadata-empty.xml",
+        "metadata-incomplete.xml",
+        "metadata-legacy.xml",
+    ] {
+        let http = HttpFixture::new();
+        let connection = metadata_connection(&http, "2410.00001", file).await;
+        let bytes = fixture!("arxiv-content", "pdf.tar").await;
+        let (_temp, operator) = temp_fs(&[("pdf/one.tar", &bytes)]);
+        let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
+            .with_metadata_connection(connection)
+            .records()
+            .content(ArxivContentFormat::Pdf);
+        let mut request = ArxivReadRequest::new(ArxivKind::Pdf).with_shard("pdf/one.tar");
+        request.options.projection = Some(vec![]);
+        let mut reader = records.open(request).await.unwrap();
+        assert!(reader.next().await.is_err(), "{file}");
+        assert_eq!(http.requests().len(), 1);
     }
 }

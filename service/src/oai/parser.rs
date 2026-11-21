@@ -16,12 +16,20 @@ pub(super) struct Records {
 }
 
 pub(super) async fn parse_page(bytes: Bytes) -> Result<OaiPage> {
+    parse_response(bytes, "ListRecords").await
+}
+
+pub(super) async fn parse_record(bytes: Bytes) -> Result<OaiPage> {
+    parse_response(bytes, "GetRecord").await
+}
+
+async fn parse_response(bytes: Bytes, verb: &str) -> Result<OaiPage> {
     let document = XmlDocument::new(&bytes, "OAI-PMH")?;
     let batch = document
         .read(vec![
             XmlField::structure(
                 "records",
-                document.element("ListRecords"),
+                document.element(verb),
                 true,
                 vec![
                     XmlField::list(

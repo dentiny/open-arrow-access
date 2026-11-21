@@ -168,11 +168,21 @@ Enabling a feature compiles an API; construct the accessor/layer to use it.
 | CSV/TSV, JSON/JSONL, Parquet, XML, ATIF, WARC | `format-csv`, `format-json`, `format-parquet`, `format-xml`, `format-atif`, `format-warc` |
 | Additional Parquet page codecs | `format-parquet-zstd`, `format-parquet-lz4`, `format-parquet-gzip`, `format-parquet-brotli` (each also enables Parquet; Snappy is included in `format-parquet`) |
 | Compressed byte streams | `decompression-gzip`, `decompression-bz2`, `decompression-lz4`, `decompression-zstd` |
-| Archive members | `decompression-zip`, `decompression-tar` |
+| Archive members (low-level) | TAR always available; ZIP through `decompression-zip` |
+| Integrated TAR/single-file expansion into binary member rows | Always available, including TAR and gzip |
 | Directory or explicit file-set reads | Always available; enable the selected `format-*` reader |
 | A provider | `service-<name>`; see the [complete service table](service/README.md#choose-a-service) |
 | Core contracts, storage, shared service HTTP utilities, record layers | Always available; no extra facade feature |
 | Fs, S3, or another storage backend | Enable `services-fs`, `services-s3`, etc. on your **OpenDAL** dependency |
+
+`ArchiveAccessor::new(bytes, ArchiveOptions::new(ArchiveFormat::Tar))` combines
+outer decompression, header filtering and incremental member batching. Output
+contains `source_uri`, `entry_index`, `entry_name` and unchanged binary `data`.
+Configure `with_entry_filter` to select members before buffering their bodies;
+use `ArchiveFormat::Single { name }` for a lone file. The default outer decoder
+uses object suffixes; format selection is explicit. Read through EOF to finish
+decoder integrity checks. The [Rust API documentation](src/archive/accessor.rs)
+describes projection, batching, error timing and composition with `CrawlAccessor`.
 
 Always-available layers include schema evolution with SQL/Expr computed columns, sampling, row limits,
 parallel reads, and unordered emission. See the
