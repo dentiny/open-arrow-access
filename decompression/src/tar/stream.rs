@@ -12,7 +12,7 @@ use open_arrow_access_core::{
 use super::{
     TarEntry, TarLimits,
     error::{active_entry, decode},
-    validation::{BLOCK_SIZE, parse_entry},
+    validation::{BLOCK_SIZE, is_long_name, long_name, parse_entry},
 };
 
 /// A sequential TAR entry and its lazy, bounded body reader.
@@ -42,6 +42,10 @@ struct State {
     payload: u64,
     padding: u64,
     index: usize,
+    headers: usize,
+    reading_name: bool,
+    name_bytes: Vec<u8>,
+    pending_name: Option<Vec<u8>>,
     zero_block: bool,
     finished: bool,
 }
@@ -57,6 +61,10 @@ impl TarStream {
                 payload: 0,
                 padding: 0,
                 index: 0,
+                headers: 0,
+                reading_name: false,
+                name_bytes: Vec::new(),
+                pending_name: None,
                 zero_block: false,
                 finished: false,
             })),
@@ -126,6 +134,8 @@ impl State {
         self.finished = true;
         self.pending = Bytes::new();
         self.header.clear();
+        self.name_bytes.clear();
+        self.pending_name = None;
         self.input = Box::pin(stream::empty());
     }
 
@@ -145,17 +155,24 @@ impl State {
     }
 
     async fn next_header(&mut self, limits: &TarLimits) -> Result<Option<TarEntry>> {
-        while self.payload != 0 {
-            let bytes = self
-                .take(self.payload.min(usize::MAX as u64) as usize)
-                .await?;
-            self.payload -= bytes.len() as u64;
-        }
-        while self.padding != 0 {
-            let bytes = self.take(self.padding as usize).await?;
-            self.padding -= bytes.len() as u64;
-        }
         loop {
+            while self.payload != 0 {
+                let bytes = self
+                    .take(self.payload.min(usize::MAX as u64) as usize)
+                    .await?;
+                self.payload -= bytes.len() as u64;
+                if self.reading_name {
+                    self.name_bytes.extend_from_slice(&bytes);
+                }
+            }
+            while self.padding != 0 {
+                let bytes = self.take(self.padding as usize).await?;
+                self.padding -= bytes.len() as u64;
+            }
+            if self.reading_name {
+                self.pending_name = Some(long_name(std::mem::take(&mut self.name_bytes))?);
+                self.reading_name = false;
+            }
             while self.header.len() != BLOCK_SIZE as usize {
                 let bytes = self.take(BLOCK_SIZE as usize - self.header.len()).await?;
                 self.header.extend_from_slice(&bytes);
@@ -176,15 +193,31 @@ impl State {
                 return Ok(None);
             }
             if zero {
+                if self.pending_name.is_some() {
+                    return Err(decode("GNU long name has no following entry"));
+                }
                 self.zero_block = true;
                 self.header.clear();
                 continue;
             }
-            let entry = parse_entry(&self.header, self.index, limits)?;
+            let mut entry = parse_entry(&self.header, self.headers, limits)?;
+            self.headers += 1;
+            let is_name = is_long_name(&self.header);
             self.header.clear();
-            self.index += 1;
             self.payload = entry.size;
             self.padding = (BLOCK_SIZE - entry.size % BLOCK_SIZE) % BLOCK_SIZE;
+            if is_name {
+                if self.pending_name.is_some() {
+                    return Err(decode("consecutive GNU long names"));
+                }
+                self.reading_name = true;
+                continue;
+            }
+            if let Some(name) = self.pending_name.take() {
+                entry.name = name;
+            }
+            entry.index = self.index;
+            self.index += 1;
             return Ok(Some(entry));
         }
     }
