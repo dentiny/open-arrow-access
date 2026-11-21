@@ -23,13 +23,13 @@ fn read_info(connection: &Connection) -> Result<BhlMetadataInfo> {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(error::duckdb)?;
-    validation::database_header(count, version)?;
+    validation::validate_database_header(count, version)?;
     serde_json::from_str(&info).map_err(error::json)
 }
 
 fn check_sources(connection: &Connection, info: &BhlMetadataInfo) -> Result<()> {
     let tables = tables();
-    validation::database_manifest(info, tables.len())?;
+    validation::validate_database_manifest(info, tables.len())?;
     for table in tables {
         let mut query = connection
             .prepare(&format!("DESCRIBE main.\"{}\"", table.name))
@@ -41,7 +41,7 @@ fn check_sources(connection: &Connection, info: &BhlMetadataInfo) -> Result<()> 
             .map_err(error::duckdb)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(error::duckdb)?;
-        validation::database_source_schema(&table, &columns, info)?;
+        validation::validate_database_source_schema(&table, &columns, info)?;
         let rows: u64 = connection
             .query_row(
                 &format!("SELECT count(*) FROM main.\"{}\"", table.name),
@@ -49,7 +49,7 @@ fn check_sources(connection: &Connection, info: &BhlMetadataInfo) -> Result<()> 
                 |row| row.get(0),
             )
             .map_err(error::duckdb)?;
-        validation::database_source_rows(rows, info.sources[&table.name].rows)?;
+        validation::validate_database_source_rows(rows, info.sources[&table.name].rows)?;
     }
     Ok(())
 }
@@ -64,7 +64,7 @@ impl BhlMetadata {
         path: impl AsRef<Path>,
     ) -> Result<()> {
         let path = path.as_ref().to_path_buf();
-        validation::database_destination(path.try_exists().map_err(error::database_io)?)?;
+        validation::validate_database_destination(path.try_exists().map_err(error::database_io)?)?;
         let stage = tempfile::Builder::new()
             .prefix(".bhl-metadata-")
             .tempdir_in(
