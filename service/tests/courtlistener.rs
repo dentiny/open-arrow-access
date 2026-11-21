@@ -172,3 +172,119 @@ async fn snapshot_record_plans_preserve_validation_order_and_quoted_csv() {
         ["nc", "minnag", "arizsuper", "nc", "minnag", "arizsuper"]
     );
 }
+
+use arrow_array::{Array, Float64Array, Int16Array, StringArray, TimestampMicrosecondArray};
+use futures::AsyncWriteExt;
+use open_arrow_access_core::ReadRequest;
+use open_arrow_access_service::courtlistener::CourtListenerTableAccessor;
+
+async fn write_bz(root: &std::path::Path, table: &str, data: &str) {
+    let mut encoder = async_compression::futures::write::BzEncoder::new(Vec::new());
+    encoder.write_all(data.as_bytes()).await.unwrap();
+    encoder.close().await.unwrap();
+    tokio::fs::write(
+        root.join(format!("bulk-data/{table}-2026-09-30.csv.bz2")),
+        encoder.into_inner(),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn typed_tables_preserve_sql_types_and_copy_nulls() -> Result<()> {
+    let input = fixture!("courtlistener", "courts-2026-09-30.csv.bz2").await;
+    let source = CourtListenerTableAccessor::new(MemoryAccessor::new(&input, 1));
+    let mut reader = source
+        .open(ReadRequest::new("bulk-data/courts-2026-09-30.csv.bz2"))
+        .await?;
+    let batch = reader.next().await?.unwrap();
+    assert_eq!(batch.num_rows(), 3);
+    assert_eq!(batch.num_columns(), 20);
+    let column = |name: &str| batch.column_by_name(name).unwrap();
+    assert_eq!(
+        column("id")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+            .value(0),
+        "nc"
+    );
+    assert_eq!(
+        column("position")
+            .as_any()
+            .downcast_ref::<Float64Array>()
+            .unwrap()
+            .value(0),
+        366.97
+    );
+    assert_eq!(
+        column("pacer_court_id")
+            .as_any()
+            .downcast_ref::<Int16Array>()
+            .unwrap()
+            .null_count(),
+        3
+    );
+    assert_eq!(
+        column("fjc_court_id")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+            .value(0),
+        ""
+    );
+    assert!(
+        column("notes")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+            .value(0)
+            .contains("\r\n")
+    );
+    assert_eq!(
+        column("date_modified")
+            .as_any()
+            .downcast_ref::<TimestampMicrosecondArray>()
+            .unwrap()
+            .null_count(),
+        0
+    );
+    assert!(reader.next().await?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn typed_table_plans_are_lazy_and_reject_drift_and_invalid_values() -> Result<()> {
+    let root = tempfile::tempdir().unwrap();
+    tokio::fs::create_dir(root.path().join("bulk-data"))
+        .await
+        .unwrap();
+    let source = CourtListenerTableAccessor::new(OpenDalAccessor::new(fs_operator(root.path())));
+    let req = ReadRequest::new("bulk-data/courts-2026-09-30.csv.bz2");
+    assert_eq!(
+        source
+            .plan_scan(req.clone())
+            .await?
+            .partitions
+            .size_hint()
+            .0,
+        1
+    );
+    assert!(
+        source
+            .open(req.clone().with_projection(["missing"]))
+            .await
+            .is_err()
+    );
+    let fixture = fixture!("courtlistener", "courts-2026-09-30.csv").await;
+    let raw = std::str::from_utf8(&fixture).unwrap();
+    for invalid in [raw.replacen("id,", "unknown,", 1), String::new()] {
+        write_bz(root.path(), "courts", &invalid).await;
+        assert!(source.open(req.clone()).await.is_err());
+    }
+    write_bz(root.path(), "courts", &raw.replace("\"366.97\"", "\"NaN\"")).await;
+    let mut reader = source.open(req.with_projection(["id"])).await?;
+    assert!(reader.next().await.is_err());
+    assert!(reader.next().await?.is_none());
+    Ok(())
+}

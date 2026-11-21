@@ -2,14 +2,21 @@
 //! Storage is rooted above `bulk-data/`; schemas and record conversion remain
 //! with the consumer. See the service README for public S3 configuration.
 
+mod copy_csv;
 mod error;
+mod object;
 mod schema;
+mod table;
+mod valdiation;
+mod values;
+pub use copy_csv::CourtListenerCopyDialect;
 pub use schema::CourtListenerSchemas;
-mod validation;
+pub use table::CourtListenerTableAccessor;
 
 use std::sync::Arc;
 
-use validation::{parse_object, validate_snapshot, validate_table};
+use object::{SnapshotObject, parse_object};
+use valdiation::{validate_snapshot, validate_table};
 
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectRef,
@@ -90,8 +97,7 @@ impl<A: ByteAccessor> CourtListenerBulkAccessor<A> {
         Ok(objects
             .into_iter()
             .filter_map(|object| {
-                let validation::SnapshotObject { table: name, date } =
-                    parse_object(object.locator())?;
+                let SnapshotObject { table: name, date } = parse_object(object.locator())?;
                 (name == table).then(|| CourtListenerSnapshot {
                     table: name.into(),
                     date: date.into(),

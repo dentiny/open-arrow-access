@@ -3082,6 +3082,7 @@ dependencies = [
  "arrow-json",
  "arrow-schema",
  "arrow-select",
+ "async-compression",
  "backon",
  "chrono",
  "duckdb",

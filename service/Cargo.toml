@@ -28,7 +28,13 @@ bhl = [
     "open-arrow-access-file-format/csv",
 ]
 biorxiv = ["meca", "dep:chrono"]
-courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2", "dep:arrow-schema"]
+courtlistener = [
+    "dep:open-arrow-access-decompression",
+    "open-arrow-access-decompression/bz2",
+    "dep:arrow-array",
+    "dep:arrow-schema",
+    "dep:arrow-cast",
+]
 dataverse = []
 default = []
 doab = ["oai"]
@@ -118,6 +124,7 @@ url.workspace = true
 arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
+async-compression = { workspace = true, features = ["bzip2"] }
 more-asserts.workspace = true
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = [
     "csv",

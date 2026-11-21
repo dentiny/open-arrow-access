@@ -208,6 +208,9 @@ impl CourtListenerSchemas {
     }
 }
 impl CourtListenerSchemas {
+    pub(crate) fn tables(&self) -> [&Fields; 4] {
+        [&self.opinion, &self.cluster, &self.docket, &self.court]
+    }
     /// Fixed nested output schema: one row per opinion, with nullable related structs.
     /// Default callers share one allocation; historical overrides never enter that cache.
     pub fn schema(&self) -> SchemaRef {

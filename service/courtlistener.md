@@ -28,6 +28,51 @@ The provider defines no Arrow schema. Same-date tables are not an atomic databas
 snapshot. For public S3, callers configure the `com-courtlistener-storage` bucket,
 region and unsigned access on their OpenDAL operator; local mirrors work too.
 
+## Typed table records
+
+`CourtListenerTableAccessor` provides strict typed records for `opinions`,
+`opinion-clusters`, `dockets` and `courts`. `CourtListenerSchemas::default()` pins
+the 22/36/54/20 exported fields and SQL nullability of the 2026-09-30 snapshot.
+Use `table_schema(table)` to inspect a flat table schema, and `schemas.schema()`
+for the nested opinion/cluster/docket/court output contract described in
+[the date-shard design](https://github.com/dentiny/open-arrow-access/pull/617).
+
+```rust,no_run
+use open_arrow_access::{Accessor, ReadRequest, Result};
+use open_arrow_access::service::courtlistener::CourtListenerTableAccessor;
+use open_arrow_access::storage::OpenDalAccessor;
+
+async fn read_opinions(storage: OpenDalAccessor) -> Result<()> {
+    let source = CourtListenerTableAccessor::new(storage);
+    let mut reader = source.open(ReadRequest::new(
+        "bulk-data/opinions-2026-09-30.csv.bz2",
+    )).await?;
+    while let Some(batch) = reader.next().await? {
+        println!("{} opinions", batch.num_rows());
+    }
+    Ok(())
+}
+```
+
+Scalar conversion uses Arrow strict casts (`safe=false`), with COPY-specific
+boolean/precision checks; no JSON intermediate rows or custom typed-array
+builders are used. Timestamps become UTC microsecond values, dates become `Date32`, booleans and
+numeric IDs/codes/counts use explicit numeric types, and text identifiers such
+as court IDs retain leading zeros. The parser distinguishes unquoted NULL from
+quoted empty strings and supports COPY backslash escaping and multiline fields.
+Invalid values (including negative counts), required NULLs and header drift
+fail rather than becoming null or losing rows. `with_dialect` accepts an explicit
+`CourtListenerCopyDialect` for reviewed historical exports (for example backtick
+quotes); quote/escape rules are never guessed from the file. All fields are validated even
+when projected away. EOF/errors are terminal; no background producer is spawned.
+
+Historical header/type variants require an explicit reviewed `with_schemas`
+contract; this reader does not download or execute source SQL. Input storage
+still supplies the compressed bytes. Batches target 8 MiB and at most the requested
+row count (capped at 1024); one row may exceed that target. `ScanPlanner` exposes one lazy partition per input object, suitable for
+explicit file-set composition. It does not split one bzip2 file into row ranges,
+join source tables, discover output destinations or write a Lance dataset.
+
 ## Usage and results
 
 ```rust
