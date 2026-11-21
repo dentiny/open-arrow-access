@@ -195,25 +195,25 @@ async fn duckdb_pages_stream_ocr_metadata_and_reports() {
     }
     assert_eq!(ids, [2, 8, 2, 20]);
     assert_eq!(count, 4);
-    let requests = observations.requests.lock().unwrap();
-    assert_eq!(requests.len(), 4);
-    assert!(
-        requests
-            .iter()
-            .all(|request| request.options == byte_options)
-    );
-    drop(requests);
-    let reports = reports.lock().unwrap();
-    assert_eq!(reports.len(), 4);
-    assert!(
-        reports
-            .iter()
-            .find(|(key, _)| key == missing)
-            .unwrap()
-            .1
-            .contains(&"item:20".into())
-    );
-    drop(reports);
+    {
+        let requests = observations.requests.lock().unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.options == byte_options)
+        );
+        let reports = reports.lock().unwrap();
+        assert_eq!(reports.len(), 4);
+        assert!(
+            reports
+                .iter()
+                .find(|(key, _)| key == missing)
+                .unwrap()
+                .1
+                .contains(&"item:20".into())
+        );
+    }
     use open_arrow_access_core::AccessorExt;
     use open_arrow_access_layers::ParallelReadLayer;
     let parallel = pages.layer(ParallelReadLayer::new(
