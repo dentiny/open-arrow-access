@@ -31,10 +31,9 @@ biorxiv = ["meca", "dep:chrono"]
 courtlistener = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/bz2",
-    "dep:chrono",
     "dep:arrow-array",
     "dep:arrow-schema",
-    "dep:arrow-buffer",
+    "dep:arrow-cast",
 ]
 courtlistener-joined = [
     "courtlistener",
@@ -101,7 +100,6 @@ oai = ["format-xml"]
 
 [dependencies]
 tempfile = { workspace = true, optional = true }
-arrow-buffer = { workspace = true, optional = true }
 # Keep DuckDB on the Arrow 58 binding line used by the public workspace.
 duckdb = { version = "1.10506.1", default-features = false, features = ["bundled"], optional = true }
 arrow-cast = { workspace = true, optional = true }

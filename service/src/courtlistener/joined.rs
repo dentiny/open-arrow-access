@@ -1,12 +1,11 @@
 //! Import typed Arrow batches into DuckDB, SQL-join a date, stream Arrow results.
 use super::{
     CourtListenerCopyDialect, CourtListenerSchemas, CourtListenerSnapshot,
-    CourtListenerTableAccessor,
-    values::{date, error},
+    CourtListenerTableAccessor, values::error,
 };
 use arrow_array::{ArrayRef, RecordBatch, UInt64Array};
 use arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
-use duckdb::{Config, Connection, InterruptHandle, params, types::Value};
+use duckdb::{Config, Connection, InterruptHandle, params};
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, Error, ErrorKind, OrderRequirement, ReadRequest, RecordCapability,
@@ -227,7 +226,7 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerDateAccessor<A> {
         self.schemas.validate()?;
         let schema = self.schemas.schema();
         let projection = request.options.resolve_projection(&schema)?;
-        let day = date(request.object.locator())?;
+        let day = request.object.locator().to_owned();
         let options = self.options.clone();
         let schemas = self.schemas.clone();
         let mut database = blocking(move || Database::new(options, &schemas)).await?;
@@ -320,7 +319,7 @@ struct QueryState {
     interrupt: Arc<InterruptHandle>,
     schema: SchemaRef,
     sql: String,
-    day: i32,
+    day: String,
     uris: Vec<String>,
     batch_size: usize,
 }
@@ -332,7 +331,7 @@ impl QueryState {
             let sql = self.sql.clone();
             let schema = self.schema.clone();
             let uris = self.uris.clone();
-            let day = self.day;
+            let day = self.day.clone();
             let batch_size = self.batch_size;
             self.task = Some(tokio::task::spawn_blocking(move || {
                 if sender.is_closed() {
@@ -340,13 +339,7 @@ impl QueryState {
                 }
                 let mut statement = database.connection.prepare(&sql).map_err(db_error)?;
                 let _ = statement
-                    .stream_arrow(params![
-                        Value::Date32(day),
-                        &uris[0],
-                        &uris[1],
-                        &uris[2],
-                        &uris[3]
-                    ])
+                    .stream_arrow(params![day, &uris[0], &uris[1], &uris[2], &uris[3]])
                     .map_err(db_error)?;
                 while !sender.is_closed() {
                     let Some(batch) = statement.step().map_err(db_error)? else {

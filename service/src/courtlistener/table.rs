@@ -1,12 +1,12 @@
 //! Typed streaming readers for the four CourtListener join inputs.
 use super::{
-    CourtListenerBulkAccessor, CourtListenerSchemas, CourtListenerSnapshot,
+    CourtListenerBulkAccessor, CourtListenerSchemas,
     copy_csv::{CopyCsv, CourtListenerCopyDialect},
     validation::parse_object,
-    values::{self, Row, error},
+    values::{self, error},
 };
-use arrow_array::{RecordBatch, StructArray};
-use arrow_schema::{Fields, Schema, SchemaRef};
+use arrow_array::{RecordBatch, StringArray};
+use arrow_schema::{Schema, SchemaRef};
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, OrderRequirement, ReadRequest, RecordCapability,
@@ -68,44 +68,6 @@ impl<A> CourtListenerTableAccessor<A> {
     }
 }
 
-pub(super) async fn open_csv<A: ByteAccessor>(
-    bulk: &CourtListenerBulkAccessor<A>,
-    snapshot: CourtListenerSnapshot,
-    request: &ReadRequest,
-    fields: &Fields,
-    uri: String,
-    framing: (usize, CourtListenerCopyDialect),
-) -> Result<CopyCsv> {
-    let reader = bulk
-        .open(ByteReadRequest::new(snapshot.object()).with_options(request.byte_options))
-        .await?;
-    let mut input = CopyCsv::new(reader, uri.clone(), framing.0, fields.len(), framing.1);
-    let header = input
-        .row()
-        .await?
-        .ok_or_else(|| error(format!("{uri}: empty upstream export")))?;
-    let expected = fields
-        .iter()
-        .map(|f| Some(f.name().clone()))
-        .collect::<Vec<_>>();
-    if header != expected {
-        return Err(error(format!(
-            "{uri}: header differs from explicitly selected schema"
-        )));
-    }
-    input.ordinal = 0;
-    Ok(input)
-}
-pub(super) async fn typed(input: &mut CopyCsv, fields: &Fields) -> Result<Option<(Row, u64)>> {
-    let index = input.ordinal;
-    let context = format!("{} record {index}", input.object);
-    input
-        .row()
-        .await?
-        .map(|raw| values::decode(raw, fields, &context).map(|row| (row, index)))
-        .transpose()
-}
-
 #[async_trait]
 impl<A: ByteAccessor + 'static> Accessor for CourtListenerTableAccessor<A> {
     type Request = ReadRequest;
@@ -118,15 +80,26 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerTableAccessor<A> {
         let object = parse_object(request.object.locator()).ok_or_else(super::error::invalid)?;
         let schema = self.table_schema(object.table)?;
         let projection = request.options.resolve_projection(&schema)?;
-        let input = open_csv(
-            &self.bulk,
-            CourtListenerSnapshot::new(object.table, object.date)?,
-            &request,
-            schema.fields(),
+        let reader = self.bulk.open(ByteReadRequest::from(&request)).await?;
+        let mut input = CopyCsv::new(
+            reader,
             request.object.locator().into(),
-            (self.max_record_bytes.get(), self.dialect),
-        )
-        .await?;
+            self.max_record_bytes.get(),
+            schema.fields().len(),
+            self.dialect,
+        );
+        let expected = schema
+            .fields()
+            .iter()
+            .map(|f| Some(f.name().clone()))
+            .collect::<Vec<_>>();
+        if input.row().await?.as_ref() != Some(&expected) {
+            return Err(error(format!(
+                "{}: missing or mismatched CourtListener CSV header",
+                request.object.locator()
+            )));
+        }
+        input.ordinal = 0;
         let metadata = RecordMetadata {
             schema: projection.schema.clone(),
             source: Some(request.object.clone()),
@@ -177,30 +150,41 @@ struct TableState {
 }
 impl TableState {
     async fn next(&mut self) -> Result<Option<RecordBatch>> {
+        let first_record = self.input.ordinal;
         let mut rows = Vec::new();
         let mut bytes = 0;
         while rows.len() < self.batch_size.min(1024) && bytes < 8 * 1024 * 1024 {
-            let Some((row, _)) = typed(&mut self.input, self.schema.fields()).await? else {
+            let Some(row) = self.input.row().await? else {
                 break;
             };
-            bytes += row
-                .iter()
-                .map(|v| v.as_str().map_or(8, str::len))
-                .sum::<usize>();
+            if row.len() != self.schema.fields().len() {
+                return Err(error(format!(
+                    "{} record {}: CSV column count differs from pinned schema",
+                    self.input.object,
+                    self.input.ordinal - 1
+                )));
+            }
+            bytes += row.iter().flatten().map(String::len).sum::<usize>();
             rows.push(row);
         }
         if rows.is_empty() {
             return Ok(None);
         }
-        let array = values::structure(
-            self.schema.fields(),
-            &rows.iter().map(Some).collect::<Vec<_>>(),
-        )?;
-        let array = array
-            .as_any()
-            .downcast_ref::<StructArray>()
-            .expect("structure output");
-        RecordBatch::try_new(self.schema.clone(), array.columns().to_vec())
+        let context = format!(
+            "{} records {first_record}..{}",
+            self.input.object, self.input.ordinal
+        );
+        let columns = self
+            .schema
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(i, field)| {
+                let input = StringArray::from_iter(rows.iter().map(|row| row[i].as_deref()));
+                values::cast(&input, field, &context)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        RecordBatch::try_new(self.schema.clone(), columns)
             .map(Some)
             .map_err(|e| error(e.to_string()))
     }
