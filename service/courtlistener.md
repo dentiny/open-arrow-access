@@ -92,17 +92,15 @@ dates independently and sends each date stream to one Lance destination.
 ```rust,no_run
 use std::{num::NonZeroUsize, path::PathBuf};
 use open_arrow_access::{Accessor, ReadRequest, Result};
-use open_arrow_access::service::courtlistener::{
-    CourtListenerDateAccessor, CourtListenerJoinOptions,
-};
+use open_arrow_access::service::courtlistener::CourtListenerDateAccessor;
 use open_arrow_access::storage::OpenDalAccessor;
 
 async fn read_date(storage: OpenDalAccessor, scratch: PathBuf) -> Result<()> {
-    let source = CourtListenerDateAccessor::new(storage, CourtListenerJoinOptions {
-        source_root: "s3://com-courtlistener-storage".into(),
-        scratch_directory: scratch, // existing directory on caller-owned disk
-        dialect: Default::default(), // current COPY quote/escape rules
-    })?;
+    let source = CourtListenerDateAccessor::new(
+        storage,
+        "s3://com-courtlistener-storage",
+        scratch, // existing directory on caller-owned disk
+    )?;
     let mut rows = source.open(ReadRequest::new("2026-09-30")
         .with_batch_size(NonZeroUsize::new(1024).unwrap())).await?;
     while let Some(batch) = rows.next().await? {

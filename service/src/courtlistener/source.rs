@@ -1,6 +1,6 @@
 //! Stage one: import the four typed input streams concurrently, as in BHL metadata.
 use super::{
-    CourtListenerJoinOptions, CourtListenerSchemas, CourtListenerSnapshot,
+    CourtListenerCopyDialect, CourtListenerSchemas, CourtListenerSnapshot,
     CourtListenerTableAccessor,
     error::{arrow_error, db_error, scratch_error, task_error},
     valdiation::validate_keys,
@@ -10,7 +10,7 @@ use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use duckdb::{Config, Connection};
 use futures::future::join_all;
 use open_arrow_access_core::{Accessor, ByteAccessor, ReadRequest, Result};
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 pub(super) const TABLES: [&str; 4] = ["opinions", "opinion-clusters", "dockets", "courts"];
 pub(super) const ORDINAL: &str = "__courtlistener_ordinal";
@@ -42,8 +42,8 @@ pub(super) struct Database {
     _directory: tempfile::TempDir,
 }
 impl Database {
-    fn new(options: CourtListenerJoinOptions, schemas: &CourtListenerSchemas) -> Result<Self> {
-        let directory = tempfile::tempdir_in(options.scratch_directory).map_err(scratch_error)?;
+    fn new(scratch_directory: PathBuf, schemas: &CourtListenerSchemas) -> Result<Self> {
+        let directory = tempfile::tempdir_in(scratch_directory).map_err(scratch_error)?;
         let config = Config::default()
             .with(
                 "temp_directory",
@@ -116,14 +116,15 @@ async fn import_table<A: ByteAccessor + 'static>(
 
 pub(super) async fn ingest<A: ByteAccessor + 'static>(
     storage: Arc<A>,
-    options: CourtListenerJoinOptions,
+    scratch_directory: PathBuf,
+    dialect: CourtListenerCopyDialect,
     schemas: CourtListenerSchemas,
     request: &ReadRequest,
 ) -> Result<Database> {
     let source = CourtListenerTableAccessor::new(storage)
         .with_schemas(schemas.clone())?
-        .with_dialect(options.dialect)?;
-    let database = blocking(move || Database::new(options, &schemas)).await?;
+        .with_dialect(dialect)?;
+    let database = blocking(move || Database::new(scratch_directory, &schemas)).await?;
     let mut imports = Vec::new();
     for (i, table) in TABLES.iter().enumerate() {
         let connection = database.connection.try_clone().map_err(db_error)?;

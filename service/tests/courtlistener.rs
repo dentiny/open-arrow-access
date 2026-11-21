@@ -312,9 +312,7 @@ mod joined {
 
     use arrow_array::{BooleanArray, Float64Array, Int64Array, StructArray, UInt64Array};
     use open_arrow_access_core::RecordReader;
-    use open_arrow_access_service::courtlistener::{
-        CourtListenerDateAccessor, CourtListenerJoinOptions,
-    };
+    use open_arrow_access_service::courtlistener::CourtListenerDateAccessor;
     async fn joined_fixture() -> (
         tempfile::TempDir,
         tempfile::TempDir,
@@ -330,11 +328,8 @@ mod joined {
         }
         let source = CourtListenerDateAccessor::new(
             OpenDalAccessor::new(fs_operator(root.path())),
-            CourtListenerJoinOptions {
-                source_root: "s3://com-courtlistener-storage".into(),
-                scratch_directory: scratch.path().into(),
-                dialect: Default::default(),
-            },
+            "s3://com-courtlistener-storage",
+            scratch.path().into(),
         )
         .unwrap();
         (root, scratch, source)

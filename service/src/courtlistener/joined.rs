@@ -3,7 +3,7 @@ use super::{
     CourtListenerCopyDialect, CourtListenerSchemas, CourtListenerSnapshot,
     query::query,
     source::{TABLES, ingest},
-    valdiation::{validate_join_options, validate_join_schema},
+    valdiation::{validate_join_schema, validate_source_root},
 };
 use futures::stream;
 use open_arrow_access_core::{
@@ -12,45 +12,45 @@ use open_arrow_access_core::{
 };
 use std::{path::PathBuf, sync::Arc};
 
-/// Caller-owned scratch and provenance for one date conversion.
-#[derive(Clone, Debug)]
-pub struct CourtListenerJoinOptions {
-    pub source_root: String,
-    pub scratch_directory: PathBuf,
-    pub dialect: CourtListenerCopyDialect,
-}
-impl CourtListenerJoinOptions {
-    pub fn new(source_root: impl Into<String>, scratch_directory: PathBuf) -> Self {
-        Self {
-            source_root: source_root.into(),
-            scratch_directory,
-            dialect: Default::default(),
-        }
-    }
-}
 /// A YYYY-MM-DD locator imports the four inputs and exposes one joined Arrow stream.
 pub struct CourtListenerDateAccessor<A> {
     storage: Arc<A>,
-    options: CourtListenerJoinOptions,
+    source_root: String,
+    scratch_directory: PathBuf,
+    dialect: CourtListenerCopyDialect,
     schemas: CourtListenerSchemas,
 }
 impl<A> Clone for CourtListenerDateAccessor<A> {
     fn clone(&self) -> Self {
         Self {
             storage: self.storage.clone(),
-            options: self.options.clone(),
+            source_root: self.source_root.clone(),
+            scratch_directory: self.scratch_directory.clone(),
+            dialect: self.dialect,
             schemas: self.schemas.clone(),
         }
     }
 }
 impl<A> CourtListenerDateAccessor<A> {
-    pub fn new(storage: A, options: CourtListenerJoinOptions) -> Result<Self> {
-        validate_join_options(&options)?;
+    pub fn new(
+        storage: A,
+        source_root: impl Into<String>,
+        scratch_directory: PathBuf,
+    ) -> Result<Self> {
+        let source_root = source_root.into();
+        validate_source_root(&source_root)?;
         Ok(Self {
             storage: Arc::new(storage),
-            options,
+            source_root,
+            scratch_directory,
+            dialect: Default::default(),
             schemas: Default::default(),
         })
+    }
+    pub fn with_dialect(mut self, dialect: CourtListenerCopyDialect) -> Result<Self> {
+        dialect.validate()?;
+        self.dialect = dialect;
+        Ok(self)
     }
     pub fn with_schemas(mut self, schemas: CourtListenerSchemas) -> Result<Self> {
         validate_join_schema(&schemas)?;
@@ -76,7 +76,8 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerDateAccessor<A> {
         let day = request.object.locator().to_owned();
         let database = ingest(
             self.storage.clone(),
-            self.options.clone(),
+            self.scratch_directory.clone(),
+            self.dialect,
             self.schemas.clone(),
             &request,
         )
@@ -87,7 +88,7 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerDateAccessor<A> {
                 let object = CourtListenerSnapshot::new(*table, &day)?.object();
                 Ok(format!(
                     "{}/{}",
-                    self.options.source_root.trim_end_matches('/'),
+                    self.source_root.trim_end_matches('/'),
                     object.locator()
                 ))
             })

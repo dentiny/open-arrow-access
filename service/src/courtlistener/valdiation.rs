@@ -206,9 +206,8 @@ pub(super) fn validate_keys(connection: &duckdb::Connection, tables: &[&str]) ->
     Ok(())
 }
 
-pub(super) fn validate_join_options(options: &super::CourtListenerJoinOptions) -> Result<()> {
-    options.dialect.validate()?;
-    if options.source_root.is_empty() {
+pub(super) fn validate_source_root(source_root: &str) -> Result<()> {
+    if source_root.is_empty() {
         return Err(invalid());
     }
     Ok(())

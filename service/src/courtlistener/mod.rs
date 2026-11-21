@@ -7,7 +7,7 @@ mod error;
 mod joined;
 mod query;
 mod source;
-pub use joined::{CourtListenerDateAccessor, CourtListenerJoinOptions};
+pub use joined::CourtListenerDateAccessor;
 mod object;
 mod schema;
 mod table;
