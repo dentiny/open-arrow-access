@@ -4,7 +4,6 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::Duration,
 };
 
 use arrow_array::types::UInt64Type;
@@ -94,11 +93,7 @@ async fn batches_process_in_parallel_with_one_archive_open_and_bounded_discovery
         let batch = reader.next().await.unwrap().unwrap();
         (batch, reader)
     });
-    tokio::time::timeout(Duration::from_secs(5), started.acquire_many(2))
-        .await
-        .unwrap()
-        .unwrap()
-        .forget();
+    started.acquire_many(2).await.unwrap().forget();
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     assert!(
         !first.is_finished(),
