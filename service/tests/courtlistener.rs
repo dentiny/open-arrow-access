@@ -172,3 +172,170 @@ async fn snapshot_record_plans_preserve_validation_order_and_quoted_csv() {
         ["nc", "minnag", "arizsuper", "nc", "minnag", "arizsuper"]
     );
 }
+
+use arrow_array::{
+    Array, BooleanArray, Int64Array, StringArray, TimestampMicrosecondArray, UInt64Array,
+};
+use futures::AsyncWriteExt;
+use open_arrow_access_core::ReadRequest;
+use open_arrow_access_service::courtlistener::CourtListenerTableAccessor;
+const JOIN_FIXTURES: [(&str, &str); 4] = [
+    (
+        "opinions",
+        include_str!("../../testdata/courtlistener/joined/opinion.csv"),
+    ),
+    (
+        "opinion-clusters",
+        include_str!("../../testdata/courtlistener/joined/cluster.csv"),
+    ),
+    (
+        "dockets",
+        include_str!("../../testdata/courtlistener/joined/docket.csv"),
+    ),
+    (
+        "courts",
+        include_str!("../../testdata/courtlistener/joined/court.csv"),
+    ),
+];
+async fn write_bz(root: &std::path::Path, table: &str, data: &str) {
+    let mut encoder = async_compression::futures::write::BzEncoder::new(Vec::new());
+    encoder.write_all(data.as_bytes()).await.unwrap();
+    encoder.close().await.unwrap();
+    tokio::fs::write(
+        root.join(format!("bulk-data/{table}-2026-09-30.csv.bz2")),
+        encoder.into_inner(),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn typed_tables_preserve_sql_types_and_copy_nulls() -> Result<()> {
+    let root = tempfile::tempdir().unwrap();
+    tokio::fs::create_dir(root.path().join("bulk-data"))
+        .await
+        .unwrap();
+    for (table, data) in JOIN_FIXTURES {
+        write_bz(root.path(), table, data).await;
+    }
+    let source = CourtListenerTableAccessor::new(OpenDalAccessor::new(fs_operator(root.path())));
+    let mut reader = source
+        .open(ReadRequest::new("bulk-data/opinions-2026-09-30.csv.bz2"))
+        .await?;
+    let batch = reader.next().await?.unwrap();
+    assert_eq!(batch.num_rows(), 5);
+    assert_eq!(batch.num_columns(), 22);
+    assert_eq!(
+        batch
+            .column_by_name("id")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .values(),
+        &[1, 2, 3, 4, 5]
+    );
+    let counts = batch
+        .column_by_name("page_count")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<UInt64Array>()
+        .unwrap();
+    assert_eq!(counts.value(0), 12);
+    assert!(counts.is_null(1));
+    let times = batch
+        .column_by_name("date_created")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<TimestampMicrosecondArray>()
+        .unwrap();
+    assert_eq!(times.value(0) - times.value(1), 123456);
+    let flags = batch
+        .column_by_name("per_curiam")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .unwrap();
+    assert!(flags.value(0));
+    let urls = batch
+        .column_by_name("download_url")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert!(urls.is_null(0));
+    assert!(!urls.is_null(1));
+    assert_eq!(urls.value(1), "");
+    assert_eq!(
+        batch
+            .column_by_name("plain_text")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+            .value(0),
+        "line1\nline2 \"quoted\" \\ slash"
+    );
+    assert!(reader.next().await?.is_none());
+    let expected = [
+        ("opinions", 22),
+        ("opinion-clusters", 36),
+        ("dockets", 54),
+        ("courts", 20),
+    ];
+    for (table, n) in expected {
+        assert_eq!(source.table_schema(table)?.fields().len(), n);
+        let mut reader = source
+            .open(
+                ReadRequest::new(format!("bulk-data/{table}-2026-09-30.csv.bz2"))
+                    .with_batch_size(NonZeroUsize::MIN)
+                    .with_projection(Vec::<String>::new()),
+            )
+            .await?;
+        let batch = reader.next().await?.unwrap();
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(batch.num_columns(), 0);
+    }
+    Ok(())
+}
+#[tokio::test]
+async fn typed_table_plans_are_lazy_and_reject_drift_and_invalid_values() -> Result<()> {
+    let root = tempfile::tempdir().unwrap();
+    tokio::fs::create_dir(root.path().join("bulk-data"))
+        .await
+        .unwrap();
+    let source = CourtListenerTableAccessor::new(OpenDalAccessor::new(fs_operator(root.path())));
+    let req = ReadRequest::new("bulk-data/opinions-2026-09-30.csv.bz2");
+    assert_eq!(
+        source
+            .plan_scan(req.clone())
+            .await?
+            .partitions
+            .size_hint()
+            .0,
+        1
+    );
+    assert!(
+        source
+            .open(req.clone().with_projection(["missing"]))
+            .await
+            .is_err()
+    );
+    for raw in [
+        JOIN_FIXTURES[0].1.replacen("id,", "unknown,", 1),
+        String::new(),
+    ] {
+        write_bz(root.path(), "opinions", &raw).await;
+        assert!(source.open(req.clone()).await.is_err());
+    }
+    write_bz(
+        root.path(),
+        "opinions",
+        &JOIN_FIXTURES[0].1.replace("\"12\"", "\"-1\""),
+    )
+    .await;
+    let mut reader = source.open(req.with_projection(["id"])).await?;
+    assert!(reader.next().await.is_err());
+    assert!(reader.next().await?.is_none());
+    Ok(())
+}

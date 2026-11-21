@@ -1,5 +1,6 @@
 //! Schema contract pinned to the exported 2026-09-30 headers and companion SQL.
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
+use open_arrow_access_core::{Error, ErrorKind, Result};
 use std::sync::{Arc, OnceLock};
 
 /// Field definitions for the four entities in one joined output schema.
@@ -208,6 +209,55 @@ impl CourtListenerSchemas {
     }
 }
 impl CourtListenerSchemas {
+    pub(crate) fn tables(&self) -> [&Fields; 4] {
+        [&self.opinion, &self.cluster, &self.docket, &self.court]
+    }
+    pub(crate) fn validate(&self) -> Result<()> {
+        for fields in self.tables() {
+            let mut seen = std::collections::HashSet::new();
+            for f in fields {
+                if !seen.insert(f.name())
+                    || !matches!(
+                        f.data_type(),
+                        DataType::Utf8
+                            | DataType::Boolean
+                            | DataType::Int16
+                            | DataType::Int32
+                            | DataType::Int64
+                            | DataType::UInt64
+                            | DataType::Float64
+                            | DataType::Date32
+                            | DataType::Timestamp(TimeUnit::Microsecond, _)
+                    )
+                {
+                    return Err(invalid("duplicate field or unsupported schema type"));
+                }
+                if let DataType::Timestamp(_, zone) = f.data_type()
+                    && zone.as_deref() != Some("UTC")
+                {
+                    return Err(invalid("timestamps must use UTC"));
+                }
+            }
+        }
+        for (fields, name, dtype, required) in [
+            (&self.opinion, "id", DataType::Int64, true),
+            (&self.opinion, "cluster_id", DataType::Int64, true),
+            (&self.cluster, "id", DataType::Int64, true),
+            (&self.cluster, "docket_id", DataType::Int64, true),
+            (&self.docket, "id", DataType::Int64, true),
+            (&self.docket, "court_id", DataType::Utf8, true),
+            (&self.court, "id", DataType::Utf8, true),
+        ] {
+            if !fields.iter().any(|f| {
+                f.name() == name && f.data_type() == &dtype && (!required || !f.is_nullable())
+            }) {
+                return Err(invalid(
+                    "missing, nullable, or incompatible primary/join key",
+                ));
+            }
+        }
+        Ok(())
+    }
     /// Fixed nested output schema: one row per opinion, with nullable related structs.
     /// Default callers share one allocation; historical overrides never enter that cache.
     pub fn schema(&self) -> SchemaRef {
@@ -260,4 +310,8 @@ impl CourtListenerSchemas {
 
 fn same_fields(a: &Fields, b: &Fields) -> bool {
     std::ptr::eq(a.as_ref(), b.as_ref())
+}
+
+fn invalid(message: &str) -> Error {
+    Error::new(ErrorKind::InvalidInput, "courtlistener_schema", message)
 }

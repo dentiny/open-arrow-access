@@ -28,7 +28,14 @@ bhl = [
     "open-arrow-access-file-format/csv",
 ]
 biorxiv = ["meca", "dep:chrono"]
-courtlistener = ["dep:open-arrow-access-decompression", "open-arrow-access-decompression/bz2", "dep:arrow-schema"]
+courtlistener = [
+    "dep:open-arrow-access-decompression",
+    "open-arrow-access-decompression/bz2",
+    "dep:chrono",
+    "dep:arrow-array",
+    "dep:arrow-schema",
+    "dep:arrow-buffer",
+]
 dataverse = []
 default = []
 doab = ["oai"]
@@ -84,6 +91,7 @@ format-xml = [
 oai = ["format-xml"]
 
 [dependencies]
+arrow-buffer = { workspace = true, optional = true }
 # Keep DuckDB on the Arrow 58 binding line used by the public workspace.
 duckdb = { version = "1.10506.1", default-features = false, features = ["bundled"], optional = true }
 arrow-cast = { workspace = true, optional = true }
@@ -118,6 +126,7 @@ url.workspace = true
 arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
+async-compression = { workspace = true, features = ["bzip2"] }
 more-asserts.workspace = true
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = [
     "csv",

@@ -2,10 +2,15 @@
 //! Storage is rooted above `bulk-data/`; schemas and record conversion remain
 //! with the consumer. See the service README for public S3 configuration.
 
+mod copy_csv;
 mod error;
 mod schema;
-pub use schema::CourtListenerSchemas;
+mod table;
 mod validation;
+mod values;
+pub use copy_csv::CourtListenerCopyDialect;
+pub use schema::CourtListenerSchemas;
+pub use table::CourtListenerTableAccessor;
 
 use std::sync::Arc;
 
