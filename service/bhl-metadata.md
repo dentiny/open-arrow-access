@@ -117,3 +117,7 @@ filtered or reinterpreted. This removes per-cell owned String/Value creation,
 per-row appender calls, and per-batch appender recreation/flush. Each table
 uses one blocking importer while its asynchronous byte reader runs on the
 existing runtime; all 13 import tasks are joined before returning.
+
+Request-level page selections also use Arrow appends, in batches of up to 8,192
+identities. Request ordinals retain input order and duplicate selections; the
+selection appender flushes once before the join query runs.
