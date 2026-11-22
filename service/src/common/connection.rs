@@ -34,7 +34,6 @@ pub struct Connection {
     pub(super) query: Vec<(String, String)>,
     operator: Operator,
     config: StorageConfig,
-    pub(super) has_layers: bool,
     http_concurrency_limit: Option<HttpConcurrencyLimitLayer>,
 }
 impl std::fmt::Debug for Connection {
@@ -60,7 +59,6 @@ impl Connection {
             query: vec![],
             operator,
             config: Default::default(),
-            has_layers: false,
             http_concurrency_limit: None,
         })
     }
@@ -88,7 +86,6 @@ impl Connection {
     /// ```
     pub fn with_layer<L: Layer>(mut self, layer: L) -> Self {
         self.operator = self.operator.layer(layer);
-        self.has_layers = true;
         self
     }
     /// Share a total HTTP request budget with other connections or OpenDAL operators.
@@ -189,8 +186,8 @@ impl Connection {
     /// Open an absolute URL, preserving encoded paths and signatures byte-for-byte.
     /// Readers support exact ranges for a known identity length with
     /// `Accept-Ranges: bytes`. Strong ETags pin requests to that version.
-    /// With `with_layer` or `with_http_concurrency_limit`, range-capable inputs use bounded
-    /// range reads for sequential output, avoiding an idle response holding the only permit.
+    /// Range-capable inputs with a known length use bounded reads for sequential
+    /// output, avoiding an idle response holding a permit needed by range reads.
     pub async fn open(&self, url: &str, options: ByteReadOptions) -> Result<Box<dyn ByteReader>> {
         reader::open(self.clone(), resolve_download_url(url)?, options).await
     }
