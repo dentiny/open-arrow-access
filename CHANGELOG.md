@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.20.2 - 2026-11-22
+
+- Read multiple complete BHL item/part directories in one native scan with `BhlShardReadRequest::from_prefixes`, sharing one metadata join and preserving selected directory order. Bound concurrent directory listings to eight by default, with a per-request override.
+- Retry HTTP 406 responses through the configured transport retry policy, preserving admission control and retry limits.
+- Release all eight public workspace crates at 0.20.2 with aligned internal dependency requirements.
+
 ## 0.20.1 - 2026-11-22
 
 - Add `BhlShardAccessor` and `BhlShardReadRequest` for complete OCR item/part directories, with read-only metadata snapshot reuse, strict reconciliation and native CrawlAccessor planning.
