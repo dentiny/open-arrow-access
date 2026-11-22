@@ -76,12 +76,13 @@ async fn import_table(
             .map(|field| Field::new(field.name(), DataType::Utf8, false))
             .collect::<Vec<_>>(),
     ));
+    // An empty character intersection preserves every cell without Unicode boundary checks.
     let format = CsvFormat::default()
         .with_header(true)
         .with_header_validation(true)
         .with_delimiter(b'\t')
         .with_quote(0)
-        .with_null_regex(regex::Regex::new(r"\b\B").expect("preserve empty cells"));
+        .with_null_regex(regex::Regex::new(r"[a&&b]").expect("preserve empty cells"));
     let csv = CsvAccessor::new(input, schema).with_format(format);
     let path = format!("data/{}.txt.gz", table.name);
     let mut reader = csv.open(ReadRequest::new(path.clone())).await?;
