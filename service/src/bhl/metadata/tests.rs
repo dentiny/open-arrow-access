@@ -9,10 +9,14 @@ const PART: &str = "ocr/part-8/part-8-3-1.txt";
 const MISSING: &str = "ocr/item-20/item-20-30-1.txt";
 
 async fn source(title: &str) -> (tempfile::TempDir, OpenDalAccessor) {
+    source_table("title", title).await
+}
+
+async fn source_table(name: &str, filename: &str) -> (tempfile::TempDir, OpenDalAccessor) {
     let mut files = Vec::new();
     for table in tables() {
-        let filename = if table.name == "title" {
-            title.to_owned()
+        let filename = if table.name == name {
+            filename.to_owned()
         } else {
             format!("{}.txt.gz", table.name)
         };
@@ -35,7 +39,7 @@ pub(in crate::bhl) async fn load() -> BhlMetadata {
 }
 
 fn cell(row: &StructArray, table: &str, field: &str) -> String {
-    if matches!(table, "item" | "title" | "page") {
+    if matches!(table, "item" | "title" | "page" | "part") {
         return list(row, table, field).remove(0);
     }
     row.column_by_name(table)
@@ -131,7 +135,7 @@ async fn joins_pages_and_preserves_source_values_and_relation_order() {
             assert_eq!(cell(row, "part", "RightsStatement"), "Part rights");
             assert_eq!(list(row, "partpage", "PageID"), ["3", "3"]);
         } else {
-            assert!(row.column_by_name("part").unwrap().is_null(0));
+            assert!(list(row, "part", "PartID").is_empty());
             assert!(list(row, "partpage", "PageID").is_empty());
         }
     }
@@ -312,6 +316,46 @@ async fn databases_reopen_without_source_access_and_keep_provenance() {
             .unwrap();
     }
     assert!(BhlMetadata::open(&path).is_err());
+}
+
+#[tokio::test]
+async fn part_parent_associations_preserve_blank_ids_and_do_not_multiply_pages() {
+    let (_root, storage) = source_table("part", "part-multi-item.txt.gz").await;
+    let metadata = BhlMetadata::load(storage).await.unwrap();
+    assert_eq!(metadata.info.sources["part"].rows, 2);
+    let rows = read(&metadata, &[ITEM, PART, PART]);
+    assert_eq!(rows.len(), 3);
+    assert!(list(&rows[0].metadata, "part", "PartID").is_empty());
+    for row in &rows[1..] {
+        assert_eq!(list(&row.metadata, "part", "PartID"), ["8", "8"]);
+        assert_eq!(list(&row.metadata, "part", "ItemID"), ["2", ""]);
+        assert_eq!(cell(&row.metadata, "item", "ItemID"), "2");
+        assert!(row.missing.is_empty());
+        assert!(row.conflicts.is_empty());
+    }
+    metadata
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch("UPDATE part SET ItemID = '9' WHERE ItemID = '';")
+        .unwrap();
+    let row = read(&metadata, &[PART]).pop().unwrap();
+    assert_eq!(row.conflicts, ["part.ItemID=9, selected item=Some(2)"]);
+    metadata
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch("DELETE FROM page; DELETE FROM partpage;")
+        .unwrap();
+    let row = read(&metadata, &[PART]).pop().unwrap();
+    assert!(row.missing.contains(&"item:unresolved parent".to_owned()));
+    assert_eq!(
+        row.conflicts,
+        [
+            "part.ItemID=2, selected item=None",
+            "part.ItemID=9, selected item=None"
+        ]
+    );
 }
 
 #[tokio::test]

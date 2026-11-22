@@ -58,7 +58,7 @@ fn tables() -> Vec<Table> {
                 name: child.name().clone(),
                 fields,
                 key,
-                single: matches!(child.name().as_str(), "title" | "part"),
+                single: child.name() == "title",
             }
         })
         .collect()
@@ -70,7 +70,7 @@ pub struct BhlPageMetadata {
     pub object: ObjectRef,
     pub metadata: StructArray,
     /// Required join targets not found for this page, e.g. `item:7` or
-    /// `title:unresolved parent`. Missing singleton children are null; the page
+    /// `title:unresolved parent`. Missing relationships have empty lists; the page
     /// is still emitted. Empty optional relationships are not reported here.
     pub missing: Vec<String>,
     /// Parent ItemID disagreements or page SequenceOrder mismatches with the
