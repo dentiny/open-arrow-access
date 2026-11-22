@@ -156,9 +156,11 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlShardAccessor<A> {
         // Reject invalid projections before discovery performs any I/O.
         self.metadata(request.clone()).await?;
         let mut keys = Vec::new();
-        let mut listings = stream::iter(&request.prefixes)
-            .map(|prefix| self.discover_prefix(prefix))
-            .buffered(request.listing_concurrency.get());
+        let mut listings = Vec::with_capacity(request.prefixes.len());
+        for prefix in &request.prefixes {
+            listings.push(self.discover_prefix(prefix));
+        }
+        let mut listings = stream::iter(listings).buffered(request.listing_concurrency.get());
         while let Some(objects) = listings.try_next().await? {
             keys.extend(objects);
         }
