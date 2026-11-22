@@ -344,49 +344,6 @@ async fn metadata_normalizes_legacy_ids_repeats_tex_rows_and_retains_deletions()
     assert!(ArxivMetadataIndex::from_oai_records(empty).is_err());
 }
 
-#[rstest::rstest]
-#[case::transient_406(http::StatusCode::NOT_ACCEPTABLE, 1, 2, true)]
-#[case::persistent_406(http::StatusCode::NOT_ACCEPTABLE, usize::MAX, 4, false)]
-#[case::other_client_error(http::StatusCode::BAD_REQUEST, usize::MAX, 1, false)]
-#[tokio::test]
-async fn metadata_lookup_bounds_406_retries_and_caches_success(
-    #[case] status: http::StatusCode,
-    #[case] failures: usize,
-    #[case] expected_requests: usize,
-    #[case] succeeds: bool,
-) {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    let http = HttpFixture::new();
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = attempts.clone();
-    let record = fixture!("arxiv-content", "metadata-record.xml").await;
-    http.handle(move |_| {
-        let (status, body) = if observed.fetch_add(1, Ordering::SeqCst) < failures {
-            (status, open_arrow_access_core::Bytes::new())
-        } else {
-            (http::StatusCode::OK, record.clone().into())
-        };
-        Ok(open_arrow_access_test_support::http::response(status, body))
-    });
-    let resolver = super::super::metadata_fetch::MetadataResolver::new(
-        Connection::new(http.endpoint())
-            .unwrap()
-            .with_context(http.context()),
-    );
-    let result = resolver.get("2410.00001").await;
-    if succeeds {
-        let index = result.unwrap();
-        assert!(Arc::ptr_eq(
-            &index,
-            &resolver.get("2410.00001").await.unwrap()
-        ));
-    } else {
-        assert_eq!(result.err().unwrap().http_status(), Some(status.as_u16()));
-    }
-    assert_eq!(attempts.load(Ordering::SeqCst), expected_requests);
-}
-
 #[tokio::test]
 async fn rejects_null_ids_and_untyped_content_snapshots() {
     use arrow_array::{ArrayRef, StringArray};

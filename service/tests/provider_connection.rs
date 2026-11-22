@@ -8,6 +8,57 @@ use opendal::HttpBody;
 mod providers;
 use providers::connection;
 
+#[rstest::rstest]
+#[case::transient_406(StatusCode::NOT_ACCEPTABLE, 1, 3, 2, true)]
+#[case::persistent_406(StatusCode::NOT_ACCEPTABLE, usize::MAX, 3, 4, false)]
+#[case::disabled_406(StatusCode::NOT_ACCEPTABLE, usize::MAX, 0, 1, false)]
+#[case::other_client_error(StatusCode::BAD_REQUEST, usize::MAX, 3, 1, false)]
+#[tokio::test]
+async fn http_406_retries_use_the_configured_transport_policy(
+    #[case] status: StatusCode,
+    #[case] failures: usize,
+    #[case] max_retries: usize,
+    #[case] expected_requests: usize,
+    #[case] succeeds: bool,
+) {
+    use open_arrow_access_storage::{RetryConfig, StorageConfig};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use std::time::Duration;
+
+    let fixture = HttpFixture::new();
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let observed = attempts.clone();
+    fixture.handle(move |_| {
+        Ok(if observed.fetch_add(1, Ordering::SeqCst) < failures {
+            response(status, "")
+        } else {
+            response(StatusCode::OK, "{}")
+        })
+    });
+    let client = connection(&fixture)
+        .with_http_config(StorageConfig {
+            retry: Some(RetryConfig {
+                max_retries,
+                min_delay: Duration::from_millis(1),
+                max_delay: Duration::from_millis(4),
+                factor: 2.0,
+                jitter: false,
+            }),
+            timeout: None,
+        })
+        .unwrap();
+    let result = client.json("metadata", &[]).await;
+    if succeeds {
+        assert!(result.unwrap().value().is_object());
+    } else {
+        assert_eq!(result.err().unwrap().http_status(), Some(status.as_u16()));
+    }
+    assert_eq!(attempts.load(Ordering::SeqCst), expected_requests);
+}
+
 fn redirect(location: &str) -> Response<HttpBody> {
     Response::builder()
         .status(StatusCode::FOUND)
