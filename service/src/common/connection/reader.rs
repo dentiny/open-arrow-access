@@ -16,10 +16,16 @@ mod validation;
 
 const DEFAULT_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 
+pub(super) enum ReadMode {
+    Sequential,
+    Ranged,
+}
+
 pub(super) async fn open(
     mut connection: Connection,
     url: Url,
     options: ByteReadOptions,
+    mode: ReadMode,
 ) -> Result<Box<dyn ByteReader>> {
     // Download headers take precedence over connection defaults.
     for name in [
@@ -55,7 +61,9 @@ pub(super) async fn open(
         content_length: body.content_length(),
         version,
     };
-    let range_length = metadata.content_length.filter(|_| ranges);
+    let range_length = metadata
+        .content_length
+        .filter(|_| ranges && matches!(mode, ReadMode::Ranged));
     let chunks = sequential_chunks(body, &client, &request, range_length, chunk_size);
     let chunks = chunks
         .map_ok(move |buffer| {

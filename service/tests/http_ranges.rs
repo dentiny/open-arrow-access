@@ -3,7 +3,7 @@ use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 use futures::stream;
 use http::{Request, Response};
 use open_arrow_access_core::{
-    Accessor, ByteReadOptions, ByteReader, Bytes, ErrorKind, ReadRequest,
+    Accessor, ByteReadOptions, ByteReadRequest, ByteReader, Bytes, ErrorKind, ReadRequest,
 };
 use open_arrow_access_service::common::MetadataLink;
 use open_arrow_access_test_support::{
@@ -33,6 +33,36 @@ fn serve(request: &Request<Buffer>, bytes: Bytes) -> Response<HttpBody> {
         .headers_mut()
         .insert("etag", "\"v1\"".parse().unwrap());
     output
+}
+
+#[tokio::test]
+async fn sequential_download_keeps_the_original_response_with_a_rate_limit() {
+    use open_arrow_access_storage::HttpRequestRateLimitLayer;
+    let f = HttpFixture::new();
+    f.handle(|request| {
+        if request.headers().contains_key("range") {
+            return Ok(Response::builder()
+                .status(http::StatusCode::PRECONDITION_FAILED)
+                .body(HttpBody::new(stream::empty(), Some(0)))
+                .unwrap());
+        }
+        Ok(serve(&request, Bytes::from_static(b"abcdefgh")))
+    });
+    let connection = providers::connection(&f)
+        .with_layer(HttpRequestRateLimitLayer::new(Duration::from_nanos(1)).unwrap());
+    let mut reader = Accessor::open_sequential(
+        &connection,
+        ByteReadRequest::new(format!("{}/file", f.endpoint())),
+    )
+    .await
+    .unwrap();
+    assert_eq!(collect_bytes(reader.as_mut()).await.unwrap(), b"abcdefgh");
+    assert!(!reader.capability().read_with_range);
+    assert_eq!(reader.metadata().version.as_deref(), Some(r#""v1""#));
+    let requests = f.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, http::Method::GET);
+    assert!(requests[0].range().is_none());
 }
 
 #[tokio::test]

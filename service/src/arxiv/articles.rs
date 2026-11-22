@@ -173,7 +173,7 @@ where
                         };
                         let batches = stream::once(async move {
                             let input = storage
-                                .open(
+                                .open_sequential(
                                     ByteReadRequest::new(locator.clone())
                                         .with_options(byte_options),
                                 )
