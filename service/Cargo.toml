@@ -153,7 +153,7 @@ open-arrow-access-decompression = { path = "../decompression", default-features 
 ] }
 rstest.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["fs", "test-util"] }
+tokio = { workspace = true, features = ["fs"] }
 [[test]]
 name = "huggingface"
 required-features = ["huggingface"]
