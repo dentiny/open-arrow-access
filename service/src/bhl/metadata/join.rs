@@ -42,8 +42,10 @@ pub(super) fn for_each(
         )
         .map_err(error::duckdb)?;
     {
+        // Resolve the writable temporary catalog explicitly. With an unnamed
+        // catalog DuckDB checks the read-only source database instead.
         let mut appender = connection
-            .appender("bhl_selection")
+            .appender_to_catalog_and_db("bhl_selection", "temp", "main")
             .map_err(error::duckdb)?;
         let mut offset = 0u64;
         for objects in keys.chunks(SELECTION_BATCH_SIZE) {

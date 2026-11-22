@@ -302,12 +302,14 @@ async fn databases_reopen_without_source_access_and_keep_provenance() {
         assert_eq!(actual.missing, expected.missing);
         assert_eq!(actual.conflicts, expected.conflicts);
     }
-    database
-        .connection
-        .lock()
-        .unwrap()
-        .execute_batch("BEGIN TRANSACTION; DELETE FROM main.item; ROLLBACK;")
-        .unwrap();
+    assert!(
+        database
+            .connection
+            .lock()
+            .unwrap()
+            .execute_batch("DELETE FROM main.item")
+            .is_err()
+    );
     assert_eq!(read(&database, &[ITEM, ITEM]).len(), 2);
     drop(database);
     {
@@ -315,6 +317,15 @@ async fn databases_reopen_without_source_access_and_keep_provenance() {
         db.execute_batch("UPDATE __bhl_metadata SET version = 999")
             .unwrap();
     }
+    assert!(BhlMetadata::open(&path).is_err());
+}
+
+#[tokio::test]
+async fn failed_import_does_not_produce_a_readable_database() {
+    let (_root, storage) = source("title-invalid-key.txt.gz").await;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("incomplete.duckdb");
+    assert!(BhlMetadata::create(storage, &path).await.is_err());
     assert!(BhlMetadata::open(&path).is_err());
 }
 

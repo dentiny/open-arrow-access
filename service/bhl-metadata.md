@@ -1,11 +1,12 @@
 # BHL metadata joins with embedded DuckDB
 
 Metadata is included with `service-bhl` (service-crate feature `bhl`).
-The implementation uses the bundled Rust DuckDB binding, supporting 1.20000.1
-through 1.20001.x; the lockfile selects 1.20001.0. These bindings use Arrow 60
-internally. Each joined metadata batch is serialized through Arrow IPC and
-imported into the public Arrow 58 schema, adding an in-memory serialization step.
-OCR payload bytes do not pass through this conversion.
+The implementation uses the bundled Rust DuckDB binding on the 1.10506.x line;
+the lockfile selects 1.10506.1. This line uses Arrow 58, matching the public
+workspace schema. The dependency range stays on that binding line so fresh
+consumers do not select the incompatible Arrow 60 bindings. Arrow batches pass
+directly between the importer/query and the public schema; OCR payload bytes
+remain unchanged.
 
 The first version has three steps:
 
@@ -144,11 +145,14 @@ let metadata = Arc::new(BhlMetadata::open("bhl-metadata.duckdb")?);
 let pages = BhlPageAccessor::from_metadata(storage, snapshot_id, metadata, report)?;
 ```
 
-`create` imports into a temporary database on the destination filesystem,
-commits data/provenance, checkpoints and closes the database, then atomically
-publishes the file without overwriting an existing path. Workers directly open
-it with DuckDB's `READ_ONLY` access mode. `open` validates the format
-version, all source table schemas and row counts, and retains source fingerprints.
+`create` opens the requested file directly, imports all source tables, commits
+its data/provenance, checkpoints and closes all write connections before returning.
+The coordinator must await successful completion before starting readers on that
+same file. There is no staging database or file publication step. Existing paths
+are rejected; a failed import may leave an incomplete file that the caller must
+discard before retrying. `open` requires the completed metadata header and validates
+the format version, source table schemas and row counts. Workers open the file
+with DuckDB's `READ_ONLY` access mode and retain source fingerprints.
 
 Source freshness, acquisition consistency, storage and distribution are
 caller-owned. Use a compatible DuckDB storage version. Existing `load` behavior
