@@ -161,13 +161,20 @@ before reporting completion, surfacing decoder checksum/trailer and source error
 Callers must consume the archive through EOF to complete those checks; dropping
 it early cancels further consumption.
 
-TAR supports regular GNU/USTAR files, directories, and bounded GNU long-name
-metadata (up to 64 KiB including its NUL terminator). Long-name headers apply
-to the next returned entry and do not create content rows. Links, sparse files,
-and other extension headers remain unsupported. Default limits are 65,536 entries
-and 1 GiB per entry. Ranged inspection issues a header request per entry. Selected TAR
-and ZIP member readers remain sequential. Names are raw metadata; these APIs
-perform no filesystem extraction or recursive expansion.
+TAR parsing uses `tar::Archive` for GNU/USTAR/PAX headers and resolved names.
+A Tokio blocking worker bridges the synchronous package to asynchronous input;
+sequential bodies use a bounded channel and are never collected in full. Dropping
+the archive and its last live body cancels pending source I/O. Both APIs require
+a Tokio runtime. Links and sparse files remain unsupported by the exposed byte
+entry contract; no filesystem extraction is performed.
+
+Default limits are 65,536 decoded entries and 1 GiB per entry. Metadata parsing
+has a 64 KiB read budget plus two header blocks per returned entry. Extension
+records do not count as decoded entries. End-marker acceptance follows the
+package (including clean EOF or a single zero block); sequential completion still
+drains the source through EOF to validate decoder trailers. Ranged inspection
+uses seek to skip ordinary payloads, and selected member readers remain sequential.
+Names and payloads retain their original bytes.
 
 Run local examples from the repository:
 

@@ -77,7 +77,14 @@ async fn inspects_headers_once_and_streams_independent_selected_entries() {
 
 #[tokio::test]
 async fn accepts_empty_and_gnu_archives() {
-    for (name, count) in [("empty.tar", 0), ("gnu.tar", 1), ("gnu-longname.tar", 1)] {
+    for (name, count) in [
+        ("empty.tar", 0),
+        ("gnu.tar", 1),
+        ("gnu-longname.tar", 1),
+        ("pax.tar", 1),
+        ("one-zero-block.tar", 0),
+        ("missing-end.tar", 4),
+    ] {
         let source = source(name).await;
         let archive = TarArchive::open(
             source.open("archive".into()).await.unwrap(),
@@ -95,10 +102,7 @@ async fn rejects_malformed_and_unsupported_archives() {
         ("bad-checksum.tar", ErrorKind::Decode),
         ("bad-size.tar", ErrorKind::Decode),
         ("truncated.tar", ErrorKind::Decode),
-        ("missing-end.tar", ErrorKind::Decode),
-        ("one-zero-block.tar", ErrorKind::Decode),
         ("link.tar", ErrorKind::Unsupported),
-        ("pax.tar", ErrorKind::Unsupported),
     ] {
         let source = source(name).await;
         let error = TarArchive::open(
@@ -193,7 +197,8 @@ async fn streams_first_body_without_scanning_later_headers_or_using_ranges() {
     assert_eq!(first.metadata().source, Some("archive".into()));
     assert_eq!(first.metadata().version.as_deref(), Some("snapshot"));
     assert_eq!(first.metadata().content_length, Some(entry.size));
-    assert_eq!(source.observations.reads.load(Ordering::SeqCst), 16);
+    // Package parsing is demand-driven, with at most one body chunk prefetched.
+    assert!(source.observations.reads.load(Ordering::SeqCst) <= 17);
     expect_err_kind(archive.next_entry().await, ErrorKind::InvalidInput);
     byte_layer::assert_output(first.as_mut(), b"%PDF-first-paper", 64)
         .await
@@ -253,8 +258,6 @@ async fn sequential_failures_are_terminal_and_share_header_limits() {
     for (name, kind) in [
         ("bad-checksum.tar", ErrorKind::Decode),
         ("bad-size.tar", ErrorKind::Decode),
-        ("one-zero-block.tar", ErrorKind::Decode),
-        ("pax.tar", ErrorKind::Unsupported),
     ] {
         let source = MemoryAccessor::new(&fixture!("tar", name).await, 7);
         let mut archive = TarStream::new(
@@ -285,15 +288,12 @@ async fn cancelled_sequential_header_and_skip_resume_from_persistent_progress() 
     use open_arrow_access_decompression::tar::TarStream;
     use std::{
         pin::pin,
-        sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        },
+        sync::{Arc, atomic::Ordering},
         task::Context,
     };
 
     let bytes = Bytes::from(fixture!("tar", "mixed.tar").await);
-    let allowed = Arc::new(AtomicUsize::new(1));
+    let allowed = Arc::new(Gate::new(1));
     let input = gated_source(bytes, 100, allowed.clone());
     let mut archive = TarStream::new(input, TarLimits::default());
     let mut context = Context::from_waker(futures::task::noop_waker_ref());
@@ -324,7 +324,7 @@ async fn cancelled_sequential_header_and_skip_resume_from_persistent_progress() 
         .unwrap();
     allowed.store(36, Ordering::SeqCst);
     drop(archive.next_entry().await.unwrap().unwrap());
-    // The first zero marker is consumed, with only a partial second marker.
+    // Completion still waits for the underlying source/trailer to reach EOF.
     {
         let mut next = pin!(archive.next_entry());
         assert!(next.as_mut().poll(&mut context).is_pending());
@@ -364,16 +364,35 @@ async fn sequential_body_source_errors_and_truncation_terminate_archive() {
     }
 }
 
+struct Gate {
+    allowed: std::sync::atomic::AtomicUsize,
+    waker: futures::task::AtomicWaker,
+}
+
+impl Gate {
+    fn new(allowed: usize) -> Self {
+        Self {
+            allowed: std::sync::atomic::AtomicUsize::new(allowed),
+            waker: futures::task::AtomicWaker::new(),
+        }
+    }
+    fn store(&self, allowed: usize, ordering: std::sync::atomic::Ordering) {
+        self.allowed.store(allowed, ordering);
+        self.waker.wake();
+    }
+}
+
 fn gated_source(
     bytes: open_arrow_access_core::Bytes,
     chunk_size: usize,
-    allowed: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    allowed: std::sync::Arc<Gate>,
 ) -> Box<dyn open_arrow_access_core::ByteReader> {
     use open_arrow_access_core::{ByteMetadata, StreamReader};
     use std::{sync::atomic::Ordering, task::Poll};
     let mut position = 0;
-    let source = futures::stream::poll_fn(move |_| {
-        if position / chunk_size >= allowed.load(Ordering::SeqCst) {
+    let source = futures::stream::poll_fn(move |cx| {
+        allowed.waker.register(cx.waker());
+        if position / chunk_size >= allowed.allowed.load(Ordering::SeqCst) {
             return Poll::Pending;
         }
         if position == bytes.len() {
@@ -394,14 +413,11 @@ async fn cancelled_live_body_read_rejects_advancement_without_waiting_for_its_lo
     use open_arrow_access_decompression::tar::TarStream;
     use std::{
         pin::pin,
-        sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        },
+        sync::{Arc, atomic::Ordering},
         task::Context,
     };
 
-    let allowed = Arc::new(AtomicUsize::new(2));
+    let allowed = Arc::new(Gate::new(2));
     let input = gated_source(
         Bytes::from(fixture!("tar", "mixed.tar").await),
         512,
@@ -517,12 +533,9 @@ async fn cancelled_gnu_long_name_reads_resume() {
     use futures::FutureExt;
     use open_arrow_access_core::Bytes;
     use open_arrow_access_decompression::tar::TarStream;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
+    use std::sync::{Arc, atomic::Ordering};
 
-    let allowed = Arc::new(AtomicUsize::new(6));
+    let allowed = Arc::new(Gate::new(6));
     let input = gated_source(
         Bytes::from(fixture!("tar", "gnu-longname.tar").await),
         100,
@@ -546,13 +559,11 @@ async fn cancelled_gnu_long_name_reads_resume() {
 async fn malformed_or_unbounded_gnu_names_fail_in_both_readers() {
     use open_arrow_access_decompression::tar::TarStream;
     let original = fixture!("tar", "gnu-longname.tar").await;
-    let mut unterminated = original.clone();
-    unterminated[512 + 120] = b'x';
     let mut orphan = original[..1024].to_vec();
     orphan.extend_from_slice(&[0; 1024]);
     let mut consecutive = original[..1024].to_vec();
     consecutive.extend_from_slice(&original);
-    for bytes in [unterminated, orphan, consecutive] {
+    for bytes in [orphan, consecutive] {
         let input = MemoryAccessor::new(&bytes, 7).with_ranges();
         expect_err_kind(
             TarArchive::open(
@@ -573,7 +584,12 @@ async fn malformed_or_unbounded_gnu_names_fail_in_both_readers() {
     header.set_entry_type(tar::EntryType::GNULongName);
     header.set_size(64 * 1024 + 1);
     header.set_cksum();
-    let oversized = MemoryAccessor::new(header.as_bytes(), 7).with_ranges();
+    let mut bytes = header.as_bytes().to_vec();
+    bytes.extend_from_slice(&vec![b'x'; 64 * 1024]);
+    bytes.push(0);
+    bytes.resize(512 + 64 * 1024 + 512, 0);
+    bytes.extend_from_slice(&original[1024..]);
+    let oversized = MemoryAccessor::new(&bytes, 7).with_ranges();
     expect_err_kind(
         TarArchive::open(
             oversized.open("archive".into()).await.unwrap(),
@@ -587,10 +603,10 @@ async fn malformed_or_unbounded_gnu_names_fail_in_both_readers() {
         TarLimits::default(),
     );
     expect_err_kind(stream.next_entry().await, ErrorKind::Unsupported);
-    // Metadata headers count against the total header budget too.
+    // The package consumes extension metadata; limits count decoded entries.
     let input = source("gnu-longname.tar").await;
     let limits = TarLimits {
-        max_entries: 1,
+        max_entries: 0,
         ..Default::default()
     };
     expect_err_kind(

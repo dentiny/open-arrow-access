@@ -1,0 +1,30 @@
+name: TAR package adapter
+
+on:
+  pull_request:
+    paths:
+      - "decompression/**"
+      - "core/**"
+      - "test-support/**"
+      - "testdata/tar/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/tar.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  tar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.97.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy -p open-arrow-access-decompression --no-default-features --features tar --all-targets --locked -- -D warnings
+      - run: cargo test -p open-arrow-access-decompression --no-default-features --features tar --test tar --locked
