@@ -61,14 +61,8 @@ impl TarArchive {
     pub async fn open(input: Box<dyn ByteReader>, limits: TarLimits) -> Result<Self> {
         let object = input.metadata().source.clone();
         let context = |error: open_arrow_access_core::Error| error.with_object(object.as_ref());
-        let metadata = input.metadata().clone();
-        let input = open_arrow_access_core::into_async_seek(
-            input,
-            NonZeroUsize::new(512).unwrap(),
-            "open_tar",
-        )
-        .map_err(context)?;
-        let source = ArchiveSource { input, metadata };
+        let source = ArchiveSource::new(input, "open_tar", NonZeroUsize::new(512).unwrap())
+            .map_err(context)?;
         Self::inspect(source, limits).await.map_err(context)
     }
 

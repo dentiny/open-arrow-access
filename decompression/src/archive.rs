@@ -1,6 +1,6 @@
 use open_arrow_access_core::{ByteMetadata, ByteReader, Result, SeekableInput, into_async_seek};
 
-use crate::layer::DEFAULT_CHUNK_SIZE;
+use std::num::NonZeroUsize;
 
 pub(crate) const DEFAULT_MAX_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;
 
@@ -12,9 +12,13 @@ pub(crate) struct ArchiveSource {
 }
 
 impl ArchiveSource {
-    pub(crate) fn new(input: Box<dyn ByteReader>, operation: &'static str) -> Result<Self> {
+    pub(crate) fn new(
+        input: Box<dyn ByteReader>,
+        operation: &'static str,
+        chunk_size: NonZeroUsize,
+    ) -> Result<Self> {
         let metadata = input.metadata().clone();
-        let input = into_async_seek(input, DEFAULT_CHUNK_SIZE, operation)?;
+        let input = into_async_seek(input, chunk_size, operation)?;
         Ok(Self { input, metadata })
     }
 }

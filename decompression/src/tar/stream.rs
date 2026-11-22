@@ -176,7 +176,6 @@ impl Worker<'_> {
         while requests.recv().is_ok() {
             budget.store(METADATA_BUDGET, Ordering::Relaxed);
             let Some(entry) = entries.next() else {
-                drop(entries);
                 budget.store(u64::MAX, Ordering::Relaxed);
                 io::copy(&mut archive.into_inner(), &mut io::sink())
                     .map_err(error::header_error)?;
