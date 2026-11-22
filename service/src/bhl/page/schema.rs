@@ -12,6 +12,7 @@ macro_rules! many {
 
 /// Fixed page schema, including the 13-table / 104-field metadata contract.
 /// Metadata is required and assigned from caller-supplied source values.
+/// `page` retains all source records, including distinct page types for one ID.
 pub fn page_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
@@ -64,7 +65,7 @@ pub fn page_schema() -> SchemaRef {
                 ),
                 Field::new(
                     "page",
-                    record!(
+                    many!(
                         "PageID",
                         "ItemID",
                         "SequenceOrder",
@@ -76,7 +77,7 @@ pub fn page_schema() -> SchemaRef {
                         "PageTypeName",
                         "CreationDate"
                     ),
-                    true,
+                    false,
                 ),
                 Field::new(
                     "part",

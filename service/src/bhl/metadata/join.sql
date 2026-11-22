@@ -1,12 +1,17 @@
 -- The only joins/relationship unions are here. Keep source order via rowid;
 -- aggregate each relation separately so multiple 1:N relations cannot multiply.
 WITH parents AS (
-    SELECT s.*, p.__record AS page, pt.__record AS part,
+    SELECT s.*, (SELECT coalesce(list(r.__record ORDER BY r.rowid), [])
+         FROM bhl_page r WHERE r.__key = s.page_id) AS page, pt.__record AS part,
         CASE WHEN s.entity_type = 'part'
-             THEN coalesce(bhl_id(pt.ItemID), pp.item_id, bhl_id(p.ItemID))
+             THEN coalesce(bhl_id(pt.ItemID), pp.item_id, p.item_id)
              ELSE s.entity_id END AS parent_id
     FROM bhl_selection s
-    LEFT JOIN bhl_page p ON p.__key = s.page_id
+    LEFT JOIN LATERAL (
+        SELECT CASE WHEN count(DISTINCT bhl_id(ItemID)) = 1
+                    THEN min(bhl_id(ItemID)) END AS item_id
+        FROM bhl_page WHERE __key = s.page_id
+    ) p ON true
     LEFT JOIN bhl_part pt ON s.entity_type = 'part' AND pt.__key = s.entity_id
     LEFT JOIN LATERAL (
         SELECT bhl_id(ItemID) AS item_id FROM bhl_partpage
@@ -61,10 +66,11 @@ WITH parents AS (
           OR (lower(r.EntityType) = 'part' AND b.entity_type = 'part'
               AND r.__key = b.entity_id)) AS doi,
         (SELECT coalesce(list(message ORDER BY kind, ordinal), []) FROM (
-            SELECT 0 AS kind, 0::UBIGINT AS ordinal,
-                format('page.ItemID={}, selected item={}', bhl_id(b.page.ItemID), b.parent_repr) AS message
-            WHERE bhl_id(b.page.ItemID) IS NOT NULL
-              AND bhl_id(b.page.ItemID) IS DISTINCT FROM b.parent_id
+            SELECT 0 AS kind, r.rowid AS ordinal,
+                format('page.ItemID={}, selected item={}', bhl_id(r.ItemID), b.parent_repr) AS message
+            FROM bhl_page r WHERE r.__key = b.page_id
+              AND bhl_id(r.ItemID) IS NOT NULL
+              AND bhl_id(r.ItemID) IS DISTINCT FROM b.parent_id
             UNION ALL
             SELECT 1, 0,
                 format('part.ItemID={}, selected item={}', bhl_id(b.part.ItemID), b.parent_repr)
@@ -78,10 +84,11 @@ WITH parents AS (
               AND bhl_id(r.ItemID) IS NOT NULL
               AND bhl_id(r.ItemID) IS DISTINCT FROM b.parent_id
             UNION ALL
-            SELECT 3, 0,
-                format('SequenceOrder={}, filename sequence={}', bhl_id(b.page.SequenceOrder), b.sequence)
-            WHERE b.entity_type = 'item' AND bhl_id(b.page.SequenceOrder) IS NOT NULL
-              AND bhl_id(b.page.SequenceOrder) <> b.sequence
+            SELECT 3, r.rowid,
+                format('SequenceOrder={}, filename sequence={}', bhl_id(r.SequenceOrder), b.sequence)
+            FROM bhl_page r WHERE r.__key = b.page_id
+              AND b.entity_type = 'item' AND bhl_id(r.SequenceOrder) IS NOT NULL
+              AND bhl_id(r.SequenceOrder) <> b.sequence
             UNION ALL
             SELECT 3, r.rowid,
                 format('SequenceOrder={}, filename sequence={}', bhl_id(r.SequenceOrder), b.sequence)
@@ -101,7 +108,7 @@ SELECT request_id,
         partidentifier := partidentifier, pagename := pagename, doi := doi
     ) AS metadata,
     list_concat(list_filter([
-        CASE WHEN page IS NULL THEN format('page:{}', page_id) END,
+        CASE WHEN len(page) = 0 THEN format('page:{}', page_id) END,
         CASE WHEN entity_type = 'part' AND part IS NULL
              THEN format('part:{}', entity_id) END,
         CASE WHEN entity_type = 'part' AND len(partpage) = 0

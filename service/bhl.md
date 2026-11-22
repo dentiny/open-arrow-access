@@ -127,6 +127,10 @@ with their original case-sensitive names. Table names become the struct/list
 children. `?` means nullable; list containers and list elements are non-null
 when their enclosing `metadata` struct is present.
 
+`metadata.page` retains all source rows for a PageID, including multiple
+`PageTypeName` values, in source order. An unresolved page has an empty list;
+the output still has one row per requested OCR object.
+
 Every source TSV cell uses `LargeUtf8`, including IDs, dates and years.
 This preserves original lexical values, empty strings and date precision.
 It is an explicit string-valued source profile, not inferred numeric/date
@@ -173,7 +177,7 @@ metadata: Struct<
     LicenseType: LargeUtf8,
     RightsHolder: LargeUtf8
   >>,
-  page: Struct<
+  page: List<Struct<
     PageID: LargeUtf8,
     ItemID: LargeUtf8,
     SequenceOrder: LargeUtf8,
@@ -184,7 +188,7 @@ metadata: Struct<
     PageNumber: LargeUtf8,
     PageTypeName: LargeUtf8,
     CreationDate: LargeUtf8
-  >?,
+  >>,
   part: Struct<
     PartID: LargeUtf8,
     ItemID: LargeUtf8,

@@ -9,10 +9,14 @@ const PART: &str = "ocr/part-8/part-8-3-1.txt";
 const MISSING: &str = "ocr/item-20/item-20-30-1.txt";
 
 async fn source(title: &str) -> (tempfile::TempDir, OpenDalAccessor) {
+    source_table("title", title).await
+}
+
+async fn source_table(name: &str, filename: &str) -> (tempfile::TempDir, OpenDalAccessor) {
     let mut files = Vec::new();
     for table in tables() {
-        let filename = if table.name == "title" {
-            title.to_owned()
+        let filename = if table.name == name {
+            filename.to_owned()
         } else {
             format!("{}.txt.gz", table.name)
         };
@@ -35,7 +39,7 @@ pub(in crate::bhl) async fn load() -> BhlMetadata {
 }
 
 fn cell(row: &StructArray, table: &str, field: &str) -> String {
-    if matches!(table, "item" | "title") {
+    if matches!(table, "item" | "title" | "page") {
         return list(row, table, field).remove(0);
     }
     row.column_by_name(table)
@@ -312,4 +316,55 @@ async fn databases_reopen_without_source_access_and_keep_provenance() {
             .unwrap();
     }
     assert!(BhlMetadata::open(&path).is_err());
+}
+
+#[tokio::test]
+async fn page_types_preserve_source_rows_without_multiplying_ocr_pages() {
+    let (_root, storage) = source_table("page", "page-multi-type.txt.gz").await;
+    let metadata = BhlMetadata::load(storage).await.unwrap();
+    assert_eq!(metadata.info.sources["page"].rows, 2);
+    let rows = read(&metadata, &[ITEM, PART, MISSING]);
+    assert_eq!(rows.len(), 3);
+    for row in &rows[..2] {
+        assert_eq!(list(&row.metadata, "page", "PageID"), ["3", "3"]);
+        assert_eq!(
+            list(&row.metadata, "page", "PageTypeName"),
+            ["Text", "Index"]
+        );
+        assert!(row.missing.is_empty());
+        assert!(row.conflicts.is_empty());
+    }
+    assert!(list(&rows[2].metadata, "page", "PageID").is_empty());
+    metadata
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "UPDATE page SET ItemID = '9', SequenceOrder = '6' WHERE PageTypeName = 'Index';",
+        )
+        .unwrap();
+    let row = read(&metadata, &[ITEM]).pop().unwrap();
+    assert_eq!(
+        row.conflicts,
+        [
+            "page.ItemID=9, selected item=Some(2)",
+            "SequenceOrder=6, filename sequence=5",
+        ]
+    );
+    metadata
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch("DELETE FROM part; DELETE FROM partpage;")
+        .unwrap();
+    let row = read(&metadata, &[PART]).pop().unwrap();
+    assert!(list(&row.metadata, "item", "ItemID").is_empty());
+    assert!(row.missing.contains(&"item:unresolved parent".to_owned()));
+    assert_eq!(
+        row.conflicts,
+        [
+            "page.ItemID=2, selected item=None",
+            "page.ItemID=9, selected item=None",
+        ]
+    );
 }
