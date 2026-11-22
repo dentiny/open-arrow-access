@@ -638,8 +638,11 @@ Existing raw `records()` and general `open_source_package()` output are unchange
 `ArxivReadRequest::new(kind).with_shard("src/arXiv_src_2410_001.tar")`
 selects exactly one uncompressed TAR key relative to the service storage root.
 Raw archive planning creates one lazy shard partition with no manifest requests
-or listing. Content planning uses the member partitions described below; every
-reader still addresses only the selected object. Content and
+or listing. Explicit raw scans use `open_sequential`, just like content scans:
+with default byte options, supported HTTP backends reuse one GET without a HEAD
+or per-chunk range requests. Explicit I/O splitting options keep their existing
+backend-managed behavior. Content planning uses the member partitions described
+below; every reader still addresses only the selected object. Content and
 metadata wrappers forward the same request. Month and shard
 selectors cannot be combined; invalid/absolute/traversing keys are rejected
 before I/O. A caller-owned XML TAR can use this path without inventing an
