@@ -63,13 +63,24 @@ WITH parents AS (
          AND r.__key = b.entity_id) AS partidentifier,
         (SELECT coalesce(list(r.__record ORDER BY r.rowid), [])
          FROM bhl_pagename r WHERE r.__key = b.page_id) AS pagename,
-        (SELECT coalesce(list(r.__record ORDER BY r.rowid), [])
-         FROM bhl_doi r WHERE
-             (lower(r.EntityType) = 'title' AND r.__key IN (SELECT bhl_id(i.TitleID) FROM bhl_item i WHERE i.__key = b.parent_id))
-          OR (lower(r.EntityType) = 'item' AND r.__key = b.parent_id)
-          OR (lower(r.EntityType) = 'page' AND r.__key = b.page_id)
-          OR (lower(r.EntityType) = 'part' AND b.entity_type = 'part'
-              AND r.__key = b.entity_id)) AS doi,
+        -- Separate disjoint entity types before aggregation. A correlated title
+        -- membership test inside OR otherwise expands DOI rows across pages.
+        (SELECT coalesce(list(r.__record ORDER BY r.rowid), []) FROM (
+            SELECT d.rowid, d.__record FROM bhl_doi d
+            JOIN (SELECT DISTINCT __key, bhl_id(TitleID) AS title_id FROM bhl_item) i
+              ON d.__key = i.title_id
+            WHERE lower(d.EntityType) = 'title' AND i.__key = b.parent_id
+            UNION ALL
+            SELECT d.rowid, d.__record FROM bhl_doi d
+            WHERE lower(d.EntityType) = 'item' AND d.__key = b.parent_id
+            UNION ALL
+            SELECT d.rowid, d.__record FROM bhl_doi d
+            WHERE lower(d.EntityType) = 'page' AND d.__key = b.page_id
+            UNION ALL
+            SELECT d.rowid, d.__record FROM bhl_doi d
+            WHERE lower(d.EntityType) = 'part' AND b.entity_type = 'part'
+              AND d.__key = b.entity_id
+        ) r) AS doi,
         (SELECT coalesce(list(message ORDER BY kind, ordinal), []) FROM (
             SELECT 0 AS kind, r.rowid AS ordinal,
                 format('page.ItemID={}, selected item={}', bhl_id(r.ItemID), b.parent_repr) AS message
