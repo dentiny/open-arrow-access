@@ -29,3 +29,10 @@ second response uses 2410.00002 for the two-article shard). metadata-missing.xml
 is an OAI idDoesNotExist error; metadata-empty.xml has no records, and
 metadata-incomplete.xml omits the article metadata.
 All responses are synthetic and used with the in-memory HTTP transport.
+
+mixed-source.tar is a synthetic USTAR source shard containing the existing
+arxiv-articles/paper.pdf (2410.00001) followed by main.tex.gz (2410.00002).
+It reproduces mixed PDF/LaTeX bulk input without downloading article content.
+no-latex.tar contains only the existing figures/a.png and main.tex renamed to
+anc/main.tex, verifying that an intact package can lack eligible LaTeX content.
+All fixture TAR timestamps are zero.
