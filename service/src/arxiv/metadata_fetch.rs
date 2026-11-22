@@ -1,7 +1,8 @@
 //! Lazy, shared OAI lookups for the default content metadata path.
 mod rate_limit;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use backon::{ExponentialBuilder, Retryable};
 use futures::{TryStreamExt, lock::Mutex};
 use open_arrow_access_core::{Accessor, ReadRequest, Result, into_stream};
 
@@ -71,7 +72,19 @@ async fn fetch_metadata(connection: &Connection, article: &str) -> Result<OaiPag
         ArxivMetadata::PATH,
         ArxivMetadata::METADATA_PREFIX,
     )?;
-    service.get_record(&id::oai_identifier(article)?).await
+    let identifier = id::oai_identifier(article)?;
+    // The official OAI endpoint can return an empty, transient 406 before
+    // serving the same request successfully. Keep this recovery local to
+    // arXiv metadata; persistent 406s and all other failures still propagate.
+    (|| service.get_record(&identifier))
+        .retry(
+            ExponentialBuilder::default()
+                .with_min_delay(Duration::from_secs(3))
+                .with_max_delay(Duration::from_secs(12))
+                .with_max_times(3),
+        )
+        .when(|error| error.http_status() == Some(406))
+        .await
 }
 
 async fn decode_metadata(page: OaiPage, article: &str) -> Result<ArxivMetadataIndex> {
