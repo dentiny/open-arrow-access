@@ -1,12 +1,10 @@
 use std::path::Path;
 
-use arrow_array::cast::AsArray;
+use arrow_array::{RecordBatch, cast::AsArray};
 use arrow_schema::DataType;
-use futures::TryStreamExt;
 use open_arrow_access::{
     Accessor, ObjectRef,
     crawl::{CrawlAccessor, CrawlOptions},
-    into_stream,
     service::bhl::{BhlShardAccessor, BhlShardReadRequest, metadata::BhlMetadata, page_schema},
     storage::{NamedFileAccessor, OpenDalAccessor},
 };
@@ -32,6 +30,16 @@ async fn create_metadata(path: &Path) {
     .unwrap();
 }
 
+async fn read(crawl: &CrawlAccessor<BhlShardReadRequest>, prefix: &str) -> RecordBatch {
+    let mut reader = crawl
+        .open(BhlShardReadRequest::new(prefix).unwrap())
+        .await
+        .unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert!(reader.next().await.unwrap().is_none());
+    batch
+}
+
 #[tokio::test]
 async fn crawl_reuses_a_completed_database_for_item_and_part_shards() {
     let item = "ocr/item-2/item-2-3-5.txt";
@@ -48,27 +56,12 @@ async fn crawl_reuses_a_completed_database_for_item_and_part_shards() {
         .await
         .unwrap();
     let crawl = CrawlAccessor::new(source, CrawlOptions::default());
-    let read = |prefix| {
-        let crawl = crawl.clone();
-        async move {
-            into_stream(
-                crawl
-                    .open(BhlShardReadRequest::new(prefix).unwrap())
-                    .await
-                    .unwrap(),
-            )
-            .try_collect::<Vec<_>>()
-            .await
-            .unwrap()
-        }
-    };
-    let (item_batches, part_batches) = tokio::join!(read("ocr/item-2/"), read("ocr/part-8/"));
-    for (batches, key, data) in [
-        (item_batches, item, b"\r\n\xff".as_slice()),
-        (part_batches, part, b"".as_slice()),
+    let (item_batch, part_batch) =
+        tokio::join!(read(&crawl, "ocr/item-2/"), read(&crawl, "ocr/part-8/"));
+    for (batch, key, data) in [
+        (item_batch, item, b"\r\n\xff".as_slice()),
+        (part_batch, part, b"".as_slice()),
     ] {
-        assert_eq!(batches.len(), 1);
-        let batch = &batches[0];
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(
             batch["source_path"].as_string::<i64>().value(0),
