@@ -193,10 +193,10 @@ impl CsvFileFormat {
                         .with_nullable(true)
                 })
                 .collect::<Vec<_>>();
-            // Preserve blank header cells without evaluating Unicode word boundaries.
+            // Anchor the empty intersection to preserve headers without scanning their contents.
             ReaderBuilder::new(Arc::new(Schema::new(fields)))
                 .with_format(format.inner.clone().with_header(false).with_null_regex(
-                    regex::Regex::new(r"[a&&b]").expect("valid never-matching regex"),
+                    regex::Regex::new(r"\A[a&&b]").expect("valid never-matching regex"),
                 ))
                 .with_batch_size(1)
                 .build_decoder()
