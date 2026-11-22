@@ -368,3 +368,44 @@ async fn page_types_preserve_source_rows_without_multiplying_ocr_pages() {
         ]
     );
 }
+
+#[tokio::test]
+async fn page_relations_preserve_types_order_and_one_output_per_ocr_request() {
+    let (root, storage) = source("title.txt.gz").await;
+    std::fs::write(
+        root.path().join("data/page.txt.gz"),
+        fixture!("bhl-metadata", "page-multiple-types.txt.gz").await,
+    )
+    .unwrap();
+    let metadata = BhlMetadata::load(storage).await.unwrap();
+    assert_eq!(metadata.info.sources["page"].rows, 3);
+    let rows = read(&metadata, &[ITEM, PART, MISSING]);
+    assert_eq!(rows.len(), 3);
+    for row in &rows[..2] {
+        assert!(row.missing.is_empty());
+        assert!(row.conflicts.is_empty());
+        assert_eq!(
+            list(&row.metadata, "page", "PageTypeName"),
+            ["Text", "Illustration", "Text"]
+        );
+        assert_eq!(list(&row.metadata, "page", "PageNumber"), ["I", "1", "I"]);
+        assert_eq!(list(&row.metadata, "page", "ItemID"), ["2", "2", "2"]);
+    }
+    assert!(list(&rows[2].metadata, "page", "PageID").is_empty());
+    assert!(rows[2].missing.iter().any(|message| message == "page:30"));
+    metadata
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch("INSERT INTO page VALUES ('3','7','6','','','','','','Text','');")
+        .unwrap();
+    let row = read(&metadata, &[ITEM]).pop().unwrap();
+    assert_eq!(list(&row.metadata, "page", "PageID").len(), 4);
+    assert_eq!(
+        row.conflicts,
+        [
+            "page.ItemID=7, selected item=Some(2)",
+            "SequenceOrder=6, filename sequence=5"
+        ]
+    );
+}

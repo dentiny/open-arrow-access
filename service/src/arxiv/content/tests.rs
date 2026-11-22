@@ -67,8 +67,29 @@ async fn accepts_legacy_single_sources_and_rejects_non_latex() {
     for data in [b"%PDF-1.7".as_slice(), b"%!PS", b"plain text", b"\xff"] {
         assert!(read("2410/2410.00001.gz", data).await.is_err());
     }
+    for (group, file) in [
+        ("arxiv-articles", "paper.pdf"),
+        ("arxiv-articles", "paper.pdf.gz"),
+        ("arxiv-content", "no-latex.tar"),
+    ] {
+        let error = read("2410/2410.00001.gz", &fixture!(group, file).await)
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), open_arrow_access_core::ErrorKind::NotFound);
+        assert_eq!(
+            error.object().unwrap().locator(),
+            "src/arXiv_src_2410_001.tar#entry=7"
+        );
+        assert!(error.to_string().contains("2410.00001"));
+    }
     let corrupt = fixture!("arxiv-articles", "bad-crc.tar.gz").await;
-    assert!(read("2410/2410.00001.gz", &corrupt).await.is_err());
+    assert_eq!(
+        read("2410/2410.00001.gz", &corrupt)
+            .await
+            .unwrap_err()
+            .kind(),
+        open_arrow_access_core::ErrorKind::Decode,
+    );
     for name in [
         b"anc/extra.tex".as_slice(),
         b"nested/ANC/extra.tex",
@@ -328,4 +349,83 @@ async fn default_metadata_propagates_failures_even_without_projected_metadata() 
         assert!(reader.next().await.is_err(), "{file}");
         assert_eq!(http.requests().len(), 1);
     }
+}
+
+#[tokio::test]
+async fn explicit_missing_policy_skips_pdf_articles_and_keeps_latex() {
+    use open_arrow_access_core::AccessorExt;
+    use open_arrow_access_layers::{MissingObjectLayer, MissingObjectPolicy};
+    use std::sync::Mutex;
+
+    let http = HttpFixture::new();
+    let connection = metadata_connection(&http, "2410.00001", "metadata-record.xml").await;
+    metadata_connection(&http, "2410.00002", "metadata-second.xml").await;
+    let bytes = fixture!("arxiv-content", "mixed-source.tar").await;
+    let (_temp, operator) = temp_fs(&[("src/mixed.tar", &bytes)]);
+    let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
+        .with_metadata_connection(connection)
+        .records()
+        .content(ArxivContentFormat::Latex);
+    let request = ArxivReadRequest::new(ArxivKind::Source).with_shard("src/mixed.tar");
+    let mut strict = records.open(request.clone()).await.unwrap();
+    assert_eq!(
+        strict.next().await.unwrap_err().kind(),
+        open_arrow_access_core::ErrorKind::NotFound
+    );
+
+    let skipped = Arc::new(Mutex::new(Vec::new()));
+    let observed = skipped.clone();
+    let records = records.layer(MissingObjectLayer::new(
+        MissingObjectPolicy::Skip,
+        move |error| {
+            observed
+                .lock()
+                .unwrap()
+                .push(error.object().unwrap().locator().to_owned());
+            Ok(())
+        },
+    ));
+    let mut reader = records.open(request).await.unwrap();
+    let batch = reader.next().await.unwrap().unwrap();
+    assert_eq!(batch.num_rows(), 1);
+    assert_eq!(
+        batch["article_id"].as_string::<i64>().value(0),
+        "2410.00002"
+    );
+    assert_eq!(
+        batch["data"].as_binary::<i64>().value(0),
+        fixture!("arxiv-articles", "main.tex").await
+    );
+    assert_eq!(batch["metadata"].null_count(), 0);
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(*skipped.lock().unwrap(), ["src/mixed.tar#entry=0"]);
+}
+
+#[tokio::test]
+async fn missing_latex_in_multiple_tar_selection_cannot_skip_entire_shards() {
+    use open_arrow_access_core::AccessorExt;
+    use open_arrow_access_layers::{MissingObjectLayer, MissingObjectPolicy};
+    let http = HttpFixture::new();
+    let connection = metadata_connection(&http, "2410.00001", "metadata-record.xml").await;
+    let bytes = fixture!("arxiv-content", "mixed-source.tar").await;
+    let manifest = fixture!("arxiv-content", "source-manifest.xml").await;
+    let (_temp, operator) = temp_fs(&[
+        ("src/arXiv_src_manifest.xml", &manifest),
+        ("src/arXiv_src_2411_001.tar", &bytes),
+        ("src/arXiv_src_2411_002.tar", &bytes),
+    ]);
+    let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
+        .with_metadata_connection(connection)
+        .records()
+        .content(ArxivContentFormat::Latex)
+        .layer(MissingObjectLayer::new(MissingObjectPolicy::Skip, |_| {
+            panic!("must not discard an entire shard")
+        }));
+    let mut reader = records
+        .open(ArxivReadRequest::new(ArxivKind::Source).with_month(2411))
+        .await
+        .unwrap();
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), open_arrow_access_core::ErrorKind::Decode);
+    assert!(error.to_string().contains("article-level skipping"));
 }

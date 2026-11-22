@@ -25,3 +25,9 @@ item-multi-title.txt.gz and title-multi-title.txt.gz extend the base fixtures
 with a second TitleID associated with the same ItemID. They model the real
 AWS item-table relationship discovered for ItemID 62861, without copied source
 records. Both files use deterministic gzip mtime=0.
+
+page-multiple-types.txt.gz repeats PageID 3 with Text/Illustration/Text page
+types and I/1/I page labels. This models legitimate repeated PageIDs observed
+in the public AWS page table (for example, PageID 91 has Illustration and Text
+records), without copying downloaded records. All records and duplicate rows
+must be retained in metadata.page without multiplying OCR rows.

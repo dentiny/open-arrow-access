@@ -45,14 +45,17 @@ query intermediates. Prepared metadata can instead use the persistent database
 described below. DuckDB uses its default resource settings, with
 `enable_external_file_cache=false` explicitly set.
 
-`metadata.item`, `metadata.title` and `metadata.page` are now non-null lists, retaining every
-item/title association and page-type record in source order while emitting one OCR row per request.
-Consumers of the previous singleton structs must accept these list fields.
+`metadata.item`, `metadata.title` and `metadata.page` are non-null lists,
+retaining every source relationship in order while emitting one OCR row per
+request. The AWS page table can repeat a PageID for different page types or
+labels; these rows are valid and must all be preserved. Missing page matches
+produce an empty list and a reconciliation message. Consumers of the previous
+singleton structs must accept these list fields.
 The 13 source tables and 104 lexical source columns remain unchanged:
  preserve original lexical
 IDs, empty strings, quotes, Unicode, relation duplicates/order, and separate
 item/part rights. DOI matches entity type and ID. Part page sequences use
-partpage. Invalid headers/keys, missing tables and title/part numeric collisions
+partpage. Invalid headers/keys, missing tables and title/page/part numeric collisions
 fail loading. Missing joins and parent/sequence conflicts accompany each emitted
 page rather than silently dropping it. Callers decide which rows to publish.
 
@@ -105,7 +108,7 @@ output.
 
 Query failures propagate through the reader. Report callback failures stop
 before that page's OCR read. Accepted pages with missing joins retain null
-singleton children or empty relationship lists and still emit their OCR record. Reports go to the caller callback;
+children and still emit their OCR record. Reports go to the caller callback;
 they are not accumulated into schema metadata.
 
 Sequential reads follow request order, including duplicates. The scan remains
