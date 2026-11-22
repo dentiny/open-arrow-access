@@ -278,7 +278,7 @@ metadata: Struct<
 
 | Child | Rows attached to the OCR page |
 | --- | --- |
-| `page` | `page.PageID = page_id`; at most one source row |
+| `page` | All source rows matching `page.PageID = page_id`, retaining page types and labels in source order |
 | `item` | All source rows for the resolved ItemID, retaining each TitleID association in source order; part OCR resolves its parent through part/page relationships |
 | `title` | All source title rows referenced by any selected item association, in source order |
 | `part` | For part OCR only, `part.PartID = entity_id`; null for an item-namespace row |
@@ -303,8 +303,11 @@ identifier. An ItemID can occur in multiple item rows with different TitleID
 associations. `metadata.item` and `metadata.title` are non-null lists of complete
 source records in source order; related authors/subjects/identifiers cover all
 associated titles without multiplying OCR rows. This revises their former
-nullable singleton-struct contract. TitleID, PageID and PartID source collisions
-remain validation failures; no arbitrary first item/title is selected.
+nullable singleton-struct contract. `metadata.page` is also a non-null list:
+repeated PageIDs can carry different page types and labels, and all source rows
+are retained without multiplying OCR output. Missing page relationships are
+empty lists. Parent and sequence disagreements are checked against every page
+record. TitleID and PartID source collisions remain validation failures.
 A missing join leaves a singleton child null or a relationship list empty and is recorded in the reconciliation
 report; it never drops the OCR page. A valid empty relationship yields an empty
 list. Failed table acquisition must not be reported as an empty relationship.

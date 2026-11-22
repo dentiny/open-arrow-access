@@ -104,7 +104,7 @@ panics propagate after any queued page, so consume through EOF before committing
 output.
 
 Query failures propagate through the reader. Report callback failures stop
-before that page's OCR read. Accepted pages with missing joins retain null
+before that page's OCR read. Accepted pages with missing joins retain
 empty relationship lists and still emit their OCR record. Reports go to the caller callback;
 they are not accumulated into schema metadata.
 

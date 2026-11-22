@@ -89,6 +89,9 @@ async fn expand_single_latex(
         .read_to_end(&mut data)
         .await
         .map_err(|e| error::decode("invalid source package").with_source(e))?;
+    if data.starts_with(b"%PDF-") || data.starts_with(b"%!PS") {
+        return Err(error::missing_latex(batch, article_id));
+    }
     validation::source_packaging(&data)?;
     let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
     append_latex(&mut builder, batch, article_id, 0, b"main.tex", &data)?;
@@ -109,16 +112,14 @@ fn expand_tar_latex(
         let article_id = article_id.clone();
         let options = options.clone();
         async move {
-            let batch = read_latex_batch(&mut tar, &batch, &article_id, &options).await?;
-            if batch.num_rows() == 0 {
+            let output = read_latex_batch(&mut tar, &batch, &article_id, &options).await?;
+            if output.num_rows() == 0 {
                 if !emitted {
-                    return Err(error::decode(
-                        "source package contains no non-ancillary LaTeX files",
-                    ));
+                    return Err(error::missing_latex(&batch, &article_id));
                 }
                 Ok(None)
             } else {
-                Ok(Some((batch, (tar, true))))
+                Ok(Some((output, (tar, true))))
             }
         }
     })

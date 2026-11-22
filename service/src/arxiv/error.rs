@@ -1,4 +1,5 @@
-use open_arrow_access_core::{Error, ErrorKind};
+use arrow_array::{RecordBatch, cast::AsArray, types::UInt64Type};
+use open_arrow_access_core::{Error, ErrorKind, ObjectRef};
 
 pub(super) fn invalid(message: &str) -> Error {
     Error::new(ErrorKind::InvalidInput, "configure_arxiv", message)
@@ -128,4 +129,18 @@ pub(super) fn missing_content_metadata(id: &str) -> Error {
 
 pub(super) fn invalid_metadata_response() -> Error {
     decode("expected one complete OAI record matching the requested arXiv article")
+}
+
+/// Missing representation, distinct from corrupt source bytes.
+pub(super) fn missing_latex(batch: &RecordBatch, article: &str) -> Error {
+    let shard = batch["shard_uri"].as_string::<i64>().value(0);
+    let entry_index = batch["entry_index"].as_primitive::<UInt64Type>().value(0);
+    Error::new(
+        ErrorKind::NotFound,
+        "read_arxiv_latex",
+        format!("LaTeX content is unavailable for arXiv article {article}"),
+    )
+    .with_object(Some(&ObjectRef::new(format!(
+        "{shard}#entry={entry_index}"
+    ))))
 }

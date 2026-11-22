@@ -1,21 +1,20 @@
 -- The only joins/relationship unions are here. Keep source order via rowid;
 -- aggregate each relation separately so multiple 1:N relations cannot multiply.
 WITH parents AS (
-    SELECT s.*, (SELECT coalesce(list(r.__record ORDER BY r.rowid), [])
-         FROM bhl_page r WHERE r.__key = s.page_id) AS page,
-        (SELECT coalesce(list(r.__record ORDER BY r.rowid), [])
-         FROM bhl_part r WHERE s.entity_type = 'part' AND r.__key = s.entity_id) AS part,
+    SELECT s.*, p.records AS page, pt.records AS part,
         CASE WHEN s.entity_type = 'part'
              THEN coalesce(pt.item_id, pp.item_id, p.item_id)
              ELSE s.entity_id END AS parent_id
     FROM bhl_selection s
     LEFT JOIN LATERAL (
-        SELECT CASE WHEN count(DISTINCT bhl_id(ItemID)) = 1
+        SELECT coalesce(list(__record ORDER BY rowid), []) AS records,
+            CASE WHEN count(DISTINCT bhl_id(ItemID)) = 1
                     THEN min(bhl_id(ItemID)) END AS item_id
         FROM bhl_page WHERE __key = s.page_id
     ) p ON true
     LEFT JOIN LATERAL (
-        SELECT CASE WHEN count(DISTINCT bhl_id(ItemID)) = 1
+        SELECT coalesce(list(__record ORDER BY rowid), []) AS records,
+            CASE WHEN count(DISTINCT bhl_id(ItemID)) = 1
                     THEN min(bhl_id(ItemID)) END AS item_id
         FROM bhl_part WHERE s.entity_type = 'part' AND __key = s.entity_id
     ) pt ON true

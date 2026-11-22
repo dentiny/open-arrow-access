@@ -677,3 +677,18 @@ Later malformed headers or storage errors remain fatal. Consume through EOF
 before committing results. Raw scans and random-access `TarArchive` are unchanged.
 Outer article payloads remain buffered; LaTeX package decoding and selected-file
 output use the streaming handler described above. Non-TeX source policy is unchanged.
+
+## Missing LaTeX in a source shard
+
+Source shards can contain PDF/PostScript submissions and intact packages without
+eligible TeX files. These represent missing LaTeX content, rather than corrupt
+archives. With an explicit shard or a single manifest-selected TAR, they return
+`NotFound` from `read_arxiv_latex`, including article ID and `shard#entry=index`
+identity. The default remains an error. Apply `MissingObjectLayer` with
+`MissingObjectPolicy::Skip` and a reporting callback before parallel execution
+to explicitly skip those article partitions and continue reading the shard.
+
+Corrupt gzip/TAR input and invalid UTF-8 TeX remain fatal. For a multi-TAR
+selection, partitions contain entire TARs, so absent LaTeX remains fatal rather
+than allowing a missing-object policy to drop other articles in the same shard.
+Distribute such work as explicit single-shard jobs for article-level skipping.
