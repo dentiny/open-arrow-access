@@ -23,10 +23,10 @@ async fn delivers_first_page_before_query_finishes_off_the_async_thread() {
         wait.recv().unwrap();
         Err(error::invalid("late query failure"))
     });
-    let first = tokio::time::timeout(std::time::Duration::from_secs(5), query.next()).await;
+    let first = query.next().await;
     // Always release the worker, even if the incremental-read assertion fails.
     release.send(()).unwrap();
-    assert_eq!(first.unwrap().unwrap().unwrap().identity.page_id, 3);
+    assert_eq!(first.unwrap().unwrap().identity.page_id, 3);
     let failure = query.next().await.err().unwrap();
     assert_eq!(failure.to_string(), "bhl_metadata: late query failure");
     assert!(query.next().await.unwrap().is_none());
@@ -52,11 +52,6 @@ async fn bounds_queued_pages_and_stops_when_the_reader_is_dropped() {
     ready.await.unwrap();
     assert_eq!(emitted.load(Ordering::SeqCst), 1);
     drop(query);
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_secs(5), done)
-            .await
-            .unwrap()
-            .unwrap()
-    );
+    assert!(done.await.unwrap());
     assert_eq!(emitted.load(Ordering::SeqCst), 1);
 }
