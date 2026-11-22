@@ -56,28 +56,20 @@ fn check_sources(connection: &Connection, info: &BhlMetadataInfo) -> Result<()> 
 
 impl BhlMetadata {
     /// Create a persistent metadata database by importing the 13 source tables.
-    /// Publish only after all data and provenance are committed and the database
-    /// is closed. Never overwrites an existing path. The caller owns database
-    /// naming, distribution and source freshness.
+    /// Write directly to the requested path, rejecting an existing destination.
+    /// Await successful completion before opening readers: data and provenance
+    /// are committed and all write connections are closed before returning.
+    /// A failed import may leave an incomplete file; discard it before retrying.
     pub async fn create<A: ByteAccessor + 'static>(
         storage: A,
         path: impl AsRef<Path>,
     ) -> Result<()> {
         let path = path.as_ref().to_path_buf();
         validation::validate_database_destination(path.try_exists().map_err(error::database_io)?)?;
-        let stage = tempfile::Builder::new()
-            .prefix(".bhl-metadata-")
-            .tempdir_in(
-                path.parent()
-                    .filter(|p| !p.as_os_str().is_empty())
-                    .unwrap_or(Path::new(".")),
-            )
-            .map_err(error::database_io)?;
-        let file = stage.path().join("metadata.duckdb");
         let config = Config::default()
             .with("enable_external_file_cache", "false")
             .map_err(error::duckdb)?;
-        let connection = Connection::open_with_flags(&file, config).map_err(error::duckdb)?;
+        let connection = Connection::open_with_flags(&path, config).map_err(error::duckdb)?;
         let metadata = Self::import(storage, connection).await?;
         tokio::task::spawn_blocking(move || {
             let connection = metadata.connection.into_inner().map_err(error::metadata_lock)?;
@@ -96,12 +88,7 @@ impl BhlMetadata {
             connection
                 .execute_batch("COMMIT; CHECKPOINT")
                 .map_err(error::duckdb)?;
-            connection.close().map_err(|(_, source)| error::duckdb(source))?;
-            // The stage is on the target filesystem; hard_link publishes atomically
-            // without replacing an existing database, including in a writer race.
-            std::fs::hard_link(&file, path).map_err(error::database_io)?;
-            drop(stage);
-            Ok(())
+            connection.close().map_err(|(_, source)| error::duckdb(source))
         })
         .await
         .map_err(error::task)?

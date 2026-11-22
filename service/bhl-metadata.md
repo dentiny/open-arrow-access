@@ -145,11 +145,14 @@ let metadata = Arc::new(BhlMetadata::open("bhl-metadata.duckdb")?);
 let pages = BhlPageAccessor::from_metadata(storage, snapshot_id, metadata, report)?;
 ```
 
-`create` imports into a temporary database on the destination filesystem,
-commits data/provenance, checkpoints and closes the database, then atomically
-publishes the file without overwriting an existing path. Workers directly open
-it with DuckDB's `READ_ONLY` access mode. `open` validates the format
-version, all source table schemas and row counts, and retains source fingerprints.
+`create` opens the requested file directly, imports all source tables, commits
+its data/provenance, checkpoints and closes all write connections before returning.
+The coordinator must await successful completion before starting readers on that
+same file. There is no staging database or file publication step. Existing paths
+are rejected; a failed import may leave an incomplete file that the caller must
+discard before retrying. `open` requires the completed metadata header and validates
+the format version, source table schemas and row counts. Workers open the file
+with DuckDB's `READ_ONLY` access mode and retain source fingerprints.
 
 Source freshness, acquisition consistency, storage and distribution are
 caller-owned. Use a compatible DuckDB storage version. Existing `load` behavior

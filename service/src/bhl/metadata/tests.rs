@@ -321,6 +321,15 @@ async fn databases_reopen_without_source_access_and_keep_provenance() {
 }
 
 #[tokio::test]
+async fn failed_import_does_not_produce_a_readable_database() {
+    let (_root, storage) = source("title-invalid-key.txt.gz").await;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("incomplete.duckdb");
+    assert!(BhlMetadata::create(storage, &path).await.is_err());
+    assert!(BhlMetadata::open(&path).is_err());
+}
+
+#[tokio::test]
 async fn part_parent_associations_preserve_blank_ids_and_do_not_multiply_pages() {
     let (_root, storage) = source_table("part", "part-multi-item.txt.gz").await;
     let metadata = BhlMetadata::load(storage).await.unwrap();

@@ -21,7 +21,6 @@ bhl = [
     "dep:arrow-array",
     "dep:arrow-schema",
     "dep:duckdb",
-    "dep:tempfile",
     "dep:arrow-cast",
     "dep:sha2",
     "dep:regex",
