@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.20.0 - 2026-11-22
+
+- Add persistent BHL metadata database creation and read-only reopening; stream selected-page metadata on a bounded blocking worker while preserving repeated page, part and item-title associations, relation order and missing/conflicting source reports.
+- Batch DuckDB imports with reusable appenders and one transaction per source table; flatten creator-identifier and DOI membership joins to avoid large intermediate results.
+- Stream explicit arXiv raw shards and bulk manifests sequentially; normalize legacy source IDs, decode standalone legacy TeX and distinguish unavailable LaTeX from corrupt source packages.
+- Support GNU long names in indexed and streaming TAR reads, accept OAI `text/xml` responses, and avoid full-cell scans for never-null CSV predicates.
+- Add shared per-request HTTP admission and rate-limit integration for connections.
+- Make all `Connection` downloads consume the original GET response sequentially, avoiding conditional Range replays and arXiv HTTP 412 failures. `Connection` no longer provides random access; ZIP/Parquet readers require an OpenDAL-backed or custom ranged source.
+- Keep DuckDB bindings on the Arrow 58-compatible 1.10506.x line.
+- Release all eight public workspace crates at 0.20.0 with aligned internal dependency requirements.
+
 ## 0.19.0 - 2026-11-21
 
 - Add CourtListener's joined Arrow schema with typed timestamps, dates, counts and nested opinion, cluster, docket, court and provenance structs.
