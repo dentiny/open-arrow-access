@@ -3,7 +3,7 @@
 //! cargo run -p open-arrow-access-service --features arxiv,bhl \
 //!   --example provider_arrow_smoke -- arxiv /path/to/bulk/root src/shard.tar
 //! cargo run -p open-arrow-access-service --features arxiv,bhl \
-//!   --example provider_arrow_smoke -- bhl ocr/item-062861/item-062861-
+//!   --example provider_arrow_smoke -- bhl ocr/item-062861/
 //!
 //! BHL imports all 13 public metadata tables once in memory. An optional third
 //! argument reuses an existing BhlMetadata database instead of downloading them.
@@ -20,7 +20,8 @@ use open_arrow_access_service::{
     FileSetRequest,
     arxiv::{ArxivContentFormat, ArxivKind, ArxivReadRequest, ArxivService, content_schema},
     bhl::{
-        BhlOpenData, BhlPageAccessor, metadata::BhlMetadata, open_data_bucket_operator, page_schema,
+        BhlOpenData, BhlPageAccessor, BhlPageIdentity, metadata::BhlMetadata,
+        open_data_bucket_operator, page_schema,
     },
     common::Connection,
 };
@@ -103,12 +104,29 @@ fn configure_query(metadata: &BhlMetadata) -> Result<()> {
 
 async fn read_bhl(prefix: &str, database: Option<&str>) -> Result<()> {
     let storage = OpenDalAccessor::new(network_config().apply(open_data_bucket_operator()?)?);
-    let keys = BhlOpenData::new(storage.clone())
+    let objects = BhlOpenData::new(storage.clone())
         .discover(ListRequest::new(prefix))
-        .await?
-        .into_iter()
-        .filter(|object| object.locator().ends_with(".txt"))
-        .collect::<Vec<_>>();
+        .await?;
+    let mut keys = Vec::new();
+    let mut aggregates = 0;
+    for object in objects {
+        let key = object.locator();
+        if !key.ends_with(".txt") {
+            continue;
+        }
+        if let Some((directory, filename)) = key.rsplit_once('/')
+            && let Some(group) = directory.rsplit('/').next()
+            && (group.starts_with("item-") || group.starts_with("part-"))
+            && filename.strip_suffix(".txt") == Some(group)
+        {
+            eprintln!("Excluded whole-item/part OCR text: {key}");
+            aggregates += 1;
+            continue;
+        }
+        BhlPageIdentity::parse(key)?;
+        keys.push(object);
+    }
+    eprintln!("BHL excluded_aggregate_files={aggregates}");
     if keys.is_empty() {
         return Err("no OCR pages selected".into());
     }
