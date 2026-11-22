@@ -30,26 +30,19 @@ the same name, and marks header values sensitive. It preserves keys verbatim,
 including whitespace; it does not trim them. BHL, Regulations.gov, Semantic
 Scholar, USPTO and GovInfo use this validation when configuring API keys.
 
-## Attachment range reads
+## Attachment downloads
 
-`open` keeps its initial GET body for lazy sequential reads, without a HEAD
-request or whole-object buffering. The reader supports `read_range` when the
-response advertises `Accept-Ranges: bytes`, a known Content-Length and identity
-encoding. Otherwise it remains sequential.
+`open` and `open_sequential` both keep the initial GET body for lazy sequential
+reads, without a HEAD request, range replay, or whole-object buffering. The
+accessor and reader do not advertise random access, even when the response
+contains `Accept-Ranges: bytes`. Formats requiring ranges, such as ZIP/Parquet,
+need an OpenDAL-backed or custom ranged source.
 
-Range GETs leave the sequential cursor unchanged, including after EOF. Responses
-must have status 206, matching Content-Range bounds/total, identity encoding and
-the exact requested body length. Ignored ranges (HTTP 200) return Unsupported;
-other HTTP failures retain status and Retry-After metadata. Empty valid ranges
-perform no I/O, and invalid ranges fail locally.
-
-A strong initial ETag pins range requests with If-Match; changed or missing ETags
-are rejected. Weak/absent ETags provide no snapshot guarantee. Download-owned
-Range, If-Match, If-Range and Accept-Encoding headers override connection defaults;
-authentication, redirects, retries and timeouts use the existing connection policy.
-
-This enables native Parquet decoding through `RemoteFiles` on range-capable
-servers. Outer compression still removes native random access.
+Content-Length framing is validated and the response ETag is retained as version
+metadata. Download-owned Range, If-Match, If-Range and Accept-Encoding headers
+override connection defaults; authentication, redirects, retries and timeouts
+use the existing connection policy. An open response holds its HTTP concurrency
+permit until it is consumed or dropped.
 
 ## Usage and results
 

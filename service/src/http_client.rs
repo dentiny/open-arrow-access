@@ -12,7 +12,7 @@ mod transport;
 pub(crate) use transport::{MAX_REDIRECTS, new_single_hop_transport, new_transport};
 pub(crate) mod validation;
 
-pub(crate) use error::{http_status_error, json_error, request_error, transport_error};
+pub(crate) use error::{json_error, request_error, transport_error};
 use http::Request;
 use open_arrow_access_core::Result;
 use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};

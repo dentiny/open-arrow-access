@@ -128,8 +128,9 @@ async fn http_formats_preserve_distinct_bytes_and_missing_html_does_not_fallback
         ("src", "source.tar.gz"),
         ("html", "paper.html"),
     ] {
-        http.file(
+        http.respond(
             &format!("/{route}/2410.00001v1"),
+            StatusCode::OK,
             Bytes::from(load(fixture).await),
         );
     }
@@ -160,6 +161,13 @@ async fn http_formats_preserve_distinct_bytes_and_missing_html_does_not_fallback
         assert_eq!(batch["data"].as_binary::<i64>().value(0), expected);
     }
     assert!(reader.next().await.unwrap().is_none());
+    let requests = http.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.method == http::Method::GET && request.range().is_none())
+    );
     http.clear_requests();
     let mut reader = accessor
         .open(ArxivArticleReadRequest::new(vec![ArxivArticle::new(

@@ -64,7 +64,9 @@ representation is one lazy scan partition, emitting one row. Install the usual
 `ParallelReadLayer` for bounded concurrent partitions; plain `open` is sequential.
 An empty selection emits no rows, and duplicate selections remain distinct.
 Complete responses are buffered, even for projections omitting `data`; this
-is not a cheap remote listing API. Source access and request pacing remain caller responsibilities.
+is not a cheap remote listing API. Whole representations use sequential byte
+access, retaining the original response without HEAD or range-replay requirements.
+Source access and request pacing remain caller responsibilities.
 Use the official bulk route for whole-corpus acquisition.
 
 ## Expand source packages, including images and multimedia
