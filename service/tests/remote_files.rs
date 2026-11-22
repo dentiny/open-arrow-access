@@ -39,7 +39,19 @@ fn invalid_or_duplicate_membership_fails_before_network_io() {
 #[tokio::test]
 async fn remote_files_preserve_aliases_and_reader_independence() {
     let f = HttpFixture::new();
-    f.file("/content?sig=a%2Bb", Bytes::from_static(b"original"));
+    f.handle(|request| {
+        let mut response = open_arrow_access_test_support::http::file_response(
+            &request,
+            Bytes::from_static(b"original"),
+        );
+        response
+            .headers_mut()
+            .insert("accept-ranges", "bytes".parse().unwrap());
+        response
+            .headers_mut()
+            .insert("etag", "\"v1\"".parse().unwrap());
+        Ok(response)
+    });
     let c = providers::connection(&f);
     let url = format!("{}/content?sig=a%2Bb", f.endpoint());
     let files = c
@@ -87,7 +99,9 @@ async fn remote_files_preserve_aliases_and_reader_independence() {
     assert!(
         f.requests()
             .iter()
-            .all(|request| request.path == "/content?sig=a%2Bb")
+            .all(|request| request.path == "/content?sig=a%2Bb"
+                && request.method == http::Method::GET
+                && request.range().is_none())
     );
 }
 

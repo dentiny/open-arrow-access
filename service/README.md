@@ -91,7 +91,7 @@ flowchart TD
     Service --> Metadata["Provider metadata / ApiDocument"]
     Service --> Files["Selected logical file namespace"]
     Files --> Managed["Provider-configured OpenDAL operator"]
-    Files --> HTTP["Connection: sequential / advertised HTTP ranges"]
+    Files --> HTTP["Connection: sequential HTTP downloads"]
     Caller["Caller-configured Fs / S3 / HTTP operator"] --> Storage["OpenDalAccessor"]
     Managed --> Storage
     Storage --> Bytes["ByteReader"]

@@ -184,20 +184,9 @@ impl Connection {
             .await
     }
     /// Open an absolute URL, preserving encoded paths and signatures byte-for-byte.
-    /// Readers support exact ranges for a known identity length with
-    /// `Accept-Ranges: bytes`. Strong ETags pin requests to that version.
-    /// Range-capable inputs with a known length use bounded reads for sequential
-    /// output, avoiding an idle response holding a permit needed by range reads.
-    /// Use `Accessor::open_sequential` for whole-response downloads; it retains
-    /// the original GET body and does not advertise random access.
+    /// Read the original GET response sequentially, without replaying range requests.
     pub async fn open(&self, url: &str, options: ByteReadOptions) -> Result<Box<dyn ByteReader>> {
-        reader::open(
-            self.clone(),
-            resolve_download_url(url)?,
-            options,
-            reader::ReadMode::Ranged,
-        )
-        .await
+        reader::open(self.clone(), resolve_download_url(url)?, options).await
     }
     /// Resolve file links into lazy downloads, retaining the full JSON as metadata.
     /// The resolver owns provider identity/availability checks.
@@ -234,23 +223,13 @@ impl Accessor for Connection {
     fn capability(&self) -> Capability {
         Capability {
             read: true,
-            read_with_range: true,
+            read_with_range: false,
             read_parallel: false,
             list: false,
         }
     }
     async fn open(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
         Connection::open(self, request.object.locator(), request.options).await
-    }
-
-    async fn open_sequential(&self, request: ByteReadRequest) -> Result<Box<dyn ByteReader>> {
-        reader::open(
-            self.clone(),
-            resolve_download_url(request.object.locator())?,
-            request.options,
-            reader::ReadMode::Sequential,
-        )
-        .await
     }
 }
 

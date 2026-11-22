@@ -52,17 +52,6 @@ impl BodyReader {
         })
     }
 
-    /// Require exact framing even when the server omits Content-Length.
-    pub(crate) fn with_expected_length(mut self, expected: u64) -> Result<Self> {
-        if *self.length.expected.get_or_insert(expected) != expected {
-            return Err(error::body_error(
-                self.length.operation,
-                "unexpected Content-Length",
-            ));
-        }
-        Ok(self)
-    }
-
     pub(crate) fn content_length(&self) -> Option<u64> {
         self.length.expected
     }
