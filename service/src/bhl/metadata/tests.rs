@@ -275,7 +275,7 @@ async fn emits_rows_until_callback_fails() {
 }
 
 #[tokio::test]
-async fn databases_reopen_read_only_without_source_access_and_keep_provenance() {
+async fn databases_reopen_without_source_access_and_keep_provenance() {
     let (root, storage) = source("title.txt.gz").await;
     let metadata = BhlMetadata::load(storage.clone()).await.unwrap();
     let expected = read(&metadata, &[ITEM, PART]);
@@ -298,14 +298,12 @@ async fn databases_reopen_read_only_without_source_access_and_keep_provenance() 
         assert_eq!(actual.missing, expected.missing);
         assert_eq!(actual.conflicts, expected.conflicts);
     }
-    assert!(
-        database
-            .connection
-            .lock()
-            .unwrap()
-            .execute_batch("DELETE FROM main.item")
-            .is_err()
-    );
+    database
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch("BEGIN TRANSACTION; DELETE FROM main.item; ROLLBACK;")
+        .unwrap();
     assert_eq!(read(&database, &[ITEM, ITEM]).len(), 2);
     drop(database);
     {

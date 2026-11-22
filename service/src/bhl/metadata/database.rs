@@ -6,43 +6,13 @@ use std::{path::Path, sync::Mutex};
 
 pub(super) const DATABASE_VERSION: u64 = 1;
 
-fn open_read_only(path: impl AsRef<Path>) -> Result<Connection> {
+fn open_database(path: impl AsRef<Path>) -> Result<Connection> {
     let config = Config::default()
         .with("enable_external_file_cache", "false")
         .map_err(error::duckdb)?
-        .with("access_mode", "READ_ONLY")
+        .with("access_mode", "READ_WRITE")
         .map_err(error::duckdb)?;
     Connection::open_with_flags(path, config).map_err(error::duckdb)
-}
-
-fn query_workspace(path: &Path) -> Result<Connection> {
-    let path = path.canonicalize().map_err(error::database_io)?;
-    let path = path
-        .to_str()
-        .ok_or_else(|| error::invalid("metadata database path must be UTF-8"))?
-        .replace('\'', "''");
-    let config = Config::default()
-        .with("enable_external_file_cache", "false")
-        .map_err(error::duckdb)?;
-    let connection = Connection::open_in_memory_with_flags(config).map_err(error::duckdb)?;
-    // Appenders reject READ_ONLY handles even for temporary selection tables.
-    // Keep source data read-only and selections in this private writable catalog.
-    connection
-        .execute_batch(&format!(
-            "ATTACH '{path}' AS bhl_source (READ_ONLY);
-             CREATE MACRO bhl_id(value) AS bhl_source.main.bhl_id(value);"
-        ))
-        .map_err(error::duckdb)?;
-    for table in tables() {
-        connection
-            .execute_batch(&format!(
-                "CREATE VIEW main.\"{0}\" AS SELECT * FROM bhl_source.main.\"{0}\";
-                 CREATE VIEW main.\"bhl_{0}\" AS SELECT * FROM bhl_source.main.\"bhl_{0}\";",
-                table.name
-            ))
-            .map_err(error::duckdb)?;
-    }
-    Ok(connection)
 }
 
 fn read_info(connection: &Connection) -> Result<BhlMetadataInfo> {
@@ -137,15 +107,12 @@ impl BhlMetadata {
         .map_err(error::task)?
     }
 
-    /// Open the persistent database read-only, without acquiring any AWS tables.
+    /// Open the persistent database read-write, without acquiring any AWS tables.
     /// Temporary per-query selections remain private to cloned connections.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        let connection = open_read_only(path)?;
+        let connection = open_database(path)?;
         let info = read_info(&connection)?;
         check_sources(&connection, &info)?;
-        drop(connection);
-        let connection = query_workspace(path)?;
         Ok(Self {
             connection: Mutex::new(connection),
             info,
