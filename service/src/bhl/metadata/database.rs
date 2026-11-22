@@ -6,11 +6,11 @@ use std::{path::Path, sync::Mutex};
 
 pub(super) const DATABASE_VERSION: u64 = 1;
 
-fn open_read_only(path: impl AsRef<Path>) -> Result<Connection> {
+fn open_database(path: impl AsRef<Path>) -> Result<Connection> {
     let config = Config::default()
         .with("enable_external_file_cache", "false")
         .map_err(error::duckdb)?
-        .with("access_mode", "READ_ONLY")
+        .with("access_mode", "READ_WRITE")
         .map_err(error::duckdb)?;
     Connection::open_with_flags(path, config).map_err(error::duckdb)
 }
@@ -107,10 +107,10 @@ impl BhlMetadata {
         .map_err(error::task)?
     }
 
-    /// Open the persistent database read-only, without acquiring any AWS tables.
+    /// Open the persistent database read-write, without acquiring any AWS tables.
     /// Temporary per-query selections remain private to cloned connections.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let connection = open_read_only(path)?;
+        let connection = open_database(path)?;
         let info = read_info(&connection)?;
         check_sources(&connection, &info)?;
         Ok(Self {
