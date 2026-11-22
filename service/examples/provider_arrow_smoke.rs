@@ -158,7 +158,10 @@ async fn read_bhl(prefix: &str, database: Option<&str>) -> Result<()> {
         }
         Ok(())
     })?;
-    let expected = keys.iter().map(|key| key.locator().to_owned()).collect();
+    let expected = keys
+        .iter()
+        .map(|key| format!("{OPEN_DATA_BUCKET_URL}{}", key.locator()))
+        .collect();
     let reader = pages.open(FileSetRequest::new(keys)).await?;
     consume(reader, page_schema(), "source_path", Some(expected)).await?;
     Ok(())
