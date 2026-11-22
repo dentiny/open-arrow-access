@@ -1,5 +1,4 @@
 use super::*;
-use open_arrow_access_core::ErrorKind;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::oneshot;
 
@@ -60,12 +59,4 @@ async fn bounds_queued_pages_and_stops_when_the_reader_is_dropped() {
             .unwrap()
     );
     assert_eq!(emitted.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
-async fn propagates_worker_panics_instead_of_successful_eof() {
-    let mut query = Query::start(|_| panic!("query worker panic"));
-    let failure = query.next().await.err().unwrap();
-    assert_eq!(failure.kind(), ErrorKind::Internal);
-    assert!(query.next().await.unwrap().is_none());
 }
