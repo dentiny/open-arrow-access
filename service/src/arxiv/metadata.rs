@@ -204,6 +204,7 @@ fn pdf_metadata_row(name: Option<&[u8]>, ids: &HashMap<String, u64>) -> Result<u
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::arxiv::ArxivContentFormat;
     use arrow_array::{ArrayRef, LargeBinaryArray, StringArray};
 
     fn snapshot(ids: Vec<&str>) -> RecordBatch {
@@ -293,6 +294,23 @@ mod tests {
         assert_eq!(
             id::pdf_id(b"0001/math.GT0001001v1.pdf").unwrap(),
             "math.GT0001001"
+        );
+        for name in [
+            "2610/2610.01234.pdf",
+            "2610/2610.01234.pdf.gz",
+            "2610/2610.01234v2.ps.gz",
+            "2610/2610.01234.tex.gz",
+            "2610/2610.01234.tar.gz",
+        ] {
+            assert_eq!(
+                validation::content_article_id(name.as_bytes(), ArxivContentFormat::Latex,)
+                    .unwrap(),
+                "2610.01234",
+            );
+        }
+        assert!(
+            validation::content_article_id(b"2610/not-an-id.pdf.gz", ArxivContentFormat::Latex,)
+                .is_err()
         );
     }
 }
