@@ -22,9 +22,11 @@ mod backend;
 mod config;
 mod error;
 mod http_limit;
+mod http_request_rate;
 mod retry;
 pub use config::{RetryConfig, StorageConfig, TimeoutConfig};
 pub use http_limit::HttpConcurrencyLimitLayer;
+pub use http_request_rate::{HttpRequestRateLimitLayer, HttpRequestRateLimitPermit};
 pub use retry::HttpReadRateLimitLayer;
 mod validation;
 
