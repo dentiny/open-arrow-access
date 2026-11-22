@@ -3,7 +3,7 @@
 //! cargo run -p open-arrow-access-service --features arxiv,bhl \
 //!   --example provider_arrow_smoke -- arxiv /path/to/bulk/root src/shard.tar
 //! cargo run -p open-arrow-access-service --features arxiv,bhl \
-//!   --example provider_arrow_smoke -- bhl ocr/item-062861/
+//!   --example provider_arrow_smoke -- bhl ocr/item-062861/item-062861-
 //!
 //! BHL imports all 13 public metadata tables once in memory. An optional third
 //! argument reuses an existing BhlMetadata database instead of downloading them.

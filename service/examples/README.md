@@ -27,8 +27,12 @@ sampling limit hides those errors.
 Read all OCR pages under a BHL prefix, including joined metadata:
 
 ```sh
-target/debug/examples/provider_arrow_smoke bhl ocr/item-062861/
+target/debug/examples/provider_arrow_smoke bhl ocr/item-062861/item-062861-
 ```
+
+Use the page-file prefix shown above. The parent directory also contains
+`item-062861.txt`, a combined whole-item OCR file that is not a single page.
+The example fails on invalid page identities instead of silently ignoring them.
 
 This imports all 13 live public metadata tables once in memory. The compressed
 tables total about 2.6 GiB; import memory and elapsed time are substantial. OCR
@@ -36,7 +40,7 @@ page selection is bounded by the prefix. If a database was already created with
 `BhlMetadata::create`, reuse it:
 
 ```sh
-target/debug/examples/provider_arrow_smoke bhl ocr/item-062861/ /path/to/metadata.duckdb
+target/debug/examples/provider_arrow_smoke bhl ocr/item-062861/item-062861- /path/to/metadata.duckdb
 ```
 
 The example checks the public schema, stable batch schemas, full Arrow array
