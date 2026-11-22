@@ -45,9 +45,12 @@ query intermediates. Prepared metadata can instead use the persistent database
 described below. DuckDB uses its default resource settings, with
 `enable_external_file_cache=false` explicitly set.
 
-`metadata.item` and `metadata.title` are now non-null lists, retaining every
-item/title association in source order while emitting one OCR row per request.
-Consumers of the previous singleton structs must accept these list fields.
+`metadata.item`, `metadata.title` and `metadata.page` are non-null lists,
+retaining every source relationship in order while emitting one OCR row per
+request. The AWS page table can repeat a PageID for different page types or
+labels; these rows are valid and must all be preserved. Missing page matches
+produce an empty list and a reconciliation message. Consumers of the previous
+singleton structs must accept these list fields.
 The 13 source tables and 104 lexical source columns remain unchanged:
  preserve original lexical
 IDs, empty strings, quotes, Unicode, relation duplicates/order, and separate
