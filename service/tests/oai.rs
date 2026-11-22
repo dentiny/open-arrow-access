@@ -6,6 +6,57 @@ use open_arrow_access_test_support::{collect_bytes, fixture, http::HttpFixture};
 use providers::connection;
 
 #[tokio::test]
+async fn negotiates_text_xml_for_records_resume_and_single_record() {
+    let fixture = HttpFixture::new();
+    let page = Bytes::from(fixture!("oai", "page.xml").await);
+    let record = Bytes::from(fixture!("arxiv-content", "metadata-record.xml").await);
+    fixture.handle(move |request| {
+        let accepts_text_xml = request.headers()["accept"]
+            .to_str()
+            .unwrap()
+            .split(',')
+            .any(|value| value.trim().split(';').next() == Some("text/xml"));
+        let mut response = if accepts_text_xml {
+            let body = if request.uri().query().unwrap().contains("verb=GetRecord") {
+                record.clone()
+            } else {
+                page.clone()
+            };
+            open_arrow_access_test_support::http::response(StatusCode::OK, body)
+        } else {
+            open_arrow_access_test_support::http::response(
+                StatusCode::NOT_ACCEPTABLE,
+                Bytes::from_static(b"Only text/xml is available"),
+            )
+        };
+        response.headers_mut().insert(
+            http::header::CONTENT_TYPE,
+            http::HeaderValue::from_static("text/xml"),
+        );
+        Ok(response)
+    });
+    let service = OaiService::new(connection(&fixture), "oai", "arXivRaw").unwrap();
+    assert_eq!(
+        service
+            .records(None, None, None)
+            .await
+            .unwrap()
+            .record_count,
+        2
+    );
+    assert_eq!(service.resume("next").await.unwrap().record_count, 2);
+    assert_eq!(
+        service
+            .get_record("oai:arXiv.org:2410.00001")
+            .await
+            .unwrap()
+            .record_count,
+        1,
+    );
+    assert_eq!(fixture.requests().len(), 3);
+}
+
+#[tokio::test]
 async fn raw_records_tokens_and_deleted_headers() {
     let f = HttpFixture::new();
     let bytes = Bytes::from(fixture!("oai", "page.xml").await);

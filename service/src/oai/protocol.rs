@@ -3,6 +3,9 @@ use crate::common::Connection;
 use open_arrow_access_core::Result;
 use url::Url;
 
+// OAI-PMH repositories serve both registered XML media types; arXiv uses text/xml.
+const XML_ACCEPT: &str = "application/xml, text/xml;q=0.9";
+
 /// Protocol shared by arXiv, DOAB and OAPEN. `records` and `resume` each fetch
 /// one page; `harvest` binds an automatic continuation scanner.
 #[derive(Clone, Debug)]
@@ -62,7 +65,7 @@ impl OaiService {
             ("metadataPrefix", self.metadata_prefix.as_str()),
             ("identifier", identifier),
         ]);
-        let bytes = self.connection.bytes(url, "application/xml").await?;
+        let bytes = self.connection.bytes(url, XML_ACCEPT).await?;
         parser::parse_record(bytes).await
     }
 
@@ -76,7 +79,7 @@ impl OaiService {
     async fn page(&self, query: &[(&str, &str)]) -> Result<OaiPage> {
         let mut url = self.endpoint.clone();
         url.query_pairs_mut().extend_pairs(query.iter().copied());
-        let bytes = self.connection.bytes(url, "application/xml").await?;
+        let bytes = self.connection.bytes(url, XML_ACCEPT).await?;
         parser::parse_page(bytes).await
     }
 }
