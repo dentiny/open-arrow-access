@@ -46,13 +46,13 @@ WITH parents AS (
          FROM bhl_partcreator r WHERE b.entity_type = 'part'
          AND r.__key = b.entity_id) AS partcreator,
         (SELECT coalesce(list(r.__record ORDER BY r.rowid), [])
-         FROM bhl_creatoridentifier r WHERE EXISTS (
-             SELECT 1 FROM bhl_creator c
-             WHERE c.__key IN (SELECT bhl_id(i.TitleID) FROM bhl_item i WHERE i.__key = b.parent_id) AND bhl_id(c.CreatorID) = r.__key
+         FROM bhl_creatoridentifier r WHERE r.__key IN (
+             SELECT bhl_id(c.CreatorID) FROM bhl_creator c
+             JOIN bhl_item i ON c.__key = bhl_id(i.TitleID)
+             WHERE i.__key = b.parent_id
              UNION ALL
-             SELECT 1 FROM bhl_partcreator c
+             SELECT bhl_id(c.CreatorID) FROM bhl_partcreator c
              WHERE b.entity_type = 'part' AND c.__key = b.entity_id
-               AND bhl_id(c.CreatorID) = r.__key
          )) AS creatoridentifier,
         (SELECT coalesce(list(r.__record ORDER BY r.rowid), [])
          FROM bhl_subject r WHERE r.__key IN (SELECT bhl_id(i.TitleID) FROM bhl_item i WHERE i.__key = b.parent_id)) AS subject,
