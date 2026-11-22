@@ -90,7 +90,7 @@ async fn expand_single_latex(
         .await
         .map_err(|e| error::decode("invalid source package").with_source(e))?;
     if data.starts_with(b"%PDF-") || data.starts_with(b"%!PS") {
-        return Err(missing_latex(batch, article_id));
+        return Err(error::missing_latex(batch, article_id));
     }
     validation::source_packaging(&data)?;
     let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
@@ -115,7 +115,7 @@ fn expand_tar_latex(
             let output = read_latex_batch(&mut tar, &batch, &article_id, &options).await?;
             if output.num_rows() == 0 {
                 if !emitted {
-                    return Err(missing_latex(&batch, &article_id));
+                    return Err(error::missing_latex(&batch, &article_id));
                 }
                 Ok(None)
             } else {
@@ -191,14 +191,4 @@ fn append_latex(
         output.append("data", data)?;
         output.append("data_type", ArxivContentFormat::Latex.as_str())
     })
-}
-
-fn missing_latex(batch: &RecordBatch, article: &str) -> open_arrow_access_core::Error {
-    error::missing_latex(
-        batch["shard_uri"].as_string::<i64>().value(0),
-        batch["entry_index"]
-            .as_primitive::<arrow_array::types::UInt64Type>()
-            .value(0),
-        article,
-    )
 }

@@ -1,3 +1,4 @@
+use arrow_array::{RecordBatch, cast::AsArray, types::UInt64Type};
 use open_arrow_access_core::{Error, ErrorKind, ObjectRef};
 
 pub(super) fn invalid(message: &str) -> Error {
@@ -131,7 +132,9 @@ pub(super) fn invalid_metadata_response() -> Error {
 }
 
 /// Missing representation, distinct from corrupt source bytes.
-pub(super) fn missing_latex(shard: &str, entry_index: u64, article: &str) -> Error {
+pub(super) fn missing_latex(batch: &RecordBatch, article: &str) -> Error {
+    let shard = batch["shard_uri"].as_string::<i64>().value(0);
+    let entry_index = batch["entry_index"].as_primitive::<UInt64Type>().value(0);
     Error::new(
         ErrorKind::NotFound,
         "read_arxiv_latex",
