@@ -129,7 +129,8 @@ when their enclosing `metadata` struct is present.
 
 `metadata.page` retains all source rows for a PageID, including multiple
 `PageTypeName` values, in source order. An unresolved page has an empty list;
-the output still has one row per requested OCR object.
+the output still has one row per requested OCR object. `metadata.part` likewise
+retains repeated PartIDs and their ItemID associations, including empty IDs.
 
 Every source TSV cell uses `LargeUtf8`, including IDs, dates and years.
 This preserves original lexical values, empty strings and date precision.
@@ -189,7 +190,7 @@ metadata: Struct<
     PageTypeName: LargeUtf8,
     CreationDate: LargeUtf8
   >>,
-  part: Struct<
+  part: List<Struct<
     PartID: LargeUtf8,
     ItemID: LargeUtf8,
     ContributorName: LargeUtf8,
@@ -214,7 +215,7 @@ metadata: Struct<
     LicenseUrl: LargeUtf8,
     RightsHolder: LargeUtf8,
     BarCode: LargeUtf8
-  >?,
+  >>,
   partpage: List<Struct<
     PartID: LargeUtf8,
     PageID: LargeUtf8,
