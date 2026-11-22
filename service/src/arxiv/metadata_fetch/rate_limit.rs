@@ -4,11 +4,12 @@ use open_arrow_access_storage::{HttpRequestRateLimitLayer, HttpRequestRateLimitP
 use std::sync::LazyLock;
 use std::time::Duration;
 
-// https://info.arxiv.org/help/api/tou.html: one request every three seconds,
-// with one connection at a time. Keep the guard until the body is decoded.
+// Keep the guard until the body is decoded to allow only one lookup at a time.
 static OFFICIAL_REQUESTS: LazyLock<HttpRequestRateLimitLayer> = LazyLock::new(|| {
     HttpRequestRateLimitLayer::new(REQUEST_INTERVAL).expect("valid official request interval")
 });
+// arXiv's legacy API policy includes OAI-PMH and permits at most one request
+// every three seconds: https://info.arxiv.org/help/api/tou.html#rate-limits
 const REQUEST_INTERVAL: Duration = Duration::from_secs(3);
 
 pub(super) async fn acquire(connection: &Connection) -> Option<HttpRequestRateLimitPermit> {
