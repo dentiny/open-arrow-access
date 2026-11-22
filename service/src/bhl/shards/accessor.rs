@@ -1,7 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, Capability, ListRequest, OrderRequirement, RecordCapability,
+    Accessor, ByteAccessor, Capability, ListRequest, ObjectRef, OrderRequirement, RecordCapability,
     RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, async_trait,
 };
 
@@ -17,10 +17,10 @@ use crate::{
 
 type MetadataReport = dyn Fn(&BhlPageMetadata) -> Result<()> + Send + Sync;
 
-/// Discover and read one complete OCR item/part shard with joined metadata.
+/// Discover and read complete OCR item/part directories with joined metadata.
 ///
-/// Listing is scoped to the requested directory and consumes all listing pages.
-/// Only that directory's aggregate TXT object is excluded. Malformed identities,
+/// Listing is scoped to each requested directory and consumes all listing pages.
+/// Only each directory's aggregate TXT object is excluded. Malformed identities,
 /// empty selections and missing/conflicting metadata fail by default.
 ///
 /// Implements the native scan planner: pass this accessor directly to
@@ -135,23 +135,27 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlShardAccessor<A> {
     async fn plan_scan(&self, request: Self::Request) -> Result<ScanPlan> {
         // Reject invalid projections before discovery performs any I/O.
         self.metadata(request.clone()).await?;
-        let group = validation::group(&request.prefix)?;
-        let aggregate = format!("{}{group}.txt", request.prefix);
         let mut keys = Vec::new();
-        for object in BhlOpenData::new(self.storage.clone())
-            .discover(ListRequest::new(request.prefix.clone()))
-            .await?
-        {
-            validation::object_in_shard(&object, &request.prefix)?;
-            if object.locator() == aggregate {
-                continue;
+        let directory = BhlOpenData::new(self.storage.clone());
+        for prefix in &request.prefixes {
+            let group = validation::group(prefix)?;
+            let aggregate = format!("{prefix}{group}.txt");
+            let start = keys.len();
+            for object in directory.discover(ListRequest::new(prefix.clone())).await? {
+                validation::object_in_shard(&object, prefix)?;
+                if object.locator() == aggregate {
+                    continue;
+                }
+                BhlPageIdentity::parse(object.locator())?;
+                keys.push(object);
             }
-            BhlPageIdentity::parse(object.locator())?;
-            keys.push(object);
+            if keys.len() == start {
+                return Err(error::invalid_pages("BHL shard contains no page objects")
+                    .with_object(Some(&ObjectRef::new(prefix.clone()))));
+            }
         }
-        if keys.is_empty() {
-            return Err(error::invalid_pages("BHL shard contains no page objects"));
-        }
+        // One selection table/join worker for the complete directory batch.
+        // Only keys are collected here; OCR bodies remain independent partitions.
         let report = self.report.clone();
         let pages = BhlPageAccessor::from_metadata(
             self.storage.clone(),

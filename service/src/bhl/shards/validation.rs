@@ -1,5 +1,24 @@
 use super::super::{error, pages::identity::number};
 use open_arrow_access_core::{ObjectRef, Result};
+use std::collections::HashSet;
+
+pub(super) fn prefixes(prefixes: &[String]) -> Result<()> {
+    if prefixes.is_empty() {
+        return Err(error::invalid_pages(
+            "BHL directory selection must not be empty",
+        ));
+    }
+    let mut unique = HashSet::new();
+    for prefix in prefixes {
+        group(prefix)?;
+        if !unique.insert(prefix) {
+            return Err(error::invalid_pages(format!(
+                "duplicate BHL directory: {prefix}"
+            )));
+        }
+    }
+    Ok(())
+}
 
 pub(super) fn group(prefix: &str) -> Result<&str> {
     let invalid = || {

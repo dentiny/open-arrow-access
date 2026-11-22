@@ -82,6 +82,50 @@ Keep complete upstream metadata and item/part rights from the AWS TSV tables. Re
 missing payloads, blank pages, failed reads and unresolved joins explicitly.
 No new OCR, language/license filtering, normalization or indexing is implied.
 
+## Native directory batches
+
+`BhlShardAccessor` accepts one directory or an explicitly selected batch, for
+example 500 item/part directories in one conversion job:
+
+```rust,no_run
+use std::sync::Arc;
+use open_arrow_access_core::Accessor;
+use open_arrow_access_service::bhl::{
+    BhlShardAccessor, BhlShardReadRequest, metadata::BhlMetadata,
+    open_data_bucket_operator,
+};
+use open_arrow_access_storage::OpenDalAccessor;
+# async fn example() -> open_arrow_access_core::Result<()> {
+let storage = OpenDalAccessor::new(open_data_bucket_operator()?);
+let metadata = Arc::new(BhlMetadata::load(storage.clone()).await?);
+let pages = BhlShardAccessor::from_metadata(storage, metadata)?;
+let request = BhlShardReadRequest::from_prefixes([
+    "ocr/item-295621/",
+    "ocr/part-174622/",
+])?;
+let mut reader = pages.open(request).await?;
+while let Some(batch) = reader.next().await? {
+    // All selected directories contribute to this one fixed-schema scan.
+}
+# Ok(())
+# }
+```
+
+`new(prefix)` remains the single-directory constructor. `from_prefixes` rejects
+empty selections, duplicate paths and malformed directories before I/O;
+`prefixes()` returns every selected path in caller order. The existing `prefix()`
+getter returns the first path for single-directory compatibility.
+
+Schema inspection does not list OCR objects. Scan opening completely lists each
+selected directory and excludes only its known aggregate TXT file. An empty or
+malformed directory fails the complete selection rather than being omitted.
+Only page keys are collected at this stage, not OCR bodies. One shared metadata
+database and one selection/join stream cover the entire batch; page reads remain
+independent native partitions. Projection, byte options, snapshot provenance and
+strict reconciliation apply to every directory. Memory for discovery is
+proportional to the selected page-key count. This API does not freeze the live
+bucket or create balanced/immutable dataset shards.
+
 ## Fixed Arrow / Lance page schema and value assignment
 
 `page_schema()` defines the fixed output types below. `BhlPageRecord::into_batch()`
