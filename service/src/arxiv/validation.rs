@@ -267,7 +267,9 @@ pub(super) fn content_article_id(name: &[u8], format: ArxivContentFormat) -> Res
     let mut stem = path.to_owned();
     match format {
         ArxivContentFormat::Latex => {
-            for suffix in [".gz", ".tar", ".tex"] {
+            // Source shards also contain standalone PDF/PostScript submissions.
+            // Normalize their article identity before validating LaTeX content.
+            for suffix in [".gz", ".tar", ".tex", ".pdf", ".ps"] {
                 if let Some(value) = stem.strip_suffix(suffix) {
                     stem = value.to_owned();
                 }
