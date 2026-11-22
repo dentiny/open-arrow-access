@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.20.3 - 2026-11-22
+
+- Fix the BHL multi-directory planner's Send future compilation error by constructing directory listing futures before buffering them. Preserve bounded concurrency and selected directory order.
+- Release all eight public workspace crates at 0.20.3 with aligned internal dependency requirements.
+
 ## 0.20.2 - 2026-11-22
 
 - Read multiple complete BHL item/part directories in one native scan with `BhlShardReadRequest::from_prefixes`, sharing one metadata join and preserving selected directory order. Bound concurrent directory listings to eight by default, with a per-request override.
