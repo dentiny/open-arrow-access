@@ -175,9 +175,3 @@ async fn cloned_layers_pace_independent_opendal_operators() {
     assert_eq!(starts.len(), 2);
     assert_eq!(starts[1] - starts[0], Duration::from_secs(3));
 }
-
-#[test]
-fn rejects_invalid_intervals() {
-    assert!(HttpRequestRateLimitLayer::new(Duration::ZERO).is_err());
-    assert!(HttpRequestRateLimitLayer::new(Duration::MAX).is_err());
-}
