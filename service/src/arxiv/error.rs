@@ -1,4 +1,4 @@
-use open_arrow_access_core::{Error, ErrorKind};
+use open_arrow_access_core::{Error, ErrorKind, ObjectRef};
 
 pub(super) fn invalid(message: &str) -> Error {
     Error::new(ErrorKind::InvalidInput, "configure_arxiv", message)
@@ -128,4 +128,16 @@ pub(super) fn missing_content_metadata(id: &str) -> Error {
 
 pub(super) fn invalid_metadata_response() -> Error {
     decode("expected one complete OAI record matching the requested arXiv article")
+}
+
+/// Missing representation, distinct from corrupt source bytes.
+pub(super) fn missing_latex(shard: &str, entry_index: u64, article: &str) -> Error {
+    Error::new(
+        ErrorKind::NotFound,
+        "read_arxiv_latex",
+        format!("LaTeX content is unavailable for arXiv article {article}"),
+    )
+    .with_object(Some(&ObjectRef::new(format!(
+        "{shard}#entry={entry_index}"
+    ))))
 }

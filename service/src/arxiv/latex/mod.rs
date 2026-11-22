@@ -89,6 +89,9 @@ async fn expand_single_latex(
         .read_to_end(&mut data)
         .await
         .map_err(|e| error::decode("invalid source package").with_source(e))?;
+    if data.starts_with(b"%PDF-") || data.starts_with(b"%!PS") {
+        return Err(missing_latex(batch, article_id));
+    }
     validation::source_packaging(&data)?;
     let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
     append_latex(&mut builder, batch, article_id, 0, b"main.tex", &data)?;
@@ -109,16 +112,14 @@ fn expand_tar_latex(
         let article_id = article_id.clone();
         let options = options.clone();
         async move {
-            let batch = read_latex_batch(&mut tar, &batch, &article_id, &options).await?;
-            if batch.num_rows() == 0 {
+            let output = read_latex_batch(&mut tar, &batch, &article_id, &options).await?;
+            if output.num_rows() == 0 {
                 if !emitted {
-                    return Err(error::decode(
-                        "source package contains no non-ancillary LaTeX files",
-                    ));
+                    return Err(missing_latex(&batch, &article_id));
                 }
                 Ok(None)
             } else {
-                Ok(Some((batch, (tar, true))))
+                Ok(Some((output, (tar, true))))
             }
         }
     })
@@ -190,4 +191,14 @@ fn append_latex(
         output.append("data", data)?;
         output.append("data_type", ArxivContentFormat::Latex.as_str())
     })
+}
+
+fn missing_latex(batch: &RecordBatch, article: &str) -> open_arrow_access_core::Error {
+    error::missing_latex(
+        batch["shard_uri"].as_string::<i64>().value(0),
+        batch["entry_index"]
+            .as_primitive::<arrow_array::types::UInt64Type>()
+            .value(0),
+        article,
+    )
 }

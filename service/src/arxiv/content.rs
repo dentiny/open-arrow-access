@@ -122,6 +122,8 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
         };
         plan.metadata.schema = projection.schema.clone();
         let format = self.format;
+        // Only article partitions can be skipped without dropping other articles.
+        let article_partitions = plan.streaming_discovery;
         let metadata = self.metadata.clone();
         plan.partitions = plan
             .partitions
@@ -133,6 +135,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
                         projection.clone(),
                         options.clone(),
                         metadata.clone(),
+                        article_partitions,
                     )
                 })
             })
@@ -147,6 +150,7 @@ fn content_partition(
     projection: ResolvedProjection,
     options: ReadOptions,
     metadata: ContentMetadata,
+    article_partition: bool,
 ) -> ScanPartition {
     scan_partition(async move {
         let reader = partition.await?;
@@ -159,7 +163,19 @@ fn content_partition(
             .and_then(move |batch| {
                 content_batches(batch, format, options.clone(), metadata.clone())
             })
-            .try_flatten();
+            .try_flatten()
+            .map_err(move |error| {
+                if !article_partition && error.operation() == "read_arxiv_latex"
+                    && error.kind() == open_arrow_access_core::ErrorKind::NotFound
+                {
+                    // A file partition can contain other valid articles. Never
+                    // let a missing-object policy discard the whole TAR.
+                    super::error::decode("TAR contains an article without LaTeX; select a single shard for article-level skipping")
+                        .with_object(error.object()).with_source(error)
+                } else {
+                    error
+                }
+            });
         Ok(record_stream_reader(
             batches,
             output,
