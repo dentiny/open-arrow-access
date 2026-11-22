@@ -53,50 +53,73 @@ async fn packages_keep_only_tex_with_provenance() {
     }
 }
 
+#[rstest::rstest]
+#[case::uncompressed("main.tex")]
+#[case::gzip("main.tex.gz")]
 #[tokio::test]
-async fn accepts_legacy_single_sources_and_rejects_non_latex() {
-    for file in ["main.tex", "main.tex.gz", "plain-tex.tex"] {
-        let batches = read("hep-th/9901001.gz", &fixture!("arxiv-articles", file).await)
-            .await
-            .unwrap();
-        assert_eq!(
-            batches[0]["article_id"].as_string::<i64>().value(0),
-            "hep-th9901001"
-        );
-        if file == "plain-tex.tex" {
-            assert_eq!(
-                batches[0]["data"].as_binary::<i64>().value(0),
-                fixture!("arxiv-articles", file).await
-            );
-        }
-    }
-    for data in [b"%PDF-1.7".as_slice(), b"%!PS", b"\xf7\x02DVI content"] {
-        assert_eq!(
-            read("2410/2410.00001.gz", data).await.unwrap_err().kind(),
-            open_arrow_access_core::ErrorKind::NotFound
-        );
-    }
-    for data in [b"plain text".as_slice(), b"\xff"] {
-        assert_eq!(
-            read("2410/2410.00001.gz", data).await.unwrap_err().kind(),
-            open_arrow_access_core::ErrorKind::Decode
-        );
-    }
-    for (group, file) in [
-        ("arxiv-articles", "paper.pdf"),
-        ("arxiv-articles", "paper.pdf.gz"),
-        ("arxiv-content", "no-latex.tar"),
-    ] {
-        let error = read("2410/2410.00001.gz", &fixture!(group, file).await)
-            .await
-            .unwrap_err();
-        assert_eq!(error.kind(), open_arrow_access_core::ErrorKind::NotFound);
-        assert_eq!(
-            error.object().unwrap().locator(),
-            "src/arXiv_src_2410_001.tar#entry=7"
-        );
-        assert!(error.to_string().contains("2410.00001"));
-    }
+async fn accepts_legacy_single_latex_sources(#[case] file: &str) {
+    let batches = read("hep-th/9901001.gz", &fixture!("arxiv-articles", file).await)
+        .await
+        .unwrap();
+    assert_eq!(
+        batches[0]["article_id"].as_string::<i64>().value(0),
+        "hep-th9901001"
+    );
+}
+
+#[tokio::test]
+async fn accepts_legacy_plain_tex_and_preserves_content() {
+    let data = fixture!("arxiv-articles", "plain-tex.tex").await;
+    let batches = read("hep-th/9901001.gz", &data).await.unwrap();
+    assert_eq!(
+        batches[0]["article_id"].as_string::<i64>().value(0),
+        "hep-th9901001"
+    );
+    assert_eq!(batches[0]["data"].as_binary::<i64>().value(0), data);
+}
+
+#[rstest::rstest]
+#[case::pdf(b"%PDF-1.7")]
+#[case::postscript(b"%!PS")]
+#[case::dvi(b"\xf7\x02DVI content")]
+#[tokio::test]
+async fn non_tex_document_signatures_report_missing_tex(#[case] data: &[u8]) {
+    assert_eq!(
+        read("2410/2410.00001.gz", data).await.unwrap_err().kind(),
+        open_arrow_access_core::ErrorKind::NotFound
+    );
+}
+
+#[rstest::rstest]
+#[case::plain_text(b"plain text")]
+#[case::invalid_utf8(b"\xff")]
+#[tokio::test]
+async fn invalid_sources_report_decode_errors(#[case] data: &[u8]) {
+    assert_eq!(
+        read("2410/2410.00001.gz", data).await.unwrap_err().kind(),
+        open_arrow_access_core::ErrorKind::Decode
+    );
+}
+
+#[rstest::rstest]
+#[case::pdf("arxiv-articles", "paper.pdf")]
+#[case::gzip_pdf("arxiv-articles", "paper.pdf.gz")]
+#[case::archive_without_tex("arxiv-content", "no-latex.tar")]
+#[tokio::test]
+async fn missing_tex_errors_include_article_provenance(#[case] group: &str, #[case] file: &str) {
+    let error = read("2410/2410.00001.gz", &fixture!(group, file).await)
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), open_arrow_access_core::ErrorKind::NotFound);
+    assert_eq!(
+        error.object().unwrap().locator(),
+        "src/arXiv_src_2410_001.tar#entry=7"
+    );
+    assert!(error.to_string().contains("2410.00001"));
+}
+
+#[tokio::test]
+async fn corrupt_gzip_sources_report_decode_errors() {
     let corrupt = fixture!("arxiv-articles", "bad-crc.tar.gz").await;
     assert_eq!(
         read("2410/2410.00001.gz", &corrupt)
@@ -105,14 +128,24 @@ async fn accepts_legacy_single_sources_and_rejects_non_latex() {
             .kind(),
         open_arrow_access_core::ErrorKind::Decode,
     );
-    for name in [
-        b"anc/extra.tex".as_slice(),
-        b"nested/ANC/extra.tex",
-        b"figure.png",
-    ] {
-        assert!(!validation::is_tex(name).unwrap());
-    }
+}
+
+#[rstest::rstest]
+#[case::ancillary(b"anc/extra.tex")]
+#[case::nested_ancillary(b"nested/ANC/extra.tex")]
+#[case::image(b"figure.png")]
+#[test]
+fn tex_selection_excludes_ancillary_and_non_tex_files(#[case] name: &[u8]) {
+    assert!(!validation::is_tex(name).unwrap());
+}
+
+#[test]
+fn tex_selection_accepts_nested_tex_files() {
     assert!(validation::is_tex(b"chapters/intro.tex").unwrap());
+}
+
+#[test]
+fn tex_selection_rejects_path_traversal() {
     assert!(validation::is_tex(b"../escape.tex").is_err());
 }
 
