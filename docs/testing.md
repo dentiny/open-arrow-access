@@ -24,6 +24,7 @@ crate whose behavior they exercise; the facade file-source smoke test lives in r
 
 | Independent API page request scheduling | [`service/tests/page_set.rs`](../service/tests/page_set.rs) |
 | pmc | [`service/tests/pmc.rs`](../service/tests/pmc.rs) |
+| BHL metadata streaming, backpressure and worker lifecycle | [`service/tests/unit/bhl_metadata_stream.rs`](../service/tests/unit/bhl_metadata_stream.rs) |
 | arXiv bulk manifests and TAR composition | [`service/tests/arxiv.rs`](../service/tests/arxiv.rs) |
 | Hugging Face Parquet datasets | [`service/tests/huggingface.rs`](../service/tests/huggingface.rs) |
 | Dataverse published-version original files | [`service/tests/dataverse.rs`](../service/tests/dataverse.rs) |

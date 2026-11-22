@@ -45,8 +45,8 @@ impl<A> BhlPageAccessor<A> {
         )
     }
 
-    /// Execute one synchronous join per request on first read, buffer its
-    /// metadata rows, then create independent OCR read partitions.
+    /// Execute one join per request on a blocking worker on first read, then
+    /// stream metadata through a bounded queue into independent OCR partitions.
     /// `report` sees each page's missing/conflicting joins before its OCR read;
     /// return an error to stop the scan, or Ok(()) to retain the page.
     pub fn from_metadata(

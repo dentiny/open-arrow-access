@@ -92,11 +92,16 @@ and snapshot ID. Metadata fingerprints/source counts are attached automatically;
 `with_schema_metadata` merges additional caller provenance. The existing
 `BhlPageAccessor::new` still accepts a custom metadata provider.
 
-On first read, the caller's thread executes the synchronous DuckDB query and
-buffers metadata for the selected request in a Vec. OCR partitions then consume
-those rows. The reader uses no query worker, channel or `spawn_blocking`; the
-SQL call occupies the current thread until it finishes. V1 assumes enough
-memory for the request's metadata as well as the loaded source tables.
+On first read, a blocking worker executes the synchronous DuckDB query and
+sends joined rows through a one-page bounded queue. OCR partitions can start
+before all joined rows have been converted; the async executor remains free.
+The reader retains the selected keys and DuckDB's query state/current Arrow
+batch, but no longer collects every joined metadata row in a Rust Vec. Loaded
+source tables and SQL execution can still require substantial memory.
+Dropping discovery closes the queue and stops emission at the next send; it
+does not interrupt a DuckDB operation already in progress. Worker errors and
+panics propagate after any queued page, so consume through EOF before committing
+output.
 
 Query failures propagate through the reader. Report callback failures stop
 before that page's OCR read. Accepted pages with missing joins retain null
