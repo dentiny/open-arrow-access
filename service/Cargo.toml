@@ -284,3 +284,7 @@ required-features = ["arxiv"]
 [[test]]
 name = "arxiv_source_package"
 required-features = ["arxiv"]
+
+[[example]]
+name = "provider_arrow_smoke"
+required-features = ["arxiv", "bhl"]

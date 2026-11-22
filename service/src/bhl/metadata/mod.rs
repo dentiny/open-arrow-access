@@ -91,7 +91,10 @@ impl BhlMetadata {
         join::for_each(&connection, keys, emit)
     }
 
-    fn query_connection(&self) -> Result<duckdb::Connection> {
+    /// Clone a connection to the same metadata database for ad hoc SQL.
+    /// Temporary objects belong to the returned connection; persistent tables
+    /// are shared. Run blocking SQL outside asynchronous runtime workers.
+    pub fn query_connection(&self) -> Result<duckdb::Connection> {
         self.connection
             .lock()
             .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?
