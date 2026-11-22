@@ -83,7 +83,6 @@ impl Layer for HttpRequestRateLimitLayer {
 
 /// Admission held until dropped, including when the owning task is cancelled.
 #[derive(Debug)]
-#[must_use = "dropping the permit releases request admission"]
 pub struct HttpRequestRateLimitPermit {
     _guard: OwnedMutexGuard<Option<Instant>>,
 }
