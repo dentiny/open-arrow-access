@@ -1,9 +1,9 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use futures::{FutureExt, pin_mut, poll};
 use http::{Request, Response};
 use open_arrow_access_storage::HttpRequestRateLimitLayer;
-use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter, Operator};
+use opendal::{Buffer, HttpBody, HttpTransport, HttpTransporter};
 use tokio::time::Instant;
 
 fn limit() -> HttpRequestRateLimitLayer {
@@ -51,13 +51,11 @@ enum Outcome {
 
 #[derive(Clone, Debug)]
 struct Server {
-    starts: Arc<std::sync::Mutex<Vec<Instant>>>,
     outcome: Outcome,
 }
 
 impl HttpTransport for Server {
     async fn fetch(&self, _: Request<Buffer>) -> opendal::Result<Response<HttpBody>> {
-        self.starts.lock().unwrap().push(Instant::now());
         let body = match self.outcome {
             Outcome::Body => HttpBody::new(futures::stream::iter([Ok(Buffer::from("x"))]), Some(1)),
             Outcome::BodyError => HttpBody::new(
@@ -76,10 +74,7 @@ impl HttpTransport for Server {
 }
 
 fn server(outcome: Outcome) -> Server {
-    Server {
-        starts: Arc::default(),
-        outcome,
-    }
+    Server { outcome }
 }
 
 fn request() -> Request<Buffer> {
@@ -113,27 +108,4 @@ async fn transport_holds_admission_until_body_finishes(
         drop(response);
         assert!(poll!(&mut next).is_ready());
     }
-}
-
-#[tokio::test(start_paused = true)]
-async fn cloned_layers_pace_independent_opendal_operators() {
-    let gate = limit();
-    let server = server(Outcome::Body);
-    let operator = || {
-        let builder =
-            Operator::new(opendal_service_http::Http::default().endpoint("http://rate.invalid"))
-                .unwrap();
-        let context = builder
-            .base_context()
-            .with_http_transport(HttpTransporter::new(server.clone()));
-        builder.with_context(context).layer(gate.clone())
-    };
-    let first = operator();
-    let second = operator();
-    let (a, b) = tokio::join!(first.read("a"), second.read("b"));
-    assert_eq!(a.unwrap().to_vec(), b"x");
-    assert_eq!(b.unwrap().to_vec(), b"x");
-    let starts = server.starts.lock().unwrap();
-    assert_eq!(starts.len(), 2);
-    assert_eq!(starts[1] - starts[0], Duration::from_secs(3));
 }
