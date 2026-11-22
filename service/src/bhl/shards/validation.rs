@@ -46,3 +46,11 @@ pub(super) fn object_in_shard(object: &ObjectRef, prefix: &str) -> Result<()> {
     }
     Ok(())
 }
+
+pub(super) fn nonempty_shard(objects: &[ObjectRef], prefix: &str) -> Result<()> {
+    if objects.is_empty() {
+        return Err(error::invalid_pages("BHL shard contains no page objects")
+            .with_object(Some(&ObjectRef::new(prefix))));
+    }
+    Ok(())
+}

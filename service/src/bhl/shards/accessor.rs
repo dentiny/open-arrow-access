@@ -1,7 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, Capability, ListRequest, ObjectRef, OrderRequirement, RecordCapability,
+    Accessor, ByteAccessor, Capability, ListRequest, OrderRequirement, RecordCapability,
     RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, async_trait,
 };
 
@@ -149,10 +149,7 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlShardAccessor<A> {
                 BhlPageIdentity::parse(object.locator())?;
                 keys.push(object);
             }
-            if keys.len() == start {
-                return Err(error::invalid_pages("BHL shard contains no page objects")
-                    .with_object(Some(&ObjectRef::new(prefix.clone()))));
-            }
+            validation::nonempty_shard(&keys[start..], prefix)?;
         }
         // One selection table/join worker for the complete directory batch.
         // Only keys are collected here; OCR bodies remain independent partitions.
