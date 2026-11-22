@@ -1,4 +1,5 @@
 //! Lazy, shared OAI lookups for the default content metadata path.
+mod rate_limit;
 use std::{collections::HashMap, sync::Arc};
 
 use futures::{TryStreamExt, lock::Mutex};
@@ -27,7 +28,7 @@ struct State {
 impl State {
     fn connection(&mut self) -> Result<&Connection> {
         if self.connection.is_none() {
-            self.connection = Some(Connection::new(ArxivMetadata::ORIGIN)?);
+            self.connection = Some(rate_limit::apply(Connection::new(ArxivMetadata::ORIGIN)?));
         }
         Ok(self.connection.as_ref().unwrap())
     }
@@ -43,7 +44,7 @@ impl MetadataResolver {
     pub(super) fn new(connection: Connection) -> Self {
         Self {
             state: Mutex::new(State {
-                connection: Some(connection),
+                connection: Some(rate_limit::apply(connection)),
                 ..Default::default()
             }),
         }

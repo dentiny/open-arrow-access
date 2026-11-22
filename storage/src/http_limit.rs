@@ -10,7 +10,7 @@ use opendal::{
     Buffer, HttpBody, HttpTransport, HttpTransporter, OperationContext,
     raw::{Layer, Servicer},
 };
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::Semaphore;
 
 const DEFAULT_HTTP_CONCURRENCY: usize = 64;
 
@@ -72,24 +72,26 @@ impl HttpTransport for LimitedTransport {
             .await
             .expect("private semaphore is never closed");
         let response = self.inner.fetch(request).await?;
-        Ok(response.map(|body| {
-            body.map_inner(|inner| {
-                Box::new(PermitStream {
-                    inner: Some(inner),
-                    permit: Some(permit),
-                })
-            })
-        }))
+        Ok(response.map(|body| hold_permit(body, permit)))
     }
 }
 
-// Drop the body before returning its permit, including cancellation.
-struct PermitStream<S> {
-    inner: Option<S>,
-    permit: Option<OwnedSemaphorePermit>,
+pub(crate) fn hold_permit<P: Send + Sync + Unpin + 'static>(body: HttpBody, permit: P) -> HttpBody {
+    body.map_inner(|inner| {
+        Box::new(PermitStream {
+            inner: Some(inner),
+            permit: Some(permit),
+        })
+    })
 }
 
-impl<S: Stream<Item = opendal::Result<Buffer>> + Unpin> Stream for PermitStream<S> {
+// Drop the body before returning its permit, including cancellation.
+struct PermitStream<S, P> {
+    inner: Option<S>,
+    permit: Option<P>,
+}
+
+impl<S: Stream<Item = opendal::Result<Buffer>> + Unpin, P: Unpin> Stream for PermitStream<S, P> {
     type Item = opendal::Result<Buffer>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

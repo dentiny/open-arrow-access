@@ -56,13 +56,7 @@ pub(super) async fn open(
         version,
     };
     let range_length = metadata.content_length.filter(|_| ranges);
-    let chunks = sequential_chunks(
-        body,
-        &client,
-        &request,
-        range_length.filter(|_| connection.http_concurrency_limit.is_some()),
-        chunk_size,
-    );
+    let chunks = sequential_chunks(body, &client, &request, range_length, chunk_size);
     let chunks = chunks
         .map_ok(move |buffer| {
             stream::iter(buffer.flat_map(move |part| {

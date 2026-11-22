@@ -74,7 +74,12 @@ async fn malformed_or_changed_partial_responses_are_rejected() {
         let f = HttpFixture::new();
         f.handle(move |request| {
             let mut output = serve(&request, Bytes::from_static(b"abcdefgh"));
-            if request.headers().contains_key("range") {
+            // Corrupt the requested range while allowing subsequent sequential reads.
+            if request
+                .headers()
+                .get("range")
+                .is_some_and(|range| range == "bytes=2-3")
+            {
                 match field {
                     "status" => *output.status_mut() = value.parse().unwrap(),
                     "body" => {

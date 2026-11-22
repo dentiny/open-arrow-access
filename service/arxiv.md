@@ -573,10 +573,12 @@ Deleted records retain their header with null inner metadata. Missing, malformed
 mismatched and failed responses fail the scan, even if metadata is projected away.
 
 Services and their clones share an article metadata cache, including concurrent
-lookups for the same article. The resolver uses the shared `Connection` directly;
-request pacing, retry and timeout policies are caller-owned. Configure the
-connection/transport to follow the [arXiv rate limit](https://info.arxiv.org/help/api/tou.html),
-and pass it with `ArxivService::with_metadata_connection(connection)`.
+lookups for the same article. Automatic lookups against the official arXiv origin
+share a process-wide gate: request starts are at least three seconds apart, and
+the preceding response body is fully consumed before the next request starts, following
+the [arXiv rate limit](https://info.arxiv.org/help/api/tou.html). Cache hits do not
+wait. Custom mirror origins retain their own rate policies. Retry and timeout
+settings remain caller-owned via `ArxivService::with_metadata_connection(connection)`.
 
 Online metadata is the latest OAI record, including version history. For bulk or
 offline jobs, a reconciled typed snapshot pins metadata and avoids per-article HTTP:
