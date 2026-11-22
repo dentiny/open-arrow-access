@@ -94,7 +94,12 @@ async fn joins_pages_and_preserves_source_values_and_relation_order() {
          INSERT INTO creatoridentifier VALUES ('10', '', 'other', '');
          INSERT INTO subject VALUES ('1', 'a', '');
          INSERT INTO subject VALUES ('1', 'z', '');
-         INSERT INTO partpage VALUES ('8', '3', '2', '1', '');",
+         INSERT INTO partpage VALUES ('8', '3', '2', '1', '');
+         INSERT INTO doi VALUES ('PAGE', '3', 'page DOI', '');
+         INSERT INTO doi VALUES ('item', '2', 'item DOI', '');
+         INSERT INTO doi VALUES ('page', '3', 'page DOI', '');
+         INSERT INTO doi VALUES ('part', '8', 'part DOI', '');
+         INSERT INTO doi VALUES ('title', '2', 'unrelated DOI', '');",
         )
         .unwrap();
     let rows = read(&metadata, &[ITEM, PART, MISSING]);
@@ -130,7 +135,11 @@ async fn joins_pages_and_preserves_source_values_and_relation_order() {
             ["same", "same", "other"]
         );
         assert_eq!(list(row, "subject", "Subject"), ["a", "z"]);
-        assert_eq!(list(row, "doi", "DOI"), ["title DOI"]);
+        let mut expected_dois = vec!["title DOI", "page DOI", "item DOI", "page DOI"];
+        if page.object.locator() == PART {
+            expected_dois.push("part DOI");
+        }
+        assert_eq!(list(row, "doi", "DOI"), expected_dois);
         if page.object.locator() == PART {
             assert_eq!(cell(row, "part", "RightsStatement"), "Part rights");
             assert_eq!(list(row, "partpage", "PageID"), ["3", "3"]);
@@ -178,7 +187,8 @@ async fn item_title_associations_preserve_all_records_without_multiplying_pages(
             "INSERT INTO subject VALUES ('1', 'first subject', '');
          INSERT INTO subject VALUES ('42', 'second subject', '');
          INSERT INTO creator VALUES ('1', '9', '', '', '');
-         INSERT INTO creator VALUES ('42', '10', 'Author', 'Other author', '');",
+         INSERT INTO creator VALUES ('42', '10', 'Author', 'Other author', '');
+         INSERT INTO doi VALUES ('Title', '42', 'second title DOI', '');",
         )
         .unwrap();
     let rows = read(&metadata, &[ITEM, PART]);
@@ -188,6 +198,10 @@ async fn item_title_associations_preserve_all_records_without_multiplying_pages(
         assert!(page.conflicts.is_empty());
         assert_eq!(list(&page.metadata, "item", "TitleID"), ["1", "42"]);
         assert_eq!(list(&page.metadata, "title", "TitleID"), ["001", "42"]);
+        assert_eq!(
+            list(&page.metadata, "doi", "DOI"),
+            ["title DOI", "second title DOI"]
+        );
         assert_eq!(
             list(&page.metadata, "item", "RightsStatement"),
             ["Source rights", "Source rights"]
@@ -201,6 +215,16 @@ async fn item_title_associations_preserve_all_records_without_multiplying_pages(
             ["9", "9", "10"]
         );
     }
+    metadata
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch("INSERT INTO item SELECT * FROM item WHERE bhl_id(TitleID) = 1")
+        .unwrap();
+    assert_eq!(
+        list(&read(&metadata, &[ITEM])[0].metadata, "doi", "DOI"),
+        ["title DOI", "second title DOI"]
+    );
     metadata
         .connection
         .lock()
