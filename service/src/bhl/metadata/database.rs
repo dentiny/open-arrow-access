@@ -63,48 +63,67 @@ impl BhlMetadata {
         storage: A,
         path: impl AsRef<Path>,
     ) -> Result<()> {
-        let path = path.as_ref().to_path_buf();
-        validation::validate_database_destination(path.try_exists().map_err(error::database_io)?)?;
-        let stage = tempfile::Builder::new()
-            .prefix(".bhl-metadata-")
-            .tempdir_in(
-                path.parent()
-                    .filter(|p| !p.as_os_str().is_empty())
-                    .unwrap_or(Path::new(".")),
-            )
-            .map_err(error::database_io)?;
-        let file = stage.path().join("metadata.duckdb");
         let config = Config::default()
             .with("enable_external_file_cache", "false")
             .map_err(error::duckdb)?;
-        let connection = Connection::open_with_flags(&file, config).map_err(error::duckdb)?;
-        let metadata = Self::import(storage, connection).await?;
-        tokio::task::spawn_blocking(move || {
-            let connection = metadata.connection.into_inner().map_err(error::metadata_lock)?;
-            let info = serde_json::to_string(&metadata.info).map_err(error::json)?;
-            connection
-                .execute_batch(
-                    "BEGIN TRANSACTION; CREATE TABLE __bhl_metadata (version UBIGINT, info VARCHAR);",
+        Self::create_with_config(storage, path, config).await
+    }
+
+    /// Create a metadata database with caller-provided DuckDB settings, such as
+    /// `memory_limit` and `threads`. Publication and validation match `create`.
+    /// Local database setup happens immediately; the returned `Send` future imports tables.
+    pub fn create_with_config<A: ByteAccessor + 'static>(
+        storage: A,
+        path: impl AsRef<Path>,
+        config: Config,
+    ) -> impl std::future::Future<Output = Result<()>> + Send {
+        let prepared = (|| {
+            let path = path.as_ref().to_path_buf();
+            validation::validate_database_destination(
+                path.try_exists().map_err(error::database_io)?,
+            )?;
+            let stage = tempfile::Builder::new()
+                .prefix(".bhl-metadata-")
+                .tempdir_in(
+                    path.parent()
+                        .filter(|p| !p.as_os_str().is_empty())
+                        .unwrap_or(Path::new(".")),
                 )
-                .map_err(error::duckdb)?;
-            connection
-                .execute(
-                    "INSERT INTO __bhl_metadata VALUES (?, ?)",
-                    params![DATABASE_VERSION, info],
-                )
-                .map_err(error::duckdb)?;
-            connection
-                .execute_batch("COMMIT; CHECKPOINT")
-                .map_err(error::duckdb)?;
-            connection.close().map_err(|(_, source)| error::duckdb(source))?;
-            // The stage is on the target filesystem; hard_link publishes atomically
-            // without replacing an existing database, including in a writer race.
-            std::fs::hard_link(&file, path).map_err(error::database_io)?;
-            drop(stage);
-            Ok(())
-        })
-        .await
-        .map_err(error::task)?
+                .map_err(error::database_io)?;
+            let file = stage.path().join("metadata.duckdb");
+            let connection = Connection::open_with_flags(&file, config).map_err(error::duckdb)?;
+            Ok::<_, open_arrow_access_core::Error>((path, connection, stage))
+        })();
+        async move {
+            let (path, connection, stage) = prepared?;
+            let metadata = Self::import(storage, connection).await?;
+            tokio::task::spawn_blocking(move || {
+                let connection = metadata.connection.into_inner().map_err(error::metadata_lock)?;
+                let info = serde_json::to_string(&metadata.info).map_err(error::json)?;
+                connection
+                    .execute_batch(
+                        "BEGIN TRANSACTION; CREATE TABLE __bhl_metadata (version UBIGINT, info VARCHAR);",
+                    )
+                    .map_err(error::duckdb)?;
+                connection
+                    .execute(
+                        "INSERT INTO __bhl_metadata VALUES (?, ?)",
+                        params![DATABASE_VERSION, info],
+                    )
+                    .map_err(error::duckdb)?;
+                connection
+                    .execute_batch("COMMIT; CHECKPOINT")
+                    .map_err(error::duckdb)?;
+                connection.close().map_err(|(_, source)| error::duckdb(source))?;
+                // The stage is on the target filesystem; hard_link publishes atomically
+                // without replacing an existing database, including in a writer race.
+                std::fs::hard_link(stage.path().join("metadata.duckdb"), path).map_err(error::database_io)?;
+                drop(stage);
+                Ok(())
+            })
+            .await
+            .map_err(error::task)?
+        }
     }
 
     /// Open the persistent database read-write, without acquiring any AWS tables.
