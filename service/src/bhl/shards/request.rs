@@ -21,7 +21,7 @@ impl BhlShardReadRequest {
     /// distinct storage paths and are not silently deduplicated.
     pub fn from_prefixes(prefixes: impl IntoIterator<Item = impl Into<String>>) -> Result<Self> {
         let prefixes = prefixes.into_iter().map(Into::into).collect::<Vec<_>>();
-        super::validation::prefixes(&prefixes)?;
+        super::validation::validate_prefixes(&prefixes)?;
         Ok(Self {
             prefixes,
             options: ReadOptions::default(),

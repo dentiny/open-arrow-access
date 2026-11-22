@@ -2,7 +2,7 @@ use super::super::{error, pages::identity::number};
 use open_arrow_access_core::{ObjectRef, Result};
 use std::collections::HashSet;
 
-pub(super) fn prefixes(prefixes: &[String]) -> Result<()> {
+pub(super) fn validate_prefixes(prefixes: &[String]) -> Result<()> {
     if prefixes.is_empty() {
         return Err(error::invalid_pages(
             "BHL directory selection must not be empty",
