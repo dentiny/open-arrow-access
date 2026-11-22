@@ -117,7 +117,11 @@ empty selections, duplicate paths and malformed directories before I/O;
 getter returns the first path for single-directory compatibility.
 
 Schema inspection does not list OCR objects. Scan opening completely lists each
-selected directory and excludes only its known aggregate TXT file. An empty or
+selected directory with bounded I/O concurrency (eight directories by default;
+configure with `with_listing_concurrency(NonZeroUsize)`). This is independent of
+per-object byte-read concurrency. Listing results retain the requested directory
+order even when requests finish out of order. Each listing excludes only its
+known aggregate TXT file. An empty or
 malformed directory fails the complete selection rather than being omitted.
 Only page keys are collected at this stage, not OCR bodies. One shared metadata
 database and one selection/join stream cover the entire batch; page reads remain

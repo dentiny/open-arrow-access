@@ -1,7 +1,8 @@
 use std::{path::Path, sync::Arc};
 
+use futures::{StreamExt, TryStreamExt, stream};
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, Capability, ListRequest, OrderRequirement, RecordCapability,
+    Accessor, ByteAccessor, Capability, ListRequest, ObjectRef, OrderRequirement, RecordCapability,
     RecordMetadata, RecordReader, Result, ScanPlan, ScanPlanner, async_trait,
 };
 
@@ -93,6 +94,25 @@ impl<A: ByteAccessor + 'static> BhlShardAccessor<A> {
         self.report = Arc::new(report);
         self
     }
+
+    async fn discover_prefix(&self, prefix: &str) -> Result<Vec<ObjectRef>> {
+        let group = validation::group(prefix)?;
+        let aggregate = format!("{prefix}{group}.txt");
+        let mut keys = Vec::new();
+        for object in BhlOpenData::new(self.storage.clone())
+            .discover(ListRequest::new(prefix))
+            .await?
+        {
+            validation::object_in_shard(&object, prefix)?;
+            if object.locator() == aggregate {
+                continue;
+            }
+            BhlPageIdentity::parse(object.locator())?;
+            keys.push(object);
+        }
+        validation::nonempty_shard(&keys, prefix)?;
+        Ok(keys)
+    }
 }
 
 #[async_trait]
@@ -136,20 +156,11 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlShardAccessor<A> {
         // Reject invalid projections before discovery performs any I/O.
         self.metadata(request.clone()).await?;
         let mut keys = Vec::new();
-        let directory = BhlOpenData::new(self.storage.clone());
-        for prefix in &request.prefixes {
-            let group = validation::group(prefix)?;
-            let aggregate = format!("{prefix}{group}.txt");
-            let start = keys.len();
-            for object in directory.discover(ListRequest::new(prefix.clone())).await? {
-                validation::object_in_shard(&object, prefix)?;
-                if object.locator() == aggregate {
-                    continue;
-                }
-                BhlPageIdentity::parse(object.locator())?;
-                keys.push(object);
-            }
-            validation::nonempty_shard(&keys[start..], prefix)?;
+        let mut listings = stream::iter(&request.prefixes)
+            .map(|prefix| self.discover_prefix(prefix))
+            .buffered(request.listing_concurrency.get());
+        while let Some(objects) = listings.try_next().await? {
+            keys.extend(objects);
         }
         // One selection table/join worker for the complete directory batch.
         // Only keys are collected here; OCR bodies remain independent partitions.

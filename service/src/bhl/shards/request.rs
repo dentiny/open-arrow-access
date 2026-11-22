@@ -1,4 +1,5 @@
 use open_arrow_access_core::{ByteReadOptions, ReadOptions, ReadOptionsProvider, Result};
+use std::num::NonZeroUsize;
 
 /// One or more complete `ocr/item-<id>/` or `ocr/part-<id>/` directories.
 /// Original spelling and zero padding are retained for storage access.
@@ -7,6 +8,9 @@ pub struct BhlShardReadRequest {
     pub(super) prefixes: Vec<String>,
     pub options: ReadOptions,
     pub byte_options: ByteReadOptions,
+    /// Maximum concurrent directory listings, independent of per-object I/O.
+    /// Defaults to eight. Listing results retain the selected directory order.
+    pub listing_concurrency: NonZeroUsize,
 }
 
 impl BhlShardReadRequest {
@@ -26,6 +30,7 @@ impl BhlShardReadRequest {
             prefixes,
             options: ReadOptions::default(),
             byte_options: ByteReadOptions::default(),
+            listing_concurrency: NonZeroUsize::new(8).unwrap(),
         })
     }
 
@@ -46,6 +51,11 @@ impl BhlShardReadRequest {
 
     pub fn with_byte_options(mut self, options: ByteReadOptions) -> Self {
         self.byte_options = options;
+        self
+    }
+
+    pub fn with_listing_concurrency(mut self, concurrency: NonZeroUsize) -> Self {
+        self.listing_concurrency = concurrency;
         self
     }
 }
