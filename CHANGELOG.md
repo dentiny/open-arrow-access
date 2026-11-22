@@ -2,7 +2,11 @@
 
 ## Unreleased
 
+## 0.20.1 - 2026-11-22
+
 - Add `BhlShardAccessor` and `BhlShardReadRequest` for complete OCR item/part directories, with read-only metadata snapshot reuse, strict reconciliation and native CrawlAccessor planning.
+
+- Release all eight public workspace crates at 0.20.1 with aligned internal dependency requirements.
 
 ## 0.20.0 - 2026-11-22
 
