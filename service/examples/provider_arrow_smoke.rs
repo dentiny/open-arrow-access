@@ -20,7 +20,7 @@ use open_arrow_access_service::{
     FileSetRequest,
     arxiv::{ArxivContentFormat, ArxivKind, ArxivReadRequest, ArxivService, content_schema},
     bhl::{
-        BhlOpenData, BhlPageAccessor, BhlPageIdentity, metadata::BhlMetadata,
+        BhlOpenData, BhlPageAccessor, BhlPageIdentity, OPEN_DATA_BUCKET_URL, metadata::BhlMetadata,
         open_data_bucket_operator, page_schema,
     },
     common::Connection,
