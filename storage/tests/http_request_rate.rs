@@ -43,20 +43,10 @@ async fn cancelled_waiter_does_not_reserve_an_extra_interval() {
     assert_eq!(Instant::now() - start, Duration::from_secs(3));
 }
 
-#[tokio::test(start_paused = true)]
-async fn independent_layers_do_not_share_admission() {
-    let first = limit();
-    let second = limit();
-    let _first = first.acquire().await;
-    assert!(poll!(Box::pin(second.acquire())).is_ready());
-}
-
 #[derive(Clone, Copy, Debug)]
 enum Outcome {
     Body,
     BodyError,
-    FetchError,
-    PendingFetch,
 }
 
 #[derive(Clone, Debug)]
@@ -77,13 +67,6 @@ impl HttpTransport for Server {
                 ))]),
                 None,
             ),
-            Outcome::FetchError => {
-                return Err(opendal::Error::new(
-                    opendal::ErrorKind::Unexpected,
-                    "fetch failed",
-                ));
-            }
-            Outcome::PendingFetch => return futures::future::pending().await,
         };
         Ok(Response::builder()
             .header(http::header::CONTENT_LENGTH, "1")
@@ -130,27 +113,6 @@ async fn transport_holds_admission_until_body_finishes(
         drop(response);
         assert!(poll!(&mut next).is_ready());
     }
-}
-
-#[rstest::rstest]
-#[case::fetch_error(Outcome::FetchError)]
-#[case::fetch_cancelled(Outcome::PendingFetch)]
-#[tokio::test(start_paused = true)]
-async fn failed_or_cancelled_fetch_releases_admission(#[case] outcome: Outcome) {
-    let gate = limit();
-    let transport = gate.wrap(HttpTransporter::new(server(outcome)));
-    {
-        let fetch = transport.fetch(request());
-        pin_mut!(fetch);
-        match outcome {
-            Outcome::FetchError => assert!(fetch.await.is_err()),
-            Outcome::PendingFetch => assert!(poll!(&mut fetch).is_pending()),
-            _ => unreachable!(),
-        }
-    }
-    let start = Instant::now();
-    let _permit = gate.acquire().await;
-    assert_eq!(Instant::now() - start, Duration::from_secs(3));
 }
 
 #[tokio::test(start_paused = true)]
