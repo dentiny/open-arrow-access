@@ -91,6 +91,10 @@ async fn import_table(
     let (connection, count, hash) = tokio::task::spawn_blocking(move || {
         let mut count = 0u64;
         let mut hash = Sha256::new();
+        // Avoid repeated auto-commits while a persistent table is imported.
+        connection
+            .execute_batch("BEGIN TRANSACTION")
+            .map_err(error::duckdb)?;
         let mut appender = connection.appender(&import_name).map_err(error::duckdb)?;
         // Keep one appender for the table. Network reads remain asynchronous on
         // the runtime while this blocking importer owns DuckDB's native state.
@@ -126,6 +130,7 @@ async fn import_table(
         // Appender::drop suppresses write errors; flush once, explicitly.
         appender.flush().map_err(error::duckdb)?;
         drop(appender);
+        connection.execute_batch("COMMIT").map_err(error::duckdb)?;
         Ok::<_, open_arrow_access_core::Error>((connection, count, hash))
     })
     .await
