@@ -38,6 +38,17 @@ pub(in crate::bhl) async fn load() -> BhlMetadata {
     BhlMetadata::load(storage).await.unwrap()
 }
 
+pub(in crate::bhl) async fn load_with_sql(sql: &str) -> BhlMetadata {
+    let metadata = load().await;
+    metadata
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch(sql)
+        .unwrap();
+    metadata
+}
+
 fn cell(row: &StructArray, table: &str, field: &str) -> String {
     if matches!(table, "item" | "title" | "page" | "part") {
         return list(row, table, field).remove(0);
