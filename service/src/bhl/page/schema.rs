@@ -64,7 +64,7 @@ pub fn page_schema() -> SchemaRef {
                 ),
                 Field::new(
                     "page",
-                    record!(
+                    many!(
                         "PageID",
                         "ItemID",
                         "SequenceOrder",
@@ -76,7 +76,7 @@ pub fn page_schema() -> SchemaRef {
                         "PageTypeName",
                         "CreationDate"
                     ),
-                    true,
+                    false,
                 ),
                 Field::new(
                     "part",

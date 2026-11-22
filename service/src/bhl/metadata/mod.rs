@@ -58,7 +58,7 @@ fn tables() -> Vec<Table> {
                 name: child.name().clone(),
                 fields,
                 key,
-                single: matches!(child.name().as_str(), "title" | "page" | "part"),
+                single: matches!(child.name().as_str(), "title" | "part"),
             }
         })
         .collect()
