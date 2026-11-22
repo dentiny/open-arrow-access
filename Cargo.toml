@@ -167,3 +167,7 @@ required-features = ["format-xml"]
 [[test]]
 name = "arxiv_documents"
 required-features = ["service-arxiv"]
+
+[[test]]
+name = "bhl_shards"
+required-features = ["service-bhl"]

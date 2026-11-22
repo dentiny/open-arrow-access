@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add `BhlShardAccessor` and `BhlShardReadRequest` for complete OCR item/part directories, with read-only metadata snapshot reuse, strict reconciliation and native CrawlAccessor planning.
+
 ## 0.20.0 - 2026-11-22
 
 - Add persistent BHL metadata database creation and read-only reopening; stream selected-page metadata on a bounded blocking worker while preserving repeated page, part and item-title associations, relation order and missing/conflicting source reports.
