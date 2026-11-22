@@ -5,6 +5,60 @@ Enable facade feature `service-bhl` (or service-crate feature `bhl`).
 It reuses existing native file-set scan planning and bounded parallel execution;
 it does not introduce another executor or split one file into arbitrary ranges.
 
+## Read one complete OCR shard
+
+`BhlShardAccessor` combines natural shard discovery with the existing page and
+metadata planner. Pass it directly to `CrawlAccessor`:
+
+```rust
+use open_arrow_access::{
+    Accessor,
+    crawl::{CrawlAccessor, CrawlOptions},
+    service::bhl::{BhlShardAccessor, BhlShardReadRequest, open_data_bucket_operator},
+    storage::OpenDalAccessor,
+};
+
+let storage = OpenDalAccessor::new(open_data_bucket_operator()?);
+let source = BhlShardAccessor::from_database(storage, "/data/bhl-metadata.duckdb").await?;
+let mut reader = CrawlAccessor::new(source, CrawlOptions::default())
+    .open(BhlShardReadRequest::new("ocr/item-295621/")?)
+    .await?;
+while let Some(batch) = reader.next().await? {
+    // Consume Arrow batches or connect into_stream(reader) to an Arrow sink.
+}
+```
+
+Create the database once with `BhlMetadata::create(storage, path).await` before
+opening shard readers. `from_database` opens only a completed, compatible file,
+read-only on a blocking worker. It never imports tables, creates a missing file,
+or writes to the snapshot. Cloned accessors share it and use private temporary
+query selections. `from_metadata(storage, Arc<BhlMetadata>)` also accepts an
+already loaded in-memory or persistent snapshot.
+
+The request accepts exactly one `ocr/item-<positive-id>/` or
+`ocr/part-<positive-id>/` directory, with its trailing slash. Zero padding is
+retained. Discovery consumes every listing page, excludes only that directory's
+aggregate TXT object, and rejects other malformed identities. Empty or
+aggregate-only directories fail. Selected-key memory is proportional to the
+page count of this one shard.
+
+Missing required metadata and conflicting parent/sequence values stop the scan
+by default, with the page key attached to the error. `with_report(callback)`
+replaces that policy explicitly: return `Ok(())` to retain a reported page or
+return an error to stop. Relations preserve all source rows, duplicates and order.
+
+`metadata(request)` inspects the fixed projected schema without listing or
+reading OCR data. Opening a scan discovers its page keys; the existing bounded
+metadata worker and independent OCR partitions then execute on consumption.
+Projections omitting `data` skip OCR downloads. Request read options and byte I/O
+options reach the native page planner unchanged. Execution, concurrency and
+backpressure remain owned by `CrawlAccessor`.
+
+Rows default to the metadata fingerprint as `snapshot_id`; `with_snapshot_id`
+can supply a caller inventory label while retaining schema provenance. Neither
+label freezes the live OCR bucket. Use `BhlPageAccessor` with explicit saved keys
+when workers must consume a previously fixed inventory without listing.
+
 ## Discover once, distribute explicit keys
 
 ```text
