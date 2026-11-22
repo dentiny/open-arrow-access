@@ -1,6 +1,7 @@
 use std::num::NonZeroUsize;
 
-use arrow_select::concat::concat_batches;
+use arrow_schema::DataType;
+use arrow_select::{coalesce::BatchCoalescer, concat::concat_batches};
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, Error, ErrorKind, Layer, RecordBatch, RecordCapability, RecordReader, Result,
@@ -200,9 +201,32 @@ impl Coalescer {
                 None => Ok(None),
             },
             1 => Ok(batches.pop()),
-            _ => concat_batches(&self.schema, &batches)
-                .map(Some)
-                .map_err(crate::error::coalesce_error),
+            _ => {
+                // Arrow's view coalescer can compact sparse backing buffers. Keep
+                // the existing concat behavior for views to avoid introducing
+                // payload copies here; other types use the package coalescer.
+                if self.schema.fields().iter().any(|field| {
+                    matches!(field.data_type(), DataType::Utf8View | DataType::BinaryView)
+                }) {
+                    return concat_batches(&self.schema, &batches)
+                        .map(Some)
+                        .map_err(crate::error::coalesce_error);
+                }
+                // Use actual rows, not the configured ceiling: primitive builders
+                // reserve the target capacity on their first write. Passing an
+                // entire oversized input would also eagerly queue its outputs.
+                let mut coalescer = BatchCoalescer::new(self.schema.clone(), rows);
+                for batch in batches {
+                    coalescer
+                        .push_batch(batch)
+                        .map_err(crate::error::coalesce_error)?;
+                }
+                Ok(coalescer.next_completed_batch())
+            }
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/coalesce_batches.rs"]
+mod tests;
