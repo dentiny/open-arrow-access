@@ -133,13 +133,13 @@ selection appender flushes once before the join query runs.
 ## Reuse one persistent metadata database across page jobs
 
 A coordinator imports the 13 TSV tables directly into a persistent DuckDB
-file. Independent processes open that file read-only. Per-query page selections
+file. Each worker process opens its own writable copy. Per-query page selections
 use connection-local temporary tables, without a separate in-memory database,
 source-data copy or forwarding views.
 
 ```rust,ignore
 BhlMetadata::create(storage.clone(), "bhl-metadata.duckdb").await?;
-// Distribute this exact file to the workers, or place it on a shared filesystem.
+// Give each worker process its own writable copy of this exact file.
 let metadata = Arc::new(BhlMetadata::open("bhl-metadata.duckdb")?);
 let pages = BhlPageAccessor::from_metadata(storage, snapshot_id, metadata, report)?;
 ```
@@ -154,3 +154,27 @@ Source freshness, acquisition consistency, storage and distribution are
 caller-owned. Use a compatible DuckDB storage version. Existing `load` behavior
 remains an in-memory import; conversion-service job wiring remains a consumer
 adoption step after this API is released.
+
+
+## Ad hoc SQL and native import configuration
+
+`query_connection()` returns a cloned DuckDB connection to the metadata database.
+Run blocking SQL outside async runtime workers. Temporary objects belong to the
+connection; persistent table changes are shared with its database.
+
+```rust,ignore
+let metadata = BhlMetadata::open("bhl-metadata.duckdb")?;
+let connection = metadata.query_connection()?;
+let mut query = connection.prepare(
+    "SELECT ItemID, TitleID FROM bhl_item WHERE __key = ? ORDER BY rowid",
+)?;
+let rows = query.query_map([62861_u64], |row| {
+    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+})?;
+for row in rows { println!("{:?}", row?); }
+```
+
+`create_with_config(storage, path, duckdb::Config)` accepts native settings such
+as `memory_limit` and `threads`. Ordinary `create` retains its existing defaults.
+The [provider example](examples/README.md) demonstrates persistent creation,
+ad hoc SQL results fetched as Arrow through EOF, and real arXiv/BHL reads.
