@@ -89,7 +89,7 @@ async fn expand_single_latex(
         .read_to_end(&mut data)
         .await
         .map_err(|e| error::decode("invalid source package").with_source(e))?;
-    if data.starts_with(b"%PDF-") || data.starts_with(b"%!PS") {
+    if data.starts_with(b"%PDF-") || data.starts_with(b"%!PS") || data.starts_with(b"\xf7\x02") {
         return Err(error::missing_latex(batch, article_id));
     }
     validation::source_packaging(&data)?;

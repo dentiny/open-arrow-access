@@ -55,7 +55,7 @@ async fn packages_keep_only_tex_with_provenance() {
 
 #[tokio::test]
 async fn accepts_legacy_single_sources_and_rejects_non_latex() {
-    for file in ["main.tex", "main.tex.gz"] {
+    for file in ["main.tex", "main.tex.gz", "plain-tex.tex"] {
         let batches = read("hep-th/9901001.gz", &fixture!("arxiv-articles", file).await)
             .await
             .unwrap();
@@ -63,9 +63,24 @@ async fn accepts_legacy_single_sources_and_rejects_non_latex() {
             batches[0]["article_id"].as_string::<i64>().value(0),
             "hep-th9901001"
         );
+        if file == "plain-tex.tex" {
+            assert_eq!(
+                batches[0]["data"].as_binary::<i64>().value(0),
+                fixture!("arxiv-articles", file).await
+            );
+        }
     }
-    for data in [b"%PDF-1.7".as_slice(), b"%!PS", b"plain text", b"\xff"] {
-        assert!(read("2410/2410.00001.gz", data).await.is_err());
+    for data in [b"%PDF-1.7".as_slice(), b"%!PS", b"\xf7\x02DVI content"] {
+        assert_eq!(
+            read("2410/2410.00001.gz", data).await.unwrap_err().kind(),
+            open_arrow_access_core::ErrorKind::NotFound
+        );
+    }
+    for data in [b"plain text".as_slice(), b"\xff"] {
+        assert_eq!(
+            read("2410/2410.00001.gz", data).await.unwrap_err().kind(),
+            open_arrow_access_core::ErrorKind::Decode
+        );
     }
     for (group, file) in [
         ("arxiv-articles", "paper.pdf"),

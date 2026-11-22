@@ -169,7 +169,12 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivServi
         archive: &ArxivArchive,
         options: ByteReadOptions,
     ) -> Result<TarStream> {
-        let input = self.open_archive_input(archive, options).await?;
+        validate_archive(archive)?;
+        let input = self
+            .storage
+            .open_sequential(ByteReadRequest::new(archive.filename.clone()).with_options(options))
+            .await?;
+        validate_archive_length(archive, input.metadata().content_length)?;
         Ok(TarStream::new(input, self.tar_limits.clone()))
     }
 

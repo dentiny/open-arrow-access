@@ -1,4 +1,5 @@
 //! Lazy, shared OAI lookups for the default content metadata path.
+mod rate_limit;
 use std::{collections::HashMap, sync::Arc};
 
 use futures::{TryStreamExt, lock::Mutex};
@@ -57,7 +58,9 @@ impl MetadataResolver {
         if let Some(index) = state.cache.get(&key) {
             return Ok(index.clone());
         }
-        let page = fetch_metadata(state.connection()?, &key).await?;
+        let connection = state.connection()?;
+        let _permit = rate_limit::acquire(connection).await;
+        let page = fetch_metadata(connection, &key).await?;
         let index = Arc::new(decode_metadata(page, &key).await?);
         state.cache.insert(key, index.clone());
         Ok(index)

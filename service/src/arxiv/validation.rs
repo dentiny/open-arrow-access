@@ -292,9 +292,17 @@ pub(super) fn source_packaging(data: &[u8]) -> Result<ArxivSourcePackaging> {
     }
     let text = std::str::from_utf8(data)
         .map_err(|_| error::decode("source is neither a TAR nor UTF-8 LaTeX"))?;
-    if !["\\documentclass", "\\documentstyle", "\\begin{document}"]
-        .iter()
-        .any(|marker| text.contains(marker))
+    // Older bulk submissions include plain TeX (for example harvmac), not
+    // just LaTeX documents. Recognize their macro input/end markers too.
+    if ![
+        "\\documentclass",
+        "\\documentstyle",
+        "\\begin{document}",
+        "\\input",
+        "\\bye",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
     {
         return Err(error::decode(
             "single-file source is not recognized as LaTeX",

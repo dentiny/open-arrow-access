@@ -573,10 +573,12 @@ Deleted records retain their header with null inner metadata. Missing, malformed
 mismatched and failed responses fail the scan, even if metadata is projected away.
 
 Services and their clones share an article metadata cache, including concurrent
-lookups for the same article. The resolver uses the shared `Connection` directly;
-request pacing, retry and timeout policies are caller-owned. Configure the
-connection/transport to follow the [arXiv rate limit](https://info.arxiv.org/help/api/tou.html),
-and pass it with `ArxivService::with_metadata_connection(connection)`.
+lookups for the same article. Automatic lookups against the official arXiv origin
+share a process-wide gate: request starts are at least three seconds apart, and
+the preceding response is fully decoded before the next lookup starts, following
+the [arXiv rate limit](https://info.arxiv.org/help/api/tou.html). Cache hits do not
+wait. Custom mirror origins retain their own rate policies. Retry and timeout
+settings remain caller-owned via `ArxivService::with_metadata_connection(connection)`.
 
 Online metadata is the latest OAI record, including version history. For bulk or
 offline jobs, a reconciled typed snapshot pins metadata and avoids per-article HTTP:
@@ -601,7 +603,8 @@ and emits each UTF-8 `.tex` member outside any `anc/` directory. Images,
 ancillary TeX, videos, bibliography/style files and the original package are
 excluded. Multi-file manuscripts remain separate files; includes are not
 expanded and TeX is not compiled or concatenated. Single files must contain a
-LaTeX document marker. Non-LaTeX sources, packages without eligible TeX,
+LaTeX document marker or a plain TeX macro-input/end marker such as `\input`
+or `\bye`; this includes legacy harvmac submissions. Non-TeX sources, packages without eligible TeX,
 invalid UTF-8 and corrupt archives fail the scan; no PDF fallback or silent
 row skipping occurs.
 
@@ -680,7 +683,7 @@ output use the streaming handler described above. Non-TeX source policy is uncha
 
 ## Missing LaTeX in a source shard
 
-Source shards can contain PDF/PostScript submissions and intact packages without
+Source shards can contain PDF/PostScript/DVI submissions and intact packages without
 eligible TeX files. These represent missing LaTeX content, rather than corrupt
 archives. With an explicit shard or a single manifest-selected TAR, they return
 `NotFound` from `read_arxiv_latex`, including article ID and `shard#entry=index`
