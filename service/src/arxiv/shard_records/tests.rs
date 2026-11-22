@@ -21,7 +21,8 @@ async fn manifest_service(
         "/src/arXiv_src_2411_002.tar",
         "/src/arXiv_src_2412_001.tar",
     ] {
-        http.file(key, bytes.clone());
+        // Bulk mirrors can serve sequential GETs without supporting HEAD.
+        http.respond(key, http::StatusCode::OK, bytes.clone());
     }
     let operator =
         opendal::Operator::new(opendal_service_http::Http::default().endpoint(http.endpoint()))
@@ -70,13 +71,14 @@ async fn manifest_content_splits_single_tar_but_keeps_multiple_tars_independent(
         );
         for sequence in 1..=count {
             let key = format!("/src/arXiv_src_{month}_{sequence:03}.tar");
-            assert_eq!(
-                http.requests()
-                    .iter()
-                    .filter(|request| request.method == http::Method::GET && request.path == key)
-                    .count(),
-                1
-            );
+            let requests = http.requests();
+            let requests = requests
+                .iter()
+                .filter(|request| request.path == key)
+                .collect::<Vec<_>>();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].method, http::Method::GET);
+            assert!(requests[0].range().is_none());
         }
     }
 }

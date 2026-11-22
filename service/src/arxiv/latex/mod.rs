@@ -77,6 +77,11 @@ fn latex_input(batch: &RecordBatch) -> (DecodedInput, Option<ObjectRef>) {
     (input, source)
 }
 
+/// Recognize PDF, PostScript, and DVI documents by their leading bytes.
+fn is_non_tex_document(data: &[u8]) -> bool {
+    data.starts_with(b"%PDF-") || data.starts_with(b"%!PS") || data.starts_with(b"\xf7\x02")
+}
+
 /// Append the remaining decoded bytes to the sniffed prefix and validate the
 /// complete single-file source before emitting one `main.tex` content row.
 async fn expand_single_latex(
@@ -89,7 +94,7 @@ async fn expand_single_latex(
         .read_to_end(&mut data)
         .await
         .map_err(|e| error::decode("invalid source package").with_source(e))?;
-    if data.starts_with(b"%PDF-") || data.starts_with(b"%!PS") {
+    if is_non_tex_document(&data) {
         return Err(error::missing_latex(batch, article_id));
     }
     validation::source_packaging(&data)?;

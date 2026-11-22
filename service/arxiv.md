@@ -601,7 +601,8 @@ and emits each UTF-8 `.tex` member outside any `anc/` directory. Images,
 ancillary TeX, videos, bibliography/style files and the original package are
 excluded. Multi-file manuscripts remain separate files; includes are not
 expanded and TeX is not compiled or concatenated. Single files must contain a
-LaTeX document marker. Non-LaTeX sources, packages without eligible TeX,
+LaTeX document marker or a plain TeX macro-input/end marker such as `\input`
+or `\bye`; this includes legacy harvmac submissions. Non-TeX sources, packages without eligible TeX,
 invalid UTF-8 and corrupt archives fail the scan; no PDF fallback or silent
 row skipping occurs.
 
@@ -680,7 +681,7 @@ output use the streaming handler described above. Non-TeX source policy is uncha
 
 ## Missing LaTeX in a source shard
 
-Source shards can contain PDF/PostScript submissions and intact packages without
+Source shards can contain PDF/PostScript/DVI submissions and intact packages without
 eligible TeX files. These represent missing LaTeX content, rather than corrupt
 archives. With an explicit shard or a single manifest-selected TAR, they return
 `NotFound` from `read_arxiv_latex`, including article ID and `shard#entry=index`
