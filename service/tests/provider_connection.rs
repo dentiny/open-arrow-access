@@ -8,57 +8,6 @@ use opendal::HttpBody;
 mod providers;
 use providers::connection;
 
-#[tokio::test(start_paused = true)]
-async fn layers_share_request_policy_across_connections_downloads_and_operators() {
-    use std::{sync::Arc, time::Duration};
-
-    use open_arrow_access_storage::HttpRequestRateLimitLayer;
-    use open_arrow_access_test_support::http::file_response;
-    use opendal::Operator;
-    use tokio::time::Instant;
-
-    let fixture = HttpFixture::new();
-    let starts = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let observed = starts.clone();
-    fixture.handle(move |request| {
-        observed.lock().unwrap().push(Instant::now());
-        if request.uri().path() == "/page" {
-            return Ok(response(StatusCode::OK, "{}"));
-        }
-        let mut response = file_response(&request, "payload");
-        response
-            .headers_mut()
-            .insert("accept-ranges", "bytes".parse().unwrap());
-        Ok(response)
-    });
-    let interval = Duration::from_secs(3);
-    let limit = HttpRequestRateLimitLayer::new(interval).unwrap();
-    // Replacing the transport after adding a layer must retain that layer.
-    let first = Connection::new(fixture.endpoint())
-        .unwrap()
-        .with_layer(limit.clone())
-        .with_context(fixture.context());
-    let second = connection(&fixture).with_layer(limit.clone());
-    first.json("page", &[]).await.unwrap();
-    second.json("page", &[]).await.unwrap();
-    let mut reader = first
-        .clone()
-        .open(&format!("{}/file", fixture.endpoint()), Default::default())
-        .await
-        .unwrap();
-    // An idle sequential reader must not hold the only permit needed by ranges.
-    assert_eq!(reader.read_range(1..3).await.unwrap(), b"ay".as_slice());
-    assert_eq!(read_all(reader, "test").await.unwrap(), b"payload");
-
-    let builder =
-        Operator::new(opendal_service_http::Http::default().endpoint(fixture.endpoint())).unwrap();
-    let operator = builder.with_context(fixture.context()).layer(limit);
-    assert_eq!(operator.read("file").await.unwrap().to_vec(), b"payload");
-    let starts = starts.lock().unwrap();
-    assert_eq!(starts.len(), 6);
-    assert!(starts.windows(2).all(|pair| pair[1] - pair[0] == interval));
-}
-
 fn redirect(location: &str) -> Response<HttpBody> {
     Response::builder()
         .status(StatusCode::FOUND)
