@@ -440,3 +440,40 @@ async fn explicit_shard_validates_selection_and_reads_only_that_object() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].object.locator(), shard);
 }
+
+#[tokio::test]
+async fn explicit_raw_shard_streams_with_one_get_and_no_head() {
+    use open_arrow_access_test_support::http::HttpFixture;
+    let http = HttpFixture::new();
+    let shard = "src/one.tar";
+    http.respond(
+        "/src/one.tar",
+        http::StatusCode::OK,
+        fixture!("arxiv-content", "latex-two.tar").await,
+    );
+    let operator =
+        opendal::Operator::new(opendal_service_http::Http::default().endpoint(http.endpoint()))
+            .unwrap()
+            .with_context(http.context());
+    let records = ArxivService::new(OpenDalAccessor::new(operator)).records();
+    let mut reader = records
+        .open(ArxivReadRequest::new(ArxivKind::Source).with_shard(shard))
+        .await
+        .unwrap();
+    assert!(http.requests().is_empty());
+    let mut rows = 0;
+    while let Some(batch) = reader.next().await.unwrap() {
+        rows += batch.num_rows();
+        assert!(
+            batch["shard_uri"]
+                .as_string::<i64>()
+                .iter()
+                .all(|value| value == Some(shard))
+        );
+    }
+    assert_eq!(rows, 2);
+    let requests = http.requests();
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    assert_eq!(requests[0].method, http::Method::GET);
+    assert_eq!(requests[0].path, "/src/one.tar");
+}

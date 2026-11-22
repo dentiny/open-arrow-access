@@ -193,7 +193,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
                 } else {
                     let input = service
                         .storage
-                        .open(
+                        .open_sequential(
                             ByteReadRequest::new(source.clone()).with_options(request.byte_options),
                         )
                         .await?;
