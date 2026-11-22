@@ -302,12 +302,14 @@ async fn databases_reopen_without_source_access_and_keep_provenance() {
         assert_eq!(actual.missing, expected.missing);
         assert_eq!(actual.conflicts, expected.conflicts);
     }
-    database
-        .connection
-        .lock()
-        .unwrap()
-        .execute_batch("BEGIN TRANSACTION; DELETE FROM main.item; ROLLBACK;")
-        .unwrap();
+    assert!(
+        database
+            .connection
+            .lock()
+            .unwrap()
+            .execute_batch("DELETE FROM main.item")
+            .is_err()
+    );
     assert_eq!(read(&database, &[ITEM, ITEM]).len(), 2);
     drop(database);
     {
