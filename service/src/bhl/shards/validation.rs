@@ -1,5 +1,5 @@
 use super::super::{error, pages::identity::number};
-use open_arrow_access_core::Result;
+use open_arrow_access_core::{ObjectRef, Result};
 
 pub(super) fn group(prefix: &str) -> Result<&str> {
     let invalid = || {
@@ -17,4 +17,13 @@ pub(super) fn group(prefix: &str) -> Result<&str> {
         .ok_or_else(invalid)?;
     number(id).map_err(|_| invalid())?;
     Ok(group)
+}
+
+pub(super) fn object_in_shard(object: &ObjectRef, prefix: &str) -> Result<()> {
+    if !object.locator().starts_with(prefix) {
+        return Err(
+            error::invalid_pages("object outside the selected BHL shard").with_object(Some(object)),
+        );
+    }
+    Ok(())
 }

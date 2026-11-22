@@ -142,12 +142,7 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlShardAccessor<A> {
             .discover(ListRequest::new(request.prefix.clone()))
             .await?
         {
-            if !object.locator().starts_with(&request.prefix) {
-                return Err(
-                    error::invalid_pages("object outside the selected BHL shard")
-                        .with_object(Some(&object)),
-                );
-            }
+            validation::object_in_shard(&object, &request.prefix)?;
             if object.locator() == aggregate {
                 continue;
             }
