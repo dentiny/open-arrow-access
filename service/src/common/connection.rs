@@ -12,7 +12,7 @@ use open_arrow_access_core::{
     Result, async_trait,
 };
 use open_arrow_access_storage::{HttpConcurrencyLimitLayer, StorageConfig};
-use opendal::{Buffer, HttpTransporter, OperationContext};
+use opendal::{Buffer, HttpTransporter, OperationContext, Operator, raw::Layer};
 use url::Url;
 
 use crate::file_manifest::FileSpec;
@@ -32,7 +32,9 @@ pub struct Connection {
     pub(super) origin: Url,
     pub(super) headers: HeaderMap,
     pub(super) query: Vec<(String, String)>,
-    client: HttpClient,
+    operator: Operator,
+    config: StorageConfig,
+    pub(super) has_layers: bool,
     http_concurrency_limit: Option<HttpConcurrencyLimitLayer>,
 }
 impl std::fmt::Debug for Connection {
@@ -48,21 +50,45 @@ impl Connection {
         let context = OperationContext::new().with_http_transport(HttpTransporter::new(
             crate::http_client::new_single_hop_transport()?,
         ));
+        let operator =
+            Operator::new(opendal_service_http::Http::default().endpoint(origin.as_str()))
+                .map_err(|error| crate::http_client::transport_error(error::OP, error))?
+                .with_context(context);
         Ok(Self {
             origin,
             headers: HeaderMap::new(),
             query: vec![],
-            client: HttpClient {
-                context,
-                config: Default::default(),
-            },
+            operator,
+            config: Default::default(),
+            has_layers: false,
             http_concurrency_limit: None,
         })
     }
     /// Override transport, for custom TLS/proxy configuration or deterministic tests.
     /// The inner transport must return single-hop responses; redirects are followed by the provider transport.
     pub fn with_context(mut self, context: OperationContext) -> Self {
-        self.client.context = context;
+        self.operator = self.operator.with_context(context);
+        self
+    }
+    /// Add an OpenDAL layer to the connection's HTTP operator.
+    /// Layers are shared by connection clones and retained across `with_context`.
+    /// API requests and file reads use the operator's composed HTTP context;
+    /// OpenDAL operation hooks (such as read/stat wrappers) do not intercept
+    /// these direct HTTP requests. Use HTTP context layers for request policies.
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use open_arrow_access_service::common::Connection;
+    /// use open_arrow_access_storage::HttpRequestRateLimitLayer;
+    /// # fn main() -> open_arrow_access_core::Result<()> {
+    /// let limit = HttpRequestRateLimitLayer::new(Duration::from_secs(3))?;
+    /// let connection = Connection::new("https://example.com")?.with_layer(limit);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_layer<L: Layer>(mut self, layer: L) -> Self {
+        self.operator = self.operator.layer(layer);
+        self.has_layers = true;
         self
     }
     /// Share a total HTTP request budget with other connections or OpenDAL operators.
@@ -73,20 +99,21 @@ impl Connection {
     }
 
     fn http_client(&self) -> HttpClient {
-        let mut client = self.client.clone();
+        let mut operator = self.operator.clone();
         if let Some(limit) = &self.http_concurrency_limit {
-            let transport = limit.wrap(client.context.http_transport().clone());
-            client.context = client.context.with_http_transport(transport);
+            operator = operator.layer(limit.clone());
         }
-        client.context = transport::follow_redirects(client.context);
-        client
+        HttpClient {
+            context: transport::follow_redirects(operator.context().clone()),
+            config: self.config.clone(),
+        }
     }
 
     /// Configure retries and per-attempt/stream-read timeouts for this connection.
     /// Preserved when replacing the transport with `with_context`.
     pub fn with_http_config(mut self, config: StorageConfig) -> Result<Self> {
         config.validate()?;
-        self.client.config = config;
+        self.config = config;
         Ok(self)
     }
     pub fn origin(&self) -> &Url {
@@ -162,7 +189,7 @@ impl Connection {
     /// Open an absolute URL, preserving encoded paths and signatures byte-for-byte.
     /// Readers support exact ranges for a known identity length with
     /// `Accept-Ranges: bytes`. Strong ETags pin requests to that version.
-    /// With `with_http_concurrency_limit`, range-capable inputs also use bounded
+    /// With `with_layer` or `with_http_concurrency_limit`, range-capable inputs use bounded
     /// range reads for sequential output, avoiding an idle response holding the only permit.
     pub async fn open(&self, url: &str, options: ByteReadOptions) -> Result<Box<dyn ByteReader>> {
         reader::open(self.clone(), resolve_download_url(url)?, options).await

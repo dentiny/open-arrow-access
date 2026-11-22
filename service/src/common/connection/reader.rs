@@ -60,7 +60,8 @@ pub(super) async fn open(
         body,
         &client,
         &request,
-        range_length.filter(|_| connection.http_concurrency_limit.is_some()),
+        range_length
+            .filter(|_| connection.has_layers || connection.http_concurrency_limit.is_some()),
         chunk_size,
     );
     let chunks = chunks

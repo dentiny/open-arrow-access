@@ -28,7 +28,7 @@ struct State {
 impl State {
     fn connection(&mut self) -> Result<&Connection> {
         if self.connection.is_none() {
-            self.connection = Some(Connection::new(ArxivMetadata::ORIGIN)?);
+            self.connection = Some(rate_limit::apply(Connection::new(ArxivMetadata::ORIGIN)?));
         }
         Ok(self.connection.as_ref().unwrap())
     }
@@ -44,7 +44,7 @@ impl MetadataResolver {
     pub(super) fn new(connection: Connection) -> Self {
         Self {
             state: Mutex::new(State {
-                connection: Some(connection),
+                connection: Some(rate_limit::apply(connection)),
                 ..Default::default()
             }),
         }
@@ -58,9 +58,7 @@ impl MetadataResolver {
         if let Some(index) = state.cache.get(&key) {
             return Ok(index.clone());
         }
-        let connection = state.connection()?;
-        let _permit = rate_limit::acquire(connection).await;
-        let page = fetch_metadata(connection, &key).await?;
+        let page = fetch_metadata(state.connection()?, &key).await?;
         let index = Arc::new(decode_metadata(page, &key).await?);
         state.cache.insert(key, index.clone());
         Ok(index)

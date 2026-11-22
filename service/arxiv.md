@@ -575,7 +575,7 @@ mismatched and failed responses fail the scan, even if metadata is projected awa
 Services and their clones share an article metadata cache, including concurrent
 lookups for the same article. Automatic lookups against the official arXiv origin
 share a process-wide gate: request starts are at least three seconds apart, and
-the preceding response is fully decoded before the next lookup starts, following
+the preceding response body is fully consumed before the next request starts, following
 the [arXiv rate limit](https://info.arxiv.org/help/api/tou.html). Cache hits do not
 wait. Custom mirror origins retain their own rate policies. Retry and timeout
 settings remain caller-owned via `ArxivService::with_metadata_connection(connection)`.
