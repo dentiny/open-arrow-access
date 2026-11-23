@@ -54,7 +54,6 @@ impl DuckDbDatabase {
         })
     }
 
-    #[cfg(feature = "bhl")]
     pub(crate) fn into_connection(self) -> (ManagedConnection, String) {
         (self.connection, self.location)
     }
