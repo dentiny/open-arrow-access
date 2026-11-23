@@ -29,6 +29,15 @@ async fn tar_preserves_members_and_ancillary_bytes() {
         "anc/archive.zip",
         "main.tex",
     ];
+    let mut payloads = Vec::new();
+    for (index, name) in names.iter().enumerate() {
+        let path = if index == 6 {
+            "duplicate.tex".into()
+        } else {
+            format!("members/{name}")
+        };
+        payloads.push(fixture!("arxiv-articles", &path).await);
+    }
     let mut options = ArxivSourceOptions::default();
     options.options.batch_size = NonZeroUsize::new(2).unwrap();
     options.target_bytes = NonZeroUsize::MIN;
@@ -39,11 +48,6 @@ async fn tar_preserves_members_and_ancillary_bytes() {
         let mut reader = open(path, packaging, options.clone()).await.unwrap();
         for (index, name) in names.iter().enumerate() {
             let batch = reader.next().await.unwrap().unwrap();
-            let expected = if index == 6 {
-                "duplicate.tex".into()
-            } else {
-                format!("members/{name}")
-            };
             assert_eq!(batch.num_rows(), 1); // Whole files can exceed the soft byte target.
             assert_eq!(
                 batch["entry_name"].as_binary::<i64>().value(0),
@@ -53,10 +57,7 @@ async fn tar_preserves_members_and_ancillary_bytes() {
                 batch["entry_index"].as_primitive::<UInt64Type>().value(0),
                 index as u64 + 1
             );
-            assert_eq!(
-                batch["data"].as_binary::<i64>().value(0),
-                fixture!("arxiv-articles", &expected).await
-            );
+            assert_eq!(batch["data"].as_binary::<i64>().value(0), payloads[index]);
             assert_eq!(
                 batch["article_id"].as_string::<i64>().value(0),
                 "2410.00001v1"
@@ -74,6 +75,7 @@ async fn tar_preserves_members_and_ancillary_bytes() {
 #[tokio::test]
 async fn single_files_preserve_original_and_empty_payloads() {
     for name in ["main.tex", "paper.pdf", "empty.tex"] {
+        let expected = fixture!("arxiv-articles", name).await;
         for (path, packaging) in [
             (
                 name.to_owned(),
@@ -92,10 +94,7 @@ async fn single_files_preserve_original_and_empty_payloads() {
                 .await
                 .unwrap();
             let batch = reader.next().await.unwrap().unwrap();
-            assert_eq!(
-                batch["data"].as_binary::<i64>().value(0),
-                fixture!("arxiv-articles", name).await
-            );
+            assert_eq!(batch["data"].as_binary::<i64>().value(0), expected);
             assert_eq!(
                 batch["entry_name"].as_binary::<i64>().value(0),
                 name.as_bytes()

@@ -7,7 +7,7 @@ use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::arxiv::{ArxivKind, ArxivReadRequest, ArxivService};
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::{
-    MemoryAccessor, byte_layer, fixture, fixture_path, fs_operator,
+    MemoryAccessor, byte_layer, expect_err_kind, fixture, fixture_path, fs_operator, temp_fs,
 };
 
 fn service() -> ArxivService<OpenDalAccessor> {
@@ -77,14 +77,9 @@ async fn forwards_byte_options_and_validates_before_opening_storage() {
         ..Default::default()
     };
     for month in [2413, 2400, 10000] {
-        assert_eq!(
-            service
-                .manifest(ArxivKind::Pdf, Some(month), options)
-                .await
-                .err()
-                .unwrap()
-                .kind(),
-            ErrorKind::InvalidInput
+        expect_err_kind(
+            service.manifest(ArxivKind::Pdf, Some(month), options).await,
+            ErrorKind::InvalidInput,
         );
     }
     assert!(observed.requests.lock().unwrap().is_empty());
@@ -144,23 +139,17 @@ async fn rejects_invalid_manifests_and_changed_archive_length() {
         .await
         .unwrap();
     let changed = ArxivService::new(MemoryAccessor::new(b"short", 3).with_ranges());
-    assert_eq!(
+    expect_err_kind(
         changed
             .archive(&archives[1], ByteReadOptions::default())
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Decode
+            .await,
+        ErrorKind::Decode,
     );
-    assert_eq!(
+    expect_err_kind(
         changed
             .stream(&archives[1], ByteReadOptions::default())
-            .await
-            .err()
-            .unwrap()
-            .kind(),
-        ErrorKind::Decode
+            .await,
+        ErrorKind::Decode,
     );
 }
 
@@ -208,28 +197,20 @@ async fn numeric_month_preserves_zero_padded_archive_names() {
     assert_eq!(archives[0].filename, "pdf/arXiv_pdf_0001_003.tar");
 }
 
-fn native_record_fixture() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join("pdf")).unwrap();
-    std::fs::copy(
-        fixture_path!("arxiv", "pdf/arXiv_pdf_manifest.xml"),
-        dir.path().join("pdf/arXiv_pdf_manifest.xml"),
-    )
-    .unwrap();
-    for name in ["arXiv_pdf_2410_003.tar", "arXiv_pdf_2410_001.tar"] {
-        std::fs::copy(
-            fixture_path!("arxiv", "pdf/arXiv_pdf_2410_001.tar"),
-            dir.path().join("pdf").join(name),
-        )
-        .unwrap();
-    }
-    dir
+async fn native_record_fixture() -> (tempfile::TempDir, opendal::Operator) {
+    let manifest = fixture!("arxiv", "pdf/arXiv_pdf_manifest.xml").await;
+    let archive = fixture!("arxiv", "pdf/arXiv_pdf_2410_001.tar").await;
+    temp_fs(&[
+        ("pdf/arXiv_pdf_manifest.xml", &manifest),
+        ("pdf/arXiv_pdf_2410_003.tar", &archive),
+        ("pdf/arXiv_pdf_2410_001.tar", &archive),
+    ])
 }
 
 #[tokio::test]
 async fn native_parallel_shards_preserve_order_and_payloads_with_a_soft_byte_target() {
-    let dir = native_record_fixture();
-    let records = ArxivService::new(OpenDalAccessor::new(fs_operator(dir.path()))).records();
+    let (_dir, operator) = native_record_fixture().await;
+    let records = ArxivService::new(OpenDalAccessor::new(operator)).records();
     // A payload may exceed the target, but it must remain intact in its own batch.
     let request = ArxivReadRequest::new(ArxivKind::Pdf)
         .with_month(2410)
@@ -332,7 +313,7 @@ async fn auto_propagates_storage_and_manifest_errors() {
 
 #[tokio::test]
 async fn manifest_payload_sizes_allow_tar_framing_in_stream_index_and_native_scan() {
-    let dir = native_record_fixture();
+    let (dir, operator) = native_record_fixture().await;
     let manifest = dir.path().join("pdf/arXiv_pdf_manifest.xml");
     // Upstream size is the sum of member payloads, not the padded TAR length.
     let payload_size = b"%PDF-first-paper".len() + b"%PDF-second-paper".len();
@@ -341,7 +322,7 @@ async fn manifest_payload_sizes_allow_tar_framing_in_stream_index_and_native_sca
         &format!("<size>{payload_size}</size>"),
     );
     std::fs::write(manifest, xml).unwrap();
-    let service = ArxivService::new(OpenDalAccessor::new(fs_operator(dir.path())));
+    let service = ArxivService::new(OpenDalAccessor::new(operator));
     let shards = service
         .manifest(ArxivKind::Pdf, Some(2410), ByteReadOptions::default())
         .await

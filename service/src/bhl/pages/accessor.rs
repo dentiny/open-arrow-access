@@ -108,9 +108,11 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
         if request.objects.is_empty() {
             return Err(super::invalid("empty BHL page selection"));
         }
-        for object in &request.objects {
-            BhlPageIdentity::parse(object.locator())?;
-        }
+        let identities = request
+            .objects
+            .iter()
+            .map(|object| BhlPageIdentity::parse(object.locator()))
+            .collect::<Result<Vec<_>>>()?;
         let schema = Arc::new(
             page_schema()
                 .as_ref()
@@ -139,8 +141,8 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
                 let pages = request
                     .objects
                     .into_iter()
-                    .map(|object| {
-                        let identity = BhlPageIdentity::parse(object.locator())?;
+                    .zip(identities)
+                    .map(|(object, identity)| {
                         let metadata = provider(&identity)?;
                         Ok(BhlPageMetadata {
                             identity,

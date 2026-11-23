@@ -43,6 +43,7 @@ pub(super) fn for_each(
          page_id UBIGINT, sequence UBIGINT);",
         )
         .map_err(error::duckdb)?;
+    let mut parsed_identities = Vec::with_capacity(keys.len());
     {
         // Resolve the writable temporary catalog explicitly. With an unnamed
         // catalog DuckDB checks the read-only source database instead.
@@ -89,6 +90,7 @@ pub(super) fn for_each(
             .map_err(error::arrow)?;
             appender.append_record_batch(batch).map_err(error::duckdb)?;
             offset = end;
+            parsed_identities.extend(identities);
         }
         appender.flush().map_err(error::duckdb)?;
     }
@@ -141,7 +143,7 @@ pub(super) fn for_each(
                 continue;
             }
             emit(BhlPageMetadata {
-                identity: BhlPageIdentity::parse(object.locator())?,
+                identity: parsed_identities[index].clone(),
                 object: object.clone(),
                 metadata: metadata.slice(row, 1),
                 missing: strings(batch.column(2).as_ref(), row)?,

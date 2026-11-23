@@ -219,17 +219,18 @@ pub(super) fn validate_content_kind(format: ArxivContentFormat, kind: ArxivKind)
 }
 
 pub(super) fn is_tex(name: &[u8]) -> Result<bool> {
-    if !name.to_ascii_lowercase().ends_with(b".tex") {
+    if !name
+        .last_chunk::<4>()
+        .is_some_and(|suffix| suffix.eq_ignore_ascii_case(b".tex"))
+    {
         return Ok(false);
     }
     let name =
         std::str::from_utf8(name).map_err(|_| error::decode("LaTeX member name is not UTF-8"))?;
-    let parts = name.split('/').collect::<Vec<_>>();
-    if name.starts_with('/') || parts.contains(&"..") || name.contains('\\') {
+    if name.starts_with('/') || name.split('/').any(|part| part == "..") || name.contains('\\') {
         return Err(error::decode("unsafe source member name"));
     }
-    Ok(!parts.iter().any(|part| part.eq_ignore_ascii_case("anc"))
-        && name.to_ascii_lowercase().ends_with(".tex"))
+    Ok(!name.split('/').any(|part| part.eq_ignore_ascii_case("anc")))
 }
 pub(super) fn is_tar(data: &[u8]) -> bool {
     if data.len() < TAR_HEADER_SIZE {

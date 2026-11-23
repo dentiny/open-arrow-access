@@ -19,7 +19,7 @@ impl BhlPageIdentity {
         let fields = name.split('-').collect::<Vec<_>>();
         if fields.len() != 4
             || !matches!(fields[0], "item" | "part")
-            || pieces[1] != format!("{}-{}", fields[0], fields[1])
+            || pieces[1].split_once('-') != Some((fields[0], fields[1]))
         {
             return Err(super::invalid(format!("invalid OCR page identity: {key}")));
         }
