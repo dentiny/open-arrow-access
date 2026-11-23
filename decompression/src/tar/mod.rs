@@ -12,9 +12,7 @@ use futures::stream::try_unfold;
 use open_arrow_access_core::{ByteReader, Result, StreamReader};
 
 use crate::archive::{ArchiveSource, DEFAULT_MAX_ENTRY_BYTES};
-use bridge::METADATA_BUDGET;
 use error::{decode, missing_entry};
-use std::sync::atomic::Ordering;
 
 const DEFAULT_MAX_ENTRIES: usize = 65_536;
 
@@ -70,7 +68,7 @@ impl TarArchive {
         let handle = tokio::runtime::Handle::try_current().map_err(error::runtime)?;
         let token = tokio_util::sync::CancellationToken::new();
         let _cancel = token.clone().drop_guard();
-        let (input, budget) = bridge::reader(source.input.clone(), token, handle.clone());
+        let input = bridge::reader(source.input.clone(), token, handle.clone());
         let archive_len = source.input.content_length();
         let entries = handle
             .spawn_blocking(move || {
@@ -78,7 +76,6 @@ impl TarArchive {
                 let mut input = archive.entries_with_seek().map_err(error::header_error)?;
                 let mut entries = Vec::new();
                 loop {
-                    budget.store(METADATA_BUDGET, Ordering::Relaxed);
                     let Some(entry) = input.next() else {
                         break;
                     };

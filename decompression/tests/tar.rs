@@ -545,7 +545,7 @@ async fn cancelled_gnu_long_name_reads_resume() {
 }
 
 #[tokio::test]
-async fn malformed_or_unbounded_gnu_names_fail_in_both_readers() {
+async fn malformed_gnu_names_fail_in_both_readers() {
     use open_arrow_access_decompression::tar::TarStream;
     let original = fixture!("tar", "gnu-longname.tar").await;
     let mut orphan = original[..1024].to_vec();
@@ -569,29 +569,6 @@ async fn malformed_or_unbounded_gnu_names_fail_in_both_readers() {
         expect_err_kind(stream.next_entry().await, ErrorKind::Decode);
         assert!(stream.next_entry().await.unwrap().is_none());
     }
-    let mut header = tar::Header::new_gnu();
-    header.set_entry_type(tar::EntryType::GNULongName);
-    header.set_size(64 * 1024 + 1);
-    header.set_cksum();
-    let mut bytes = header.as_bytes().to_vec();
-    bytes.extend_from_slice(&vec![b'x'; 64 * 1024]);
-    bytes.push(0);
-    bytes.resize(512 + 64 * 1024 + 512, 0);
-    bytes.extend_from_slice(&original[1024..]);
-    let oversized = MemoryAccessor::new(&bytes, 7).with_ranges();
-    expect_err_kind(
-        TarArchive::open(
-            oversized.open("archive".into()).await.unwrap(),
-            TarLimits::default(),
-        )
-        .await,
-        ErrorKind::Unsupported,
-    );
-    let mut stream = TarStream::new(
-        oversized.open("archive".into()).await.unwrap(),
-        TarLimits::default(),
-    );
-    expect_err_kind(stream.next_entry().await, ErrorKind::Unsupported);
     // The package consumes extension metadata; limits count decoded entries.
     let input = source("gnu-longname.tar").await;
     let limits = TarLimits {

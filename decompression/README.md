@@ -169,8 +169,8 @@ it seeks past payloads instead of downloading them. Dropping the archive and its
 last live body releases the sequential source. Links and sparse files remain
 unsupported by the exposed byte entry contract; no filesystem extraction is performed.
 
-Default limits are 65,536 decoded entries and 1 GiB per entry. Metadata parsing
-has a 64 KiB read budget plus two header blocks per returned entry. Extension
+Default limits are 65,536 decoded entries and 1 GiB per entry. GNU/PAX metadata
+is handled by the packages; no additional metadata byte limit is imposed. Extension
 records do not count as decoded entries. End-marker acceptance follows the
 package (including clean EOF or a single zero block); sequential completion still
 drains the source through EOF to validate decoder trailers. Ranged inspection

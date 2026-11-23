@@ -9,14 +9,10 @@ use std::sync::{
 };
 use tokio_util::compat::{Compat, FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
-use super::{
-    TarEntry, TarLimits,
-    bridge::{self, Budget, METADATA_BUDGET},
-    error, validation,
-};
+use super::{TarEntry, TarLimits, error, validation};
 use crate::layer::DEFAULT_CHUNK_SIZE;
 
-type Input = Compat<Budget<Box<dyn AsyncRead + Send + Unpin>>>;
+type Input = Compat<Box<dyn AsyncRead + Send + Unpin>>;
 
 /// A sequential TAR entry and its bounded body reader.
 pub struct TarEntryReader {
@@ -36,8 +32,6 @@ pub struct TarStream {
     active: Weak<()>,
     remaining: Arc<AtomicU64>,
     failed: Arc<AtomicBool>,
-    budget: Arc<AtomicU64>,
-    pending: bool,
     ended: bool,
 }
 
@@ -45,7 +39,6 @@ impl TarStream {
     pub fn new(input: Box<dyn ByteReader>, limits: TarLimits) -> Self {
         let metadata = input.metadata().clone();
         let input: Box<dyn AsyncRead + Send + Unpin> = Box::new(into_async_read(input, "read_tar"));
-        let (input, budget) = bridge::budget(input);
         let mut archive = tokio_tar::Archive::new(input.compat());
         let entries = archive
             .entries()
@@ -59,8 +52,6 @@ impl TarStream {
             active: Weak::new(),
             remaining: Arc::new(AtomicU64::new(0)),
             failed: Arc::new(AtomicBool::new(false)),
-            budget,
-            pending: false,
             ended: false,
         }
     }
@@ -76,15 +67,6 @@ impl TarStream {
         }
         if self.active.upgrade().is_some() && self.remaining.load(Ordering::Acquire) != 0 {
             return Err(error::active_entry());
-        }
-        if !self.pending {
-            // The package skips any dropped body before parsing metadata. Account
-            // for those bytes without letting cancellation replenish the budget.
-            self.budget.store(
-                METADATA_BUDGET.saturating_add(self.remaining.load(Ordering::Acquire)),
-                Ordering::Relaxed,
-            );
-            self.pending = true;
         }
         let result = self.read_entry().await;
         if !matches!(&result, Ok(Some(_))) {
@@ -107,8 +89,6 @@ impl TarStream {
                     &self.limits,
                 )?;
                 self.index += 1;
-                self.pending = false;
-                self.budget.store(u64::MAX, Ordering::Relaxed);
                 self.remaining = Arc::new(AtomicU64::new(selected.size));
                 let token = Arc::new(());
                 self.active = Arc::downgrade(&token);
@@ -131,7 +111,6 @@ impl TarStream {
                 }));
             }
             self.ended = true;
-            self.budget.store(u64::MAX, Ordering::Relaxed);
         }
         // Retain ended/drain progress if this call is cancelled while waiting
         // for a decoder trailer or source EOF.
