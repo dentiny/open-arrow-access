@@ -1,6 +1,3 @@
-use std::collections::HashSet;
-
-use super::inference::CsvInferenceOptions;
 use arrow_schema::{DataType, Schema, TimeUnit};
 use open_arrow_access_core::Result;
 
@@ -64,29 +61,6 @@ fn supported_type(data_type: &DataType) -> bool {
         }
         _ => false,
     }
-}
-
-impl CsvInferenceOptions {
-    pub(super) fn validate(self) -> Result<()> {
-        if self.max_records == 0 || self.max_bytes == 0 {
-            return Err(super::error::invalid_inference_limits());
-        }
-        Ok(())
-    }
-}
-
-pub(super) fn validate_inferred_schema(schema: &Schema) -> Result<()> {
-    let mut names = HashSet::new();
-    for field in schema.fields() {
-        if field.name().is_empty() || !names.insert(field.name()) {
-            return Err(super::error::invalid_inferred_headers());
-        }
-        if field.data_type() == &DataType::Null {
-            return Err(super::error::null_inferred_column());
-        }
-    }
-
-    Ok(())
 }
 
 pub(super) fn require_dialect(dialect: Option<super::CsvDialect>) -> Result<super::CsvDialect> {

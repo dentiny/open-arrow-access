@@ -72,21 +72,6 @@ impl CsvDialect {
         }
         format
     }
-
-    pub(super) fn reader_builder(self) -> csv_async::AsyncReaderBuilder {
-        let mut builder = csv_async::AsyncReaderBuilder::new();
-        builder
-            .has_headers(false)
-            .flexible(true)
-            .delimiter(self.delimiter)
-            .quote(self.quote)
-            .escape(self.escape)
-            .comment(self.comment);
-        if let Some(terminator) = self.terminator {
-            builder.terminator(csv_async::Terminator::Any(terminator));
-        }
-        builder
-    }
 }
 
 /// Inspect only suffixes; object locators are not URLs or filesystem paths here.
