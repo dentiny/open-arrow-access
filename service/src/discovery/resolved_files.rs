@@ -4,7 +4,7 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_storage::NamedFileAccessor;
 
-use crate::file_manifest::FileSpec;
+use crate::discovery::file_manifest::FileSpec;
 
 /// A fixed file namespace with provider-defined metadata and independently owned readers.
 #[derive(Clone, Debug)]

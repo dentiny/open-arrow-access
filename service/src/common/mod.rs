@@ -14,7 +14,7 @@ mod connection;
 pub(crate) mod transport;
 pub use connection::{ApiKey, Connection, RemoteFiles};
 
-pub use json_util::{LinkField, MetadataLink, resolve_named_links, resolve_optional_links};
+pub use crate::discovery::{LinkField, MetadataLink, resolve_named_links, resolve_optional_links};
 
 #[allow(
     unused_imports,

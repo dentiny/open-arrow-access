@@ -13,7 +13,7 @@ use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 use serde::Deserialize;
 
 use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
-use crate::{ResolvedFileSet, file_manifest::FileSpec};
+use crate::{ResolvedFileSet, discovery::file_manifest::FileSpec};
 use error::map_file_namespace_error;
 use validation::validate_record;
 
