@@ -1,5 +1,5 @@
 # Existing architectural debt suppressed by `deslop-please --allow`.
-# Fixing an entry here never fails CI; new issues not listed here fail.
+# Fixing an entry here never fails the check; new issues not listed here fail.
 module-cycle open_arrow_access::archive::reader,open_arrow_access::archive::validation
 module-cycle open_arrow_access::attachment::options,open_arrow_access::attachment::validation
 module-cycle open_arrow_access_core::error,open_arrow_access_core::field_index,open_arrow_access_core::request

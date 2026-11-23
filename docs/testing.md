@@ -127,7 +127,7 @@ formats. Use the workspace command above for complete coverage.
 module cycles, tangles, field leaks, shallow modules, wide directories, and long
 files across the Cargo workspace. It is a development tool, not a library dependency.
 The CLI version is pinned in `Makefile`; Rust and rust-analyzer are pinned together
-in `rust-toolchain.toml`. Use the same versions locally and in CI.
+in `rust-toolchain.toml` for reproducible local checks.
 
 Install the pinned toolchain components and CLI once:
 
@@ -143,9 +143,8 @@ Run the check separately or as part of `make lint`:
 make lint-deslop
 ```
 
-The GitHub Actions architecture job runs the same command on pushes and pull
-requests. `.deslop-please.allow` records the initial architecture debt; new
-findings fail the check. Existing debt is not evidence that the code is clean.
+`.deslop-please.allow` records the initial architecture debt; new findings fail
+the local check. Existing debt is not evidence that the code is clean.
 To inspect all findings, including the baseline:
 
 ```sh
