@@ -1,7 +1,6 @@
-use super::{error, tables};
+use super::{connection::MetadataConnection, error, tables};
 use arrow_array::{Array, StringArray};
 use arrow_schema::{DataType, Field, Schema};
-use duckdb::{Config, Connection};
 use futures::future::join_all;
 use open_arrow_access_core::{Accessor, AccessorExt, ByteAccessor, ReadRequest, Result};
 use open_arrow_access_decompression::{DecompressionLayer, gzip::Gzip};
@@ -36,7 +35,7 @@ pub struct BhlMetadataInfo {
 /// All 13 AWS metadata tables in one in-memory or persistent DuckDB database.
 pub struct BhlMetadata {
     pub info: BhlMetadataInfo,
-    pub(super) connection: Mutex<Connection>,
+    pub(super) connection: Mutex<MetadataConnection>,
 }
 
 fn hex(bytes: impl AsRef<[u8]>) -> String {
@@ -53,7 +52,7 @@ fn quoted(name: &str) -> String {
 }
 
 async fn import_table(
-    connection: Connection,
+    connection: MetadataConnection,
     input: Arc<dyn ByteAccessor>,
     table: super::Table,
 ) -> Result<(String, SourceInfo)> {
@@ -190,16 +189,13 @@ impl BhlMetadata {
     /// Import the 13 gzip TSV tables concurrently into an in-memory database.
     /// V1 assumes the source tables and query intermediates fit in memory.
     pub async fn load<A: ByteAccessor + 'static>(storage: A) -> Result<Self> {
-        let config = Config::default()
-            .with("enable_external_file_cache", "false")
-            .map_err(error::duckdb)?;
-        let connection = Connection::open_in_memory_with_flags(config).map_err(error::duckdb)?;
+        let connection = MetadataConnection::in_memory()?;
         Self::import(storage, connection).await
     }
 
     pub(super) async fn import<A: ByteAccessor + 'static>(
         storage: A,
-        connection: Connection,
+        connection: MetadataConnection,
     ) -> Result<Self> {
         connection
             .execute_batch(
@@ -212,7 +208,7 @@ impl BhlMetadata {
             Arc::new(Arc::new(storage).layer(DecompressionLayer::new(Gzip)));
         let mut imports = Vec::new();
         for table in tables() {
-            let connection = connection.try_clone().map_err(error::duckdb)?;
+            let connection = connection.try_clone()?;
             let input = input.clone();
             imports.push(import_table(connection, input, table));
         }

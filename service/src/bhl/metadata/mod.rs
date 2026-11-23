@@ -1,4 +1,5 @@
 //! Direct AWS TSV acquisition and populated page metadata joins.
+mod connection;
 mod database;
 mod error;
 mod join;
@@ -91,12 +92,11 @@ impl BhlMetadata {
         join::for_each(&connection, keys, emit)
     }
 
-    fn query_connection(&self) -> Result<duckdb::Connection> {
+    fn query_connection(&self) -> Result<connection::MetadataConnection> {
         self.connection
             .lock()
             .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?
             .try_clone()
-            .map_err(error::duckdb)
     }
 
     pub(in crate::bhl) fn stream(
