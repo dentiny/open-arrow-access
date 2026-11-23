@@ -1,16 +1,17 @@
 //! Internet Archive item metadata and attached file bytes.
 
 mod error;
+mod resolver;
 mod validation;
 
 use open_arrow_access_core::Result;
 use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 use serde::{Deserialize, Deserializer, de::Error as _};
 
-use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
-use crate::{ResolvedFileSet, discovery::file_manifest::FileSpec};
+use crate::ResolvedFileSet;
+use crate::http_client::files::HttpFileService;
 use error::map_file_namespace_error;
-use validation::{extract_items_and_validate, validate_credentials, validate_identifier};
+use validation::{validate_credentials, validate_identifier};
 
 const CONFIGURE: &str = "configure_internet_archive";
 const RESOLVE: &str = "resolve_internet_archive";
@@ -69,23 +70,7 @@ impl InternetArchiveService {
             .unwrap();
         self.http
             .resolve_files(&url, |response| {
-                let files =
-                    extract_items_and_validate(response, identifier, self.http.has_credentials())?;
-                Ok(ResolvedFilesPlan::new(
-                    format!("download/{identifier}/"),
-                    files
-                        .iter()
-                        .map(|file| FileSpec {
-                            name: file.name.clone(),
-                            object: file.name.clone().into(),
-                            content_length: None,
-                        })
-                        .collect(),
-                    InternetArchiveMetadata {
-                        identifier: identifier.into(),
-                        files,
-                    },
-                ))
+                resolver::resolve_item(response, identifier, self.http.has_credentials())
             })
             .await
     }
