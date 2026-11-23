@@ -24,10 +24,15 @@ pub(super) fn oai_identifier(article: &str) -> Result<String> {
 
 pub(super) fn pdf_id(name: &[u8]) -> Result<String> {
     let path = std::str::from_utf8(name).map_err(|_| error::invalid_pdf_entry_encoding())?;
-    let name = path.rsplit('/').next().unwrap_or(path);
-    let stem = name
+    let path = path
         .strip_suffix(".pdf")
         .ok_or_else(error::invalid_pdf_extension)?;
+    article_id(path)
+}
+
+/// Normalize a bulk member path after its format suffixes have been removed.
+pub(super) fn article_id(path: &str) -> Result<String> {
+    let stem = path.rsplit('/').next().unwrap_or(path);
     let stem = match stem.rsplit_once('v') {
         Some((id, version))
             if !version.is_empty() && version.bytes().all(|b| b.is_ascii_digit()) =>

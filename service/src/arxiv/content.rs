@@ -195,9 +195,10 @@ async fn content_batches(
         validation::content_article_id(batch["entry_name"].as_binary::<i64>().value(0), format)?;
     let index = metadata.resolve(&article).await?;
     let batches = match format {
-        ArxivContentFormat::Pdf => super::pdf::read(batch, &article)?,
         ArxivContentFormat::Latex => super::latex::read(batch, article, options).await?,
-        ArxivContentFormat::Xml => super::xml::read(batch, &article)?,
+        ArxivContentFormat::Pdf | ArxivContentFormat::Xml => {
+            futures::stream::iter([Ok(document_batch(&batch, format, &article)?)]).boxed()
+        }
     };
     Ok(batches
         .map(move |batch| index.attach_content(batch?))

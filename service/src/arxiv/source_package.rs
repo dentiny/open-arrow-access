@@ -60,7 +60,7 @@ pub async fn open_source_package(
     options: ArxivSourceOptions,
 ) -> Result<Box<dyn RecordReader>> {
     let article_id = article_id.into();
-    super::id::pdf_id(format!("{article_id}.pdf").as_bytes())?;
+    super::id::article_id(&article_id)?;
     let schema = options
         .options
         .resolve_projection(&article_schema())?
