@@ -2,9 +2,7 @@
 use super::error;
 use ::duckdb::{Config, Connection};
 use open_arrow_access_core::Result;
-#[cfg(any(feature = "bhl", test))]
-use std::path::Path;
-use std::{ops::Deref, sync::Arc};
+use std::{ops::Deref, path::Path, sync::Arc};
 
 pub(crate) struct ManagedConnection {
     // Fields drop in declaration order: close DuckDB before removing its files.
@@ -26,7 +24,6 @@ impl ManagedConnection {
         Ok((config, directory))
     }
 
-    #[cfg(any(feature = "bhl", test))]
     pub(crate) fn in_memory() -> Result<Self> {
         let (config, directory) = Self::config()?;
         let connection = Connection::open_in_memory_with_flags(config).map_err(error::database)?;
@@ -36,7 +33,6 @@ impl ManagedConnection {
         })
     }
 
-    #[cfg(any(feature = "bhl", test))]
     pub(crate) fn open(path: impl AsRef<Path>, read_only: bool) -> Result<Self> {
         let (mut config, directory) = Self::config()?;
         if read_only {
@@ -52,7 +48,6 @@ impl ManagedConnection {
     }
 
     /// Store both the database and its spill files on disposable local disk.
-    #[cfg(any(feature = "courtlistener", test))]
     pub(crate) fn temporary() -> Result<Self> {
         let (config, directory) = Self::config()?;
         let connection =
@@ -71,7 +66,6 @@ impl ManagedConnection {
         })
     }
 
-    #[cfg(any(feature = "bhl", test))]
     pub(crate) fn close(self) -> Result<()> {
         let result = self
             .connection
