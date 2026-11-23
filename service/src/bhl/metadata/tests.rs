@@ -406,12 +406,7 @@ async fn plain_tables_open_read_only_without_importer_objects_and_keep_query_iso
     assert!(BhlMetadata::open(&path).is_err());
     let metadata = Arc::new(BhlMetadata::open_tables(&path, "fixture-database-v1").unwrap());
     assert_eq!(metadata.info.fingerprint, "fixture-database-v1");
-    assert_eq!(metadata.info.sources.len(), 13);
-    let info = serde_json::to_value(&metadata.info).unwrap();
-    for source in info["sources"].as_object().unwrap().values() {
-        assert!(source.get("sha256").is_none());
-        assert!(source["path"].as_str().unwrap().contains("#table="));
-    }
+    assert!(metadata.info.sources.is_empty());
     let actual = read(&metadata, &[ITEM, PART]);
     for (actual, expected) in actual.iter().zip(&expected) {
         assert_eq!(actual.metadata, expected.metadata);

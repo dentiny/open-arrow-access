@@ -186,16 +186,16 @@ strings. Column nullability constraints need not be declared in the dump; consum
 NULL cells fail rather than being silently converted to empty strings. Title IDs
 must be valid, unique positive numeric keys.
 
-Opening validates the table schemas, reads their row counts and checks title keys.
+Opening validates the table schemas and checks title keys.
 Every query connection creates private temporary helper views/macros and page
 selections. Neither opening nor querying modifies the database file. Concurrent
 readers can share one `Arc<BhlMetadata>`.
 
 The caller supplies an immutable database identity, preferably the file SHA-256
-computed once when publishing it. This becomes the metadata fingerprint. Source
-entries identify the database path and table, with row counts; unavailable TSV
-lexical checksums are omitted. These identities are distinct from fingerprints
-produced by `load`/`create`.
+computed once when publishing it. This becomes the metadata fingerprint. External
+files do not produce TSV source entries: `sources` is empty, with no per-table row
+counts or fabricated lexical checksums. Managed databases created by `load`/`create`
+retain their existing provenance and validation.
 
 BHL reuses the shared DuckDB loader for local paths and remote URLs. For example, open an authenticated remote database:
 

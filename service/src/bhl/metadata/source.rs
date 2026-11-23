@@ -17,9 +17,7 @@ use std::{
 pub struct SourceInfo {
     pub path: String,
     pub rows: u64,
-    /// Hash of decoded lexical cell rows for imported TSVs. Unavailable for
-    /// caller-owned tables; omitted rather than inventing a source checksum.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    /// Hash of decoded lexical cell rows, not compressed bytes or AWS versions.
     pub sha256: String,
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -29,9 +27,8 @@ pub struct BhlMetadataInfo {
     /// it is not the caller's storage location or an immutable snapshot ID.
     pub source_root: String,
     pub fingerprint: String,
-    /// Source tables keyed by name (e.g. `title` or `page`). Imported tables
-    /// retain their AWS URI and lexical checksum. Externally opened tables
-    /// identify the database/table and row count, without a lexical checksum.
+    /// Imported TSV tables keyed by name, with source URI, row count and checksum.
+    /// Empty for externally opened databases, which use the caller's fingerprint.
     pub sources: BTreeMap<String, SourceInfo>,
 }
 

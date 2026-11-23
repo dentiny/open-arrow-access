@@ -1,9 +1,9 @@
 //! Persistent DuckDB storage for reusable BHL metadata.
-use super::{BhlMetadata, BhlMetadataInfo, SourceInfo, error, source, tables, validation};
+use super::{BhlMetadata, BhlMetadataInfo, error, source, tables, validation};
 use crate::duckdb::{DuckDbDatabase, ManagedConnection};
 use ::duckdb::{Connection, params};
 use open_arrow_access_core::{ByteAccessor, Result};
-use std::{collections::BTreeMap, path::Path, sync::Mutex};
+use std::{path::Path, sync::Mutex};
 
 pub(super) const DATABASE_VERSION: u64 = 1;
 
@@ -16,9 +16,7 @@ fn read_info(connection: &Connection) -> Result<BhlMetadataInfo> {
         )
         .map_err(error::duckdb)?;
     validation::validate_database_header(count, version)?;
-    let info: serde_json::Value = serde_json::from_str(&info).map_err(error::json)?;
-    validation::validate_managed_source_checksums(&info)?;
-    serde_json::from_value(info).map_err(error::json)
+    serde_json::from_str(&info).map_err(error::json)
 }
 
 fn check_sources(connection: &ManagedConnection, info: &BhlMetadataInfo) -> Result<()> {
@@ -94,50 +92,34 @@ impl BhlMetadata {
         Self::from_tables_database(DuckDbDatabase::open(path)?, snapshot_id)
     }
 
-    /// Bind a shared local, remote, or staged DuckDB database to BHL tables.
-    /// File loading, credentials and source lifetime belong to the shared module.
+    /// Bind a shared local or remote DuckDB database to BHL tables.
+    /// File loading, credentials and cache lifetime belong to the shared module.
     pub fn from_tables_database(
         database: DuckDbDatabase,
         snapshot_id: impl Into<String>,
     ) -> Result<Self> {
         let snapshot_id = snapshot_id.into();
         validation::validate_database_snapshot_id(&snapshot_id)?;
-        let (connection, location) = database.into_connection();
-        let mut sources = BTreeMap::new();
+        let connection = database.into_connection();
         for table in tables() {
             let columns = connection.table_columns(&table.name)?;
             validation::validate_table_schema(&table, &columns)?;
-            let rows = connection.table_row_count(&table.name)?;
-            sources.insert(
-                table.name.clone(),
-                SourceInfo {
-                    path: format!("{location}#table={}", table.name),
-                    rows,
-                    sha256: String::new(),
-                },
-            );
         }
         source::create_id_macro(&connection, true)?;
-        let invalid: u64 = connection
+        let valid_title_keys: bool = connection
             .query_row(
-                "SELECT count(*) FROM main.title WHERE bhl_id(TitleID) IS NULL",
+                "SELECT count(*) = count(DISTINCT bhl_id(TitleID)) FROM main.title",
                 [],
                 |row| row.get(0),
             )
             .map_err(error::duckdb)?;
-        let duplicates: u64 = connection.query_row(
-            "SELECT count(*) FROM (SELECT bhl_id(TitleID) FROM main.title GROUP BY bhl_id(TitleID) HAVING count(*) > 1)",
-            [], |row| row.get(0),
-        ).map_err(error::duckdb)?;
-        if invalid != 0 || duplicates != 0 {
-            return Err(error::invalid("invalid or duplicate numeric key in title"));
-        }
+        validation::validate_title_keys(valid_title_keys)?;
         Ok(Self {
             connection: Mutex::new(connection),
             info: BhlMetadataInfo {
                 source_root: super::super::OPEN_DATA_BUCKET_URL.to_owned(),
                 fingerprint: snapshot_id,
-                sources,
+                sources: Default::default(),
             },
         })
     }

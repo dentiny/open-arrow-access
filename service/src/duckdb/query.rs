@@ -15,8 +15,6 @@ use std::path::Path;
 pub struct DuckDbDatabase {
     // The managed connection retains scratch/cache storage for all clones.
     connection: ManagedConnection,
-    // Source database path or URL, retained for consumer provenance records.
-    location: String,
 }
 
 impl DuckDbDatabase {
@@ -24,8 +22,7 @@ impl DuckDbDatabase {
     /// created empty database. Paths are passed directly to DuckDB, never SQL.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Ok(Self {
-            connection: ManagedConnection::open(&path, true)?,
-            location: path.as_ref().to_string_lossy().into_owned(),
+            connection: ManagedConnection::open(path, true)?,
         })
     }
 
@@ -41,7 +38,6 @@ impl DuckDbDatabase {
     pub fn connect(location: &str, secret_sql_file: Option<&Path>) -> Result<Self> {
         Ok(Self {
             connection: ManagedConnection::connect(location, secret_sql_file)?,
-            location: location.to_owned(),
         })
     }
 
@@ -50,12 +46,11 @@ impl DuckDbDatabase {
     pub fn try_clone(&self) -> Result<Self> {
         Ok(Self {
             connection: self.connection.try_clone()?,
-            location: self.location.clone(),
         })
     }
 
-    pub(crate) fn into_connection(self) -> (ManagedConnection, String) {
-        (self.connection, self.location)
+    pub(crate) fn into_connection(self) -> ManagedConnection {
+        self.connection
     }
 
     /// Execute SQL with bound parameters and emit Arrow batches incrementally.
