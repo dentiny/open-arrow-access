@@ -4,7 +4,7 @@ use open_arrow_access_core::{
     ByteMetadata, ByteReader, Result, StreamReader, into_async_read, read_chunks,
 };
 use std::sync::{
-    Arc, Weak,
+    Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use tokio_util::compat::{Compat, FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
@@ -28,7 +28,6 @@ pub struct TarStream {
     entries: Option<tokio_tar::Entries<Input>>,
     metadata: ByteMetadata,
     index: usize,
-    active: Weak<()>,
     remaining: Arc<AtomicU64>,
     failed: Arc<AtomicBool>,
     ended: bool,
@@ -47,7 +46,6 @@ impl TarStream {
             entries: Some(entries),
             metadata,
             index: 0,
-            active: Weak::new(),
             remaining: Arc::new(AtomicU64::new(0)),
             failed: Arc::new(AtomicBool::new(false)),
             ended: false,
@@ -63,7 +61,8 @@ impl TarStream {
             self.archive = None;
             return Ok(None);
         }
-        if self.active.upgrade().is_some() && self.remaining.load(Ordering::Acquire) != 0 {
+        // The body stream holds the other reference until EOF or drop.
+        if Arc::strong_count(&self.remaining) > 1 && self.remaining.load(Ordering::Acquire) != 0 {
             return Err(error::active_entry());
         }
         let result = self.read_entry().await;
@@ -80,22 +79,19 @@ impl TarStream {
                 let entry = entry.map_err(error::header_error)?;
                 let selected = validation::entry(
                     self.index,
-                    entry.path_bytes(),
+                    entry.path_bytes().map_err(error::header_error)?,
                     entry.effective_size(),
                     entry.header().entry_type().is_file(),
                     entry.header().entry_type().is_dir(),
                 )?;
                 self.index += 1;
                 self.remaining = Arc::new(AtomicU64::new(selected.size));
-                let token = Arc::new(());
-                self.active = Arc::downgrade(&token);
                 let remaining = self.remaining.clone();
                 let failed = self.failed.clone();
                 let mut metadata = self.metadata.clone();
                 metadata.content_length = Some(selected.size);
                 let chunks = read_chunks(entry.compat(), DEFAULT_CHUNK_SIZE)
                     .inspect_ok(move |bytes| {
-                        let _keep_body_alive = &token;
                         remaining.fetch_sub(bytes.len() as u64, Ordering::Release);
                     })
                     .map_err(move |error| {

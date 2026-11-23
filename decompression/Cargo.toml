@@ -23,7 +23,7 @@ open-arrow-access-core.workspace = true
 tar = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, features = ["rt"] }
 tokio-tar = { package = "astral-tokio-tar", version = "0.7.1", default-features = false, optional = true }
-tokio-util = { version = "0.7.20", default-features = false, features = ["compat", "io-util", "rt"], optional = true }
+tokio-util = { version = "0.7.20", default-features = false, features = ["compat", "rt"], optional = true }
 
 [dev-dependencies]
 more-asserts.workspace = true

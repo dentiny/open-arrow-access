@@ -1,62 +1,79 @@
 //! Bridge ranged indexing to synchronous I/O, cancelling reads when dropped.
-use futures::io::{AsyncRead, AsyncSeek};
-use std::{
-    future::Future,
-    io::{self, SeekFrom},
-    pin::Pin,
-    task::{Context, Poll},
-};
-use tokio_util::{compat::FuturesAsyncReadCompatExt, io::SyncIoBridge, sync::CancellationToken};
+use futures::io::{AsyncRead, AsyncReadExt, AsyncSeek, AsyncSeekExt};
+use std::{future::Future, io};
+use tokio_util::sync::CancellationToken;
 
-pub(super) struct Cancellable<R> {
-    inner: R,
-    cancelled: Pin<Box<dyn Future<Output = ()> + Send>>,
-}
-
-impl<R> Cancellable<R> {
-    fn check(&mut self, cx: &mut Context<'_>) -> io::Result<()> {
-        if self.cancelled.as_mut().poll(cx).is_ready() {
-            return Err(io::Error::new(
-                io::ErrorKind::BrokenPipe,
-                "TAR reader dropped",
-            ));
-        }
-        Ok(())
-    }
-}
-
-type PackageInput<R> = SyncIoBridge<tokio_util::compat::Compat<Cancellable<R>>>;
-
-pub(super) fn reader<R: AsyncRead + Unpin>(
+pub(super) struct Reader<R> {
     input: R,
     token: CancellationToken,
     handle: tokio::runtime::Handle,
-) -> PackageInput<R> {
-    let input = Cancellable {
-        inner: input,
-        cancelled: Box::pin(token.cancelled_owned()),
-    };
-    SyncIoBridge::new_with_handle(input.compat(), handle)
 }
 
-impl<R: AsyncRead + Unpin> AsyncRead for Cancellable<R> {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        output: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
-        self.check(cx)?;
-        Pin::new(&mut self.inner).poll_read(cx, output)
+pub(super) fn reader<R>(
+    input: R,
+    token: CancellationToken,
+    handle: tokio::runtime::Handle,
+) -> Reader<R> {
+    Reader {
+        input,
+        token,
+        handle,
     }
 }
 
-impl<R: AsyncSeek + Unpin> AsyncSeek for Cancellable<R> {
-    fn poll_seek(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        from: SeekFrom,
-    ) -> Poll<io::Result<u64>> {
-        self.check(cx)?;
-        Pin::new(&mut self.inner).poll_seek(cx, from)
+fn run<T>(
+    handle: &tokio::runtime::Handle,
+    token: &CancellationToken,
+    operation: impl Future<Output = io::Result<T>>,
+) -> io::Result<T> {
+    handle
+        .block_on(token.run_until_cancelled(operation))
+        .unwrap_or_else(|| {
+            Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "TAR reader dropped",
+            ))
+        })
+}
+
+impl<R: AsyncRead + Unpin> io::Read for Reader<R> {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        run(&self.handle, &self.token, self.input.read(output))
+    }
+}
+
+impl<R: AsyncSeek + Unpin> io::Seek for Reader<R> {
+    fn seek(&mut self, from: io::SeekFrom) -> io::Result<u64> {
+        run(&self.handle, &self.token, self.input.seek(from))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::{TryStreamExt, channel::oneshot, stream};
+    use std::{io::Read, task::Poll};
+
+    #[tokio::test]
+    async fn dropping_guard_cancels_pending_read() {
+        let (started, waiting) = oneshot::channel();
+        let mut started = Some(started);
+        let input = stream::poll_fn(move |_| {
+            if let Some(started) = started.take() {
+                let _ = started.send(());
+            }
+            Poll::Pending::<Option<io::Result<Vec<u8>>>>
+        })
+        .into_async_read();
+        let token = CancellationToken::new();
+        let guard = token.clone().drop_guard();
+        let mut input = reader(input, token, tokio::runtime::Handle::current());
+        let worker = tokio::task::spawn_blocking(move || input.read(&mut [0; 512]));
+        waiting.await.unwrap();
+        drop(guard);
+        assert_eq!(
+            worker.await.unwrap().unwrap_err().kind(),
+            io::ErrorKind::BrokenPipe
+        );
     }
 }

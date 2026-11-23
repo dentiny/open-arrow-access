@@ -57,12 +57,9 @@ impl TarArchive {
         let entries = handle
             .spawn_blocking(move || {
                 let mut archive = tar::Archive::new(input);
-                let mut input = archive.entries_with_seek().map_err(error::header_error)?;
+                let input = archive.entries_with_seek().map_err(error::header_error)?;
                 let mut entries = Vec::new();
-                loop {
-                    let Some(entry) = input.next() else {
-                        break;
-                    };
+                for entry in input {
                     let entry = entry.map_err(error::header_error)?;
                     let metadata = validation::entry(
                         entries.len(),
