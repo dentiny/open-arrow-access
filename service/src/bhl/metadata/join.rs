@@ -34,6 +34,51 @@ pub(super) fn for_each(
     if keys.is_empty() {
         return Ok(());
     }
+    selection(connection, keys)?;
+    let schema = page_schema();
+    let field = schema.field_with_name("metadata").expect("fixed metadata");
+    let mut statement = connection
+        .prepare(include_str!("join.sql"))
+        .map_err(error::duckdb)?;
+    let _ = statement.stream_arrow([]).map_err(error::duckdb)?;
+    let mut emitted = 0;
+    while let Some(batch) = statement.step().map_err(error::duckdb)? {
+        let batch = RecordBatch::from(&batch);
+        let indices = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .ok_or_else(|| error::invalid("expected request IDs"))?;
+        // Match the fixed nested LargeUtf8/nullability contract.
+        let metadata =
+            arrow_cast::cast(batch.column(1), field.data_type()).map_err(error::arrow)?;
+        let metadata = metadata
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .ok_or_else(|| error::invalid("expected metadata struct"))?;
+        for row in 0..batch.num_rows() {
+            let index = usize::try_from(indices.value(row))
+                .map_err(|_| error::invalid("request ID overflow"))?;
+            let object = keys
+                .get(index)
+                .ok_or_else(|| error::invalid("unknown request ID"))?;
+            emit(BhlPageMetadata {
+                identity: BhlPageIdentity::parse(object.locator())?,
+                object: object.clone(),
+                metadata: metadata.slice(row, 1),
+                missing: strings(batch.column(2).as_ref(), row)?,
+                conflicts: strings(batch.column(3).as_ref(), row)?,
+            })?;
+            emitted += 1;
+        }
+    }
+    if emitted != keys.len() {
+        return Err(error::invalid("unexpected joined page count"));
+    }
+    Ok(())
+}
+
+pub(super) fn selection(connection: &duckdb::Connection, keys: &[ObjectRef]) -> Result<()> {
     connection
         .execute_batch(
             "CREATE TEMP TABLE bhl_selection (
@@ -89,46 +134,6 @@ pub(super) fn for_each(
             offset = end;
         }
         appender.flush().map_err(error::duckdb)?;
-    }
-    let schema = page_schema();
-    let field = schema.field_with_name("metadata").expect("fixed metadata");
-    let mut statement = connection
-        .prepare(include_str!("join.sql"))
-        .map_err(error::duckdb)?;
-    let _ = statement.stream_arrow([]).map_err(error::duckdb)?;
-    let mut emitted = 0;
-    while let Some(batch) = statement.step().map_err(error::duckdb)? {
-        let batch = RecordBatch::from(&batch);
-        let indices = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<UInt64Array>()
-            .ok_or_else(|| error::invalid("expected request IDs"))?;
-        // Match the fixed nested LargeUtf8/nullability contract.
-        let metadata =
-            arrow_cast::cast(batch.column(1), field.data_type()).map_err(error::arrow)?;
-        let metadata = metadata
-            .as_any()
-            .downcast_ref::<StructArray>()
-            .ok_or_else(|| error::invalid("expected metadata struct"))?;
-        for row in 0..batch.num_rows() {
-            let index = usize::try_from(indices.value(row))
-                .map_err(|_| error::invalid("request ID overflow"))?;
-            let object = keys
-                .get(index)
-                .ok_or_else(|| error::invalid("unknown request ID"))?;
-            emit(BhlPageMetadata {
-                identity: BhlPageIdentity::parse(object.locator())?,
-                object: object.clone(),
-                metadata: metadata.slice(row, 1),
-                missing: strings(batch.column(2).as_ref(), row)?,
-                conflicts: strings(batch.column(3).as_ref(), row)?,
-            })?;
-            emitted += 1;
-        }
-    }
-    if emitted != keys.len() {
-        return Err(error::invalid("unexpected joined page count"));
     }
     Ok(())
 }

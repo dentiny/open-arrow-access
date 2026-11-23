@@ -158,3 +158,27 @@ Source freshness, acquisition consistency, storage and distribution are
 caller-owned. Use a compatible DuckDB storage version. Existing `load` behavior
 remains an in-memory import; conversion-service job wiring remains a consumer
 adoption step after this API is released.
+
+## Canonical OCR versions in directory scans
+
+`BhlShardAccessor` reconciles all listed versions by entity type, entity ID and
+PageID before planning any OCR reads. Source filename sequences can be zero;
+entity IDs and PageIDs must remain positive. For each page, the accessor requires
+one authoritative `page.SequenceOrder` for items or `partpage.SequenceOrder` for
+parts, then selects exactly one listed key with that sequence. Missing or invalid
+sequences, duplicate metadata rows, missing matching keys and multiple matching
+keys fail with source-key context. `with_report` still controls joined metadata
+and parent conflicts, but cannot bypass canonical selection.
+
+Every excluded version is quarantined from the scan and reported with its full
+key, the canonical key and metadata sequence. The default audit writes to stderr.
+Use `with_alternative_report` to persist `BhlPageAlternative` records in the
+application's audit store; callback errors abort planning before OCR reads.
+Alternative objects remain in the source bucket. Their bodies are never read,
+compared or assumed equal, even when ETags happen to agree.
+
+Selection runs on a blocking worker using a temporary selection table for the
+whole directory batch. The resulting canonical keys use the existing bounded
+metadata stream and independent OCR partitions. `BhlPageAccessor` with an explicit
+inventory continues to read exactly the requested keys under its caller policy;
+it does not perform directory-version selection.

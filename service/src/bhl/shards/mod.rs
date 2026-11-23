@@ -3,7 +3,7 @@ mod accessor;
 mod request;
 mod validation;
 
-pub use accessor::BhlShardAccessor;
+pub use accessor::{BhlPageAlternative, BhlShardAccessor};
 pub use request::BhlShardReadRequest;
 
 #[cfg(test)]

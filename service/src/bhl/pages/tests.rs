@@ -72,10 +72,17 @@ fn schema_and_page_identity_match_the_contract() {
             .sum::<usize>(),
         104
     );
+    assert_eq!(
+        BhlPageIdentity::parse("ocr/item-1/item-1-3-0000.txt")
+            .unwrap()
+            .sequence,
+        0
+    );
     for key in [
         "ocr/item-1/part-1-3-1.txt",
         "ocr/item-1/item-2-3-1.txt",
         "ocr/item-1/item-1-0-1.txt",
+        "ocr/item-0/item-0-3-1.txt",
         "ocr/item-1/item-1-3-18446744073709551616.txt",
     ] {
         assert!(BhlPageIdentity::parse(key).is_err());
