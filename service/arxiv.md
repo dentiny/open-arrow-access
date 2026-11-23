@@ -327,7 +327,7 @@ is one manifest-selected TAR; a month is a convenient group of those units.
   buffers all affect peak memory. Projection without `data` still drains the
   sequential member bodies; it saves materialization, not download bandwidth.
 - Default TAR limits allow 65,536 decoded entries and 1 GiB per member; callers can use
-  `with_tar_limits`. The upstream `tar` package resolves GNU/USTAR/PAX metadata;
+  `with_tar_limits`. The upstream TAR packages resolve GNU/USTAR/PAX metadata;
   regular files and directories are exposed, while links and sparse files are rejected. A signed sample confirmed the first shard uses GNU/USTAR headers; this is
   not full-corpus format validation.
 

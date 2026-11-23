@@ -314,6 +314,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "astral-tokio-tar"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "821ed36daf7c40d00a7b62759f9833fb279fb7c87dd989ec0a4d626dcd8d1dca"
+dependencies = [
+ "futures-core",
+ "libc",
+ "portable-atomic",
+ "rustc-hash",
+ "rustix 1.1.6",
+ "tokio",
+ "tokio-stream",
+ "zerocopy",
+]
+
+[[package]]
 name = "async-compression"
 version = "0.4.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3046,6 +3062,7 @@ dependencies = [
 name = "open-arrow-access-decompression"
 version = "0.20.3"
 dependencies = [
+ "astral-tokio-tar",
  "async-compression",
  "async_zip",
  "futures",

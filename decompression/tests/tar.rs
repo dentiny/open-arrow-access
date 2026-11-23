@@ -197,8 +197,7 @@ async fn streams_first_body_without_scanning_later_headers_or_using_ranges() {
     assert_eq!(first.metadata().source, Some("archive".into()));
     assert_eq!(first.metadata().version.as_deref(), Some("snapshot"));
     assert_eq!(first.metadata().content_length, Some(entry.size));
-    // Package parsing is demand-driven, with at most one body chunk prefetched.
-    assert!(source.observations.reads.load(Ordering::SeqCst) <= 17);
+    assert_eq!(source.observations.reads.load(Ordering::SeqCst), 16);
     expect_err_kind(archive.next_entry().await, ErrorKind::InvalidInput);
     byte_layer::assert_output(first.as_mut(), b"%PDF-first-paper", 64)
         .await
@@ -288,12 +287,15 @@ async fn cancelled_sequential_header_and_skip_resume_from_persistent_progress() 
     use open_arrow_access_decompression::tar::TarStream;
     use std::{
         pin::pin,
-        sync::{Arc, atomic::Ordering},
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
         task::Context,
     };
 
     let bytes = Bytes::from(fixture!("tar", "mixed.tar").await);
-    let allowed = Arc::new(Gate::new(1));
+    let allowed = Arc::new(AtomicUsize::new(1));
     let input = gated_source(bytes, 100, allowed.clone());
     let mut archive = TarStream::new(input, TarLimits::default());
     let mut context = Context::from_waker(futures::task::noop_waker_ref());
@@ -364,35 +366,16 @@ async fn sequential_body_source_errors_and_truncation_terminate_archive() {
     }
 }
 
-struct Gate {
-    allowed: std::sync::atomic::AtomicUsize,
-    waker: futures::task::AtomicWaker,
-}
-
-impl Gate {
-    fn new(allowed: usize) -> Self {
-        Self {
-            allowed: std::sync::atomic::AtomicUsize::new(allowed),
-            waker: futures::task::AtomicWaker::new(),
-        }
-    }
-    fn store(&self, allowed: usize, ordering: std::sync::atomic::Ordering) {
-        self.allowed.store(allowed, ordering);
-        self.waker.wake();
-    }
-}
-
 fn gated_source(
     bytes: open_arrow_access_core::Bytes,
     chunk_size: usize,
-    allowed: std::sync::Arc<Gate>,
+    allowed: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 ) -> Box<dyn open_arrow_access_core::ByteReader> {
     use open_arrow_access_core::{ByteMetadata, StreamReader};
     use std::{sync::atomic::Ordering, task::Poll};
     let mut position = 0;
-    let source = futures::stream::poll_fn(move |cx| {
-        allowed.waker.register(cx.waker());
-        if position / chunk_size >= allowed.allowed.load(Ordering::SeqCst) {
+    let source = futures::stream::poll_fn(move |_| {
+        if position / chunk_size >= allowed.load(Ordering::SeqCst) {
             return Poll::Pending;
         }
         if position == bytes.len() {
@@ -413,11 +396,14 @@ async fn cancelled_live_body_read_rejects_advancement_without_waiting_for_its_lo
     use open_arrow_access_decompression::tar::TarStream;
     use std::{
         pin::pin,
-        sync::{Arc, atomic::Ordering},
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
         task::Context,
     };
 
-    let allowed = Arc::new(Gate::new(2));
+    let allowed = Arc::new(AtomicUsize::new(2));
     let input = gated_source(
         Bytes::from(fixture!("tar", "mixed.tar").await),
         512,
@@ -533,9 +519,12 @@ async fn cancelled_gnu_long_name_reads_resume() {
     use futures::FutureExt;
     use open_arrow_access_core::Bytes;
     use open_arrow_access_decompression::tar::TarStream;
-    use std::sync::{Arc, atomic::Ordering};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
-    let allowed = Arc::new(Gate::new(6));
+    let allowed = Arc::new(AtomicUsize::new(6));
     let input = gated_source(
         Bytes::from(fixture!("tar", "gnu-longname.tar").await),
         100,

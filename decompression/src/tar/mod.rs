@@ -12,7 +12,7 @@ use futures::stream::try_unfold;
 use open_arrow_access_core::{ByteReader, Result, StreamReader};
 
 use crate::archive::{ArchiveSource, DEFAULT_MAX_ENTRY_BYTES};
-use bridge::{Lease, METADATA_BUDGET};
+use bridge::METADATA_BUDGET;
 use error::{decode, missing_entry};
 use std::sync::atomic::Ordering;
 
@@ -68,8 +68,9 @@ impl TarArchive {
 
     async fn inspect(source: ArchiveSource, limits: TarLimits) -> Result<Self> {
         let handle = tokio::runtime::Handle::try_current().map_err(error::runtime)?;
-        let lease = Arc::new(Lease(tokio_util::sync::CancellationToken::new()));
-        let (input, budget) = bridge::reader(source.input.clone(), lease.0.clone(), handle.clone());
+        let token = tokio_util::sync::CancellationToken::new();
+        let _cancel = token.clone().drop_guard();
+        let (input, budget) = bridge::reader(source.input.clone(), token, handle.clone());
         let archive_len = source.input.content_length();
         let entries = handle
             .spawn_blocking(move || {
@@ -82,7 +83,14 @@ impl TarArchive {
                         break;
                     };
                     let entry = entry.map_err(error::header_error)?;
-                    let metadata = validation::entry(&entry, entries.len(), &limits)?;
+                    let metadata = validation::entry(
+                        entries.len(),
+                        entry.path_bytes(),
+                        entry.size(),
+                        entry.header().entry_type().is_file(),
+                        entry.header().entry_type().is_dir(),
+                        &limits,
+                    )?;
                     let start = entry.raw_file_position();
                     if start
                         .checked_add(metadata.size)
@@ -96,7 +104,6 @@ impl TarArchive {
             })
             .await
             .map_err(error::worker)??;
-        drop(lease);
         Ok(Self {
             source,
             entries: entries.into(),

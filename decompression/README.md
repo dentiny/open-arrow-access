@@ -161,12 +161,13 @@ before reporting completion, surfacing decoder checksum/trailer and source error
 Callers must consume the archive through EOF to complete those checks; dropping
 it early cancels further consumption.
 
-TAR parsing uses `tar::Archive` for GNU/USTAR/PAX headers and resolved names.
-A Tokio blocking worker bridges the synchronous package to asynchronous input;
-sequential bodies use a bounded channel and are never collected in full. Dropping
-the archive and its last live body cancels pending source I/O. Both APIs require
-a Tokio runtime. Links and sparse files remain unsupported by the exposed byte
-entry contract; no filesystem extraction is performed.
+TAR format parsing is delegated to packages: `tar::Archive` for ranged indexing
+and `astral-tokio-tar` for sequential input. Sequential bodies use the shared
+`read_chunks` adapter, without producer tasks, channels or full-body buffering.
+Only ranged indexing requires a Tokio runtime for its synchronous package adapter;
+it seeks past payloads instead of downloading them. Dropping the archive and its
+last live body releases the sequential source. Links and sparse files remain
+unsupported by the exposed byte entry contract; no filesystem extraction is performed.
 
 Default limits are 65,536 decoded entries and 1 GiB per entry. Metadata parsing
 has a 64 KiB read budget plus two header blocks per returned entry. Extension
