@@ -5,6 +5,7 @@ mod error;
 mod planning;
 pub use dialect::{CsvDialect, CsvHeader};
 mod format;
+mod framing;
 mod inference;
 mod reader;
 mod validation;

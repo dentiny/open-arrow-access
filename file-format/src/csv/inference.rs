@@ -1,12 +1,12 @@
 use crate::scan::byte_chunks::ByteChunks;
 
-use std::{io::Cursor, sync::Arc};
+use std::{collections::HashSet, io::Cursor, sync::Arc};
 
 use arrow_schema::{DataType, Schema};
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{ByteReader, Result, SchemaRef, StreamReader};
 
-use super::{CsvDialect, CsvFormat, CsvHeader, error::inference_error, planning::CsvChunks};
+use super::{CsvDialect, CsvFormat, CsvHeader, error::inference_error, framing::CsvFramer};
 
 /// How to determine column types when no explicit schema is supplied.
 /// Header handling remains controlled independently by [`CsvHeader`].
@@ -36,6 +36,29 @@ impl Default for CsvInferenceOptions {
             max_bytes: 64 * 1024 * 1024,
         }
     }
+}
+
+impl CsvInferenceOptions {
+    pub(super) fn validate(self) -> Result<()> {
+        if self.max_records == 0 || self.max_bytes == 0 {
+            return Err(super::error::invalid_inference_limits());
+        }
+        Ok(())
+    }
+}
+
+fn validate_inferred_schema(schema: &Schema) -> Result<()> {
+    let mut names = HashSet::new();
+    for field in schema.fields() {
+        if field.name().is_empty() || !names.insert(field.name()) {
+            return Err(super::error::invalid_inferred_headers());
+        }
+        if field.data_type() == &DataType::Null {
+            return Err(super::error::null_inferred_column());
+        }
+    }
+
+    Ok(())
 }
 
 fn infer_sample(sample: &[u8], has_header: bool, allow_truncated_rows: bool) -> Result<Schema> {
@@ -117,7 +140,7 @@ pub(super) async fn resolve(
 ) -> Result<Option<ResolvedCsvInput>> {
     let mut metadata = input.metadata().clone();
     // Frame every row, including the potential header, with the source dialect.
-    let mut records = CsvChunks::new(
+    let mut records = CsvFramer::new(
         input,
         CsvDialect {
             header: CsvHeader::Absent,
@@ -173,7 +196,7 @@ pub(super) async fn resolve(
         } else {
             infer_sample(&sample, has_header, dialect.allow_truncated_rows)?
         };
-        super::validation::validate_inferred_schema(&schema)?;
+        validate_inferred_schema(&schema)?;
         (Arc::new(schema), has_header)
     };
     // Canonicalization preserves field contents, but changes the byte representation.
