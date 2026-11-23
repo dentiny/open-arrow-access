@@ -25,9 +25,11 @@ impl AsRef<[u8]> for ArticleBytes {
 /// Share the input Arrow buffer, decode gzip when present, and sniff one TAR
 /// header before choosing a single-file or archive reader. TAR batches are
 /// emitted incrementally; consume the stream through EOF to catch trailer errors.
-pub(super) async fn read(batch: RecordBatch, options: ReadOptions) -> Result<RecordStream> {
-    let name = batch["entry_name"].as_binary::<i64>().value(0);
-    let article_id = validation::content_article_id(name, ArxivContentFormat::Latex)?;
+pub(super) async fn read(
+    batch: RecordBatch,
+    article_id: String,
+    options: ReadOptions,
+) -> Result<RecordStream> {
     let (mut input, source) = latex_input(&batch);
     // Inspect only one TAR header, then replay it into the streaming parser.
     let mut prefix = Vec::with_capacity(validation::TAR_HEADER_SIZE);
