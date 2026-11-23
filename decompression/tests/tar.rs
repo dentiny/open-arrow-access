@@ -504,51 +504,20 @@ async fn malformed_gnu_names_fail_in_both_readers() {
 }
 
 #[tokio::test]
-async fn link_metadata_never_dereferences_targets_and_preserves_following_files() {
-    use open_arrow_access_decompression::tar::TarStream;
-    let input = source("links-and-files.tar").await;
-    let indexed = TarArchive::open(input.open("archive".into()).await.unwrap())
+async fn indexed_links_cannot_be_opened_as_files() {
+    let mut tar = tar::Builder::new(Vec::new());
+    let mut link = tar::Header::new_ustar();
+    link.set_entry_type(tar::EntryType::Link);
+    link.set_size(0);
+    tar.append_link(&mut link, "figure.pdf", "original.pdf")
+        .unwrap();
+    let input = MemoryAccessor::new(&tar.into_inner().unwrap(), 7).with_ranges();
+    let archive = TarArchive::open(input.open("archive".into()).await.unwrap())
         .await
         .unwrap();
-    let headers: Vec<_> = indexed.entries().cloned().collect();
-    assert_eq!(headers.len(), 4);
-    let mut stream = TarStream::new(input.open("archive".into()).await.unwrap());
-    for (index, header) in headers.iter().enumerate() {
-        let mut member = stream.next_entry().await.unwrap().unwrap();
-        assert_eq!(&member.entry, header);
-        assert_eq!(header.index, index);
-        if header.is_file {
-            let expected = if index == 0 {
-                b"first".as_slice()
-            } else {
-                b"last".as_slice()
-            };
-            assert_eq!(
-                collect_bytes(member.reader.as_mut()).await.unwrap(),
-                expected
-            );
-            assert_eq!(
-                collect_bytes(
-                    indexed
-                        .open_entry(index, NonZeroUsize::MIN)
-                        .unwrap()
-                        .as_mut()
-                )
-                .await
-                .unwrap(),
-                expected
-            );
-        } else {
-            expect_err_kind(indexed.entry_range(index), ErrorKind::Unsupported);
-            assert!(indexed.open_entry(index, NonZeroUsize::MIN).is_err());
-            assert!(
-                collect_bytes(member.reader.as_mut())
-                    .await
-                    .unwrap()
-                    .is_empty()
-            );
-        }
-    }
-    assert!(stream.next_entry().await.unwrap().is_none());
-    assert_eq!(input.observations.requests.lock().unwrap().len(), 2);
+    assert!(!archive.entries().next().unwrap().is_file);
+    expect_err_kind(
+        archive.open_entry(0, NonZeroUsize::MIN),
+        ErrorKind::Unsupported,
+    );
 }

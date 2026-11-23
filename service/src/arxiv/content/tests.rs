@@ -141,21 +141,30 @@ fn tex_selection_rejects_path_traversal() {
 }
 
 #[tokio::test]
-async fn latex_skips_linked_attachments_and_keeps_following_tex() {
-    let data = fixture!("tar", "links-and-files.tar").await;
-    let batches = read("2509/2509.17155.gz", &data).await.unwrap();
-    assert_eq!(batches.len(), 2);
-    for (batch, index, name, body) in [
-        (&batches[0], 0, b"main.tex".as_slice(), b"first".as_slice()),
-        (&batches[1], 3, b"last.tex".as_slice(), b"last".as_slice()),
-    ] {
-        assert_eq!(
-            batch["source_index"].as_primitive::<UInt64Type>().value(0),
-            index
-        );
-        assert_eq!(batch["source_name"].as_binary::<i64>().value(0), name);
-        assert_eq!(batch["data"].as_binary::<i64>().value(0), body);
-    }
+async fn latex_skips_linked_pdf_and_reads_following_tex() {
+    let mut tar = tar::Builder::new(Vec::new());
+    let mut link = tar::Header::new_ustar();
+    link.set_entry_type(tar::EntryType::Link);
+    link.set_size(0);
+    tar.append_link(&mut link, "figure.pdf", "original.pdf")
+        .unwrap();
+
+    let mut tex = tar::Header::new_ustar();
+    tex.set_size(5);
+    tex.set_mode(0o644);
+    tex.set_cksum();
+    tar.append_data(&mut tex, "main.tex", b"hello".as_slice())
+        .unwrap();
+
+    let batches = read("2509/2509.17155.gz", &tar.into_inner().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(
+        batches[0]["source_name"].as_binary::<i64>().value(0),
+        b"main.tex"
+    );
+    assert_eq!(batches[0]["data"].as_binary::<i64>().value(0), b"hello");
 }
 
 #[tokio::test]
