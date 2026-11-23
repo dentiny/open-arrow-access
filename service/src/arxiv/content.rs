@@ -171,11 +171,8 @@ impl<A> ArxivContentRecords<A> {
                 secret_sql,
             } => {
                 let database = tokio::task::spawn_blocking(move || {
-                    crate::duckdb::DuckDbDatabase::connect_with_secret_sql(
-                        &location,
-                        secret_sql.as_deref(),
-                    )
-                    .map(ArxivMetadataDatabase::new)
+                    crate::duckdb::DuckDbDatabase::connect(&location, secret_sql.as_deref())
+                        .map(ArxivMetadataDatabase::new)
                 })
                 .await
                 .map_err(super::error::metadata_worker)??;

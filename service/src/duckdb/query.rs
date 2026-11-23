@@ -27,28 +27,19 @@ impl DuckDbDatabase {
     }
 
     /// Open a local path or DuckDB-supported remote URL read-only.
-    /// Execute the optional trusted SQL file (e.g. LOAD httpfs; CREATE SECRET ...)
+    /// Execute the optional trusted SQL string (e.g. LOAD httpfs; CREATE SECRET ...)
     /// before attaching the database. Secrets are temporary unless the script
     /// explicitly requests persistence. cache_httpfs is force-installed from
     /// community and loaded on each connect; its on-disk cache is always
     /// configured before ATTACH, including local paths.
     /// Only requested
     /// blocks are fetched, with no full database download during opening.
-    /// This is synchronous; use a blocking worker in async applications.
-    pub fn connect(location: &str, secret_sql_file: Option<&Path>) -> Result<Self> {
-        Ok(Self {
-            connection: ManagedConnection::connect(location, secret_sql_file)?,
-        })
-    }
-
-    /// Open a local path or remote URL using caller-provided trusted setup SQL.
-    /// Execute the SQL once before configuring cache_httpfs and attaching the
-    /// database read-only, with the same behavior as [`Self::connect`].
     /// The caller can load the SQL from any source or construct it in memory.
     /// SQL execution errors omit the SQL text, which may contain credentials.
-    pub fn connect_with_secret_sql(location: &str, secret_sql: Option<&str>) -> Result<Self> {
+    /// This is synchronous; use a blocking worker in async applications.
+    pub fn connect(location: &str, secret_sql: Option<&str>) -> Result<Self> {
         Ok(Self {
-            connection: ManagedConnection::connect_with_secret_sql(location, secret_sql)?,
+            connection: ManagedConnection::connect(location, secret_sql)?,
         })
     }
 

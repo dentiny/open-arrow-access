@@ -88,7 +88,7 @@ returned through the shared error type. Opening and querying are synchronous;
 run them in a blocking worker when using an async runtime. No provider-specific
 schema validation is performed.
 
-For HTTP and S3 URLs, use `DuckDbDatabase::connect(location, secret_sql_file)`.
+For HTTP and S3 URLs, use `DuckDbDatabase::connect(location, secret_sql)`.
 DuckDB attaches the database read-only and `cache_httpfs` fetches requested blocks
 into a private temporary on-disk cache. Opening does not first download the entire
 database. See [remote access and secrets](#duckdb-native-remote-access-and-secrets).
@@ -375,19 +375,18 @@ through `CrawlOptions`; caller-bound storage retains HTTP, retry and I/O policy.
 
 ### DuckDB-native remote access and secrets
 
-`DuckDbDatabase::connect(location, secret_sql_file)` accepts a local path or a
+`DuckDbDatabase::connect(location, secret_sql)` accepts a local path or a
 DuckDB-supported URL. It creates an in-memory control connection, executes the
-optional trusted SQL file, always configures cache_httpfs, then attaches
+optional trusted SQL string, always configures cache_httpfs, then attaches
 the source read-only and selects it as the default database. Run this synchronous
 API on a blocking worker in async apps.
 
 ```rust,ignore
 use open_arrow_access::service::duckdb::DuckDbDatabase;
-use std::path::Path;
 
 let database = DuckDbDatabase::connect(
     "s3://bucket/metadata.duckdb",
-    Some(Path::new("/run/secrets/duckdb.sql")),
+    Some("CREATE SECRET metadata (TYPE s3, PROVIDER credential_chain);"),
 )?;
 database.query("SELECT * FROM metadata LIMIT 10", [], |batch| {
     println!("{batch:?}");
@@ -395,7 +394,7 @@ database.query("SELECT * FROM metadata LIMIT 10", [], |batch| {
 })?;
 ```
 
-The SQL file can load required extensions and create scoped credentials:
+The SQL string can load required extensions and create scoped credentials:
 
 ```sql
 LOAD httpfs;

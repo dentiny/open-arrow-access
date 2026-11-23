@@ -586,20 +586,20 @@ and query metadata by normalized `article_id` using its index:
 
 ```rust
 use open_arrow_access::service::{arxiv::ArxivMetadataDatabase, duckdb::DuckDbDatabase};
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 // Run blocking connection setup outside async runtime workers.
 let database = tokio::task::spawn_blocking(|| {
     DuckDbDatabase::connect(
         "s3://pretrain-dataset/arxiv-metadata/arxiv.duckdb",
-        Some(Path::new("metadata-secret.sql")),
+        Some("CREATE SECRET metadata (TYPE s3, PROVIDER credential_chain);"),
     )
 }).await??;
 let metadata = Arc::new(ArxivMetadataDatabase::new(database));
 let records = service.records().content(format).with_metadata_database(metadata);
 ```
 
-The optional SQL file configures secrets before attachment. The shared connection
+The optional SQL string configures secrets before attachment. The shared connection
 uses `cache_httpfs` with a private on-disk cache and reads remote ranges instead
 of downloading the whole database. `DuckDbDatabase::open(path)` also supports a
 local snapshot. The table `main.arxiv_metadata` must expose an indexed normalized
