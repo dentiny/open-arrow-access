@@ -372,6 +372,140 @@ async fn failed_import_does_not_produce_a_readable_database() {
     assert!(BhlMetadata::open(&path).is_err());
 }
 
+async fn plain_database() -> (tempfile::TempDir, std::path::PathBuf, Vec<BhlPageMetadata>) {
+    let metadata = load().await;
+    let expected = read(&metadata, &[ITEM, PART]);
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("plain'quoted.duckdb");
+    let connection = metadata.connection.lock().unwrap();
+    connection
+        .execute_batch(&format!(
+            "ATTACH '{}' AS plain_dump;",
+            path.to_string_lossy().replace('\'', "''")
+        ))
+        .unwrap();
+    for table in tables() {
+        connection
+            .execute_batch(&format!(
+                "CREATE TABLE plain_dump.main.\"{}\" AS SELECT * FROM main.\"{}\";",
+                table.name, table.name
+            ))
+            .unwrap();
+    }
+    connection.execute_batch("DETACH plain_dump;").unwrap();
+    drop(connection);
+    drop(metadata);
+    (directory, path, expected)
+}
+
+#[tokio::test]
+async fn plain_tables_open_read_only_without_importer_objects_and_keep_query_isolation() {
+    let (_directory, path, expected) = plain_database().await;
+    let original = std::fs::read(&path).unwrap();
+    // Managed databases retain their strict importer-manifest contract.
+    assert!(BhlMetadata::open(&path).is_err());
+    let metadata = Arc::new(BhlMetadata::open_tables(&path, "fixture-database-v1").unwrap());
+    assert_eq!(metadata.info.fingerprint, "fixture-database-v1");
+    assert_eq!(metadata.info.sources.len(), 13);
+    let info = serde_json::to_value(&metadata.info).unwrap();
+    for source in info["sources"].as_object().unwrap().values() {
+        assert!(source.get("sha256").is_none());
+        assert!(source["path"].as_str().unwrap().contains("#table="));
+    }
+    let actual = read(&metadata, &[ITEM, PART]);
+    for (actual, expected) in actual.iter().zip(&expected) {
+        assert_eq!(actual.metadata, expected.metadata);
+        assert_eq!(actual.missing, expected.missing);
+        assert_eq!(actual.conflicts, expected.conflicts);
+    }
+    // Each clone must initialize its own temporary helpers and selection table.
+    let readers = [ITEM, PART].map(|key| {
+        let metadata = metadata.clone();
+        std::thread::spawn(move || {
+            assert_eq!(read(&metadata, &[key]).len(), 1);
+            assert_eq!(read(&metadata, &[key]).len(), 1);
+        })
+    });
+    for reader in readers {
+        reader.join().unwrap();
+    }
+    assert!(
+        metadata
+            .connection
+            .lock()
+            .unwrap()
+            .execute_batch("DELETE FROM main.page")
+            .is_err()
+    );
+    drop(metadata);
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+}
+
+#[tokio::test]
+async fn plain_tables_reject_bad_schemas_keys_and_consumed_null_cells() {
+    for sql in [
+        "DROP TABLE page",
+        "ALTER TABLE title ALTER TitleID TYPE BIGINT",
+        "INSERT INTO title SELECT * FROM title",
+        "UPDATE title SET TitleID = 'invalid'",
+    ] {
+        let (_directory, path, _) = plain_database().await;
+        let connection = ::duckdb::Connection::open(&path).unwrap();
+        connection.execute_batch(sql).unwrap();
+        drop(connection);
+        assert!(
+            BhlMetadata::open_tables(&path, "snapshot").is_err(),
+            "{sql}"
+        );
+    }
+    let (_directory, path, _) = plain_database().await;
+    let connection = ::duckdb::Connection::open(&path).unwrap();
+    connection
+        .execute_batch("UPDATE title SET FullTitle = NULL")
+        .unwrap();
+    drop(connection);
+    let metadata = BhlMetadata::open_tables(&path, "snapshot").unwrap();
+    assert!(
+        metadata
+            .for_each(&[ObjectRef::new(ITEM)], |_| Ok(()))
+            .is_err()
+    );
+    assert!(BhlMetadata::open_tables(&path, "  ").is_err());
+    let missing = path.with_file_name("missing.duckdb");
+    assert!(BhlMetadata::open_tables(&missing, "snapshot").is_err());
+    assert!(!missing.exists());
+}
+
+#[test]
+#[ignore = "requires a caller-provided BHL_METADATA_DATABASE SQL dump"]
+fn opens_real_plain_database_without_importing_tables() {
+    let path = std::env::var("BHL_METADATA_DATABASE").expect("BHL_METADATA_DATABASE");
+    let metadata = BhlMetadata::open_tables(&path, "real-database-validation").unwrap();
+    assert_eq!(metadata.info.sources.len(), 13);
+    let connection = metadata.query_connection().unwrap();
+    let (page, item, sequence): (u64, u64, u64) = connection
+        .query_row(
+            "SELECT bhl_id(PageID), bhl_id(ItemID), bhl_id(SequenceOrder)
+             FROM main.page WHERE ItemID = '24311' AND bhl_id(SequenceOrder) > 0 LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    drop(connection);
+    let key = ObjectRef::new(format!(
+        "ocr/item-{item:06}/item-{item:06}-{page:08}-{sequence:04}.txt"
+    ));
+    let mut count = 0;
+    metadata
+        .for_each(&[key], |row| {
+            assert_eq!(cell(&row.metadata, "item", "ItemID"), "24311");
+            count += 1;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
 #[tokio::test]
 async fn part_parent_associations_preserve_blank_ids_and_do_not_multiply_pages() {
     let (_root, storage) = source_table("part", "part-multi-item.txt.gz").await;

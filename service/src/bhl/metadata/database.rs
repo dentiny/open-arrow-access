@@ -1,9 +1,9 @@
 //! Persistent DuckDB storage for reusable BHL metadata.
-use super::{BhlMetadata, BhlMetadataInfo, error, tables, validation};
+use super::{BhlMetadata, BhlMetadataInfo, SourceInfo, error, source, tables, validation};
 use crate::duckdb::ManagedConnection;
 use ::duckdb::{Connection, params};
 use open_arrow_access_core::{ByteAccessor, Result};
-use std::{path::Path, sync::Mutex};
+use std::{collections::BTreeMap, path::Path, sync::Mutex};
 
 pub(super) const DATABASE_VERSION: u64 = 1;
 
@@ -92,6 +92,77 @@ impl BhlMetadata {
         Ok(Self {
             connection: Mutex::new(connection),
             info,
+            external_tables: false,
+        })
+    }
+
+    /// Open a caller-created DuckDB file containing the 13 BHL source tables.
+    /// No TSV acquisition, table copying, or private manifest is required.
+    ///
+    /// The file is opened read-only. All required columns must appear in source
+    /// order as VARCHAR, preserving empty strings. Query helpers are temporary
+    /// and private to each query connection. `snapshot_id` must identify this
+    /// immutable database (for example, its SHA-256 computed once by the caller).
+    /// It is not presented as a checksum of the original TSV rows.
+    pub fn open_tables(path: impl AsRef<Path>, snapshot_id: impl Into<String>) -> Result<Self> {
+        let snapshot_id = snapshot_id.into();
+        if snapshot_id.trim().is_empty() {
+            return Err(error::invalid("database snapshot_id must not be blank"));
+        }
+        let path = path.as_ref();
+        let connection = ManagedConnection::open(path, true)?;
+        let mut sources = BTreeMap::new();
+        for table in tables() {
+            let mut statement = connection
+                .prepare(&format!("DESCRIBE main.\"{}\"", table.name))
+                .map_err(error::duckdb)?;
+            let columns = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(error::duckdb)?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(error::duckdb)?;
+            validation::validate_table_schema(&table, &columns)?;
+            let rows = connection
+                .query_row(
+                    &format!("SELECT count(*) FROM main.\"{}\"", table.name),
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(error::duckdb)?;
+            sources.insert(
+                table.name.clone(),
+                SourceInfo {
+                    path: format!("{}#table={}", path.display(), table.name),
+                    rows,
+                    sha256: String::new(),
+                },
+            );
+        }
+        source::create_id_macro(&connection, true)?;
+        let invalid: u64 = connection
+            .query_row(
+                "SELECT count(*) FROM main.title WHERE bhl_id(TitleID) IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(error::duckdb)?;
+        let duplicates: u64 = connection.query_row(
+            "SELECT count(*) FROM (SELECT bhl_id(TitleID) FROM main.title GROUP BY bhl_id(TitleID) HAVING count(*) > 1)",
+            [], |row| row.get(0),
+        ).map_err(error::duckdb)?;
+        if invalid != 0 || duplicates != 0 {
+            return Err(error::invalid("invalid or duplicate numeric key in title"));
+        }
+        Ok(Self {
+            connection: Mutex::new(connection),
+            external_tables: true,
+            info: BhlMetadataInfo {
+                source_root: super::super::OPEN_DATA_BUCKET_URL.to_owned(),
+                fingerprint: snapshot_id,
+                sources,
+            },
         })
     }
 }

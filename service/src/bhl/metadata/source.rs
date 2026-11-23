@@ -17,7 +17,9 @@ use std::{
 pub struct SourceInfo {
     pub path: String,
     pub rows: u64,
-    /// Hash of decoded lexical cell rows, not compressed bytes or AWS versions.
+    /// Hash of decoded lexical cell rows for imported TSVs. Unavailable for
+    /// caller-owned tables; omitted rather than inventing a source checksum.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub sha256: String,
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -27,9 +29,9 @@ pub struct BhlMetadataInfo {
     /// it is not the caller's storage location or an immutable snapshot ID.
     pub source_root: String,
     pub fingerprint: String,
-    /// Imported source tables keyed by table name (e.g. `title` or `page`).
-    /// Each entry records the canonical AWS object URI, imported row count,
-    /// and SHA-256 fingerprint of the decoded lexical cells.
+    /// Source tables keyed by name (e.g. `title` or `page`). Imported tables
+    /// retain their AWS URI and lexical checksum. Externally opened tables
+    /// identify the database/table and row count, without a lexical checksum.
     pub sources: BTreeMap<String, SourceInfo>,
 }
 
@@ -37,6 +39,7 @@ pub struct BhlMetadataInfo {
 pub struct BhlMetadata {
     pub info: BhlMetadataInfo,
     pub(super) connection: Mutex<ManagedConnection>,
+    pub(super) external_tables: bool,
 }
 
 fn hex(bytes: impl AsRef<[u8]>) -> String {
@@ -50,6 +53,55 @@ fn hex(bytes: impl AsRef<[u8]>) -> String {
 // Fixed schema identifiers only; source cells always go through bound values.
 fn quoted(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+pub(super) fn create_id_macro(connection: &::duckdb::Connection, temporary: bool) -> Result<()> {
+    let scope = if temporary { "TEMP " } else { "" };
+    connection
+        .execute_batch(&format!(
+            "CREATE {scope}MACRO bhl_id(value) AS CASE
+             WHEN regexp_full_match(value, '[+]?[0-9]+')
+             THEN nullif(try_cast(value AS UBIGINT), 0) END;"
+        ))
+        .map_err(error::duckdb)
+}
+
+fn create_view(
+    connection: &::duckdb::Connection,
+    table: &super::Table,
+    temporary: bool,
+) -> Result<()> {
+    let key = quoted(table.fields[table.key].name());
+    let fields = table
+        .fields
+        .iter()
+        .map(|field| {
+            let name = quoted(field.name());
+            if temporary {
+                format!("{name} := CASE WHEN {name} IS NULL THEN error('NULL cell in BHL {}.{}') ELSE {name} END", table.name, field.name())
+            } else {
+                format!("{name} := {name}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let scope = if temporary { "TEMP " } else { "" };
+    connection
+        .execute_batch(&format!(
+            "CREATE {scope}VIEW bhl_{} AS SELECT *, rowid, bhl_id({key}) AS __key, struct_pack({fields}) AS __record FROM main.{};",
+            table.name,
+            quoted(&table.name)
+        ))
+        .map_err(error::duckdb)
+}
+
+/// Temporary objects are connection-local and never alter the supplied file.
+pub(super) fn prepare_external_queries(connection: &::duckdb::Connection) -> Result<()> {
+    create_id_macro(connection, true)?;
+    for table in tables() {
+        create_view(connection, &table, true)?;
+    }
+    Ok(())
 }
 
 async fn import_table(
@@ -149,22 +201,7 @@ async fn import_table(
                 Err(source) => return Err(error::duckdb(source)),
             }
         }
-        let fields = table
-            .fields
-            .iter()
-            .map(|field| {
-                let name = quoted(field.name());
-                format!("{name} := {name}")
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        connection
-            .execute_batch(&format!(
-                "CREATE VIEW bhl_{} AS SELECT *, rowid, bhl_id({key}) AS __key, struct_pack({fields}) AS __record FROM {};",
-                table.name,
-                quoted(&table.name)
-            ))
-            .map_err(error::duckdb)?;
+        create_view(&connection, &table, false)?;
         Ok((
             table.name,
             SourceInfo {
@@ -190,13 +227,7 @@ impl BhlMetadata {
         storage: A,
         connection: ManagedConnection,
     ) -> Result<Self> {
-        connection
-            .execute_batch(
-                "CREATE MACRO bhl_id(value) AS CASE
-             WHEN regexp_full_match(value, '[+]?[0-9]+')
-             THEN nullif(try_cast(value AS UBIGINT), 0) END;",
-            )
-            .map_err(error::duckdb)?;
+        create_id_macro(&connection, false)?;
         let input: Arc<dyn ByteAccessor> =
             Arc::new(Arc::new(storage).layer(DecompressionLayer::new(Gzip)));
         let mut imports = Vec::new();
@@ -217,6 +248,7 @@ impl BhlMetadata {
         ));
         Ok(Self {
             connection: Mutex::new(connection),
+            external_tables: false,
             info: BhlMetadataInfo {
                 source_root,
                 fingerprint,

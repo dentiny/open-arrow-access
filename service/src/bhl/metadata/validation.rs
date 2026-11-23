@@ -33,12 +33,20 @@ pub(super) fn validate_database_source_schema(
     columns: &[(String, String)],
     info: &BhlMetadataInfo,
 ) -> Result<()> {
+    validate_table_schema(table, columns)?;
+    if !info.sources.contains_key(&table.name) {
+        return Err(error::invalid("database source schema mismatch"));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_table_schema(table: &Table, columns: &[(String, String)]) -> Result<()> {
     let expected = table
         .fields
         .iter()
         .map(|field| (field.name().clone(), "VARCHAR".to_owned()))
         .collect::<Vec<_>>();
-    if columns != expected.as_slice() || !info.sources.contains_key(&table.name) {
+    if columns != expected.as_slice() {
         return Err(error::invalid("database source schema mismatch"));
     }
     Ok(())

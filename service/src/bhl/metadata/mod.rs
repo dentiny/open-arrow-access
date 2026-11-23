@@ -95,10 +95,15 @@ impl BhlMetadata {
     }
 
     fn query_connection(&self) -> Result<ManagedConnection> {
-        self.connection
+        let connection = self
+            .connection
             .lock()
             .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?
-            .try_clone()
+            .try_clone()?;
+        if self.external_tables {
+            source::prepare_external_queries(&connection)?;
+        }
+        Ok(connection)
     }
 
     pub(in crate::bhl) fn stream(
