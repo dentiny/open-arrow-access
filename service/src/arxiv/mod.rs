@@ -24,7 +24,7 @@ mod validation;
 use open_arrow_access_core::{
     Accessor, ByteReadOptions, ByteReadRequest, ByteReader, ErrorKind, Result, read_object,
 };
-use open_arrow_access_decompression::tar::{TarArchive, TarLimits, TarStream};
+use open_arrow_access_decompression::tar::{TarArchive, TarStream};
 
 use manifest::parse_manifest;
 use validation::{validate_archive, validate_archive_length, validate_month};
@@ -88,7 +88,6 @@ pub struct ArxivArchive {
 #[derive(Clone, Debug)]
 pub struct ArxivService<A> {
     storage: A,
-    tar_limits: TarLimits,
     metadata: std::sync::Arc<metadata_fetch::MetadataResolver>,
 }
 
@@ -96,7 +95,6 @@ impl<A> ArxivService<A> {
     pub fn new(storage: A) -> Self {
         Self {
             storage,
-            tar_limits: TarLimits::default(),
             metadata: Default::default(),
         }
     }
@@ -105,11 +103,6 @@ impl<A> ArxivService<A> {
     /// Content scans always enrich metadata; this changes only where it is fetched.
     pub fn with_metadata_connection(mut self, connection: crate::common::Connection) -> Self {
         self.metadata = std::sync::Arc::new(metadata_fetch::MetadataResolver::new(connection));
-        self
-    }
-
-    pub fn with_tar_limits(mut self, limits: TarLimits) -> Self {
-        self.tar_limits = limits;
         self
     }
 }
@@ -173,7 +166,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivServi
             .open_sequential(ByteReadRequest::new(archive.filename.clone()).with_options(options))
             .await?;
         validate_archive_length(archive, input.metadata().content_length)?;
-        Ok(TarStream::new(input, self.tar_limits.clone()))
+        Ok(TarStream::new(input))
     }
 
     /// Open a known-length, ranged TAR for independent entry reads.
@@ -184,7 +177,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader>> ArxivServi
         options: ByteReadOptions,
     ) -> Result<TarArchive> {
         let input = self.open_archive_input(archive, options).await?;
-        TarArchive::open(input, self.tar_limits.clone()).await
+        TarArchive::open(input).await
     }
 
     async fn open_archive_input(

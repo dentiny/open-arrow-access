@@ -85,7 +85,7 @@ impl ReadOptionsProvider for ArxivReadRequest {
 }
 
 /// Native Arrow rows for regular TAR entries, preserving names and payloads as LargeBinary.
-/// Each partition owns one sequential TAR stream; TarLimits apply.
+/// Each partition owns one sequential TAR stream.
 /// See [`ArxivReadRequest::target_bytes`] for batch payload sizing.
 pub struct ArxivRecords<A> {
     pub(super) service: Arc<ArxivService<A>>,
@@ -197,7 +197,7 @@ impl<A: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static> 
                             ByteReadRequest::new(source.clone()).with_options(request.byte_options),
                         )
                         .await?;
-                    super::TarStream::new(input, service.tar_limits.clone())
+                    super::TarStream::new(input)
                 };
                 let output = RecordMetadata {
                     schema,

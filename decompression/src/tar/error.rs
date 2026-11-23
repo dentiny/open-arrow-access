@@ -9,7 +9,8 @@ pub(super) fn unsupported(message: &str) -> Error {
 }
 
 pub(super) fn header_error(error: std::io::Error) -> Error {
-    decode("invalid TAR header").with_source(error)
+    let kind = ErrorKind::from_source(&error).unwrap_or(ErrorKind::Decode);
+    Error::new(kind, "read_tar", "TAR package read failed").with_source(error)
 }
 
 pub(super) fn missing_entry() -> Error {
@@ -26,4 +27,12 @@ pub(super) fn active_entry() -> Error {
         "read_tar",
         "consume or drop the current entry reader before advancing",
     )
+}
+
+pub(super) fn runtime(error: tokio::runtime::TryCurrentError) -> Error {
+    unsupported("TAR package adapter requires a Tokio runtime").with_source(error)
+}
+
+pub(super) fn worker(error: tokio::task::JoinError) -> Error {
+    Error::new(ErrorKind::Io, "read_tar", "TAR package worker failed").with_source(error)
 }

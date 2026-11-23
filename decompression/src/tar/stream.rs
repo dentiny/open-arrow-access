@@ -1,215 +1,118 @@
-use std::sync::{Arc, Weak};
-
-use futures::{
-    StreamExt,
-    lock::Mutex,
-    stream::{self, BoxStream},
-};
+//! Sequential package entries over asynchronous storage, without producer tasks.
+use futures::{StreamExt, TryStreamExt, io::AsyncRead};
 use open_arrow_access_core::{
-    ByteMetadata, ByteReader, Bytes, Result, StreamReader, empty_chunk, into_stream,
+    ByteMetadata, ByteReader, Result, StreamReader, into_async_read, read_chunks,
 };
-
-use super::{
-    TarEntry, TarLimits,
-    error::{active_entry, decode},
-    validation::{BLOCK_SIZE, is_long_name, long_name, parse_entry},
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
+use tokio_util::compat::{Compat, FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
-/// A sequential TAR entry and its lazy, bounded body reader.
+use super::{TarEntry, error, validation};
+use crate::layer::DEFAULT_CHUNK_SIZE;
+
+type Input = Compat<Box<dyn AsyncRead + Send + Unpin>>;
+
+/// A sequential TAR entry and its bounded body reader.
 pub struct TarEntryReader {
     pub entry: TarEntry,
     pub reader: Box<dyn ByteReader>,
 }
 
-/// Incremental TAR consumption over one sequential source. Entry bodies must be
-/// consumed or dropped before advancing. Dropped bodies are drained on the next
-/// call. No range requests or upfront header index are required. Partial header
-/// and skip progress survive cancellation; a cancelled body read must be dropped.
-/// After TAR end markers, input is drained through EOF to surface underlying
-/// decoder checksum/trailer and source errors before reporting archive completion.
-/// Dropping the archive early does not drain the remaining input.
+/// Consume or drop the current body before advancing. Package parsing retains
+/// partial header/skip progress across cancellation; cancelled body reads must be
+/// dropped. Completion drains decoder trailers. Bodies may outlive the archive.
 pub struct TarStream {
-    state: Arc<Mutex<State>>,
-    active: Weak<()>,
-    limits: TarLimits,
+    archive: Option<tokio_tar::Archive<Input>>,
+    entries: Option<tokio_tar::Entries<Input>>,
     metadata: ByteMetadata,
-}
-
-struct State {
-    input: BoxStream<'static, Result<Bytes>>,
-    pending: Bytes,
-    header: Vec<u8>,
-    payload: u64,
-    padding: u64,
     index: usize,
-    headers: usize,
-    pending_name: Option<Vec<u8>>,
-    zero_block: bool,
-    finished: bool,
+    remaining: Arc<AtomicU64>,
+    failed: Arc<AtomicBool>,
+    ended: bool,
 }
 
 impl TarStream {
-    pub fn new(input: Box<dyn ByteReader>, limits: TarLimits) -> Self {
+    pub fn new(input: Box<dyn ByteReader>) -> Self {
         let metadata = input.metadata().clone();
+        let input: Box<dyn AsyncRead + Send + Unpin> = Box::new(into_async_read(input, "read_tar"));
+        let mut archive = tokio_tar::Archive::new(input.compat());
+        let entries = archive
+            .entries()
+            .expect("new archive starts at position zero");
         Self {
-            state: Arc::new(Mutex::new(State {
-                input: into_stream(input),
-                pending: Bytes::new(),
-                header: Vec::with_capacity(BLOCK_SIZE as usize),
-                payload: 0,
-                padding: 0,
-                index: 0,
-                headers: 0,
-                pending_name: None,
-                zero_block: false,
-                finished: false,
-            })),
-            active: Weak::new(),
-            limits,
+            archive: Some(archive),
+            entries: Some(entries),
             metadata,
+            index: 0,
+            remaining: Arc::new(AtomicU64::new(0)),
+            failed: Arc::new(AtomicBool::new(false)),
+            ended: false,
         }
     }
 
-    /// Advance by one header and return a lazy, bounded sequential body reader.
-    /// Once a body is consumed, its reader remains at EOF even after advancement.
     pub async fn next_entry(&mut self) -> Result<Option<TarEntryReader>> {
-        let mut state = self.state.try_lock().ok_or_else(active_entry)?;
-        if state.finished {
+        if self.entries.is_none() {
             return Ok(None);
         }
-        if state.payload != 0 && self.active.upgrade().is_some() {
-            return Err(active_entry());
-        }
-        let entry = match state.next_header(&self.limits).await {
-            Ok(entry) => entry,
-            Err(error) => {
-                state.finish();
-                return Err(error.with_object(self.metadata.source.as_ref()));
-            }
-        };
-        let Some(entry) = entry else {
+        if self.failed.load(Ordering::Acquire) {
+            self.entries = None;
+            self.archive = None;
             return Ok(None);
-        };
-        let mut metadata = self.metadata.clone();
-        metadata.content_length = Some(entry.size);
-        let token = Arc::new(());
-        self.active = Arc::downgrade(&token);
-        let stream = stream::try_unfold(
-            (self.state.clone(), entry.size, token),
-            |(state, remaining, token)| async move {
-                if remaining == 0 {
-                    return Ok(None);
-                }
-                let mut input = state.lock().await;
-                if input.finished {
-                    return Ok(None);
-                }
-                let bytes = match input.take(remaining.min(usize::MAX as u64) as usize).await {
-                    Ok(bytes) => bytes,
-                    Err(error) => {
-                        input.finish();
-                        return Err(error);
-                    }
-                };
-                input.payload -= bytes.len() as u64;
-                let remaining = remaining - bytes.len() as u64;
-                drop(input);
-                Ok(Some((bytes, (state, remaining, token))))
-            },
-        );
-        let reader = StreamReader::bytes(stream, metadata);
-        Ok(Some(TarEntryReader {
-            entry,
-            reader: Box::new(reader),
-        }))
-    }
-}
-
-impl State {
-    fn finish(&mut self) {
-        self.finished = true;
-        self.pending = Bytes::new();
-        self.header.clear();
-        self.pending_name = None;
-        self.input = Box::pin(stream::empty());
-    }
-
-    async fn take(&mut self, limit: usize) -> Result<Bytes> {
-        if self.pending.is_empty() {
-            self.pending = self
-                .input
-                .next()
-                .await
-                .transpose()?
-                .ok_or_else(|| decode("truncated TAR stream"))?;
-            if self.pending.is_empty() {
-                return Err(empty_chunk("read_tar"));
-            }
         }
-        Ok(self.pending.split_to(limit.min(self.pending.len())))
+        // The body stream holds the other reference until EOF or drop.
+        if Arc::strong_count(&self.remaining) > 1 && self.remaining.load(Ordering::Acquire) != 0 {
+            return Err(error::active_entry());
+        }
+        let result = self.read_entry().await;
+        if !matches!(&result, Ok(Some(_))) {
+            self.entries = None;
+            self.archive = None;
+        }
+        result.map_err(|error| error.with_object(self.metadata.source.as_ref()))
     }
 
-    async fn next_header(&mut self, limits: &TarLimits) -> Result<Option<TarEntry>> {
-        loop {
-            while self.payload != 0 {
-                let bytes = self
-                    .take(self.payload.min(usize::MAX as u64) as usize)
-                    .await?;
-                self.payload -= bytes.len() as u64;
-                if let Some(name) = &mut self.pending_name {
-                    name.extend_from_slice(&bytes);
-                }
+    async fn read_entry(&mut self) -> Result<Option<TarEntryReader>> {
+        if !self.ended {
+            if let Some(entry) = self.entries.as_mut().unwrap().next().await {
+                let entry = entry.map_err(error::header_error)?;
+                let selected = validation::entry(
+                    self.index,
+                    entry.path_bytes().map_err(error::header_error)?,
+                    entry.effective_size(),
+                    entry.header().entry_type().is_file(),
+                    entry.header().entry_type().is_dir(),
+                )?;
+                self.index += 1;
+                self.remaining = Arc::new(AtomicU64::new(selected.size));
+                let remaining = self.remaining.clone();
+                let failed = self.failed.clone();
+                let mut metadata = self.metadata.clone();
+                metadata.content_length = Some(selected.size);
+                let chunks = read_chunks(entry.compat(), DEFAULT_CHUNK_SIZE)
+                    .inspect_ok(move |bytes| {
+                        remaining.fetch_sub(bytes.len() as u64, Ordering::Release);
+                    })
+                    .map_err(move |error| {
+                        failed.store(true, Ordering::Release);
+                        super::error::header_error(error)
+                    });
+                return Ok(Some(TarEntryReader {
+                    entry: selected,
+                    reader: Box::new(StreamReader::bytes(chunks, metadata)),
+                }));
             }
-            while self.padding != 0 {
-                let bytes = self.take(self.padding as usize).await?;
-                self.padding -= bytes.len() as u64;
-            }
-            while self.header.len() != BLOCK_SIZE as usize {
-                let bytes = self.take(BLOCK_SIZE as usize - self.header.len()).await?;
-                self.header.extend_from_slice(&bytes);
-            }
-            let zero = self.header.iter().all(|byte| *byte == 0);
-            if self.zero_block {
-                if !zero {
-                    return Err(decode("TAR archive requires two zero end blocks"));
-                }
-                // Finish the underlying decoder too: its checksum/trailer may
-                // follow the TAR end markers or trailing archive padding.
-                while let Some(bytes) = self.input.next().await {
-                    if bytes?.is_empty() {
-                        return Err(empty_chunk("read_tar"));
-                    }
-                }
-                self.finish();
-                return Ok(None);
-            }
-            if zero {
-                if self.pending_name.is_some() {
-                    return Err(decode("GNU long name has no following entry"));
-                }
-                self.zero_block = true;
-                self.header.clear();
-                continue;
-            }
-            let mut entry = parse_entry(&self.header, self.headers, limits)?;
-            self.headers += 1;
-            let is_name = is_long_name(&self.header);
-            self.header.clear();
-            self.payload = entry.size;
-            self.padding = (BLOCK_SIZE - entry.size % BLOCK_SIZE) % BLOCK_SIZE;
-            if is_name {
-                if self.pending_name.is_some() {
-                    return Err(decode("consecutive GNU long names"));
-                }
-                self.pending_name = Some(Vec::new());
-                continue;
-            }
-            if let Some(name) = self.pending_name.take() {
-                entry.name = long_name(name)?;
-            }
-            entry.index = self.index;
-            self.index += 1;
-            return Ok(Some(entry));
+            self.ended = true;
         }
+        // Retain ended/drain progress if this call is cancelled while waiting
+        // for a decoder trailer or source EOF.
+        futures::io::copy(
+            &mut self.archive.as_mut().unwrap().compat(),
+            &mut futures::io::sink(),
+        )
+        .await
+        .map_err(error::header_error)?;
+        Ok(None)
     }
 }

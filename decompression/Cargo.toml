@@ -11,7 +11,7 @@ bz2 = ["dep:async-compression", "async-compression/bzip2"]
 default = []
 gzip = ["dep:async-compression", "async-compression/gzip"]
 lz4 = ["dep:async-compression", "async-compression/lz4"]
-tar = ["dep:tar"]
+tar = ["dep:tar", "dep:tokio", "dep:tokio-util", "dep:tokio-tar"]
 zip = ["dep:async_zip"]
 zstd = ["dep:async-compression", "async-compression/zstd"]
 
@@ -21,6 +21,9 @@ async_zip = { workspace = true, optional = true }
 futures.workspace = true
 open-arrow-access-core.workspace = true
 tar = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["rt"] }
+tokio-tar = { package = "astral-tokio-tar", version = "0.7.1", default-features = false, optional = true }
+tokio-util = { version = "0.7.20", default-features = false, features = ["compat", "rt"], optional = true }
 
 [dev-dependencies]
 more-asserts.workspace = true

@@ -1,5 +1,6 @@
 //! Bounded inspection and selected-entry reads of uncompressed TAR archives.
 
+mod bridge;
 mod error;
 mod stream;
 pub use stream::{TarEntryReader, TarStream};
@@ -10,26 +11,11 @@ use std::{num::NonZeroUsize, sync::Arc};
 use futures::stream::try_unfold;
 use open_arrow_access_core::{ByteReader, Result, StreamReader};
 
-use crate::archive::{ArchiveSource, DEFAULT_MAX_ENTRY_BYTES};
+use crate::archive::ArchiveSource;
 use error::{decode, missing_entry};
-use validation::{BLOCK_SIZE, entry_end, is_long_name, long_name, parse_entry};
 
-const DEFAULT_MAX_ENTRIES: usize = 65_536;
-
-#[derive(Clone, Debug)]
-pub struct TarLimits {
-    pub max_entries: usize,
-    pub max_entry_bytes: u64,
-}
-
-impl Default for TarLimits {
-    fn default() -> Self {
-        Self {
-            max_entries: DEFAULT_MAX_ENTRIES,
-            max_entry_bytes: DEFAULT_MAX_ENTRY_BYTES,
-        }
-    }
-}
+/// TAR headers occupy one 512-byte block; index reads use the same granularity.
+const TAR_BLOCK_SIZE: NonZeroUsize = NonZeroUsize::new(512).unwrap();
 
 /// Original entry names are metadata, never paths extracted to the filesystem.
 /// Duplicate names retain separate indices; directories cannot be opened as files.
@@ -43,8 +29,9 @@ pub struct TarEntry {
 
 /// One opened source and its cached entry headers. Inspection reads header blocks
 /// and skips bodies using exact ranges; there is one header request per entry.
-/// Supports regular GNU/USTAR files, directories and GNU long-name metadata.
-/// Other extension headers, sparse files and links remain unsupported. Compressed
+/// Uses tar::Archive for GNU/USTAR/PAX metadata and file-name decoding.
+/// Exposes regular files and directories; sparse files and links remain unsupported.
+/// Requires a Tokio runtime for the synchronous package adapter. Compressed
 /// TAR requires a separate ranged representation; a sequential gzip decoder cannot
 /// supply this input.
 #[derive(Clone)]
@@ -54,59 +41,46 @@ pub struct TarArchive {
 }
 
 impl TarArchive {
-    pub async fn open(input: Box<dyn ByteReader>, limits: TarLimits) -> Result<Self> {
+    pub async fn open(input: Box<dyn ByteReader>) -> Result<Self> {
         let object = input.metadata().source.clone();
         let context = |error: open_arrow_access_core::Error| error.with_object(object.as_ref());
-        let source = ArchiveSource::new(input, "open_tar").map_err(context)?;
-        Self::inspect(source, limits).await.map_err(context)
+        let source = ArchiveSource::new(input, "open_tar", TAR_BLOCK_SIZE).map_err(context)?;
+        Self::inspect(source).await.map_err(context)
     }
 
-    async fn inspect(source: ArchiveSource, limits: TarLimits) -> Result<Self> {
-        // Own the adapter across awaits: its buffered reader is Send, not Sync.
-        let input = source.input.clone();
-        let mut offset = 0;
-        let mut entries = Vec::new();
-        let mut headers = 0;
-        let mut pending_name = None;
-        loop {
-            if input.content_length().saturating_sub(offset) < BLOCK_SIZE {
-                return Err(decode("TAR archive has no complete end marker"));
-            }
-            let bytes = input.read_range(offset..offset + BLOCK_SIZE).await?;
-            if bytes.iter().all(|byte| *byte == 0) {
-                if pending_name.is_some() {
-                    return Err(decode("GNU long name has no following entry"));
+    async fn inspect(source: ArchiveSource) -> Result<Self> {
+        let handle = tokio::runtime::Handle::try_current().map_err(error::runtime)?;
+        let token = tokio_util::sync::CancellationToken::new();
+        let _cancel = token.clone().drop_guard();
+        let input = bridge::reader(source.input.clone(), token, handle.clone());
+        let archive_len = source.input.content_length();
+        let entries = handle
+            .spawn_blocking(move || {
+                let mut archive = tar::Archive::new(input);
+                let input = archive.entries_with_seek().map_err(error::header_error)?;
+                let mut entries = Vec::new();
+                for entry in input {
+                    let entry = entry.map_err(error::header_error)?;
+                    let metadata = validation::entry(
+                        entries.len(),
+                        entry.path_bytes(),
+                        entry.size(),
+                        entry.header().entry_type().is_file(),
+                        entry.header().entry_type().is_dir(),
+                    )?;
+                    let start = entry.raw_file_position();
+                    if start
+                        .checked_add(metadata.size)
+                        .is_none_or(|end| end > archive_len)
+                    {
+                        return Err(decode("TAR entry exceeds archive length"));
+                    }
+                    entries.push((metadata, start));
                 }
-                if input.content_length().saturating_sub(offset) < 2 * BLOCK_SIZE
-                    || !input
-                        .read_range(offset + BLOCK_SIZE..offset + 2 * BLOCK_SIZE)
-                        .await?
-                        .iter()
-                        .all(|byte| *byte == 0)
-                {
-                    return Err(decode("TAR archive requires two zero end blocks"));
-                }
-                break;
-            }
-            let mut entry = parse_entry(&bytes, headers, &limits)?;
-            headers += 1;
-            let start = offset + BLOCK_SIZE;
-            offset = entry_end(start, entry.size, input.content_length())?;
-            if is_long_name(&bytes) {
-                if pending_name.is_some() {
-                    return Err(decode("consecutive GNU long names"));
-                }
-                pending_name = Some(long_name(
-                    input.read_range(start..start + entry.size).await?.to_vec(),
-                )?);
-                continue;
-            }
-            if let Some(name) = pending_name.take() {
-                entry.name = name;
-            }
-            entry.index = entries.len();
-            entries.push((entry, start));
-        }
+                Ok(entries)
+            })
+            .await
+            .map_err(error::worker)??;
         Ok(Self {
             source,
             entries: entries.into(),

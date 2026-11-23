@@ -153,21 +153,28 @@ at 1 GiB each. CRC/decoded-length checks finish at EOF.
 
 | TAR API | Input | When to use |
 | --- | --- | --- |
-| `TarStream::new(input, limits)` | Sequential bytes, including gzip-decoded `.tar.gz` | One physical-order scan; consume/drop the current body before advancing |
-| `TarArchive::open(input, limits).await` | Exact ranges and known length | Inspect headers once and independently open selected entries |
+| `TarStream::new(input)` | Sequential bytes, including gzip-decoded `.tar.gz` | One physical-order scan; consume/drop the current body before advancing |
+| `TarArchive::open(input).await` | Exact ranges and known length | Inspect headers once and independently open selected entries |
 
 `TarStream` drains its underlying input through EOF after the TAR end markers
 before reporting completion, surfacing decoder checksum/trailer and source errors.
 Callers must consume the archive through EOF to complete those checks; dropping
 it early cancels further consumption.
 
-TAR supports regular GNU/USTAR files, directories, and bounded GNU long-name
-metadata (up to 64 KiB including its NUL terminator). Long-name headers apply
-to the next returned entry and do not create content rows. Links, sparse files,
-and other extension headers remain unsupported. Default limits are 65,536 entries
-and 1 GiB per entry. Ranged inspection issues a header request per entry. Selected TAR
-and ZIP member readers remain sequential. Names are raw metadata; these APIs
-perform no filesystem extraction or recursive expansion.
+TAR format parsing is delegated to packages: `tar::Archive` for ranged indexing
+and `astral-tokio-tar` for sequential input. Sequential bodies use the shared
+`read_chunks` adapter, without producer tasks, channels or full-body buffering.
+Only ranged indexing requires a Tokio runtime for its synchronous package adapter;
+it seeks past payloads instead of downloading them. Dropping the archive and its
+last live body releases the sequential source. Links and sparse files remain
+unsupported by the exposed byte entry contract; no filesystem extraction is performed.
+
+TAR entry counts, body sizes and GNU/PAX metadata have no additional
+library-imposed limits. End-marker acceptance follows the
+package (including clean EOF or a single zero block); sequential completion still
+drains the source through EOF to validate decoder trailers. Ranged inspection
+uses seek to skip ordinary payloads, and selected member readers remain sequential.
+Names and payloads retain their original bytes.
 
 Run local examples from the repository:
 

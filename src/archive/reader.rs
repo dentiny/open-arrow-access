@@ -5,8 +5,7 @@ use futures::stream;
 
 use crate::{
     ByteReader, OrderRequirement, ReadOptions, RecordBatch, RecordBatchBuilder, RecordMetadata,
-    RecordReader, Result, Schema, SchemaRef, StreamReader,
-    decompression::tar::{TarLimits, TarStream},
+    RecordReader, Result, Schema, SchemaRef, StreamReader, decompression::tar::TarStream,
 };
 
 use super::{ArchiveFormat, ArchiveOptions, validation};
@@ -46,13 +45,7 @@ pub(super) fn open_reader(
             }))
         }
         ArchiveFormat::Tar => {
-            let tar = TarStream::new(
-                input,
-                TarLimits {
-                    max_entries: usize::MAX,
-                    max_entry_bytes: u64::MAX,
-                },
-            );
+            let tar = TarStream::new(input);
             Box::pin(stream::try_unfold(tar, move |mut tar| {
                 let source = source.clone();
                 let read = read.clone();

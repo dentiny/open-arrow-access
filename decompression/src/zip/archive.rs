@@ -26,7 +26,8 @@ impl ZipArchive {
     pub async fn open(input: Box<dyn ByteReader>, limits: ZipLimits) -> Result<Self> {
         let object = input.metadata().source.clone();
         let context = |error: open_arrow_access_core::Error| error.with_object(object.as_ref());
-        let source = ArchiveSource::new(input, "open_zip").map_err(context)?;
+        let source = ArchiveSource::new(input, "open_zip", crate::layer::DEFAULT_CHUNK_SIZE)
+            .map_err(context)?;
         Self::inspect(source, limits).await.map_err(context)
     }
 
