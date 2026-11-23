@@ -1,5 +1,7 @@
 //! Common binary-content rows for PDF, attachment-free LaTeX, and supplied XML shards.
-use super::{ArxivMetadataIndex, ArxivReadRequest, ArxivRecords, validation};
+use super::{
+    ArxivMetadataDatabase, ArxivMetadataIndex, ArxivReadRequest, ArxivRecords, validation,
+};
 use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
 use futures::{StreamExt, TryStreamExt};
@@ -27,11 +29,67 @@ impl ArxivContentFormat {
     }
 }
 
+/// Arrow output schema shared by PDF, LaTeX and XML conversion.
+/// Metadata includes only fields available in the DuckDB snapshot.
 pub fn content_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
-            let metadata = crate::arxiv_metadata::schema().arrow_schema();
+            let mut article_fields: Vec<_> = [
+                "id",
+                "submitter",
+                "title",
+                "authors",
+                "categories",
+                "comments",
+                "report-no",
+                "journal-ref",
+                "doi",
+                "license",
+                "abstract",
+            ]
+            .into_iter()
+            .map(|name| Field::new(format!("arxiv:{name}"), DataType::Utf8, true))
+            .collect();
+            article_fields.push(Field::new(
+                "arxiv:version",
+                DataType::List(Arc::new(Field::new(
+                    "item",
+                    DataType::Struct(
+                        vec![
+                            Field::new("@version", DataType::Utf8, true),
+                            Field::new("arxiv:date", DataType::Utf8, true),
+                        ]
+                        .into(),
+                    ),
+                    false,
+                ))),
+                true,
+            ));
+            let metadata = DataType::Struct(
+                vec![
+                    Field::new(
+                        "oai:header",
+                        DataType::Struct(
+                            vec![Field::new("oai:identifier", DataType::Utf8, true)].into(),
+                        ),
+                        false,
+                    ),
+                    Field::new(
+                        "oai:metadata",
+                        DataType::Struct(
+                            vec![Field::new(
+                                "arxiv:arXivRaw",
+                                DataType::Struct(article_fields.into()),
+                                true,
+                            )]
+                            .into(),
+                        ),
+                        true,
+                    ),
+                ]
+                .into(),
+            );
             Arc::new(Schema::new(vec![
                 Field::new("article_id", DataType::LargeUtf8, false),
                 Field::new("format", DataType::LargeUtf8, false),
@@ -42,11 +100,7 @@ pub fn content_schema() -> SchemaRef {
                 Field::new("source_name", DataType::LargeBinary, false),
                 Field::new("data", DataType::LargeBinary, false),
                 Field::new("data_type", DataType::LargeUtf8, false),
-                Field::new(
-                    "metadata",
-                    DataType::Struct(metadata.fields().clone()),
-                    true,
-                ),
+                Field::new("metadata", metadata, true),
             ]))
         })
         .clone()
@@ -56,12 +110,20 @@ pub fn content_schema() -> SchemaRef {
 enum ContentMetadata {
     Online(Arc<super::metadata_fetch::MetadataResolver>),
     Snapshot(Arc<ArxivMetadataIndex>),
+    Database(Arc<ArxivMetadataDatabase>),
 }
 impl ContentMetadata {
     async fn resolve(&self, article: &str) -> Result<Arc<ArxivMetadataIndex>> {
         match self {
             Self::Online(resolver) => resolver.get(article).await,
             Self::Snapshot(index) => Ok(index.clone()),
+            Self::Database(database) => {
+                let database = database.clone();
+                let article = article.to_owned();
+                tokio::task::spawn_blocking(move || database.article(&article).map(Arc::new))
+                    .await
+                    .map_err(super::error::metadata_worker)?
+            }
         }
     }
 }
@@ -72,7 +134,7 @@ pub struct ArxivContentRecords<A> {
     metadata: ContentMetadata,
 }
 impl<A> ArxivRecords<A> {
-    /// Read content with complete OAI metadata, fetched lazily and cached by article ID.
+    /// Read content with metadata fetched lazily and cached by article ID.
     pub fn content(self, format: ArxivContentFormat) -> ArxivContentRecords<A> {
         let metadata = ContentMetadata::Online(self.service.metadata.clone());
         ArxivContentRecords {
@@ -83,6 +145,11 @@ impl<A> ArxivRecords<A> {
     }
 }
 impl<A> ArxivContentRecords<A> {
+    pub fn with_metadata_database(mut self, database: Arc<ArxivMetadataDatabase>) -> Self {
+        self.metadata = ContentMetadata::Database(database);
+        self
+    }
+
     /// Use a shared typed OAI snapshot instead of fetching metadata automatically.
     /// Missing article matches fail the scan, including when metadata is projected
     /// away. No metadata network requests are made by content workers.

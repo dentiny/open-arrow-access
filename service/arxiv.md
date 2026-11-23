@@ -432,30 +432,26 @@ field names, order, Arrow types and nullability:
 | `source_name` | `LargeBinary`, non-null | Inner TeX filename; empty for whole PDF/XML documents |
 | `data` | `LargeBinary`, non-null | PDF bytes, decoded source bytes, or original XML bytes |
 | `data_type` | `LargeUtf8`, non-null | Representation of this row's payload: `pdf`, `latex`, or `xml` |
-| `metadata` | `Struct`, nullable | Full arXivRaw OAI record; automatically populated for every content row |
+| `metadata` | `Struct`, nullable | Supported article metadata; automatically populated for every content row |
 
-The content schema has ten fields. `metadata` contains the complete typed arXivRaw
-OAI record, including license and version history. `content(format)` automatically
+The content schema has ten fields. `metadata` contains the supported typed
+arXivRaw fields, including license and version history. `content(format)` automatically
 fetches and attaches matching metadata; no `with_metadata` call is required.
 The Arrow field remains nullable for schema compatibility, but content readers
 never emit a null outer metadata struct. `content_schema()` is shared by all
 three formats.
 
-### Exact fields of the content `metadata` struct (0.16.0)
+### Exact fields of the content `metadata` struct
 
-`metadata` contains the **whole OAI record**, including its header; it is not a
-flat article struct. The literal Arrow field names retain namespace prefixes,
-colons, hyphens and attribute markers. The following tree lists every field in
-schema order. `?` means nullable; a field without `?` is non-null when its parent
-struct or list element exists.
+The conversion schema retains OAI namespace prefixes and nested structures,
+but only includes fields supported by the Cornell/Kaggle metadata snapshot.
+The following tree lists every emitted field in schema order. `?` means nullable;
+a field without `?` is non-null when its parent exists.
 
 ```text
 metadata: Struct?
 ├── oai:header: Struct
-│   ├── oai:identifier: Utf8?
-│   ├── oai:datestamp: Utf8?
-│   ├── @status: Utf8?
-│   └── oai:setSpec: List<Utf8?>?
+│   └── oai:identifier: Utf8?
 └── oai:metadata: Struct?
     └── arxiv:arXivRaw: Struct?
         ├── arxiv:id: Utf8?
@@ -464,65 +460,41 @@ metadata: Struct?
         ├── arxiv:authors: Utf8?
         ├── arxiv:categories: Utf8?
         ├── arxiv:comments: Utf8?
-        ├── arxiv:proxy: Utf8?
         ├── arxiv:report-no: Utf8?
-        ├── arxiv:acm-class: Utf8?
-        ├── arxiv:msc-class: Utf8?
         ├── arxiv:journal-ref: Utf8?
         ├── arxiv:doi: Utf8?
         ├── arxiv:license: Utf8?
         ├── arxiv:abstract: Utf8?
-        ├── @xsi:schemaLocation: Utf8?
         └── arxiv:version: List<item: Struct>?
             ├── @version: Utf8?
-            ├── arxiv:date: Utf8?
-            ├── arxiv:size: Utf8?
-            └── arxiv:source_type: Utf8?
+            └── arxiv:date: Utf8?
 ```
 
-The `oai:setSpec` list's Arrow item field is named `oai:setSpec` and is
-nullable. The `arxiv:version` list's item field is named `item` and is a
-non-null struct; all four fields inside each version are nullable.
+The `arxiv:version` list item is named `item` and is a non-null struct.
+Both version fields are nullable. Scalar values remain `Utf8`; dates and IDs
+are not converted to numeric or date types. Authors and categories retain their
+original text rather than becoming lists. Supported optional fields, such as
+DOI or comments, can still be null for an individual article.
 
-| Field / parent | Meaning |
+The following nine fields are **removed from the conversion Arrow schema and
+will not be emitted to Lance**, rather than being populated with NULL:
+
+| Parent under `metadata` | Omitted fields |
 | --- | --- |
-| `oai:header.oai:identifier` | OAI record identifier, distinct from the article's `arxiv:id` |
-| `oai:header.oai:datestamp` | OAI record datestamp used for harvesting updates |
-| `oai:header.@status` | OAI header status, such as `deleted`, when supplied |
-| `oai:header.oai:setSpec` | Repeated OAI set memberships |
-| `arxiv:id` under `oai:metadata.arxiv:arXivRaw` | Article identifier retained as text, including leading zeros or legacy spelling |
-| `arxiv:submitter` | Submitter text |
-| `arxiv:title` | Article title |
-| `arxiv:authors` | Original author text; not a list of normalized author objects |
-| `arxiv:categories` | Original category text; not a list of category objects |
-| `arxiv:comments` | Author comments |
-| `arxiv:proxy` | Proxy submission text |
-| `arxiv:report-no` | Report number text |
-| `arxiv:acm-class` | ACM classification text |
-| `arxiv:msc-class` | Mathematics Subject Classification text |
-| `arxiv:journal-ref` | Journal reference text |
-| `arxiv:doi` | DOI text; not a normalized DOI list |
-| `arxiv:license` | License value supplied by arXiv |
-| `arxiv:abstract` | Abstract text |
-| `@xsi:schemaLocation` | XML schema-location attribute on `arxiv:arXivRaw` |
-| `arxiv:version[].@version` | Version label supplied in the XML attribute |
-| `arxiv:version[].arxiv:date` | Original version date text |
-| `arxiv:version[].arxiv:size` | Original version size text; not parsed as a numeric byte count |
-| `arxiv:version[].arxiv:source_type` | Original version source-type text |
+| `oai:header` | `oai:datestamp`, `@status`, `oai:setSpec` |
+| `oai:metadata.arxiv:arXivRaw` | `arxiv:proxy`, `arxiv:acm-class`, `arxiv:msc-class`, `@xsi:schemaLocation` |
+| `oai:metadata.arxiv:arXivRaw.arxiv:version[]` | `arxiv:size`, `arxiv:source_type` |
 
-All scalar values above are Arrow **`Utf8`**, not `LargeUtf8`, numeric, date or
-list values. Missing optional scalar values are null. Set memberships and
-version history retain list types even with one entry; an existing container
-with no matching entries yields an empty list. The namespace URI selects XML
-fields, while the Arrow names shown above use the fixed `oai`, `arxiv` and `xsi`
-prefixes regardless of the input XML's prefix spelling.
+This is a nested schema change: existing consumers must accept the smaller
+metadata struct. PDF, LaTeX and XML share this schema, whether metadata comes
+from DuckDB, an in-memory snapshot or OAI. The ten top-level content fields
+remain unchanged. Snapshot `update_date` is not substituted for OAI datestamp;
+the Cornell/Kaggle snapshot does not provide OAI deletion status or set membership.
 
-Every emitted content row contains the matching complete OAI record. Separately
-harvested typed OAI records have `oai:header` and `oai:metadata` as their top-level
-columns, without the outer content `metadata` wrapper. Deleted OAI records retain
-their header and have null inner `oai:metadata`; the outer struct remains present.
-The legacy raw-PDF snapshot join uses the caller's snapshot schema instead of
-this fixed content schema.
+[Raw OAI harvesting](arxiv-metadata.md#full-harvested-record-schema) retains its
+full schema, including these nine fields. An OAI deleted record can still yield
+an outer metadata struct with null inner `oai:metadata` after conversion projection.
+The legacy raw-PDF snapshot join continues to use the caller's snapshot schema.
 
 `data_type` is a separate top-level string column alongside `data`; the two are
 not wrapped in a Struct. It tags each row's binary payload, so consumers need not
@@ -568,7 +540,8 @@ while let Some(batch) = reader.next().await? {
 
 PDF, LaTeX and XML content automatically request matching `arXivRaw` metadata
 via OAI `GetRecord`. No `with_metadata` call is required. Lookups are lazy;
-legacy IDs regain the OAI slash, and every TeX row receives the complete record.
+legacy IDs regain the OAI slash, and every TeX row receives the matching record
+projected to the conversion schema above.
 Deleted records retain their header with null inner metadata. Missing, malformed,
 mismatched and failed responses fail the scan, even if metadata is projected away.
 
@@ -587,6 +560,33 @@ offline jobs, a reconciled typed snapshot pins metadata and avoids per-article H
 let index = std::sync::Arc::new(ArxivMetadataIndex::from_oai_records(snapshot)?);
 let records = service.records().content(format).with_metadata(index)?;
 ```
+
+For an existing DuckDB snapshot, open a shared connection once and query metadata
+by normalized `article_id` using its index:
+
+```rust
+use open_arrow_access::service::{arxiv::ArxivMetadataDatabase, duckdb::DuckDbDatabase};
+use std::{path::Path, sync::Arc};
+
+// Run blocking connection setup outside async runtime workers.
+let database = tokio::task::spawn_blocking(|| {
+    DuckDbDatabase::connect(
+        "s3://pretrain-dataset/arxiv-metadata/arxiv.duckdb",
+        Some(Path::new("metadata-secret.sql")),
+    )
+}).await??;
+let metadata = Arc::new(ArxivMetadataDatabase::new(database));
+let records = service.records().content(format).with_metadata_database(metadata);
+```
+
+The optional SQL file configures secrets before attachment. The shared connection
+uses `cache_httpfs` with a private on-disk cache and reads remote ranges instead
+of downloading the whole database. `DuckDbDatabase::open(path)` also supports a
+local snapshot. The table `main.arxiv_metadata` must expose an indexed normalized
+`article_id` and the nested `oai:header` / `oai:metadata` columns. Each article lookup
+selects only its matching record; its TeX rows reuse that metadata. Missing or
+mismatched records fail the scan without an OAI fallback. Database work runs on
+blocking workers, and readers share the database instance and cache lifetime.
 
 Harvest snapshot batches with `ArxivMetadataService::inferred_record_format()`,
 follow continuation tokens, reconcile updates and concatenate selected batches.

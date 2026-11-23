@@ -5,14 +5,17 @@ use arrow_schema::DataType;
 use open_arrow_access_file_format::xml::{NamespaceBinding, XmlField, XmlFormat, XmlSchema};
 
 pub(super) fn record_format() -> XmlFormat {
-    XmlFormat::new("/oai:OAI-PMH/oai:ListRecords/oai:record").with_schema(schema().clone())
+    XmlFormat::new("/oai:OAI-PMH/oai:ListRecords/oai:record")
+        .with_schema(oai_metadata_schema().clone())
 }
 
 pub(crate) fn single_record_format() -> XmlFormat {
-    XmlFormat::new("/oai:OAI-PMH/oai:GetRecord/oai:record").with_schema(schema().clone())
+    XmlFormat::new("/oai:OAI-PMH/oai:GetRecord/oai:record")
+        .with_schema(oai_metadata_schema().clone())
 }
 
-pub(crate) fn schema() -> &'static XmlSchema {
+/// Complete OAI XML mapping, including fields omitted from content conversion.
+pub(crate) fn oai_metadata_schema() -> &'static XmlSchema {
     static SCHEMA: OnceLock<XmlSchema> = OnceLock::new();
     SCHEMA.get_or_init(|| {
         let header = XmlField::structure(

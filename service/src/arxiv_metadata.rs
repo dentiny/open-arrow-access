@@ -1,7 +1,7 @@
 //! ArxivMetadata metadata harvesting via the shared OAI-PMH protocol.
 mod format;
 
-pub(crate) use format::{schema, single_record_format};
+pub(crate) use format::{oai_metadata_schema, single_record_format};
 
 use crate::oai::{OaiProvider, OaiProviderService};
 #[derive(Clone, Debug)]

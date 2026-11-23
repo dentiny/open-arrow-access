@@ -118,7 +118,7 @@ pub(super) fn invalid_oai_metadata_schema() -> Error {
 }
 
 pub(super) fn invalid_content_metadata_schema() -> Error {
-    invalid("content metadata requires the complete typed arXivRaw OAI schema")
+    invalid("content metadata requires the typed OAI or conversion metadata schema")
 }
 
 pub(super) fn missing_content_metadata(id: &str) -> Error {
@@ -128,7 +128,7 @@ pub(super) fn missing_content_metadata(id: &str) -> Error {
 }
 
 pub(super) fn invalid_metadata_response() -> Error {
-    decode("expected one complete OAI record matching the requested arXiv article")
+    decode("expected one metadata record matching the requested arXiv article")
 }
 
 /// Missing representation, distinct from corrupt source bytes.
@@ -143,4 +143,13 @@ pub(super) fn missing_latex(batch: &RecordBatch, article: &str) -> Error {
     .with_object(Some(&ObjectRef::new(format!(
         "{shard}#entry={entry_index}"
     ))))
+}
+
+pub(super) fn metadata_worker(source: tokio::task::JoinError) -> Error {
+    Error::new(
+        ErrorKind::Internal,
+        "arxiv_metadata_worker",
+        source.to_string(),
+    )
+    .with_source(source)
 }

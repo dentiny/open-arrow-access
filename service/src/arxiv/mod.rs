@@ -13,8 +13,10 @@ pub use source_package::{ArxivSourceOptions, ArxivSourcePackaging, open_source_p
 mod id;
 mod manifest;
 mod metadata;
+mod metadata_database;
 mod metadata_fetch;
 pub use metadata::{ArxivMetadataIndex, ArxivPdfRecords};
+pub use metadata_database::ArxivMetadataDatabase;
 mod records;
 mod shard_records;
 pub use records::{ArxivReadRequest, ArxivRecords, record_schema};

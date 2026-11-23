@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Query arXiv metadata from an indexed local or remote DuckDB snapshot through shared connections and `cache_httpfs`, with optional secret SQL before attachment.
+- Change PDF/LaTeX/XML conversion metadata schemas to omit nine fields unavailable in the Cornell/Kaggle snapshot, rather than emitting NULL placeholders. Keep raw OAI harvesting schemas unchanged; document both contracts and the nested schema change.
 - Stop retrying HTTP 406 Not Acceptable responses under the provider transport retry policy.
 
 ## 0.20.4 - 2026-11-22
