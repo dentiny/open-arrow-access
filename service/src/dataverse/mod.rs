@@ -1,16 +1,17 @@
 //! Published Dataverse dataset versions and their original-download files.
 
 mod error;
+mod resolver;
 mod validation;
 
 use open_arrow_access_core::Result;
 use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 use serde::Deserialize;
 
-use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
-use crate::{ResolvedFileSet, discovery::file_manifest::FileSpec};
+use crate::ResolvedFileSet;
+use crate::http_client::files::HttpFileService;
 use error::map_file_namespace_error;
-use validation::{validate_dataset, validate_request, validate_token};
+use validation::{validate_request, validate_token};
 
 #[derive(Clone, Debug)]
 pub struct DataverseService {
@@ -82,52 +83,14 @@ impl DataverseService {
             .append_pair("excludeFiles", "false")
             .append_pair("excludeMetadataBlocks", "true");
         self.http
-            .resolve_files(&url, |response: Response| {
-                validate_dataset(
-                    &response,
+            .resolve_files(&url, |response| {
+                resolver::resolve_dataset(
+                    response,
                     persistent_id,
+                    version,
                     expected,
                     self.http.has_credentials(),
-                )?;
-                let files: Vec<_> = response
-                    .data
-                    .files
-                    .into_iter()
-                    .map(|file| DataverseFile {
-                        name: if file.directory_label.is_empty() {
-                            file.label
-                        } else {
-                            format!(
-                                "{}/{}",
-                                file.directory_label.trim_end_matches('/'),
-                                file.label
-                            )
-                        },
-                        id: file.data_file.id,
-                        size: file
-                            .data_file
-                            .original_file_size
-                            .unwrap_or(file.data_file.filesize),
-                    })
-                    .collect();
-                let mappings = files
-                    .iter()
-                    .map(|file| FileSpec {
-                        name: file.name.clone(),
-                        object: file.id.to_string().into(),
-                        content_length: Some(file.size),
-                    })
-                    .collect();
-                Ok(ResolvedFilesPlan::new(
-                    "api/access/datafile/",
-                    mappings,
-                    DataverseMetadata {
-                        persistent_id: persistent_id.to_owned(),
-                        version: version.to_owned(),
-                        files,
-                    },
                 )
-                .with_query(&[("format", "original")]))
             })
             .await
     }
