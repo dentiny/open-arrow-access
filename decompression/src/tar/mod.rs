@@ -14,6 +14,9 @@ use open_arrow_access_core::{ByteReader, Result, StreamReader};
 use crate::archive::ArchiveSource;
 use error::{decode, missing_entry};
 
+/// TAR headers occupy one 512-byte block; index reads use the same granularity.
+const TAR_BLOCK_SIZE: NonZeroUsize = NonZeroUsize::new(512).unwrap();
+
 /// Original entry names are metadata, never paths extracted to the filesystem.
 /// Duplicate names retain separate indices; directories cannot be opened as files.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -41,8 +44,7 @@ impl TarArchive {
     pub async fn open(input: Box<dyn ByteReader>) -> Result<Self> {
         let object = input.metadata().source.clone();
         let context = |error: open_arrow_access_core::Error| error.with_object(object.as_ref());
-        let source = ArchiveSource::new(input, "open_tar", NonZeroUsize::new(512).unwrap())
-            .map_err(context)?;
+        let source = ArchiveSource::new(input, "open_tar", TAR_BLOCK_SIZE).map_err(context)?;
         Self::inspect(source).await.map_err(context)
     }
 
