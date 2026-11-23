@@ -561,8 +561,26 @@ let index = std::sync::Arc::new(ArxivMetadataIndex::from_oai_records(snapshot)?)
 let records = service.records().content(format).with_metadata(index)?;
 ```
 
-For an existing DuckDB snapshot, open a shared connection once and query metadata
-by normalized `article_id` using its index:
+Choose the backend explicitly with `ArxivMetadataSource`. Its default is `Oai`,
+which keeps lazy OAI lookups and honors `with_metadata_connection`. DuckDB is
+opt-in; its location and optional trusted secret SQL file are caller-owned:
+
+```rust
+use open_arrow_access::service::arxiv::ArxivMetadataSource;
+
+let records = service.records().content(format)
+    .with_metadata_source(ArxivMetadataSource::DuckDbDatabase {
+        location: "s3://pretrain-dataset/arxiv-metadata/arxiv.duckdb".into(),
+        secret_sql_file: Some("metadata-secret.sql".into()),
+    }).await?;
+```
+
+The method opens the database once on a blocking worker; article readers share
+that connection and its cache. Setup errors propagate without an OAI fallback.
+To select OAI explicitly, pass `ArxivMetadataSource::Oai` or `Default::default()`.
+
+For an already-open DuckDB snapshot, callers can still supply a shared connection
+and query metadata by normalized `article_id` using its index:
 
 ```rust
 use open_arrow_access::service::{arxiv::ArxivMetadataDatabase, duckdb::DuckDbDatabase};

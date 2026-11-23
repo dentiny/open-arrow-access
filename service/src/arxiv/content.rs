@@ -11,7 +11,23 @@ use open_arrow_access_core::{
     ScanPartition, ScanPlan, ScanPlanner, SchemaRef, async_trait, into_stream,
     record_stream_reader, scan_partition,
 };
-use std::sync::{Arc, OnceLock};
+use std::{
+    path::PathBuf,
+    sync::{Arc, OnceLock},
+};
+
+/// Metadata backend opened once for a content source.
+/// OAI remains the default; database access is explicitly selected by callers.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum ArxivMetadataSource {
+    #[default]
+    Oai,
+    /// A local path or remote URL and optional trusted extension/secret SQL file.
+    DuckDbDatabase {
+        location: String,
+        secret_sql_file: Option<PathBuf>,
+    },
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ArxivContentFormat {
@@ -145,6 +161,30 @@ impl<A> ArxivRecords<A> {
     }
 }
 impl<A> ArxivContentRecords<A> {
+    /// Select and open metadata once, off the async runtime for DuckDB setup.
+    /// OAI reuses the service's configured connection and fetches lazily.
+    /// Database failures are returned without falling back to OAI.
+    pub async fn with_metadata_source(mut self, source: ArxivMetadataSource) -> Result<Self> {
+        self.metadata = match source {
+            ArxivMetadataSource::Oai => {
+                ContentMetadata::Online(self.records.service.metadata.clone())
+            }
+            ArxivMetadataSource::DuckDbDatabase {
+                location,
+                secret_sql_file,
+            } => {
+                let database = tokio::task::spawn_blocking(move || {
+                    crate::duckdb::DuckDbDatabase::connect(&location, secret_sql_file.as_deref())
+                        .map(ArxivMetadataDatabase::new)
+                })
+                .await
+                .map_err(super::error::metadata_worker)??;
+                ContentMetadata::Database(Arc::new(database))
+            }
+        };
+        Ok(self)
+    }
+
     pub fn with_metadata_database(mut self, database: Arc<ArxivMetadataDatabase>) -> Self {
         self.metadata = ContentMetadata::Database(database);
         self

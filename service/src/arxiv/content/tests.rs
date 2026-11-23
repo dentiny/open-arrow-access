@@ -7,6 +7,43 @@ use open_arrow_access_test_support::{fixture, http::HttpFixture, temp_fs};
 
 type TestContent = ArxivContentRecords<OpenDalAccessor>;
 
+#[tokio::test]
+async fn metadata_source_defaults_to_lazy_oai_and_can_reset_database() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("metadata.duckdb");
+    drop(::duckdb::Connection::open(&path).unwrap());
+    let database = Arc::new(ArxivMetadataDatabase::new(
+        crate::duckdb::DuckDbDatabase::open(path).unwrap(),
+    ));
+    let records = crate::arxiv::ArxivService::new(())
+        .records()
+        .content(ArxivContentFormat::Latex)
+        .with_metadata_database(database)
+        .with_metadata_source(ArxivMetadataSource::default())
+        .await
+        .unwrap();
+    assert!(matches!(records.metadata, ContentMetadata::Online(_)));
+}
+
+#[tokio::test]
+async fn metadata_source_reports_secret_failure_without_oai_fallback() {
+    let directory = tempfile::tempdir().unwrap();
+    let result = crate::arxiv::ArxivService::new(())
+        .records()
+        .content(ArxivContentFormat::Latex)
+        .with_metadata_source(ArxivMetadataSource::DuckDbDatabase {
+            location: directory
+                .path()
+                .join("missing.duckdb")
+                .to_string_lossy()
+                .into_owned(),
+            secret_sql_file: Some(directory.path().join("missing-secret.sql")),
+        })
+        .await;
+    assert!(result.is_err());
+    assert!(!directory.path().join("missing.duckdb").exists());
+}
+
 fn raw_batch(name: &str, data: &[u8]) -> Result<RecordBatch> {
     let mut input = RecordBatchBuilder::new(crate::arxiv::record_schema(), None)?;
     input.push(|row| {
@@ -212,7 +249,10 @@ async fn content_fixture(
     let records = crate::arxiv::ArxivService::new(OpenDalAccessor::new(operator))
         .with_metadata_connection(connection)
         .records()
-        .content(format);
+        .content(format)
+        .with_metadata_source(ArxivMetadataSource::default())
+        .await
+        .unwrap();
     (temp, records, key)
 }
 
