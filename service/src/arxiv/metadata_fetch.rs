@@ -82,7 +82,7 @@ async fn decode_metadata(page: OaiPage, article: &str) -> Result<ArxivMetadataIn
         .await?;
     let batches: Vec<_> = into_stream(reader).try_collect().await?;
     let batch = arrow_select::concat::concat_batches(
-        &crate::arxiv_metadata::schema().arrow_schema(),
+        &crate::arxiv_metadata::oai_metadata_schema().arrow_schema(),
         &batches,
     )
     .map_err(error::arrow_error)?;

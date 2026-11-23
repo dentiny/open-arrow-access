@@ -5,7 +5,11 @@ use open_arrow_access_core::Result;
 use super::{ArxivArchive, ArxivContentFormat, ArxivKind, ArxivMetadataIndex, error, id};
 
 pub(super) fn validate_oai_metadata(batch: &RecordBatch) -> Result<()> {
-    if batch.schema().as_ref() != crate::arxiv_metadata::schema().arrow_schema().as_ref() {
+    if batch.schema().as_ref()
+        != crate::arxiv_metadata::oai_metadata_schema()
+            .arrow_schema()
+            .as_ref()
+    {
         return Err(error::invalid_oai_metadata_schema());
     }
     validate_metadata_header(batch)
@@ -77,7 +81,10 @@ fn validate_article_metadata(batch: &RecordBatch, article: &str) -> Result<()> {
 }
 
 pub(super) fn validate_content_schema(metadata: &ArxivMetadataIndex) -> Result<()> {
-    if metadata.rows.fields() != crate::arxiv_metadata::schema().arrow_schema().fields()
+    if metadata.rows.fields()
+        != crate::arxiv_metadata::oai_metadata_schema()
+            .arrow_schema()
+            .fields()
         && metadata.rows.data_type()
             != super::content::content_schema()
                 .field_with_name("metadata")

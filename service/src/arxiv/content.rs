@@ -29,6 +29,8 @@ impl ArxivContentFormat {
     }
 }
 
+/// Arrow output schema shared by PDF, LaTeX and XML conversion.
+/// Metadata includes only fields available in the DuckDB snapshot.
 pub fn content_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
