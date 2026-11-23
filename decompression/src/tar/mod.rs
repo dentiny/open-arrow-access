@@ -11,26 +11,8 @@ use std::{num::NonZeroUsize, sync::Arc};
 use futures::stream::try_unfold;
 use open_arrow_access_core::{ByteReader, Result, StreamReader};
 
-use crate::archive::{ArchiveSource, DEFAULT_MAX_ENTRY_BYTES};
+use crate::archive::ArchiveSource;
 use error::{decode, missing_entry};
-
-const DEFAULT_MAX_ENTRIES: usize = 65_536;
-
-#[derive(Clone, Debug)]
-pub struct TarLimits {
-    /// Maximum decoded entries, excluding package-consumed extension metadata.
-    pub max_entries: usize,
-    pub max_entry_bytes: u64,
-}
-
-impl Default for TarLimits {
-    fn default() -> Self {
-        Self {
-            max_entries: DEFAULT_MAX_ENTRIES,
-            max_entry_bytes: DEFAULT_MAX_ENTRY_BYTES,
-        }
-    }
-}
 
 /// Original entry names are metadata, never paths extracted to the filesystem.
 /// Duplicate names retain separate indices; directories cannot be opened as files.
@@ -56,15 +38,15 @@ pub struct TarArchive {
 }
 
 impl TarArchive {
-    pub async fn open(input: Box<dyn ByteReader>, limits: TarLimits) -> Result<Self> {
+    pub async fn open(input: Box<dyn ByteReader>) -> Result<Self> {
         let object = input.metadata().source.clone();
         let context = |error: open_arrow_access_core::Error| error.with_object(object.as_ref());
         let source = ArchiveSource::new(input, "open_tar", NonZeroUsize::new(512).unwrap())
             .map_err(context)?;
-        Self::inspect(source, limits).await.map_err(context)
+        Self::inspect(source).await.map_err(context)
     }
 
-    async fn inspect(source: ArchiveSource, limits: TarLimits) -> Result<Self> {
+    async fn inspect(source: ArchiveSource) -> Result<Self> {
         let handle = tokio::runtime::Handle::try_current().map_err(error::runtime)?;
         let token = tokio_util::sync::CancellationToken::new();
         let _cancel = token.clone().drop_guard();
@@ -86,7 +68,6 @@ impl TarArchive {
                         entry.size(),
                         entry.header().entry_type().is_file(),
                         entry.header().entry_type().is_dir(),
-                        &limits,
                     )?;
                     let start = entry.raw_file_position();
                     if start

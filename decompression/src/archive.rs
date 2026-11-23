@@ -2,6 +2,7 @@ use open_arrow_access_core::{ByteMetadata, ByteReader, Result, SeekableInput, in
 
 use std::num::NonZeroUsize;
 
+#[cfg(feature = "zip")]
 pub(crate) const DEFAULT_MAX_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// One opened archive source. Clones share storage with independent cursors.

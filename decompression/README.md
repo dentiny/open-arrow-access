@@ -153,8 +153,8 @@ at 1 GiB each. CRC/decoded-length checks finish at EOF.
 
 | TAR API | Input | When to use |
 | --- | --- | --- |
-| `TarStream::new(input, limits)` | Sequential bytes, including gzip-decoded `.tar.gz` | One physical-order scan; consume/drop the current body before advancing |
-| `TarArchive::open(input, limits).await` | Exact ranges and known length | Inspect headers once and independently open selected entries |
+| `TarStream::new(input)` | Sequential bytes, including gzip-decoded `.tar.gz` | One physical-order scan; consume/drop the current body before advancing |
+| `TarArchive::open(input).await` | Exact ranges and known length | Inspect headers once and independently open selected entries |
 
 `TarStream` drains its underlying input through EOF after the TAR end markers
 before reporting completion, surfacing decoder checksum/trailer and source errors.
@@ -169,9 +169,8 @@ it seeks past payloads instead of downloading them. Dropping the archive and its
 last live body releases the sequential source. Links and sparse files remain
 unsupported by the exposed byte entry contract; no filesystem extraction is performed.
 
-Default limits are 65,536 decoded entries and 1 GiB per entry. GNU/PAX metadata
-is handled by the packages; no additional metadata byte limit is imposed. Extension
-records do not count as decoded entries. End-marker acceptance follows the
+TAR entry counts, body sizes and GNU/PAX metadata have no additional
+library-imposed limits. End-marker acceptance follows the
 package (including clean EOF or a single zero block); sequential completion still
 drains the source through EOF to validate decoder trailers. Ranged inspection
 uses seek to skip ordinary payloads, and selected member readers remain sequential.

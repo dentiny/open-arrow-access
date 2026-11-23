@@ -9,7 +9,7 @@ use std::sync::{
 };
 use tokio_util::compat::{Compat, FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
-use super::{TarEntry, TarLimits, error, validation};
+use super::{TarEntry, error, validation};
 use crate::layer::DEFAULT_CHUNK_SIZE;
 
 type Input = Compat<Box<dyn AsyncRead + Send + Unpin>>;
@@ -27,7 +27,6 @@ pub struct TarStream {
     archive: Option<tokio_tar::Archive<Input>>,
     entries: Option<tokio_tar::Entries<Input>>,
     metadata: ByteMetadata,
-    limits: TarLimits,
     index: usize,
     active: Weak<()>,
     remaining: Arc<AtomicU64>,
@@ -36,7 +35,7 @@ pub struct TarStream {
 }
 
 impl TarStream {
-    pub fn new(input: Box<dyn ByteReader>, limits: TarLimits) -> Self {
+    pub fn new(input: Box<dyn ByteReader>) -> Self {
         let metadata = input.metadata().clone();
         let input: Box<dyn AsyncRead + Send + Unpin> = Box::new(into_async_read(input, "read_tar"));
         let mut archive = tokio_tar::Archive::new(input.compat());
@@ -47,7 +46,6 @@ impl TarStream {
             archive: Some(archive),
             entries: Some(entries),
             metadata,
-            limits,
             index: 0,
             active: Weak::new(),
             remaining: Arc::new(AtomicU64::new(0)),
@@ -86,7 +84,6 @@ impl TarStream {
                     entry.effective_size(),
                     entry.header().entry_type().is_file(),
                     entry.header().entry_type().is_dir(),
-                    &self.limits,
                 )?;
                 self.index += 1;
                 self.remaining = Arc::new(AtomicU64::new(selected.size));

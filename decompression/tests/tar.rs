@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
 use open_arrow_access_core::{Accessor, ErrorKind};
-use open_arrow_access_decompression::tar::{TarArchive, TarEntryReader, TarLimits};
+use open_arrow_access_decompression::tar::{TarArchive, TarEntryReader};
 use open_arrow_access_test_support::{
     MemoryAccessor, byte_layer, collect_bytes, expect_err_kind, fixture, ranged_input,
 };
@@ -15,12 +15,9 @@ async fn source(name: &str) -> MemoryAccessor {
 #[tokio::test]
 async fn inspects_headers_once_and_streams_independent_selected_entries() {
     let source = source("mixed.tar").await;
-    let archive = TarArchive::open(
-        source.open("archive".into()).await.unwrap(),
-        TarLimits::default(),
-    )
-    .await
-    .unwrap();
+    let archive = TarArchive::open(source.open("archive".into()).await.unwrap())
+        .await
+        .unwrap();
     let entries: Vec<_> = archive.entries().collect();
     assert_eq!(entries.len(), 4);
     assert_eq!(entries[1].name, b"papers/paper.pdf");
@@ -86,12 +83,9 @@ async fn accepts_empty_and_gnu_archives() {
         ("missing-end.tar", 4),
     ] {
         let source = source(name).await;
-        let archive = TarArchive::open(
-            source.open("archive".into()).await.unwrap(),
-            TarLimits::default(),
-        )
-        .await
-        .unwrap();
+        let archive = TarArchive::open(source.open("archive".into()).await.unwrap())
+            .await
+            .unwrap();
         assert_eq!(archive.entries().len(), count);
     }
 }
@@ -105,43 +99,20 @@ async fn rejects_malformed_and_unsupported_archives() {
         ("link.tar", ErrorKind::Unsupported),
     ] {
         let source = source(name).await;
-        let error = TarArchive::open(
-            source.open("archive".into()).await.unwrap(),
-            TarLimits::default(),
-        )
-        .await
-        .err()
-        .unwrap();
+        let error = TarArchive::open(source.open("archive".into()).await.unwrap())
+            .await
+            .err()
+            .unwrap();
         assert_eq!(error.kind(), kind, "{name}");
         assert!(error.to_string().contains("archive"));
     }
 }
 
 #[tokio::test]
-async fn enforces_limits_and_exact_source_contract() {
-    let source = source("mixed.tar").await;
-    for limits in [
-        TarLimits {
-            max_entries: 1,
-            ..Default::default()
-        },
-        TarLimits {
-            max_entry_bytes: 2,
-            ..Default::default()
-        },
-    ] {
-        assert_eq!(
-            TarArchive::open(source.open("archive".into()).await.unwrap(), limits)
-                .await
-                .err()
-                .unwrap()
-                .kind(),
-            ErrorKind::Unsupported
-        );
-    }
+async fn enforces_exact_source_contract() {
     let bytes = fixture!("tar", "mixed.tar").await;
     ranged_input::assert_contract(&bytes, |source| async move {
-        TarArchive::open(source.open("archive".into()).await?, TarLimits::default()).await
+        TarArchive::open(source.open("archive".into()).await?).await
     })
     .await;
 }
@@ -152,12 +123,9 @@ async fn preserves_entry_source_errors_and_terminates_reader() {
     let source = MemoryAccessor::new(&bytes, 3)
         .with_ranges()
         .with_range_failure(6, ErrorKind::PermissionDenied);
-    let archive = TarArchive::open(
-        source.open("archive".into()).await.unwrap(),
-        TarLimits::default(),
-    )
-    .await
-    .unwrap();
+    let archive = TarArchive::open(source.open("archive".into()).await.unwrap())
+        .await
+        .unwrap();
     let mut reader = archive
         .open_entry(1, NonZeroUsize::new(4).unwrap())
         .unwrap();
@@ -179,10 +147,7 @@ async fn streams_first_body_without_scanning_later_headers_or_using_ranges() {
     let source = MemoryAccessor::new(&bytes, 64)
         .without_content_length()
         .with_version("snapshot");
-    let mut archive = TarStream::new(
-        source.open("archive".into()).await.unwrap(),
-        TarLimits::default(),
-    );
+    let mut archive = TarStream::new(source.open("archive".into()).await.unwrap());
     let TarEntryReader {
         entry: directory,
         reader: mut empty,
@@ -228,10 +193,7 @@ async fn drains_dropped_bodies_and_readers_outlive_sequential_archive() {
 
     let bytes = fixture!("tar", "mixed.tar").await;
     let source = MemoryAccessor::new(&bytes, 3);
-    let mut archive = TarStream::new(
-        source.open("archive".into()).await.unwrap(),
-        TarLimits::default(),
-    );
+    let mut archive = TarStream::new(source.open("archive".into()).await.unwrap());
     drop(archive.next_entry().await.unwrap().unwrap());
     let TarEntryReader {
         entry: _,
@@ -251,7 +213,7 @@ async fn drains_dropped_bodies_and_readers_outlive_sequential_archive() {
 }
 
 #[tokio::test]
-async fn sequential_failures_are_terminal_and_share_header_limits() {
+async fn sequential_failures_are_terminal() {
     use open_arrow_access_decompression::tar::TarStream;
 
     for (name, kind) in [
@@ -259,25 +221,10 @@ async fn sequential_failures_are_terminal_and_share_header_limits() {
         ("bad-size.tar", ErrorKind::Decode),
     ] {
         let source = MemoryAccessor::new(&fixture!("tar", name).await, 7);
-        let mut archive = TarStream::new(
-            source.open("archive".into()).await.unwrap(),
-            TarLimits::default(),
-        );
+        let mut archive = TarStream::new(source.open("archive".into()).await.unwrap());
         expect_err_kind(archive.next_entry().await, kind);
         assert!(archive.next_entry().await.unwrap().is_none());
     }
-    let bytes = fixture!("tar", "mixed.tar").await;
-    let source = MemoryAccessor::new(&bytes, 64);
-    let mut archive = TarStream::new(
-        source.open("archive".into()).await.unwrap(),
-        TarLimits {
-            max_entries: 1,
-            ..Default::default()
-        },
-    );
-    drop(archive.next_entry().await.unwrap().unwrap());
-    expect_err_kind(archive.next_entry().await, ErrorKind::Unsupported);
-    assert!(archive.next_entry().await.unwrap().is_none());
 }
 
 #[tokio::test]
@@ -297,7 +244,7 @@ async fn cancelled_sequential_header_and_skip_resume_from_persistent_progress() 
     let bytes = Bytes::from(fixture!("tar", "mixed.tar").await);
     let allowed = Arc::new(AtomicUsize::new(1));
     let input = gated_source(bytes, 100, allowed.clone());
-    let mut archive = TarStream::new(input, TarLimits::default());
+    let mut archive = TarStream::new(input);
     let mut context = Context::from_waker(futures::task::noop_waker_ref());
     {
         let mut next = pin!(archive.next_entry());
@@ -351,10 +298,7 @@ async fn sequential_body_source_errors_and_truncation_terminate_archive() {
         ),
         (MemoryAccessor::new(&bytes[..1030], 64), ErrorKind::Decode),
     ] {
-        let mut archive = TarStream::new(
-            source.open("archive".into()).await.unwrap(),
-            TarLimits::default(),
-        );
+        let mut archive = TarStream::new(source.open("archive".into()).await.unwrap());
         drop(archive.next_entry().await.unwrap().unwrap());
         let TarEntryReader {
             entry: _,
@@ -409,7 +353,7 @@ async fn cancelled_live_body_read_rejects_advancement_without_waiting_for_its_lo
         512,
         allowed.clone(),
     );
-    let mut archive = TarStream::new(input, TarLimits::default());
+    let mut archive = TarStream::new(input);
     drop(archive.next_entry().await.unwrap().unwrap());
     let TarEntryReader {
         entry: _,
@@ -468,7 +412,7 @@ async fn sequential_completion_and_malformed_headers_release_source_with_archive
                 .map_or(Poll::Ready(None), |bytes| Poll::Ready(Some(Ok(bytes))))
         });
         let input = Box::new(StreamReader::new(source, ByteMetadata::default()));
-        let mut archive = TarStream::new(input, TarLimits::default());
+        let mut archive = TarStream::new(input);
         assert!(!dropped.load(Ordering::SeqCst));
         if malformed {
             expect_err_kind(archive.next_entry().await, ErrorKind::Decode);
@@ -490,16 +434,10 @@ async fn sequential_completion_and_malformed_headers_release_source_with_archive
 async fn gnu_long_names_match_in_indexed_and_sequential_reads() {
     use open_arrow_access_decompression::tar::TarStream;
     let input = source("gnu-longname.tar").await;
-    let indexed = TarArchive::open(
-        input.open("archive".into()).await.unwrap(),
-        TarLimits::default(),
-    )
-    .await
-    .unwrap();
-    let mut streamed = TarStream::new(
-        input.open("archive".into()).await.unwrap(),
-        TarLimits::default(),
-    );
+    let indexed = TarArchive::open(input.open("archive".into()).await.unwrap())
+        .await
+        .unwrap();
+    let mut streamed = TarStream::new(input.open("archive".into()).await.unwrap());
     let mut member = streamed.next_entry().await.unwrap().unwrap();
     assert_eq!(&member.entry, indexed.entries().next().unwrap());
     assert_eq!(member.entry.index, 0);
@@ -530,7 +468,7 @@ async fn cancelled_gnu_long_name_reads_resume() {
         100,
         allowed.clone(),
     );
-    let mut archive = TarStream::new(input, TarLimits::default());
+    let mut archive = TarStream::new(input);
     // Cancel during the name payload, its padding, and the following header.
     for chunks in [6, 7, 11] {
         allowed.store(chunks, Ordering::SeqCst);
@@ -555,30 +493,11 @@ async fn malformed_gnu_names_fail_in_both_readers() {
     for bytes in [orphan, consecutive] {
         let input = MemoryAccessor::new(&bytes, 7).with_ranges();
         expect_err_kind(
-            TarArchive::open(
-                input.open("archive".into()).await.unwrap(),
-                TarLimits::default(),
-            )
-            .await,
+            TarArchive::open(input.open("archive".into()).await.unwrap()).await,
             ErrorKind::Decode,
         );
-        let mut stream = TarStream::new(
-            input.open("archive".into()).await.unwrap(),
-            TarLimits::default(),
-        );
+        let mut stream = TarStream::new(input.open("archive".into()).await.unwrap());
         expect_err_kind(stream.next_entry().await, ErrorKind::Decode);
         assert!(stream.next_entry().await.unwrap().is_none());
     }
-    // The package consumes extension metadata; limits count decoded entries.
-    let input = source("gnu-longname.tar").await;
-    let limits = TarLimits {
-        max_entries: 0,
-        ..Default::default()
-    };
-    expect_err_kind(
-        TarArchive::open(input.open("archive".into()).await.unwrap(), limits.clone()).await,
-        ErrorKind::Unsupported,
-    );
-    let mut stream = TarStream::new(input.open("archive".into()).await.unwrap(), limits);
-    expect_err_kind(stream.next_entry().await, ErrorKind::Unsupported);
 }

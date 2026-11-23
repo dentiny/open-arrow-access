@@ -7,9 +7,7 @@ use open_arrow_access_core::{
     Result, bytes_reader, into_async_read, read_all,
 };
 use open_arrow_access_decompression::{
-    Codec, DecodedInput, decoded_reader,
-    gzip::Gzip,
-    tar::{TarLimits, TarStream},
+    Codec, DecodedInput, decoded_reader, gzip::Gzip, tar::TarStream,
 };
 use std::num::NonZeroUsize;
 
@@ -49,13 +47,7 @@ pub(super) async fn read(batch: RecordBatch, options: ReadOptions) -> Result<Rec
         "read_arxiv_latex",
         "source",
     );
-    let tar = TarStream::new(
-        input,
-        TarLimits {
-            max_entry_bytes: u64::MAX,
-            ..TarLimits::default()
-        },
-    );
+    let tar = TarStream::new(input);
     Ok(expand_tar_latex(tar, batch, article_id, options))
 }
 

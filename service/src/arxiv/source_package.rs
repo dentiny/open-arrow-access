@@ -5,11 +5,7 @@ use open_arrow_access_core::{
     ByteReader, Bytes, ObjectRef, OrderRequirement, ReadOptions, RecordBatchBuilder,
     RecordMetadata, RecordReader, Result, StreamReader, bytes_reader, into_async_read, read_all,
 };
-use open_arrow_access_decompression::{
-    Codec, decoded_reader,
-    gzip::Gzip,
-    tar::{TarLimits, TarStream},
-};
+use open_arrow_access_decompression::{Codec, decoded_reader, gzip::Gzip, tar::TarStream};
 use std::num::NonZeroUsize;
 
 /// Packaging is explicit: a gzip file is not necessarily a TAR.
@@ -137,13 +133,7 @@ fn open_tar_source(
     output: RecordMetadata,
     options: ArxivSourceOptions,
 ) -> Result<Box<dyn RecordReader>> {
-    let tar = TarStream::new(
-        Box::new(bytes_reader(data, output.source.clone())),
-        TarLimits {
-            max_entry_bytes: u64::MAX,
-            ..TarLimits::default()
-        },
-    );
+    let tar = TarStream::new(Box::new(bytes_reader(data, output.source.clone())));
     let batches = stream::try_unfold(tar, move |tar| {
         let article_id = article_id.clone();
         let source_uri = source_uri.clone();

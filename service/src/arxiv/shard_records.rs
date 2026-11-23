@@ -90,7 +90,6 @@ where
                                     ByteReadRequest::new(shard.clone()).with_options(byte_options),
                                 )
                                 .await?,
-                            service.tar_limits.clone(),
                         )
                     }
                 }

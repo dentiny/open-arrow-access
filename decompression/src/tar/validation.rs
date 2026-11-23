@@ -1,7 +1,7 @@
-//! Application limits; archive format decoding belongs to the TAR packages.
+//! Validate entry kinds exposed by the byte-reader API.
 use std::borrow::Cow;
 
-use super::{TarEntry, TarLimits, error::unsupported};
+use super::{TarEntry, error::unsupported};
 use open_arrow_access_core::Result;
 
 pub(super) fn entry(
@@ -10,14 +10,7 @@ pub(super) fn entry(
     size: u64,
     is_file: bool,
     is_dir: bool,
-    limits: &TarLimits,
 ) -> Result<TarEntry> {
-    if index >= limits.max_entries {
-        return Err(unsupported("TAR archive exceeds configured entry count"));
-    }
-    if size > limits.max_entry_bytes {
-        return Err(unsupported("TAR entry exceeds configured byte limit"));
-    }
     if !is_file && !is_dir {
         return Err(unsupported(
             "TAR byte entries must be regular files or directories; links and sparse files are not exposed",
