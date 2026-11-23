@@ -1,7 +1,6 @@
 use super::{error::decode, validation};
-use crate::common::{
-    Connection, LinkField, MetadataLink, encode_path, resolve_download_url, resolve_optional_links,
-};
+use crate::common::{Connection, MetadataLink, encode_path, resolve_download_url};
+use crate::discovery::links::resolve_optional_fields;
 use open_arrow_access_core::Result;
 use serde_json::Value;
 use url::Url;
@@ -50,33 +49,17 @@ pub(super) fn resolve_metadata_url(
 }
 
 fn resolve_links(value: &Value, fields: &[&str], prefix: &str) -> Result<Vec<MetadataLink>> {
-    let mut selected = serde_json::Map::new();
-    for field in fields {
-        if let Some(value) = value.get(*field) {
-            let value = match value {
-                Value::String(url) if url.starts_with("//") => {
-                    Value::String(format!("https:{url}"))
-                }
-                _ => value.clone(),
-            };
-            selected.insert((*field).into(), value);
-        }
-    }
-    let selectors = fields
-        .iter()
-        .map(|field| LinkField {
-            json_field: field,
-            file_name: field,
-        })
-        .collect::<Vec<_>>();
-    Ok(
-        resolve_optional_links(&Value::Object(selected), &selectors)?
-            .into_iter()
-            .map(|link| MetadataLink {
-                file_name: format!("{prefix}/{}", link.file_name),
-                ..link
-            })
-            .collect(),
+    resolve_optional_fields(
+        value,
+        fields.iter().map(|field| (*field, *field)),
+        |name, url| MetadataLink {
+            file_name: format!("{prefix}/{name}"),
+            url: if url.starts_with("//") {
+                format!("https:{url}")
+            } else {
+                url.into()
+            },
+        },
     )
 }
 

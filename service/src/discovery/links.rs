@@ -43,21 +43,37 @@ pub fn resolve_optional_links(
     value: &Value,
     fields: &[LinkField<'_>],
 ) -> Result<Vec<MetadataLink>> {
+    resolve_optional_fields(
+        value,
+        fields
+            .iter()
+            .map(|field| (field.json_field, field.file_name)),
+        |name, url| MetadataLink {
+            file_name: name.into(),
+            url: url.into(),
+        },
+    )
+}
+
+/// Share optional-field traversal while providers retain naming and URL normalization.
+pub(crate) fn resolve_optional_fields<'a>(
+    value: &Value,
+    fields: impl IntoIterator<Item = (&'a str, &'a str)>,
+    resolve: impl Fn(&str, &str) -> MetadataLink,
+) -> Result<Vec<MetadataLink>> {
     if !value.is_object() {
         return Err(error::decode("expected metadata object"));
     }
     let mut files = Vec::new();
-    for field in fields {
-        match value.get(field.json_field) {
+    for (json_field, file_name) in fields {
+        match value.get(json_field) {
             Some(Value::String(url)) if !url.is_empty() => {
-                crate::common::resolve_download_url(url)?;
-                files.push(MetadataLink {
-                    file_name: field.file_name.into(),
-                    url: url.clone(),
-                });
+                let link = resolve(file_name, url);
+                crate::common::resolve_download_url(&link.url)?;
+                files.push(link);
             }
             None | Some(Value::Null) | Some(Value::String(_)) => {}
-            _ => return Err(error::missing_field(field.json_field)),
+            _ => return Err(error::missing_field(json_field)),
         }
     }
     Ok(files)

@@ -43,21 +43,6 @@ additional fields may be present):
 }
 ```
 
-## Resolve metadata before binding storage
-
-`record_metadata(id).await` returns
-`ResolvedMetadata<ZenodoMetadata, HttpFileRoot>` without creating an OpenDAL
-accessor. Inspect `metadata()`, ordered `files()`, `origin()` and `location()`
-without listing or downloading attachments. File descriptions expose `name()`,
-`object()` and the known `content_length()`; Zenodo lengths remain unknown in
-these descriptions, as in the existing read path.
-
-Pass that result to `files_from_metadata(resolved)` on a service with the same
-endpoint to construct the lazy accessor without another metadata request.
-Binding supplies the service's current authentication and HTTP policy and checks
-the file namespace. Metadata resolved at a different endpoint is rejected.
-`record(id).await` still performs both steps and returns the existing accessor.
-
 ## Usage and results
 
 ```rust

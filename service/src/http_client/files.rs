@@ -1,17 +1,43 @@
 //! Bind a provider's validated manifest to lazy HTTP file access.
 
-use open_arrow_access_core::{Error, ErrorKind, Result};
+use open_arrow_access_core::{Error, Result};
 use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 use serde::de::DeserializeOwned;
 use url::Url;
 
 use super::{HttpClient, resolve_origin};
-use crate::ResolvedFileSet;
-#[cfg(test)]
-use crate::discovery::file_manifest::FileSpec;
+use crate::{ResolvedFileSet, discovery::file_manifest::FileSpec};
 
-/// Compatibility name for the shared storage-independent resolution result.
-pub(crate) type ResolvedFilesPlan<M> = crate::ResolvedMetadata<M, crate::HttpFileRoot>;
+/// Canonical download root, ordered logical-name mappings and provider metadata.
+/// Providers validate identity and availability; binding validates the file namespace.
+pub(crate) struct ResolvedFilesPlan<M> {
+    /// Download path prefix relative to the service's HTTP origin.
+    root: String,
+    files: Vec<FileSpec>,
+    metadata: M,
+    /// (Query parameter name, value) pairs appended to download requests and
+    /// URL-encoded by the transport; metadata requests keep their own query.
+    query: Vec<(String, String)>,
+}
+
+impl<M> ResolvedFilesPlan<M> {
+    pub(crate) fn new(root: impl Into<String>, files: Vec<FileSpec>, metadata: M) -> Self {
+        Self {
+            root: root.into(),
+            files,
+            metadata,
+            query: Vec::new(),
+        }
+    }
+
+    pub(crate) fn with_query(mut self, query: &[(&str, &str)]) -> Self {
+        self.query = query
+            .iter()
+            .map(|(key, value)| ((*key).into(), (*value).into()))
+            .collect();
+        self
+    }
+}
 
 /// Connection and error context shared by JSON-manifest providers.
 #[derive(Clone)]
@@ -119,53 +145,24 @@ impl HttpFileService {
         metadata_url: &Url,
         resolve: impl FnOnce(T) -> Result<ResolvedFilesPlan<M>>,
     ) -> Result<ResolvedFileSet<OpenDalAccessor, M>> {
-        let resolved = self.resolve_metadata(metadata_url, resolve).await?;
-        self.bind_metadata(resolved)
-    }
-
-    /// Fetch and interpret metadata without constructing a storage accessor.
-    pub(crate) async fn resolve_metadata<T: DeserializeOwned, M>(
-        &self,
-        metadata_url: &Url,
-        resolve: impl FnOnce(T) -> Result<ResolvedFilesPlan<M>>,
-    ) -> Result<ResolvedFilesPlan<M>> {
-        let response = self
-            .client()
+        let client = self.client();
+        let response = client
             .json(metadata_url.as_str(), self.token.as_deref(), self.operation)
             .await?;
-        Ok(resolve(response)?.with_origin(self.endpoint.clone()))
-    }
-
-    /// Bind a previously resolved root and membership without fetching metadata.
-    pub(crate) fn bind_metadata<M>(
-        &self,
-        resolved: ResolvedFilesPlan<M>,
-    ) -> Result<ResolvedFileSet<OpenDalAccessor, M>> {
-        if resolved
-            .origin()
-            .is_some_and(|origin| origin != &self.endpoint)
-        {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                self.operation,
-                "resolved metadata belongs to a different service endpoint",
-            ));
-        }
-        let (metadata, files, location) = resolved.into_parts();
-        let lengths = files.iter().filter_map(|file| {
+        let plan = resolve(response)?;
+        let lengths = plan.files.iter().filter_map(|file| {
             file.content_length
                 .map(|length| (file.object.locator().to_owned(), length))
         });
-        let storage = self
-            .client()
+        let storage = client
             .accessor(
                 &self.endpoint,
-                &location.root,
-                location.query,
+                &plan.root,
+                plan.query,
                 self.token.as_deref(),
             )?
             .with_content_lengths(lengths);
-        ResolvedFileSet::from_files(storage, files, metadata)
+        ResolvedFileSet::from_files(storage, plan.files, plan.metadata)
             .map_err(super::error::file_namespace)
             .map_err(self.map_file_namespace_error)
     }

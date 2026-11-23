@@ -41,18 +41,6 @@ additional fields may be present):
 }
 ```
 
-## Resolve metadata before binding storage
-
-`article_metadata(id, version).await` returns `ResolvedMetadata<ApiDocument>`
-without constructing a file accessor. It retains the original JSON and ordered
-file descriptions with exact download URL strings. Inspect `metadata()`,
-`files()` and `origin()` independently of file reads.
-
-`files_from_metadata(resolved)` binds that result using the service's connection
-without another API request. Download URL and namespace validation run at binding;
-signed URLs are preserved and are not refreshed. `article(id, version).await`
-still performs both steps and returns the existing `RemoteFiles` type.
-
 ## Usage and results
 
 ```rust

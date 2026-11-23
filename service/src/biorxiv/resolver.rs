@@ -1,22 +1,19 @@
-use crate::common::{LinkField, MetadataLink, array, resolve_optional_links};
+use crate::common::{MetadataLink, array};
+use crate::discovery::links::resolve_optional_fields;
 use open_arrow_access_core::Result;
 use serde_json::Value;
 
 pub(super) fn resolve_jats_files(value: &Value) -> Result<Vec<MetadataLink>> {
     let mut files = Vec::new();
     for (i, paper) in array(value, "collection")?.iter().enumerate() {
-        for link in resolve_optional_links(
+        files.extend(resolve_optional_fields(
             paper,
-            &[LinkField {
-                json_field: "jatsxml",
-                file_name: "xml",
-            }],
-        )? {
-            files.push(MetadataLink {
+            [("jatsxml", "xml")],
+            |_, url| MetadataLink {
                 file_name: format!("paper-{i:05}.xml"),
-                url: link.url,
-            });
-        }
+                url: url.into(),
+            },
+        )?);
     }
     Ok(files)
 }

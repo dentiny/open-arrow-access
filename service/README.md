@@ -127,20 +127,11 @@ timeout, and authentication settings.
 | Return type | Consume with | Meaning |
 | --- | --- | --- |
 | `ApiDocument` | `value()` | Parsed upstream JSON retaining unknown fields |
-| `ResolvedMetadata<M, L>` | `metadata()`, `files()`, `location()`, `origin()` | Unbound provider metadata and ordered file descriptions |
 | `RemoteFiles<M>` / `ResolvedFileSet<A, M>` | `metadata()`, `list`, `open` | Fixed logical membership with lazy byte downloads |
 | `ByteReader` | `next().await` | Original or explicitly decoded bytes |
 | `RecordReader` | `metadata().schema`, `next().await` | Fixed-schema Arrow batches |
 | `OaiPage` | `bytes`, `record_count`, `resumption_token` | XML envelope and protocol continuation |
 | Archive session | Inspect entries, open selected member | Member metadata and bytes |
-
-Zenodo's `record_metadata` and Figshare's `article_metadata` separate metadata
-resolution from storage construction. Their `files_from_metadata` methods bind
-already resolved membership without another metadata request. Existing `record`
-and `article` methods still compose resolution and binding. Provider identity
-validation runs during resolution; download/namespace validation remains at
-binding. `ResolvedMetadata` holds data rather than an operator, reader or
-credentials; provider metadata keeps its existing type.
 
 Bind an explicit format through `ResolvedFileSet::records(format)` and select
 names with `service::FileSetRequest` to decode resolved files. The service module
