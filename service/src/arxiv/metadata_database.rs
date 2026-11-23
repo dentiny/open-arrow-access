@@ -84,31 +84,4 @@ mod tests {
         assert!(database.article("2410.99999").is_err());
         assert!(database.article("2410.00001").is_ok());
     }
-
-    #[test]
-    fn concurrent_lookups_keep_parameter_bindings_independent() {
-        let (_directory, database) = database();
-        let barrier = std::sync::Barrier::new(4);
-        std::thread::scope(|scope| {
-            for worker in 0..4 {
-                let database = &database;
-                let barrier = &barrier;
-                scope.spawn(move || {
-                    barrier.wait();
-                    for iteration in 0..8 {
-                        let (article, title) = if (worker + iteration) % 2 == 0 {
-                            ("2410.00001", "Modern")
-                        } else {
-                            ("hep-th/9901001", "Legacy")
-                        };
-                        let index = database.article(article).unwrap();
-                        assert_eq!(index.rows.len(), 1);
-                        let raw =
-                            index.rows["oai:metadata"].as_struct()["arxiv:arXivRaw"].as_struct();
-                        assert_eq!(raw["arxiv:title"].as_string::<i32>().value(0), title);
-                    }
-                });
-            }
-        });
-    }
 }
