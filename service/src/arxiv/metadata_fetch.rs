@@ -3,7 +3,7 @@ mod rate_limit;
 use std::{collections::HashMap, sync::Arc};
 
 use futures::{TryStreamExt, lock::Mutex};
-use open_arrow_access_core::{Accessor, ReadRequest, Result, into_stream};
+use open_arrow_access_core::{Accessor, Error, ErrorKind, ReadRequest, Result, into_stream};
 
 use super::{ArxivMetadataIndex, error, id, validation};
 use crate::{
@@ -71,7 +71,30 @@ async fn fetch_metadata(connection: &Connection, article: &str) -> Result<OaiPag
         ArxivMetadata::PATH,
         ArxivMetadata::METADATA_PREFIX,
     )?;
-    service.get_record(&id::oai_identifier(article)?).await
+    service
+        .get_record(&id::oai_identifier(article)?)
+        .await
+        .map_err(|source| {
+            if source.http_status() != Some(406) {
+                return source;
+            }
+            let retry_after = source.retry_after().map(str::to_owned);
+            // Without a server delay, let the caller recover after transport
+            // retries. Preserve explicit-delay policy: an over-budget wait
+            // must not become an early automatic job retry.
+            let kind = if retry_after.is_none() {
+                ErrorKind::Unavailable
+            } else {
+                source.kind()
+            };
+            Error::new(
+                kind,
+                "fetch_arxiv_metadata",
+                format!("arXiv OAI metadata request failed for article {article}"),
+            )
+            .with_http_response(406, retry_after)
+            .with_source(source)
+        })
 }
 
 async fn decode_metadata(page: OaiPage, article: &str) -> Result<ArxivMetadataIndex> {
@@ -89,3 +112,6 @@ async fn decode_metadata(page: OaiPage, article: &str) -> Result<ArxivMetadataIn
     validation::validate_fetched_metadata(&batch, article)?;
     ArxivMetadataIndex::from_oai_records(batch)
 }
+
+#[cfg(test)]
+mod tests;
