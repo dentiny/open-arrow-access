@@ -2,9 +2,16 @@
 
 ## Unreleased
 
+## 0.21.0 - 2026-11-23
+
+- Add explicit `ArxivMetadataSource::{Oai, DuckDbDatabase { location, init_sql }}` selection; keep lazy OAI as the default.
+- Let shared `DuckDbDatabase::connect(location, init_sql)` execute caller-provided initialization SQL before read-only local or remote attachment.
+- Open caller-created BHL databases containing the 13 source tables without requiring the importer manifest.
 - Query arXiv metadata from an indexed local or remote DuckDB snapshot through shared connections and `cache_httpfs`, with optional secret SQL before attachment.
 - Change PDF/LaTeX/XML conversion metadata schemas to omit nine fields unavailable in the Cornell/Kaggle snapshot, rather than emitting NULL placeholders. Keep raw OAI harvesting schemas unchanged; document both contracts and the nested schema change.
 - Stop retrying HTTP 406 Not Acceptable responses under the provider transport retry policy.
+
+- Release all eight public workspace crates at 0.21.0 with aligned internal dependency requirements.
 
 ## 0.20.4 - 2026-11-22
 
