@@ -120,3 +120,48 @@ cargo test -p open-arrow-access-storage --locked
 
 Plain `cargo test` does not select every workspace member or enable optional
 formats. Use the workspace command above for complete coverage.
+
+## Architecture lint
+
+[deslop-please](https://github.com/deterministic-machines/deslop-please) checks
+module cycles, tangles, field leaks, shallow modules, wide directories, and long
+files across the Cargo workspace. It is a development tool, not a library dependency.
+The CLI version is pinned in `Makefile`; Rust and rust-analyzer are pinned together
+in `rust-toolchain.toml`. Use the same versions locally and in CI.
+
+Install the pinned toolchain components and CLI once:
+
+```sh
+rustup show active-toolchain
+make install-deslop
+```
+
+Ensure Cargo's installation directory (normally `$HOME/.cargo/bin`) is on `PATH`.
+Run the check separately or as part of `make lint`:
+
+```sh
+make lint-deslop
+```
+
+The GitHub Actions architecture job runs the same command on pushes and pull
+requests. `.deslop-please.allow` records the initial architecture debt; new
+findings fail the check. Existing debt is not evidence that the code is clean.
+To inspect all findings, including the baseline:
+
+```sh
+PATH="$(dirname "$(rustup which rust-analyzer)"):$PATH" deslop-please
+```
+
+Fix findings by reviewing responsibilities and dependency directions. Do not
+mechanically move code or automatically refresh the allowlist to silence a failure.
+After reviewing an intentional baseline change (including removal of fixed debt),
+regenerate it explicitly and review the diff:
+
+```sh
+PATH="$(dirname "$(rustup which rust-analyzer)"):$PATH" deslop-please --update-allow .deslop-please.allow
+git diff -- .deslop-please.allow
+make lint-deslop
+```
+
+Review the baseline when upgrading either the CLI or Rust toolchain: changes in
+rust-analyzer's index can change the findings.

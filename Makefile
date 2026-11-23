@@ -1,6 +1,8 @@
-.PHONY: lint lint-rust lint-toml fmt fmt-check
+.PHONY: lint lint-rust lint-toml lint-deslop install-deslop fmt fmt-check
 
-lint: fmt-check lint-toml lint-rust
+DESLOP_VERSION := 0.1.3
+
+lint: fmt-check lint-toml lint-rust lint-deslop
 
 fmt:
 	cargo fmt --all
@@ -16,3 +18,10 @@ lint-toml:
 
 lint-rust:
 	cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+# Use the analyzer shipped with the toolchain pinned in rust-toolchain.toml.
+install-deslop:
+	cargo install deslop-please --version $(DESLOP_VERSION) --locked
+
+lint-deslop:
+	PATH="$$(dirname "$$(rustup which rust-analyzer)"):$${CARGO_HOME:-$$HOME/.cargo}/bin:$$PATH" deslop-please --allow .deslop-please.allow
