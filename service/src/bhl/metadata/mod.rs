@@ -100,9 +100,7 @@ impl BhlMetadata {
             .lock()
             .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?
             .try_clone()?;
-        if self.external_tables {
-            source::prepare_external_queries(&connection)?;
-        }
+        source::prepare_queries(&connection)?;
         Ok(connection)
     }
 

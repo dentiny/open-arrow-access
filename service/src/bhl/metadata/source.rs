@@ -39,7 +39,6 @@ pub struct BhlMetadataInfo {
 pub struct BhlMetadata {
     pub info: BhlMetadataInfo,
     pub(super) connection: Mutex<ManagedConnection>,
-    pub(super) external_tables: bool,
 }
 
 fn hex(bytes: impl AsRef<[u8]>) -> String {
@@ -96,7 +95,7 @@ fn create_view(
 }
 
 /// Temporary objects are connection-local and never alter the supplied file.
-pub(super) fn prepare_external_queries(connection: &::duckdb::Connection) -> Result<()> {
+pub(super) fn prepare_queries(connection: &::duckdb::Connection) -> Result<()> {
     create_id_macro(connection, true)?;
     for table in tables() {
         create_view(connection, &table, true)?;
@@ -248,7 +247,6 @@ impl BhlMetadata {
         ));
         Ok(Self {
             connection: Mutex::new(connection),
-            external_tables: false,
             info: BhlMetadataInfo {
                 source_root,
                 fingerprint,

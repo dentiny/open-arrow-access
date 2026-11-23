@@ -79,7 +79,6 @@ impl BhlMetadata {
         Ok(Self {
             connection: Mutex::new(connection),
             info,
-            external_tables: false,
         })
     }
 
@@ -137,7 +136,6 @@ impl BhlMetadata {
         }
         Ok(Self {
             connection: Mutex::new(connection),
-            external_tables: true,
             info: BhlMetadataInfo {
                 source_root: super::super::OPEN_DATA_BUCKET_URL.to_owned(),
                 fingerprint: snapshot_id,
