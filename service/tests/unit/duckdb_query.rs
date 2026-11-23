@@ -79,7 +79,6 @@ fn streams_batches_and_returns_empty_result_schema() {
     assert_eq!(schema.field(0).data_type(), &DataType::Int64);
 }
 
-#[cfg(feature = "arxiv")]
 #[test]
 fn cached_query_rebinds_and_resets_after_an_interrupted_result() {
     let (_directory, path) = database();

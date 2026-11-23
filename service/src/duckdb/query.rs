@@ -73,9 +73,9 @@ impl DuckDbDatabase {
         query_statement(&mut statement, params, emit)
     }
 
-    /// Reuse a prepared statement on this connection for repeated metadata SQL.
-    #[cfg(feature = "arxiv")]
-    pub(crate) fn query_cached<P: Params>(
+    /// Execute SQL using this connection's prepared-statement cache.
+    /// Parameters are rebound on each call; results are streamed as in [`Self::query`].
+    pub fn query_cached<P: Params>(
         &self,
         sql: &str,
         params: P,
