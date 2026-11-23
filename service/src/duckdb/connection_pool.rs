@@ -1,29 +1,40 @@
 use super::DuckDbDatabase;
 use open_arrow_access_core::{Error, ErrorKind, Result};
-use std::{ops::Deref, sync::Mutex};
+use std::{collections::VecDeque, ops::Deref, sync::Mutex};
+
+const DEFAULT_MAX_IDLE: usize = 16;
 
 /// Reuse connections and their prepared statements while sharing one database.
-/// The pool grows on demand with concurrent checkouts and retains idle connections.
+/// Active checkouts grow on demand; retained idle connections are bounded.
 pub struct DuckDbConnectionPool {
     connections: Mutex<Connections>,
+    max_idle: usize,
 }
 
 struct Connections {
     database: DuckDbDatabase,
-    idle: Vec<DuckDbDatabase>,
+    idle: VecDeque<DuckDbDatabase>,
 }
 
 impl DuckDbConnectionPool {
+    /// Retain at most 16 idle connections.
     pub fn new(database: DuckDbDatabase) -> Self {
+        Self::with_max_idle(database, DEFAULT_MAX_IDLE)
+    }
+
+    /// Retain at most `max_idle` connections, evicting the least recently returned.
+    /// Zero disables idle retention. Active checkouts are not limited.
+    pub fn with_max_idle(database: DuckDbDatabase, max_idle: usize) -> Self {
         Self {
             connections: Mutex::new(Connections {
                 database,
-                idle: Vec::new(),
+                idle: VecDeque::new(),
             }),
+            max_idle,
         }
     }
 
-    /// Check out an idle connection, cloning one only when all are in use.
+    /// Check out the most recently returned connection, or clone one if none is idle.
     /// The returned guard returns it to the pool on drop, including on errors.
     /// No pool lock is held while callers execute queries.
     pub fn get_connection(&self) -> Result<PooledConnection<'_>> {
@@ -34,7 +45,7 @@ impl DuckDbConnectionPool {
                 "connection pool lock poisoned",
             )
         })?;
-        let connection = match connections.idle.pop() {
+        let connection = match connections.idle.pop_back() {
             Some(connection) => connection,
             None => connections.database.try_clone()?,
         };
@@ -63,11 +74,26 @@ impl Deref for PooledConnection<'_> {
 
 impl Drop for PooledConnection<'_> {
     fn drop(&mut self) {
-        if let Some(connection) = self.connection.take()
-            && let Ok(mut connections) = self.pool.connections.lock()
-        {
-            connections.idle.push(connection);
+        let Some(connection) = self.connection.take() else {
+            return;
+        };
+        if self.pool.max_idle == 0 {
+            return;
         }
+        let evicted = {
+            let Ok(mut connections) = self.pool.connections.lock() else {
+                return;
+            };
+            let evicted = if connections.idle.len() == self.pool.max_idle {
+                connections.idle.pop_front()
+            } else {
+                None
+            };
+            connections.idle.push_back(connection);
+            evicted
+        };
+        // Closing a connection must not block other checkouts behind the pool lock.
+        drop(evicted);
     }
 }
 
@@ -75,12 +101,18 @@ impl Drop for PooledConnection<'_> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn returns_connection_on_error_and_preserves_connection_local_state() {
+    fn database() -> (tempfile::TempDir, DuckDbDatabase) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("pool.duckdb");
         ::duckdb::Connection::open(&path).unwrap().close().unwrap();
-        let pool = DuckDbConnectionPool::new(DuckDbDatabase::open(path).unwrap());
+        let database = DuckDbDatabase::open(path).unwrap();
+        (directory, database)
+    }
+
+    #[test]
+    fn returns_connection_on_error_and_preserves_connection_local_state() {
+        let (_directory, database) = database();
+        let pool = DuckDbConnectionPool::new(database);
         let result = (|| -> Result<()> {
             let connection = pool.get_connection()?;
             connection.query(
@@ -110,5 +142,30 @@ mod tests {
             })
             .unwrap();
         assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn bounds_idle_connections_and_retains_the_most_recently_returned() {
+        for max_idle in [0, 1, 2] {
+            let (_directory, database) = database();
+            let pool = DuckDbConnectionPool::with_max_idle(database, max_idle);
+            let connections: Vec<_> = (0..4).map(|_| pool.get_connection().unwrap()).collect();
+            connections
+                .last()
+                .unwrap()
+                .query(
+                    "CREATE TEMP TABLE newest_connection AS SELECT 1",
+                    [],
+                    |_| Ok(()),
+                )
+                .unwrap();
+            for connection in connections {
+                drop(connection);
+            }
+            assert_eq!(pool.connections.lock().unwrap().idle.len(), max_idle);
+            let connection = pool.get_connection().unwrap();
+            let result = connection.query("SELECT * FROM newest_connection", [], |_| Ok(()));
+            assert_eq!(result.is_ok(), max_idle > 0);
+        }
     }
 }
