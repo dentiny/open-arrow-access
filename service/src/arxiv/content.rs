@@ -145,8 +145,6 @@ impl<A> ArxivRecords<A> {
     }
 }
 impl<A> ArxivContentRecords<A> {
-    /// Query article metadata from a shared local or cached remote DuckDB file.
-    /// Missing matches fail the scan; this path never falls back to OAI.
     pub fn with_metadata_database(mut self, database: Arc<ArxivMetadataDatabase>) -> Self {
         self.metadata = ContentMetadata::Database(database);
         self
