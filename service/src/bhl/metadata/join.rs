@@ -5,6 +5,7 @@ use open_arrow_access_core::{ObjectRef, Result};
 use std::sync::Arc;
 
 const SELECTION_BATCH_SIZE: usize = 8192;
+const CANONICAL_ID_COLUMN: usize = 4;
 const CANONICAL_MATCHES_COLUMN: usize = 5;
 
 fn strings(column: &dyn Array, row: usize) -> Result<Vec<String>> {
@@ -125,7 +126,7 @@ pub(super) fn for_each(
                 .downcast_ref::<UInt64Array>()
                 .ok_or_else(|| error::invalid("expected canonical match counts"))?;
             let selected = batch
-                .column(4)
+                .column(CANONICAL_ID_COLUMN)
                 .as_any()
                 .downcast_ref::<UInt64Array>()
                 .ok_or_else(|| error::invalid("expected canonical request IDs"))?;
