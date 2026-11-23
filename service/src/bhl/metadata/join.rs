@@ -118,7 +118,8 @@ pub(super) fn for_each(
             .as_any()
             .downcast_ref::<UInt64Array>()
             .ok_or_else(|| error::invalid("expected canonical request IDs"))?;
-        // Match the fixed nested LargeUtf8/nullability contract.
+        // Enforce the fixed LargeUtf8/non-null contract on joined records only;
+        // NULL cells in unrelated source rows must not fail this query.
         let metadata =
             arrow_cast::cast(batch.column(1), field.data_type()).map_err(error::arrow)?;
         let metadata = metadata

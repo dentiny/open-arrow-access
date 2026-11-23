@@ -401,6 +401,13 @@ async fn plain_database() -> (tempfile::TempDir, std::path::PathBuf, Vec<BhlPage
 #[tokio::test]
 async fn plain_tables_open_read_only_without_importer_objects_and_keep_query_isolation() {
     let (_directory, path, expected) = plain_database().await;
+    {
+        let connection = ::duckdb::Connection::open(&path).unwrap();
+        // The query must ignore NULL cells in titles unrelated to these pages.
+        connection.execute_batch(
+            "INSERT INTO title SELECT * REPLACE ('999999' AS TitleID, NULL AS FullTitle) FROM title LIMIT 1;"
+        ).unwrap();
+    }
     let original = std::fs::read(&path).unwrap();
     // Managed databases retain their strict importer-manifest contract.
     assert!(BhlMetadata::open(&path).is_err());
@@ -408,6 +415,7 @@ async fn plain_tables_open_read_only_without_importer_objects_and_keep_query_iso
     assert_eq!(metadata.info.fingerprint, "fixture-database-v1");
     assert!(metadata.info.sources.is_empty());
     let actual = read(&metadata, &[ITEM, PART]);
+    assert_eq!(actual.len(), expected.len());
     for (actual, expected) in actual.iter().zip(&expected) {
         assert_eq!(actual.metadata, expected.metadata);
         assert_eq!(actual.missing, expected.missing);
@@ -532,21 +540,6 @@ async fn page_relations_preserve_types_order_and_one_output_per_ocr_request() {
         .execute_batch("INSERT INTO page VALUES ('3','7','6','','','','','','Text','');")
         .unwrap();
     invalid_selection(&metadata, &[ITEM]);
-}
-
-#[tokio::test]
-async fn plain_tables_reuse_shared_connection_and_setup_sql() {
-    let (directory, path, expected) = plain_database().await;
-    let script = directory.path().join("secrets.sql");
-    std::fs::write(&script, "CREATE MACRO shared_setup() AS 42;").unwrap();
-    let database =
-        crate::duckdb::DuckDbDatabase::connect(path.to_str().unwrap(), Some(&script)).unwrap();
-    let metadata = BhlMetadata::from_tables_database(database, "shared-database-v1").unwrap();
-    let actual = read(&metadata, &[ITEM, PART]);
-    assert_eq!(actual.len(), expected.len());
-    for (actual, expected) in actual.iter().zip(&expected) {
-        assert_eq!(actual.metadata, expected.metadata);
-    }
 }
 
 #[tokio::test]

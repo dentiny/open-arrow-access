@@ -73,11 +73,7 @@ fn create_view(
         .iter()
         .map(|field| {
             let name = quoted(field.name());
-            if temporary {
-                format!("{name} := CASE WHEN {name} IS NULL THEN error('NULL cell in BHL {}.{}') ELSE {name} END", table.name, field.name())
-            } else {
-                format!("{name} := {name}")
-            }
+            format!("{name} := {name}")
         })
         .collect::<Vec<_>>()
         .join(", ");
