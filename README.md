@@ -407,10 +407,9 @@ CREATE SECRET metadata_storage (
 ```
 
 For an authenticated HTTP endpoint, use DuckDB's `TYPE http` secret with
-`BEARER_TOKEN` or `EXTRA_HTTP_HEADERS` instead. Install compatible extensions
-before using `connect` (`INSTALL cache_httpfs FROM community`, including for local
-paths), or include
-installation in the trusted setup script. Script errors are redacted to avoid including credentials in error messages. Secrets
+`BEARER_TOKEN` or `EXTRA_HTTP_HEADERS` instead. Each `connect` runs
+`FORCE INSTALL cache_httpfs FROM community` followed by `LOAD cache_httpfs`,
+including for local paths. Script errors are redacted to avoid including credentials in error messages. Secrets
 remain temporary unless the script explicitly uses `CREATE PERSISTENT SECRET`.
 Cloned connections share secrets, the selected search path and cached remote
 blocks. Shared temporary storage contains separate `http-cache/` and `spill/`

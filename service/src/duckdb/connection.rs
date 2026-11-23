@@ -75,7 +75,8 @@ impl ManagedConnection {
         std::fs::create_dir_all(&cache).map_err(error::scratch)?;
         self.connection
             .execute_batch(&format!(
-                "LOAD cache_httpfs;
+                "FORCE INSTALL cache_httpfs FROM community;
+                 LOAD cache_httpfs;
                  SET cache_httpfs_type = 'on_disk';
                  SET cache_httpfs_cache_directories_config = '';
                  SET cache_httpfs_cache_directory = '{}';",

@@ -31,8 +31,9 @@ impl DuckDbDatabase {
     /// Open a local path or DuckDB-supported remote URL read-only.
     /// Execute the optional trusted SQL file (e.g. LOAD httpfs; CREATE SECRET ...)
     /// before attaching the database. Secrets are temporary unless the script
-    /// explicitly requests persistence. cache_httpfs must be installed; its
-    /// on-disk cache is always configured before ATTACH, including local paths.
+    /// explicitly requests persistence. cache_httpfs is force-installed from
+    /// community and loaded on each connect; its on-disk cache is always
+    /// configured before ATTACH, including local paths.
     /// Only requested
     /// blocks are fetched, with no full database download during opening.
     /// This is synchronous; use a blocking worker in async applications.
