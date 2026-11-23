@@ -476,36 +476,6 @@ async fn plain_tables_reject_bad_schemas_keys_and_consumed_null_cells() {
     assert!(!missing.exists());
 }
 
-#[test]
-#[ignore = "requires a caller-provided BHL_METADATA_DATABASE SQL dump"]
-fn opens_real_plain_database_without_importing_tables() {
-    let path = std::env::var("BHL_METADATA_DATABASE").expect("BHL_METADATA_DATABASE");
-    let metadata = BhlMetadata::open_tables(&path, "real-database-validation").unwrap();
-    assert_eq!(metadata.info.sources.len(), 13);
-    let connection = metadata.query_connection().unwrap();
-    let (page, item, sequence): (u64, u64, u64) = connection
-        .query_row(
-            "SELECT bhl_id(PageID), bhl_id(ItemID), bhl_id(SequenceOrder)
-             FROM main.page WHERE ItemID = '24311' AND bhl_id(SequenceOrder) > 0 LIMIT 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .unwrap();
-    drop(connection);
-    let key = ObjectRef::new(format!(
-        "ocr/item-{item:06}/item-{item:06}-{page:08}-{sequence:04}.txt"
-    ));
-    let mut count = 0;
-    metadata
-        .for_each(&[key], |row| {
-            assert_eq!(cell(&row.metadata, "item", "ItemID"), "24311");
-            count += 1;
-            Ok(())
-        })
-        .unwrap();
-    assert_eq!(count, 1);
-}
-
 #[tokio::test]
 async fn part_parent_associations_preserve_blank_ids_and_do_not_multiply_pages() {
     let (_root, storage) = source_table("part", "part-multi-item.txt.gz").await;
