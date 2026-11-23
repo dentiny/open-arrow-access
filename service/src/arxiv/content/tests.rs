@@ -514,4 +514,3 @@ async fn missing_latex_in_multiple_tar_selection_cannot_skip_entire_shards() {
     assert_eq!(error.kind(), open_arrow_access_core::ErrorKind::Decode);
     assert!(error.to_string().contains("article-level skipping"));
 }
-
