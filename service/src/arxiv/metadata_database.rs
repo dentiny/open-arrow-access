@@ -1,58 +1,31 @@
 use super::{ArxivMetadataIndex, content::content_schema, error, id, validation};
-use crate::duckdb::{DuckDbDatabase, params};
+use crate::duckdb::{DuckDbConnectionPool, DuckDbDatabase, params};
 use arrow_array::{RecordBatch, StructArray, cast::AsArray};
 use open_arrow_access_core::Result;
-use std::sync::Mutex;
 
 /// Share one read-only DuckDB instance and its disk cache across article readers.
 pub struct ArxivMetadataDatabase {
-    connections: Mutex<MetadataConnections>,
-}
-
-struct MetadataConnections {
-    database: DuckDbDatabase,
-    idle: Vec<DuckDbDatabase>,
+    connections: DuckDbConnectionPool,
 }
 
 impl ArxivMetadataDatabase {
     pub fn new(database: DuckDbDatabase) -> Self {
         Self {
-            connections: Mutex::new(MetadataConnections {
-                database,
-                idle: Vec::new(),
-            }),
+            connections: DuckDbConnectionPool::new(database),
         }
     }
 
     pub(super) fn article(&self, article: &str) -> Result<ArxivMetadataIndex> {
         let article = id::metadata_id(article)?;
-        // Only hold the pool lock during checkout/return, never during a query.
-        // Grow to the caller's concurrent lookup count, then reuse connections
-        // and their prepared statements for subsequent articles.
-        let connection = {
-            let mut connections = self
-                .connections
-                .lock()
-                .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?;
-            match connections.idle.pop() {
-                Some(connection) => connection,
-                None => connections.database.try_clone()?,
-            }
-        };
+        let connection = self.connections.get_connection()?;
         let mut batches = Vec::new();
         // LIMIT 2 lets validation reject duplicate article IDs.
-        let result = connection.query_cached(
+        let schema = connection.query_cached(
             "SELECT \"oai:header\", \"oai:metadata\" FROM main.arxiv_metadata WHERE article_id = ? LIMIT 2",
             params![article],
             |batch| { batches.push(batch); Ok(()) },
-        );
-        // Return the connection even when execution or fetching failed.
-        self.connections
-            .lock()
-            .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?
-            .idle
-            .push(connection);
-        let schema = result?;
+        )?;
+        drop(connection);
         let batch =
             arrow_select::concat::concat_batches(&schema, &batches).map_err(error::arrow_error)?;
         validation::validate_metadata_record_count(batch.num_rows())?;
@@ -107,11 +80,9 @@ mod tests {
             let raw = index.rows["oai:metadata"].as_struct()["arxiv:arXivRaw"].as_struct();
             assert_eq!(raw["arxiv:title"].as_string::<i32>().value(0), title);
         }
-        assert_eq!(database.connections.lock().unwrap().idle.len(), 1);
         // An empty result must not leave the cached statement's old row behind.
         assert!(database.article("2410.99999").is_err());
         assert!(database.article("2410.00001").is_ok());
-        assert_eq!(database.connections.lock().unwrap().idle.len(), 1);
     }
 
     #[test]
@@ -139,7 +110,5 @@ mod tests {
                 });
             }
         });
-        let connections = database.connections.lock().unwrap();
-        assert!((1..=4).contains(&connections.idle.len()));
     }
 }
