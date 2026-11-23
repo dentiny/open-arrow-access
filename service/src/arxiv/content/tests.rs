@@ -91,17 +91,6 @@ async fn non_tex_document_signatures_report_missing_tex(#[case] data: &[u8]) {
 }
 
 #[rstest::rstest]
-#[case::plain_text(b"plain text")]
-#[case::invalid_utf8(b"\xff")]
-#[tokio::test]
-async fn invalid_sources_report_decode_errors(#[case] data: &[u8]) {
-    assert_eq!(
-        read("2410/2410.00001.gz", data).await.unwrap_err().kind(),
-        open_arrow_access_core::ErrorKind::Decode
-    );
-}
-
-#[rstest::rstest]
 #[case::pdf("arxiv-articles", "paper.pdf")]
 #[case::gzip_pdf("arxiv-articles", "paper.pdf.gz")]
 #[case::archive_without_tex("arxiv-content", "no-latex.tar")]

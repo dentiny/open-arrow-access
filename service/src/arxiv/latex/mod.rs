@@ -82,7 +82,7 @@ fn is_non_tex_document(data: &[u8]) -> bool {
     data.starts_with(b"%PDF-") || data.starts_with(b"%!PS") || data.starts_with(b"\xf7\x02")
 }
 
-/// Append the remaining decoded bytes to the sniffed prefix and validate the
+/// Append the remaining decoded bytes to the sniffed prefix and preserve the
 /// complete single-file source before emitting one `main.tex` content row.
 async fn expand_single_latex(
     mut input: DecodedInput,
@@ -97,7 +97,6 @@ async fn expand_single_latex(
     if is_non_tex_document(&data) {
         return Err(error::missing_latex(batch, article_id));
     }
-    validation::source_packaging(&data)?;
     let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
     append_latex(&mut builder, batch, article_id, 0, b"main.tex", &data)?;
     Ok(stream::iter([builder.finish()]).boxed())
@@ -165,7 +164,7 @@ async fn read_latex_batch(
     builder.finish()
 }
 
-/// Validate the LaTeX bytes and append one content row, preserving the payload
+/// Append one content row, preserving the selected source payload
 /// unchanged. Combine shard/article provenance from the single-row `outer` batch
 /// with the selected source file's index and name.
 fn append_latex(
@@ -176,7 +175,6 @@ fn append_latex(
     name: &[u8],
     data: &[u8],
 ) -> Result<()> {
-    validation::validate_latex_bytes(data)?;
     builder.push(|output| {
         output.append("article_id", article_id)?;
         output.append("format", "latex")?;

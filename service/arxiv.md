@@ -430,7 +430,7 @@ field names, order, Arrow types and nullability:
 | `entry_name` | `LargeBinary`, non-null | Original outer filename including version spelling |
 | `source_index` | `UInt64`, non-null | Inner TeX member index; zero for whole PDF/XML documents |
 | `source_name` | `LargeBinary`, non-null | Inner TeX filename; empty for whole PDF/XML documents |
-| `data` | `LargeBinary`, non-null | PDF bytes, decoded UTF-8 TeX bytes, or original XML bytes |
+| `data` | `LargeBinary`, non-null | PDF bytes, decoded source bytes, or original XML bytes |
 | `data_type` | `LargeUtf8`, non-null | Representation of this row's payload: `pdf`, `latex`, or `xml` |
 | `metadata` | `Struct`, nullable | Full arXivRaw OAI record; automatically populated for every content row |
 
@@ -599,14 +599,14 @@ The legacy raw-PDF join still accepts arbitrary caller snapshot schemas.
 `service.records().content(ArxivContentFormat::Latex)` accepts `ArxivKind::Source`.
 It uses article partitions for a single selected TAR and file partitions for
 multiple TARs, as described below. It decodes gzip source payloads, detects TAR packages,
-and emits each UTF-8 `.tex` member outside any `anc/` directory. Images,
+and emits each `.tex` member outside any `anc/` directory. Images,
 ancillary TeX, videos, bibliography/style files and the original package are
 excluded. Multi-file manuscripts remain separate files; includes are not
-expanded and TeX is not compiled or concatenated. Single files must contain a
-LaTeX document marker or a plain TeX macro-input/end marker such as `\input`
-or `\bye`; this includes legacy harvmac submissions. Non-TeX sources, packages without eligible TeX,
-invalid UTF-8 and corrupt archives fail the scan; no PDF fallback or silent
-row skipping occurs.
+expanded and TeX is not compiled or concatenated. Selected file bytes are preserved
+without UTF-8 validation or TeX marker detection, including empty files and
+`%auto-ignore` stubs. Standalone PDF, PostScript and DVI signatures and packages
+without eligible TeX report missing LaTeX; corrupt archives fail the scan.
+There is no PDF fallback.
 
 The schema is `article_id: LargeUtf8`, `format: LargeUtf8` (`latex`),
 `shard_uri: LargeUtf8`, `entry_index: UInt64`, `entry_name: LargeBinary`,
@@ -691,7 +691,7 @@ identity. The default remains an error. Apply `MissingObjectLayer` with
 `MissingObjectPolicy::Skip` and a reporting callback before parallel execution
 to explicitly skip those article partitions and continue reading the shard.
 
-Corrupt gzip/TAR input and invalid UTF-8 TeX remain fatal. For a multi-TAR
-selection, partitions contain entire TARs, so absent LaTeX remains fatal rather
+Corrupt gzip/TAR input remains fatal; source content does not require UTF-8.
+For a multi-TAR selection, partitions contain entire TARs, so absent LaTeX remains fatal rather
 than allowing a missing-object policy to drop other articles in the same shard.
 Distribute such work as explicit single-shard jobs for article-level skipping.
