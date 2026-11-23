@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.20.4 - 2026-11-22
+
+- Select BHL OCR versions by authoritative metadata sequence, accepting zero-based filename alternatives without emitting duplicate pages or choosing mismatched content.
+- Give BHL and CourtListener shared managed DuckDB connections with private writable spill storage retained across connection clones.
+- Preserve arXiv source payload bytes without rejecting non-UTF-8 TeX or unrecognized single-file text; simplify content readers and reuse parsed article IDs.
+- Delegate ranged and sequential TAR parsing to archive packages, retaining lazy member reads, cancellation and decoder-trailer checks.
+- TAR API change: remove `TarLimits` and `ArxivService::with_tar_limits`; use `TarStream::new(input)` and `TarArchive::open(input).await`. TAR counts, member sizes and GNU/PAX metadata have no custom limits. Only ranged indexing requires Tokio.
+- Release all eight public workspace crates at 0.20.4 with aligned internal dependency requirements.
+
 ## 0.20.3 - 2026-11-22
 
 - Fix the BHL multi-directory planner's Send future compilation error by constructing directory listing futures before buffering them. Preserve bounded concurrency and selected directory order.
