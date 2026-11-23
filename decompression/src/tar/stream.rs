@@ -83,6 +83,8 @@ impl TarStream {
                     entry.effective_size(),
                     entry.header().entry_type().is_file(),
                     entry.header().entry_type().is_dir(),
+                    entry.header().entry_type().is_hard_link()
+                        || entry.header().entry_type().is_symlink(),
                 )?;
                 self.index += 1;
                 self.remaining = Arc::new(AtomicU64::new(selected.size));

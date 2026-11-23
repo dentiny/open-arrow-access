@@ -18,7 +18,7 @@ use error::{decode, missing_entry};
 const TAR_BLOCK_SIZE: NonZeroUsize = NonZeroUsize::new(512).unwrap();
 
 /// Original entry names are metadata, never paths extracted to the filesystem.
-/// Duplicate names retain separate indices; directories cannot be opened as files.
+/// Duplicate names retain separate indices; directories and links cannot be opened as files.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TarEntry {
     pub index: usize,
@@ -30,7 +30,8 @@ pub struct TarEntry {
 /// One opened source and its cached entry headers. Inspection reads header blocks
 /// and skips bodies using exact ranges; there is one header request per entry.
 /// Uses tar::Archive for GNU/USTAR/PAX metadata and file-name decoding.
-/// Exposes regular files and directories; sparse files and links remain unsupported.
+/// Exposes regular files, directories, and link metadata; never follows link targets.
+/// Sparse files and special entries remain unsupported.
 /// Requires a Tokio runtime for the synchronous package adapter. Compressed
 /// TAR requires a separate ranged representation; a sequential gzip decoder cannot
 /// supply this input.
@@ -67,6 +68,8 @@ impl TarArchive {
                         entry.size(),
                         entry.header().entry_type().is_file(),
                         entry.header().entry_type().is_dir(),
+                        entry.header().entry_type().is_hard_link()
+                            || entry.header().entry_type().is_symlink(),
                     )?;
                     let start = entry.raw_file_position();
                     if start

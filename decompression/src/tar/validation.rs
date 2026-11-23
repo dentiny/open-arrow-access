@@ -10,10 +10,11 @@ pub(super) fn entry(
     size: u64,
     is_file: bool,
     is_dir: bool,
+    is_link: bool,
 ) -> Result<TarEntry> {
-    if !is_file && !is_dir {
+    if !is_file && !is_dir && !is_link {
         return Err(unsupported(
-            "TAR byte entries must be regular files or directories; links and sparse files are not exposed",
+            "TAR byte entries must be regular files, directories, or links; sparse files and special entries are not exposed",
         ));
     }
     Ok(TarEntry {
@@ -26,7 +27,7 @@ pub(super) fn entry(
 
 pub(super) fn validate_regular_entry(entry: &TarEntry) -> Result<()> {
     if !entry.is_file {
-        return Err(unsupported("TAR directory entries have no file reader"));
+        return Err(unsupported("TAR non-file entries have no file reader"));
     }
     Ok(())
 }

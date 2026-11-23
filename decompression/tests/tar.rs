@@ -79,6 +79,7 @@ async fn accepts_empty_and_gnu_archives() {
         ("gnu.tar", 1),
         ("gnu-longname.tar", 1),
         ("pax.tar", 1),
+        ("link.tar", 1),
         ("one-zero-block.tar", 0),
         ("missing-end.tar", 4),
     ] {
@@ -96,7 +97,7 @@ async fn rejects_malformed_and_unsupported_archives() {
         ("bad-checksum.tar", ErrorKind::Decode),
         ("bad-size.tar", ErrorKind::Decode),
         ("truncated.tar", ErrorKind::Decode),
-        ("link.tar", ErrorKind::Unsupported),
+        ("special.tar", ErrorKind::Unsupported),
     ] {
         let source = source(name).await;
         let error = TarArchive::open(source.open("archive".into()).await.unwrap())
@@ -500,4 +501,54 @@ async fn malformed_gnu_names_fail_in_both_readers() {
         expect_err_kind(stream.next_entry().await, ErrorKind::Decode);
         assert!(stream.next_entry().await.unwrap().is_none());
     }
+}
+
+#[tokio::test]
+async fn link_metadata_never_dereferences_targets_and_preserves_following_files() {
+    use open_arrow_access_decompression::tar::TarStream;
+    let input = source("links-and-files.tar").await;
+    let indexed = TarArchive::open(input.open("archive".into()).await.unwrap())
+        .await
+        .unwrap();
+    let headers: Vec<_> = indexed.entries().cloned().collect();
+    assert_eq!(headers.len(), 4);
+    let mut stream = TarStream::new(input.open("archive".into()).await.unwrap());
+    for (index, header) in headers.iter().enumerate() {
+        let mut member = stream.next_entry().await.unwrap().unwrap();
+        assert_eq!(&member.entry, header);
+        assert_eq!(header.index, index);
+        if header.is_file {
+            let expected = if index == 0 {
+                b"first".as_slice()
+            } else {
+                b"last".as_slice()
+            };
+            assert_eq!(
+                collect_bytes(member.reader.as_mut()).await.unwrap(),
+                expected
+            );
+            assert_eq!(
+                collect_bytes(
+                    indexed
+                        .open_entry(index, NonZeroUsize::MIN)
+                        .unwrap()
+                        .as_mut()
+                )
+                .await
+                .unwrap(),
+                expected
+            );
+        } else {
+            expect_err_kind(indexed.entry_range(index), ErrorKind::Unsupported);
+            assert!(indexed.open_entry(index, NonZeroUsize::MIN).is_err());
+            assert!(
+                collect_bytes(member.reader.as_mut())
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+    assert!(stream.next_entry().await.unwrap().is_none());
+    assert_eq!(input.observations.requests.lock().unwrap().len(), 2);
 }

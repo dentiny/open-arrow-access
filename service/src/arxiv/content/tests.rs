@@ -141,6 +141,24 @@ fn tex_selection_rejects_path_traversal() {
 }
 
 #[tokio::test]
+async fn latex_skips_linked_attachments_and_keeps_following_tex() {
+    let data = fixture!("tar", "links-and-files.tar").await;
+    let batches = read("2509/2509.17155.gz", &data).await.unwrap();
+    assert_eq!(batches.len(), 2);
+    for (batch, index, name, body) in [
+        (&batches[0], 0, b"main.tex".as_slice(), b"first".as_slice()),
+        (&batches[1], 3, b"last.tex".as_slice(), b"last".as_slice()),
+    ] {
+        assert_eq!(
+            batch["source_index"].as_primitive::<UInt64Type>().value(0),
+            index
+        );
+        assert_eq!(batch["source_name"].as_binary::<i64>().value(0), name);
+        assert_eq!(batch["data"].as_binary::<i64>().value(0), body);
+    }
+}
+
+#[tokio::test]
 async fn formats_preserve_content_and_join_metadata() {
     let schema = content_schema();
     let snapshot = oai_snapshot().await;
