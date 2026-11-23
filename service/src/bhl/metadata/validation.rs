@@ -10,6 +10,13 @@ pub(super) fn validate_database_destination(exists: bool) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn validate_database_snapshot_id(snapshot_id: &str) -> Result<()> {
+    if snapshot_id.trim().is_empty() {
+        return Err(error::invalid("database snapshot_id must not be blank"));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_database_header(count: u64, version: u64) -> Result<()> {
     if count != 1 || version != DATABASE_VERSION {
         return Err(error::invalid(

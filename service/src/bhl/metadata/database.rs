@@ -101,9 +101,7 @@ impl BhlMetadata {
         snapshot_id: impl Into<String>,
     ) -> Result<Self> {
         let snapshot_id = snapshot_id.into();
-        if snapshot_id.trim().is_empty() {
-            return Err(error::invalid("database snapshot_id must not be blank"));
-        }
+        validation::validate_database_snapshot_id(&snapshot_id)?;
         let (connection, location) = database.into_connection();
         let mut sources = BTreeMap::new();
         for table in tables() {
