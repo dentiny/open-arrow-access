@@ -1,6 +1,6 @@
 //! Persistent DuckDB storage for reusable BHL metadata.
-use super::{BhlMetadata, BhlMetadataInfo, error, tables, validation};
-use crate::duckdb::ManagedConnection;
+use super::{BhlMetadata, BhlMetadataInfo, error, source, tables, validation};
+use crate::duckdb::{DuckDbDatabase, ManagedConnection};
 use ::duckdb::{Connection, params};
 use open_arrow_access_core::{ByteAccessor, Result};
 use std::{path::Path, sync::Mutex};
@@ -19,28 +19,13 @@ fn read_info(connection: &Connection) -> Result<BhlMetadataInfo> {
     serde_json::from_str(&info).map_err(error::json)
 }
 
-fn check_sources(connection: &Connection, info: &BhlMetadataInfo) -> Result<()> {
+fn check_sources(connection: &ManagedConnection, info: &BhlMetadataInfo) -> Result<()> {
     let tables = tables();
     validation::validate_database_manifest(info, tables.len())?;
     for table in tables {
-        let mut query = connection
-            .prepare(&format!("DESCRIBE main.\"{}\"", table.name))
-            .map_err(error::duckdb)?;
-        let columns = query
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(error::duckdb)?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(error::duckdb)?;
+        let columns = connection.table_columns(&table.name)?;
         validation::validate_database_source_schema(&table, &columns, info)?;
-        let rows: u64 = connection
-            .query_row(
-                &format!("SELECT count(*) FROM main.\"{}\"", table.name),
-                [],
-                |row| row.get(0),
-            )
-            .map_err(error::duckdb)?;
+        let rows = connection.table_row_count(&table.name)?;
         validation::validate_database_source_rows(rows, info.sources[&table.name].rows)?;
     }
     Ok(())
@@ -92,6 +77,50 @@ impl BhlMetadata {
         Ok(Self {
             connection: Mutex::new(connection),
             info,
+        })
+    }
+
+    /// Open a caller-created DuckDB file containing the 13 BHL source tables.
+    /// No TSV acquisition, table copying, or private manifest is required.
+    ///
+    /// The file is opened read-only. All required columns must appear in source
+    /// order as VARCHAR, preserving empty strings. Query helpers are temporary
+    /// and private to each query connection. `snapshot_id` must identify this
+    /// immutable database (for example, its SHA-256 computed once by the caller).
+    /// It is not presented as a checksum of the original TSV rows.
+    pub fn open_tables(path: impl AsRef<Path>, snapshot_id: impl Into<String>) -> Result<Self> {
+        Self::from_tables_database(DuckDbDatabase::open(path)?, snapshot_id)
+    }
+
+    /// Bind a shared local or remote DuckDB database to BHL tables.
+    /// File loading, credentials and cache lifetime belong to the shared module.
+    pub fn from_tables_database(
+        database: DuckDbDatabase,
+        snapshot_id: impl Into<String>,
+    ) -> Result<Self> {
+        let snapshot_id = snapshot_id.into();
+        validation::validate_database_snapshot_id(&snapshot_id)?;
+        let connection = database.into_connection();
+        for table in tables() {
+            let columns = connection.table_columns(&table.name)?;
+            validation::validate_table_schema(&table, &columns)?;
+        }
+        source::create_id_macro(&connection, true)?;
+        let valid_title_keys: bool = connection
+            .query_row(
+                "SELECT count(*) = count(DISTINCT bhl_id(TitleID)) FROM main.title",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(error::duckdb)?;
+        validation::validate_title_keys(valid_title_keys)?;
+        Ok(Self {
+            connection: Mutex::new(connection),
+            info: BhlMetadataInfo {
+                source_root: super::super::OPEN_DATA_BUCKET_URL.to_owned(),
+                fingerprint: snapshot_id,
+                sources: Default::default(),
+            },
         })
     }
 }

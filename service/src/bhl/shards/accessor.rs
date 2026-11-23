@@ -75,6 +75,23 @@ impl<A: ByteAccessor + 'static> BhlShardAccessor<A> {
         Self::from_metadata(storage, Arc::new(metadata))
     }
 
+    /// Read a plain SQL-dumped database containing the 13 source tables.
+    /// No BHL importer manifest or persistent helper views are required.
+    /// `snapshot_id` identifies the caller's immutable database, e.g. its SHA-256.
+    pub async fn from_tables_database(
+        storage: A,
+        path: impl AsRef<Path>,
+        snapshot_id: impl Into<String>,
+    ) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let snapshot_id = snapshot_id.into();
+        let metadata =
+            tokio::task::spawn_blocking(move || BhlMetadata::open_tables(path, snapshot_id))
+                .await
+                .map_err(error::metadata_worker)??;
+        Self::from_metadata(storage, Arc::new(metadata))
+    }
+
     /// Override the row snapshot label, retaining the metadata provenance fields.
     pub fn with_snapshot_id(mut self, snapshot_id: impl Into<String>) -> Result<Self> {
         let snapshot_id = snapshot_id.into();

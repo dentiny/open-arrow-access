@@ -16,12 +16,8 @@ arxiv = [
     "open-arrow-access-decompression/gzip",
 ]
 bhl = [
-    "dep:tempfile",
     "tokio/sync",
     "opendal/services-s3",
-    "dep:arrow-array",
-    "dep:arrow-schema",
-    "dep:duckdb",
     "dep:arrow-cast",
     "dep:sha2",
     "dep:regex",
@@ -33,12 +29,8 @@ biorxiv = ["meca", "dep:chrono"]
 courtlistener = [
     "dep:open-arrow-access-decompression",
     "open-arrow-access-decompression/bz2",
-    "dep:arrow-array",
-    "dep:arrow-schema",
     "dep:arrow-cast",
-    "dep:duckdb",
     "duckdb/appender-arrow",
-    "dep:tempfile",
     "tokio/rt",
     "tokio/sync",
 ]
@@ -70,8 +62,6 @@ pmc = [
     "dep:percent-encoding",
     "opendal/services-s3",
     "dep:arrow-json",
-    "dep:arrow-array",
-    "dep:arrow-schema",
     "open-arrow-access-file-format/csv",
     "open-arrow-access-file-format/json",
     "dep:open-arrow-access-decompression",
@@ -79,8 +69,6 @@ pmc = [
 ]
 regulations = []
 semantic-scholar = [
-    "dep:arrow-array",
-    "dep:arrow-schema",
     "open-arrow-access-file-format/json",
     "dep:open-arrow-access-layers",
 ]
@@ -91,20 +79,18 @@ zenodo = []
 format-xml = [
     "dep:quick-xml",
     "open-arrow-access-file-format/xml",
-    "dep:arrow-array",
-    "dep:arrow-schema",
 ]
 oai = ["format-xml"]
 
 [dependencies]
-tempfile = { workspace = true, optional = true }
+tempfile.workspace = true
 # Keep DuckDB on the Arrow 58 binding line used by the public workspace.
-duckdb = { version = "~1.10506.1", default-features = false, features = ["bundled", "appender-arrow"], optional = true }
+duckdb = { version = "~1.10506.1", default-features = false, features = ["bundled", "appender-arrow"] }
 arrow-cast = { workspace = true, optional = true }
 sha2 = { version = "0.11", optional = true }
 regex = { workspace = true, optional = true }
 
-arrow-array = { workspace = true, optional = true }
+arrow-array.workspace = true
 arrow-json = { workspace = true, optional = true }
 arrow-select = { workspace = true, optional = true }
 backon = { version = "1.6", default-features = false, features = ["std", "tokio-sleep"] }
@@ -129,7 +115,7 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["time"] }
 url.workspace = true
 
-arrow-schema = { workspace = true, optional = true }
+arrow-schema.workspace = true
 
 [dev-dependencies]
 async-compression = { workspace = true, features = ["bzip2"] }

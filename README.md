@@ -55,6 +55,44 @@ cargo run --locked --example read_parquet --features format-parquet -- testdata/
 Readers own their resources. Drop a reader to stop consuming it; after cancelling
 a pending read, drop that reader too.
 
+## Query a local or remote DuckDB metadata file
+
+The shared DuckDB utility can query existing local databases, including persisted
+provider metadata databases, without enabling a provider feature. Pass its file
+path and parameterized SQL:
+
+```rust,no_run
+use open_arrow_access::service::duckdb::{DuckDbDatabase, params};
+
+fn main() -> open_arrow_access::Result<()> {
+    let database = DuckDbDatabase::open("/data/metadata.duckdb")?;
+    let schema = database.query(
+        "SELECT * FROM main.page WHERE PageID = ?",
+        params![123_i64],
+        |batch| {
+            println!("{} rows", batch.num_rows());
+            Ok(())
+        },
+    )?;
+    println!("{schema:?}");
+    Ok(())
+}
+```
+
+The source database is opened read-only; missing files fail without creating a
+database. SQL determines the output schema, filtering, projection and ordering.
+Use `[]` for queries without parameters, such as `SHOW TABLES`. The callback
+receives batches incrementally and can return an error to stop reading; the
+returned schema is available even for an empty result. SQL and fetch errors are
+returned through the shared error type. Opening and querying are synchronous;
+run them in a blocking worker when using an async runtime. No provider-specific
+schema validation is performed.
+
+For HTTP and S3 URLs, use `DuckDbDatabase::connect(location, secret_sql_file)`.
+DuckDB attaches the database read-only and `cache_httpfs` fetches requested blocks
+into a private temporary on-disk cache. Opening does not first download the entire
+database. See [remote access and secrets](#duckdb-native-remote-access-and-secrets).
+
 ## Reusable file sources
 
 For an explicitly selected provider attachment, use the typed
@@ -334,3 +372,52 @@ Use [`crawl::CrawlAccessor`](docs/crawl.md) to combine service/dataset discovery
 native scan planning, bounded parallel reads, unordered emission, schema
 conversion and optional coalescing/read-ahead. Supply existing layer configurations
 through `CrawlOptions`; caller-bound storage retains HTTP, retry and I/O policy.
+
+### DuckDB-native remote access and secrets
+
+`DuckDbDatabase::connect(location, secret_sql_file)` accepts a local path or a
+DuckDB-supported URL. It creates an in-memory control connection, executes the
+optional trusted SQL file, always configures cache_httpfs, then attaches
+the source read-only and selects it as the default database. Run this synchronous
+API on a blocking worker in async apps.
+
+```rust,ignore
+use open_arrow_access::service::duckdb::DuckDbDatabase;
+use std::path::Path;
+
+let database = DuckDbDatabase::connect(
+    "s3://bucket/metadata.duckdb",
+    Some(Path::new("/run/secrets/duckdb.sql")),
+)?;
+database.query("SELECT * FROM metadata LIMIT 10", [], |batch| {
+    println!("{batch:?}");
+    Ok(())
+})?;
+```
+
+The SQL file can load required extensions and create scoped credentials:
+
+```sql
+LOAD httpfs;
+CREATE SECRET metadata_storage (
+    TYPE s3,
+    PROVIDER credential_chain,
+    SCOPE 's3://bucket/'
+);
+```
+
+For an authenticated HTTP endpoint, use DuckDB's `TYPE http` secret with
+`BEARER_TOKEN` or `EXTRA_HTTP_HEADERS` instead. Each `connect` runs
+`FORCE INSTALL cache_httpfs FROM community` followed by `LOAD cache_httpfs`,
+including for local paths. Script errors are redacted to avoid including credentials in error messages. Secrets
+remain temporary unless the script explicitly uses `CREATE PERSISTENT SECRET`.
+Cloned connections share secrets, the selected search path and cached remote
+blocks. Shared temporary storage contains separate `http-cache/` and `spill/`
+subdirectories; the final connection release removes both. The shared loader
+sets `cache_httpfs_type='on_disk'` and `cache_httpfs_cache_directory` before
+ATTACH. It clears the advanced multi-directory override so cached data stays
+inside the owned temporary directory. There is no full-download fallback.
+A query that scans most of a database can still fetch most blocks on demand.
+The attached source is read-only; the control database and connection-local
+temporary objects remain writable. BHL consumes the same loader through
+`BhlMetadata::from_tables_database(database, snapshot_id)`.

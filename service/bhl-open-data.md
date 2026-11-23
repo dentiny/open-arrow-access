@@ -35,6 +35,14 @@ or writes to the snapshot. Cloned accessors share it and use private temporary
 query selections. `from_metadata(storage, Arc<BhlMetadata>)` also accepts an
 already loaded in-memory or persistent snapshot.
 
+For a plain SQL dump containing the 13 BHL source tables, use
+`BhlShardAccessor::from_tables_database(storage, path, snapshot_id).await` instead.
+It reads the existing tables directly and creates only connection-local temporary
+query helpers. No TSV acquisition, table import or internal importer header is
+required. Supply the published file's immutable identity, preferably its SHA-256.
+See [SQL-dumped metadata databases](bhl-metadata.md#open-an-existing-sql-dumped-duckdb-database)
+for schema, provenance and file-distribution requirements.
+
 The request accepts exactly one `ocr/item-<positive-id>/` or
 `ocr/part-<positive-id>/` directory, with its trailing slash. Zero padding is
 retained. Discovery consumes every listing page, excludes only that directory's

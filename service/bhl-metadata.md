@@ -166,6 +166,60 @@ caller-owned. Use a compatible DuckDB storage version. Existing `load` behavior
 remains an in-memory import; conversion-service job wiring remains a consumer
 adoption step after this API is released.
 
+## Open an existing SQL-dumped DuckDB database
+
+Use `open_tables` for a caller-created file containing the 13 source tables:
+
+```rust,ignore
+let metadata = Arc::new(BhlMetadata::open_tables(
+    "/data/BHL-metadata.duckdb",
+    "sha256:<database-file-sha256>",
+)?);
+let pages = BhlPageAccessor::from_metadata(storage, snapshot_id, metadata, report)?;
+```
+
+This opens the file with DuckDB's `READ_ONLY` mode. It does not acquire TSVs,
+copy tables, calculate lexical-row checksums, or require the importer's
+`__bhl_metadata` header and persistent `bhl_*` views. Required tables must retain
+the BHL source columns in their original order, all as `VARCHAR`, preserving empty
+strings. Column nullability constraints need not be declared in the dump; consumed
+NULL cells fail rather than being silently converted to empty strings. Title IDs
+must be valid, unique positive numeric keys.
+
+Opening validates the table schemas and checks title keys.
+Every query connection creates private temporary helper views/macros and page
+selections. Neither opening nor querying modifies the database file. Concurrent
+readers can share one `Arc<BhlMetadata>`.
+
+The caller supplies an immutable database identity, preferably the file SHA-256
+computed once when publishing it. This becomes the metadata fingerprint. External
+files do not produce TSV source entries: `sources` is empty, with no per-table row
+counts or fabricated lexical checksums. Managed databases created by `load`/`create`
+retain their existing provenance and validation.
+
+BHL reuses the shared DuckDB loader for local paths and remote URLs. For example, open an authenticated remote database:
+
+```rust,ignore
+use open_arrow_access_service::duckdb::DuckDbDatabase;
+use std::path::Path;
+
+let database = DuckDbDatabase::connect(
+    "s3://bucket/BHL-metadata.duckdb",
+    Some(Path::new("/run/secrets/duckdb.sql")),
+)?;
+let metadata = BhlMetadata::from_tables_database(database, "published-snapshot-id")?;
+```
+
+The shared connection executes the SQL file before attaching the database
+read-only. Remote reads use cache_httpfs with a temporary on-disk block cache,
+without downloading a complete database before opening. The shared loader owns
+credentials, connection cloning and cache lifetime. `BhlMetadata` only adds BHL
+schema/key validation and per-query helpers. Each `DuckDbDatabase::connect`
+force-installs cache_httpfs from community and loads it, including for local paths.
+`BhlShardAccessor::from_tables_database(storage, path, snapshot_id)` remains a
+local convenience wrapper. The existing `open`/`from_database` APIs continue to
+validate importer-managed databases.
+
 ## OCR version selection
 
 Metadata joins select the unique key matching metadata `SequenceOrder` in the
