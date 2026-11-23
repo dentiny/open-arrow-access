@@ -37,9 +37,9 @@ impl DuckDbDatabase {
     /// The caller can load the SQL from any source or construct it in memory.
     /// SQL execution errors omit the SQL text, which may contain credentials.
     /// This is synchronous; use a blocking worker in async applications.
-    pub fn connect(location: &str, secret_sql: Option<&str>) -> Result<Self> {
+    pub fn connect(location: &str, init_sql: Option<&str>) -> Result<Self> {
         Ok(Self {
-            connection: ManagedConnection::connect(location, secret_sql)?,
+            connection: ManagedConnection::connect(location, init_sql)?,
         })
     }
 

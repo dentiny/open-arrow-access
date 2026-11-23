@@ -1,6 +1,6 @@
 //! Query local or remote DuckDB files and manage embedded provider databases.
 //!
-//! `DuckDbDatabase::connect` executes optional secret SQL before a read-only
+//! `DuckDbDatabase::connect` executes optional initialization SQL before a read-only
 //! local/remote ATTACH. Remote HTTP/S3 reads use cache_httpfs with a private
 //! temporary on-disk cache, fetching only requested blocks.
 //! BHL uses in-memory or caller-owned persistent databases; CourtListener uses a

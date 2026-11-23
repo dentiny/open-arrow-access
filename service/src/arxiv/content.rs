@@ -19,10 +19,10 @@ use std::sync::{Arc, OnceLock};
 pub enum ArxivMetadataSource {
     #[default]
     Oai,
-    /// A local path or remote URL and optional trusted extension/CREATE SECRET SQL.
+    /// A local path or remote URL and optional trusted initialization SQL.
     DuckDbDatabase {
         location: String,
-        secret_sql: Option<String>,
+        init_sql: Option<String>,
     },
 }
 
@@ -166,12 +166,9 @@ impl<A> ArxivContentRecords<A> {
             ArxivMetadataSource::Oai => {
                 ContentMetadata::Online(self.records.service.metadata.clone())
             }
-            ArxivMetadataSource::DuckDbDatabase {
-                location,
-                secret_sql,
-            } => {
+            ArxivMetadataSource::DuckDbDatabase { location, init_sql } => {
                 let database = tokio::task::spawn_blocking(move || {
-                    crate::duckdb::DuckDbDatabase::connect(&location, secret_sql.as_deref())
+                    crate::duckdb::DuckDbDatabase::connect(&location, init_sql.as_deref())
                         .map(ArxivMetadataDatabase::new)
                 })
                 .await

@@ -563,7 +563,7 @@ let records = service.records().content(format).with_metadata(index)?;
 
 Choose the backend explicitly with `ArxivMetadataSource`. Its default is `Oai`,
 which keeps lazy OAI lookups and honors `with_metadata_connection`. DuckDB is
-opt-in; its location and optional trusted secret SQL string are caller-owned:
+opt-in; its location and optional trusted initialization SQL string are caller-owned:
 
 ```rust
 use open_arrow_access::service::arxiv::ArxivMetadataSource;
@@ -571,7 +571,7 @@ use open_arrow_access::service::arxiv::ArxivMetadataSource;
 let records = service.records().content(format)
     .with_metadata_source(ArxivMetadataSource::DuckDbDatabase {
         location: "s3://pretrain-dataset/arxiv-metadata/arxiv.duckdb".into(),
-        secret_sql: Some("CREATE SECRET metadata (TYPE s3, PROVIDER credential_chain);".into()),
+        init_sql: Some("CREATE SECRET metadata (TYPE s3, PROVIDER credential_chain);".into()),
     }).await?;
 ```
 

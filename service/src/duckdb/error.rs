@@ -17,11 +17,11 @@ pub(super) fn cache_setup(source: ::duckdb::Error) -> Error {
     .with_source(source)
 }
 
-pub(super) fn secret_setup() -> Error {
+pub(super) fn init_setup() -> Error {
     Error::new(
         ErrorKind::Io,
-        "duckdb_secret_setup",
-        "could not read or execute secret SQL file",
+        "duckdb_init_setup",
+        "could not execute initialization SQL",
     )
 }
 

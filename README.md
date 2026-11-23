@@ -88,7 +88,7 @@ returned through the shared error type. Opening and querying are synchronous;
 run them in a blocking worker when using an async runtime. No provider-specific
 schema validation is performed.
 
-For HTTP and S3 URLs, use `DuckDbDatabase::connect(location, secret_sql)`.
+For HTTP and S3 URLs, use `DuckDbDatabase::connect(location, init_sql)`.
 DuckDB attaches the database read-only and `cache_httpfs` fetches requested blocks
 into a private temporary on-disk cache. Opening does not first download the entire
 database. See [remote access and secrets](#duckdb-native-remote-access-and-secrets).
@@ -375,7 +375,7 @@ through `CrawlOptions`; caller-bound storage retains HTTP, retry and I/O policy.
 
 ### DuckDB-native remote access and secrets
 
-`DuckDbDatabase::connect(location, secret_sql)` accepts a local path or a
+`DuckDbDatabase::connect(location, init_sql)` accepts a local path or a
 DuckDB-supported URL. It creates an in-memory control connection, executes the
 optional trusted SQL string, always configures cache_httpfs, then attaches
 the source read-only and selects it as the default database. Run this synchronous
