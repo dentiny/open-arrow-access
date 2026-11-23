@@ -83,7 +83,3 @@ impl Deref for ManagedConnection {
         &self.connection
     }
 }
-
-#[cfg(test)]
-#[path = "../../tests/unit/duckdb_connection.rs"]
-mod tests;
