@@ -15,6 +15,7 @@ use std::path::Path;
 pub struct DuckDbDatabase {
     // The managed connection retains scratch/cache storage for all clones.
     connection: ManagedConnection,
+    // Source database path or URL, retained for consumer provenance records.
     location: String,
 }
 
