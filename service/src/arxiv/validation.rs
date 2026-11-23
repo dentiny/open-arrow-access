@@ -267,12 +267,16 @@ pub(super) fn is_tex(name: &[u8]) -> Result<bool> {
     {
         return Ok(false);
     }
-    let name =
-        std::str::from_utf8(name).map_err(|_| error::decode("LaTeX member name is not UTF-8"))?;
-    if name.starts_with('/') || name.split('/').any(|part| part == "..") || name.contains('\\') {
+    // TAR paths are byte strings; source_name preserves these bytes in Arrow.
+    if name.starts_with(b"/")
+        || name.split(|byte| *byte == b'/').any(|part| part == b"..")
+        || name.contains(&b'\\')
+    {
         return Err(error::decode("unsafe source member name"));
     }
-    Ok(!name.split('/').any(|part| part.eq_ignore_ascii_case("anc")))
+    Ok(!name
+        .split(|byte| *byte == b'/')
+        .any(|part| part.eq_ignore_ascii_case(b"anc")))
 }
 pub(super) fn is_tar(data: &[u8]) -> bool {
     if data.len() < TAR_HEADER_SIZE {

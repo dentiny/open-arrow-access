@@ -141,6 +141,43 @@ fn tex_selection_rejects_path_traversal() {
 }
 
 #[tokio::test]
+async fn packages_preserve_non_utf8_tex_names_and_payloads() {
+    let mut data = fixture!("arxiv-articles", "source.tar").await;
+    // Mutate a real regular-file header without transcoding the stored path.
+    let header = &mut data[512..1024];
+    header[0] = 0xff;
+    header[148..156].fill(b' ');
+    let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+    header[148..156].copy_from_slice(format!("{checksum:06o}\0 ").as_bytes());
+    let batches = read("2410/2410.00001.gz", &data).await.unwrap();
+    assert_eq!(
+        batches[0]["source_name"].as_binary::<i64>().value(0),
+        b"\xffain.tex"
+    );
+    assert_eq!(
+        batches[0]["data"].as_binary::<i64>().value(0),
+        fixture!("arxiv-articles", "members/main.tex").await
+    );
+}
+
+#[rstest::rstest]
+#[case(b"anc/\xff.tex", false)]
+#[case(b"nested/ANC/\xff.tex", false)]
+#[case(b"chapters/\xff.TEX", true)]
+fn tex_selection_handles_binary_paths(#[case] name: &[u8], #[case] selected: bool) {
+    assert_eq!(validation::is_tex(name).unwrap(), selected);
+}
+
+#[rstest::rstest]
+#[case(b"../\xff.tex")]
+#[case(b"/\xff.tex")]
+#[case(b"nested/../\xff.tex")]
+#[case(b"nested\\\xff.tex")]
+fn binary_tex_names_still_reject_unsafe_paths(#[case] name: &[u8]) {
+    assert!(validation::is_tex(name).is_err());
+}
+
+#[tokio::test]
 async fn formats_preserve_content_and_join_metadata() {
     let schema = content_schema();
     let snapshot = oai_snapshot().await;
