@@ -6,7 +6,7 @@ use serde::de::DeserializeOwned;
 use url::Url;
 
 use super::{HttpClient, resolve_origin};
-use crate::{ResolvedFileSet, file_manifest::FileSpec};
+use crate::{ResolvedFileSet, discovery::file_manifest::FileSpec};
 
 /// Canonical download root, ordered logical-name mappings and provider metadata.
 /// Providers validate identity and availability; binding validates the file namespace.

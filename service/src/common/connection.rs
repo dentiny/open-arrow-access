@@ -1,5 +1,5 @@
 use super::{
-    ApiDocument, MetadataLink, error, resolve_download_url,
+    ApiDocument, error, resolve_download_url,
     transport::{self, AuthScope},
     url_util, validation,
 };
@@ -14,8 +14,6 @@ use open_arrow_access_core::{
 use open_arrow_access_storage::{HttpConcurrencyLimitLayer, StorageConfig};
 use opendal::{Buffer, HttpTransporter, OperationContext, Operator, raw::Layer};
 use url::Url;
-
-use crate::file_manifest::FileSpec;
 
 /// Where an origin-scoped API credential is sent.
 #[derive(Clone, Copy, Debug)]
@@ -187,29 +185,6 @@ impl Connection {
     /// Read the original GET response sequentially, without replaying range requests.
     pub async fn open(&self, url: &str, options: ByteReadOptions) -> Result<Box<dyn ByteReader>> {
         reader::open(self.clone(), resolve_download_url(url)?, options).await
-    }
-    /// Resolve file links into lazy downloads, retaining the full JSON as metadata.
-    /// The resolver owns provider identity/availability checks.
-    pub async fn resolve_json_files(
-        &self,
-        path: &str,
-        query: &[(&str, &str)],
-        resolve: impl FnOnce(&ApiDocument) -> Result<Vec<MetadataLink>> + Send,
-    ) -> Result<RemoteFiles> {
-        let document = self.json(path, query).await?;
-        let files = resolve(&document)?;
-        self.files(files, document)
-    }
-
-    /// Bind a validated provider manifest to lazy byte reads. Logical names remain opaque.
-    pub fn files<M>(&self, files: Vec<MetadataLink>, metadata: M) -> Result<RemoteFiles<M>> {
-        validation::validate_downloads(&files)?;
-        ResolvedFileSet::from_files(
-            self.clone(),
-            files.into_iter().map(FileSpec::from),
-            metadata,
-        )
-        .map_err(error::file_namespace)
     }
 }
 

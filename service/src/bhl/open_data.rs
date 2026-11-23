@@ -5,7 +5,7 @@ use open_arrow_access_core::{ByteAccessor, ListRequest, ObjectRef, Result, list_
 use opendal::{Operator, services::S3};
 
 use super::{error, validation};
-use crate::{ResolvedFileSet, file_manifest::FileSpec};
+use crate::{ResolvedFileSet, discovery::file_manifest::FileSpec};
 
 pub const OPEN_DATA_BUCKET_URL: &str = "s3://bhl-open-data/";
 

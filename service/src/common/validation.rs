@@ -1,5 +1,5 @@
 //! Input constraints and byte-stream invariants for shared provider utilities.
-use super::{MetadataLink, decode, invalid};
+use super::{decode, invalid};
 use open_arrow_access_core::Result;
 use url::Url;
 
@@ -20,13 +20,6 @@ pub(super) fn same_origin(origin: &Url, url: &Url) -> Result<()> {
 pub(super) fn redirect(current: &Url, next: &Url) -> Result<()> {
     if current.scheme() == "https" && next.scheme() != "https" {
         return Err(decode("HTTPS downgrade redirect"));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_downloads(files: &[MetadataLink]) -> Result<()> {
-    for file in files {
-        super::resolve_download_url(&file.url)?;
     }
     Ok(())
 }

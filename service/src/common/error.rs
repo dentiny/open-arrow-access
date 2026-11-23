@@ -27,7 +27,7 @@ pub(crate) fn missing_field(field: &str) -> Error {
     decode(&format!("missing or invalid {field}"))
 }
 
-pub(super) fn file_namespace(error: Error) -> Error {
+pub(crate) fn file_namespace(error: Error) -> Error {
     decode("invalid file namespace").with_source(error)
 }
 
