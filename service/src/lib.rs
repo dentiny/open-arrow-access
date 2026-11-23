@@ -14,7 +14,7 @@ mod discovery;
 mod error;
 #[cfg(feature = "oai")]
 mod pagination;
-pub use discovery::ResolvedFileSet;
+pub use discovery::{HttpFileRoot, ResolvedFile, ResolvedFileSet, ResolvedMetadata};
 pub use open_arrow_access_dataset::file_set::{FileSetAccessor, FileSetRequest};
 
 #[cfg(feature = "courtlistener")]

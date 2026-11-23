@@ -3,6 +3,7 @@
 mod error;
 mod parser;
 mod validation;
+use crate::ResolvedMetadata;
 use crate::common::{ApiDocument, Connection, RemoteFiles};
 use open_arrow_access_core::Result;
 use std::num::{NonZeroU32, NonZeroU64};
@@ -26,15 +27,35 @@ impl FigshareService {
         id: NonZeroU64,
         version: Option<NonZeroU32>,
     ) -> Result<RemoteFiles> {
+        let metadata = self.article_metadata(id, version).await?;
+        self.files_from_metadata(metadata)
+    }
+
+    /// Fetch and validate one article version without constructing storage.
+    /// Original JSON and exact download URL strings remain available in the result.
+    pub async fn article_metadata(
+        &self,
+        id: NonZeroU64,
+        version: Option<NonZeroU32>,
+    ) -> Result<ResolvedMetadata<ApiDocument>> {
         let mut path = format!("v2/articles/{id}");
         if let Some(version) = version {
             path.push_str(&format!("/versions/{version}"));
         }
         self.connection
-            .resolve_json_files(&path, &[], |doc| {
+            .resolve_json_metadata(&path, &[], |doc| {
                 parser::parse_article_files(doc.value(), id.get(), version.map(NonZeroU32::get))
             })
             .await
+    }
+
+    /// Bind a resolved article without fetching metadata or renewing signed URLs.
+    /// Download URL and namespace validation happen here, using this connection.
+    pub fn files_from_metadata(
+        &self,
+        metadata: ResolvedMetadata<ApiDocument>,
+    ) -> Result<RemoteFiles> {
+        self.connection.bind_metadata(metadata)
     }
 
     pub async fn collection_articles(

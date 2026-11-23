@@ -13,7 +13,7 @@ use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 use serde::Deserialize;
 
 use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
-use crate::{ResolvedFileSet, discovery::file_manifest::FileSpec};
+use crate::{HttpFileRoot, ResolvedFileSet, ResolvedMetadata, discovery::file_manifest::FileSpec};
 use error::map_file_namespace_error;
 use validation::validate_record;
 
@@ -63,13 +63,23 @@ impl ZenodoService {
     /// Resolve one published record. Membership is fetched once; attachment
     /// bytes are read lazily through the returned accessor.
     pub async fn record(&self, id: NonZeroU64) -> Result<ZenodoAccessor> {
+        let metadata = self.record_metadata(id).await?;
+        self.files_from_metadata(metadata)
+    }
+
+    /// Resolve one published version's metadata and file descriptions without
+    /// constructing storage. File namespace validation is deferred to binding.
+    pub async fn record_metadata(
+        &self,
+        id: NonZeroU64,
+    ) -> Result<ResolvedMetadata<ZenodoMetadata, HttpFileRoot>> {
         let url = self
             .http
             .endpoint()
             .join(&format!("api/records/{id}"))
             .unwrap();
         self.http
-            .resolve_files(&url, |record: Record| {
+            .resolve_metadata(&url, |record: Record| {
                 validate_record(&record, id)?;
                 // Use this version's canonical content route, never a latest
                 // version link or an arbitrary host supplied in metadata.
@@ -91,6 +101,15 @@ impl ZenodoService {
                 ))
             })
             .await
+    }
+
+    /// Bind metadata resolved at this service's endpoint, without another API request.
+    /// The current service supplies transport, HTTP policy and authentication.
+    pub fn files_from_metadata(
+        &self,
+        metadata: ResolvedMetadata<ZenodoMetadata, HttpFileRoot>,
+    ) -> Result<ZenodoAccessor> {
+        self.http.bind_metadata(metadata)
     }
 }
 
