@@ -87,7 +87,7 @@ oai = ["format-xml"]
 [dependencies]
 tempfile.workspace = true
 # Keep DuckDB on the Arrow 58 binding line used by the public workspace.
-duckdb = { version = "~1.10506.1", default-features = false, features = ["bundled", "appender-arrow"] }
+duckdb = { version = "~1.20001.0", default-features = false, features = ["bundled", "appender-arrow"] }
 arrow-cast = { workspace = true, optional = true }
 sha2 = { version = "0.11", optional = true }
 regex = { workspace = true, optional = true }
