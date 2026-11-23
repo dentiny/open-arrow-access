@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.21.1 - 2026-11-23
+
+- Reuse pooled DuckDB metadata connections and cached prepared queries for arXiv article lookups, returning connections before Arrow result processing.
+- Ignore DuckDB upgrades in Dependabot so upgrades remain manual.
+- Release all eight public workspace crates at 0.21.1 with aligned internal dependency requirements.
+
 ## 0.21.0 - 2026-11-23
 
 - Add explicit `ArxivMetadataSource::{Oai, DuckDbDatabase { location, init_sql }}` selection; keep lazy OAI as the default.
