@@ -1,19 +1,11 @@
 //! Persistent DuckDB storage for reusable BHL metadata.
 use super::{BhlMetadata, BhlMetadataInfo, error, tables, validation};
-use duckdb::{Config, Connection, params};
+use crate::duckdb::ManagedConnection;
+use ::duckdb::{Connection, params};
 use open_arrow_access_core::{ByteAccessor, Result};
 use std::{path::Path, sync::Mutex};
 
 pub(super) const DATABASE_VERSION: u64 = 1;
-
-fn open_read_only(path: impl AsRef<Path>) -> Result<Connection> {
-    let config = Config::default()
-        .with("enable_external_file_cache", "false")
-        .map_err(error::duckdb)?
-        .with("access_mode", "READ_ONLY")
-        .map_err(error::duckdb)?;
-    Connection::open_with_flags(path, config).map_err(error::duckdb)
-}
 
 fn read_info(connection: &Connection) -> Result<BhlMetadataInfo> {
     let (count, version, info): (u64, u64, String) = connection
@@ -66,10 +58,7 @@ impl BhlMetadata {
     ) -> Result<()> {
         let path = path.as_ref().to_path_buf();
         validation::validate_database_destination(path.try_exists().map_err(error::database_io)?)?;
-        let config = Config::default()
-            .with("enable_external_file_cache", "false")
-            .map_err(error::duckdb)?;
-        let connection = Connection::open_with_flags(&path, config).map_err(error::duckdb)?;
+        let connection = ManagedConnection::open(&path, false)?;
         let metadata = Self::import(storage, connection).await?;
         tokio::task::spawn_blocking(move || {
             let connection = metadata.connection.into_inner().map_err(error::metadata_lock)?;
@@ -88,7 +77,7 @@ impl BhlMetadata {
             connection
                 .execute_batch("COMMIT; CHECKPOINT")
                 .map_err(error::duckdb)?;
-            connection.close().map_err(|(_, source)| error::duckdb(source))
+            connection.close()
         })
         .await
         .map_err(error::task)?
@@ -97,7 +86,7 @@ impl BhlMetadata {
     /// Open the persistent database read-only, without acquiring any AWS tables.
     /// Temporary per-query selections remain private to cloned connections.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let connection = open_read_only(path)?;
+        let connection = ManagedConnection::open(path, true)?;
         let info = read_info(&connection)?;
         check_sources(&connection, &info)?;
         Ok(Self {

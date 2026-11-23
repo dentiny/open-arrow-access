@@ -4,6 +4,11 @@
 //! selected JSON records with [`common::ApiDocument::records_at`]. Formats are
 //! explicit; metadata links are never followed automatically.
 
+// Individual providers use different parts of the shared DuckDB support.
+#[cfg(any(feature = "bhl", feature = "courtlistener"))]
+#[allow(dead_code)]
+mod duckdb;
+
 mod error;
 mod file_manifest;
 mod resolved_files;

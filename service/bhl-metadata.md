@@ -44,7 +44,12 @@ to combine these results with OCR bytes as shown below. Lance writing remains th
 The in-memory `load` path assumes sufficient memory for the loaded tables and
 query intermediates. Prepared metadata can instead use the persistent database
 described below. DuckDB uses its default resource settings, with
-`enable_external_file_cache=false` explicitly set.
+`enable_external_file_cache=false` explicitly set. All three entry points
+(`load`, `create`, and `open`) use a private system temporary directory for DuckDB
+spill files, independent of the working directory or database-file permissions.
+Set `TMPDIR` to select a writable scratch volume with sufficient disk space.
+The directory is shared by cloned connections and removed after the last
+connection closes, including when an import fails or its future is dropped.
 
 `metadata.item`, `metadata.title`, `metadata.page` and `metadata.part` are now non-null lists, retaining every
 item/title association, page-type record and part-parent association in source order while emitting one OCR row per request.

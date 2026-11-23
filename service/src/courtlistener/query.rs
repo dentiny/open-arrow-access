@@ -4,9 +4,9 @@ use super::{
     error::{arrow_error, db_error, task_error},
     ingest::{Database, ORDINAL},
 };
+use ::duckdb::params;
 use arrow_array::{ArrayRef, RecordBatch};
 use arrow_cast::{CastOptions, cast_with_options};
-use duckdb::params;
 use open_arrow_access_core::Result;
 use tokio::{sync::mpsc, task::JoinHandle};
 

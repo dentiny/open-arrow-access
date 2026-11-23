@@ -190,7 +190,7 @@ pub(super) fn validate_columns(
     Ok(())
 }
 
-pub(super) fn validate_keys(connection: &duckdb::Connection, tables: &[&str]) -> Result<()> {
+pub(super) fn validate_keys(connection: &::duckdb::Connection, tables: &[&str]) -> Result<()> {
     for (i, table) in tables.iter().enumerate() {
         let duplicate = connection.query_row(
             &format!("SELECT 1 FROM cl_{i} GROUP BY id HAVING count(*)>1 LIMIT 1"),
@@ -199,7 +199,7 @@ pub(super) fn validate_keys(connection: &duckdb::Connection, tables: &[&str]) ->
         );
         match duplicate {
             Ok(_) => return Err(records_error(format!("duplicate primary key in {table}"))),
-            Err(duckdb::Error::QueryReturnedNoRows) => {}
+            Err(::duckdb::Error::QueryReturnedNoRows) => {}
             Err(e) => return Err(db_error(e)),
         }
     }
