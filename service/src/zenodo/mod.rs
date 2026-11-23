@@ -3,6 +3,7 @@
 //! File membership stays bound to the selected published record ID.
 
 mod error;
+mod resolver;
 mod validation;
 
 use std::num::NonZeroU64;
@@ -12,10 +13,9 @@ use open_arrow_access_storage::{OpenDalAccessor, StorageConfig};
 
 use serde::Deserialize;
 
-use crate::http_client::files::{HttpFileService, ResolvedFilesPlan};
-use crate::{ResolvedFileSet, discovery::file_manifest::FileSpec};
+use crate::ResolvedFileSet;
+use crate::http_client::files::HttpFileService;
 use error::map_file_namespace_error;
-use validation::validate_record;
 
 /// Connection settings. Construction performs no network requests.
 #[derive(Clone, Debug)]
@@ -69,27 +69,7 @@ impl ZenodoService {
             .join(&format!("api/records/{id}"))
             .unwrap();
         self.http
-            .resolve_files(&url, |record: Record| {
-                validate_record(&record, id)?;
-                // Use this version's canonical content route, never a latest
-                // version link or an arbitrary host supplied in metadata.
-                Ok(ResolvedFilesPlan::new(
-                    format!("api/records/{id}/files/"),
-                    record
-                        .files
-                        .iter()
-                        .map(|file| FileSpec {
-                            name: file.key.clone(),
-                            object: format!("{}/content", file.key).into(),
-                            content_length: None,
-                        })
-                        .collect(),
-                    ZenodoMetadata {
-                        id,
-                        files: record.files,
-                    },
-                ))
-            })
+            .resolve_files(&url, |record| resolver::resolve_record(record, id))
             .await
     }
 }
