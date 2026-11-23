@@ -100,7 +100,7 @@ pub(super) fn classify_response(
         Ok(response)
             if matches!(
                 response.status().as_u16(),
-                406 | 408 | 429 | 500 | 502 | 503 | 504
+                408 | 429 | 500 | 502 | 503 | 504
             ) =>
         {
             Err(Failure::Response(Box::new(response)))

@@ -2,11 +2,34 @@ use futures::stream;
 use http::{Response, StatusCode};
 use open_arrow_access_core::{ErrorKind, read_all};
 use open_arrow_access_service::common::Connection;
+use open_arrow_access_storage::{RetryConfig, StorageConfig};
 use open_arrow_access_test_support::http::{HttpFixture, response};
 use opendal::HttpBody;
 
 mod providers;
 use providers::connection;
+
+#[tokio::test]
+async fn not_acceptable_is_not_retried_with_retry_policy_enabled() {
+    let fixture = HttpFixture::new();
+    fixture.respond("/metadata", StatusCode::NOT_ACCEPTABLE, "Not Acceptable");
+    let client = connection(&fixture)
+        .with_http_config(StorageConfig {
+            retry: Some(RetryConfig {
+                min_delay: std::time::Duration::ZERO,
+                max_delay: std::time::Duration::ZERO,
+                jitter: false,
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let error = client.json("metadata", &[]).await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+    assert_eq!(error.http_status(), Some(406));
+    assert_eq!(fixture.requests().len(), 1);
+}
 
 fn redirect(location: &str) -> Response<HttpBody> {
     Response::builder()
