@@ -1,5 +1,5 @@
 //! Demand-driven OAI continuation scanning over the existing single-page protocol.
-use std::{collections::HashSet, num::NonZeroUsize};
+use std::num::NonZeroUsize;
 
 use futures::{StreamExt, stream};
 use open_arrow_access_core::{
@@ -8,7 +8,8 @@ use open_arrow_access_core::{
 };
 use open_arrow_access_file_format::xml::XmlFormat;
 
-use super::{OaiService, error};
+use super::{OaiPage, OaiService, error};
+use crate::pagination::{Page, PageSource, Pager, PaginationErrors};
 
 /// One independent harvest. `read` controls logical source, projection and batch size.
 /// Initial selectors and a resumption token are mutually exclusive.
@@ -76,9 +77,7 @@ impl Accessor for OaiHarvester {
         }
         // Check format and explicit projection configuration before network I/O.
         let _ = self.format.prepare(&request.read)?;
-        let mut seen = HashSet::new();
         let page = if let Some(token) = &request.resumption_token {
-            seen.insert(token.clone());
             self.service.resume(token).await?
         } else {
             self.service
@@ -94,30 +93,29 @@ impl Accessor for OaiHarvester {
             .open(request.read.clone())
             .await?;
         let metadata = current.metadata().clone();
-        let harvester = self.clone();
-        let continuations = stream::try_unfold(
-            (page.resumption_token, seen, 1usize),
-            move |(next, mut seen, pages)| {
-                let harvester = harvester.clone();
-                let request = request.clone();
-                async move {
-                    let Some(token) = next else {
-                        return Ok(None);
-                    };
-                    if !seen.insert(token.clone()) {
-                        return Err(error::repeated_harvest_token());
-                    }
-                    if request.max_pages.is_some_and(|limit| pages >= limit.get()) {
-                        return Err(error::harvest_page_limit());
-                    }
-                    let pages = pages.checked_add(1).ok_or_else(error::harvest_page_limit)?;
-                    let page = harvester.service.resume(&token).await?;
-                    let reader = page.records(harvester.format).open(request.read).await?;
-                    let partition: ScanPartition = Box::pin(async move { Ok(reader) });
-                    Ok(Some((partition, (page.resumption_token, seen, pages))))
-                }
+        let pager = Pager::new(
+            self.service.clone(),
+            page.resumption_token,
+            request.resumption_token.clone(),
+            request.max_pages,
+            PaginationErrors {
+                repeated_cursor: error::repeated_harvest_token,
+                page_limit: error::harvest_page_limit,
             },
         );
+        let harvester = self.clone();
+        let continuations = stream::try_unfold(pager, move |mut pager| {
+            let harvester = harvester.clone();
+            let request = request.clone();
+            async move {
+                let Some(page) = pager.next().await? else {
+                    return Ok(None);
+                };
+                let reader = page.records(harvester.format).open(request.read).await?;
+                let partition: ScanPartition = Box::pin(async move { Ok(reader) });
+                Ok(Some((partition, pager)))
+            }
+        });
         let first: ScanPartition = Box::pin(async move { Ok(current) });
         // Sequential execution drains each page before discovering its continuation.
         let partitions = stream::iter([Ok(first)]).chain(continuations);
@@ -133,5 +131,19 @@ impl ScanPlanner for OaiHarvester {
     async fn plan_scan(&self, request: OaiHarvestRequest) -> Result<ScanPlan> {
         // Token-dependent discovery stays indivisible even under ParallelReadLayer.
         Ok(ScanPlan::whole_input(self.open(request).await?))
+    }
+}
+
+#[async_trait]
+impl PageSource for OaiService {
+    type Cursor = String;
+    type Body = OaiPage;
+
+    async fn resume_page(&self, cursor: String) -> Result<Page<OaiPage, String>> {
+        let page = self.resume(&cursor).await?;
+        Ok(Page {
+            next: page.resumption_token.clone(),
+            body: page,
+        })
     }
 }

@@ -2,7 +2,9 @@ use std::num::NonZeroUsize;
 
 use arrow_array::cast::AsArray;
 use http::StatusCode;
-use open_arrow_access_core::{Accessor, AccessorExt, ReadOptions, ReadRequest, ScanPlanner};
+use open_arrow_access_core::{
+    Accessor, AccessorExt, ErrorKind, ReadOptions, ReadRequest, ScanPlanner,
+};
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::oai::{OaiHarvestRequest, OaiProvider, OaiProviderService};
 use open_arrow_access_test_support::http::HttpFixture;
@@ -136,4 +138,92 @@ async fn resume_projection_and_planning() {
     }
     assert_eq!(count, 2);
     assert_eq!(http.requests().len(), 3);
+}
+
+#[tokio::test]
+async fn rejects_selectors_and_projection_before_fetching() {
+    let http = HttpFixture::new();
+    let harvest = service(&http).harvest();
+    let mut req = request();
+    req.resumption_token = Some("start".into());
+    req.from = Some("2026-01-01".into());
+    let error = harvest.open(req).await.err().unwrap();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert_eq!(error.operation(), "oai_pmh");
+    let mut req = request();
+    req.read.options.projection = Some(vec!["missing".into()]);
+    assert!(harvest.open(req).await.is_err());
+    assert!(http.requests().is_empty());
+}
+
+#[tokio::test]
+async fn page_limit_is_checked_only_when_a_continuation_is_needed() {
+    for next in [None, Some("next")] {
+        let http = HttpFixture::new();
+        respond(&http, None, page(&["one", "two"], next));
+        let mut req = request();
+        req.max_pages = Some(NonZeroUsize::MIN);
+        let mut reader = service(&http).harvest().open(req).await.unwrap();
+        for _ in 0..2 {
+            assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
+        }
+        match next {
+            None => assert!(reader.next().await.unwrap().is_none()),
+            Some(_) => {
+                let error = reader.next().await.unwrap_err();
+                assert_eq!(error.kind(), ErrorKind::ResourceExhausted);
+                assert_eq!(
+                    error.to_string(),
+                    "oai_pmh: OAI harvest page limit reached with a continuation"
+                );
+                assert!(reader.next().await.unwrap().is_none());
+            }
+        }
+        assert_eq!(http.requests().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn repeated_tokens_win_over_page_limits_without_another_request() {
+    let http = HttpFixture::new();
+    respond(&http, Some("start"), page(&["one"], Some("start")));
+    let mut req = request();
+    req.resumption_token = Some("start".into());
+    req.max_pages = Some(NonZeroUsize::MIN);
+    let mut reader = service(&http).harvest().open(req).await.unwrap();
+    assert!(reader.next().await.unwrap().is_some());
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert_eq!(error.to_string(), "oai_pmh: repeated OAI resumption token");
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(http.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn dropping_a_reader_does_not_fetch_its_continuation() {
+    let http = HttpFixture::new();
+    respond(&http, None, page(&["one", "two"], Some("unused")));
+    let mut reader = service(&http).harvest().open(request()).await.unwrap();
+    assert!(reader.next().await.unwrap().is_some());
+    drop(reader);
+    tokio::task::yield_now().await;
+    assert_eq!(http.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn continuation_protocol_errors_are_terminal() {
+    let http = HttpFixture::new();
+    respond(&http, None, page(&["one"], Some("bad")));
+    respond(
+        &http,
+        Some("bad"),
+        "<OAI-PMH><error code=\"badResumptionToken\"/></OAI-PMH>".into(),
+    );
+    let mut reader = service(&http).harvest().open(request()).await.unwrap();
+    assert!(reader.next().await.unwrap().is_some());
+    let error = reader.next().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Decode);
+    assert_eq!(error.operation(), "oai_pmh");
+    assert!(reader.next().await.unwrap().is_none());
+    assert_eq!(http.requests().len(), 2);
 }
