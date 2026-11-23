@@ -37,8 +37,6 @@ impl ArxivMetadataDatabase {
         let batch =
             arrow_select::concat::concat_batches(&schema, &batches).map_err(error::arrow_error)?;
         validation::validate_metadata_record_count(batch.num_rows())?;
-        // Cast by field name to the exact conversion schema, dropping unsupported
-        // OAI fields instead of emitting NULL placeholders for them.
         let metadata = arrow_cast::cast(
             &StructArray::from(batch),
             content_schema()
