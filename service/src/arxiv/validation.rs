@@ -12,7 +12,12 @@ pub(super) fn validate_oai_metadata(batch: &RecordBatch) -> Result<()> {
 }
 
 pub(super) fn validate_content_records(batch: &RecordBatch) -> Result<()> {
-    if batch.schema().as_ref() != super::content::metadata_schema().as_ref() {
+    if &DataType::Struct(batch.schema().fields().clone())
+        != super::content::content_schema()
+            .field_with_name("metadata")
+            .unwrap()
+            .data_type()
+    {
         return Err(error::invalid_content_metadata_schema());
     }
     validate_metadata_header(batch)
@@ -73,7 +78,11 @@ fn validate_article_metadata(batch: &RecordBatch, article: &str) -> Result<()> {
 
 pub(super) fn validate_content_schema(metadata: &ArxivMetadataIndex) -> Result<()> {
     if metadata.rows.fields() != crate::arxiv_metadata::schema().arrow_schema().fields()
-        && metadata.rows.fields() != super::content::metadata_schema().fields()
+        && metadata.rows.data_type()
+            != super::content::content_schema()
+                .field_with_name("metadata")
+                .unwrap()
+                .data_type()
     {
         return Err(error::invalid_content_metadata_schema());
     }

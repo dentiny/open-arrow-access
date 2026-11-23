@@ -3,7 +3,7 @@ use super::{
     ArxivMetadataDatabase, ArxivMetadataIndex, ArxivReadRequest, ArxivRecords, validation,
 };
 use arrow_array::cast::AsArray;
-use arrow_schema::{DataType, Field, Fields, Schema};
+use arrow_schema::{DataType, Field, Schema};
 use futures::{StreamExt, TryStreamExt};
 use open_arrow_access_core::{
     Accessor, ByteReadRequest, ByteReader, ReadOptions, RecordBatch, RecordBatchBuilder,
@@ -29,57 +29,67 @@ impl ArxivContentFormat {
     }
 }
 
-/// Metadata fields supported by the published Cornell/Kaggle snapshot.
-/// Raw OAI harvesting keeps its complete schema; conversion omits unsupported fields.
-pub(super) fn metadata_schema() -> SchemaRef {
-    fn supported(fields: &Fields) -> Fields {
-        fields
-            .iter()
-            .filter(|field| {
-                !matches!(
-                    field.name().as_str(),
-                    "oai:datestamp"
-                        | "@status"
-                        | "oai:setSpec"
-                        | "arxiv:proxy"
-                        | "arxiv:acm-class"
-                        | "arxiv:msc-class"
-                        | "@xsi:schemaLocation"
-                        | "arxiv:size"
-                        | "arxiv:source_type"
-                )
-            })
-            .map(|field| {
-                let data_type = match field.data_type() {
-                    DataType::Struct(fields) => DataType::Struct(supported(fields)),
-                    DataType::List(item) => {
-                        let data_type = match item.data_type() {
-                            DataType::Struct(fields) => DataType::Struct(supported(fields)),
-                            data_type => data_type.clone(),
-                        };
-                        DataType::List(Arc::new(item.as_ref().clone().with_data_type(data_type)))
-                    }
-                    data_type => data_type.clone(),
-                };
-                Arc::new(field.as_ref().clone().with_data_type(data_type))
-            })
-            .collect()
-    }
-    static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
-    SCHEMA
-        .get_or_init(|| {
-            Arc::new(Schema::new(supported(
-                crate::arxiv_metadata::schema().arrow_schema().fields(),
-            )))
-        })
-        .clone()
-}
-
 pub fn content_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
     SCHEMA
         .get_or_init(|| {
-            let metadata = metadata_schema();
+            let mut article_fields: Vec<_> = [
+                "id",
+                "submitter",
+                "title",
+                "authors",
+                "categories",
+                "comments",
+                "report-no",
+                "journal-ref",
+                "doi",
+                "license",
+                "abstract",
+            ]
+            .into_iter()
+            .map(|name| Field::new(format!("arxiv:{name}"), DataType::Utf8, true))
+            .collect();
+            article_fields.push(Field::new(
+                "arxiv:version",
+                DataType::List(Arc::new(Field::new(
+                    "item",
+                    DataType::Struct(
+                        vec![
+                            Field::new("@version", DataType::Utf8, true),
+                            Field::new("arxiv:date", DataType::Utf8, true),
+                        ]
+                        .into(),
+                    ),
+                    false,
+                ))),
+                true,
+            ));
+            // Conversion emits only fields supported by the metadata snapshot.
+            // Raw OAI harvesting retains its complete schema.
+            let metadata = DataType::Struct(
+                vec![
+                    Field::new(
+                        "oai:header",
+                        DataType::Struct(
+                            vec![Field::new("oai:identifier", DataType::Utf8, true)].into(),
+                        ),
+                        false,
+                    ),
+                    Field::new(
+                        "oai:metadata",
+                        DataType::Struct(
+                            vec![Field::new(
+                                "arxiv:arXivRaw",
+                                DataType::Struct(article_fields.into()),
+                                true,
+                            )]
+                            .into(),
+                        ),
+                        true,
+                    ),
+                ]
+                .into(),
+            );
             Arc::new(Schema::new(vec![
                 Field::new("article_id", DataType::LargeUtf8, false),
                 Field::new("format", DataType::LargeUtf8, false),
@@ -90,11 +100,7 @@ pub fn content_schema() -> SchemaRef {
                 Field::new("source_name", DataType::LargeBinary, false),
                 Field::new("data", DataType::LargeBinary, false),
                 Field::new("data_type", DataType::LargeUtf8, false),
-                Field::new(
-                    "metadata",
-                    DataType::Struct(metadata.fields().clone()),
-                    true,
-                ),
+                Field::new("metadata", metadata, true),
             ]))
         })
         .clone()

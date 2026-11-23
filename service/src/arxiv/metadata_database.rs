@@ -1,8 +1,7 @@
 //! Indexed article lookups in an existing metadata DuckDB snapshot.
-use super::{ArxivMetadataIndex, content::metadata_schema, error, id, validation};
+use super::{ArxivMetadataIndex, content::content_schema, error, id, validation};
 use crate::duckdb::{DuckDbDatabase, params};
 use arrow_array::{RecordBatch, StructArray, cast::AsArray};
-use arrow_schema::DataType;
 use open_arrow_access_core::Result;
 use std::sync::Mutex;
 
@@ -42,7 +41,10 @@ impl ArxivMetadataDatabase {
         // OAI fields instead of emitting NULL placeholders for them.
         let metadata = arrow_cast::cast(
             &StructArray::from(batch),
-            &DataType::Struct(metadata_schema().fields().clone()),
+            content_schema()
+                .field_with_name("metadata")
+                .unwrap()
+                .data_type(),
         )
         .map_err(error::arrow_error)?;
         let batch = RecordBatch::from(metadata.as_struct().clone());
@@ -72,7 +74,13 @@ mod tests {
         ] {
             let index = database.article(article).unwrap();
             assert_eq!(index.rows.len(), 1);
-            assert_eq!(index.rows.fields(), metadata_schema().fields());
+            assert_eq!(
+                index.rows.data_type(),
+                content_schema()
+                    .field_with_name("metadata")
+                    .unwrap()
+                    .data_type()
+            );
             let raw = index.rows["oai:metadata"].as_struct()["arxiv:arXivRaw"].as_struct();
             assert_eq!(raw["arxiv:title"].as_string::<i32>().value(0), title);
         }

@@ -284,7 +284,10 @@ fn index(snapshot: RecordBatch) -> Arc<ArxivMetadataIndex> {
 fn assert_metadata(batch: &RecordBatch, snapshot: &RecordBatch, expected_row: usize) {
     let expected = arrow_cast::cast(
         &StructArray::from(snapshot.clone()).slice(expected_row, 1),
-        &DataType::Struct(metadata_schema().fields().clone()),
+        content_schema()
+            .field_with_name("metadata")
+            .unwrap()
+            .data_type(),
     )
     .unwrap();
     let expected = expected.as_struct();

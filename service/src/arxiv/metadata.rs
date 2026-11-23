@@ -89,7 +89,10 @@ impl ArxivMetadataIndex {
             .map_err(error::arrow_error)?;
         let metadata = arrow_cast::cast(
             metadata.as_ref(),
-            &DataType::Struct(super::content::metadata_schema().fields().clone()),
+            super::content::content_schema()
+                .field_with_name("metadata")
+                .unwrap()
+                .data_type(),
         )
         .map_err(error::arrow_error)?;
         let mut columns = batch.columns().to_vec();
