@@ -15,6 +15,7 @@ updates:
       - dependency-name: "datafusion*"
       - dependency-name: "opendal*"
       - dependency-name: "lance*"
+      - dependency-name: "duckdb"
     groups:
       minor-and-patch:
         patterns:
