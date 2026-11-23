@@ -9,6 +9,7 @@
 #[allow(dead_code)]
 mod duckdb;
 
+mod arrow;
 mod error;
 mod file_manifest;
 #[cfg(feature = "oai")]

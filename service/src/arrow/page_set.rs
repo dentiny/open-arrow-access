@@ -6,7 +6,7 @@ use open_arrow_access_core::{
     ScanPartition, ScanPlan, ScanPlanner, async_trait,
 };
 
-use super::error::empty_page_selection;
+use crate::common::error::empty_page_selection;
 
 /// An ordered selection of independently fetchable API requests.
 /// The opener owns provider validation, authentication and record decoding.

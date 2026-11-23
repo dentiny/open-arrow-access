@@ -1,5 +1,5 @@
 //! Common utilities shared by provider services.
-mod error;
+pub(crate) mod error;
 mod json_util;
 mod url_util;
 mod validation;
@@ -22,8 +22,4 @@ pub use json_util::{LinkField, MetadataLink, resolve_named_links, resolve_option
 )]
 pub(crate) use validation::{is_commit_sha, reject_reserved_parameters};
 
-mod record_page;
-pub use record_page::{RecordPage, RecordPageInput};
-
-mod page_set;
-pub use page_set::PageSetAccessor;
+pub use crate::arrow::{PageSetAccessor, RecordPage, RecordPageInput};

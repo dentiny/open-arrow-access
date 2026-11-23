@@ -23,7 +23,7 @@ pub(super) fn header_name(error: http::header::InvalidHeaderName) -> Error {
 pub(super) fn header_value(error: http::header::InvalidHeaderValue) -> Error {
     invalid("invalid header value").with_source(error)
 }
-pub(super) fn missing_field(field: &str) -> Error {
+pub(crate) fn missing_field(field: &str) -> Error {
     decode(&format!("missing or invalid {field}"))
 }
 
@@ -45,11 +45,11 @@ pub(super) fn missing_auth_scope() -> opendal::Error {
     )
 }
 
-pub(super) fn serialize_metadata(source: serde_json::Error) -> Error {
+pub(crate) fn serialize_metadata(source: serde_json::Error) -> Error {
     decode("failed to serialize selected API records").with_source(source)
 }
 
-pub(super) fn empty_page_selection() -> Error {
+pub(crate) fn empty_page_selection() -> Error {
     Error::new(
         ErrorKind::InvalidInput,
         "plan_page_set",
