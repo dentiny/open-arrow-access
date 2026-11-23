@@ -64,8 +64,6 @@ pub fn content_schema() -> SchemaRef {
                 ))),
                 true,
             ));
-            // Conversion emits only fields supported by the metadata snapshot.
-            // Raw OAI harvesting retains its complete schema.
             let metadata = DataType::Struct(
                 vec![
                     Field::new(
@@ -134,7 +132,7 @@ pub struct ArxivContentRecords<A> {
     metadata: ContentMetadata,
 }
 impl<A> ArxivRecords<A> {
-    /// Read content with supported OAI metadata, fetched lazily and cached by article ID.
+    /// Read content with metadata fetched lazily and cached by article ID.
     pub fn content(self, format: ArxivContentFormat) -> ArxivContentRecords<A> {
         let metadata = ContentMetadata::Online(self.service.metadata.clone());
         ArxivContentRecords {

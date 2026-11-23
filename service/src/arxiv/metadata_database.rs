@@ -1,4 +1,3 @@
-//! Indexed article lookups in an existing metadata DuckDB snapshot.
 use super::{ArxivMetadataIndex, content::content_schema, error, id, validation};
 use crate::duckdb::{DuckDbDatabase, params};
 use arrow_array::{RecordBatch, StructArray, cast::AsArray};
@@ -6,8 +5,6 @@ use open_arrow_access_core::Result;
 use std::sync::Mutex;
 
 /// Share one read-only DuckDB instance and its disk cache across article readers.
-/// Construct it from `DuckDbDatabase::connect(location, secret_sql_file)` for
-/// remote HTTP/S3 access, or `DuckDbDatabase::open(path)` for local snapshots.
 pub struct ArxivMetadataDatabase {
     database: Mutex<DuckDbDatabase>,
 }
@@ -27,8 +24,7 @@ impl ArxivMetadataDatabase {
             .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?
             .try_clone()?;
         let mut batches = Vec::new();
-        // Match the indexed normalized key directly; do not transform the table
-        // column or load the complete snapshot. Two rows also detect duplicates.
+        // LIMIT 2 lets validation reject duplicate article IDs.
         let schema = connection.query(
             "SELECT \"oai:header\", \"oai:metadata\" FROM main.arxiv_metadata WHERE article_id = ? LIMIT 2",
             params![article],

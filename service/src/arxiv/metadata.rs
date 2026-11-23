@@ -11,13 +11,7 @@ use open_arrow_access_core::{
 
 use super::{ArxivReadRequest, ArxivRecords, error, id, record_schema, validation};
 
-/// Reusable in-memory metadata snapshot, indexed by the article ID column.
-///
-/// The legacy raw-PDF join retains all snapshot columns inside `metadata`.
-/// Common content readers project to the supported conversion metadata schema. IDs may be canonical arXiv IDs or OAI identifiers. Duplicate IDs are
-/// rejected instead of choosing an arbitrary record. Harvest/persist the snapshot
-/// separately under a single rate-limited coordinator, then share this index
-/// between shard readers. For large snapshots, load a month at a time.
+/// In-memory metadata indexed by normalized arXiv IDs; duplicate IDs are rejected.
 pub struct ArxivMetadataIndex {
     // Metadata records; each struct row retains all columns from the snapshot.
     pub(super) rows: StructArray,
