@@ -1,6 +1,6 @@
 use super::{error, tables};
 use crate::duckdb::ManagedConnection;
-use arrow_array::{Array, StringArray};
+use arrow_array::cast::AsArray;
 use arrow_schema::{DataType, Field, Schema};
 use futures::future::join_all;
 use open_arrow_access_core::{Accessor, AccessorExt, ByteAccessor, ReadRequest, Result};
@@ -99,26 +99,18 @@ async fn import_table(
         // Keep one appender for the table. Network reads remain asynchronous on
         // the runtime while this blocking importer owns DuckDB's native state.
         while let Some(batch) = futures::executor::block_on(reader.next())? {
+            // CsvAccessor decoded the fixed non-nullable Utf8 schema above;
+            // Arrow has already checked the column types and nullability.
             let columns = batch
                 .columns()
                 .iter()
-                .map(|column| {
-                    column
-                        .as_any()
-                        .downcast_ref::<StringArray>()
-                        .ok_or_else(|| error::invalid("expected lexical metadata cells"))
-                })
-                .collect::<Result<Vec<_>>>()?;
+                .map(|column| column.as_string::<i32>())
+                .collect::<Vec<_>>();
             for row in 0..batch.num_rows() {
                 let cells = columns
                     .iter()
-                    .map(|column| {
-                        if column.is_null(row) {
-                            return Err(error::invalid("unexpected null metadata cell"));
-                        }
-                        Ok(column.value(row))
-                    })
-                    .collect::<Result<Vec<_>>>()?;
+                    .map(|column| column.value(row))
+                    .collect::<Vec<_>>();
                 super::super::pages::identity::number(cells[key_column])?;
                 // Preserve the decoded lexical-row fingerprint exactly.
                 hash.update(serde_json::to_vec(&cells).map_err(error::json)?);

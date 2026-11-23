@@ -90,7 +90,7 @@ async fn explicit_formats_have_independent_lazy_partitions_and_preserve_payloads
 
 #[tokio::test]
 async fn invalid_selection_and_projection_fail_before_any_storage_io() {
-    let storage = MemoryAccessor::new(&load("paper.pdf").await, 2);
+    let storage = MemoryAccessor::new(b"unused", 2);
     let observed = storage.observations.clone();
     let accessor = ArxivService::new(storage).article_records();
     let request = ArxivArticleReadRequest::new(vec![
@@ -123,16 +123,19 @@ async fn http_formats_preserve_distinct_bytes_and_missing_html_does_not_fallback
     use open_arrow_access_storage::OpenDalAccessor;
     use open_arrow_access_test_support::http::HttpFixture;
     let http = HttpFixture::new();
+    let mut payloads = Vec::new();
     for (route, fixture) in [
         ("pdf", "paper.pdf"),
         ("src", "source.tar.gz"),
         ("html", "paper.html"),
     ] {
+        let payload = Bytes::from(load(fixture).await);
         http.respond(
             &format!("/{route}/2410.00001v1"),
             StatusCode::OK,
-            Bytes::from(load(fixture).await),
+            payload.clone(),
         );
+        payloads.push(payload);
     }
     http.respond_for(
         http::Method::HEAD,
@@ -155,8 +158,7 @@ async fn http_formats_preserve_distinct_bytes_and_missing_html_does_not_fallback
         .open(ArxivArticleReadRequest::new(selections))
         .await
         .unwrap();
-    for name in ["paper.pdf", "source.tar.gz", "paper.html"] {
-        let expected = load(name).await;
+    for expected in payloads {
         let batch = reader.next().await.unwrap().unwrap();
         assert_eq!(batch["data"].as_binary::<i64>().value(0), expected);
     }
