@@ -17,7 +17,6 @@ use std::{
 
 const ITEM: &str = "ocr/item-2/item-2-3-5.txt";
 const PART: &str = "ocr/part-8/part-8-3-1.txt";
-const MISSING: &str = "ocr/item-20/item-20-30-1.txt";
 
 async fn read(
     pages: &impl Accessor<Request = FileSetRequest, Reader = dyn RecordReader>,
@@ -109,7 +108,7 @@ async fn duckdb_pages_preserve_order_metadata_reports_and_projection() {
         io_concurrency: NonZeroUsize::new(2).unwrap(),
         io_chunk_size: NonZeroUsize::new(2),
     };
-    let request = FileSetRequest::new([ITEM, PART, ITEM, MISSING]).with_byte_options(byte_options);
+    let request = FileSetRequest::new([ITEM, PART]).with_byte_options(byte_options);
     let plan = pages.plan_scan(request.clone()).await.unwrap();
     assert!(plan.streaming_discovery);
     assert!(observations.requests.lock().unwrap().is_empty());
@@ -121,51 +120,37 @@ async fn duckdb_pages_preserve_order_metadata_reports_and_projection() {
     );
     assert_eq!(schema.metadata()["caller"], "value");
     let batches = read(&pages, request).await;
-    assert_eq!(batches.len(), 4);
-    for (batch, id) in batches.iter().zip([2, 8, 2, 20]) {
+    assert_eq!(batches.len(), 2);
+    for (batch, id) in batches.iter().zip([2, 8]) {
         assert_eq!(batch.schema(), schema);
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(batch["entity_id"].as_primitive::<UInt64Type>().value(0), id);
         assert_eq!(batch["data"].as_binary::<i64>().value(0), b"\r\n\xff");
         let joined = batch["metadata"].as_struct();
-        if id == 20 {
-            assert_eq!(
-                joined
-                    .column_by_name("item")
-                    .unwrap()
-                    .as_list::<i32>()
-                    .value_length(0),
-                0
-            );
-        } else {
-            assert_eq!(
-                joined
-                    .column_by_name("title")
-                    .unwrap()
-                    .as_list::<i32>()
-                    .value(0)
-                    .as_struct()
-                    .column_by_name("TitleID")
-                    .unwrap()
-                    .as_string::<i64>()
-                    .value(0),
-                "001"
-            );
-        }
+        assert_eq!(
+            joined
+                .column_by_name("title")
+                .unwrap()
+                .as_list::<i32>()
+                .value(0)
+                .as_struct()
+                .column_by_name("TitleID")
+                .unwrap()
+                .as_string::<i64>()
+                .value(0),
+            "001"
+        );
     }
     let requests = observations.requests.lock().unwrap().clone();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 2);
     assert!(
         requests
             .iter()
             .all(|request| request.options == byte_options)
     );
     let reports = reports.lock().unwrap().clone();
-    assert_eq!(reports.len(), 4);
-    assert_eq!(
-        reports[3],
-        ["page:30", "item:20", "title:unresolved parent"]
-    );
+    assert_eq!(reports.len(), 2);
+    assert!(reports.iter().all(Vec::is_empty));
 
     let parallel = pages.layer(ParallelReadLayer::new(
         NonZeroUsize::new(2).unwrap(),
@@ -183,7 +168,7 @@ async fn duckdb_pages_preserve_order_metadata_reports_and_projection() {
         assert_eq!(batch.schema().field(0).name(), "metadata");
         assert_eq!(batch.schema().field(1).name(), "page_id");
     }
-    assert_eq!(observations.requests.lock().unwrap().len(), 4);
+    assert_eq!(observations.requests.lock().unwrap().len(), 2);
 }
 
 #[tokio::test]

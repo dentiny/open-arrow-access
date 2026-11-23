@@ -10,15 +10,12 @@ use tokio::{sync::mpsc, task::JoinHandle};
 pub(super) fn pages(
     metadata: Arc<BhlMetadata>,
     keys: Vec<ObjectRef>,
-    canonical: bool,
 ) -> BoxStream<'static, Result<BhlPageMetadata>> {
     // Start only when discovery is polled. DuckDB must never run on the async
     // executor, and slow OCR consumers must not accumulate all joined rows.
     stream::once(async move {
         Ok(stream::try_unfold(
-            Query::start(move |emit| {
-                super::join::for_each(&metadata.query_connection()?, &keys, canonical, emit)
-            }),
+            Query::start(move |emit| metadata.for_each(&keys, emit)),
             |mut query| async move { Ok(query.next().await?.map(|page| (page, query))) },
         ))
     })

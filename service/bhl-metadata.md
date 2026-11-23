@@ -105,11 +105,13 @@ panics propagate after any queued page, so consume through EOF before committing
 output.
 
 Query failures propagate through the reader. Report callback failures stop
-before that page's OCR read. Accepted pages with missing joins retain
+before that page's OCR read. Sequence selection is mandatory before reports.
+Accepted pages with other missing joins retain
 empty relationship lists and still emit their OCR record. Reports go to the caller callback;
 they are not accumulated into schema metadata.
 
-Sequential reads follow request order, including duplicates. The scan remains
+Sequential reads follow the selected keys' request order. Duplicate matches for
+an entity/PageID fail instead of emitting repeated rows. The scan remains
 reorderable for callers explicitly using unordered/parallel execution layers.
 Projection constructs only selected page columns. Requests without `data`
 perform no OCR object opens/downloads; zero-column projections still retain one
@@ -159,10 +161,10 @@ caller-owned. Use a compatible DuckDB storage version. Existing `load` behavior
 remains an in-memory import; conversion-service job wiring remains a consumer
 adoption step after this API is released.
 
-## OCR versions in directory scans
+## OCR version selection
 
-Directory scans select the unique key matching metadata `SequenceOrder` in the
+Metadata joins select the unique key matching metadata `SequenceOrder` in the
 existing metadata join (`page` for items, `partpage` for parts). Other versions
 are excluded and logged to stderr without reading their bodies. Missing or
 ambiguous matches fail; filename sequences may be zero, but IDs remain positive.
-Explicit page inventories retain their caller-selected behavior.
+This rule also applies to explicit file selections, before caller report callbacks.

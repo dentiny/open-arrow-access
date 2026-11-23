@@ -31,7 +31,6 @@ pub struct BhlPageAccessor<A> {
     snapshot_id: Arc<str>,
     metadata: MetadataSource,
     schema_metadata: HashMap<String, String>,
-    canonical: bool,
 }
 impl<A> BhlPageAccessor<A> {
     pub fn new(
@@ -77,13 +76,7 @@ impl<A> BhlPageAccessor<A> {
             snapshot_id: snapshot_id.into(),
             metadata,
             schema_metadata: HashMap::new(),
-            canonical: false,
         })
-    }
-
-    pub(in crate::bhl) fn canonical_versions(mut self) -> Self {
-        self.canonical = true;
-        self
     }
 
     /// Merge caller provenance into the emitted batch schemas.
@@ -162,14 +155,11 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlPageAccessor<A> {
             }
             MetadataSource::DuckDb { metadata, report } => {
                 let report = report.clone();
-                let partitions = metadata
-                    .clone()
-                    .stream(request.objects, self.canonical)
-                    .map(move |page| {
-                        let page = page?;
-                        report(&page)?;
-                        Ok(partition(page))
-                    });
+                let partitions = metadata.clone().stream(request.objects).map(move |page| {
+                    let page = page?;
+                    report(&page)?;
+                    Ok(partition(page))
+                });
                 ScanPlan::from_stream(output, partitions).with_streaming_discovery()
             }
         };

@@ -90,6 +90,16 @@ fn read(metadata: &BhlMetadata, paths: &[&str]) -> Vec<BhlPageMetadata> {
     rows
 }
 
+fn invalid_selection(metadata: &BhlMetadata, paths: &[&str]) {
+    let keys = paths
+        .iter()
+        .map(|path| ObjectRef::new(*path))
+        .collect::<Vec<_>>();
+    let error = metadata.for_each(&keys, |_| Ok(())).unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    assert!(error.to_string().contains("SequenceOrder"), "{error}");
+}
+
 #[tokio::test]
 async fn joins_pages_and_preserves_source_values_and_relation_order() {
     let metadata = load().await;
@@ -113,9 +123,9 @@ async fn joins_pages_and_preserves_source_values_and_relation_order() {
          INSERT INTO doi VALUES ('title', '2', 'unrelated DOI', '');",
         )
         .unwrap();
-    let rows = read(&metadata, &[ITEM, PART, MISSING]);
+    let rows = read(&metadata, &[ITEM, PART]);
     assert_eq!(metadata.info.sources.len(), 13);
-    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.len(), 2);
     for page in rows {
         let row = &page.metadata;
         assert_eq!(
@@ -127,14 +137,6 @@ async fn joins_pages_and_preserves_source_values_and_relation_order() {
         );
         assert!(!row.is_null(0));
         assert!(page.conflicts.is_empty());
-        if page.object.locator() == MISSING {
-            assert_eq!(
-                page.missing,
-                ["page:30", "item:20", "title:unresolved parent"]
-            );
-            assert!(list(row, "item", "ItemID").is_empty());
-            continue;
-        }
         assert!(page.missing.is_empty());
         assert_eq!(cell(row, "title", "TitleID"), "001");
         assert_eq!(cell(row, "title", "FullTitle"), "Original \"title\" 遗传");
@@ -257,14 +259,19 @@ async fn reports_conflicts_and_falls_back_to_partpage_parent() {
          INSERT INTO partpage VALUES ('8', '3', '9', '2', '');",
         )
         .unwrap();
+    invalid_selection(&metadata, &[PART]);
+    metadata
+        .connection
+        .lock()
+        .unwrap()
+        .execute_batch("DELETE FROM partpage WHERE SequenceOrder = '2'")
+        .unwrap();
     let row = read(&metadata, &[PART]).pop().unwrap();
     assert_eq!(
         row.conflicts,
         [
             "page.ItemID=2, selected item=Some(7)",
             "partpage.ItemID=2, selected item=Some(7)",
-            "partpage.ItemID=9, selected item=Some(7)",
-            "SequenceOrder=2, filename sequence=1",
         ]
     );
     assert_eq!(row.missing, ["item:7", "title:unresolved parent"]);
@@ -302,9 +309,10 @@ async fn emits_rows_until_callback_fails() {
         .unwrap_err();
     assert_eq!(error.to_string(), "bhl_metadata: stop sink");
     assert_eq!(emitted, 1);
-    // Subsequent queries are independent, and duplicate requests stay duplicated.
+    // Subsequent queries are independent; missing/ambiguous selections fail.
     assert_eq!(read(&metadata, &[ITEM, PART]).len(), 2);
-    assert_eq!(read(&metadata, &[ITEM, ITEM]).len(), 2);
+    invalid_selection(&metadata, &[ITEM, ITEM]);
+    invalid_selection(&metadata, &[MISSING]);
     assert!(metadata.for_each(&[], |_| panic!("empty query")).is_ok());
     assert!(
         metadata
@@ -345,7 +353,7 @@ async fn databases_reopen_without_source_access_and_keep_provenance() {
             .execute_batch("DELETE FROM main.item")
             .is_err()
     );
-    assert_eq!(read(&database, &[ITEM, ITEM]).len(), 2);
+    invalid_selection(&database, &[ITEM, ITEM]);
     drop(database);
     {
         let db = duckdb::Connection::open(&path).unwrap();
@@ -369,8 +377,8 @@ async fn part_parent_associations_preserve_blank_ids_and_do_not_multiply_pages()
     let (_root, storage) = source_table("part", "part-multi-item.txt.gz").await;
     let metadata = BhlMetadata::load(storage).await.unwrap();
     assert_eq!(metadata.info.sources["part"].rows, 2);
-    let rows = read(&metadata, &[ITEM, PART, PART]);
-    assert_eq!(rows.len(), 3);
+    let rows = read(&metadata, &[ITEM, PART]);
+    assert_eq!(rows.len(), 2);
     assert!(list(&rows[0].metadata, "part", "PartID").is_empty());
     for row in &rows[1..] {
         assert_eq!(list(&row.metadata, "part", "PartID"), ["8", "8"]);
@@ -393,15 +401,7 @@ async fn part_parent_associations_preserve_blank_ids_and_do_not_multiply_pages()
         .unwrap()
         .execute_batch("DELETE FROM page; DELETE FROM partpage;")
         .unwrap();
-    let row = read(&metadata, &[PART]).pop().unwrap();
-    assert!(row.missing.contains(&"item:unresolved parent".to_owned()));
-    assert_eq!(
-        row.conflicts,
-        [
-            "part.ItemID=2, selected item=None",
-            "part.ItemID=9, selected item=None"
-        ]
-    );
+    invalid_selection(&metadata, &[PART]);
 }
 
 #[tokio::test]
@@ -414,8 +414,8 @@ async fn page_relations_preserve_types_order_and_one_output_per_ocr_request() {
     .unwrap();
     let metadata = BhlMetadata::load(storage).await.unwrap();
     assert_eq!(metadata.info.sources["page"].rows, 3);
-    let rows = read(&metadata, &[ITEM, PART, MISSING]);
-    assert_eq!(rows.len(), 3);
+    let rows = read(&metadata, &[ITEM, PART]);
+    assert_eq!(rows.len(), 2);
     for row in &rows[..2] {
         assert!(row.missing.is_empty());
         assert!(row.conflicts.is_empty());
@@ -426,21 +426,11 @@ async fn page_relations_preserve_types_order_and_one_output_per_ocr_request() {
         assert_eq!(list(&row.metadata, "page", "PageNumber"), ["I", "1", "I"]);
         assert_eq!(list(&row.metadata, "page", "ItemID"), ["2", "2", "2"]);
     }
-    assert!(list(&rows[2].metadata, "page", "PageID").is_empty());
-    assert!(rows[2].missing.iter().any(|message| message == "page:30"));
     metadata
         .connection
         .lock()
         .unwrap()
         .execute_batch("INSERT INTO page VALUES ('3','7','6','','','','','','Text','');")
         .unwrap();
-    let row = read(&metadata, &[ITEM]).pop().unwrap();
-    assert_eq!(list(&row.metadata, "page", "PageID").len(), 4);
-    assert_eq!(
-        row.conflicts,
-        [
-            "page.ItemID=7, selected item=Some(2)",
-            "SequenceOrder=6, filename sequence=5"
-        ]
-    );
+    invalid_selection(&metadata, &[ITEM]);
 }

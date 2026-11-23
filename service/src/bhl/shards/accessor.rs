@@ -172,8 +172,7 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlShardAccessor<A> {
             self.snapshot_id.clone(),
             self.metadata.clone(),
             move |page| report(page),
-        )?
-        .canonical_versions();
+        )?;
         pages
             .plan_scan(
                 FileSetRequest::new(keys)

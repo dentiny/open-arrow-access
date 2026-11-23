@@ -29,7 +29,6 @@ fn strings(column: &dyn Array, row: usize) -> Result<Vec<String>> {
 pub(super) fn for_each(
     connection: &duckdb::Connection,
     keys: &[ObjectRef],
-    canonical: bool,
     mut emit: impl FnMut(BhlPageMetadata) -> Result<()>,
 ) -> Result<()> {
     if keys.is_empty() {
@@ -96,7 +95,7 @@ pub(super) fn for_each(
     let mut statement = connection
         .prepare(include_str!("join.sql"))
         .map_err(error::duckdb)?;
-    let _ = statement.stream_arrow([canonical]).map_err(error::duckdb)?;
+    let _ = statement.stream_arrow([]).map_err(error::duckdb)?;
     let mut emitted = 0;
     while let Some(batch) = statement.step().map_err(error::duckdb)? {
         let batch = RecordBatch::from(&batch);
@@ -119,32 +118,30 @@ pub(super) fn for_each(
                 .get(index)
                 .ok_or_else(|| error::invalid("unknown request ID"))?;
             emitted += 1;
-            if canonical {
-                let matches = batch
-                    .column(5)
-                    .as_any()
-                    .downcast_ref::<UInt64Array>()
-                    .ok_or_else(|| error::invalid("expected canonical match counts"))?;
-                let selected = batch
-                    .column(4)
-                    .as_any()
-                    .downcast_ref::<UInt64Array>()
-                    .ok_or_else(|| error::invalid("expected canonical request IDs"))?;
-                if matches.value(row) != 1 {
-                    return Err(crate::bhl::error::invalid_pages(format!(
-                        "expected exactly one OCR key matching authoritative SequenceOrder; found {} for {}",
-                        matches.value(row), object.locator()
-                    )).with_object(Some(object)));
-                }
-                if selected.value(row) != indices.value(row) {
-                    let canonical = &keys[selected.value(row) as usize];
-                    eprintln!(
-                        "BHL quarantined alternative {}: selected {}",
-                        object.locator(),
-                        canonical.locator()
-                    );
-                    continue;
-                }
+            let matches = batch
+                .column(5)
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .ok_or_else(|| error::invalid("expected canonical match counts"))?;
+            let selected = batch
+                .column(4)
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .ok_or_else(|| error::invalid("expected canonical request IDs"))?;
+            if matches.value(row) != 1 {
+                return Err(crate::bhl::error::invalid_pages(format!(
+                    "expected exactly one OCR key matching authoritative SequenceOrder; found {} for {}",
+                    matches.value(row), object.locator()
+                )).with_object(Some(object)));
+            }
+            if selected.value(row) != indices.value(row) {
+                let canonical = &keys[selected.value(row) as usize];
+                eprintln!(
+                    "BHL quarantined alternative {}: selected {}",
+                    object.locator(),
+                    canonical.locator()
+                );
+                continue;
             }
             emit(BhlPageMetadata {
                 identity: BhlPageIdentity::parse(object.locator())?,

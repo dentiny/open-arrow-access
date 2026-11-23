@@ -116,12 +116,10 @@ WITH parents AS (
         ) messages) AS conflicts
     FROM base b
 ), sequences AS (
-    SELECT *, CASE
-        WHEN entity_type = 'item' AND len(page) = 1
-            THEN bhl_id(page[1].SequenceOrder)
-        WHEN entity_type = 'part' AND len(partpage) = 1
-            THEN bhl_id(partpage[1].SequenceOrder)
-        END AS expected_sequence
+    SELECT *, CASE WHEN entity_type = 'item'
+        THEN list_distinct(list_transform(page, lambda r: bhl_id(r.SequenceOrder)))
+        ELSE list_distinct(list_transform(partpage, lambda r: bhl_id(r.SequenceOrder)))
+        END AS expected_sequences
     FROM joined
 )
 SELECT request_id,
@@ -146,10 +144,8 @@ SELECT request_id,
          WHERE i.__key = joined.parent_id AND t.__key IS NULL)
     ) AS missing,
     conflicts,
-    CASE WHEN $1 THEN min(request_id) FILTER (WHERE sequence = expected_sequence) OVER versions
-         ELSE request_id END AS canonical_id,
-    CASE WHEN $1 THEN count(*) FILTER (WHERE sequence = expected_sequence) OVER versions
-         ELSE 1 END::UBIGINT AS canonical_matches
+    min(request_id) FILTER (WHERE expected_sequences = [sequence]) OVER versions AS canonical_id,
+    (count(*) FILTER (WHERE expected_sequences = [sequence]) OVER versions)::UBIGINT AS canonical_matches
 FROM sequences AS joined
 WINDOW versions AS (PARTITION BY entity_type, entity_id, page_id)
 ORDER BY request_id
