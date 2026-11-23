@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.21.2 - 2026-11-23
+
+- Expose TAR link entries as non-file entries so arXiv source readers can skip linked attachments without following their targets. Continue rejecting file reads of links and unsupported sparse or special entries.
+- Release all eight public workspace crates at 0.21.2 with aligned internal dependency requirements.
+
 ## 0.21.1 - 2026-11-23
 
 - Reuse pooled DuckDB metadata connections and cached prepared queries for arXiv article lookups, returning connections before Arrow result processing.
