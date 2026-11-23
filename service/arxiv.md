@@ -561,25 +561,45 @@ let index = std::sync::Arc::new(ArxivMetadataIndex::from_oai_records(snapshot)?)
 let records = service.records().content(format).with_metadata(index)?;
 ```
 
-For an existing DuckDB snapshot, open a shared connection once and query metadata
-by normalized `article_id` using its index:
+Choose the backend explicitly with `ArxivMetadataSource`. Its default is `Oai`,
+which keeps lazy OAI lookups and honors `with_metadata_connection`. DuckDB is
+opt-in; its location and optional trusted initialization SQL string are caller-owned:
+
+```rust
+use open_arrow_access::service::arxiv::ArxivMetadataSource;
+
+let records = service.records().content(format)
+    .with_metadata_source(ArxivMetadataSource::DuckDbDatabase {
+        location: "s3://pretrain-dataset/arxiv-metadata/arxiv.duckdb".into(),
+        init_sql: Some("CREATE SECRET metadata (TYPE s3, PROVIDER credential_chain);".into()),
+    }).await?;
+```
+
+The method opens the database once on a blocking worker; article readers share
+that connection and its cache. Setup errors propagate without an OAI fallback.
+The caller can generate SQL in memory or read it from local files or remote
+configuration. The enum does not interpret the string as a filename or URL.
+To select OAI explicitly, pass `ArxivMetadataSource::Oai` or `Default::default()`.
+
+For an already-open DuckDB snapshot, callers can still supply a shared connection
+and query metadata by normalized `article_id` using its index:
 
 ```rust
 use open_arrow_access::service::{arxiv::ArxivMetadataDatabase, duckdb::DuckDbDatabase};
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 // Run blocking connection setup outside async runtime workers.
 let database = tokio::task::spawn_blocking(|| {
     DuckDbDatabase::connect(
         "s3://pretrain-dataset/arxiv-metadata/arxiv.duckdb",
-        Some(Path::new("metadata-secret.sql")),
+        Some("CREATE SECRET metadata (TYPE s3, PROVIDER credential_chain);"),
     )
 }).await??;
 let metadata = Arc::new(ArxivMetadataDatabase::new(database));
 let records = service.records().content(format).with_metadata_database(metadata);
 ```
 
-The optional SQL file configures secrets before attachment. The shared connection
+The optional SQL string configures secrets before attachment. The shared connection
 uses `cache_httpfs` with a private on-disk cache and reads remote ranges instead
 of downloading the whole database. `DuckDbDatabase::open(path)` also supports a
 local snapshot. The table `main.arxiv_metadata` must expose an indexed normalized

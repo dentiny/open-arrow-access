@@ -56,14 +56,13 @@ impl ManagedConnection {
 
     /// Initialize secrets before attaching an existing local or remote database.
     /// The script is trusted caller SQL, executed once per database instance.
-    pub(crate) fn connect(location: &str, secret_sql_file: Option<&Path>) -> Result<Self> {
+    pub(crate) fn connect(location: &str, init_sql: Option<&str>) -> Result<Self> {
         let connection = Self::in_memory()?;
-        if let Some(path) = secret_sql_file {
-            let sql = std::fs::read_to_string(path).map_err(|_| error::secret_setup())?;
+        if let Some(sql) = init_sql {
             // DuckDB errors may echo SQL containing credentials; do not retain them.
             connection
-                .execute_batch(&sql)
-                .map_err(|_| error::secret_setup())?;
+                .execute_batch(sql)
+                .map_err(|_| error::init_setup())?;
         }
         connection.configure_remote_cache()?;
         let location = location.replace('\'', "''");

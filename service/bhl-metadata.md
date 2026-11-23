@@ -201,16 +201,15 @@ BHL reuses the shared DuckDB loader for local paths and remote URLs. For example
 
 ```rust,ignore
 use open_arrow_access_service::duckdb::DuckDbDatabase;
-use std::path::Path;
 
 let database = DuckDbDatabase::connect(
     "s3://bucket/BHL-metadata.duckdb",
-    Some(Path::new("/run/secrets/duckdb.sql")),
+    Some("CREATE SECRET metadata (TYPE s3, PROVIDER credential_chain);"),
 )?;
 let metadata = BhlMetadata::from_tables_database(database, "published-snapshot-id")?;
 ```
 
-The shared connection executes the SQL file before attaching the database
+The shared connection executes the SQL string before attaching the database
 read-only. Remote reads use cache_httpfs with a temporary on-disk block cache,
 without downloading a complete database before opening. The shared loader owns
 credentials, connection cloning and cache lifetime. `BhlMetadata` only adds BHL

@@ -13,6 +13,19 @@ use open_arrow_access_core::{
 };
 use std::sync::{Arc, OnceLock};
 
+/// Metadata backend opened once for a content source.
+/// OAI remains the default; database access is explicitly selected by callers.
+#[derive(Clone, Default, Eq, PartialEq)]
+pub enum ArxivMetadataSource {
+    #[default]
+    Oai,
+    /// A local path or remote URL and optional trusted initialization SQL.
+    DuckDbDatabase {
+        location: String,
+        init_sql: Option<String>,
+    },
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ArxivContentFormat {
     Pdf,
@@ -145,6 +158,27 @@ impl<A> ArxivRecords<A> {
     }
 }
 impl<A> ArxivContentRecords<A> {
+    /// Select and open metadata once, off the async runtime for DuckDB setup.
+    /// OAI reuses the service's configured connection and fetches lazily.
+    /// Database failures are returned without falling back to OAI.
+    pub async fn with_metadata_source(mut self, source: ArxivMetadataSource) -> Result<Self> {
+        self.metadata = match source {
+            ArxivMetadataSource::Oai => {
+                ContentMetadata::Online(self.records.service.metadata.clone())
+            }
+            ArxivMetadataSource::DuckDbDatabase { location, init_sql } => {
+                let database = tokio::task::spawn_blocking(move || {
+                    crate::duckdb::DuckDbDatabase::connect(&location, init_sql.as_deref())
+                        .map(ArxivMetadataDatabase::new)
+                })
+                .await
+                .map_err(super::error::metadata_worker)??;
+                ContentMetadata::Database(Arc::new(database))
+            }
+        };
+        Ok(self)
+    }
+
     pub fn with_metadata_database(mut self, database: Arc<ArxivMetadataDatabase>) -> Self {
         self.metadata = ContentMetadata::Database(database);
         self

@@ -2,7 +2,7 @@
 
 mod content;
 mod latex;
-pub use content::{ArxivContentFormat, ArxivContentRecords, content_schema};
+pub use content::{ArxivContentFormat, ArxivContentRecords, ArxivMetadataSource, content_schema};
 mod articles;
 mod error;
 pub use articles::{
