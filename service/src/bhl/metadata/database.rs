@@ -1,8 +1,7 @@
 //! Persistent DuckDB storage for reusable BHL metadata.
-use super::{
-    BhlMetadata, BhlMetadataInfo, connection::MetadataConnection, error, tables, validation,
-};
-use duckdb::{Connection, params};
+use super::{BhlMetadata, BhlMetadataInfo, error, tables, validation};
+use crate::duckdb::ManagedConnection;
+use ::duckdb::{Connection, params};
 use open_arrow_access_core::{ByteAccessor, Result};
 use std::{path::Path, sync::Mutex};
 
@@ -59,7 +58,7 @@ impl BhlMetadata {
     ) -> Result<()> {
         let path = path.as_ref().to_path_buf();
         validation::validate_database_destination(path.try_exists().map_err(error::database_io)?)?;
-        let connection = MetadataConnection::open(&path, false)?;
+        let connection = ManagedConnection::open(&path, false)?;
         let metadata = Self::import(storage, connection).await?;
         tokio::task::spawn_blocking(move || {
             let connection = metadata.connection.into_inner().map_err(error::metadata_lock)?;
@@ -87,7 +86,7 @@ impl BhlMetadata {
     /// Open the persistent database read-only, without acquiring any AWS tables.
     /// Temporary per-query selections remain private to cloned connections.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let connection = MetadataConnection::open(path, true)?;
+        let connection = ManagedConnection::open(path, true)?;
         let info = read_info(&connection)?;
         check_sources(&connection, &info)?;
         Ok(Self {

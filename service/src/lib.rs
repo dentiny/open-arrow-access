@@ -4,6 +4,9 @@
 //! selected JSON records with [`common::ApiDocument::records_at`]. Formats are
 //! explicit; metadata links are never followed automatically.
 
+#[cfg(any(feature = "bhl", feature = "courtlistener"))]
+mod duckdb;
+
 mod error;
 mod file_manifest;
 mod resolved_files;

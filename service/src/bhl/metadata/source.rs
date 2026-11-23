@@ -1,4 +1,5 @@
-use super::{connection::MetadataConnection, error, tables};
+use super::{error, tables};
+use crate::duckdb::ManagedConnection;
 use arrow_array::{Array, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use futures::future::join_all;
@@ -35,7 +36,7 @@ pub struct BhlMetadataInfo {
 /// All 13 AWS metadata tables in one in-memory or persistent DuckDB database.
 pub struct BhlMetadata {
     pub info: BhlMetadataInfo,
-    pub(super) connection: Mutex<MetadataConnection>,
+    pub(super) connection: Mutex<ManagedConnection>,
 }
 
 fn hex(bytes: impl AsRef<[u8]>) -> String {
@@ -52,7 +53,7 @@ fn quoted(name: &str) -> String {
 }
 
 async fn import_table(
-    connection: MetadataConnection,
+    connection: ManagedConnection,
     input: Arc<dyn ByteAccessor>,
     table: super::Table,
 ) -> Result<(String, SourceInfo)> {
@@ -152,7 +153,7 @@ async fn import_table(
                         table.name
                     )));
                 }
-                Err(duckdb::Error::QueryReturnedNoRows) => {}
+                Err(::duckdb::Error::QueryReturnedNoRows) => {}
                 Err(source) => return Err(error::duckdb(source)),
             }
         }
@@ -189,13 +190,13 @@ impl BhlMetadata {
     /// Import the 13 gzip TSV tables concurrently into an in-memory database.
     /// V1 assumes the source tables and query intermediates fit in memory.
     pub async fn load<A: ByteAccessor + 'static>(storage: A) -> Result<Self> {
-        let connection = MetadataConnection::in_memory()?;
+        let connection = ManagedConnection::in_memory()?;
         Self::import(storage, connection).await
     }
 
     pub(super) async fn import<A: ByteAccessor + 'static>(
         storage: A,
-        connection: MetadataConnection,
+        connection: ManagedConnection,
     ) -> Result<Self> {
         connection
             .execute_batch(

@@ -348,7 +348,7 @@ async fn databases_reopen_without_source_access_and_keep_provenance() {
     assert_eq!(read(&database, &[ITEM, ITEM]).len(), 2);
     drop(database);
     {
-        let db = duckdb::Connection::open(&path).unwrap();
+        let db = ::duckdb::Connection::open(&path).unwrap();
         db.execute_batch("UPDATE __bhl_metadata SET version = 999")
             .unwrap();
     }

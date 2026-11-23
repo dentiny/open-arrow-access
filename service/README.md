@@ -44,6 +44,14 @@ The linked guides document credentials, version selection, request types, and
 response schemas. Shared `service::common` HTTP/JSON utilities are always
 available; concrete providers are feature-gated.
 
+## Shared DuckDB support
+
+BHL metadata and CourtListener record conversion share the internal
+[`src/duckdb`](src/duckdb) module. It manages connection configuration, private
+spill directories, temporary on-disk databases, connection cloning and cleanup,
+and database/scratch error conversion. Provider-specific schemas, import logic,
+SQL joins and Arrow conversion remain with each provider.
+
 ## Example setup
 
 The following example discovers files and reads bytes.

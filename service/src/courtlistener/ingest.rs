@@ -2,12 +2,12 @@
 use super::{
     CourtListenerCopyDialect, CourtListenerSchemas, CourtListenerSnapshot,
     CourtListenerTableAccessor,
-    error::{arrow_error, db_error, scratch_error, task_error},
+    error::{arrow_error, db_error, task_error},
     valdiation::validate_keys,
 };
+use crate::duckdb::ManagedConnection;
 use arrow_array::{RecordBatch, UInt64Array};
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
-use duckdb::{Config, Connection};
 use futures::future::join_all;
 use open_arrow_access_core::{Accessor, ByteAccessor, ReadRequest, Result};
 use std::sync::Arc;
@@ -34,25 +34,11 @@ fn sql_type(dtype: &DataType) -> &'static str {
     }
 }
 pub(super) struct Database {
-    pub connection: Connection,
-    /// Owns the temporary database and spill directory until the query finishes.
-    /// Dropping this guard removes the directory and its files.
-    _directory: tempfile::TempDir,
+    pub connection: ManagedConnection,
 }
 impl Database {
     fn new(schemas: &CourtListenerSchemas) -> Result<Self> {
-        // Store imported tables and DuckDB join/sort spill files on temporary disk.
-        // Database owns the directory through query completion; dropping it removes the files.
-        let directory = tempfile::tempdir().map_err(scratch_error)?;
-        let config = Config::default()
-            .with(
-                "temp_directory",
-                directory.path().join("spill").to_string_lossy(),
-            )
-            .map_err(db_error)?;
-        let connection =
-            Connection::open_with_flags(directory.path().join("snapshot.duckdb"), config)
-                .map_err(db_error)?;
+        let connection = ManagedConnection::temporary()?;
         for (i, fields) in schemas.tables().iter().enumerate() {
             let columns = fields
                 .iter()
@@ -73,14 +59,11 @@ impl Database {
                 ))
                 .map_err(db_error)?;
         }
-        Ok(Self {
-            connection,
-            _directory: directory,
-        })
+        Ok(Self { connection })
     }
 }
 async fn import_table<A: ByteAccessor + 'static>(
-    connection: Connection,
+    connection: ManagedConnection,
     source: CourtListenerTableAccessor<Arc<A>>,
     request: ReadRequest,
     table: usize,
@@ -147,7 +130,7 @@ pub(super) async fn ingest<A: ByteAccessor + 'static>(
         .map_err(|e| task_error("courtlistener_duckdb_task", e))??;
     let mut imports = Vec::new();
     for (i, table) in TABLES.iter().enumerate() {
-        let connection = database.connection.try_clone().map_err(db_error)?;
+        let connection = database.connection.try_clone()?;
         let object = CourtListenerSnapshot::new(*table, request.object.locator())?.object();
         imports.push(import_table(
             connection,

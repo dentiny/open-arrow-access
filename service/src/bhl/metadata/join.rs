@@ -27,7 +27,7 @@ fn strings(column: &dyn Array, row: usize) -> Result<Vec<String>> {
 }
 
 pub(super) fn for_each(
-    connection: &duckdb::Connection,
+    connection: &::duckdb::Connection,
     keys: &[ObjectRef],
     mut emit: impl FnMut(BhlPageMetadata) -> Result<()>,
 ) -> Result<()> {
