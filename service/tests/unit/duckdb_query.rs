@@ -340,9 +340,102 @@ fn opens_authenticated_remote_database_after_creating_secret() {
     )
     .unwrap();
     let db = DuckDbDatabase::connect(&url, Some(&script)).unwrap();
+    db.query(
+        "SELECT CAST(sum(id) AS BIGINT) FROM metadata",
+        [],
+        |batch| {
+            assert_eq!(
+                batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap()
+                    .value(0),
+                49_995_000
+            );
+            Ok(())
+        },
+    )
+    .unwrap();
     assert_row_count(&db);
     let clone = db.try_clone().unwrap();
     drop(db);
     assert_row_count(&clone);
     assert!(clone.query("DELETE FROM metadata", [], |_| Ok(())).is_err());
+}
+
+#[test]
+fn clones_preserve_selected_schema_and_full_search_path() {
+    let (_directory, path) = database();
+    let connection = ::duckdb::Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE SCHEMA custom; CREATE TABLE custom.only_custom AS SELECT 7 AS value;",
+        )
+        .unwrap();
+    drop(connection);
+    let db = DuckDbDatabase::connect(path.to_str().unwrap(), None).unwrap();
+    db.query(
+        "SET search_path = 'source_database.custom,source_database.main'",
+        [],
+        |_| Ok(()),
+    )
+    .unwrap();
+    let clone = db.try_clone().unwrap();
+    drop(db);
+    clone
+        .query("SELECT * FROM only_custom", [], |batch| {
+            assert_eq!(
+                batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<arrow_array::Int32Array>()
+                    .unwrap()
+                    .value(0),
+                7
+            );
+            Ok(())
+        })
+        .unwrap();
+    assert_row_count(&clone);
+}
+
+#[test]
+#[ignore = "requires a local S3 HTTP fixture and installed httpfs"]
+fn opens_s3_database_with_secret_sql_and_reads_actual_rows() {
+    let (directory, path) = database();
+    let served = std::env::var("DUCKDB_TEST_HTTP_DIRECTORY").unwrap();
+    std::fs::copy(path, std::path::Path::new(&served).join("source.duckdb")).unwrap();
+    let endpoint = std::env::var("DUCKDB_TEST_S3_ENDPOINT").unwrap();
+    let script = directory.path().join("s3-secrets.sql");
+    std::fs::write(&script, format!("LOAD httpfs; CREATE SECRET fixture_s3 (TYPE s3, KEY_ID 'fixture-key', SECRET 'fixture-value', REGION 'us-east-1', ENDPOINT '{}', USE_SSL false, URL_STYLE 'path');", endpoint.replace('\'', "''"))).unwrap();
+    let db = DuckDbDatabase::connect("s3://fixture-bucket/source.duckdb", Some(&script)).unwrap();
+    let clone = db.try_clone().unwrap();
+    drop(db);
+    let mut rows = 0;
+    clone
+        .query(
+            "SELECT id, title FROM metadata WHERE id >= 9998 ORDER BY id",
+            [],
+            |batch| {
+                let ids = batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .unwrap();
+                let titles = batch
+                    .column(1)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap();
+                for index in 0..batch.num_rows() {
+                    assert_eq!(ids.value(index), 9998 + rows);
+                    assert_eq!(titles.value(index), format!("title-{}", 9998 + rows));
+                    rows += 1;
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(rows, 2);
 }

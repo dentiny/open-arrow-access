@@ -583,3 +583,24 @@ async fn plain_tables_reuse_shared_connection_and_setup_sql() {
         assert_eq!(actual.metadata, expected.metadata);
     }
 }
+
+#[tokio::test]
+async fn managed_manifests_still_require_source_checksums() {
+    let (_root, storage) = source("title.txt.gz").await;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("managed.duckdb");
+    BhlMetadata::create(storage, &path).await.unwrap();
+    let db = ::duckdb::Connection::open(&path).unwrap();
+    let info: String = db
+        .query_row("SELECT info FROM __bhl_metadata", [], |row| row.get(0))
+        .unwrap();
+    let mut info: serde_json::Value = serde_json::from_str(&info).unwrap();
+    info["sources"]["page"]
+        .as_object_mut()
+        .unwrap()
+        .remove("sha256");
+    db.execute("UPDATE __bhl_metadata SET info = ?", [info.to_string()])
+        .unwrap();
+    drop(db);
+    assert!(BhlMetadata::open(&path).is_err());
+}

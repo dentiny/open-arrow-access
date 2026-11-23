@@ -8,7 +8,6 @@ pub(super) fn scratch(source: std::io::Error) -> Error {
     Error::new(ErrorKind::Io, "duckdb_scratch", source.to_string()).with_source(source)
 }
 
-#[cfg(feature = "duckdb")]
 pub(super) fn length_mismatch() -> Error {
     Error::new(
         ErrorKind::Io,
@@ -17,12 +16,10 @@ pub(super) fn length_mismatch() -> Error {
     )
 }
 
-#[cfg(feature = "duckdb")]
 pub(super) fn task(source: tokio::task::JoinError) -> Error {
     Error::new(ErrorKind::Internal, "duckdb_open", source.to_string()).with_source(source)
 }
 
-#[cfg(feature = "duckdb")]
 pub(super) fn secret_setup() -> Error {
     Error::new(
         ErrorKind::Io,
@@ -31,7 +28,6 @@ pub(super) fn secret_setup() -> Error {
     )
 }
 
-#[cfg(feature = "duckdb")]
 pub(super) fn attach() -> Error {
     Error::new(
         ErrorKind::Io,

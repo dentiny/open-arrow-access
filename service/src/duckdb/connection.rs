@@ -52,7 +52,6 @@ impl ManagedConnection {
 
     /// Initialize secrets before attaching an existing local or remote database.
     /// The script is trusted caller SQL, executed once per database instance.
-    #[cfg(feature = "duckdb")]
     pub(crate) fn connect(location: &str, secret_sql_file: Option<&Path>) -> Result<Self> {
         let connection = Self::in_memory()?;
         if let Some(path) = secret_sql_file {
@@ -71,7 +70,6 @@ impl ManagedConnection {
         Ok(connection)
     }
 
-    #[cfg(feature = "duckdb")]
     pub(crate) fn retain_source(&mut self, directory: tempfile::TempDir) {
         self.source_directory = Some(Arc::new(directory));
     }
@@ -118,14 +116,23 @@ impl ManagedConnection {
     }
 
     pub(crate) fn try_clone(&self) -> Result<Self> {
-        let database: String = self
+        let (database, search_path): (String, String) = self
             .connection
-            .query_row("SELECT current_database()", [], |row| row.get(0))
+            .query_row(
+                "SELECT current_database(), current_setting('search_path')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
             .map_err(error::database)?;
         let connection = self.connection.try_clone().map_err(error::database)?;
-        // DuckDB clones reset the current catalog to the primary in-memory DB.
+        // DuckDB clones reset catalog and schema selection. Restore the complete
+        // search path so unqualified names resolve exactly as on the source.
         connection
-            .execute_batch(&format!("USE \"{}\"", database.replace('"', "\"\"")))
+            .execute_batch(&format!(
+                "USE \"{}\"; SET search_path = '{}';",
+                database.replace('"', "\"\""),
+                search_path.replace('\'', "''")
+            ))
             .map_err(error::database)?;
         Ok(Self {
             connection,

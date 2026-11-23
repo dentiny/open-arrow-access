@@ -57,8 +57,9 @@ a pending read, drop that reader too.
 
 ## Query a local or remote DuckDB metadata file
 
-Enable `service-duckdb` to query an existing local DuckDB database, including a
-persisted provider metadata database. Pass its file path and parameterized SQL:
+The shared DuckDB utility can query existing local databases, including persisted
+provider metadata databases, without enabling a provider feature. Pass its file
+path and parameterized SQL:
 
 ```rust,no_run
 use open_arrow_access::service::duckdb::{DuckDbDatabase, params};
