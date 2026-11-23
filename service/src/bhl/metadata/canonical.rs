@@ -3,13 +3,12 @@ use std::collections::HashMap;
 use open_arrow_access_core::{ObjectRef, Result};
 
 use super::{error, join};
-use crate::bhl::{BhlPageAlternative, BhlPageIdentity};
+use crate::bhl::BhlPageIdentity;
 
 /// Reconcile identities only; never read or compare alternative OCR bodies.
 pub(super) fn select(
     connection: &duckdb::Connection,
     keys: Vec<ObjectRef>,
-    mut report: impl FnMut(&BhlPageAlternative) -> Result<()>,
 ) -> Result<Vec<ObjectRef>> {
     join::selection(connection, &keys)?;
     let mut statement = connection
@@ -74,11 +73,11 @@ pub(super) fn select(
         selected[canonical] = true;
         for index in candidates {
             if index != canonical {
-                report(&BhlPageAlternative {
-                    canonical: keys[canonical].clone(),
-                    alternative: keys[index].clone(),
-                    sequence,
-                })?;
+                eprintln!(
+                    "BHL quarantined alternative {}: selected {} (metadata SequenceOrder={sequence})",
+                    keys[index].locator(),
+                    keys[canonical].locator()
+                );
             }
         }
     }

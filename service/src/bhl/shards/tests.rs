@@ -88,12 +88,6 @@ async fn reads_five_hundred_directories_through_one_native_scan() {
         metadata,
     )
     .unwrap();
-    let alternatives = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let captured = alternatives.clone();
-    let source = source.with_alternative_report(move |_| {
-        captured.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Ok(())
-    });
     let batches = read(
         &source,
         BhlShardReadRequest::from_prefixes(prefixes).unwrap(),
@@ -107,7 +101,6 @@ async fn reads_five_hundred_directories_through_one_native_scan() {
         assert_eq!(batch["data"].as_binary::<i64>().value(0), payload);
     }
     assert_eq!(ids.len(), 500);
-    assert_eq!(alternatives.load(std::sync::atomic::Ordering::Relaxed), 500);
 }
 
 #[tokio::test]
@@ -197,9 +190,8 @@ async fn parent_conflicts_remain_strict_unless_overridden() {
 }
 
 #[tokio::test]
-async fn selects_item_and_part_versions_and_audits_without_reading_alternatives() {
+async fn selects_item_and_part_versions_without_reading_alternatives() {
     use arrow_array::types::UInt64Type;
-    use std::sync::Mutex;
 
     let (root, source) = fixture(&[
         ("ocr/item-2/item-2-3-4.txt", b"different stale body"),
@@ -208,16 +200,10 @@ async fn selects_item_and_part_versions_and_audits_without_reading_alternatives(
         ("ocr/part-8/part-8-3-1.txt", b"canonical part"),
     ])
     .await;
-    let audit = Arc::new(Mutex::new(Vec::new()));
-    let captured = audit.clone();
-    let source = source.with_alternative_report(move |version| {
-        captured.lock().unwrap().push(version.clone());
-        Ok(())
-    });
     let request = BhlShardReadRequest::from_prefixes(["ocr/item-2/", "ocr/part-8/"]).unwrap();
     let mut reader = source.open(request).await.unwrap();
-    for version in audit.lock().unwrap().iter() {
-        std::fs::remove_file(root.path().join(version.alternative.locator())).unwrap();
+    for key in ["ocr/item-2/item-2-3-4.txt", "ocr/part-8/part-8-3-0.txt"] {
+        std::fs::remove_file(root.path().join(key)).unwrap();
     }
     let mut batches = Vec::new();
     while let Some(batch) = reader.next().await.unwrap() {
@@ -234,11 +220,6 @@ async fn selects_item_and_part_versions_and_audits_without_reading_alternatives(
         );
         assert_eq!(batch["data"].as_binary::<i64>().value(0), body);
     }
-    let audit = audit.lock().unwrap();
-    assert_eq!(audit.len(), 2);
-    assert_eq!(audit[0].alternative.locator(), "ocr/item-2/item-2-3-4.txt");
-    assert_eq!(audit[0].canonical.locator(), "ocr/item-2/item-2-3-5.txt");
-    assert_eq!(audit[1].sequence, 1);
 }
 
 #[tokio::test]
@@ -277,30 +258,12 @@ async fn rejects_ambiguous_or_invalid_authoritative_sequences() {
             "ocr/item-2/item-2-3-5.txt"
         };
         let error = expect_err_kind(
-            metadata.canonical_keys(vec![ObjectRef::new(key)], |_| Ok(())),
+            metadata.canonical_keys(vec![ObjectRef::new(key)]),
             ErrorKind::InvalidInput,
         );
         assert!(error.to_string().contains("SequenceOrder"), "{error}");
         assert_eq!(error.object().unwrap().locator(), key);
     }
-}
-
-#[tokio::test]
-async fn audit_errors_stop_planning_before_ocr_reads() {
-    let (_root, source) = fixture(&[
-        ("ocr/item-2/item-2-3-4.txt", b"stale"),
-        ("ocr/item-2/item-2-3-5.txt", b"canonical"),
-    ])
-    .await;
-    let source = source
-        .with_alternative_report(|_| Err(crate::bhl::error::invalid_pages("audit unavailable")));
-    let error = expect_err_kind(
-        source
-            .open(BhlShardReadRequest::new("ocr/item-2/").unwrap())
-            .await,
-        ErrorKind::InvalidInput,
-    );
-    assert!(error.to_string().contains("audit unavailable"));
 }
 
 #[tokio::test]
@@ -332,16 +295,9 @@ async fn reconciles_real_keys_from_all_five_failed_batches() {
         expected.push(key(sequence));
     }
     let metadata = crate::bhl::metadata::tests::load_with_sql(&sql).await;
-    let mut audit = Vec::new();
-    let selected = metadata
-        .canonical_keys(keys, |version| {
-            audit.push(version.alternative.clone());
-            Ok(())
-        })
-        .unwrap();
+    let selected = metadata.canonical_keys(keys).unwrap();
     assert_eq!(
         selected.iter().map(|key| key.locator()).collect::<Vec<_>>(),
         expected.iter().map(|key| key.locator()).collect::<Vec<_>>()
     );
-    assert_eq!(audit.len(), examples.len());
 }

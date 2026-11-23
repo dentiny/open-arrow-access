@@ -171,9 +171,7 @@ keys fail with source-key context. `with_report` still controls joined metadata
 and parent conflicts, but cannot bypass canonical selection.
 
 Every excluded version is quarantined from the scan and reported with its full
-key, the canonical key and metadata sequence. The default audit writes to stderr.
-Use `with_alternative_report` to persist `BhlPageAlternative` records in the
-application's audit store; callback errors abort planning before OCR reads.
+key, the canonical key and metadata sequence. Audit messages go to stderr.
 Alternative objects remain in the source bucket. Their bodies are never read,
 compared or assumed equal, even when ETags happen to agree.
 

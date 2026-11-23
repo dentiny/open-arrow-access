@@ -92,12 +92,8 @@ impl BhlMetadata {
         join::for_each(&connection, keys, emit)
     }
 
-    pub(in crate::bhl) fn canonical_keys(
-        &self,
-        keys: Vec<ObjectRef>,
-        report: impl FnMut(&super::BhlPageAlternative) -> Result<()>,
-    ) -> Result<Vec<ObjectRef>> {
-        canonical::select(&self.query_connection()?, keys, report)
+    pub(in crate::bhl) fn canonical_keys(&self, keys: Vec<ObjectRef>) -> Result<Vec<ObjectRef>> {
+        canonical::select(&self.query_connection()?, keys)
     }
 
     fn query_connection(&self) -> Result<duckdb::Connection> {

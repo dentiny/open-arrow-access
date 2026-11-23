@@ -7,6 +7,6 @@ mod pages;
 mod shards;
 pub use page::{BhlPageRecord, page_schema};
 pub use pages::{BhlPageAccessor, BhlPageIdentity};
-pub use shards::{BhlPageAlternative, BhlShardAccessor, BhlShardReadRequest};
+pub use shards::{BhlShardAccessor, BhlShardReadRequest};
 mod validation;
 pub use open_data::{BhlOpenData, OPEN_DATA_BUCKET_URL, open_data_bucket_operator};

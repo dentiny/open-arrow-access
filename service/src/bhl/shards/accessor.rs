@@ -16,16 +16,6 @@ use crate::{
     },
 };
 
-/// An OCR version excluded from a shard scan by authoritative metadata.
-/// The objects remain in source storage; their bodies may differ.
-#[derive(Clone, Debug)]
-pub struct BhlPageAlternative {
-    pub canonical: ObjectRef,
-    pub alternative: ObjectRef,
-    pub sequence: u64,
-}
-
-type AlternativeReport = dyn Fn(&BhlPageAlternative) -> Result<()> + Send + Sync;
 type MetadataReport = dyn Fn(&BhlPageMetadata) -> Result<()> + Send + Sync;
 
 /// Discover and read complete OCR item/part directories with joined metadata.
@@ -44,7 +34,6 @@ pub struct BhlShardAccessor<A> {
     metadata: Arc<BhlMetadata>,
     snapshot_id: String,
     report: Arc<MetadataReport>,
-    alternative_report: Arc<AlternativeReport>,
 }
 
 impl<A> Clone for BhlShardAccessor<A> {
@@ -54,7 +43,6 @@ impl<A> Clone for BhlShardAccessor<A> {
             metadata: self.metadata.clone(),
             snapshot_id: self.snapshot_id.clone(),
             report: self.report.clone(),
-            alternative_report: self.alternative_report.clone(),
         }
     }
 }
@@ -75,15 +63,6 @@ impl<A: ByteAccessor + 'static> BhlShardAccessor<A> {
             metadata,
             snapshot_id,
             report: Arc::new(error::require_page_metadata),
-            alternative_report: Arc::new(|version| {
-                eprintln!(
-                    "BHL quarantined alternative {}: selected {} (metadata SequenceOrder={})",
-                    version.alternative.locator(),
-                    version.canonical.locator(),
-                    version.sequence
-                );
-                Ok(())
-            }),
         })
     }
 
@@ -116,17 +95,6 @@ impl<A: ByteAccessor + 'static> BhlShardAccessor<A> {
         report: impl Fn(&BhlPageMetadata) -> Result<()> + Send + Sync + 'static,
     ) -> Self {
         self.report = Arc::new(report);
-        self
-    }
-
-    /// Record every excluded source version. Defaults to a stderr audit message.
-    /// Called on a blocking worker before OCR planning. Return an error to abort
-    /// if the audit cannot be persisted. Excluded bodies are never read or emitted.
-    pub fn with_alternative_report(
-        mut self,
-        report: impl Fn(&BhlPageAlternative) -> Result<()> + Send + Sync + 'static,
-    ) -> Self {
-        self.alternative_report = Arc::new(report);
         self
     }
 
@@ -200,12 +168,9 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlShardAccessor<A> {
             keys.extend(objects);
         }
         let metadata = self.metadata.clone();
-        let alternative_report = self.alternative_report.clone();
-        let keys = tokio::task::spawn_blocking(move || {
-            metadata.canonical_keys(keys, |version| alternative_report(version))
-        })
-        .await
-        .map_err(error::metadata_worker)??;
+        let keys = tokio::task::spawn_blocking(move || metadata.canonical_keys(keys))
+            .await
+            .map_err(error::metadata_worker)??;
         // One joined metadata worker for the complete canonical directory batch.
         // Only keys are collected here; OCR bodies remain independent partitions.
         let report = self.report.clone();
