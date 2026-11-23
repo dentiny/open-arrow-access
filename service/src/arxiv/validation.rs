@@ -2,10 +2,7 @@ use arrow_array::{Array, RecordBatch, cast::AsArray};
 use arrow_schema::DataType;
 use open_arrow_access_core::Result;
 
-use super::{
-    ArxivArchive, ArxivContentFormat, ArxivKind, ArxivMetadataIndex, ArxivSourcePackaging, error,
-    id,
-};
+use super::{ArxivArchive, ArxivContentFormat, ArxivKind, ArxivMetadataIndex, error, id};
 
 pub(super) fn validate_oai_metadata(batch: &RecordBatch) -> Result<()> {
     if batch.schema().as_ref() != crate::arxiv_metadata::schema().arrow_schema().as_ref() {
@@ -268,7 +265,7 @@ pub(super) fn content_article_id(name: &[u8], format: ArxivContentFormat) -> Res
     match format {
         ArxivContentFormat::Latex => {
             // Source shards also contain standalone PDF/PostScript submissions.
-            // Normalize their article identity before validating LaTeX content.
+            // Normalize their article identity before expanding source content.
             for suffix in [".gz", ".tar", ".tex", ".pdf", ".ps"] {
                 if let Some(value) = stem.strip_suffix(suffix) {
                     stem = value.to_owned();
@@ -284,36 +281,4 @@ pub(super) fn content_article_id(name: &[u8], format: ArxivContentFormat) -> Res
         ArxivContentFormat::Pdf => unreachable!(),
     }
     id::pdf_id(format!("{stem}.pdf").as_bytes())
-}
-
-pub(super) fn source_packaging(data: &[u8]) -> Result<ArxivSourcePackaging> {
-    if is_tar(data) {
-        return Ok(ArxivSourcePackaging::Tar);
-    }
-    let text = std::str::from_utf8(data)
-        .map_err(|_| error::decode("source is neither a TAR nor UTF-8 LaTeX"))?;
-    // Older bulk submissions include plain TeX (for example harvmac), not
-    // just LaTeX documents. Recognize their macro input/end markers too.
-    if ![
-        "\\documentclass",
-        "\\documentstyle",
-        "\\begin{document}",
-        "\\input",
-        "\\bye",
-    ]
-    .iter()
-    .any(|marker| text.contains(marker))
-    {
-        return Err(error::decode(
-            "single-file source is not recognized as LaTeX",
-        ));
-    }
-    Ok(ArxivSourcePackaging::Single {
-        name: b"main.tex".to_vec(),
-    })
-}
-
-pub(super) fn validate_latex_bytes(data: &[u8]) -> Result<()> {
-    std::str::from_utf8(data).map_err(|_| error::decode("LaTeX member is not UTF-8"))?;
-    Ok(())
 }

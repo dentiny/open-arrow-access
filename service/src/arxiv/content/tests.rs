@@ -92,13 +92,15 @@ async fn non_tex_document_signatures_report_missing_tex(#[case] data: &[u8]) {
 
 #[rstest::rstest]
 #[case::plain_text(b"plain text")]
-#[case::invalid_utf8(b"\xff")]
+#[case::auto_ignore(b"%auto-ignore")]
+#[case::non_utf8(b"\xff")]
+#[case::empty(b"")]
 #[tokio::test]
-async fn invalid_sources_report_decode_errors(#[case] data: &[u8]) {
-    assert_eq!(
-        read("2410/2410.00001.gz", data).await.unwrap_err().kind(),
-        open_arrow_access_core::ErrorKind::Decode
-    );
+async fn single_sources_preserve_bytes_without_content_validation(#[case] data: &[u8]) {
+    let batches = read("2410/2410.00001.gz", data).await.unwrap();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].num_rows(), 1);
+    assert_eq!(batches[0]["data"].as_binary::<i64>().value(0), data);
 }
 
 #[rstest::rstest]
