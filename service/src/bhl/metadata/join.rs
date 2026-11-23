@@ -1,4 +1,4 @@
-use super::{BhlPageMetadata, error};
+use super::{BhlPageMetadata, error, validation};
 use crate::bhl::{BhlPageIdentity, page_schema};
 use arrow_array::{Array, ArrayRef, ListArray, RecordBatch, StringArray, StructArray, UInt64Array};
 use open_arrow_access_core::{ObjectRef, Result};
@@ -130,12 +130,7 @@ pub(super) fn for_each(
             let object = keys
                 .get(index)
                 .ok_or_else(|| error::invalid("unknown request ID"))?;
-            if matches.value(row) != 1 {
-                return Err(crate::bhl::error::invalid_pages(format!(
-                    "expected exactly one OCR key matching authoritative SequenceOrder; found {} for {}",
-                    matches.value(row), object.locator()
-                )).with_object(Some(object)));
-            }
+            validation::validate_canonical_matches(matches.value(row), object)?;
             if selected.value(row) != indices.value(row) {
                 let canonical = &keys[selected.value(row) as usize];
                 eprintln!(
