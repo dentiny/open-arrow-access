@@ -195,9 +195,10 @@ async fn content_batches(
         validation::content_article_id(batch["entry_name"].as_binary::<i64>().value(0), format)?;
     let index = metadata.resolve(&article).await?;
     let batches = match format {
-        ArxivContentFormat::Pdf => super::pdf::read(batch)?,
-        ArxivContentFormat::Latex => super::latex::read(batch, options).await?,
-        ArxivContentFormat::Xml => super::xml::read(batch)?,
+        ArxivContentFormat::Latex => super::latex::read(batch, article, options).await?,
+        ArxivContentFormat::Pdf | ArxivContentFormat::Xml => {
+            futures::stream::iter([Ok(document_batch(&batch, format, &article)?)]).boxed()
+        }
     };
     Ok(batches
         .map(move |batch| index.attach_content(batch?))
@@ -207,12 +208,12 @@ async fn content_batches(
 pub(super) fn document_batch(
     batch: &RecordBatch,
     format: ArxivContentFormat,
+    article_id: &str,
 ) -> Result<RecordBatch> {
     let name = batch["entry_name"].as_binary::<i64>().value(0);
-    let id = validation::content_article_id(name, format)?;
     let mut builder = RecordBatchBuilder::new(content_schema(), None)?;
     builder.push(|row| {
-        row.append("article_id", id.as_str())?;
+        row.append("article_id", article_id)?;
         row.append("format", format.as_str())?;
         row.append("shard_uri", batch["shard_uri"].as_string::<i64>().value(0))?;
         row.append(

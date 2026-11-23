@@ -261,24 +261,23 @@ pub(super) fn content_article_id(name: &[u8], format: ArxivContentFormat) -> Res
     }
     let path =
         std::str::from_utf8(name).map_err(|_| error::decode("article filename is not UTF-8"))?;
-    let mut stem = path.to_owned();
+    let mut stem = path;
     match format {
         ArxivContentFormat::Latex => {
             // Source shards also contain standalone PDF/PostScript submissions.
             // Normalize their article identity before expanding source content.
             for suffix in [".gz", ".tar", ".tex", ".pdf", ".ps"] {
                 if let Some(value) = stem.strip_suffix(suffix) {
-                    stem = value.to_owned();
+                    stem = value;
                 }
             }
         }
         ArxivContentFormat::Xml => {
             stem = path
                 .strip_suffix(".xml")
-                .ok_or_else(|| error::decode("XML shard member must end in .xml"))?
-                .to_owned();
+                .ok_or_else(|| error::decode("XML shard member must end in .xml"))?;
         }
         ArxivContentFormat::Pdf => unreachable!(),
     }
-    id::pdf_id(format!("{stem}.pdf").as_bytes())
+    id::article_id(stem)
 }

@@ -19,8 +19,10 @@ fn raw_batch(name: &str, data: &[u8]) -> Result<RecordBatch> {
 }
 
 async fn read(name: &str, data: &[u8]) -> Result<Vec<RecordBatch>> {
+    let article_id = validation::content_article_id(name.as_bytes(), ArxivContentFormat::Latex)?;
     crate::arxiv::latex::read(
         raw_batch(name, data)?,
+        article_id,
         ReadOptions::default().with_batch_size(std::num::NonZeroUsize::MIN),
     )
     .await?
@@ -315,6 +317,7 @@ async fn metadata_normalizes_legacy_ids_repeats_tex_rows_and_retains_deletions()
     let deleted = document_batch(
         &raw_batch("2410/2410.99999.pdf", b"%PDF").unwrap(),
         ArxivContentFormat::Pdf,
+        "2410.99999",
     )
     .unwrap();
     let resolver = super::super::metadata_fetch::MetadataResolver::new(
