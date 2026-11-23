@@ -112,13 +112,12 @@ quick-xml = { workspace = true, optional = true }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["time", "fs", "io-util", "rt"] }
+tokio = { workspace = true, features = ["time"] }
 url.workspace = true
 
 arrow-schema.workspace = true
 
 [dev-dependencies]
-opendal = { workspace = true, features = ["services-s3"] }
 async-compression = { workspace = true, features = ["bzip2"] }
 more-asserts.workspace = true
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = [

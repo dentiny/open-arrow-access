@@ -2,18 +2,18 @@ use super::{ManagedConnection, error};
 use ::duckdb::Params;
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
-use open_arrow_access_core::{ByteAccessor, ByteReadRequest, Result};
+use open_arrow_access_core::Result;
 use std::path::Path;
-use tokio::io::AsyncWriteExt;
 
-/// Query a local, attached remote, or staged DuckDB file, including provider metadata databases.
+/// Query a local or remote DuckDB file, including provider metadata databases.
 ///
-/// The database is opened read-only. Local `open` and `query` are synchronous;
-/// use a blocking worker in async applications. Remote `open_from` is async.
+/// The database is opened read-only. Opening and querying are synchronous;
+/// use a blocking worker in async applications. Remote reads use cache_httpfs
+/// with a private temporary on-disk block cache.
 /// No provider-specific schema is required, and query results retain DuckDB's
 /// Arrow types and column names.
 pub struct DuckDbDatabase {
-    // Close DuckDB before deleting a staged source file.
+    // The managed connection retains scratch/cache storage for all clones.
     connection: ManagedConnection,
     location: String,
 }
@@ -31,7 +31,9 @@ impl DuckDbDatabase {
     /// Open a local path or DuckDB-supported remote URL read-only.
     /// Execute the optional trusted SQL file (e.g. LOAD httpfs; CREATE SECRET ...)
     /// before attaching the database. Secrets are temporary unless the script
-    /// explicitly requests persistence. Required extensions must be available.
+    /// explicitly requests persistence. For HTTP/S3 URLs, cache_httpfs must be
+    /// installed; its on-disk cache is configured before ATTACH. Only requested
+    /// blocks are fetched, with no full database download during opening.
     /// This is synchronous; use a blocking worker in async applications.
     pub fn connect(location: &str, secret_sql_file: Option<&Path>) -> Result<Self> {
         Ok(Self {
@@ -40,7 +42,7 @@ impl DuckDbDatabase {
         })
     }
 
-    /// Clone a connection while retaining staged files and database-scoped secrets.
+    /// Clone a connection while retaining cached blocks and database-scoped secrets.
     /// Temporary views and tables remain connection-local.
     pub fn try_clone(&self) -> Result<Self> {
         Ok(Self {
@@ -52,54 +54,6 @@ impl DuckDbDatabase {
     #[cfg(feature = "bhl")]
     pub(crate) fn into_connection(self) -> (ManagedConnection, String) {
         (self.connection, self.location)
-    }
-
-    /// Download a database through caller-configured storage, then open it read-only.
-    ///
-    /// Supports S3, HTTP and other locations understood by `storage`. The object
-    /// locator is interpreted by the accessor, just like other byte inputs.
-    /// Credentials, retries and I/O settings remain with storage and `request`.
-    /// The complete file is copied to private temporary disk before opening;
-    /// memory use is bounded by the storage reader's chunks. The copy is deleted
-    /// on failure or when this database is dropped. Publish a closed/checkpointed
-    /// database as one immutable object: separate WAL files are not downloaded.
-    pub async fn open_from<A: ByteAccessor + ?Sized>(
-        storage: &A,
-        request: impl Into<ByteReadRequest>,
-    ) -> Result<Self> {
-        let request = request.into();
-        let location = request.object.locator().to_owned();
-        let requested_length = request.content_length;
-        let mut reader = storage.open_sequential(request).await?;
-        let expected = requested_length.or(reader.metadata().content_length);
-        let directory = tempfile::tempdir().map_err(error::scratch)?;
-        let path = directory.path().join("source.duckdb");
-        let mut file = tokio::fs::File::create(&path)
-            .await
-            .map_err(error::scratch)?;
-        let mut downloaded = 0_u64;
-        while let Some(chunk) = reader.next().await? {
-            downloaded += chunk.len() as u64;
-            if expected.is_some_and(|length| downloaded > length) {
-                return Err(error::length_mismatch());
-            }
-            file.write_all(&chunk).await.map_err(error::scratch)?;
-        }
-        if expected.is_some_and(|length| downloaded != length) {
-            return Err(error::length_mismatch());
-        }
-        file.flush().await.map_err(error::scratch)?;
-        drop(file);
-        tokio::task::spawn_blocking(move || {
-            let mut connection = ManagedConnection::open(&path, true)?;
-            connection.retain_source(directory);
-            Ok(Self {
-                connection,
-                location,
-            })
-        })
-        .await
-        .map_err(error::task)?
     }
 
     /// Execute SQL with bound parameters and emit Arrow batches incrementally.

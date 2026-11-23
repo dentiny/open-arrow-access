@@ -139,140 +139,6 @@ fn assert_row_count(db: &DuckDbDatabase) {
     .unwrap();
 }
 
-#[tokio::test]
-async fn stages_chunked_storage_and_keeps_file_until_database_drops() {
-    use open_arrow_access_core::ByteReadOptions;
-    use open_arrow_access_test_support::MemoryAccessor;
-    use std::num::NonZeroUsize;
-
-    let (directory, path) = database();
-    let storage = MemoryAccessor::new(&std::fs::read(path).unwrap(), 4096).without_content_length();
-    let options = ByteReadOptions {
-        io_concurrency: NonZeroUsize::new(2).unwrap(),
-        io_chunk_size: NonZeroUsize::new(1024),
-    };
-    let db = DuckDbDatabase::open_from(
-        &storage,
-        ByteReadRequest::new("s3://bucket/metadata.duckdb").with_options(options),
-    )
-    .await
-    .unwrap();
-    let staged = db
-        .connection
-        .source_directory
-        .as_ref()
-        .unwrap()
-        .path()
-        .to_path_buf();
-    assert!(staged.join("source.duckdb").exists());
-    let requests = storage.observations.requests.lock().unwrap();
-    assert_eq!(requests[0].object.locator(), "s3://bucket/metadata.duckdb");
-    assert_eq!(requests[0].options, options);
-    drop(requests);
-    drop(storage);
-    drop(directory);
-    let clone = db.try_clone().unwrap();
-    drop(db);
-    assert_row_count(&clone);
-    assert!(staged.exists());
-    drop(clone);
-    assert!(!staged.exists());
-}
-
-#[tokio::test]
-async fn rejects_failed_truncated_and_invalid_remote_downloads() {
-    use open_arrow_access_test_support::{MemoryAccessor, expect_err_kind};
-    let (_directory, path) = database();
-    let bytes = std::fs::read(path).unwrap();
-    let storage = MemoryAccessor::new(&bytes, 4096).with_failure(4096, ErrorKind::PermissionDenied);
-    expect_err_kind(
-        DuckDbDatabase::open_from(&storage, "key").await,
-        ErrorKind::PermissionDenied,
-    );
-    let storage = MemoryAccessor::new(&bytes, 4096).with_open_failure(ErrorKind::NotFound);
-    expect_err_kind(
-        DuckDbDatabase::open_from(&storage, "key").await,
-        ErrorKind::NotFound,
-    );
-    let storage = MemoryAccessor::new(&bytes, 4096).without_content_length();
-    for length in [bytes.len() as u64 - 1, bytes.len() as u64 + 1] {
-        let error = expect_err_kind(
-            DuckDbDatabase::open_from(
-                &storage,
-                ByteReadRequest::new("key").with_content_length(length),
-            )
-            .await,
-            ErrorKind::Io,
-        );
-        assert_eq!(error.operation(), "duckdb_download");
-    }
-    let storage = MemoryAccessor::new(b"not a database", 4);
-    expect_err_kind(
-        DuckDbDatabase::open_from(&storage, "key").await,
-        ErrorKind::Io,
-    );
-}
-
-#[tokio::test]
-async fn queries_http_database_using_configured_storage() {
-    use open_arrow_access_storage::OpenDalAccessor;
-    use open_arrow_access_test_support::http::HttpFixture;
-    let (_directory, path) = database();
-    let fixture = HttpFixture::new();
-    fixture.file("/data/metadata.duckdb", std::fs::read(path).unwrap());
-    let operator = opendal::Operator::new(
-        opendal_service_http::Http::default()
-            .endpoint(fixture.endpoint())
-            .root("/data"),
-    )
-    .unwrap()
-    .with_context(fixture.context());
-    let storage = OpenDalAccessor::new(operator);
-    let db = DuckDbDatabase::open_from(&storage, "metadata.duckdb")
-        .await
-        .unwrap();
-    assert_row_count(&db);
-    assert!(
-        fixture
-            .requests()
-            .iter()
-            .any(|request| request.method == http::Method::GET)
-    );
-}
-
-#[tokio::test]
-async fn queries_s3_database_and_uses_caller_credentials() {
-    use open_arrow_access_storage::OpenDalAccessor;
-    use open_arrow_access_test_support::http::HttpFixture;
-    let (_directory, path) = database();
-    let fixture = HttpFixture::new();
-    fixture.file("/bucket/data/metadata.duckdb", std::fs::read(path).unwrap());
-    let operator = opendal::Operator::new(
-        opendal::services::S3::default()
-            .endpoint(fixture.endpoint())
-            .bucket("bucket")
-            .region("us-east-1")
-            .root("/data")
-            .access_key_id("fixture-access-key")
-            .secret_access_key("fixture-secret-key")
-            .disable_config_load(),
-    )
-    .unwrap()
-    .with_context(fixture.context());
-    let storage = OpenDalAccessor::new(operator);
-    let db = DuckDbDatabase::open_from(&storage, "metadata.duckdb")
-        .await
-        .unwrap();
-    assert_row_count(&db);
-    let requests = fixture.requests();
-    assert!(requests.iter().any(|request| {
-        request
-            .headers
-            .get("authorization")
-            .is_some_and(|value| value.to_str().unwrap().contains("fixture-access-key"))
-    }));
-}
-
 #[test]
 fn initializes_sql_before_attach_and_keeps_database_read_only() {
     let (directory, path) = database();
@@ -327,7 +193,7 @@ fn creates_real_secrets_visible_to_cloned_connections() {
 }
 
 #[test]
-#[ignore = "requires an authenticated range-capable HTTP fixture and installed httpfs"]
+#[ignore = "requires an authenticated range-capable HTTP fixture and installed cache_httpfs"]
 fn opens_authenticated_remote_database_after_creating_secret() {
     let (directory, path) = database();
     let served = std::env::var("DUCKDB_TEST_HTTP_DIRECTORY").unwrap();
@@ -340,6 +206,23 @@ fn opens_authenticated_remote_database_after_creating_secret() {
     )
     .unwrap();
     let db = DuckDbDatabase::connect(&url, Some(&script)).unwrap();
+    let cache: String = db
+        .connection
+        .query_row(
+            "SELECT current_setting('cache_httpfs_cache_directory')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let cache = std::path::PathBuf::from(cache);
+    let cache_type: String = db
+        .connection
+        .query_row("SELECT current_setting('cache_httpfs_type')", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(cache_type, "on_disk");
+    assert!(cache.is_dir());
     db.query(
         "SELECT CAST(sum(id) AS BIGINT) FROM metadata",
         [],
@@ -362,6 +245,10 @@ fn opens_authenticated_remote_database_after_creating_secret() {
     drop(db);
     assert_row_count(&clone);
     assert!(clone.query("DELETE FROM metadata", [], |_| Ok(())).is_err());
+    assert!(cache.is_dir());
+    assert!(std::fs::read_dir(&cache).unwrap().next().is_some());
+    drop(clone);
+    assert!(!cache.exists());
 }
 
 #[test]
@@ -401,7 +288,7 @@ fn clones_preserve_selected_schema_and_full_search_path() {
 }
 
 #[test]
-#[ignore = "requires a local S3 HTTP fixture and installed httpfs"]
+#[ignore = "requires a local S3 HTTP fixture and installed cache_httpfs"]
 fn opens_s3_database_with_secret_sql_and_reads_actual_rows() {
     let (directory, path) = database();
     let served = std::env::var("DUCKDB_TEST_HTTP_DIRECTORY").unwrap();

@@ -88,44 +88,10 @@ returned through the shared error type. Opening and querying are synchronous;
 run them in a blocking worker when using an async runtime. No provider-specific
 schema validation is performed.
 
-For HTTP, S3 or another storage backend, use `DuckDbDatabase::open_from` with a
-caller-configured `ByteAccessor`. For example, download an HTTP database:
-
-```rust,no_run
-use open_arrow_access::{ByteReadRequest, service::duckdb::DuckDbDatabase};
-use open_arrow_access::storage::{OpenDalAccessor, opendal};
-
-async fn http_database() -> Result<DuckDbDatabase, Box<dyn std::error::Error>> {
-    // https://example.com/catalog/metadata.duckdb
-    let operator = opendal::Operator::new(
-        opendal::services::Http::default().endpoint("https://example.com"),
-    )?;
-    let storage = OpenDalAccessor::new(operator);
-    Ok(DuckDbDatabase::open_from(
-        &storage, ByteReadRequest::new("catalog/metadata.duckdb"),
-    ).await?)
-}
-```
-
-For `s3://my-bucket/catalog/metadata.duckdb`, enable OpenDAL's `services-s3`
-feature and replace the operator builder with:
-
-```rust,ignore
-opendal::services::S3::default().bucket("my-bucket").region("us-east-1")
-```
-
-The request locator is relative to the configured backend/root, as with other
-byte inputs; full URL parsing and credentials belong to the caller. S3 credentials,
-HTTP tokens, custom endpoints, retries and request I/O options use the existing
-storage configuration. No DuckDB network extension is required.
-
-`open_from` downloads the entire database to private temporary disk before
-opening it read-only, using bounded storage chunks rather than buffering the
-whole database in memory. Subsequent queries reuse that local copy; this is not
-remote range-based query execution. The copy is deleted when the database is
-dropped or an open fails. Publish an immutable, closed/checkpointed database file;
-separate WAL files are not fetched. Opening is async; `query` remains synchronous
-and should run on a blocking worker in async applications.
+For HTTP and S3 URLs, use `DuckDbDatabase::connect(location, secret_sql_file)`.
+DuckDB attaches the database read-only and `cache_httpfs` fetches requested blocks
+into a private temporary on-disk cache. Opening does not first download the entire
+database. See [remote access and secrets](#duckdb-native-remote-access-and-secrets).
 
 ## Reusable file sources
 
@@ -411,8 +377,9 @@ through `CrawlOptions`; caller-bound storage retains HTTP, retry and I/O policy.
 
 `DuckDbDatabase::connect(location, secret_sql_file)` accepts a local path or a
 DuckDB-supported URL. It creates an in-memory control connection, executes the
-optional trusted SQL file, then attaches the source read-only and selects it as
-the default database. Run this synchronous API on a blocking worker in async apps.
+optional trusted SQL file, configures cache_httpfs for remote URLs, then attaches
+the source read-only and selects it as the default database. Run this synchronous
+API on a blocking worker in async apps.
 
 ```rust,ignore
 use open_arrow_access::service::duckdb::DuckDbDatabase;
@@ -441,12 +408,16 @@ CREATE SECRET metadata_storage (
 
 For an authenticated HTTP endpoint, use DuckDB's `TYPE http` secret with
 `BEARER_TOKEN` or `EXTRA_HTTP_HEADERS` instead. Install compatible extensions
-before deployment, or include installation in the trusted setup script. Script
-errors are redacted to avoid including credentials in error messages. Secrets
+before deployment (`INSTALL cache_httpfs FROM community` for HTTP/S3), or include
+installation in the trusted setup script. Script errors are redacted to avoid including credentials in error messages. Secrets
 remain temporary unless the script explicitly uses `CREATE PERSISTENT SECRET`.
-Cloned connections share secrets and retain the selected source database; staged
-files stay alive until the final clone closes. The attached source is read-only;
-the control database and connection-local temporary objects remain writable.
-`open_from` continues to use the supplied storage accessor's credentials rather
-than DuckDB secrets. BHL consumes any of these shared loaders through
+Cloned connections share secrets, the selected search path and cached remote
+blocks. Shared temporary storage contains separate `http-cache/` and `spill/`
+subdirectories; the final connection release removes both. The shared loader
+sets `cache_httpfs_type='on_disk'` and `cache_httpfs_cache_directory` before
+ATTACH. It clears the advanced multi-directory override so cached data stays
+inside the owned temporary directory. There is no full-download fallback.
+A query that scans most of a database can still fetch most blocks on demand.
+The attached source is read-only; the control database and connection-local
+temporary objects remain writable. BHL consumes the same loader through
 `BhlMetadata::from_tables_database(database, snapshot_id)`.

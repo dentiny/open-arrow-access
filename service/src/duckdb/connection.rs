@@ -8,7 +8,6 @@ pub(crate) struct ManagedConnection {
     // Fields drop in declaration order: close DuckDB before removing its files.
     connection: Connection,
     directory: Arc<tempfile::TempDir>,
-    pub(super) source_directory: Option<Arc<tempfile::TempDir>>,
 }
 
 impl ManagedConnection {
@@ -31,7 +30,6 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory,
-            source_directory: None,
         })
     }
 
@@ -46,7 +44,6 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory,
-            source_directory: None,
         })
     }
 
@@ -61,6 +58,11 @@ impl ManagedConnection {
                 .execute_batch(&sql)
                 .map_err(|_| error::secret_setup())?;
         }
+        if url::Url::parse(location)
+            .is_ok_and(|url| matches!(url.scheme(), "http" | "https" | "s3" | "gs" | "gcs" | "r2"))
+        {
+            connection.configure_remote_cache()?;
+        }
         let location = location.replace('\'', "''");
         connection
             .execute_batch(&format!(
@@ -70,8 +72,20 @@ impl ManagedConnection {
         Ok(connection)
     }
 
-    pub(crate) fn retain_source(&mut self, directory: tempfile::TempDir) {
-        self.source_directory = Some(Arc::new(directory));
+    /// The same scratch owner keeps spill files and cached remote blocks alive
+    /// until the final cloned connection closes. No full database copy is made.
+    fn configure_remote_cache(&self) -> Result<()> {
+        let cache = self.directory.path().join("http-cache");
+        std::fs::create_dir_all(&cache).map_err(error::scratch)?;
+        self.connection
+            .execute_batch(&format!(
+                "LOAD cache_httpfs;
+                 SET cache_httpfs_type = 'on_disk';
+                 SET cache_httpfs_cache_directories_config = '';
+                 SET cache_httpfs_cache_directory = '{}';",
+                cache.to_string_lossy().replace('\'', "''")
+            ))
+            .map_err(error::cache_setup)
     }
 
     /// Describe a caller-owned table in the main schema without copying it.
@@ -111,7 +125,6 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory,
-            source_directory: None,
         })
     }
 
@@ -137,7 +150,6 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory: self.directory.clone(),
-            source_directory: self.source_directory.clone(),
         })
     }
 

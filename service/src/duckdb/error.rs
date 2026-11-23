@@ -8,16 +8,13 @@ pub(super) fn scratch(source: std::io::Error) -> Error {
     Error::new(ErrorKind::Io, "duckdb_scratch", source.to_string()).with_source(source)
 }
 
-pub(super) fn length_mismatch() -> Error {
+pub(super) fn cache_setup(source: ::duckdb::Error) -> Error {
     Error::new(
         ErrorKind::Io,
-        "duckdb_download",
-        "database file length differs from expected length",
+        "duckdb_cache",
+        "could not load cache_httpfs or configure its temporary on-disk cache",
     )
-}
-
-pub(super) fn task(source: tokio::task::JoinError) -> Error {
-    Error::new(ErrorKind::Internal, "duckdb_open", source.to_string()).with_source(source)
+    .with_source(source)
 }
 
 pub(super) fn secret_setup() -> Error {

@@ -197,8 +197,7 @@ entries identify the database path and table, with row counts; unavailable TSV
 lexical checksums are omitted. These identities are distinct from fingerprints
 produced by `load`/`create`.
 
-BHL reuses the shared DuckDB loader for local paths, remote URLs and staged
-storage objects. For example, open an authenticated remote database:
+BHL reuses the shared DuckDB loader for local paths and remote URLs. For example, open an authenticated remote database:
 
 ```rust,ignore
 use open_arrow_access_service::duckdb::DuckDbDatabase;
@@ -212,10 +211,11 @@ let metadata = BhlMetadata::from_tables_database(database, "published-snapshot-i
 ```
 
 The shared connection executes the SQL file before attaching the database
-read-only. It owns credentials, connection cloning and staged-file lifetime.
-`BhlMetadata` only adds BHL schema/key validation and per-query helpers. To use
-caller-configured storage instead, pass a database returned by
-`DuckDbDatabase::open_from(&storage, request).await` to the same BHL constructor.
+read-only. Remote reads use cache_httpfs with a temporary on-disk block cache,
+without downloading a complete database before opening. The shared loader owns
+credentials, connection cloning and cache lifetime. `BhlMetadata` only adds BHL
+schema/key validation and per-query helpers. Install a compatible cache_httpfs
+extension before opening remote URLs.
 `BhlShardAccessor::from_tables_database(storage, path, snapshot_id)` remains a
 local convenience wrapper. The existing `open`/`from_database` APIs continue to
 validate importer-managed databases.
