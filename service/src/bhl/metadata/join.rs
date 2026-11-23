@@ -98,7 +98,7 @@ pub(super) fn for_each(
         .prepare(include_str!("join.sql"))
         .map_err(error::duckdb)?;
     let _ = statement.stream_arrow([]).map_err(error::duckdb)?;
-    let mut emitted = 0;
+    let mut joined_rows = 0;
     while let Some(batch) = statement.step().map_err(error::duckdb)? {
         let batch = RecordBatch::from(&batch);
         let indices = batch
@@ -106,6 +106,16 @@ pub(super) fn for_each(
             .as_any()
             .downcast_ref::<UInt64Array>()
             .ok_or_else(|| error::invalid("expected request IDs"))?;
+        let matches = batch
+            .column(CANONICAL_MATCHES_COLUMN)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .ok_or_else(|| error::invalid("expected canonical match counts"))?;
+        let selected = batch
+            .column(CANONICAL_ID_COLUMN)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .ok_or_else(|| error::invalid("expected canonical request IDs"))?;
         // Match the fixed nested LargeUtf8/nullability contract.
         let metadata =
             arrow_cast::cast(batch.column(1), field.data_type()).map_err(error::arrow)?;
@@ -113,23 +123,13 @@ pub(super) fn for_each(
             .as_any()
             .downcast_ref::<StructArray>()
             .ok_or_else(|| error::invalid("expected metadata struct"))?;
+        joined_rows += batch.num_rows();
         for row in 0..batch.num_rows() {
             let index = usize::try_from(indices.value(row))
                 .map_err(|_| error::invalid("request ID overflow"))?;
             let object = keys
                 .get(index)
                 .ok_or_else(|| error::invalid("unknown request ID"))?;
-            emitted += 1;
-            let matches = batch
-                .column(CANONICAL_MATCHES_COLUMN)
-                .as_any()
-                .downcast_ref::<UInt64Array>()
-                .ok_or_else(|| error::invalid("expected canonical match counts"))?;
-            let selected = batch
-                .column(CANONICAL_ID_COLUMN)
-                .as_any()
-                .downcast_ref::<UInt64Array>()
-                .ok_or_else(|| error::invalid("expected canonical request IDs"))?;
             if matches.value(row) != 1 {
                 return Err(crate::bhl::error::invalid_pages(format!(
                     "expected exactly one OCR key matching authoritative SequenceOrder; found {} for {}",
@@ -154,7 +154,7 @@ pub(super) fn for_each(
             })?;
         }
     }
-    if emitted != keys.len() {
+    if joined_rows != keys.len() {
         return Err(error::invalid("unexpected joined page count"));
     }
     Ok(())

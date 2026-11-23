@@ -100,19 +100,6 @@ WITH parents AS (
               AND r.__key = b.entity_id AND bhl_id(r.PageID) = b.page_id
               AND bhl_id(r.ItemID) IS NOT NULL
               AND bhl_id(r.ItemID) IS DISTINCT FROM b.parent_id
-            UNION ALL
-            SELECT 3, r.rowid,
-                format('SequenceOrder={}, filename sequence={}', bhl_id(r.SequenceOrder), b.sequence)
-            FROM bhl_page r WHERE r.__key = b.page_id
-              AND b.entity_type = 'item' AND bhl_id(r.SequenceOrder) IS NOT NULL
-              AND bhl_id(r.SequenceOrder) <> b.sequence
-            UNION ALL
-            SELECT 3, r.rowid,
-                format('SequenceOrder={}, filename sequence={}', bhl_id(r.SequenceOrder), b.sequence)
-            FROM bhl_partpage r WHERE b.entity_type = 'part'
-              AND r.__key = b.entity_id AND bhl_id(r.PageID) = b.page_id
-              AND bhl_id(r.SequenceOrder) IS NOT NULL
-              AND bhl_id(r.SequenceOrder) <> b.sequence
         ) messages) AS conflicts
     FROM base b
 ), sequences AS (
