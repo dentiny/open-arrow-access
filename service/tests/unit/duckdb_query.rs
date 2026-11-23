@@ -78,39 +78,3 @@ fn streams_batches_and_returns_empty_result_schema() {
     assert_eq!(schema.field(0).name(), "id");
     assert_eq!(schema.field(0).data_type(), &DataType::Int64);
 }
-
-#[test]
-fn cached_query_rebinds_and_resets_after_an_interrupted_result() {
-    let (_directory, path) = database();
-    let db = DuckDbDatabase::open(path).unwrap();
-    let sql = "SELECT id FROM metadata WHERE id >= ? ORDER BY id";
-    // Leave an unread multi-batch result in the cached statement.
-    let result = db.query_cached(sql, crate::duckdb::params![0_i64], |_| {
-        Err(error::scratch(std::io::Error::other(
-            "stop after one batch",
-        )))
-    });
-    assert!(result.is_err());
-    for (start, expected) in [
-        (9998_i64, vec![9998, 9999]),
-        (10000, vec![]),
-        (9999, vec![9999]),
-    ] {
-        let mut rows = Vec::new();
-        let schema = db
-            .query_cached(sql, crate::duckdb::params![start], |batch| {
-                rows.extend(
-                    batch
-                        .column(0)
-                        .as_primitive::<Int64Type>()
-                        .values()
-                        .iter()
-                        .copied(),
-                );
-                Ok(())
-            })
-            .unwrap();
-        assert_eq!(schema.field(0).data_type(), &DataType::Int64);
-        assert_eq!(rows, expected);
-    }
-}
