@@ -58,11 +58,7 @@ impl ManagedConnection {
                 .execute_batch(&sql)
                 .map_err(|_| error::secret_setup())?;
         }
-        if url::Url::parse(location)
-            .is_ok_and(|url| matches!(url.scheme(), "http" | "https" | "s3" | "gs" | "gcs" | "r2"))
-        {
-            connection.configure_remote_cache()?;
-        }
+        connection.configure_remote_cache()?;
         let location = location.replace('\'', "''");
         connection
             .execute_batch(&format!(

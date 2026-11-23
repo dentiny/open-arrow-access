@@ -377,7 +377,7 @@ through `CrawlOptions`; caller-bound storage retains HTTP, retry and I/O policy.
 
 `DuckDbDatabase::connect(location, secret_sql_file)` accepts a local path or a
 DuckDB-supported URL. It creates an in-memory control connection, executes the
-optional trusted SQL file, configures cache_httpfs for remote URLs, then attaches
+optional trusted SQL file, always configures cache_httpfs, then attaches
 the source read-only and selects it as the default database. Run this synchronous
 API on a blocking worker in async apps.
 
@@ -408,7 +408,8 @@ CREATE SECRET metadata_storage (
 
 For an authenticated HTTP endpoint, use DuckDB's `TYPE http` secret with
 `BEARER_TOKEN` or `EXTRA_HTTP_HEADERS` instead. Install compatible extensions
-before deployment (`INSTALL cache_httpfs FROM community` for HTTP/S3), or include
+before using `connect` (`INSTALL cache_httpfs FROM community`, including for local
+paths), or include
 installation in the trusted setup script. Script errors are redacted to avoid including credentials in error messages. Secrets
 remain temporary unless the script explicitly uses `CREATE PERSISTENT SECRET`.
 Cloned connections share secrets, the selected search path and cached remote

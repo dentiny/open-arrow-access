@@ -31,8 +31,9 @@ impl DuckDbDatabase {
     /// Open a local path or DuckDB-supported remote URL read-only.
     /// Execute the optional trusted SQL file (e.g. LOAD httpfs; CREATE SECRET ...)
     /// before attaching the database. Secrets are temporary unless the script
-    /// explicitly requests persistence. For HTTP/S3 URLs, cache_httpfs must be
-    /// installed; its on-disk cache is configured before ATTACH. Only requested
+    /// explicitly requests persistence. cache_httpfs must be installed; its
+    /// on-disk cache is always configured before ATTACH, including local paths.
+    /// Only requested
     /// blocks are fetched, with no full database download during opening.
     /// This is synchronous; use a blocking worker in async applications.
     pub fn connect(location: &str, secret_sql_file: Option<&Path>) -> Result<Self> {

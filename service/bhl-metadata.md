@@ -215,7 +215,7 @@ read-only. Remote reads use cache_httpfs with a temporary on-disk block cache,
 without downloading a complete database before opening. The shared loader owns
 credentials, connection cloning and cache lifetime. `BhlMetadata` only adds BHL
 schema/key validation and per-query helpers. Install a compatible cache_httpfs
-extension before opening remote URLs.
+extension before using `DuckDbDatabase::connect`, including for local paths.
 `BhlShardAccessor::from_tables_database(storage, path, snapshot_id)` remains a
 local convenience wrapper. The existing `open`/`from_database` APIs continue to
 validate importer-managed databases.
