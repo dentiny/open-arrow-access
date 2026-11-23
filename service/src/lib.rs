@@ -5,9 +5,9 @@
 //! explicit; metadata links are never followed automatically.
 
 // Individual providers use different parts of the shared DuckDB support.
-#[cfg(any(feature = "bhl", feature = "courtlistener"))]
+#[cfg(any(feature = "bhl", feature = "courtlistener", feature = "duckdb"))]
 #[allow(dead_code)]
-mod duckdb;
+pub mod duckdb;
 
 mod arrow;
 mod discovery;

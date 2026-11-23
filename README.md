@@ -55,6 +55,77 @@ cargo run --locked --example read_parquet --features format-parquet -- testdata/
 Readers own their resources. Drop a reader to stop consuming it; after cancelling
 a pending read, drop that reader too.
 
+## Query a local or remote DuckDB metadata file
+
+Enable `service-duckdb` to query an existing local DuckDB database, including a
+persisted provider metadata database. Pass its file path and parameterized SQL:
+
+```rust,no_run
+use open_arrow_access::service::duckdb::{DuckDbDatabase, params};
+
+fn main() -> open_arrow_access::Result<()> {
+    let database = DuckDbDatabase::open("/data/metadata.duckdb")?;
+    let schema = database.query(
+        "SELECT * FROM main.page WHERE PageID = ?",
+        params![123_i64],
+        |batch| {
+            println!("{} rows", batch.num_rows());
+            Ok(())
+        },
+    )?;
+    println!("{schema:?}");
+    Ok(())
+}
+```
+
+The source database is opened read-only; missing files fail without creating a
+database. SQL determines the output schema, filtering, projection and ordering.
+Use `[]` for queries without parameters, such as `SHOW TABLES`. The callback
+receives batches incrementally and can return an error to stop reading; the
+returned schema is available even for an empty result. SQL and fetch errors are
+returned through the shared error type. Opening and querying are synchronous;
+run them in a blocking worker when using an async runtime. No provider-specific
+schema validation is performed.
+
+For HTTP, S3 or another storage backend, use `DuckDbDatabase::open_from` with a
+caller-configured `ByteAccessor`. For example, download an HTTP database:
+
+```rust,no_run
+use open_arrow_access::{ByteReadRequest, service::duckdb::DuckDbDatabase};
+use open_arrow_access::storage::{OpenDalAccessor, opendal};
+
+async fn http_database() -> Result<DuckDbDatabase, Box<dyn std::error::Error>> {
+    // https://example.com/catalog/metadata.duckdb
+    let operator = opendal::Operator::new(
+        opendal::services::Http::default().endpoint("https://example.com"),
+    )?;
+    let storage = OpenDalAccessor::new(operator);
+    Ok(DuckDbDatabase::open_from(
+        &storage, ByteReadRequest::new("catalog/metadata.duckdb"),
+    ).await?)
+}
+```
+
+For `s3://my-bucket/catalog/metadata.duckdb`, enable OpenDAL's `services-s3`
+feature and replace the operator builder with:
+
+```rust,ignore
+opendal::services::S3::default().bucket("my-bucket").region("us-east-1")
+```
+
+The request locator is relative to the configured backend/root, as with other
+byte inputs; full URL parsing and credentials belong to the caller. S3 credentials,
+HTTP tokens, custom endpoints, retries and request I/O options use the existing
+storage configuration. No DuckDB network extension is required.
+
+`open_from` downloads the entire database to private temporary disk before
+opening it read-only, using bounded storage chunks rather than buffering the
+whole database in memory. Subsequent queries reuse that local copy; this is not
+remote range-based query execution. The copy is deleted when the database is
+dropped or an open fails. Publish an immutable, closed/checkpointed database file;
+separate WAL files are not fetched. Opening is async; `query` remains synchronous
+and should run on a blocking worker in async applications.
+
 ## Reusable file sources
 
 For an explicitly selected provider attachment, use the typed
@@ -334,3 +405,47 @@ Use [`crawl::CrawlAccessor`](docs/crawl.md) to combine service/dataset discovery
 native scan planning, bounded parallel reads, unordered emission, schema
 conversion and optional coalescing/read-ahead. Supply existing layer configurations
 through `CrawlOptions`; caller-bound storage retains HTTP, retry and I/O policy.
+
+### DuckDB-native remote access and secrets
+
+`DuckDbDatabase::connect(location, secret_sql_file)` accepts a local path or a
+DuckDB-supported URL. It creates an in-memory control connection, executes the
+optional trusted SQL file, then attaches the source read-only and selects it as
+the default database. Run this synchronous API on a blocking worker in async apps.
+
+```rust,ignore
+use open_arrow_access::service::duckdb::DuckDbDatabase;
+use std::path::Path;
+
+let database = DuckDbDatabase::connect(
+    "s3://bucket/metadata.duckdb",
+    Some(Path::new("/run/secrets/duckdb.sql")),
+)?;
+database.query("SELECT * FROM metadata LIMIT 10", [], |batch| {
+    println!("{batch:?}");
+    Ok(())
+})?;
+```
+
+The SQL file can load required extensions and create scoped credentials:
+
+```sql
+LOAD httpfs;
+CREATE SECRET metadata_storage (
+    TYPE s3,
+    PROVIDER credential_chain,
+    SCOPE 's3://bucket/'
+);
+```
+
+For an authenticated HTTP endpoint, use DuckDB's `TYPE http` secret with
+`BEARER_TOKEN` or `EXTRA_HTTP_HEADERS` instead. Install compatible extensions
+before deployment, or include installation in the trusted setup script. Script
+errors are redacted to avoid including credentials in error messages. Secrets
+remain temporary unless the script explicitly uses `CREATE PERSISTENT SECRET`.
+Cloned connections share secrets and retain the selected source database; staged
+files stay alive until the final clone closes. The attached source is read-only;
+the control database and connection-local temporary objects remain writable.
+`open_from` continues to use the supplied storage accessor's credentials rather
+than DuckDB secrets. BHL consumes any of these shared loaders through
+`BhlMetadata::from_tables_database(database, snapshot_id)`.

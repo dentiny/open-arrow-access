@@ -8,6 +8,7 @@ pub(crate) struct ManagedConnection {
     // Fields drop in declaration order: close DuckDB before removing its files.
     connection: Connection,
     directory: Arc<tempfile::TempDir>,
+    pub(super) source_directory: Option<Arc<tempfile::TempDir>>,
 }
 
 impl ManagedConnection {
@@ -30,6 +31,7 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory,
+            source_directory: None,
         })
     }
 
@@ -44,7 +46,34 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory,
+            source_directory: None,
         })
+    }
+
+    /// Initialize secrets before attaching an existing local or remote database.
+    /// The script is trusted caller SQL, executed once per database instance.
+    #[cfg(feature = "duckdb")]
+    pub(crate) fn connect(location: &str, secret_sql_file: Option<&Path>) -> Result<Self> {
+        let connection = Self::in_memory()?;
+        if let Some(path) = secret_sql_file {
+            let sql = std::fs::read_to_string(path).map_err(|_| error::secret_setup())?;
+            // DuckDB errors may echo SQL containing credentials; do not retain them.
+            connection
+                .execute_batch(&sql)
+                .map_err(|_| error::secret_setup())?;
+        }
+        let location = location.replace('\'', "''");
+        connection
+            .execute_batch(&format!(
+                "ATTACH '{location}' AS source_database (READ_ONLY); USE source_database;"
+            ))
+            .map_err(|_| error::attach())?;
+        Ok(connection)
+    }
+
+    #[cfg(feature = "duckdb")]
+    pub(crate) fn retain_source(&mut self, directory: tempfile::TempDir) {
+        self.source_directory = Some(Arc::new(directory));
     }
 
     /// Describe a caller-owned table in the main schema without copying it.
@@ -84,13 +113,24 @@ impl ManagedConnection {
         Ok(Self {
             connection,
             directory,
+            source_directory: None,
         })
     }
 
     pub(crate) fn try_clone(&self) -> Result<Self> {
+        let database: String = self
+            .connection
+            .query_row("SELECT current_database()", [], |row| row.get(0))
+            .map_err(error::database)?;
+        let connection = self.connection.try_clone().map_err(error::database)?;
+        // DuckDB clones reset the current catalog to the primary in-memory DB.
+        connection
+            .execute_batch(&format!("USE \"{}\"", database.replace('"', "\"\"")))
+            .map_err(error::database)?;
         Ok(Self {
-            connection: self.connection.try_clone().map_err(error::database)?,
+            connection,
             directory: self.directory.clone(),
+            source_directory: self.source_directory.clone(),
         })
     }
 

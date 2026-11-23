@@ -568,3 +568,18 @@ async fn page_relations_preserve_types_order_and_one_output_per_ocr_request() {
         .unwrap();
     invalid_selection(&metadata, &[ITEM]);
 }
+
+#[tokio::test]
+async fn plain_tables_reuse_shared_connection_and_setup_sql() {
+    let (directory, path, expected) = plain_database().await;
+    let script = directory.path().join("secrets.sql");
+    std::fs::write(&script, "CREATE MACRO shared_setup() AS 42;").unwrap();
+    let database =
+        crate::duckdb::DuckDbDatabase::connect(path.to_str().unwrap(), Some(&script)).unwrap();
+    let metadata = BhlMetadata::from_tables_database(database, "shared-database-v1").unwrap();
+    let actual = read(&metadata, &[ITEM, PART]);
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.iter().zip(&expected) {
+        assert_eq!(actual.metadata, expected.metadata);
+    }
+}

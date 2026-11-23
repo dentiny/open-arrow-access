@@ -16,6 +16,7 @@ arxiv = [
     "open-arrow-access-decompression/gzip",
 ]
 bhl = [
+    "duckdb",
     "dep:tempfile",
     "tokio/sync",
     "opendal/services-s3",
@@ -44,6 +45,7 @@ courtlistener = [
 ]
 dataverse = []
 default = []
+duckdb = ["dep:duckdb", "dep:tempfile", "dep:arrow-array", "dep:arrow-schema", "tokio/fs", "tokio/io-util", "tokio/rt"]
 doab = ["oai"]
 federal-register = []
 figshare = []
@@ -132,6 +134,7 @@ url.workspace = true
 arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
+opendal = { workspace = true, features = ["services-s3"] }
 async-compression = { workspace = true, features = ["bzip2"] }
 more-asserts.workspace = true
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = [

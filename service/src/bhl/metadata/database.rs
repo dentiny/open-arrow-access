@@ -1,6 +1,6 @@
 //! Persistent DuckDB storage for reusable BHL metadata.
 use super::{BhlMetadata, BhlMetadataInfo, SourceInfo, error, source, tables, validation};
-use crate::duckdb::ManagedConnection;
+use crate::duckdb::{DuckDbDatabase, ManagedConnection};
 use ::duckdb::{Connection, params};
 use open_arrow_access_core::{ByteAccessor, Result};
 use std::{collections::BTreeMap, path::Path, sync::Mutex};
@@ -90,12 +90,20 @@ impl BhlMetadata {
     /// immutable database (for example, its SHA-256 computed once by the caller).
     /// It is not presented as a checksum of the original TSV rows.
     pub fn open_tables(path: impl AsRef<Path>, snapshot_id: impl Into<String>) -> Result<Self> {
+        Self::from_tables_database(DuckDbDatabase::open(path)?, snapshot_id)
+    }
+
+    /// Bind a shared local, remote, or staged DuckDB database to BHL tables.
+    /// File loading, credentials and source lifetime belong to the shared module.
+    pub fn from_tables_database(
+        database: DuckDbDatabase,
+        snapshot_id: impl Into<String>,
+    ) -> Result<Self> {
         let snapshot_id = snapshot_id.into();
         if snapshot_id.trim().is_empty() {
             return Err(error::invalid("database snapshot_id must not be blank"));
         }
-        let path = path.as_ref();
-        let connection = ManagedConnection::open(path, true)?;
+        let (connection, location) = database.into_connection();
         let mut sources = BTreeMap::new();
         for table in tables() {
             let columns = connection.table_columns(&table.name)?;
@@ -104,7 +112,7 @@ impl BhlMetadata {
             sources.insert(
                 table.name.clone(),
                 SourceInfo {
-                    path: format!("{}#table={}", path.display(), table.name),
+                    path: format!("{location}#table={}", table.name),
                     rows,
                     sha256: String::new(),
                 },
