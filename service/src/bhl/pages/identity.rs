@@ -27,20 +27,22 @@ impl BhlPageIdentity {
             entity_type: fields[0].to_owned(),
             entity_id: number(fields[1])?,
             page_id: number(fields[2])?,
-            sequence: number(fields[3])?,
+            sequence: nonnegative_number(fields[3])?,
         })
     }
 }
 
 pub(in crate::bhl) fn number(value: &str) -> Result<u64> {
-    if value.is_empty() || !value.bytes().all(|c| c.is_ascii_digit()) {
-        return Err(super::invalid(format!(
-            "invalid BHL numeric ID/sequence: {value:?}"
-        )));
+    let number = nonnegative_number(value)?;
+    if number == 0 {
+        return Err(super::invalid(format!("invalid BHL numeric ID: {value:?}")));
     }
-    value
-        .parse::<u64>()
-        .ok()
-        .filter(|&n| n > 0)
-        .ok_or_else(|| super::invalid(format!("invalid BHL numeric ID/sequence: {value:?}")))
+    Ok(number)
+}
+
+fn nonnegative_number(value: &str) -> Result<u64> {
+    (!value.is_empty() && value.bytes().all(|c| c.is_ascii_digit()))
+        .then(|| value.parse::<u64>().ok())
+        .flatten()
+        .ok_or_else(|| super::invalid(format!("invalid BHL number: {value:?}")))
 }

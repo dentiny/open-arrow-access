@@ -1,6 +1,6 @@
-//! Validation of persistent metadata database values, without database or file I/O.
+//! Validation of metadata database values and OCR selections, without database or file I/O.
 use super::{BhlMetadataInfo, Table, database::DATABASE_VERSION, error};
-use open_arrow_access_core::Result;
+use open_arrow_access_core::{ObjectRef, Result};
 
 pub(super) fn validate_database_destination(exists: bool) -> Result<()> {
     if exists {
@@ -47,6 +47,18 @@ pub(super) fn validate_database_source_schema(
 pub(super) fn validate_database_source_rows(actual: u64, expected: u64) -> Result<()> {
     if actual != expected {
         return Err(error::invalid("database source row count mismatch"));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_canonical_matches(matches: u64, object: &ObjectRef) -> Result<()> {
+    if matches != 1 {
+        return Err(crate::bhl::error::invalid_pages(format!(
+            "expected exactly one OCR key matching authoritative SequenceOrder; found {} for {}",
+            matches,
+            object.locator()
+        ))
+        .with_object(Some(object)));
     }
     Ok(())
 }

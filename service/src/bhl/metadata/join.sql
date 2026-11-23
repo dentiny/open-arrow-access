@@ -100,21 +100,14 @@ WITH parents AS (
               AND r.__key = b.entity_id AND bhl_id(r.PageID) = b.page_id
               AND bhl_id(r.ItemID) IS NOT NULL
               AND bhl_id(r.ItemID) IS DISTINCT FROM b.parent_id
-            UNION ALL
-            SELECT 3, r.rowid,
-                format('SequenceOrder={}, filename sequence={}', bhl_id(r.SequenceOrder), b.sequence)
-            FROM bhl_page r WHERE r.__key = b.page_id
-              AND b.entity_type = 'item' AND bhl_id(r.SequenceOrder) IS NOT NULL
-              AND bhl_id(r.SequenceOrder) <> b.sequence
-            UNION ALL
-            SELECT 3, r.rowid,
-                format('SequenceOrder={}, filename sequence={}', bhl_id(r.SequenceOrder), b.sequence)
-            FROM bhl_partpage r WHERE b.entity_type = 'part'
-              AND r.__key = b.entity_id AND bhl_id(r.PageID) = b.page_id
-              AND bhl_id(r.SequenceOrder) IS NOT NULL
-              AND bhl_id(r.SequenceOrder) <> b.sequence
         ) messages) AS conflicts
     FROM base b
+), sequences AS (
+    SELECT *, CASE WHEN entity_type = 'item'
+        THEN list_distinct(list_transform(page, lambda r: bhl_id(r.SequenceOrder)))
+        ELSE list_distinct(list_transform(partpage, lambda r: bhl_id(r.SequenceOrder)))
+        END AS expected_sequences
+    FROM joined
 )
 SELECT request_id,
     struct_pack(
@@ -137,6 +130,9 @@ SELECT request_id,
          FROM bhl_item i LEFT JOIN bhl_title t ON t.__key = bhl_id(i.TitleID)
          WHERE i.__key = joined.parent_id AND t.__key IS NULL)
     ) AS missing,
-    conflicts
-FROM joined
+    conflicts,
+    min(request_id) FILTER (WHERE expected_sequences = [sequence]) OVER versions AS canonical_id,
+    (count(*) FILTER (WHERE expected_sequences = [sequence]) OVER versions)::UBIGINT AS canonical_matches
+FROM sequences AS joined
+WINDOW versions AS (PARTITION BY entity_type, entity_id, page_id)
 ORDER BY request_id

@@ -1,10 +1,12 @@
-use super::{BhlPageMetadata, error};
+use super::{BhlPageMetadata, error, validation};
 use crate::bhl::{BhlPageIdentity, page_schema};
 use arrow_array::{Array, ArrayRef, ListArray, RecordBatch, StringArray, StructArray, UInt64Array};
 use open_arrow_access_core::{ObjectRef, Result};
 use std::sync::Arc;
 
 const SELECTION_BATCH_SIZE: usize = 8192;
+const CANONICAL_ID_COLUMN: usize = 4;
+const CANONICAL_MATCHES_COLUMN: usize = 5;
 
 fn strings(column: &dyn Array, row: usize) -> Result<Vec<String>> {
     let list = column
@@ -96,7 +98,7 @@ pub(super) fn for_each(
         .prepare(include_str!("join.sql"))
         .map_err(error::duckdb)?;
     let _ = statement.stream_arrow([]).map_err(error::duckdb)?;
-    let mut emitted = 0;
+    let mut joined_rows = 0;
     while let Some(batch) = statement.step().map_err(error::duckdb)? {
         let batch = RecordBatch::from(&batch);
         let indices = batch
@@ -104,6 +106,16 @@ pub(super) fn for_each(
             .as_any()
             .downcast_ref::<UInt64Array>()
             .ok_or_else(|| error::invalid("expected request IDs"))?;
+        let matches = batch
+            .column(CANONICAL_MATCHES_COLUMN)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .ok_or_else(|| error::invalid("expected canonical match counts"))?;
+        let selected = batch
+            .column(CANONICAL_ID_COLUMN)
+            .as_any()
+            .downcast_ref::<UInt64Array>()
+            .ok_or_else(|| error::invalid("expected canonical request IDs"))?;
         // Match the fixed nested LargeUtf8/nullability contract.
         let metadata =
             arrow_cast::cast(batch.column(1), field.data_type()).map_err(error::arrow)?;
@@ -111,12 +123,23 @@ pub(super) fn for_each(
             .as_any()
             .downcast_ref::<StructArray>()
             .ok_or_else(|| error::invalid("expected metadata struct"))?;
+        joined_rows += batch.num_rows();
         for row in 0..batch.num_rows() {
             let index = usize::try_from(indices.value(row))
                 .map_err(|_| error::invalid("request ID overflow"))?;
             let object = keys
                 .get(index)
                 .ok_or_else(|| error::invalid("unknown request ID"))?;
+            validation::validate_canonical_matches(matches.value(row), object)?;
+            if selected.value(row) != indices.value(row) {
+                let canonical = &keys[selected.value(row) as usize];
+                eprintln!(
+                    "BHL quarantined alternative {}: selected {}",
+                    object.locator(),
+                    canonical.locator()
+                );
+                continue;
+            }
             emit(BhlPageMetadata {
                 identity: BhlPageIdentity::parse(object.locator())?,
                 object: object.clone(),
@@ -124,10 +147,9 @@ pub(super) fn for_each(
                 missing: strings(batch.column(2).as_ref(), row)?,
                 conflicts: strings(batch.column(3).as_ref(), row)?,
             })?;
-            emitted += 1;
         }
     }
-    if emitted != keys.len() {
+    if joined_rows != keys.len() {
         return Err(error::invalid("unexpected joined page count"));
     }
     Ok(())

@@ -82,7 +82,9 @@ pub struct BhlPageMetadata {
 impl BhlMetadata {
     /// Execute one join query and emit each selected page to the callback.
     /// This is synchronous; call from a blocking worker in async applications.
-    /// Returning an error from the callback stops emission immediately.
+    /// Only unique metadata-sequence-matching keys are emitted; missing or
+    /// ambiguous matches fail before the callback. Returning an error from the
+    /// callback stops emission immediately.
     pub fn for_each(
         &self,
         keys: &[ObjectRef],
