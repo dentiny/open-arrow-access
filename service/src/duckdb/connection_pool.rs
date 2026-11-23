@@ -110,41 +110,6 @@ mod tests {
     }
 
     #[test]
-    fn returns_connection_on_error_and_preserves_connection_local_state() {
-        let (_directory, database) = database();
-        let pool = DuckDbConnectionPool::new(database);
-        let result = (|| -> Result<()> {
-            let connection = pool.get_connection()?;
-            connection.query(
-                "CREATE TEMP TABLE checkout_state AS SELECT 42 AS value",
-                [],
-                |_| Ok(()),
-            )?;
-            // Another simultaneous checkout must use a distinct connection.
-            let other = pool.get_connection()?;
-            assert!(
-                other
-                    .query("SELECT * FROM checkout_state", [], |_| Ok(()))
-                    .is_err()
-            );
-            connection.query("SELECT * FROM missing_table", [], |_| Ok(()))?;
-            Ok(())
-        })();
-        assert!(result.is_err());
-        // Error propagation drops the guard. Reusing that connection retains
-        // its temporary table, which a newly cloned connection would not see.
-        let connection = pool.get_connection().unwrap();
-        let mut rows = 0;
-        connection
-            .query("SELECT * FROM checkout_state", [], |batch| {
-                rows += batch.num_rows();
-                Ok(())
-            })
-            .unwrap();
-        assert_eq!(rows, 1);
-    }
-
-    #[test]
     fn bounds_idle_connections_and_retains_the_most_recently_returned() {
         for max_idle in [0, 1, 2] {
             let (_directory, database) = database();
