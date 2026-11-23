@@ -11,21 +11,18 @@ use open_arrow_access_core::{
     ScanPartition, ScanPlan, ScanPlanner, SchemaRef, async_trait, into_stream,
     record_stream_reader, scan_partition,
 };
-use std::{
-    path::PathBuf,
-    sync::{Arc, OnceLock},
-};
+use std::sync::{Arc, OnceLock};
 
 /// Metadata backend opened once for a content source.
 /// OAI remains the default; database access is explicitly selected by callers.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Default, Eq, PartialEq)]
 pub enum ArxivMetadataSource {
     #[default]
     Oai,
-    /// A local path or remote URL and optional trusted extension/secret SQL file.
+    /// A local path or remote URL and optional trusted extension/CREATE SECRET SQL.
     DuckDbDatabase {
         location: String,
-        secret_sql_file: Option<PathBuf>,
+        secret_sql: Option<String>,
     },
 }
 
@@ -171,11 +168,14 @@ impl<A> ArxivContentRecords<A> {
             }
             ArxivMetadataSource::DuckDbDatabase {
                 location,
-                secret_sql_file,
+                secret_sql,
             } => {
                 let database = tokio::task::spawn_blocking(move || {
-                    crate::duckdb::DuckDbDatabase::connect(&location, secret_sql_file.as_deref())
-                        .map(ArxivMetadataDatabase::new)
+                    crate::duckdb::DuckDbDatabase::connect_with_secret_sql(
+                        &location,
+                        secret_sql.as_deref(),
+                    )
+                    .map(ArxivMetadataDatabase::new)
                 })
                 .await
                 .map_err(super::error::metadata_worker)??;

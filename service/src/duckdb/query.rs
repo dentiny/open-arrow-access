@@ -41,6 +41,17 @@ impl DuckDbDatabase {
         })
     }
 
+    /// Open a local path or remote URL using caller-provided trusted setup SQL.
+    /// Execute the SQL once before configuring cache_httpfs and attaching the
+    /// database read-only, with the same behavior as [`Self::connect`].
+    /// The caller can load the SQL from any source or construct it in memory.
+    /// SQL execution errors omit the SQL text, which may contain credentials.
+    pub fn connect_with_secret_sql(location: &str, secret_sql: Option<&str>) -> Result<Self> {
+        Ok(Self {
+            connection: ManagedConnection::connect_with_secret_sql(location, secret_sql)?,
+        })
+    }
+
     /// Clone a connection while retaining cached blocks and database-scoped secrets.
     /// Temporary views and tables remain connection-local.
     pub fn try_clone(&self) -> Result<Self> {
