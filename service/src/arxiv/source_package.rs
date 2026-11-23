@@ -41,7 +41,7 @@ impl Default for ArxivSourceOptions {
 ///
 /// Returns format-neutral artifact rows with `format = "source_member"`, preserving
 /// every regular member, including figures and `anc/` files, without an allowlist.
-/// Directories are skipped. Duplicate/non-UTF-8 names retain physical indices.
+/// Directories and links are skipped; link targets are never followed. Duplicate/non-UTF-8 names retain physical indices.
 /// Single-file sources require an explicit name; gzip CRC/truncation/trailing data
 /// are checked through EOF before emitting rows. Inner archives are not expanded
 /// recursively, LaTeX is not compiled, and external links are not fetched.

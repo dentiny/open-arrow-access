@@ -141,6 +141,33 @@ fn tex_selection_rejects_path_traversal() {
 }
 
 #[tokio::test]
+async fn latex_skips_linked_pdf_and_reads_following_tex() {
+    let mut tar = tar::Builder::new(Vec::new());
+    let mut link = tar::Header::new_ustar();
+    link.set_entry_type(tar::EntryType::Link);
+    link.set_size(0);
+    tar.append_link(&mut link, "figure.pdf", "original.pdf")
+        .unwrap();
+
+    let mut tex = tar::Header::new_ustar();
+    tex.set_size(5);
+    tex.set_mode(0o644);
+    tex.set_cksum();
+    tar.append_data(&mut tex, "main.tex", b"hello".as_slice())
+        .unwrap();
+
+    let batches = read("2509/2509.17155.gz", &tar.into_inner().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(
+        batches[0]["source_name"].as_binary::<i64>().value(0),
+        b"main.tex"
+    );
+    assert_eq!(batches[0]["data"].as_binary::<i64>().value(0), b"hello");
+}
+
+#[tokio::test]
 async fn packages_preserve_non_utf8_tex_names_and_payloads() {
     let mut data = fixture!("arxiv-articles", "source.tar").await;
     // Mutate a real regular-file header without transcoding the stored path.

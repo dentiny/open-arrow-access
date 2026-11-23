@@ -79,6 +79,7 @@ async fn accepts_empty_and_gnu_archives() {
         ("gnu.tar", 1),
         ("gnu-longname.tar", 1),
         ("pax.tar", 1),
+        ("link.tar", 1),
         ("one-zero-block.tar", 0),
         ("missing-end.tar", 4),
     ] {
@@ -96,7 +97,7 @@ async fn rejects_malformed_and_unsupported_archives() {
         ("bad-checksum.tar", ErrorKind::Decode),
         ("bad-size.tar", ErrorKind::Decode),
         ("truncated.tar", ErrorKind::Decode),
-        ("link.tar", ErrorKind::Unsupported),
+        ("special.tar", ErrorKind::Unsupported),
     ] {
         let source = source(name).await;
         let error = TarArchive::open(source.open("archive".into()).await.unwrap())
@@ -500,4 +501,23 @@ async fn malformed_gnu_names_fail_in_both_readers() {
         expect_err_kind(stream.next_entry().await, ErrorKind::Decode);
         assert!(stream.next_entry().await.unwrap().is_none());
     }
+}
+
+#[tokio::test]
+async fn indexed_links_cannot_be_opened_as_files() {
+    let mut tar = tar::Builder::new(Vec::new());
+    let mut link = tar::Header::new_ustar();
+    link.set_entry_type(tar::EntryType::Link);
+    link.set_size(0);
+    tar.append_link(&mut link, "figure.pdf", "original.pdf")
+        .unwrap();
+    let input = MemoryAccessor::new(&tar.into_inner().unwrap(), 7).with_ranges();
+    let archive = TarArchive::open(input.open("archive".into()).await.unwrap())
+        .await
+        .unwrap();
+    assert!(!archive.entries().next().unwrap().is_file);
+    expect_err_kind(
+        archive.open_entry(0, NonZeroUsize::MIN),
+        ErrorKind::Unsupported,
+    );
 }

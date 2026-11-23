@@ -120,6 +120,7 @@ url.workspace = true
 arrow-schema.workspace = true
 
 [dev-dependencies]
+tar.workspace = true
 async-compression = { workspace = true, features = ["bzip2"] }
 more-asserts.workspace = true
 open-arrow-access-file-format = { path = "../file-format", default-features = false, features = [

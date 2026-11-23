@@ -76,8 +76,9 @@ They compose with sequential JSON, CSV, XML, ATIF, and WARC consumers. They cann
 directly feed the current Parquet reader or ranged ZIP/TAR inspection. Parquet's
 internal page compression is independent of these external codecs.
 
-TAR supports regular GNU/USTAR files and directories; links, sparse files, and
-extension headers are unsupported. Archive names remain metadata; readers do
+TAR supports regular GNU/USTAR files, directories, and link metadata. Links are
+never followed and cannot be opened as ranged files. Sparse files and special
+entries remain unsupported. Archive names remain metadata; readers do
 not extract paths to the filesystem. Read compressed/ZIP entries through EOF to
 complete integrity validation. See [decompression](../decompression/README.md)
 and the [TAR example](../examples/read_tar.rs).

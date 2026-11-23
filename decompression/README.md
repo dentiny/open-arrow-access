@@ -166,8 +166,9 @@ and `astral-tokio-tar` for sequential input. Sequential bodies use the shared
 `read_chunks` adapter, without producer tasks, channels or full-body buffering.
 Only ranged indexing requires a Tokio runtime for its synchronous package adapter;
 it seeks past payloads instead of downloading them. Dropping the archive and its
-last live body releases the sequential source. Links and sparse files remain
-unsupported by the exposed byte entry contract; no filesystem extraction is performed.
+last live body releases the sequential source. Hard links and symbolic links are
+exposed as non-file metadata and are never followed; ranged file reads reject them.
+Sparse files and special entries remain unsupported; no filesystem extraction is performed.
 
 TAR entry counts, body sizes and GNU/PAX metadata have no additional
 library-imposed limits. End-marker acceptance follows the
