@@ -6,30 +6,53 @@ use std::sync::Mutex;
 
 /// Share one read-only DuckDB instance and its disk cache across article readers.
 pub struct ArxivMetadataDatabase {
-    database: Mutex<DuckDbDatabase>,
+    connections: Mutex<MetadataConnections>,
+}
+
+struct MetadataConnections {
+    database: DuckDbDatabase,
+    idle: Vec<DuckDbDatabase>,
 }
 
 impl ArxivMetadataDatabase {
     pub fn new(database: DuckDbDatabase) -> Self {
         Self {
-            database: Mutex::new(database),
+            connections: Mutex::new(MetadataConnections {
+                database,
+                idle: Vec::new(),
+            }),
         }
     }
 
     pub(super) fn article(&self, article: &str) -> Result<ArxivMetadataIndex> {
         let article = id::metadata_id(article)?;
-        let connection = self
-            .database
-            .lock()
-            .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?
-            .try_clone()?;
+        // Only hold the pool lock during checkout/return, never during a query.
+        // Grow to the caller's concurrent lookup count, then reuse connections
+        // and their prepared statements for subsequent articles.
+        let connection = {
+            let mut connections = self
+                .connections
+                .lock()
+                .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?;
+            match connections.idle.pop() {
+                Some(connection) => connection,
+                None => connections.database.try_clone()?,
+            }
+        };
         let mut batches = Vec::new();
         // LIMIT 2 lets validation reject duplicate article IDs.
-        let schema = connection.query(
+        let result = connection.query_cached(
             "SELECT \"oai:header\", \"oai:metadata\" FROM main.arxiv_metadata WHERE article_id = ? LIMIT 2",
             params![article],
             |batch| { batches.push(batch); Ok(()) },
-        )?;
+        );
+        // Return the connection even when execution or fetching failed.
+        self.connections
+            .lock()
+            .map_err(|_| error::invalid("DuckDB metadata connection lock poisoned"))?
+            .idle
+            .push(connection);
+        let schema = result?;
         let batch =
             arrow_select::concat::concat_batches(&schema, &batches).map_err(error::arrow_error)?;
         validation::validate_metadata_record_count(batch.num_rows())?;
@@ -52,8 +75,7 @@ mod tests {
     use super::*;
     use arrow_array::Array;
 
-    #[test]
-    fn looks_up_modern_and_legacy_articles_with_conversion_schema() {
+    fn database() -> (tempfile::TempDir, ArxivMetadataDatabase) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("arxiv.duckdb");
         let connection = ::duckdb::Connection::open(&path).unwrap();
@@ -62,9 +84,16 @@ mod tests {
             .unwrap();
         drop(connection);
         let database = ArxivMetadataDatabase::new(DuckDbDatabase::open(path).unwrap());
+        (directory, database)
+    }
+
+    #[test]
+    fn looks_up_modern_and_legacy_articles_with_conversion_schema() {
+        let (_directory, database) = database();
         for (article, title) in [
             ("2410.00001", "Modern"),
             ("oai:arXiv.org:hep-th/9901001", "Legacy"),
+            ("2410.00001", "Modern"),
         ] {
             let index = database.article(article).unwrap();
             assert_eq!(index.rows.len(), 1);
@@ -78,5 +107,39 @@ mod tests {
             let raw = index.rows["oai:metadata"].as_struct()["arxiv:arXivRaw"].as_struct();
             assert_eq!(raw["arxiv:title"].as_string::<i32>().value(0), title);
         }
+        assert_eq!(database.connections.lock().unwrap().idle.len(), 1);
+        // An empty result must not leave the cached statement's old row behind.
+        assert!(database.article("2410.99999").is_err());
+        assert!(database.article("2410.00001").is_ok());
+        assert_eq!(database.connections.lock().unwrap().idle.len(), 1);
+    }
+
+    #[test]
+    fn concurrent_lookups_keep_parameter_bindings_independent() {
+        let (_directory, database) = database();
+        let barrier = std::sync::Barrier::new(4);
+        std::thread::scope(|scope| {
+            for worker in 0..4 {
+                let database = &database;
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    for iteration in 0..8 {
+                        let (article, title) = if (worker + iteration) % 2 == 0 {
+                            ("2410.00001", "Modern")
+                        } else {
+                            ("hep-th/9901001", "Legacy")
+                        };
+                        let index = database.article(article).unwrap();
+                        assert_eq!(index.rows.len(), 1);
+                        let raw =
+                            index.rows["oai:metadata"].as_struct()["arxiv:arXivRaw"].as_struct();
+                        assert_eq!(raw["arxiv:title"].as_string::<i32>().value(0), title);
+                    }
+                });
+            }
+        });
+        let connections = database.connections.lock().unwrap();
+        assert!((1..=4).contains(&connections.idle.len()));
     }
 }
