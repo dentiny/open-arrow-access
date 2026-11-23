@@ -1,5 +1,5 @@
 use super::{ManagedConnection, error};
-use ::duckdb::Params;
+use ::duckdb::{Params, Statement};
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
 use open_arrow_access_core::Result;
@@ -67,20 +67,43 @@ impl DuckDbDatabase {
         &self,
         sql: &str,
         params: P,
-        mut emit: impl FnMut(RecordBatch) -> Result<()>,
+        emit: impl FnMut(RecordBatch) -> Result<()>,
     ) -> Result<SchemaRef> {
         let mut statement = self.connection.prepare(sql).map_err(error::database)?;
-        let schema = statement
-            .stream_arrow(params)
-            .map_err(error::database)?
-            .get_schema();
-        // The binding's Arrow iterator panics on fetch errors. Use the fallible
-        // step API, as the provider-specific metadata queries do.
-        while let Some(batch) = statement.step().map_err(error::database)? {
-            emit(RecordBatch::from(&batch))?;
-        }
-        Ok(schema)
+        query_statement(&mut statement, params, emit)
     }
+
+    /// Execute SQL using this connection's prepared-statement cache.
+    /// Parameters are rebound on each call; results are streamed as in [`Self::query`].
+    pub fn query_cached<P: Params>(
+        &self,
+        sql: &str,
+        params: P,
+        emit: impl FnMut(RecordBatch) -> Result<()>,
+    ) -> Result<SchemaRef> {
+        let mut statement = self
+            .connection
+            .prepare_cached(sql)
+            .map_err(error::database)?;
+        query_statement(&mut statement, params, emit)
+    }
+}
+
+fn query_statement<P: Params>(
+    statement: &mut Statement<'_>,
+    params: P,
+    mut emit: impl FnMut(RecordBatch) -> Result<()>,
+) -> Result<SchemaRef> {
+    let schema = statement
+        .stream_arrow(params)
+        .map_err(error::database)?
+        .get_schema();
+    // The binding's Arrow iterator panics on fetch errors. Use the fallible
+    // step API, as the provider-specific metadata queries do.
+    while let Some(batch) = statement.step().map_err(error::database)? {
+        emit(RecordBatch::from(&batch))?;
+    }
+    Ok(schema)
 }
 
 #[cfg(test)]

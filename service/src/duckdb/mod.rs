@@ -10,9 +10,11 @@
 //! `DuckDbDatabase` provides a general SQL interface returning Arrow batches
 //! without requiring a provider feature.
 mod connection;
+mod connection_pool;
 pub(crate) mod error;
 
 pub(crate) use connection::{ManagedConnection, TableColumn};
+pub use connection_pool::{DuckDbConnectionPool, PooledConnection};
 
 mod query;
 pub use ::duckdb::{Params, params};
