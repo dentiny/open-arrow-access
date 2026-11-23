@@ -12,7 +12,7 @@
 mod connection;
 pub(crate) mod error;
 
-pub(crate) use connection::ManagedConnection;
+pub(crate) use connection::{ManagedConnection, TableColumn};
 
 mod query;
 pub use ::duckdb::{Params, params};

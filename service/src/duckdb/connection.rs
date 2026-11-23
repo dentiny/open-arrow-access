@@ -4,6 +4,13 @@ use ::duckdb::{Config, Connection};
 use open_arrow_access_core::Result;
 use std::{ops::Deref, path::Path, sync::Arc};
 
+/// A column described by DuckDB, retaining its SQL type name.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct TableColumn {
+    pub(crate) name: String,
+    pub(crate) data_type: String,
+}
+
 pub(crate) struct ManagedConnection {
     // Fields drop in declaration order: close DuckDB before removing its files.
     connection: Connection,
@@ -86,7 +93,7 @@ impl ManagedConnection {
     }
 
     /// Describe a caller-owned table in the main schema without copying it.
-    pub(crate) fn table_columns(&self, table: &str) -> Result<Vec<(String, String)>> {
+    pub(crate) fn table_columns(&self, table: &str) -> Result<Vec<TableColumn>> {
         let table = table.replace('"', "\"\"");
         let mut statement = self
             .connection
@@ -94,7 +101,10 @@ impl ManagedConnection {
             .map_err(error::database)?;
         statement
             .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok(TableColumn {
+                    name: row.get(0)?,
+                    data_type: row.get(1)?,
+                })
             })
             .map_err(error::database)?
             .collect::<std::result::Result<Vec<_>, _>>()

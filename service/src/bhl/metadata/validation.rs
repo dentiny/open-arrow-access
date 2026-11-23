@@ -1,5 +1,6 @@
 //! Validation of metadata database values and OCR selections, without database or file I/O.
 use super::{BhlMetadataInfo, Table, database::DATABASE_VERSION, error};
+use crate::duckdb::TableColumn;
 use open_arrow_access_core::{ObjectRef, Result};
 
 pub(super) fn validate_database_destination(exists: bool) -> Result<()> {
@@ -30,7 +31,7 @@ pub(super) fn validate_database_manifest(
 
 pub(super) fn validate_database_source_schema(
     table: &Table,
-    columns: &[(String, String)],
+    columns: &[TableColumn],
     info: &BhlMetadataInfo,
 ) -> Result<()> {
     validate_table_schema(table, columns)?;
@@ -40,11 +41,14 @@ pub(super) fn validate_database_source_schema(
     Ok(())
 }
 
-pub(super) fn validate_table_schema(table: &Table, columns: &[(String, String)]) -> Result<()> {
+pub(super) fn validate_table_schema(table: &Table, columns: &[TableColumn]) -> Result<()> {
     let expected = table
         .fields
         .iter()
-        .map(|field| (field.name().clone(), "VARCHAR".to_owned()))
+        .map(|field| TableColumn {
+            name: field.name().clone(),
+            data_type: "VARCHAR".to_owned(),
+        })
         .collect::<Vec<_>>();
     if columns != expected.as_slice() {
         return Err(error::invalid("database source schema mismatch"));
