@@ -47,6 +47,34 @@ impl ManagedConnection {
         })
     }
 
+    /// Describe a caller-owned table in the main schema without copying it.
+    pub(crate) fn table_columns(&self, table: &str) -> Result<Vec<(String, String)>> {
+        let table = table.replace('"', "\"\"");
+        let mut statement = self
+            .connection
+            .prepare(&format!("DESCRIBE main.\"{table}\""))
+            .map_err(error::database)?;
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(error::database)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(error::database)
+    }
+
+    /// Read a main-schema table's row count without materializing its rows.
+    pub(crate) fn table_row_count(&self, table: &str) -> Result<u64> {
+        let table = table.replace('"', "\"\"");
+        self.connection
+            .query_row(
+                &format!("SELECT count(*) FROM main.\"{table}\""),
+                [],
+                |row| row.get(0),
+            )
+            .map_err(error::database)
+    }
+
     /// Store both the database and its spill files on disposable local disk.
     pub(crate) fn temporary() -> Result<Self> {
         let (config, directory) = Self::config()?;

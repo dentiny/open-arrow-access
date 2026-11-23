@@ -19,28 +19,13 @@ fn read_info(connection: &Connection) -> Result<BhlMetadataInfo> {
     serde_json::from_str(&info).map_err(error::json)
 }
 
-fn check_sources(connection: &Connection, info: &BhlMetadataInfo) -> Result<()> {
+fn check_sources(connection: &ManagedConnection, info: &BhlMetadataInfo) -> Result<()> {
     let tables = tables();
     validation::validate_database_manifest(info, tables.len())?;
     for table in tables {
-        let mut query = connection
-            .prepare(&format!("DESCRIBE main.\"{}\"", table.name))
-            .map_err(error::duckdb)?;
-        let columns = query
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(error::duckdb)?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(error::duckdb)?;
+        let columns = connection.table_columns(&table.name)?;
         validation::validate_database_source_schema(&table, &columns, info)?;
-        let rows: u64 = connection
-            .query_row(
-                &format!("SELECT count(*) FROM main.\"{}\"", table.name),
-                [],
-                |row| row.get(0),
-            )
-            .map_err(error::duckdb)?;
+        let rows = connection.table_row_count(&table.name)?;
         validation::validate_database_source_rows(rows, info.sources[&table.name].rows)?;
     }
     Ok(())
@@ -113,24 +98,9 @@ impl BhlMetadata {
         let connection = ManagedConnection::open(path, true)?;
         let mut sources = BTreeMap::new();
         for table in tables() {
-            let mut statement = connection
-                .prepare(&format!("DESCRIBE main.\"{}\"", table.name))
-                .map_err(error::duckdb)?;
-            let columns = statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
-                .map_err(error::duckdb)?
-                .collect::<std::result::Result<Vec<_>, _>>()
-                .map_err(error::duckdb)?;
+            let columns = connection.table_columns(&table.name)?;
             validation::validate_table_schema(&table, &columns)?;
-            let rows = connection
-                .query_row(
-                    &format!("SELECT count(*) FROM main.\"{}\"", table.name),
-                    [],
-                    |row| row.get(0),
-                )
-                .map_err(error::duckdb)?;
+            let rows = connection.table_row_count(&table.name)?;
             sources.insert(
                 table.name.clone(),
                 SourceInfo {
