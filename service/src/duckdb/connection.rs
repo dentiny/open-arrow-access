@@ -136,21 +136,18 @@ impl ManagedConnection {
     }
 
     pub(crate) fn try_clone(&self) -> Result<Self> {
-        let (database, search_path): (String, String) = self
+        let search_path: String = self
             .connection
-            .query_row(
-                "SELECT current_database(), current_setting('search_path')",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
+            .query_row("SELECT current_setting('search_path')", [], |row| {
+                row.get(0)
+            })
             .map_err(error::database)?;
         let connection = self.connection.try_clone().map_err(error::database)?;
-        // DuckDB clones reset catalog and schema selection. Restore the complete
-        // search path so unqualified names resolve exactly as on the source.
+        // The qualified search path preserves both catalog and schema selection,
+        // which DuckDB resets when cloning a connection.
         connection
             .execute_batch(&format!(
-                "USE \"{}\"; SET search_path = '{}';",
-                database.replace('"', "\"\""),
+                "SET search_path = '{}';",
                 search_path.replace('\'', "''")
             ))
             .map_err(error::database)?;
