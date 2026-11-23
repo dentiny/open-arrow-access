@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Stop retrying HTTP 406 Not Acceptable responses under the provider transport retry policy.
+
 ## 0.20.4 - 2026-11-22
 
 - Select BHL OCR versions by authoritative metadata sequence, accepting zero-based filename alternatives without emitting duplicate pages or choosing mismatched content.
