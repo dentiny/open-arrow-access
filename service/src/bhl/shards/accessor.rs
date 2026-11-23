@@ -23,8 +23,6 @@ type MetadataReport = dyn Fn(&BhlPageMetadata) -> Result<()> + Send + Sync;
 /// Listing is scoped to each requested directory and consumes all listing pages.
 /// Only each directory's aggregate TXT object is excluded. Malformed identities,
 /// empty selections and missing/conflicting metadata fail by default.
-/// Selects exactly one metadata-sequence-matching key per entity/PageID and
-/// reports every excluded alternative before any OCR body can be read.
 ///
 /// Implements the native scan planner: pass this accessor directly to
 /// `CrawlAccessor::new`. The existing page planner retains projection pushdown,
@@ -87,9 +85,8 @@ impl<A: ByteAccessor + 'static> BhlShardAccessor<A> {
         Ok(self)
     }
 
-    /// Replace the joined metadata policy, called for every canonical page
+    /// Replace strict reconciliation with a caller policy, called for every page
     /// before its OCR read or emission. Ok retains it; an error stops the scan.
-    /// This cannot bypass missing or ambiguous canonical source selection.
     pub fn with_report(
         mut self,
         report: impl Fn(&BhlPageMetadata) -> Result<()> + Send + Sync + 'static,
@@ -167,11 +164,7 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlShardAccessor<A> {
         while let Some(objects) = listings.try_next().await? {
             keys.extend(objects);
         }
-        let metadata = self.metadata.clone();
-        let keys = tokio::task::spawn_blocking(move || metadata.canonical_keys(keys))
-            .await
-            .map_err(error::metadata_worker)??;
-        // One joined metadata worker for the complete canonical directory batch.
+        // One selection table/join worker for the complete directory batch.
         // Only keys are collected here; OCR bodies remain independent partitions.
         let report = self.report.clone();
         let pages = BhlPageAccessor::from_metadata(
@@ -179,7 +172,8 @@ impl<A: ByteAccessor + 'static> ScanPlanner for BhlShardAccessor<A> {
             self.snapshot_id.clone(),
             self.metadata.clone(),
             move |page| report(page),
-        )?;
+        )?
+        .canonical_versions();
         pages
             .plan_scan(
                 FileSetRequest::new(keys)

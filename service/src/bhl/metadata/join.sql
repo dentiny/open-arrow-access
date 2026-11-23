@@ -115,6 +115,14 @@ WITH parents AS (
               AND bhl_id(r.SequenceOrder) <> b.sequence
         ) messages) AS conflicts
     FROM base b
+), sequences AS (
+    SELECT *, CASE
+        WHEN entity_type = 'item' AND len(page) = 1
+            THEN bhl_id(page[1].SequenceOrder)
+        WHEN entity_type = 'part' AND len(partpage) = 1
+            THEN bhl_id(partpage[1].SequenceOrder)
+        END AS expected_sequence
+    FROM joined
 )
 SELECT request_id,
     struct_pack(
@@ -137,6 +145,11 @@ SELECT request_id,
          FROM bhl_item i LEFT JOIN bhl_title t ON t.__key = bhl_id(i.TitleID)
          WHERE i.__key = joined.parent_id AND t.__key IS NULL)
     ) AS missing,
-    conflicts
-FROM joined
+    conflicts,
+    CASE WHEN $1 THEN min(request_id) FILTER (WHERE sequence = expected_sequence) OVER versions
+         ELSE request_id END AS canonical_id,
+    CASE WHEN $1 THEN count(*) FILTER (WHERE sequence = expected_sequence) OVER versions
+         ELSE 1 END::UBIGINT AS canonical_matches
+FROM sequences AS joined
+WINDOW versions AS (PARTITION BY entity_type, entity_id, page_id)
 ORDER BY request_id

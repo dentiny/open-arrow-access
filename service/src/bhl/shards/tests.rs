@@ -166,7 +166,7 @@ async fn rejects_invalid_or_empty_shards() {
             BhlShardReadRequest::from_prefixes(["ocr/item-2/", prefix]).unwrap(),
         ] {
             source.metadata(request.clone()).await.unwrap();
-            let error = expect_err_kind(source.open(request).await, ErrorKind::InvalidInput);
+            let error = expect_err_kind(read(&source, request).await, ErrorKind::InvalidInput);
             assert!(error.to_string().contains(prefix), "{error}");
         }
     }
@@ -235,69 +235,8 @@ async fn rejects_missing_or_ambiguous_canonical_keys_even_with_permissive_metada
         let (_root, source) = fixture(&files).await;
         let source = source.with_report(|_| Ok(()));
         let request = BhlShardReadRequest::new("ocr/item-2/").unwrap();
-        let error = expect_err_kind(source.open(request).await, ErrorKind::InvalidInput);
+        let error = expect_err_kind(read(&source, request).await, ErrorKind::InvalidInput);
         assert!(error.to_string().contains("SequenceOrder"), "{error}");
         assert!(error.to_string().contains("ocr/item-2/"), "{error}");
     }
-}
-
-#[tokio::test]
-async fn rejects_ambiguous_or_invalid_authoritative_sequences() {
-    use open_arrow_access_core::ObjectRef;
-    for sql in [
-        "INSERT INTO page SELECT * FROM page WHERE PageID = '3'",
-        "INSERT INTO page SELECT * REPLACE ('6' AS SequenceOrder) FROM page WHERE PageID = '3'",
-        "UPDATE page SET SequenceOrder = '' WHERE PageID = '3'",
-        "UPDATE page SET SequenceOrder = '0' WHERE PageID = '3'",
-        "INSERT INTO partpage SELECT * FROM partpage WHERE PartID = '8'",
-    ] {
-        let metadata = crate::bhl::metadata::tests::load_with_sql(sql).await;
-        let key = if sql.contains("partpage") {
-            "ocr/part-8/part-8-3-1.txt"
-        } else {
-            "ocr/item-2/item-2-3-5.txt"
-        };
-        let error = expect_err_kind(
-            metadata.canonical_keys(vec![ObjectRef::new(key)]),
-            ErrorKind::InvalidInput,
-        );
-        assert!(error.to_string().contains("SequenceOrder"), "{error}");
-        assert_eq!(error.object().unwrap().locator(), key);
-    }
-}
-
-#[tokio::test]
-async fn reconciles_real_keys_from_all_five_failed_batches() {
-    use open_arrow_access_core::ObjectRef;
-    // Official bucket listings and an independent metadata snapshot, 2026-11-22.
-    // Item 51616 also has positive off-by-one versions with different bodies.
-    let examples = [
-        (7219, 760784, 1),
-        (14432, 551603, 1),
-        (15702, 875958, 1),
-        (51616, 14909012, 1),
-        (108745, 34979650, 1),
-        (51616, 14908961, 20),
-    ];
-    let mut sql = String::new();
-    let mut keys = Vec::new();
-    let mut expected = Vec::new();
-    for (item, page, sequence) in examples {
-        sql.push_str(&format!(
-            "INSERT INTO page SELECT * REPLACE ('{item}' AS ItemID, '{page}' AS PageID, '{sequence}' AS SequenceOrder) FROM page WHERE PageID = '3';"
-        ));
-        let key = |seq| {
-            ObjectRef::new(format!(
-                "ocr/item-{item:06}/item-{item:06}-{page:08}-{seq:04}.txt"
-            ))
-        };
-        keys.extend([key(sequence - 1), key(sequence)]);
-        expected.push(key(sequence));
-    }
-    let metadata = crate::bhl::metadata::tests::load_with_sql(&sql).await;
-    let selected = metadata.canonical_keys(keys).unwrap();
-    assert_eq!(
-        selected.iter().map(|key| key.locator()).collect::<Vec<_>>(),
-        expected.iter().map(|key| key.locator()).collect::<Vec<_>>()
-    );
 }

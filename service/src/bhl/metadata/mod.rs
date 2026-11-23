@@ -1,5 +1,4 @@
 //! Direct AWS TSV acquisition and populated page metadata joins.
-mod canonical;
 mod database;
 mod error;
 mod join;
@@ -89,11 +88,7 @@ impl BhlMetadata {
         emit: impl FnMut(BhlPageMetadata) -> Result<()>,
     ) -> Result<()> {
         let connection = self.query_connection()?;
-        join::for_each(&connection, keys, emit)
-    }
-
-    pub(in crate::bhl) fn canonical_keys(&self, keys: Vec<ObjectRef>) -> Result<Vec<ObjectRef>> {
-        canonical::select(&self.query_connection()?, keys)
+        join::for_each(&connection, keys, false, emit)
     }
 
     fn query_connection(&self) -> Result<duckdb::Connection> {
@@ -107,8 +102,9 @@ impl BhlMetadata {
     pub(in crate::bhl) fn stream(
         self: Arc<Self>,
         keys: Vec<ObjectRef>,
+        canonical: bool,
     ) -> futures::stream::BoxStream<'static, Result<BhlPageMetadata>> {
-        stream::pages(self, keys)
+        stream::pages(self, keys, canonical)
     }
 
     pub fn schema_metadata(&self) -> Result<HashMap<String, String>> {
