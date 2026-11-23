@@ -19,6 +19,25 @@ pub(super) fn validate_database_header(count: u64, version: u64) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn validate_managed_source_checksums(info: &serde_json::Value) -> Result<()> {
+    // External provenance may omit checksums, but importer-managed manifests
+    // must retain the required fields accepted by the original reader.
+    if info
+        .get("sources")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|sources| {
+            sources
+                .values()
+                .any(|source| source.get("sha256").is_none())
+        })
+    {
+        return Err(error::invalid(
+            "managed database source checksum is missing",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_database_manifest(
     info: &BhlMetadataInfo,
     expected_tables: usize,

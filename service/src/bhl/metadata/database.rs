@@ -17,21 +17,7 @@ fn read_info(connection: &Connection) -> Result<BhlMetadataInfo> {
         .map_err(error::duckdb)?;
     validation::validate_database_header(count, version)?;
     let info: serde_json::Value = serde_json::from_str(&info).map_err(error::json)?;
-    // External provenance may omit checksums, but importer-managed manifests
-    // must retain the required fields accepted by the original reader.
-    if info
-        .get("sources")
-        .and_then(serde_json::Value::as_object)
-        .is_some_and(|sources| {
-            sources
-                .values()
-                .any(|source| source.get("sha256").is_none())
-        })
-    {
-        return Err(error::invalid(
-            "managed database source checksum is missing",
-        ));
-    }
+    validation::validate_managed_source_checksums(&info)?;
     serde_json::from_value(info).map_err(error::json)
 }
 
