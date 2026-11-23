@@ -13,8 +13,8 @@ use super::{ArxivReadRequest, ArxivRecords, error, id, record_schema, validation
 
 /// Reusable in-memory metadata snapshot, indexed by the article ID column.
 ///
-/// All input columns, types and values are retained inside the output `metadata`
-/// struct. IDs may be canonical arXiv IDs or OAI identifiers. Duplicate IDs are
+/// The legacy raw-PDF join retains all snapshot columns inside `metadata`.
+/// Common content readers project to the supported conversion metadata schema. IDs may be canonical arXiv IDs or OAI identifiers. Duplicate IDs are
 /// rejected instead of choosing an arbitrary record. Harvest/persist the snapshot
 /// separately under a single rate-limited coordinator, then share this index
 /// between shard readers. For large snapshots, load a month at a time.
@@ -54,6 +54,15 @@ impl ArxivMetadataIndex {
     /// Reconcile repeated updates before constructing this immutable snapshot.
     pub fn from_oai_records(batch: RecordBatch) -> Result<Self> {
         validation::validate_oai_metadata(&batch)?;
+        Self::from_header_records(batch)
+    }
+
+    pub(super) fn from_content_records(batch: RecordBatch) -> Result<Self> {
+        validation::validate_content_records(&batch)?;
+        Self::from_header_records(batch)
+    }
+
+    fn from_header_records(batch: RecordBatch) -> Result<Self> {
         let identifiers = batch["oai:header"].as_struct()["oai:identifier"].as_string::<i32>();
         let mut ids = HashMap::with_capacity(batch.num_rows());
         for (row, identifier) in identifiers.iter().enumerate() {
@@ -78,6 +87,11 @@ impl ArxivMetadataIndex {
             .collect::<Result<Vec<_>>>()?;
         let metadata = arrow_select::take::take(&self.rows, &UInt64Array::from(indices), None)
             .map_err(error::arrow_error)?;
+        let metadata = arrow_cast::cast(
+            metadata.as_ref(),
+            &DataType::Struct(super::content::metadata_schema().fields().clone()),
+        )
+        .map_err(error::arrow_error)?;
         let mut columns = batch.columns().to_vec();
         let position = batch
             .schema()

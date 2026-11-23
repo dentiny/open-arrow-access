@@ -8,6 +8,8 @@ description = "Dataset source providers for Open Arrow Access"
 
 [features]
 arxiv = [
+    "dep:arrow-cast",
+    "tokio/rt",
     "oai",
     "format-xml",
     "dep:arrow-select",

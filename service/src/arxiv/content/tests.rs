@@ -243,6 +243,59 @@ async fn assert_content(batch: &RecordBatch, format: ArxivContentFormat) {
     assert_eq!(batch["data"].as_binary::<i64>().value(0), expected);
 }
 
+#[test]
+fn conversion_metadata_contains_only_supported_fields() {
+    let schema = metadata_schema();
+    let DataType::Struct(header) = schema.field(0).data_type() else {
+        panic!()
+    };
+    assert_eq!(
+        header
+            .iter()
+            .map(|field| field.name().as_str())
+            .collect::<Vec<_>>(),
+        ["oai:identifier"]
+    );
+    let DataType::Struct(metadata) = schema.field(1).data_type() else {
+        panic!()
+    };
+    let DataType::Struct(raw) = metadata[0].data_type() else {
+        panic!()
+    };
+    assert_eq!(
+        raw.iter()
+            .map(|field| field.name().as_str())
+            .collect::<Vec<_>>(),
+        [
+            "arxiv:id",
+            "arxiv:submitter",
+            "arxiv:title",
+            "arxiv:authors",
+            "arxiv:categories",
+            "arxiv:comments",
+            "arxiv:report-no",
+            "arxiv:journal-ref",
+            "arxiv:doi",
+            "arxiv:license",
+            "arxiv:abstract",
+            "arxiv:version",
+        ]
+    );
+    let DataType::List(item) = raw.last().unwrap().data_type() else {
+        panic!()
+    };
+    let DataType::Struct(version) = item.data_type() else {
+        panic!()
+    };
+    assert_eq!(
+        version
+            .iter()
+            .map(|field| field.name().as_str())
+            .collect::<Vec<_>>(),
+        ["@version", "arxiv:date"]
+    );
+}
+
 async fn metadata_connection(http: &HttpFixture, article: &str, file: &str) -> Connection {
     let identifier = super::super::id::oai_identifier(article).unwrap();
     let encoded: String = url::form_urlencoded::byte_serialize(identifier.as_bytes()).collect();
@@ -282,11 +335,16 @@ fn index(snapshot: RecordBatch) -> Arc<ArxivMetadataIndex> {
 }
 
 fn assert_metadata(batch: &RecordBatch, snapshot: &RecordBatch, expected_row: usize) {
-    let expected = StructArray::from(snapshot.clone()).slice(expected_row, 1);
+    let expected = arrow_cast::cast(
+        &StructArray::from(snapshot.clone()).slice(expected_row, 1),
+        &DataType::Struct(metadata_schema().fields().clone()),
+    )
+    .unwrap();
+    let expected = expected.as_struct();
     let metadata = batch["metadata"].as_struct();
     assert_eq!(metadata.null_count(), 0);
     for row in 0..batch.num_rows() {
-        assert_eq!(metadata.slice(row, 1), expected);
+        assert_eq!(&metadata.slice(row, 1), expected);
     }
 }
 

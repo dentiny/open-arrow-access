@@ -82,11 +82,53 @@ new `OaiProvider::inferred_record_format` hook. Harvesting full metadata uses
 `service.harvest().with_format(service.inferred_record_format())`; persisting
 and reconciling a complete snapshot remains caller-owned.
 
-The [complete nested field reference](arxiv.md#exact-fields-of-the-content-metadata-struct-0160) lists every header, article and version field, its Arrow type and nullability. For these harvested records, omit the outer content `metadata` wrapper shown there.
+### Full harvested record schema
 
-PDF/LaTeX/XML `records().content(format)` rows include complete metadata by
-default, using lazy OAI `GetRecord` lookups with caching. Callers do not
-need to harvest or attach a snapshot first. For bulk/offline jobs, optionally
-build `ArxivMetadataIndex::from_oai_records(snapshot)` from reconciled typed
-records and use `.content(format).with_metadata(Arc::new(index))?` to bypass online
-lookups. See [automatic content metadata](arxiv.md#automatic-content-metadata).
+Harvested records retain the complete OAI schema below, without the outer
+content `metadata` wrapper. `?` means nullable. All scalar values are `Utf8`;
+version list elements are non-null structs. The `oai:setSpec` list item is named
+`oai:setSpec` and is nullable.
+
+```text
+oai:header: Struct
+    ├── oai:identifier: Utf8?
+    ├── oai:datestamp: Utf8?
+    ├── @status: Utf8?
+    └── oai:setSpec: List<Utf8?>?
+oai:metadata: Struct?
+    └── arxiv:arXivRaw: Struct?
+        ├── arxiv:id: Utf8?
+        ├── arxiv:submitter: Utf8?
+        ├── arxiv:title: Utf8?
+        ├── arxiv:authors: Utf8?
+        ├── arxiv:categories: Utf8?
+        ├── arxiv:comments: Utf8?
+        ├── arxiv:proxy: Utf8?
+        ├── arxiv:report-no: Utf8?
+        ├── arxiv:acm-class: Utf8?
+        ├── arxiv:msc-class: Utf8?
+        ├── arxiv:journal-ref: Utf8?
+        ├── arxiv:doi: Utf8?
+        ├── arxiv:license: Utf8?
+        ├── arxiv:abstract: Utf8?
+        ├── @xsi:schemaLocation: Utf8?
+        └── arxiv:version: List<item: Struct>?
+            ├── @version: Utf8?
+            ├── arxiv:date: Utf8?
+            ├── arxiv:size: Utf8?
+            └── arxiv:source_type: Utf8?
+```
+
+### Content conversion schema
+
+PDF/LaTeX/XML `records().content(format)` uses a smaller
+[conversion metadata schema](arxiv.md#exact-fields-of-the-content-metadata-struct).
+The nine fields unavailable in the Cornell/Kaggle snapshot are absent from that
+schema and from emitted Lance datasets, including when the source is OAI.
+They are not emitted as NULL placeholders. Raw OAI harvesting above keeps them
+so that incremental harvesting and deleted-record reconciliation remain possible.
+
+Content metadata can come from lazy OAI `GetRecord` lookups, a reconciled
+`ArxivMetadataIndex::from_oai_records(snapshot)`, or an indexed local/remote
+`ArxivMetadataDatabase`. All three paths project to the same conversion schema.
+See [automatic content metadata](arxiv.md#automatic-content-metadata).

@@ -78,9 +78,12 @@ For byte responses, use `ByteReader::next()` and apply a matching decoder.
 PDF, LaTeX and caller-supplied XML shards use one
 [common content schema](arxiv.md#common-pdf--latex--xml-content-schema) through
 `records().content(format)`. `data: LargeBinary` holds content bytes in every
-format. Content has ten fields, including nullable `metadata: Struct` with the full
-arXivRaw OAI record schema. Current content readers leave that column null;
-this schema change does not fetch or join metadata. See the
-[complete metadata field reference](arxiv.md#exact-fields-of-the-content-metadata-struct-0160)
-for all nested fields, types and nullability. Raw archive/artifact access
-and parsed OAI metadata are separate contracts.
+format. Content has ten fields, including nullable `metadata: Struct` populated
+with matching article metadata. Its nested conversion schema omits nine fields
+unavailable in the Cornell/Kaggle snapshot; these fields are absent from Arrow
+and emitted Lance schemas rather than set to NULL. DuckDB, in-memory snapshot
+and OAI sources all use the same output projection. See the
+[metadata field reference](arxiv.md#exact-fields-of-the-content-metadata-struct)
+for every retained field and the omitted-field list. Raw archive/artifact access
+and [full harvested OAI records](arxiv-metadata.md#full-harvested-record-schema)
+are separate contracts.

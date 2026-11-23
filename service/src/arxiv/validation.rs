@@ -8,6 +8,17 @@ pub(super) fn validate_oai_metadata(batch: &RecordBatch) -> Result<()> {
     if batch.schema().as_ref() != crate::arxiv_metadata::schema().arrow_schema().as_ref() {
         return Err(error::invalid_oai_metadata_schema());
     }
+    validate_metadata_header(batch)
+}
+
+pub(super) fn validate_content_records(batch: &RecordBatch) -> Result<()> {
+    if batch.schema().as_ref() != super::content::metadata_schema().as_ref() {
+        return Err(error::invalid_content_metadata_schema());
+    }
+    validate_metadata_header(batch)
+}
+
+fn validate_metadata_header(batch: &RecordBatch) -> Result<()> {
     let header = batch["oai:header"].as_struct();
     if header.null_count() != 0 {
         return Err(error::null_metadata_id());
@@ -34,6 +45,19 @@ pub(super) fn validate_fetched_metadata(batch: &RecordBatch, article: &str) -> R
     if !status.is_null(0) && status.value(0) == "deleted" {
         return Ok(());
     }
+    validate_article_metadata(batch, article)
+}
+
+pub(super) fn validate_database_metadata(batch: &RecordBatch, article: &str) -> Result<()> {
+    validate_content_records(batch)?;
+    let header = batch["oai:header"].as_struct();
+    if id::metadata_id(header["oai:identifier"].as_string::<i32>().value(0))? != article {
+        return Err(error::invalid_metadata_response());
+    }
+    validate_article_metadata(batch, article)
+}
+
+fn validate_article_metadata(batch: &RecordBatch, article: &str) -> Result<()> {
     let metadata = batch["oai:metadata"].as_struct();
     let raw = metadata["arxiv:arXivRaw"].as_struct();
     let raw_id = raw["arxiv:id"].as_string::<i32>();
@@ -48,7 +72,9 @@ pub(super) fn validate_fetched_metadata(batch: &RecordBatch, article: &str) -> R
 }
 
 pub(super) fn validate_content_schema(metadata: &ArxivMetadataIndex) -> Result<()> {
-    if metadata.rows.fields() != crate::arxiv_metadata::schema().arrow_schema().fields() {
+    if metadata.rows.fields() != crate::arxiv_metadata::schema().arrow_schema().fields()
+        && metadata.rows.fields() != super::content::metadata_schema().fields()
+    {
         return Err(error::invalid_content_metadata_schema());
     }
     Ok(())
