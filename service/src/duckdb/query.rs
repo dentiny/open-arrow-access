@@ -32,8 +32,9 @@ impl DuckDbDatabase {
     /// explicitly requests persistence. cache_httpfs is force-installed from
     /// community and loaded on each connect; its on-disk cache is always
     /// configured before ATTACH, including local paths.
-    /// Only requested
-    /// blocks are fetched, with no full database download during opening.
+    /// The on-disk cache is always private and temporary, retained until the last
+    /// cloned connection closes. Independent connections use separate directories.
+    /// Only requested blocks are fetched, with no full database download during opening.
     /// The caller can load the SQL from any source or construct it in memory.
     /// SQL execution errors omit the SQL text, which may contain credentials.
     /// This is synchronous; use a blocking worker in async applications.
