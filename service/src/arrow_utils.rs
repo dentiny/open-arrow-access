@@ -3,24 +3,18 @@ use arrow_array::{Array, GenericStringArray, OffsetSizeTrait, StructArray};
 
 /// Find a struct child with the expected array type.
 /// Missing fields and type mismatches are left to the caller's error policy.
-pub(crate) fn struct_field<'a, T: Array + 'static>(
-    entity: &'a StructArray,
-    field: &str,
-) -> Option<&'a T> {
+pub fn struct_field<'a, T: Array + 'static>(entity: &'a StructArray, field: &str) -> Option<&'a T> {
     entity.column_by_name(field)?.as_any().downcast_ref()
 }
 
 /// Read a nullable string, preserving empty strings and the original text.
-pub(crate) fn string_value<O: OffsetSizeTrait>(
-    array: &GenericStringArray<O>,
-    row: usize,
-) -> Option<&str> {
+pub fn string_value<O: OffsetSizeTrait>(array: &GenericStringArray<O>, row: usize) -> Option<&str> {
     (!array.is_null(row)).then(|| array.value(row))
 }
 
 /// Read a struct child's string, honoring both parent and child validity.
 /// The child must belong to the parent and use the same row coordinates.
-pub(crate) fn struct_string_value<'a, O: OffsetSizeTrait>(
+pub fn struct_string_value<'a, O: OffsetSizeTrait>(
     entity: &StructArray,
     array: &'a GenericStringArray<O>,
     row: usize,
