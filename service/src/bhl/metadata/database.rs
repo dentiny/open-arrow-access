@@ -102,6 +102,7 @@ impl BhlMetadata {
     /// Temporary per-query selections remain private to cloned connections.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let connection = ManagedConnection::open(path, true)?;
+        super::resources::configure(&connection)?;
         let info = read_info(&connection)?;
         check_sources(&connection, &info)?;
         Self::from_connection(connection, info)
@@ -158,6 +159,7 @@ impl BhlMetadata {
         let snapshot_id = snapshot_id.into();
         validation::validate_database_snapshot_id(&snapshot_id)?;
         let connection = database.into_connection();
+        super::resources::configure(&connection)?;
         for table in tables() {
             let columns = connection.table_columns(&table.name)?;
             validation::validate_table_schema(&table, &columns)?;
