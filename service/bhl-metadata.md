@@ -41,6 +41,12 @@ The first version has three steps:
 2. `for_each` executes one [join SQL](src/bhl/metadata/join.sql) for the requested
    page identities. DuckDB performs joins, parent resolution and ordered list
    aggregation, without multiplying independent 1:N relations.
+   Before the correlated joins, [scope SQL](src/bhl/metadata/scope.sql) creates
+   connection-local temporary tables that retain only
+   the selected pages and their reachable metadata relations. Original source
+   row ordinals, duplicates, missing targets and conflicting parents are retained.
+   This reduces the input to join materialization; unprepared source tables may
+   still require a scan to find those records. Existing databases need no rebuild.
 3. Rust converts each result batch to the existing fixed Arrow metadata schema
    and immediately emits each page through the callback. It does not collect
    the full query result into a Rust lookup map.
