@@ -1,5 +1,24 @@
 # BHL metadata joins with embedded DuckDB
 
+## Reuse a caller-owned remote block cache
+
+The default `DuckDbDatabase::connect` cache is private and deleted when its last
+connection closes. To retain blocks across independent connections or jobs,
+explicitly provide a stable cache directory:
+
+```rust,ignore
+let database = DuckDbDatabase::connect_with_cache_directory(
+    metadata_uri, Some(init_sql), "/mounted-cache/bhl-snapshot-v1",
+)?;
+let metadata = BhlMetadata::from_tables_database(database, snapshot_id)?;
+```
+
+The caller creates/distributes the mount and owns cache capacity, eviction,
+invalidation and cleanup. Use a directory reserved for trusted readers in the same
+access domain and immutable snapshot. This option does not change cache_httpfs's
+validation or cross-process filesystem semantics. Spill files remain private and
+temporary. Existing callers retain their isolated-cache behavior.
+
 Metadata is included with `service-bhl` (service-crate feature `bhl`).
 The implementation uses the bundled Rust DuckDB binding on the 1.10506.x line;
 the lockfile selects 1.10506.1. This line uses Arrow 58, matching the public

@@ -12,7 +12,7 @@ pub(super) fn cache_setup(source: ::duckdb::Error) -> Error {
     Error::new(
         ErrorKind::Io,
         "duckdb_cache",
-        "could not install/load cache_httpfs or configure its temporary on-disk cache",
+        "could not install/load cache_httpfs or configure its on-disk cache",
     )
     .with_source(source)
 }

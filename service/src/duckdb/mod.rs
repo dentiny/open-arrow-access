@@ -3,6 +3,8 @@
 //! `DuckDbDatabase::connect` executes optional initialization SQL before a read-only
 //! local/remote ATTACH. Remote HTTP/S3 reads use cache_httpfs with a private
 //! temporary on-disk cache, fetching only requested blocks.
+//! `connect_with_cache_directory` opts into a caller-owned persistent directory
+//! for cache reuse across connections/jobs; mount setup and lifecycle are caller-owned.
 //! BHL uses in-memory or caller-owned persistent databases; CourtListener uses a
 //! disposable on-disk database. All modes configure a private spill directory,
 //! disable DuckDB's external memory cache, and retain scratch/cache storage
