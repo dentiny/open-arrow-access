@@ -5,6 +5,14 @@ pub(crate) fn filter_plan_error(error: datafusion::error::DataFusionError) -> Er
     Error::new(ErrorKind::InvalidInput, "plan_filter", error.to_string()).with_source(error)
 }
 
+pub(crate) fn unsupported_cell_filter_type(field: &arrow_schema::Field) -> Error {
+    filter_plan_error(datafusion::error::DataFusionError::Plan(format!(
+        "cell filter target {:?} has unsupported type {}",
+        field.name(),
+        field.data_type(),
+    )))
+}
+
 pub(crate) fn filter_predicate_type(actual: &arrow_schema::DataType) -> ArrowError {
     ArrowError::ComputeError(format!(
         "filter predicate must return Boolean, got {actual}"

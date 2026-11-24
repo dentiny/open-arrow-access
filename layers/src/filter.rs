@@ -273,16 +273,7 @@ impl FilterPlan {
                         let index = schema
                             .index_of(column)
                             .map_err(|error| crate::error::filter_plan_error(error.into()))?;
-                        let data_type = schema.field(index).data_type();
-                        // These layouts encode nulls in children rather than a
-                        // top-level validity bitmap, so nullif cannot mask them.
-                        if matches!(data_type, DataType::Union(..) | DataType::RunEndEncoded(..)) {
-                            return Err(crate::error::filter_plan_error(
-                                datafusion::error::DataFusionError::Plan(format!(
-                                    "cell filter target {column:?} has unsupported type {data_type}"
-                                )),
-                            ));
-                        }
+                        crate::validation::validate_cell_filter_target(schema.field(index))?;
                         Some(index)
                     }
                 };

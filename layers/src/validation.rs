@@ -9,6 +9,18 @@ use open_arrow_access_core::{
     EmissionPolicy, FieldNameIndex, OrderRequirement, ParallelReadOptions, Result,
 };
 
+pub(crate) fn validate_cell_filter_target(field: &Field) -> Result<()> {
+    // These layouts encode nulls in children rather than a top-level validity
+    // bitmap, so nullif cannot mask them.
+    if matches!(
+        field.data_type(),
+        DataType::Union(..) | DataType::RunEndEncoded(..)
+    ) {
+        return Err(crate::error::unsupported_cell_filter_type(field));
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_sampling_probability(probability: f64) -> Result<()> {
     if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
         return Err(crate::error::invalid_probability());
