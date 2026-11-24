@@ -32,36 +32,15 @@ impl DuckDbDatabase {
     /// explicitly requests persistence. cache_httpfs is force-installed from
     /// community and loaded on each connect; its on-disk cache is always
     /// configured before ATTACH, including local paths.
-    /// Only requested
-    /// blocks are fetched, with no full database download during opening.
+    /// The on-disk cache is always private and temporary, retained until the last
+    /// cloned connection closes. Independent connections use separate directories.
+    /// Only requested blocks are fetched, with no full database download during opening.
     /// The caller can load the SQL from any source or construct it in memory.
     /// SQL execution errors omit the SQL text, which may contain credentials.
     /// This is synchronous; use a blocking worker in async applications.
     pub fn connect(location: &str, init_sql: Option<&str>) -> Result<Self> {
         Ok(Self {
             connection: ManagedConnection::connect(location, init_sql)?,
-        })
-    }
-
-    /// Connect with a caller-owned persistent cache_httpfs directory.
-    /// Initialization SQL and cache setup still precede the read-only ATTACH.
-    /// The directory is created if missing and is never removed by this object.
-    /// This permits reuse across independent connections or jobs when callers
-    /// provide a suitable shared mount. It does not arrange that mount or change
-    /// cache_httpfs validation/eviction/concurrency behavior. Reserve the directory
-    /// for trusted readers of the same immutable snapshots and access domain;
-    /// callers own invalidation, capacity and cleanup. Spill remains private.
-    pub fn connect_with_cache_directory(
-        location: &str,
-        init_sql: Option<&str>,
-        cache_directory: impl AsRef<Path>,
-    ) -> Result<Self> {
-        Ok(Self {
-            connection: ManagedConnection::connect_with_cache_directory(
-                location,
-                init_sql,
-                Some(cache_directory.as_ref()),
-            )?,
         })
     }
 

@@ -2,11 +2,7 @@
 use super::error;
 use ::duckdb::{Config, Connection};
 use open_arrow_access_core::Result;
-use std::{
-    ops::Deref,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{ops::Deref, path::Path, sync::Arc};
 
 /// A column described by DuckDB, retaining its SQL type name.
 #[derive(Debug, PartialEq, Eq)]
@@ -61,14 +57,6 @@ impl ManagedConnection {
     /// Initialize secrets before attaching an existing local or remote database.
     /// The script is trusted caller SQL, executed once per database instance.
     pub(crate) fn connect(location: &str, init_sql: Option<&str>) -> Result<Self> {
-        Self::connect_with_cache_directory(location, init_sql, None)
-    }
-
-    pub(crate) fn connect_with_cache_directory(
-        location: &str,
-        init_sql: Option<&str>,
-        cache_directory: Option<&Path>,
-    ) -> Result<Self> {
         let connection = Self::in_memory()?;
         if let Some(sql) = init_sql {
             // DuckDB errors may echo SQL containing credentials; do not retain them.
@@ -76,7 +64,7 @@ impl ManagedConnection {
                 .execute_batch(sql)
                 .map_err(|_| error::init_setup())?;
         }
-        connection.configure_remote_cache(cache_directory)?;
+        connection.configure_remote_cache()?;
         let location = location.replace('\'', "''");
         connection
             .execute_batch(&format!(
@@ -86,20 +74,11 @@ impl ManagedConnection {
         Ok(connection)
     }
 
-    fn cache_directory(&self, requested: Option<&Path>) -> Result<PathBuf> {
-        let cache = requested
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| self.directory.path().join("http-cache"));
+    /// The same scratch owner keeps spill files and cached remote blocks alive
+    /// until the final cloned connection closes. No full database copy is made.
+    fn configure_remote_cache(&self) -> Result<()> {
+        let cache = self.directory.path().join("http-cache");
         std::fs::create_dir_all(&cache).map_err(error::scratch)?;
-        // Resolve relative paths before passing them to DuckDB, retaining the
-        // caller's directory without transferring ownership to the scratch guard.
-        std::fs::canonicalize(cache).map_err(error::scratch)
-    }
-
-    /// Spill is always private. The default cache shares its scratch lifetime;
-    /// an explicitly supplied cache is caller-owned and survives all clones.
-    fn configure_remote_cache(&self, requested: Option<&Path>) -> Result<()> {
-        let cache = self.cache_directory(requested)?;
         self.connection
             .execute_batch(&format!(
                 "FORCE INSTALL cache_httpfs FROM community;
@@ -199,32 +178,17 @@ impl Deref for ManagedConnection {
 mod tests {
     use super::*;
 
-    #[test]
-    fn default_cache_lives_until_the_last_clone_closes() {
+    #[tokio::test]
+    async fn temporary_cache_lives_until_the_last_clone_closes() {
         let connection = ManagedConnection::in_memory().unwrap();
-        let cache = connection.cache_directory(None).unwrap();
-        std::fs::write(cache.join("block"), b"cached bytes").unwrap();
+        let cache = connection.directory.path().join("http-cache");
+        tokio::fs::create_dir_all(&cache).await.unwrap();
+        let block = cache.join("block");
+        tokio::fs::write(&block, b"cached bytes").await.unwrap();
         let clone = connection.try_clone().unwrap();
         drop(connection);
-        assert_eq!(std::fs::read(cache.join("block")).unwrap(), b"cached bytes");
+        assert_eq!(tokio::fs::read(&block).await.unwrap(), b"cached bytes");
         drop(clone);
-        assert!(!cache.exists());
-    }
-
-    #[test]
-    fn explicit_cache_survives_connections_and_invalid_paths_fail() {
-        let directory = tempfile::tempdir().unwrap();
-        let requested = directory.path().join("shared '缓存");
-        let first = ManagedConnection::in_memory().unwrap();
-        let cache = first.cache_directory(Some(&requested)).unwrap();
-        assert!(cache.is_absolute());
-        std::fs::write(cache.join("block"), b"cached bytes").unwrap();
-        drop(first);
-        let second = ManagedConnection::in_memory().unwrap();
-        assert_eq!(second.cache_directory(Some(&requested)).unwrap(), cache);
-        assert_eq!(std::fs::read(cache.join("block")).unwrap(), b"cached bytes");
-        assert!(second.cache_directory(Some(&cache.join("block"))).is_err());
-        drop(second);
-        assert!(cache.join("block").is_file());
+        assert!(!tokio::fs::try_exists(&cache).await.unwrap());
     }
 }
