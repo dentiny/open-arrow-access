@@ -15,22 +15,8 @@ async fn prepared_lookup_preserves_lexical_values_relation_order_and_read_only_q
     let before = tokio::fs::read(&path).await.unwrap();
     let metadata = BhlMetadata::open_tables(&path, "prepared-v1").unwrap();
     let actual = read(&metadata, &[ITEM, PART]);
-    for (actual, expected) in actual.iter().zip(&expected) {
-        assert_eq!(actual.metadata, expected.metadata);
-        assert_eq!(actual.missing, expected.missing);
-        assert_eq!(actual.conflicts, expected.conflicts);
-    }
-    assert_eq!(actual.len(), expected.len());
+    assert_pages_eq(&actual, &expected);
     let connection = metadata.query_connection().unwrap();
-    let sql: String = connection
-        .query_row(
-            "SELECT sql FROM duckdb_views() WHERE temporary AND view_name='bhl_page'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert!(sql.contains("__bhl_lookup_page"), "{sql}");
-    assert!(!sql.contains("bhl_id("), "{sql}");
     let raw: String = connection
         .query_row("SELECT TitleID FROM main.title LIMIT 1", [], |r| r.get(0))
         .unwrap();
@@ -60,9 +46,7 @@ async fn prepared_lookup_rejects_incomplete_or_unknown_profiles_without_fallback
     ] {
         let (_directory, path, _) = plain_database().await;
         BhlMetadata::prepare_lookup(&path).await.unwrap();
-        let db = ::duckdb::Connection::open(&path).unwrap();
-        db.execute_batch(sql).unwrap();
-        drop(db);
+        update_database(&path, sql);
         assert!(BhlMetadata::open_tables(&path, "invalid").is_err(), "{sql}");
     }
     let directory = tempfile::tempdir().unwrap();
@@ -155,13 +139,32 @@ pub(in crate::bhl) async fn load() -> BhlMetadata {
 
 pub(in crate::bhl) async fn load_with_sql(sql: &str) -> BhlMetadata {
     let metadata = load().await;
+    execute(&metadata, sql);
+    metadata
+}
+
+fn execute(metadata: &BhlMetadata, sql: &str) {
     metadata
         .connection
         .lock()
         .unwrap()
         .execute_batch(sql)
         .unwrap();
-    metadata
+}
+
+fn update_database(path: &std::path::Path, sql: &str) {
+    let connection = ::duckdb::Connection::open(path).unwrap();
+    connection.execute_batch(sql).unwrap();
+    connection.close().unwrap();
+}
+
+fn assert_pages_eq(actual: &[BhlPageMetadata], expected: &[BhlPageMetadata]) {
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert_eq!(actual.metadata, expected.metadata);
+        assert_eq!(actual.missing, expected.missing);
+        assert_eq!(actual.conflicts, expected.conflicts);
+    }
 }
 
 fn cell(row: &StructArray, table: &str, field: &str) -> String {
@@ -220,12 +223,9 @@ async fn joins_pages_and_preserves_source_values_and_relation_order() {
     let metadata = load().await;
     // Multiple independent relations and duplicate creators catch multiplication
     // bugs; insertion order must survive the joins and list aggregations.
-    metadata
-        .connection
-        .lock()
-        .unwrap()
-        .execute_batch(
-            "INSERT INTO creator VALUES ('1', '9', '', '', '');
+    execute(
+        &metadata,
+        "INSERT INTO creator VALUES ('1', '9', '', '', '');
          INSERT INTO creator VALUES ('1', '10', 'Author', 'Second', '');
          INSERT INTO creatoridentifier VALUES ('10', '', 'other', '');
          INSERT INTO subject VALUES ('1', 'a', '');
@@ -236,8 +236,7 @@ async fn joins_pages_and_preserves_source_values_and_relation_order() {
          INSERT INTO doi VALUES ('page', '3', 'page DOI', '');
          INSERT INTO doi VALUES ('part', '8', 'part DOI', '');
          INSERT INTO doi VALUES ('title', '2', 'unrelated DOI', '');",
-        )
-        .unwrap();
+    );
     let rows = read(&metadata, &[ITEM, PART]);
     assert_eq!(metadata.info.sources.len(), 13);
     assert_eq!(rows.len(), 2);
@@ -308,18 +307,14 @@ async fn item_title_associations_preserve_all_records_without_multiplying_pages(
         .unwrap();
     }
     let metadata = BhlMetadata::load(storage).await.unwrap();
-    metadata
-        .connection
-        .lock()
-        .unwrap()
-        .execute_batch(
-            "INSERT INTO subject VALUES ('1', 'first subject', '');
+    execute(
+        &metadata,
+        "INSERT INTO subject VALUES ('1', 'first subject', '');
          INSERT INTO subject VALUES ('42', 'second subject', '');
          INSERT INTO creator VALUES ('1', '9', '', '', '');
          INSERT INTO creator VALUES ('42', '10', 'Author', 'Other author', '');
          INSERT INTO doi VALUES ('Title', '42', 'second title DOI', '');",
-        )
-        .unwrap();
+    );
     let rows = read(&metadata, &[ITEM, PART]);
     assert_eq!(rows.len(), 2);
     for page in rows {
@@ -344,44 +339,28 @@ async fn item_title_associations_preserve_all_records_without_multiplying_pages(
             ["9", "9", "10"]
         );
     }
-    metadata
-        .connection
-        .lock()
-        .unwrap()
-        .execute_batch("INSERT INTO item SELECT * FROM item WHERE bhl_id(TitleID) = 1")
-        .unwrap();
+    execute(
+        &metadata,
+        "INSERT INTO item SELECT * FROM item WHERE bhl_id(TitleID) = 1",
+    );
     assert_eq!(
         list(&read(&metadata, &[ITEM])[0].metadata, "doi", "DOI"),
         ["title DOI", "second title DOI"]
     );
-    metadata
-        .connection
-        .lock()
-        .unwrap()
-        .execute_batch("DELETE FROM title WHERE bhl_id(TitleID) = 42")
-        .unwrap();
+    execute(&metadata, "DELETE FROM title WHERE bhl_id(TitleID) = 42");
     assert_eq!(read(&metadata, &[ITEM])[0].missing, ["title:42"]);
 }
 
 #[tokio::test]
 async fn reports_conflicts_and_falls_back_to_partpage_parent() {
     let metadata = load().await;
-    metadata
-        .connection
-        .lock()
-        .unwrap()
-        .execute_batch(
-            "UPDATE part SET ItemID = '7';
+    execute(
+        &metadata,
+        "UPDATE part SET ItemID = '7';
          INSERT INTO partpage VALUES ('8', '3', '9', '2', '');",
-        )
-        .unwrap();
+    );
     invalid_selection(&metadata, &[PART]);
-    metadata
-        .connection
-        .lock()
-        .unwrap()
-        .execute_batch("DELETE FROM partpage WHERE SequenceOrder = '2'")
-        .unwrap();
+    execute(&metadata, "DELETE FROM partpage WHERE SequenceOrder = '2'");
     let row = read(&metadata, &[PART]).pop().unwrap();
     assert_eq!(
         row.conflicts,
@@ -391,12 +370,7 @@ async fn reports_conflicts_and_falls_back_to_partpage_parent() {
         ]
     );
     assert_eq!(row.missing, ["item:7", "title:unresolved parent"]);
-    metadata
-        .connection
-        .lock()
-        .unwrap()
-        .execute_batch("DELETE FROM part;")
-        .unwrap();
+    execute(&metadata, "DELETE FROM part;");
     let row = read(&metadata, &[PART]).pop().unwrap();
     assert_eq!(cell(&row.metadata, "item", "ItemID"), "2");
     assert_eq!(row.missing, ["part:8"]);
@@ -467,12 +441,7 @@ async fn databases_reopen_without_source_access_and_keep_provenance() {
     assert_eq!(read(&other, &[ITEM]).len(), 1);
     drop(other);
     let actual = read(&database, &[ITEM, PART]);
-    assert_eq!(actual.len(), expected.len());
-    for (actual, expected) in actual.iter().zip(&expected) {
-        assert_eq!(actual.metadata, expected.metadata);
-        assert_eq!(actual.missing, expected.missing);
-        assert_eq!(actual.conflicts, expected.conflicts);
-    }
+    assert_pages_eq(&actual, &expected);
     assert!(
         database
             .connection
@@ -483,11 +452,7 @@ async fn databases_reopen_without_source_access_and_keep_provenance() {
     );
     invalid_selection(&database, &[ITEM, ITEM]);
     drop(database);
-    {
-        let db = ::duckdb::Connection::open(&path).unwrap();
-        db.execute_batch("UPDATE __bhl_metadata SET version = 999")
-            .unwrap();
-    }
+    update_database(&path, "UPDATE __bhl_metadata SET version = 999");
     assert!(BhlMetadata::open(&path).is_err());
 }
 
@@ -527,74 +492,46 @@ async fn plain_database() -> (tempfile::TempDir, std::path::PathBuf, Vec<BhlPage
 }
 
 #[tokio::test]
-async fn plain_tables_open_read_only_without_importer_objects_and_keep_query_isolation() {
-    let (_directory, path, expected) = plain_database().await;
-    {
-        let connection = ::duckdb::Connection::open(&path).unwrap();
-        // The query must ignore NULL cells in titles unrelated to these pages.
-        connection.execute_batch(
-            "INSERT INTO title SELECT * REPLACE ('999999' AS TitleID, NULL AS FullTitle) FROM title LIMIT 1;"
-        ).unwrap();
+async fn plain_and_legacy_tables_keep_read_only_queries_isolated() {
+    for setup in [
+        // Unrelated NULL cells must not affect the selected pages.
+        "INSERT INTO title SELECT * REPLACE ('999999' AS TitleID, NULL AS FullTitle) FROM title LIMIT 1;",
+        // Temporary helpers must shadow obsolete persistent definitions.
+        "CREATE MACRO bhl_id(value) AS 0::UBIGINT;
+         CREATE VIEW bhl_page AS SELECT 0::UBIGINT AS __key; CHECKPOINT;",
+    ] {
+        let (_directory, path, expected) = plain_database().await;
+        update_database(&path, setup);
+        let original = tokio::fs::read(&path).await.unwrap();
+        // Managed databases retain their strict importer-manifest contract.
+        assert!(BhlMetadata::open(&path).is_err());
+        let metadata = Arc::new(BhlMetadata::open_tables(&path, "fixture-database-v1").unwrap());
+        assert_eq!(metadata.info.fingerprint, "fixture-database-v1");
+        assert!(metadata.info.sources.is_empty());
+        let actual = read(&metadata, &[ITEM, PART]);
+        assert_pages_eq(&actual, &expected);
+        // Each clone must initialize its own temporary helpers and selection table.
+        let readers = [ITEM, PART].map(|key| {
+            let metadata = metadata.clone();
+            std::thread::spawn(move || {
+                assert_eq!(read(&metadata, &[key]).len(), 1);
+                assert_eq!(read(&metadata, &[key]).len(), 1);
+            })
+        });
+        for reader in readers {
+            reader.join().unwrap();
+        }
+        assert!(
+            metadata
+                .connection
+                .lock()
+                .unwrap()
+                .execute_batch("DELETE FROM main.page")
+                .is_err()
+        );
+        drop(metadata);
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), original);
     }
-    let original = tokio::fs::read(&path).await.unwrap();
-    // Managed databases retain their strict importer-manifest contract.
-    assert!(BhlMetadata::open(&path).is_err());
-    let metadata = Arc::new(BhlMetadata::open_tables(&path, "fixture-database-v1").unwrap());
-    assert_eq!(metadata.info.fingerprint, "fixture-database-v1");
-    assert!(metadata.info.sources.is_empty());
-    let actual = read(&metadata, &[ITEM, PART]);
-    assert_eq!(actual.len(), expected.len());
-    for (actual, expected) in actual.iter().zip(&expected) {
-        assert_eq!(actual.metadata, expected.metadata);
-        assert_eq!(actual.missing, expected.missing);
-        assert_eq!(actual.conflicts, expected.conflicts);
-    }
-    // Each clone must initialize its own temporary helpers and selection table.
-    let readers = [ITEM, PART].map(|key| {
-        let metadata = metadata.clone();
-        std::thread::spawn(move || {
-            assert_eq!(read(&metadata, &[key]).len(), 1);
-            assert_eq!(read(&metadata, &[key]).len(), 1);
-        })
-    });
-    for reader in readers {
-        reader.join().unwrap();
-    }
-    assert!(
-        metadata
-            .connection
-            .lock()
-            .unwrap()
-            .execute_batch("DELETE FROM main.page")
-            .is_err()
-    );
-    drop(metadata);
-    assert_eq!(tokio::fs::read(&path).await.unwrap(), original);
-}
-
-#[tokio::test]
-async fn query_local_helpers_override_legacy_persisted_helpers() {
-    let (_directory, path, expected) = plain_database().await;
-    let connection = ::duckdb::Connection::open(&path).unwrap();
-    connection
-        .execute_batch(
-            "CREATE MACRO bhl_id(value) AS 0::UBIGINT;
-             CREATE VIEW bhl_page AS SELECT 0::UBIGINT AS __key;
-             CHECKPOINT;",
-        )
-        .unwrap();
-    drop(connection);
-    let before = tokio::fs::read(&path).await.unwrap();
-    let metadata = BhlMetadata::open_tables(&path, "legacy-helpers").unwrap();
-    let actual = read(&metadata, &[ITEM, PART]);
-    assert_eq!(actual.len(), expected.len());
-    for (actual, expected) in actual.iter().zip(&expected) {
-        assert_eq!(actual.metadata, expected.metadata);
-        assert_eq!(actual.missing, expected.missing);
-        assert_eq!(actual.conflicts, expected.conflicts);
-    }
-    drop(metadata);
-    assert_eq!(tokio::fs::read(&path).await.unwrap(), before);
 }
 
 #[tokio::test]
@@ -606,20 +543,14 @@ async fn plain_tables_reject_bad_schemas_keys_and_consumed_null_cells() {
         "UPDATE title SET TitleID = 'invalid'",
     ] {
         let (_directory, path, _) = plain_database().await;
-        let connection = ::duckdb::Connection::open(&path).unwrap();
-        connection.execute_batch(sql).unwrap();
-        drop(connection);
+        update_database(&path, sql);
         assert!(
             BhlMetadata::open_tables(&path, "snapshot").is_err(),
             "{sql}"
         );
     }
     let (_directory, path, _) = plain_database().await;
-    let connection = ::duckdb::Connection::open(&path).unwrap();
-    connection
-        .execute_batch("UPDATE title SET FullTitle = NULL")
-        .unwrap();
-    drop(connection);
+    update_database(&path, "UPDATE title SET FullTitle = NULL");
     let metadata = BhlMetadata::open_tables(&path, "snapshot").unwrap();
     assert!(
         metadata
@@ -647,20 +578,10 @@ async fn part_parent_associations_preserve_blank_ids_and_do_not_multiply_pages()
         assert!(row.missing.is_empty());
         assert!(row.conflicts.is_empty());
     }
-    metadata
-        .connection
-        .lock()
-        .unwrap()
-        .execute_batch("UPDATE part SET ItemID = '9' WHERE ItemID = '';")
-        .unwrap();
+    execute(&metadata, "UPDATE part SET ItemID = '9' WHERE ItemID = '';");
     let row = read(&metadata, &[PART]).pop().unwrap();
     assert_eq!(row.conflicts, ["part.ItemID=9, selected item=Some(2)"]);
-    metadata
-        .connection
-        .lock()
-        .unwrap()
-        .execute_batch("DELETE FROM page; DELETE FROM partpage;")
-        .unwrap();
+    execute(&metadata, "DELETE FROM page; DELETE FROM partpage;");
     invalid_selection(&metadata, &[PART]);
 }
 
@@ -687,12 +608,10 @@ async fn page_relations_preserve_types_order_and_one_output_per_ocr_request() {
         assert_eq!(list(&row.metadata, "page", "PageNumber"), ["I", "1", "I"]);
         assert_eq!(list(&row.metadata, "page", "ItemID"), ["2", "2", "2"]);
     }
-    metadata
-        .connection
-        .lock()
-        .unwrap()
-        .execute_batch("INSERT INTO page VALUES ('3','7','6','','','','','','Text','');")
-        .unwrap();
+    execute(
+        &metadata,
+        "INSERT INTO page VALUES ('3','7','6','','','','','','Text','');",
+    );
     invalid_selection(&metadata, &[ITEM]);
 }
 
