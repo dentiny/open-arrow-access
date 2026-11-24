@@ -752,3 +752,84 @@ async fn header_only_opinions_produce_empty_joined_stream() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn checked_in_database_sql_matches_source_schema_and_binds_manifest() {
+    use open_arrow_access_service::courtlistener::CourtListenerSchemas;
+    let connection = duckdb::Connection::open_in_memory().unwrap();
+    let ddl = include_str!("../src/courtlistener/sql/create_tables.sql");
+    connection.execute_batch(ddl).unwrap();
+    let schema = CourtListenerSchemas::default();
+    for (table, fields) in [
+        ("opinions", &schema.opinion),
+        ("opinion_clusters", &schema.cluster),
+        ("dockets", &schema.docket),
+        ("courts", &schema.court),
+    ] {
+        let expected = fields
+            .iter()
+            .map(|field| {
+                let data_type = match field.data_type() {
+                    DataType::Utf8 => "VARCHAR",
+                    DataType::Int16 => "SMALLINT",
+                    DataType::Int32 => "INTEGER",
+                    DataType::Int64 => "BIGINT",
+                    DataType::UInt64 => "UBIGINT",
+                    DataType::Float64 => "DOUBLE",
+                    DataType::Boolean => "BOOLEAN",
+                    DataType::Date32 => "DATE",
+                    DataType::Timestamp(_, _) => "TIMESTAMP WITH TIME ZONE",
+                    _ => panic!("unexpected type"),
+                };
+                (
+                    field.name().clone(),
+                    data_type.to_owned(),
+                    if field.is_nullable() { "YES" } else { "NO" }.to_owned(),
+                )
+            })
+            .chain(std::iter::once((
+                "__courtlistener_ordinal".to_owned(),
+                "UBIGINT".to_owned(),
+                "NO".to_owned(),
+            )))
+            .collect::<Vec<_>>();
+        let mut stmt = connection.prepare(&format!("DESCRIBE {table}")).unwrap();
+        let actual = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(actual, expected, "{table}");
+    }
+    connection
+        .execute_batch(include_str!("../src/courtlistener/sql/create_snapshot.sql"))
+        .unwrap();
+    connection
+        .execute(
+            include_str!("../src/courtlistener/sql/insert_snapshot.sql"),
+            duckdb::params![1_i32, "2026-09-30", "s3://example", "schema-contract"],
+        )
+        .unwrap();
+    let row: (i32, String, String, String) = connection
+        .query_row("SELECT * FROM courtlistener_snapshot", [], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .unwrap();
+    assert_eq!(
+        row,
+        (
+            1,
+            "2026-09-30".into(),
+            "s3://example".into(),
+            "schema-contract".into()
+        )
+    );
+    assert!(connection.execute_batch(ddl).is_err());
+    connection.execute_batch("CHECKPOINT").unwrap();
+}

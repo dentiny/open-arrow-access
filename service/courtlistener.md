@@ -446,6 +446,12 @@ provide the schema above. Same-date tables are not an atomic database snapshot.
 For public S3, callers configure the `com-courtlistener-storage` bucket,
 region and unsigned access on their OpenDAL operator; local mirrors work too.
 
+## Prepared database SQL reference
+
+The [full four-table DDL and creation sequence](src/courtlistener/sql/README.md)
+document the local prepared database layout. These standalone SQL files create
+empty typed tables; CSV loading and file publication are separate steps.
+
 ## Typed table records
 
 `CourtListenerTableAccessor` provides strict typed records for `opinions`,
