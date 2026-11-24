@@ -18,7 +18,8 @@ The first version has three steps:
 2. `for_each` executes one [join SQL](src/bhl/metadata/join.sql) for the requested
    page identities. DuckDB performs joins, parent resolution and ordered list
    aggregation, without multiplying independent 1:N relations.
-   Before the correlated joins, connection-local temporary tables retain only
+   Before the correlated joins, [scope SQL](src/bhl/metadata/scope.sql) creates
+   connection-local temporary tables that retain only
    the selected pages and their reachable metadata relations. Original source
    row ordinals, duplicates, missing targets and conflicting parents are retained.
    This reduces the input to join materialization; unprepared source tables may
