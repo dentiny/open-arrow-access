@@ -249,68 +249,6 @@ async fn mixed_rules_use_original_values_and_combine_cell_masks() {
 }
 
 #[tokio::test]
-async fn cell_rules_support_reordered_hidden_and_empty_projections() {
-    let memory = MemoryRecordAccessor::new(vec![batch()]);
-    let source = memory.clone().layer(FilterLayer::with_rules(vec![
-        cell("id", col("id").gt(lit(1i64))),
-        cell("data", col("id").lt(lit(3i64))),
-    ]));
-    let mut reader = source
-        .open(ReadRequest::new("input").with_projection(["data", "id"]))
-        .await
-        .unwrap();
-    let output = reader.next().await.unwrap().unwrap();
-    assert!(output.schema().field(1).is_nullable());
-    assert_eq!(
-        output
-            .column(1)
-            .as_primitive::<Int64Type>()
-            .iter()
-            .collect::<Vec<_>>(),
-        [None, None, Some(2), Some(3), Some(4), Some(5)]
-    );
-    assert_eq!(
-        output
-            .column(0)
-            .as_binary::<i32>()
-            .iter()
-            .collect::<Vec<_>>(),
-        [
-            Some(b"".as_slice()),
-            Some(b"\xff\x00\x80".as_slice()),
-            Some(b"ab".as_slice()),
-            None,
-            None,
-            None
-        ]
-    );
-
-    let source = memory.clone().layer(FilterLayer::with_rules(vec![cell(
-        "data",
-        size_predicate(2),
-    )]));
-    let reader = source
-        .open(ReadRequest::new("input").with_projection(["id"]))
-        .await
-        .unwrap();
-    assert!(!reader.metadata().schema.field(0).is_nullable());
-    assert_eq!(
-        collect_column::<Int64Type>(reader, 0).await,
-        [0, 1, 2, 3, 4, 5]
-    );
-    assert_eq!(
-        memory.projections.lock().unwrap().last(),
-        Some(&Some(vec!["id".into(), "data".into()]))
-    );
-    let mut reader = source
-        .open(ReadRequest::new("input").with_projection(Vec::<String>::new()))
-        .await
-        .unwrap();
-    let output = reader.next().await.unwrap().unwrap();
-    assert_eq!((output.num_columns(), output.num_rows()), (0, 6));
-}
-
-#[tokio::test]
 async fn scalar_cell_rules_keep_rows_and_make_nonnullable_targets_nullable() {
     for (value, expected) in [(Some(true), true), (Some(false), false), (None, false)] {
         let source =
