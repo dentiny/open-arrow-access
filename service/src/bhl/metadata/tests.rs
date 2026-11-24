@@ -66,6 +66,7 @@ async fn prepared_lookup_rejects_incomplete_or_unknown_profiles_without_fallback
         assert!(BhlMetadata::open_tables(&path, "invalid").is_err(), "{sql}");
     }
     let directory = tempfile::tempdir().unwrap();
+    assert!(BhlMetadata::prepare_lookup(directory.path()).is_err());
     let missing = directory.path().join("missing.duckdb");
     assert!(BhlMetadata::prepare_lookup(&missing).is_err());
     assert!(!missing.exists());

@@ -16,38 +16,20 @@ pub(super) fn available(connection: &ManagedConnection) -> Result<bool> {
     if !exists {
         return Ok(false);
     }
-    let version: (u64, Option<u64>) = connection
+    let (count, version): (u64, Option<u64>) = connection
         .query_row(
             "SELECT count(*),min(version) FROM main.__bhl_lookup",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(error::duckdb)?;
-    if version != (1, Some(1)) {
-        return Err(error::invalid(
-            "unsupported or incomplete BHL lookup profile",
-        ));
-    }
+    validation::validate_lookup_header(count, version)?;
     for table in tables() {
         let columns = connection.table_columns(&format!("__bhl_lookup_{}", table.name))?;
-        if columns.len() != table.fields.len() + 2 {
-            return Err(error::invalid("invalid BHL lookup table schema"));
-        }
-        validation::validate_table_schema(&table, &columns[..table.fields.len()])?;
-        let ordinal = &columns[table.fields.len()];
-        let key = &columns[table.fields.len() + 1];
-        if ordinal.name != "__source_rowid"
-            || ordinal.data_type != "UBIGINT"
-            || key.name != "__key"
-            || key.data_type != "UBIGINT"
-        {
-            return Err(error::invalid("invalid BHL lookup key or source ordinal"));
-        }
+        validation::validate_lookup_schema(&table, &columns)?;
         let raw_count = connection.table_row_count(&table.name)?;
         let prepared_count = connection.table_row_count(&format!("__bhl_lookup_{}", table.name))?;
-        if raw_count != prepared_count {
-            return Err(error::invalid("incomplete BHL lookup table"));
-        }
+        validation::validate_lookup_rows(raw_count, prepared_count)?;
     }
     Ok(true)
 }

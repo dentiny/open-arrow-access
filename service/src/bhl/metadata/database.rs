@@ -102,14 +102,8 @@ impl BhlMetadata {
     /// Existing lookup profiles are rejected rather than overwritten.
     pub fn prepare_lookup(path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
-        if !std::fs::metadata(path)
-            .map_err(error::database_io)?
-            .is_file()
-        {
-            return Err(error::invalid(
-                "BHL lookup requires an existing database file",
-            ));
-        }
+        let file = std::fs::metadata(path).map_err(error::database_io)?;
+        validation::validate_lookup_file(file.is_file())?;
         let connection = ManagedConnection::open(path, false)?;
         for table in tables() {
             let columns = connection.table_columns(&table.name)?;
