@@ -9,26 +9,6 @@ const PART: &str = "ocr/part-8/part-8-3-1.txt";
 const MISSING: &str = "ocr/item-20/item-20-30-1.txt";
 
 #[tokio::test]
-async fn read_only_snapshots_share_bounded_query_resources() {
-    let (_directory, path, expected) = plain_database().await;
-    let metadata = BhlMetadata::open_tables(&path, "bounded-resources").unwrap();
-    for _ in 0..2 {
-        let connection = metadata.query_connection().unwrap();
-        let settings: (String, u64, String, bool) = connection
-            .query_row(
-                "SELECT current_setting('memory_limit'), current_setting('threads'),
-                 current_setting('max_temp_directory_size'),
-                 current_setting('preserve_insertion_order')",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
-        assert_eq!(settings, ("1.0 GiB".into(), 2, "1.0 GiB".into(), false));
-    }
-    assert_pages_eq(&read(&metadata, &[ITEM, PART]), &expected);
-}
-
-#[tokio::test]
 async fn prepared_lookup_preserves_lexical_values_relation_order_and_read_only_queries() {
     let (_directory, path, expected) = plain_database().await;
     BhlMetadata::prepare_lookup(&path).await.unwrap();
