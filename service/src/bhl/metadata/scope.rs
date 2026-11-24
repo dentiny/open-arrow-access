@@ -2,6 +2,11 @@
 use super::error;
 use open_arrow_access_core::Result;
 
+/// Make filtering an explicit execution boundary: a view or inline predicate
+/// alone can still let DuckDB scan and materialize the full source relation
+/// inside a correlated join. Rebind the existing view name to the narrowed
+/// temporary table so join.sql benefits without changing its reconciliation
+/// logic or modifying the shared source database.
 fn materialize(connection: &::duckdb::Connection, table: &str, predicate: &str) -> Result<()> {
     // Identifiers and predicates are fixed below, never supplied by a caller.
     // Keep the explicit source rowid: list ordering must not use the new table's
@@ -16,6 +21,12 @@ fn materialize(connection: &::duckdb::Connection, table: &str, predicate: &str) 
         .map_err(error::duckdb)
 }
 
+/// Bound metadata join inputs to this request before DuckDB builds wide
+/// correlated intermediates. Small page selections otherwise still scan the
+/// corpus-wide page/name tables and retain unrelated records in join state.
+/// Follow every reachable parent and relationship in dependency order, keeping
+/// duplicates and conflicting candidates for the existing join to reconcile.
+/// The query's private connection owns these tables, isolating concurrent reads.
 pub(super) fn prepare(connection: &::duckdb::Connection) -> Result<()> {
     materialize(
         connection,
