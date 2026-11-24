@@ -3,7 +3,7 @@
 ## Optional prepared numeric lookup tables
 
 After finalizing a local metadata database and closing its readers, run
-`BhlMetadata::prepare_lookup("bhl-metadata.duckdb")` once before distributing
+`BhlMetadata::prepare_lookup("bhl-metadata.duckdb").await?` once before distributing
 the immutable snapshot. Alternatively run
 [`prepare_lookup.sql`](src/bhl/metadata/prepare_lookup.sql) after the existing
 13-table import SQL. Both routes create the same versioned lookup profile.

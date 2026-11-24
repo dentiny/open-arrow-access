@@ -42,7 +42,11 @@ impl BhlMetadata {
         path: impl AsRef<Path>,
     ) -> Result<()> {
         let path = path.as_ref().to_path_buf();
-        validation::validate_database_destination(path.try_exists().map_err(error::database_io)?)?;
+        validation::validate_database_destination(
+            tokio::fs::try_exists(&path)
+                .await
+                .map_err(error::database_io)?,
+        )?;
         let connection = ManagedConnection::open(&path, false)?;
         let metadata = Self::import(storage, connection).await?;
         tokio::task::spawn_blocking(move || {
@@ -99,21 +103,28 @@ impl BhlMetadata {
     /// disk/memory for the derived tables and indexes. Distribute the completed
     /// immutable file only after this method returns; never modify raw tables
     /// without rebuilding the snapshot and its lookup tables together.
-    /// Existing lookup profiles are rejected rather than overwritten.
-    pub fn prepare_lookup(path: impl AsRef<Path>) -> Result<()> {
-        let path = path.as_ref();
-        let file = std::fs::metadata(path).map_err(error::database_io)?;
+    /// Existing lookup profiles are rejected rather than overwritten. Filesystem
+    /// checks are asynchronous; synchronous DuckDB work runs on a blocking worker.
+    pub async fn prepare_lookup(path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref().to_path_buf();
+        let file = tokio::fs::metadata(&path)
+            .await
+            .map_err(error::database_io)?;
         validation::validate_lookup_file(file.is_file())?;
-        let connection = ManagedConnection::open(path, false)?;
-        for table in tables() {
-            let columns = connection.table_columns(&table.name)?;
-            validation::validate_table_schema(&table, &columns)?;
-        }
-        if let Err(source) = connection.execute_batch(include_str!("prepare_lookup.sql")) {
-            let _ = connection.execute_batch("ROLLBACK");
-            return Err(error::duckdb(source));
-        }
-        connection.close()
+        tokio::task::spawn_blocking(move || {
+            let connection = ManagedConnection::open(path, false)?;
+            for table in tables() {
+                let columns = connection.table_columns(&table.name)?;
+                validation::validate_table_schema(&table, &columns)?;
+            }
+            if let Err(source) = connection.execute_batch(include_str!("prepare_lookup.sql")) {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error::duckdb(source));
+            }
+            connection.close()
+        })
+        .await
+        .map_err(error::task)?
     }
 
     /// Bind a shared local or remote DuckDB database to BHL tables.

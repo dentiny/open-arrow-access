@@ -11,8 +11,8 @@ const MISSING: &str = "ocr/item-20/item-20-30-1.txt";
 #[tokio::test]
 async fn prepared_lookup_preserves_lexical_values_relation_order_and_read_only_queries() {
     let (_directory, path, expected) = plain_database().await;
-    BhlMetadata::prepare_lookup(&path).unwrap();
-    let before = std::fs::read(&path).unwrap();
+    BhlMetadata::prepare_lookup(&path).await.unwrap();
+    let before = tokio::fs::read(&path).await.unwrap();
     let metadata = BhlMetadata::open_tables(&path, "prepared-v1").unwrap();
     let actual = read(&metadata, &[ITEM, PART]);
     for (actual, expected) in actual.iter().zip(&expected) {
@@ -45,9 +45,9 @@ async fn prepared_lookup_preserves_lexical_values_relation_order_and_read_only_q
     assert_eq!(indexes, 13);
     drop(connection);
     drop(metadata);
-    assert_eq!(std::fs::read(&path).unwrap(), before);
-    assert!(BhlMetadata::prepare_lookup(&path).is_err());
-    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(tokio::fs::read(&path).await.unwrap(), before);
+    assert!(BhlMetadata::prepare_lookup(&path).await.is_err());
+    assert_eq!(tokio::fs::read(&path).await.unwrap(), before);
 }
 
 #[tokio::test]
@@ -59,17 +59,17 @@ async fn prepared_lookup_rejects_incomplete_or_unknown_profiles_without_fallback
         "DELETE FROM __bhl_lookup_page",
     ] {
         let (_directory, path, _) = plain_database().await;
-        BhlMetadata::prepare_lookup(&path).unwrap();
+        BhlMetadata::prepare_lookup(&path).await.unwrap();
         let db = ::duckdb::Connection::open(&path).unwrap();
         db.execute_batch(sql).unwrap();
         drop(db);
         assert!(BhlMetadata::open_tables(&path, "invalid").is_err(), "{sql}");
     }
     let directory = tempfile::tempdir().unwrap();
-    assert!(BhlMetadata::prepare_lookup(directory.path()).is_err());
+    assert!(BhlMetadata::prepare_lookup(directory.path()).await.is_err());
     let missing = directory.path().join("missing.duckdb");
-    assert!(BhlMetadata::prepare_lookup(&missing).is_err());
-    assert!(!missing.exists());
+    assert!(BhlMetadata::prepare_lookup(&missing).await.is_err());
+    assert!(!tokio::fs::try_exists(&missing).await.unwrap());
 }
 
 async fn source(title: &str) -> (tempfile::TempDir, OpenDalAccessor) {
@@ -249,10 +249,11 @@ async fn rejects_invalid_sources() {
 async fn item_title_associations_preserve_all_records_without_multiplying_pages() {
     let (root, storage) = source("title.txt.gz").await;
     for table in ["item", "title"] {
-        std::fs::write(
+        tokio::fs::write(
             root.path().join(format!("data/{table}.txt.gz")),
             fixture!("bhl-metadata", &format!("{table}-multi-title.txt.gz")).await,
         )
+        .await
         .unwrap();
     }
     let metadata = BhlMetadata::load(storage).await.unwrap();
@@ -472,7 +473,7 @@ async fn plain_tables_open_read_only_without_importer_objects_and_keep_query_iso
             "INSERT INTO title SELECT * REPLACE ('999999' AS TitleID, NULL AS FullTitle) FROM title LIMIT 1;"
         ).unwrap();
     }
-    let original = std::fs::read(&path).unwrap();
+    let original = tokio::fs::read(&path).await.unwrap();
     // Managed databases retain their strict importer-manifest contract.
     assert!(BhlMetadata::open(&path).is_err());
     let metadata = Arc::new(BhlMetadata::open_tables(&path, "fixture-database-v1").unwrap());
@@ -505,7 +506,7 @@ async fn plain_tables_open_read_only_without_importer_objects_and_keep_query_iso
             .is_err()
     );
     drop(metadata);
-    assert_eq!(std::fs::read(&path).unwrap(), original);
+    assert_eq!(tokio::fs::read(&path).await.unwrap(), original);
 }
 
 #[tokio::test]
@@ -540,7 +541,7 @@ async fn plain_tables_reject_bad_schemas_keys_and_consumed_null_cells() {
     assert!(BhlMetadata::open_tables(&path, "  ").is_err());
     let missing = path.with_file_name("missing.duckdb");
     assert!(BhlMetadata::open_tables(&missing, "snapshot").is_err());
-    assert!(!missing.exists());
+    assert!(!tokio::fs::try_exists(&missing).await.unwrap());
 }
 
 #[tokio::test]
@@ -578,10 +579,11 @@ async fn part_parent_associations_preserve_blank_ids_and_do_not_multiply_pages()
 #[tokio::test]
 async fn page_relations_preserve_types_order_and_one_output_per_ocr_request() {
     let (root, storage) = source("title.txt.gz").await;
-    std::fs::write(
+    tokio::fs::write(
         root.path().join("data/page.txt.gz"),
         fixture!("bhl-metadata", "page-multiple-types.txt.gz").await,
     )
+    .await
     .unwrap();
     let metadata = BhlMetadata::load(storage).await.unwrap();
     assert_eq!(metadata.info.sources["page"].rows, 3);
