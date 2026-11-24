@@ -1,6 +1,5 @@
 -- Run with DuckDB v1.5.6 and httpfs enabled, against a NEW database file.
 LOAD httpfs;
-SET threads = 4;
 SET preserve_insertion_order = false;
 
 -- Gzip is decompressed automatically. Keep every field as VARCHAR;
