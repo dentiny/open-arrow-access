@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.21.5 - 2026-11-24
+
+- Bound BHL snapshot queries to a 1 GiB DuckDB buffer budget, two threads and 1 GiB of spill, and use a 128 MiB remote memory cache with request fanout limited to four.
+- Reduce scoped BHL metadata intermediates while preserving complete records, relationship order and lexical values.
+- Release all eight public workspace crates at 0.21.5 with aligned internal dependency requirements.
+
 ## 0.21.4 - 2026-11-23
 
 - Scope BHL metadata relations to selected pages and related parents before correlated joins build wide intermediate results.
