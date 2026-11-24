@@ -1,4 +1,5 @@
-//! Schema contract pinned to the exported 2026-09-30 headers and companion SQL.
+//! Source and document-URL schema contracts. Source fields are pinned to the
+//! exported 2026-09-30 headers and companion SQL; PDF bytes belong to the sink.
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
 use std::sync::{Arc, OnceLock};
 
@@ -211,7 +212,8 @@ impl CourtListenerSchemas {
     pub(crate) fn tables(&self) -> [&Fields; 4] {
         [&self.opinion, &self.cluster, &self.docket, &self.court]
     }
-    /// Fixed nested output schema: one row per opinion, with nullable related structs.
+    /// Six-field nested output: all source fields, including inline text/XML/HTML
+    /// and original file paths/URLs, with nullable related structs.
     /// Default callers share one allocation; historical overrides never enter that cache.
     pub fn schema(&self) -> SchemaRef {
         static JOINED: OnceLock<SchemaRef> = OnceLock::new();
@@ -233,6 +235,20 @@ impl CourtListenerSchemas {
             self.build_schema()
         }
     }
+    /// Seven-field document output: the full source schema plus resolved file URLs.
+    /// URL values require the document accessor's configured media root; no binary
+    /// PDF column or inline-content replacement is implied by this schema.
+    pub fn schema_with_document_urls(&self) -> SchemaRef {
+        let schema = self.schema();
+        let mut fields = schema.fields().to_vec();
+        fields.push(Arc::new(Field::new(
+            "documents",
+            DataType::Struct(document_fields()),
+            false,
+        )));
+        Arc::new(Schema::new_with_metadata(fields, schema.metadata().clone()))
+    }
+
     fn build_schema(&self) -> SchemaRef {
         Arc::new(Schema::new(vec![
             Field::new("snapshot_date", DataType::Date32, false),
@@ -259,6 +275,14 @@ impl CourtListenerSchemas {
             ),
         ]))
     }
+}
+
+pub(super) fn document_fields() -> Fields {
+    vec![
+        Field::new("opinion_file_url", DataType::Utf8, true),
+        Field::new("cluster_pdf_url", DataType::Utf8, true),
+    ]
+    .into()
 }
 
 fn same_fields(a: &Fields, b: &Fields) -> bool {

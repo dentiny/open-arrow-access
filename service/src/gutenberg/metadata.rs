@@ -1,3 +1,4 @@
+use crate::arrow_utils::string_value;
 use arrow_array::{Array, StructArray, cast::AsArray};
 use arrow_schema::DataType;
 use chrono::NaiveDate;
@@ -114,9 +115,8 @@ fn scalar_value<'a>(
     // Empty attributes are values; empty optional element text becomes null.
     let keep_empty = matches!(field.data_type(), DataType::Utf8 | DataType::LargeUtf8)
         && mapping.xml.path().contains('@');
-    let text = (!column.is_null(index))
-        .then(|| column.as_string::<i32>().value(index))
-        .filter(|s| !s.is_empty() || keep_empty);
+    let text =
+        string_value(column.as_string::<i32>(), index).filter(|s| !s.is_empty() || keep_empty);
     if !field.is_nullable() && text.is_none_or(str::is_empty) {
         return Err(decode(format!("missing {name}")));
     }

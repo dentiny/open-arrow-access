@@ -6,6 +6,7 @@ use super::{
 use arrow_array::{Array, Float64Array, StringArray};
 use arrow_schema::{DataType, Field, TimeUnit};
 use open_arrow_access_core::Result;
+use url::Url;
 
 use super::error::invalid;
 
@@ -220,6 +221,32 @@ pub(super) fn validate_join_schema(schemas: &CourtListenerSchemas) -> Result<()>
         .any(|fields| fields.iter().any(|f| f.name() == super::ingest::ORDINAL))
     {
         return Err(records_error("source field collides with reserved ordinal"));
+    }
+    Ok(())
+}
+
+pub(super) fn http_url(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        && url.host_str().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+}
+
+pub(super) fn validate_media_root(media_root: &Url) -> Result<()> {
+    if !http_url(media_root) || media_root.query().is_some() || media_root.fragment().is_some() {
+        return Err(schema_error(
+            "media root must be an HTTP(S) URL without credentials, query or fragment",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_relative_document_path(value: &str) -> Result<()> {
+    if value.contains(['\\', ':'])
+        || value.chars().any(char::is_control)
+        || value.split('/').any(|part| matches!(part, "" | "." | ".."))
+    {
+        return Err(records_error("invalid relative document path"));
     }
     Ok(())
 }

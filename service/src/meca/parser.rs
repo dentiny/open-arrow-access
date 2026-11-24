@@ -1,3 +1,4 @@
+use crate::arrow_utils::string_value;
 use crate::xml_metadata::XmlDocument;
 use arrow_array::{Array, StructArray, cast::AsArray};
 use arrow_schema::DataType::Utf8;
@@ -74,5 +75,5 @@ pub(super) async fn parse_manifest(bytes: &[u8]) -> Result<Manifest> {
 
 fn optional_text(values: &StructArray, column: usize, index: usize) -> Option<String> {
     let values = values.column(column).as_string::<i32>();
-    (!values.is_null(index)).then(|| values.value(index).to_owned())
+    string_value(values, index).map(str::to_owned)
 }

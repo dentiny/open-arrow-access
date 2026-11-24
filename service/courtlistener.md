@@ -4,8 +4,10 @@
 
 CourtListener provides legal data including courts, opinions and opinion
 clusters. Its bulk export stores dated table snapshots as bzip2-compressed CSV,
-with companion SQL schema objects. This provider discovers snapshots and decodes
-a selected table's bytes.
+with companion SQL schema objects. This provider discovers snapshots, decodes
+selected tables, emits typed Arrow records and joins the four opinion-centric tables by date. Text, HTML and XML
+remain inline. An optional document-URL adapter exposes file references for
+sink-side PDF downloads without fetching the documents.
 
 Enable facade feature `service-courtlistener`. See [example setup](README.md#example-setup) for dependencies and the async runtime.
 
@@ -30,7 +32,9 @@ artifacts, not output rows. Record the actual available SQL key;
 `schema_object()` constructs a same-date candidate but does not discover or
 fetch it. Some historical CSV/SQL dates differ. If no verified companion exists,
 record that explicitly rather than silently borrowing another date's schema.
-No PDF, audio, embedding download or HTML asset fetch is implied. Preserve every
+Document bytes are downloaded by the sink, not the source. The optional
+`with_document_urls(media_root)` adapter resolves PDF/original-file references;
+it does not fetch PDF, audio, embeddings or HTML assets. Preserve every
 exported source column in its corresponding struct, including the opinion's
 text/HTML/XML representations. Other bulk tables are outside this opinion-centric
 contract; this output is not a lossless database dump of all 33 tables.
@@ -110,10 +114,11 @@ frozen inputs for retries. Changed source bytes/schema create a new acquisition
 instead of overwriting a completed dataset. Publish completion only after the
 joined output has been reopened and validated.
 
-## Proposed joined Lance schema
+## Joined Arrow schema
 
-The provider supplies **no fixed Arrow or Lance schema**. This is a proposed
-conversion-layer contract, not an implemented provider schema or join API.
+`CourtListenerSchemas::default()` implements the Arrow schema below, pinned
+to the 2026-09-30 export. `CourtListenerDatePartitionAccessor` implements the
+four-table join. Lance writing and publication remain caller responsibilities.
 The example below lists every field observed in bounded reads of the four
 2026-09-30 CSV headers. `?` means nullable. Parent struct nullability and child
 field nullability are separate: `cluster.id` is required when `cluster` exists,
@@ -159,8 +164,8 @@ must not discard precision beyond microseconds: fail such inputs pending an
 explicit precision policy. Preserve the original source object and record
 ordinal in error diagnostics. Record the failed date task without publishing a
 partial dataset as complete; do not drop bad rows. These parser/type guarantees
-still require implementation and verification; configuring all-string CSV
-inference does not implement this contract.
+are implemented by the typed table reader;
+configuring generic all-string CSV inference does not implement this contract.
 
 ```text
 snapshot_date: Date32                       # required; selected export date
@@ -350,16 +355,18 @@ include acquisition identity and `snapshot_date`.
 | Decode one selected object | `open(ByteReadRequest)` streams decoded CSV bytes through Bzip2 |
 | Partition selected dates of a compatible table schema | `records(format)` wraps a caller-supplied CSV format in `FileSetAccessor`; an explicit `FileSetRequest` has one file partition per selected object |
 | Execute those file partitions concurrently | Shared `ParallelReadLayer`, with independent reader/decoder state per file |
-| One joined dataset per date | Application planner, four-table left joins and Lance writer; not supplied by the accessor |
-| Frozen inventory, empty-export policy and provenance columns | Application conversion work; not automatic |
-| Table/date-specific schema and COPY CSV semantics | Explicit caller/parser contract, not a fixed provider schema |
+| One joined Arrow stream per date | `CourtListenerDatePartitionAccessor`; caller supplies the Lance writer and destination |
+| Provenance columns | Date reader includes original source URIs and per-table record ordinals |
+| Frozen inventory and empty-export policy | Caller acquisition/publication work |
+| Typed COPY CSV parsing | `CourtListenerTableAccessor`, with defaults pinned to 2026-09-30; historical overrides are explicit |
+| XML, text and HTML | Preserved inline in the opinion struct, without choosing one representation or discarding the others |
+| PDF/original-file references | `with_document_urls(media_root)` adds document URLs; the sink downloads bytes |
 
-Thus existing library primitives support date-file partitioning, but there is no
-CourtListener-specific `shard=date` request or end-to-end date-to-Lance planner.
-Submit one joined conversion task per date, reading all four required table
-objects and producing one destination. Separate table reads can execute
-concurrently within that task, but must feed the join rather than publish four
-datasets. A parallel file-set scan alone neither joins different tables nor
+The date reader accepts a `YYYY-MM-DD` locator and exposes one lazy native
+partition for that date. Submit one joined conversion task per date and supply
+one sink destination. The reader imports all four tables concurrently and
+joins them; destination routing and Lance publication remain with the caller.
+A parallel file-set scan alone neither joins different tables nor
 routes dates to separate outputs; retain one schema per source-table scan.
 
 A conceptual selection using existing public types is:
@@ -410,10 +417,10 @@ of all four join inputs. These decoded the 22/36/54/20-column source headers.
 The 555,339-byte same-date SQL schema was fetched to verify every documented
 source type and NULL constraint;
 the empty historical opinions export was separately read and decompressed.
-No full CSV parse, corpus conversion, parallel benchmark or production deployment
-was performed. The proposed nested schema, joins, provenance and orchestration
-still require
-conversion-layer implementation/verification.
+That inventory inspection did not perform a full CSV parse, corpus conversion,
+parallel benchmark or production deployment. Typed nested schemas, joins and
+row provenance are now implemented and covered by fixture tests. Corpus-scale
+validation, durable acquisition manifests and sink orchestration remain caller work.
 
 - [Bulk data documentation](https://wiki.free.law/c/courtlistener/help/api/bulk-data/bulk-legal-data)
 - [Bulk object browser](https://com-courtlistener-storage.s3-us-west-2.amazonaws.com/list.html?prefix=bulk-data/)
@@ -434,8 +441,9 @@ Configure byte storage rooted above `bulk-data/`, then use
 `bulk-data/schema-{date}.sql` without fetching it. Input byte options are forwarded.
 Decoded content length is unknown and ranges are unsupported. CSV quoting,
 backslash escapes, multiline values and NULL/empty distinctions remain intact.
-The provider defines no Arrow schema. Same-date tables are not an atomic database
-snapshot. For public S3, callers configure the `com-courtlistener-storage` bucket,
+The byte accessor alone defines no Arrow schema; typed table/date accessors
+provide the schema above. Same-date tables are not an atomic database snapshot.
+For public S3, callers configure the `com-courtlistener-storage` bucket,
 region and unsigned access on their OpenDAL operator; local mirrors work too.
 
 ## Typed table records
@@ -562,6 +570,102 @@ whole-process memory cap or a range-readable source. The reader does not provide
 cross-run checkpoints, automatic historical schema migration, a durable manifest,
 source hash verification, orphan-count reports or a production Lance commit.
 Those acquisition/publication validations remain explicit caller work.
+
+## XML, text and PDF references
+
+Both output schemas are defined in `src/courtlistener/schema.rs`:
+
+| Schema API | Output contract |
+| --- | --- |
+| `CourtListenerSchemas::schema()` | Six source/provenance fields; already includes text, XML, HTML and original file references |
+| `CourtListenerSchemas::schema_with_document_urls()` | The same six fields plus `documents` with resolved file URLs; emitted by `with_document_urls(media_root)` |
+
+Text and XML are not excluded from the default schema. Their original fields
+were already exported and remain required `Utf8` children: `opinion.plain_text`,
+`opinion.xml_harvard` and `opinion.xml_scan`. The default schema also preserves
+`cluster.filepath_pdf_harvard: Utf8`, `opinion.local_path: Utf8` and
+`opinion.download_url: Utf8?`. Empty source paths/text remain empty strings;
+missing joined clusters remain null structs. A raw PDF path is a reference,
+not PDF content. Earlier statements about no PDF downloads do not exclude
+these fields or the inline XML/text.
+
+Keep **all** available representations. `opinion.plain_text` is inline extracted
+text; `opinion.xml_harvard` and `opinion.xml_scan` are inline XML strings. The
+`html*` fields remain unchanged too. Empty source strings remain empty strings.
+These fields are representations from different sources/processing steps, not
+additional independent opinions or a guarantee of identical content. No
+canonical-text selection, XML parsing, OCR or HTML stripping runs in this reader.
+
+PDF bytes are not embedded in the CSV. Preserve the original fields:
+
+| Source field | Meaning / scope |
+| --- | --- |
+| `opinion.local_path` | Media-relative path to the mirrored original file; it is not guaranteed to be PDF |
+| `opinion.download_url` | Original publisher URL, when present; not guaranteed to be PDF or still available |
+| `cluster.filepath_pdf_harvard` | Cluster/case-level CAP PDF path; it may cover multiple opinions |
+
+To expose download-ready references, opt into `CourtListenerDocumentAccessor`
+using `date_source.with_document_urls(media_root)?`. The configured HTTP(S) root
+must correspond to the media storage serving the exported relative paths; it
+is independent of the bulk CSV storage/provenance root. The original six fields
+and all 132 source children remain intact. A seventh required struct is added:
+
+```text
+documents: Struct<
+  opinion_file_url: Utf8?
+  cluster_pdf_url: Utf8?
+>
+```
+
+`opinion_file_url` prefers nonempty `opinion.local_path`, falling back to
+nonempty `opinion.download_url`. `cluster_pdf_url` uses
+`cluster.filepath_pdf_harvard` only. Absolute HTTP(S) references are preserved
+verbatim, including signed query strings. Raw relative storage keys are appended
+beneath the configured root with URL-encoded path segments; they are not assumed
+to be already URL-encoded. Empty references and missing related structs yield
+null URLs. No URL is invented for missing content, and there is no cross-scope
+PDF fallback. Original CSV paths/URLs are always retained in their source structs.
+
+```rust,no_run
+use open_arrow_access::{Accessor, ReadRequest, Result};
+use open_arrow_access::service::courtlistener::CourtListenerDatePartitionAccessor;
+use open_arrow_access::storage::OpenDalAccessor;
+
+async fn read_with_document_urls(
+    bulk_storage: OpenDalAccessor,
+    media_base_url: &str,
+) -> Result<()> {
+    let source = CourtListenerDatePartitionAccessor::new(
+        bulk_storage, "s3://com-courtlistener-storage",
+    )?.with_document_urls(media_base_url)?;
+    let mut reader = source.open(ReadRequest::new("2026-09-30")).await?;
+    while let Some(batch) = reader.next().await? {
+        // Send every original field plus documents URLs to your sink.
+        // Sink downloads referenced files and writes PDF/blob content.
+        println!("{} opinion rows with document references", batch.num_rows());
+    }
+    Ok(())
+}
+```
+
+Metadata and scan planning perform no storage I/O. Reading fetches only the
+four bulk tables, never document URLs; it does not check document existence,
+MIME type, size, checksum or historical immutability. Batch size, projections,
+row order and original provenance retain the date reader's behavior. URL
+references are validated even if `documents` is projected away: unsupported
+schemes, URL credentials and unsafe relative paths fail the stream rather than
+silently losing rows. EOF/errors are terminal. Existing six-field consumers
+can continue using the unwrapped date accessor.
+
+The sink owns downloads, credentials, retries, content-type validation, size
+limits, hashes and blob writes. Treat `opinion_file_url` as an original-file
+reference until the downloaded media type is known. Deduplicate shared cluster
+PDFs by source reference/content hash while preserving their association with
+each opinion. A missing URL denotes unavailable source content; a failed
+download must be reported separately, not converted to a successful empty blob.
+The snapshot date dates the CSV, not a guarantee that a live URL still serves
+the same historical bytes. Record the actual downloaded object identity/hash
+in sink provenance. This adapter does not implement a sink or publication.
 
 ## Usage and results
 

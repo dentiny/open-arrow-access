@@ -3,7 +3,7 @@ use super::{
     CourtListenerCopyDialect, CourtListenerSchemas, CourtListenerSnapshot,
     CourtListenerTableAccessor,
     error::{arrow_error, db_error, task_error},
-    valdiation::validate_keys,
+    validation::validate_keys,
 };
 use crate::duckdb::ManagedConnection;
 use arrow_array::{RecordBatch, UInt64Array};

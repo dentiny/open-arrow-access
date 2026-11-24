@@ -9,6 +9,7 @@
 pub mod duckdb;
 
 mod arrow;
+pub mod arrow_utils;
 mod discovery;
 mod error;
 #[cfg(feature = "oai")]
