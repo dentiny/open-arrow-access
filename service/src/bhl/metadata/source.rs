@@ -62,53 +62,58 @@ pub(super) fn create_id_macro(connection: &::duckdb::Connection, temporary: bool
         .map_err(error::duckdb)
 }
 
+#[derive(Clone, Copy)]
+enum ViewKind {
+    PersistentRaw,
+    TemporaryRaw,
+    TemporaryLookup,
+}
+
 fn create_view(
     connection: &::duckdb::Connection,
     table: &super::Table,
-    temporary: bool,
-    prepared: bool,
+    kind: ViewKind,
 ) -> Result<()> {
+    let name = &table.name;
     let key = quoted(table.fields[table.key].name());
-    let fields = table
+    let columns = table
         .fields
         .iter()
-        .map(|field| {
-            let name = quoted(field.name());
-            format!("{name} := {name}")
-        })
+        .map(|field| quoted(field.name()))
+        .collect::<Vec<_>>();
+    let fields = columns
+        .iter()
+        .map(|name| format!("{name} := {name}"))
         .collect::<Vec<_>>()
         .join(", ");
-    let scope = if temporary { "TEMP " } else { "" };
-    let source = if prepared {
-        format!("main.__bhl_lookup_{}", table.name)
-    } else {
-        format!("main.{}", quoted(&table.name))
+    let raw = format!(
+        "SELECT *, rowid, bhl_id({key}) AS __key,
+         struct_pack({fields}) AS __record FROM main.{}",
+        quoted(name)
+    );
+    let sql = match kind {
+        ViewKind::PersistentRaw => format!("CREATE VIEW bhl_{name} AS {raw}"),
+        ViewKind::TemporaryRaw => format!("CREATE TEMP VIEW bhl_{name} AS {raw}"),
+        ViewKind::TemporaryLookup => format!(
+            "CREATE TEMP VIEW bhl_{name} AS
+             SELECT {}, __source_rowid AS rowid, __key,
+             struct_pack({fields}) AS __record FROM main.__bhl_lookup_{name}",
+            columns.join(", ")
+        ),
     };
-    let columns = if prepared {
-        let raw = table
-            .fields
-            .iter()
-            .map(|field| quoted(field.name()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("{raw}, __source_rowid AS rowid, __key")
-    } else {
-        format!("*, rowid, bhl_id({key}) AS __key")
-    };
-    connection
-        .execute_batch(&format!(
-            "CREATE {scope}VIEW bhl_{} AS SELECT {columns}, struct_pack({fields}) AS __record FROM {source};",
-            table.name
-        ))
-        .map_err(error::duckdb)
+    connection.execute_batch(&sql).map_err(error::duckdb)
 }
 
 /// Temporary objects are connection-local and never alter the supplied file.
 pub(super) fn prepare_queries(connection: &ManagedConnection) -> Result<()> {
     create_id_macro(connection, true)?;
-    let prepared = super::lookup::available(connection)?;
+    let kind = if super::lookup::available(connection)? {
+        ViewKind::TemporaryLookup
+    } else {
+        ViewKind::TemporaryRaw
+    };
     for table in tables() {
-        create_view(connection, &table, true, prepared)?;
+        create_view(connection, &table, kind)?;
     }
     Ok(())
 }
@@ -210,7 +215,7 @@ async fn import_table(
                 Err(source) => return Err(error::duckdb(source)),
             }
         }
-        create_view(&connection, &table, false, false)?;
+        create_view(&connection, &table, ViewKind::PersistentRaw)?;
         Ok((
             table.name,
             SourceInfo {
