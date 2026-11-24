@@ -3120,6 +3120,7 @@ dependencies = [
  "datafusion",
  "futures",
  "indexmap",
+ "more-asserts",
  "open-arrow-access-core",
  "open-arrow-access-file-format",
  "open-arrow-access-test-support",

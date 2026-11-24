@@ -23,6 +23,9 @@ pub use unordered_emission::{UnorderedEmissionAccessor, UnorderedEmissionLayer};
 mod limit;
 pub use limit::{LimitAccessor, LimitLayer};
 
+mod filter;
+pub use filter::{FilterAccessor, FilterLayer};
+
 mod sampling;
 pub use sampling::{SamplingAccessor, SamplingLayer};
 
