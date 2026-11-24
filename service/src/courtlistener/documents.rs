@@ -2,11 +2,12 @@
 use super::{
     CourtListenerDatePartitionAccessor,
     error::{arrow_error, records_error, schema_error},
+    schema::document_fields,
     validation::{http_url, validate_media_root, validate_relative_document_path},
 };
 use crate::arrow_utils::{struct_field, struct_string_value};
 use arrow_array::{ArrayRef, RecordBatch, StringArray, StructArray};
-use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef};
+use arrow_schema::SchemaRef;
 use futures::stream;
 use open_arrow_access_core::{
     Accessor, ByteAccessor, OrderRequirement, ReadRequest, RecordCapability, RecordMetadata,
@@ -50,22 +51,8 @@ impl<A> CourtListenerDatePartitionAccessor<A> {
 }
 impl<A> CourtListenerDocumentAccessor<A> {
     pub fn schema(&self) -> SchemaRef {
-        let schema = self.source.schemas().schema();
-        let mut fields = schema.fields().to_vec();
-        fields.push(Arc::new(Field::new(
-            "documents",
-            DataType::Struct(document_fields()),
-            false,
-        )));
-        Arc::new(Schema::new_with_metadata(fields, schema.metadata().clone()))
+        self.source.schemas().schema_with_document_urls()
     }
-}
-fn document_fields() -> Fields {
-    vec![
-        Field::new("opinion_file_url", DataType::Utf8, true),
-        Field::new("cluster_pdf_url", DataType::Utf8, true),
-    ]
-    .into()
 }
 fn resolve(root: &Url, value: Option<&str>) -> Result<Option<String>> {
     let Some(value) = value.filter(|v| !v.is_empty()) else {

@@ -355,9 +355,11 @@ async fn documents_preserve_all_representations_and_defer_downloads_to_sink() ->
     )
     .await;
     // There are no media files, and .invalid URLs must never be fetched by this reader.
+    let expected_schema = source.schemas().schema_with_document_urls();
     let source = source.with_document_urls("https://media.invalid/base")?;
     let request = ReadRequest::new("2026-09-30").with_batch_size(NonZeroUsize::new(2).unwrap());
     let schema = source.schema();
+    assert_eq!(schema, expected_schema);
     assert_eq!(schema.fields().len(), 7);
     assert_eq!(
         source

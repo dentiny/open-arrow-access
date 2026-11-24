@@ -573,6 +573,22 @@ Those acquisition/publication validations remain explicit caller work.
 
 ## XML, text and PDF references
 
+Both output schemas are defined in `src/courtlistener/schema.rs`:
+
+| Schema API | Output contract |
+| --- | --- |
+| `CourtListenerSchemas::schema()` | Six source/provenance fields; already includes text, XML, HTML and original file references |
+| `CourtListenerSchemas::schema_with_document_urls()` | The same six fields plus `documents` with resolved file URLs; emitted by `with_document_urls(media_root)` |
+
+Text and XML are not excluded from the default schema. Their original fields
+were already exported and remain required `Utf8` children: `opinion.plain_text`,
+`opinion.xml_harvard` and `opinion.xml_scan`. The default schema also preserves
+`cluster.filepath_pdf_harvard: Utf8`, `opinion.local_path: Utf8` and
+`opinion.download_url: Utf8?`. Empty source paths/text remain empty strings;
+missing joined clusters remain null structs. A raw PDF path is a reference,
+not PDF content. Earlier statements about no PDF downloads do not exclude
+these fields or the inline XML/text.
+
 Keep **all** available representations. `opinion.plain_text` is inline extracted
 text; `opinion.xml_harvard` and `opinion.xml_scan` are inline XML strings. The
 `html*` fields remain unchanged too. Empty source strings remain empty strings.
