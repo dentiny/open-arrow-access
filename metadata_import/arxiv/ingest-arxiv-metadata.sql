@@ -96,14 +96,3 @@ FROM arxiv_metadata;
 CHECKPOINT;
 
 SELECT count(*) AS metadata_records FROM arxiv_metadata;
-
--- Query with modern ID or legacy bulk spelling (legacy slash is normalized).
--- SELECT "oai:header", "oai:metadata"
--- FROM arxiv_metadata
--- WHERE article_id = replace('2603.11251', '/', '');
-
--- Completeness: source update_date stays in arxiv_metadata_raw.source_metadata;
--- it is not asserted to be the original OAI header datestamp.
--- Kaggle does not establish complete deleted-record coverage. No deletion
--- tombstones, set membership, version size/source_type or other absent values
--- are fabricated. This is a partial OAI-shaped snapshot, not a lossless OAI dump.
