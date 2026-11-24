@@ -14,6 +14,7 @@ file-name mapping and output columns.
 | Parsed API metadata | Provider method → `ApiDocument`; `value() -> &serde_json::Value` | Complete parsed JSON for that API response |
 | Named original files | Provider resolution → `ResolvedFileSet<A, M>`; `list("")` → names; `open(ByteReadRequest)` → byte reader | Documented metadata `M` and lazy file mappings |
 | One-object Arrow metadata | `ReadRequest { object, options, byte_options }` → record reader | Fixed schema from [PMC](pmc.md) or [Gutenberg](gutenberg.md) |
+| Complete book Arrow row | Gutenberg `GutenbergBooks` + RDF `ReadRequest` | Typed metadata, exact `raw_rdf`, all advertised `files[].data` bytes |
 | Multi-file Arrow data | Provider-specific request → record reader | Manifest schema for [PMC inventory](pmc-inventory.md), first-shard schema for [Hugging Face](huggingface.md), caller format schema for [Common Crawl](commoncrawl.md) |
 | XML harvest page | `records` / `resume` → `OaiPage { bytes, record_count, resumption_token }` | Exact XML, including deleted record headers |
 | Archive members | Archive session + entry index → byte reader | Manifest/directory metadata and selected decoded bytes |

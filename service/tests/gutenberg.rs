@@ -129,3 +129,144 @@ async fn rdf_metadata_can_exceed_the_previous_size_limit() {
         .unwrap();
     assert_eq!(reader.next().await.unwrap().unwrap().num_rows(), 1);
 }
+
+// Files are opaque bytes: test binary/empty values and advertised URI/MIME
+// retention rather than repeating the same reader test for each file extension.
+#[tokio::test]
+async fn books_keep_original_bytes_rdf_and_file_order() {
+    use open_arrow_access_service::gutenberg::{GutenbergBookDecoder, GutenbergBooks, book_schema};
+    let raw = String::from_utf8(fixture!("gutenberg", "book.rdf").await)
+        .unwrap()
+        .replace("application/zip", "application/x-future-format")
+        .into_bytes();
+    for payload in [b"\x00\xff\xfe".as_slice(), b""] {
+        let rdf = MemoryAccessor::new(&raw, 17);
+        let rdf_observed = rdf.observations.clone();
+        let files = MemoryAccessor::new(payload, 2);
+        let observed = files.observations.clone();
+        let books = GutenbergBooks::new(rdf, GutenbergBookDecoder::new(files));
+        let options = ByteReadOptions {
+            io_concurrency: NonZeroUsize::new(2).unwrap(),
+            ..Default::default()
+        };
+        let mut reader = open_arrow_access_test_support::assert_metadata_matches_open(
+            &books,
+            request().with_byte_options(options),
+        )
+        .await;
+        assert_eq!(reader.metadata().schema, book_schema());
+        assert!(rdf_observed.requests.lock().unwrap().is_empty());
+        assert!(observed.requests.lock().unwrap().is_empty());
+        let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(batch["raw_rdf"].as_binary::<i64>().value(0), raw);
+        let entries = batch["files"].as_list::<i32>().value(0);
+        let entries = entries.as_struct();
+        let requests = observed.requests.lock().unwrap();
+        let uris = [
+            "https://example.invalid/42.txt",
+            "https://example.invalid/42.zip",
+            "https://example.invalid/42.txt",
+        ];
+        assert_eq!(entries.len(), uris.len());
+        assert_eq!(requests.len(), uris.len());
+        for (i, uri) in uris.into_iter().enumerate() {
+            assert_eq!(entries["uri"].as_string::<i32>().value(i), uri);
+            assert_eq!(entries["data"].as_binary::<i64>().value(i), payload);
+            assert_eq!(requests[i].object.locator(), uri);
+            assert_eq!(requests[i].options, options);
+        }
+        drop(requests);
+        let formats = entries["format"].as_list::<i32>().value(1);
+        assert_eq!(
+            formats.as_string::<i32>().iter().collect::<Vec<_>>(),
+            vec![Some("application/x-future-format"), Some("text/plain")]
+        );
+        assert_eq!(rdf_observed.requests.lock().unwrap()[0].options, options);
+        assert!(reader.next().await.unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn books_skip_unselected_or_absent_files() {
+    use open_arrow_access_service::gutenberg::{GutenbergBookDecoder, GutenbergBooks};
+    for (fixture_name, projection) in [
+        ("book.rdf", Some(vec!["raw_rdf".into(), "ebook_id".into()])),
+        ("book.rdf", Some(vec![])),
+        ("metadata_only.rdf", None),
+    ] {
+        let raw = fixture!("gutenberg", fixture_name).await;
+        let files = MemoryAccessor::new(b"", 1).with_open_failure(ErrorKind::NotFound);
+        let observed = files.observations.clone();
+        let books = GutenbergBooks::new(
+            MemoryAccessor::new(&raw, 17),
+            GutenbergBookDecoder::new(files),
+        );
+        let options = ReadOptions {
+            projection: projection.clone(),
+            ..Default::default()
+        };
+        let mut reader = books.open(request().with_options(options)).await.unwrap();
+        let batch = reader.next().await.unwrap().unwrap();
+        assert_eq!(batch.num_rows(), 1);
+        if let Some(columns) = projection {
+            assert_eq!(
+                batch
+                    .schema()
+                    .fields()
+                    .iter()
+                    .map(|f| f.name())
+                    .collect::<Vec<_>>(),
+                columns.iter().collect::<Vec<_>>()
+            );
+        } else {
+            assert!(batch["files"].as_list::<i32>().value(0).is_empty());
+        }
+        assert!(observed.requests.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn books_propagate_payload_errors() {
+    use open_arrow_access_service::gutenberg::{GutenbergBookDecoder, GutenbergBooks};
+    let raw = fixture!("gutenberg", "book.rdf").await;
+    for (files, expected) in [
+        (
+            MemoryAccessor::new(b"", 1).with_open_failure(ErrorKind::NotFound),
+            ErrorKind::NotFound,
+        ),
+        (
+            MemoryAccessor::new(b"partial", 1).with_failure(2, ErrorKind::Io),
+            ErrorKind::Io,
+        ),
+    ] {
+        let books = GutenbergBooks::new(
+            MemoryAccessor::new(&raw, 17),
+            GutenbergBookDecoder::new(files),
+        );
+        let mut reader = books.open(request()).await.unwrap();
+        assert_eq!(reader.next().await.unwrap_err().kind(), expected);
+        assert!(reader.next().await.unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn books_validate_projection_before_io_and_rdf_before_files() {
+    use open_arrow_access_service::gutenberg::{GutenbergBookDecoder, GutenbergBooks};
+    let raw = fixture!("gutenberg", "bad_date.rdf").await;
+    let rdf = MemoryAccessor::new(&raw, 17);
+    let rdf_observed = rdf.observations.clone();
+    let files = MemoryAccessor::new(b"content", 3);
+    let files_observed = files.observations.clone();
+    let books = GutenbergBooks::new(rdf, GutenbergBookDecoder::new(files));
+    open_arrow_access_test_support::expect_err_kind(
+        books.open(request().with_projection(["missing"])).await,
+        ErrorKind::InvalidInput,
+    );
+    assert!(rdf_observed.requests.lock().unwrap().is_empty());
+    let mut reader = books
+        .open(request().with_projection(["ebook_id"]))
+        .await
+        .unwrap();
+    assert_eq!(reader.next().await.unwrap_err().kind(), ErrorKind::Decode);
+    assert!(files_observed.requests.lock().unwrap().is_empty());
+}

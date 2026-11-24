@@ -112,7 +112,7 @@ and release metadata with your downstream corpus manifest.
 | Hugging Face | `service-huggingface` | Repository file bytes; Parquet config/split as Arrow | [Guide](../service/huggingface.md) |
 | Common Crawl | `service-warc` | Crawl/segment membership; native WARC Arrow view or a caller-supplied record accessor | [Guide](../service/commoncrawl.md) |
 | PMC | `service-pmc` | Article-version metadata and inventory shards as Arrow; article content is separate | [Article metadata](../service/pmc.md), [inventory](../service/pmc-inventory.md) |
-| Gutenberg | `service-gutenberg` | Per-book RDF metadata as one Arrow row; content URIs remain metadata | [Guide](../service/gutenberg.md) |
+| Gutenberg | `service-gutenberg` | Per-book metadata or complete RDF plus all advertised original-file bytes | [Guide](../service/gutenberg.md) |
 | CourtListener | `service-courtlistener` | Bulk snapshot discovery and decoded CSV bytes | [Guide](../service/courtlistener.md) |
 | Zenodo | `service-zenodo` | Record metadata and lazy original-file bytes | [Guide](../service/zenodo.md) |
 | Internet Archive | `service-internet-archive` | Item metadata and lazy original-file bytes | [Guide](../service/internet-archive.md) |
