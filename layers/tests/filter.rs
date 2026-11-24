@@ -164,3 +164,86 @@ async fn invalid_predicates_fail_before_reading() {
         assert_eq!(memory.polls.load(Ordering::SeqCst), 0);
     }
 }
+
+fn cell(column: &str, predicate: Expr) -> open_arrow_access_layers::FilterRule {
+    open_arrow_access_layers::FilterRule::Cell {
+        column: column.into(),
+        predicate,
+    }
+}
+
+#[tokio::test]
+async fn cell_rules_preserve_rows_and_existing_nulls() {
+    let source =
+        MemoryRecordAccessor::new(vec![batch()]).layer(FilterLayer::with_rules(vec![cell(
+            "data",
+            size_predicate(2),
+        )]));
+    let request = ReadRequest::new("input");
+    let metadata = source.metadata(request.clone()).await.unwrap();
+    assert_eq!(
+        source.inspect_metadata(request.clone()).await.unwrap(),
+        Some(metadata.clone())
+    );
+    let mut reader = source.open(request).await.unwrap();
+    assert_eq!(*reader.metadata(), metadata);
+    let output = reader.next().await.unwrap().unwrap();
+    assert_eq!(output.num_rows(), 6);
+    assert_eq!(output.column(0), batch().column(0));
+    assert_eq!(output.schema(), metadata.schema);
+    assert_eq!(
+        output
+            .column(1)
+            .as_binary::<i32>()
+            .iter()
+            .collect::<Vec<_>>(),
+        [
+            Some(b"".as_slice()),
+            None,
+            Some(b"ab".as_slice()),
+            None,
+            Some(b"x".as_slice()),
+            None
+        ]
+    );
+    assert!(reader.next().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn mixed_rules_use_original_values_and_combine_cell_masks() {
+    use open_arrow_access_layers::FilterRule;
+    let source = MemoryRecordAccessor::new(vec![batch()]).layer(FilterLayer::with_rules(vec![
+        cell("id", col("id").gt(lit(1i64))),
+        // This must observe id=1 even though the preceding rule masks it.
+        FilterRule::Row(col("id").gt(lit(0i64))),
+        cell("id", col("id").lt(lit(5i64))),
+        // This must also observe original ids, independently of the id masks.
+        cell("data", col("id").lt(lit(3i64))),
+    ]));
+    let mut reader = source.open(ReadRequest::new("input")).await.unwrap();
+    assert!(reader.metadata().schema.field(0).is_nullable());
+    let output = reader.next().await.unwrap().unwrap();
+    assert_eq!(output.num_rows(), 5);
+    assert_eq!(
+        output
+            .column(0)
+            .as_primitive::<Int64Type>()
+            .iter()
+            .collect::<Vec<_>>(),
+        [None, Some(2), Some(3), Some(4), None]
+    );
+    assert_eq!(
+        output
+            .column(1)
+            .as_binary::<i32>()
+            .iter()
+            .collect::<Vec<_>>(),
+        [
+            Some(b"\xff\x00\x80".as_slice()),
+            Some(b"ab".as_slice()),
+            None,
+            None,
+            None
+        ]
+    );
+}
