@@ -33,7 +33,7 @@ directly, remove the `service-` prefix. Common Crawl shares `service-warc`.
 | OpenStax | `service-openstax` | Commit-pinned textbook source ZIP archives | [OpenStax](openstax.md) |
 | BHL AWS Open Data | `service-bhl` | AWS object partitions and page records with supplied or DuckDB-joined metadata | [AWS partitions](bhl-open-data.md) |
 | Common Crawl | `service-warc` | Crawl/segment WARC membership and separately composed record reads | [Common Crawl](commoncrawl.md) |
-| CourtListener | `service-courtlistener` | Typed table/date Arrow streams with inline text/XML and optional document URLs for sink downloads | [CourtListener](courtlistener.md) |
+| CourtListener | `service-courtlistener` | Typed table/date Arrow streams, reusable local DuckDB snapshots, inline text/XML and document URLs for sink downloads | [CourtListener](courtlistener.md) |
 | Federal Register | `service-federal-register` | Rule/notice metadata and advertised document representations | [Federal Register](federal-register.md) |
 | GovInfo | `service-govinfo` | Government bulk directories and package representations | [GovInfo](govinfo.md) |
 | Library of Congress | `service-library-of-congress` | Digital-collection metadata, resource files and OCR JSON | [Library of Congress](library-of-congress.md) |

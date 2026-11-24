@@ -1,17 +1,19 @@
 //! Keep inline text/XML/HTML and expose document URLs for sink-side downloads.
 use super::{
-    CourtListenerDatePartitionAccessor,
+    CourtListenerDatePartitionAccessor, CourtListenerSchemas,
     error::{arrow_error, records_error, schema_error},
     schema::document_fields,
-    validation::{http_url, validate_media_root, validate_relative_document_path},
+    validation::{
+        http_url, is_legacy_local_path, validate_media_root, validate_relative_document_path,
+    },
 };
 use crate::arrow_utils::{struct_field, struct_string_value};
 use arrow_array::{ArrayRef, RecordBatch, StringArray, StructArray};
 use arrow_schema::SchemaRef;
 use futures::stream;
 use open_arrow_access_core::{
-    Accessor, ByteAccessor, OrderRequirement, ReadRequest, RecordCapability, RecordMetadata,
-    RecordReader, Result, ScanPlan, ScanPlanner, async_trait, record_stream_reader,
+    Accessor, OrderRequirement, ReadRequest, RecordCapability, RecordMetadata, RecordReader,
+    Result, ScanPlan, ScanPlanner, async_trait, record_stream_reader,
 };
 use std::sync::Arc;
 use url::Url;
@@ -19,13 +21,15 @@ use url::Url;
 /// A joined date stream with all original fields plus document URLs.
 /// This accessor never opens document URLs; a sink owns downloads and blob writes.
 pub struct CourtListenerDocumentAccessor<A> {
-    source: CourtListenerDatePartitionAccessor<A>,
+    source: A,
+    schemas: CourtListenerSchemas,
     media_root: Url,
 }
-impl<A> Clone for CourtListenerDocumentAccessor<A> {
+impl<A: Clone> Clone for CourtListenerDocumentAccessor<A> {
     fn clone(&self) -> Self {
         Self {
             source: self.source.clone(),
+            schemas: self.schemas.clone(),
             media_root: self.media_root.clone(),
         }
     }
@@ -36,7 +40,17 @@ impl<A> CourtListenerDatePartitionAccessor<A> {
     pub fn with_document_urls(
         self,
         media_root: impl AsRef<str>,
-    ) -> Result<CourtListenerDocumentAccessor<A>> {
+    ) -> Result<CourtListenerDocumentAccessor<Self>> {
+        let schemas = self.schemas().clone();
+        CourtListenerDocumentAccessor::new(self, schemas, media_root)
+    }
+}
+impl<A> CourtListenerDocumentAccessor<A> {
+    pub(super) fn new(
+        source: A,
+        schemas: CourtListenerSchemas,
+        media_root: impl AsRef<str>,
+    ) -> Result<Self> {
         let mut media_root = Url::parse(media_root.as_ref())
             .map_err(|_| schema_error("media root must be an absolute HTTP(S) URL"))?;
         validate_media_root(&media_root)?;
@@ -44,14 +58,15 @@ impl<A> CourtListenerDatePartitionAccessor<A> {
             media_root.set_path(&format!("{}/", media_root.path()));
         }
         Ok(CourtListenerDocumentAccessor {
-            source: self,
+            source,
+            schemas,
             media_root,
         })
     }
 }
 impl<A> CourtListenerDocumentAccessor<A> {
     pub fn schema(&self) -> SchemaRef {
-        self.source.schemas().schema_with_document_urls()
+        self.schemas.schema_with_document_urls()
     }
 }
 fn resolve(root: &Url, value: Option<&str>) -> Result<Option<String>> {
@@ -102,6 +117,7 @@ fn attach(batch: RecordBatch, schema: SchemaRef, root: &Url) -> Result<RecordBat
             root,
             struct_string_value(opinion, local, row)
                 .filter(|v| !v.is_empty())
+                .filter(|v| !is_legacy_local_path(v))
                 .or_else(|| struct_string_value(opinion, download, row).filter(|v| !v.is_empty())),
         )?);
         cluster_urls.push(resolve(
@@ -122,7 +138,9 @@ fn attach(batch: RecordBatch, schema: SchemaRef, root: &Url) -> Result<RecordBat
     RecordBatch::try_new(schema, columns).map_err(arrow_error)
 }
 #[async_trait]
-impl<A: ByteAccessor + 'static> Accessor for CourtListenerDocumentAccessor<A> {
+impl<A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + 'static> Accessor
+    for CourtListenerDocumentAccessor<A>
+{
     type Request = ReadRequest;
     type Reader = dyn RecordReader;
     fn capability(&self) -> RecordCapability {
@@ -161,7 +179,9 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerDocumentAccessor<A> {
     }
 }
 #[async_trait]
-impl<A: ByteAccessor + 'static> ScanPlanner for CourtListenerDocumentAccessor<A> {
+impl<A: Accessor<Request = ReadRequest, Reader = dyn RecordReader> + Clone + 'static> ScanPlanner
+    for CourtListenerDocumentAccessor<A>
+{
     async fn plan_scan(&self, request: ReadRequest) -> Result<ScanPlan> {
         let metadata = self.metadata(request.clone()).await?;
         let source = self.clone();

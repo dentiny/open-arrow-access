@@ -192,9 +192,9 @@ pub(super) fn validate_columns(
 }
 
 pub(super) fn validate_keys(connection: &::duckdb::Connection, tables: &[&str]) -> Result<()> {
-    for (i, table) in tables.iter().enumerate() {
+    for table in tables {
         let duplicate = connection.query_row(
-            &format!("SELECT 1 FROM cl_{i} GROUP BY id HAVING count(*)>1 LIMIT 1"),
+            &format!("SELECT 1 FROM {table} GROUP BY id HAVING count(*)>1 LIMIT 1"),
             [],
             |row| row.get::<_, i32>(0),
         );
@@ -247,6 +247,90 @@ pub(super) fn validate_relative_document_path(value: &str) -> Result<()> {
         || value.split('/').any(|part| matches!(part, "" | "." | ".."))
     {
         return Err(records_error("invalid relative document path"));
+    }
+    Ok(())
+}
+
+/// Some historical FileField values name the publisher's local filesystem,
+/// not an object beneath the public media root. Never turn these into URLs.
+pub(super) fn is_legacy_local_path(value: &str) -> bool {
+    value.starts_with('/') && !value.starts_with("//")
+}
+
+pub(super) fn validate_database_date(requested: &str, actual: &str) -> Result<()> {
+    validate_snapshot("opinions", requested)?;
+    if requested != actual {
+        return Err(records_error(
+            "requested date does not match the prepared database",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_database_snapshot_count(rows: u64) -> Result<()> {
+    if rows != 1 {
+        return Err(records_error("expected one completed database snapshot"));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_database_contract(
+    version: i32,
+    expected_version: i32,
+    stored: &str,
+    expected: &str,
+) -> Result<()> {
+    if version != expected_version || stored != expected {
+        return Err(records_error(
+            "database version/schema contract does not match requested schemas",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_database_tables(
+    connection: &::duckdb::Connection,
+    schemas: &CourtListenerSchemas,
+) -> Result<()> {
+    use super::ingest::{DB_TABLES, ORDINAL, sql_type};
+    for (i, fields) in schemas.tables().iter().enumerate() {
+        let mut statement = connection
+            .prepare(&format!("DESCRIBE {}", DB_TABLES[i]))
+            .map_err(db_error)?;
+        let actual = statement
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(db_error)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(db_error)?;
+        let mut expected = fields
+            .iter()
+            .map(|f| {
+                let sql = sql_type(f.data_type());
+                (
+                    f.name().clone(),
+                    if sql == "TIMESTAMPTZ" {
+                        "TIMESTAMP WITH TIME ZONE"
+                    } else {
+                        sql
+                    }
+                    .to_owned(),
+                    if f.is_nullable() { "YES" } else { "NO" }.to_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
+        expected.push((ORDINAL.to_owned(), "UBIGINT".to_owned(), "NO".to_owned()));
+        if actual != expected {
+            return Err(records_error(format!(
+                "prepared database table {} has incompatible columns/types/nullability",
+                DB_TABLES[i]
+            )));
+        }
     }
     Ok(())
 }

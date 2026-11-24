@@ -15,8 +15,8 @@ use open_arrow_access_dataset::file_set::FileSetRequest;
 use open_arrow_access_file_format::csv::{CsvFileFormat, CsvFormat};
 use open_arrow_access_layers::ParallelReadLayer;
 use open_arrow_access_service::courtlistener::{
-    CourtListenerBulkAccessor, CourtListenerDatePartitionAccessor, CourtListenerSnapshot,
-    CourtListenerTableAccessor,
+    CourtListenerBulkAccessor, CourtListenerDatabaseAccessor, CourtListenerDatePartitionAccessor,
+    CourtListenerSnapshot, CourtListenerTableAccessor,
 };
 use open_arrow_access_storage::OpenDalAccessor;
 use open_arrow_access_test_support::{MemoryAccessor, collect_bytes, fixture, fs_operator};
@@ -339,6 +339,127 @@ async fn consume(mut reader: Box<dyn RecordReader>) -> Result<usize> {
     Ok(count)
 }
 
+async fn collected(mut reader: Box<dyn RecordReader>) -> Result<arrow_array::RecordBatch> {
+    let schema = reader.metadata().schema.clone();
+    let mut batches = Vec::new();
+    while let Some(batch) = reader.next().await? {
+        batches.push(batch);
+    }
+    Ok(concat_batches(&schema, &batches).unwrap())
+}
+
+#[tokio::test]
+async fn persistent_database_survives_without_csv_and_matches_temporary_join() -> Result<()> {
+    let (root, source) = joined_fixture().await;
+    let request = ReadRequest::new("2026-09-30");
+    let expected = collected(source.open(request.clone()).await?).await?;
+    let path = root.path().join("snapshot.duckdb");
+    let database = source.create_database("2026-09-30", &path).await?;
+    assert_eq!(database.info().snapshot_date, "2026-09-30");
+    assert_eq!(database.info().row_counts, [5, 3, 2, 1]);
+    assert!(database.path().is_absolute());
+    let original = std::fs::read(&path).unwrap();
+    assert!(source.create_database("2026-09-30", &path).await.is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    tokio::fs::remove_dir_all(root.path().join("bulk-data"))
+        .await
+        .unwrap();
+    drop(database);
+    let database = CourtListenerDatabaseAccessor::from_path(&path).await?;
+    assert_eq!(
+        collected(database.open(request.clone()).await?).await?,
+        expected
+    );
+    assert_eq!(
+        consume(
+            database
+                .open(request.clone().with_projection(Vec::<String>::new()))
+                .await?
+        )
+        .await?,
+        5
+    );
+    let first = database.open(request.clone()).await?;
+    let second = database.open(request.clone()).await?;
+    let (first_rows, second_rows) = tokio::join!(consume(first), consume(second));
+    assert_eq!((first_rows?, second_rows?), (5, 5));
+    let mut projected = database
+        .open(
+            request
+                .clone()
+                .with_projection(["court", "opinion"])
+                .with_batch_size(NonZeroUsize::MIN),
+        )
+        .await?;
+    assert_eq!(
+        projected.next().await?.unwrap().schema().field(0).name(),
+        "court"
+    );
+    drop(projected);
+    assert!(
+        database
+            .metadata(ReadRequest::new("2026-06-30"))
+            .await
+            .is_err()
+    );
+    assert!(
+        database
+            .metadata(request.clone().with_projection(["missing"]))
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        database
+            .plan_scan(request.clone())
+            .await?
+            .partitions
+            .size_hint()
+            .0,
+        1
+    );
+    let docs = database.with_document_urls("https://media.invalid/")?;
+    assert_eq!(collected(docs.open(request).await?).await?.num_columns(), 7);
+    let generic = open_arrow_access_service::duckdb::DuckDbDatabase::open(&path)?;
+    let mut rows = 0;
+    generic.query("SELECT * FROM opinions", [], |batch| {
+        rows += batch.num_rows();
+        Ok(())
+    })?;
+    assert_eq!(rows, 5);
+    Ok(())
+}
+
+#[tokio::test]
+async fn persistent_database_rejects_missing_invalid_and_incomplete_inputs() -> Result<()> {
+    let (root, source) = joined_fixture().await;
+    let path = root.path().join("snapshot.duckdb");
+    assert!(
+        CourtListenerDatabaseAccessor::from_path(&path)
+            .await
+            .is_err()
+    );
+    assert!(!path.exists());
+    let raw = JOIN_FIXTURES[0].1.replace("\"12\"", "\"-1\"");
+    write_bz(root.path(), "opinions", &raw).await;
+    assert!(source.create_database("2026-09-30", &path).await.is_err());
+    assert!(!path.exists());
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    write_bz(root.path(), "opinions", JOIN_FIXTURES[0].1).await;
+    let database = source.create_database("2026-09-30", &path).await?;
+    drop(database);
+    let connection = duckdb::Connection::open(&path).unwrap();
+    connection
+        .execute_batch("ALTER TABLE courts ADD COLUMN unapproved VARCHAR")
+        .unwrap();
+    drop(connection);
+    assert!(
+        CourtListenerDatabaseAccessor::from_path(&path)
+            .await
+            .is_err()
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn documents_preserve_all_representations_and_defer_downloads_to_sink() -> Result<()> {
     let (root, source) = joined_fixture().await;
@@ -493,6 +614,44 @@ async fn document_plans_are_lazy_and_invalid_references_fail_without_dropping_ro
     let mut reader = source.open(ReadRequest::new("2026-09-30")).await?;
     assert!(reader.next().await.is_err());
     assert!(reader.next().await?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn historical_local_paths_keep_source_text_and_use_publisher_url_when_available() -> Result<()>
+{
+    let (root, source) = joined_fixture().await;
+    let raw = include_str!("../../testdata/courtlistener/documents/opinion.csv")
+        .replace("pdf/opinion 1.pdf", "/home/importer/archive/original.xml")
+        .replace(
+            "https://mirror.invalid/original.pdf?sig=x%2Fy",
+            "/home/importer/archive/other.xml",
+        );
+    write_bz(root.path(), "opinions", &raw).await;
+    let source = source.with_document_urls("https://media.invalid/")?;
+    let batch = collected(source.open(ReadRequest::new("2026-09-30")).await?).await?;
+    assert_eq!(batch.num_rows(), 5);
+    let docs = batch
+        .column(6)
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .unwrap();
+    let urls = child::<StringArray>(docs, "opinion_file_url");
+    assert!(urls.is_null(0));
+    assert_eq!(urls.value(2), "https://publisher.invalid/unused.pdf");
+    let opinion = batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .unwrap();
+    assert_eq!(
+        child::<StringArray>(opinion, "local_path").value(0),
+        "/home/importer/archive/original.xml"
+    );
+    assert_eq!(
+        child::<StringArray>(opinion, "xml_harvard").value(0),
+        "<opinion>XML &amp; text</opinion>"
+    );
     Ok(())
 }
 fn child<'a, T: Array + 'static>(s: &'a StructArray, name: &str) -> &'a T {

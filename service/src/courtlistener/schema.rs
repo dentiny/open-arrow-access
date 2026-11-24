@@ -209,6 +209,20 @@ impl CourtListenerSchemas {
     }
 }
 impl CourtListenerSchemas {
+    pub(super) fn database_contract(&self) -> String {
+        // Versioned source-schema identity, not a content hash or inferred schema.
+        let fields = self
+            .tables()
+            .iter()
+            .map(|fields| {
+                fields
+                    .iter()
+                    .map(|f| (f.name(), format!("{:?}", f.data_type()), f.is_nullable()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        serde_json::to_string(&fields).expect("string/boolean schema contract is serializable")
+    }
     pub(crate) fn tables(&self) -> [&Fields; 4] {
         [&self.opinion, &self.cluster, &self.docket, &self.court]
     }

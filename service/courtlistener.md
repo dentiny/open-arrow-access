@@ -356,6 +356,7 @@ include acquisition identity and `snapshot_date`.
 | Partition selected dates of a compatible table schema | `records(format)` wraps a caller-supplied CSV format in `FileSetAccessor`; an explicit `FileSetRequest` has one file partition per selected object |
 | Execute those file partitions concurrently | Shared `ParallelReadLayer`, with independent reader/decoder state per file |
 | One joined Arrow stream per date | `CourtListenerDatePartitionAccessor`; caller supplies the Lance writer and destination |
+| Reusable local database | `create_database(date, path)` followed by `CourtListenerDatabaseAccessor::from_path(path)`; no CSV import during reads |
 | Provenance columns | Date reader includes original source URIs and per-table record ordinals |
 | Frozen inventory and empty-export policy | Caller acquisition/publication work |
 | Typed COPY CSV parsing | `CourtListenerTableAccessor`, with defaults pinned to 2026-09-30; historical overrides are explicit |
@@ -571,6 +572,75 @@ cross-run checkpoints, automatic historical schema migration, a durable manifest
 source hash verification, orphan-count reports or a production Lance commit.
 Those acquisition/publication validations remain explicit caller work.
 
+## Build a local DuckDB once, then pass its path to readers
+
+`CourtListenerDatePartitionAccessor::create_database(date, path)` imports and
+validates the selected four tables once. The destination's parent directory
+must exist. An existing destination is never overwritten: the builder stages
+on the same filesystem, checks unique IDs, writes the versioned snapshot/schema
+contract, checkpoints and closes DuckDB, then atomically publishes the file.
+Failed imports do not leave a completed destination.
+
+The file contains physical `opinions`, `opinion_clusters`, `dockets` and `courts`
+tables, retaining every source column plus `__courtlistener_ordinal`. It also
+contains one `courtlistener_snapshot` row with the export date, source root and
+versioned schema contract. This stores inline TEXT/XML/HTML too; it is not a
+metadata-only database. No PDF bytes are downloaded or stored.
+
+```rust,no_run
+use open_arrow_access::{Accessor, ReadRequest, Result};
+use open_arrow_access::service::courtlistener::{
+    CourtListenerDatePartitionAccessor, CourtListenerDatabaseAccessor,
+};
+use open_arrow_access::storage::OpenDalAccessor;
+
+async fn prepare(storage: OpenDalAccessor, path: &str) -> Result<()> {
+    let source = CourtListenerDatePartitionAccessor::new(
+        storage, "s3://com-courtlistener-storage",
+    )?;
+    let database = source.create_database("2026-09-30", path).await?;
+    println!("imported rows: {:?}", database.info().row_counts);
+    Ok(())
+}
+
+async fn reuse(path: &str, media_root: &str) -> Result<()> {
+    // No byte accessor, CSV download, decompression or import on this path.
+    let database = CourtListenerDatabaseAccessor::from_path(path).await?;
+    let date = database.info().snapshot_date.clone();
+    let source = database.with_document_urls(media_root)?;
+    let mut reader = source.open(ReadRequest::new(date)).await?;
+    while let Some(batch) = reader.next().await? {
+        // Pass full Arrow rows and document URLs to the sink.
+        println!("{} rows", batch.num_rows());
+    }
+    Ok(())
+}
+```
+
+`from_path` opens a local file read-only without installing extensions or making
+network requests. It validates the completion contract, table column order,
+SQL types and nullable flags. Historical overrides use
+`from_path_with_schemas(path, reviewed_schemas)`. Queries must request the stored
+date; they cannot relabel another snapshot. Source URIs, row ordering, nullable
+LEFT JOINs, projections and document-URL output match the temporary reader.
+Each scan opens its own read-only connection and temporary spill directory.
+Metadata/partition planning after construction does not touch CSV storage.
+
+The same file works with the general `duckdb::DuckDbDatabase::open(path)`
+connection and SQL queries over the named tables. That synchronous API should
+run on a blocking worker in async programs. Use `open` for this local file;
+`connect` is the separate remote-capable attachment API with extension setup.
+
+Keep prepared files immutable. The contract is a schema/version check, not a
+content hash or proof of a complete upstream export. Row counts reflect exactly
+the supplied inputs: a database built from explicit samples remains a sample.
+Freeze input identity and retain acquisition manifests externally. A complete
+large snapshot needs space for the database, temporary import/WAL and join/sort
+spill; this reader does not impose a whole-process memory/disk limit.
+The original date reader still supports disposable imports when persistence
+is not wanted. Reusing a prepared file avoids repeated CSV ingestion, but
+queries still pay their join, sort and Arrow output costs.
+
 ## XML, text and PDF references
 
 Both output schemas are defined in `src/courtlistener/schema.rs`:
@@ -617,8 +687,12 @@ documents: Struct<
 >
 ```
 
-`opinion_file_url` prefers nonempty `opinion.local_path`, falling back to
-nonempty `opinion.download_url`. `cluster_pdf_url` uses
+`opinion_file_url` prefers a nonempty downloadable `opinion.local_path`,
+falling back to nonempty `opinion.download_url`. Historical absolute filesystem
+paths such as `/home/importer/archive/file.xml` are retained in `local_path`
+but are not public media keys: they trigger the publisher-URL fallback, or a
+null derived URL if none exists. They never become invented media URLs or cause
+opinion rows to be dropped. `cluster_pdf_url` uses
 `cluster.filepath_pdf_harvard` only. Absolute HTTP(S) references are preserved
 verbatim, including signed query strings. Raw relative storage keys are appended
 beneath the configured root with URL-encoded path segments; they are not assumed

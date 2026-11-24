@@ -57,6 +57,26 @@ impl<A> CourtListenerDatePartitionAccessor<A> {
         &self.schemas
     }
 }
+impl<A: ByteAccessor + 'static> CourtListenerDatePartitionAccessor<A> {
+    /// Validate/import one date once, then atomically publish a new local DuckDB file.
+    /// The parent directory must exist; existing destinations are never overwritten.
+    /// Source fields, logical record ordinals and snapshot provenance are retained.
+    pub async fn create_database(
+        &self,
+        date: &str,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<super::CourtListenerDatabaseAccessor> {
+        super::database::create(
+            self.storage.clone(),
+            self.dialect,
+            self.schemas.clone(),
+            ReadRequest::new(date),
+            self.source_root.clone(),
+            path.as_ref().to_owned(),
+        )
+        .await
+    }
+}
 #[async_trait]
 impl<A: ByteAccessor + 'static> Accessor for CourtListenerDatePartitionAccessor<A> {
     type Request = ReadRequest;
@@ -84,6 +104,7 @@ impl<A: ByteAccessor + 'static> Accessor for CourtListenerDatePartitionAccessor<
             self.dialect,
             self.schemas.clone(),
             &request,
+            None,
         )
         .await?;
         let uris = TABLES

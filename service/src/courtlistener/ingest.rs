@@ -14,12 +14,13 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 pub(super) const TABLES: [&str; 4] = ["opinions", "opinion-clusters", "dockets", "courts"];
+pub(super) const DB_TABLES: [&str; 4] = ["opinions", "opinion_clusters", "dockets", "courts"];
 pub(super) const ORDINAL: &str = "__courtlistener_ordinal";
 
 fn quoted(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
-fn sql_type(dtype: &DataType) -> &'static str {
+pub(super) fn sql_type(dtype: &DataType) -> &'static str {
     match dtype {
         DataType::Utf8 => "VARCHAR",
         DataType::Boolean => "BOOLEAN",
@@ -37,8 +38,11 @@ pub(super) struct Database {
     pub connection: ManagedConnection,
 }
 impl Database {
-    fn new(schemas: &CourtListenerSchemas) -> Result<Self> {
-        let connection = ManagedConnection::temporary()?;
+    fn new(schemas: &CourtListenerSchemas, connection: Option<ManagedConnection>) -> Result<Self> {
+        let connection = match connection {
+            Some(connection) => connection,
+            None => ManagedConnection::temporary()?,
+        };
         for (i, fields) in schemas.tables().iter().enumerate() {
             let columns = fields
                 .iter()
@@ -54,7 +58,8 @@ impl Database {
                 .join(",");
             connection
                 .execute_batch(&format!(
-                    "CREATE TABLE cl_{i} ({columns}, {} UBIGINT NOT NULL)",
+                    "CREATE TABLE {} ({columns}, {} UBIGINT NOT NULL)",
+                    DB_TABLES[i],
                     quoted(ORDINAL)
                 ))
                 .map_err(db_error)?;
@@ -75,9 +80,7 @@ async fn import_table<A: ByteAccessor + 'static>(
         connection
             .execute_batch("BEGIN TRANSACTION")
             .map_err(db_error)?;
-        let mut appender = connection
-            .appender(&format!("cl_{table}"))
-            .map_err(db_error)?;
+        let mut appender = connection.appender(DB_TABLES[table]).map_err(db_error)?;
         let mut ordinal = 0u64;
         while let Some(batch) = receiver.blocking_recv() {
             let end = ordinal + batch.num_rows() as u64;
@@ -121,11 +124,12 @@ pub(super) async fn ingest<A: ByteAccessor + 'static>(
     dialect: CourtListenerCopyDialect,
     schemas: CourtListenerSchemas,
     request: &ReadRequest,
+    connection: Option<ManagedConnection>,
 ) -> Result<Database> {
     let source = CourtListenerTableAccessor::new(storage)
         .with_schemas(schemas.clone())?
         .with_dialect(dialect)?;
-    let database = tokio::task::spawn_blocking(move || Database::new(&schemas))
+    let database = tokio::task::spawn_blocking(move || Database::new(&schemas, connection))
         .await
         .map_err(|e| task_error("courtlistener_duckdb_task", e))??;
     let mut imports = Vec::new();
@@ -144,7 +148,7 @@ pub(super) async fn ingest<A: ByteAccessor + 'static>(
         imported?;
     }
     tokio::task::spawn_blocking(move || -> Result<_> {
-        validate_keys(&database.connection, &TABLES)?;
+        validate_keys(&database.connection, &DB_TABLES)?;
         Ok(database)
     })
     .await

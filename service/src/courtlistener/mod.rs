@@ -3,11 +3,13 @@
 //! document reader adds URLs for sink-side downloads without fetching document bytes.
 
 mod copy_csv;
+mod database;
 mod date;
 mod documents;
 mod error;
 mod ingest;
 mod query;
+pub use database::{CourtListenerDatabaseAccessor, CourtListenerDatabaseInfo};
 pub use date::CourtListenerDatePartitionAccessor;
 pub use documents::CourtListenerDocumentAccessor;
 mod object;

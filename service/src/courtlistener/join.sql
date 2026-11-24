@@ -14,8 +14,8 @@ SELECT
         docket_record_index := d.{ordinal},
         court_record_index := k.{ordinal}
     ) AS provenance
-FROM cl_0 o
-LEFT JOIN cl_1 c ON o.cluster_id = c.id
-LEFT JOIN cl_2 d ON c.docket_id = d.id
-LEFT JOIN cl_3 k ON d.court_id = k.id
+FROM opinions o
+LEFT JOIN opinion_clusters c ON o.cluster_id = c.id
+LEFT JOIN dockets d ON c.docket_id = d.id
+LEFT JOIN courts k ON d.court_id = k.id
 ORDER BY o.{ordinal}

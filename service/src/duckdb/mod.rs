@@ -4,7 +4,7 @@
 //! local/remote ATTACH. Remote HTTP/S3 reads use cache_httpfs with a private
 //! temporary on-disk cache, fetching only requested blocks.
 //! BHL uses in-memory or caller-owned persistent databases; CourtListener uses a
-//! disposable on-disk database. All modes configure a private spill directory,
+//! disposable or caller-persisted on-disk database. All modes configure a private spill directory,
 //! disable DuckDB's external memory cache, and retain scratch/cache storage
 //! with every clone.
 //! `DuckDbDatabase` provides a general SQL interface returning Arrow batches
