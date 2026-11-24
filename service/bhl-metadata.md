@@ -1,5 +1,28 @@
 # BHL metadata joins with embedded DuckDB
 
+## Optional prepared numeric lookup tables
+
+After finalizing a local metadata database and closing its readers, run
+`BhlMetadata::prepare_lookup("bhl-metadata.duckdb")` once before distributing
+the immutable snapshot. Alternatively run
+[`prepare_lookup.sql`](src/bhl/metadata/prepare_lookup.sql) after the existing
+13-table import SQL. Both routes create the same versioned lookup profile.
+
+The optional profile keeps all raw tables unchanged and adds derived tables
+with precomputed `UBIGINT` join keys, original source row ordinals, and single-column
+ART indexes. Derived rows are ordered by numeric key for zonemap pruning; metadata
+list order still follows the original source ordinal. No duplicates are removed,
+raw strings are not normalized, and the public Arrow metadata schema is unchanged.
+Readers automatically use the profile when present. Old raw-table databases
+continue to work without it; malformed or unsupported profiles fail explicitly.
+
+Preparation needs extra disk and build memory for a copy of the source records
+and their indexes. It is transactional and rejects existing lookup objects.
+Never update raw tables after preparation: regenerate the complete snapshot and
+profile together. A remote read-only worker does not build indexes or copy tables.
+Index eligibility and benefit depend on the actual query plan and selection size;
+inspect `EXPLAIN ANALYZE` rather than assuming every join will use an index.
+
 Metadata is included with `service-bhl` (service-crate feature `bhl`).
 The implementation uses the bundled Rust DuckDB binding on the 1.10506.x line;
 the lockfile selects 1.10506.1. This line uses Arrow 58, matching the public

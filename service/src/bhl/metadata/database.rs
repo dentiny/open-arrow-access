@@ -74,6 +74,7 @@ impl BhlMetadata {
         let connection = ManagedConnection::open(path, true)?;
         let info = read_info(&connection)?;
         check_sources(&connection, &info)?;
+        super::lookup::available(&connection)?;
         Ok(Self {
             connection: Mutex::new(connection),
             info,
@@ -90,6 +91,35 @@ impl BhlMetadata {
     /// It is not presented as a checksum of the original TSV rows.
     pub fn open_tables(path: impl AsRef<Path>, snapshot_id: impl Into<String>) -> Result<Self> {
         Self::from_tables_database(DuckDbDatabase::open(path)?, snapshot_id)
+    }
+
+    /// Prepare numeric lookup keys and ART indexes after the 13 source tables
+    /// are finalized. This opt-in operation writes additional tables, preserving
+    /// every original lexical column and source row ordinal. It requires enough
+    /// disk/memory for the derived tables and indexes. Distribute the completed
+    /// immutable file only after this method returns; never modify raw tables
+    /// without rebuilding the snapshot and its lookup tables together.
+    /// Existing lookup profiles are rejected rather than overwritten.
+    pub fn prepare_lookup(path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        if !std::fs::metadata(path)
+            .map_err(error::database_io)?
+            .is_file()
+        {
+            return Err(error::invalid(
+                "BHL lookup requires an existing database file",
+            ));
+        }
+        let connection = ManagedConnection::open(path, false)?;
+        for table in tables() {
+            let columns = connection.table_columns(&table.name)?;
+            validation::validate_table_schema(&table, &columns)?;
+        }
+        if let Err(source) = connection.execute_batch(include_str!("prepare_lookup.sql")) {
+            let _ = connection.execute_batch("ROLLBACK");
+            return Err(error::duckdb(source));
+        }
+        connection.close()
     }
 
     /// Bind a shared local or remote DuckDB database to BHL tables.
@@ -114,6 +144,7 @@ impl BhlMetadata {
             )
             .map_err(error::duckdb)?;
         validation::validate_title_keys(valid_title_keys)?;
+        super::lookup::available(&connection)?;
         Ok(Self {
             connection: Mutex::new(connection),
             info: BhlMetadataInfo {

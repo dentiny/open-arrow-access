@@ -2,6 +2,7 @@
 mod database;
 mod error;
 mod join;
+mod lookup;
 mod source;
 mod stream;
 mod validation;

@@ -8,6 +8,69 @@ const ITEM: &str = "ocr/item-2/item-2-3-5.txt";
 const PART: &str = "ocr/part-8/part-8-3-1.txt";
 const MISSING: &str = "ocr/item-20/item-20-30-1.txt";
 
+#[tokio::test]
+async fn prepared_lookup_preserves_lexical_values_relation_order_and_read_only_queries() {
+    let (_directory, path, expected) = plain_database().await;
+    BhlMetadata::prepare_lookup(&path).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let metadata = BhlMetadata::open_tables(&path, "prepared-v1").unwrap();
+    let actual = read(&metadata, &[ITEM, PART]);
+    for (actual, expected) in actual.iter().zip(&expected) {
+        assert_eq!(actual.metadata, expected.metadata);
+        assert_eq!(actual.missing, expected.missing);
+        assert_eq!(actual.conflicts, expected.conflicts);
+    }
+    assert_eq!(actual.len(), expected.len());
+    let connection = metadata.query_connection().unwrap();
+    let sql: String = connection
+        .query_row(
+            "SELECT sql FROM duckdb_views() WHERE temporary AND view_name='bhl_page'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(sql.contains("__bhl_lookup_page"), "{sql}");
+    assert!(!sql.contains("bhl_id("), "{sql}");
+    let raw: String = connection
+        .query_row("SELECT TitleID FROM main.title LIMIT 1", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(raw, "001");
+    let indexes: u64 = connection
+        .query_row(
+            "SELECT count(*) FROM duckdb_indexes() WHERE index_name LIKE '__bhl_lookup_%_key'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(indexes, 13);
+    drop(connection);
+    drop(metadata);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(BhlMetadata::prepare_lookup(&path).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[tokio::test]
+async fn prepared_lookup_rejects_incomplete_or_unknown_profiles_without_fallback() {
+    for sql in [
+        "UPDATE __bhl_lookup SET version=2",
+        "DROP TABLE __bhl_lookup_page",
+        "DROP INDEX __bhl_lookup_page_key; ALTER TABLE __bhl_lookup_page ALTER __key TYPE VARCHAR",
+        "DELETE FROM __bhl_lookup_page",
+    ] {
+        let (_directory, path, _) = plain_database().await;
+        BhlMetadata::prepare_lookup(&path).unwrap();
+        let db = ::duckdb::Connection::open(&path).unwrap();
+        db.execute_batch(sql).unwrap();
+        drop(db);
+        assert!(BhlMetadata::open_tables(&path, "invalid").is_err(), "{sql}");
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("missing.duckdb");
+    assert!(BhlMetadata::prepare_lookup(&missing).is_err());
+    assert!(!missing.exists());
+}
+
 async fn source(title: &str) -> (tempfile::TempDir, OpenDalAccessor) {
     source_table("title", title).await
 }

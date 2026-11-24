@@ -66,6 +66,7 @@ fn create_view(
     connection: &::duckdb::Connection,
     table: &super::Table,
     temporary: bool,
+    prepared: bool,
 ) -> Result<()> {
     let key = quoted(table.fields[table.key].name());
     let fields = table
@@ -78,20 +79,36 @@ fn create_view(
         .collect::<Vec<_>>()
         .join(", ");
     let scope = if temporary { "TEMP " } else { "" };
+    let source = if prepared {
+        format!("main.__bhl_lookup_{}", table.name)
+    } else {
+        format!("main.{}", quoted(&table.name))
+    };
+    let columns = if prepared {
+        let raw = table
+            .fields
+            .iter()
+            .map(|field| quoted(field.name()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{raw}, __source_rowid AS rowid, __key")
+    } else {
+        format!("*, rowid, bhl_id({key}) AS __key")
+    };
     connection
         .execute_batch(&format!(
-            "CREATE {scope}VIEW bhl_{} AS SELECT *, rowid, bhl_id({key}) AS __key, struct_pack({fields}) AS __record FROM main.{};",
-            table.name,
-            quoted(&table.name)
+            "CREATE {scope}VIEW bhl_{} AS SELECT {columns}, struct_pack({fields}) AS __record FROM {source};",
+            table.name
         ))
         .map_err(error::duckdb)
 }
 
 /// Temporary objects are connection-local and never alter the supplied file.
-pub(super) fn prepare_queries(connection: &::duckdb::Connection) -> Result<()> {
+pub(super) fn prepare_queries(connection: &ManagedConnection) -> Result<()> {
     create_id_macro(connection, true)?;
+    let prepared = super::lookup::available(connection)?;
     for table in tables() {
-        create_view(connection, &table, true)?;
+        create_view(connection, &table, true, prepared)?;
     }
     Ok(())
 }
@@ -193,7 +210,7 @@ async fn import_table(
                 Err(source) => return Err(error::duckdb(source)),
             }
         }
-        create_view(&connection, &table, false)?;
+        create_view(&connection, &table, false, false)?;
         Ok((
             table.name,
             SourceInfo {
