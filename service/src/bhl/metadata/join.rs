@@ -97,60 +97,81 @@ pub(super) fn for_each(
     super::scope::prepare(connection)?;
     let schema = page_schema();
     let field = schema.field_with_name("metadata").expect("fixed metadata");
-    let mut statement = connection
-        .prepare(include_str!("join.sql"))
+    // Scope the source tables once, then keep wide joined records out of a
+    // request-sized window/sort. Include every version of each page touched by
+    // the batch, even when alternatives are far apart in the input.
+    connection
+        .execute_batch("ALTER TABLE bhl_selection RENAME TO bhl_all_selection")
         .map_err(error::duckdb)?;
-    let _ = statement.stream_arrow([]).map_err(error::duckdb)?;
     let mut joined_rows = 0;
-    while let Some(batch) = statement.step().map_err(error::duckdb)? {
-        let batch = RecordBatch::from(&batch);
-        let indices = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<UInt64Array>()
-            .ok_or_else(|| error::invalid("expected request IDs"))?;
-        let matches = batch
-            .column(CANONICAL_MATCHES_COLUMN)
-            .as_any()
-            .downcast_ref::<UInt64Array>()
-            .ok_or_else(|| error::invalid("expected canonical match counts"))?;
-        let selected = batch
-            .column(CANONICAL_ID_COLUMN)
-            .as_any()
-            .downcast_ref::<UInt64Array>()
-            .ok_or_else(|| error::invalid("expected canonical request IDs"))?;
-        // Enforce the fixed LargeUtf8/non-null contract on joined records only;
-        // NULL cells in unrelated source rows must not fail this query.
-        let metadata =
-            arrow_cast::cast(batch.column(1), field.data_type()).map_err(error::arrow)?;
-        let metadata = metadata
-            .as_any()
-            .downcast_ref::<StructArray>()
-            .ok_or_else(|| error::invalid("expected metadata struct"))?;
-        joined_rows += batch.num_rows();
-        for row in 0..batch.num_rows() {
-            let index = usize::try_from(indices.value(row))
-                .map_err(|_| error::invalid("request ID overflow"))?;
-            let object = keys
-                .get(index)
-                .ok_or_else(|| error::invalid("unknown request ID"))?;
-            validation::validate_canonical_matches(matches.value(row), object)?;
-            if selected.value(row) != indices.value(row) {
-                let canonical = &keys[selected.value(row) as usize];
-                eprintln!(
-                    "BHL quarantined alternative {}: selected {}",
-                    object.locator(),
-                    canonical.locator()
-                );
-                continue;
+    for start in (0..keys.len()).step_by(SELECTION_BATCH_SIZE) {
+        let end = start.saturating_add(SELECTION_BATCH_SIZE).min(keys.len());
+        connection
+            .execute_batch(&format!(
+                include_str!("batch_selection.sql"),
+                start = start,
+                end = end,
+            ))
+            .map_err(error::duckdb)?;
+        let mut statement = connection
+            .prepare(include_str!("join.sql"))
+            .map_err(error::duckdb)?;
+        let _ = statement.stream_arrow([]).map_err(error::duckdb)?;
+        while let Some(batch) = statement.step().map_err(error::duckdb)? {
+            let batch = RecordBatch::from(&batch);
+            let indices = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .ok_or_else(|| error::invalid("expected request IDs"))?;
+            let matches = batch
+                .column(CANONICAL_MATCHES_COLUMN)
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .ok_or_else(|| error::invalid("expected canonical match counts"))?;
+            let selected = batch
+                .column(CANONICAL_ID_COLUMN)
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .ok_or_else(|| error::invalid("expected canonical request IDs"))?;
+            // Enforce the fixed LargeUtf8/non-null contract on joined records only;
+            // NULL cells in unrelated source rows must not fail this query.
+            let metadata =
+                arrow_cast::cast(batch.column(1), field.data_type()).map_err(error::arrow)?;
+            let metadata = metadata
+                .as_any()
+                .downcast_ref::<StructArray>()
+                .ok_or_else(|| error::invalid("expected metadata struct"))?;
+            for row in 0..batch.num_rows() {
+                let index = usize::try_from(indices.value(row))
+                    .map_err(|_| error::invalid("request ID overflow"))?;
+                // Out-of-batch versions participate in canonicalization only.
+                // Their own batch emits/reports them in original request order.
+                if !(start..end).contains(&index) {
+                    continue;
+                }
+                joined_rows += 1;
+                let object = keys
+                    .get(index)
+                    .ok_or_else(|| error::invalid("unknown request ID"))?;
+                validation::validate_canonical_matches(matches.value(row), object)?;
+                if selected.value(row) != indices.value(row) {
+                    let canonical = &keys[selected.value(row) as usize];
+                    eprintln!(
+                        "BHL quarantined alternative {}: selected {}",
+                        object.locator(),
+                        canonical.locator()
+                    );
+                    continue;
+                }
+                emit(BhlPageMetadata {
+                    identity: parsed_identities[index].clone(),
+                    object: object.clone(),
+                    metadata: metadata.slice(row, 1),
+                    missing: strings(batch.column(2).as_ref(), row)?,
+                    conflicts: strings(batch.column(3).as_ref(), row)?,
+                })?;
             }
-            emit(BhlPageMetadata {
-                identity: parsed_identities[index].clone(),
-                object: object.clone(),
-                metadata: metadata.slice(row, 1),
-                missing: strings(batch.column(2).as_ref(), row)?,
-                conflicts: strings(batch.column(3).as_ref(), row)?,
-            })?;
         }
     }
     if joined_rows != keys.len() {
