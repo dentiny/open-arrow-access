@@ -9,6 +9,9 @@
 pub mod duckdb;
 
 mod arrow;
+// Providers may use only part of the shared Arrow utilities.
+#[allow(dead_code)]
+mod arrow_utils;
 mod discovery;
 mod error;
 #[cfg(feature = "oai")]

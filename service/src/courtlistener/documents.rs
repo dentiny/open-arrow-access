@@ -4,7 +4,8 @@ use super::{
     error::{arrow_error, records_error, schema_error},
     validation::{http_url, validate_media_root, validate_relative_document_path},
 };
-use arrow_array::{Array, ArrayRef, RecordBatch, StringArray, StructArray};
+use crate::arrow_utils::{struct_field, struct_string_value};
+use arrow_array::{ArrayRef, RecordBatch, StringArray, StructArray};
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef};
 use futures::stream;
 use open_arrow_access_core::{
@@ -92,17 +93,6 @@ fn resolve(root: &Url, value: Option<&str>) -> Result<Option<String>> {
     drop(segments);
     Ok(Some(url.into()))
 }
-fn strings<'a>(entity: &'a StructArray, field: &str) -> Result<&'a StringArray> {
-    entity
-        .column_by_name(field)
-        .and_then(|a| a.as_any().downcast_ref::<StringArray>())
-        .ok_or_else(|| schema_error("missing document path field"))
-}
-fn value<'a>(entity: &StructArray, array: &'a StringArray, row: usize) -> Option<&'a str> {
-    (!entity.is_null(row) && !array.is_null(row))
-        .then(|| array.value(row))
-        .filter(|v| !v.is_empty())
-}
 fn attach(batch: RecordBatch, schema: SchemaRef, root: &Url) -> Result<RecordBatch> {
     let entity = |name| {
         batch
@@ -112,17 +102,25 @@ fn attach(batch: RecordBatch, schema: SchemaRef, root: &Url) -> Result<RecordBat
     };
     let opinion = entity("opinion")?;
     let cluster = entity("cluster")?;
-    let local = strings(opinion, "local_path")?;
-    let download = strings(opinion, "download_url")?;
-    let harvard = strings(cluster, "filepath_pdf_harvard")?;
+    let local = struct_field::<StringArray>(opinion, "local_path")
+        .ok_or_else(|| schema_error("missing document path field"))?;
+    let download = struct_field::<StringArray>(opinion, "download_url")
+        .ok_or_else(|| schema_error("missing document path field"))?;
+    let harvard = struct_field::<StringArray>(cluster, "filepath_pdf_harvard")
+        .ok_or_else(|| schema_error("missing document path field"))?;
     let mut opinion_urls = Vec::with_capacity(batch.num_rows());
     let mut cluster_urls = Vec::with_capacity(batch.num_rows());
     for row in 0..batch.num_rows() {
         opinion_urls.push(resolve(
             root,
-            value(opinion, local, row).or_else(|| value(opinion, download, row)),
+            struct_string_value(opinion, local, row)
+                .filter(|v| !v.is_empty())
+                .or_else(|| struct_string_value(opinion, download, row).filter(|v| !v.is_empty())),
         )?);
-        cluster_urls.push(resolve(root, value(cluster, harvard, row))?);
+        cluster_urls.push(resolve(
+            root,
+            struct_string_value(cluster, harvard, row).filter(|v| !v.is_empty()),
+        )?);
     }
     let documents: ArrayRef = Arc::new(StructArray::new(
         document_fields(),
