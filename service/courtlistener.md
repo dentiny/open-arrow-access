@@ -448,7 +448,7 @@ region and unsigned access on their OpenDAL operator; local mirrors work too.
 
 ## Prepared database SQL reference
 
-The [full four-table DDL and creation sequence](src/courtlistener/sql/README.md)
+The [full four-table DDL and creation sequence](../metadata_import/courtlistener/README.md)
 document the local prepared database layout. These standalone SQL files create
 empty typed tables; CSV loading and file publication are separate steps.
 

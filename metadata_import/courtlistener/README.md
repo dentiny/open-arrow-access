@@ -53,8 +53,8 @@ docket → court relationship as the provider.
 ## Inspect just the schema with the DuckDB CLI
 
 ```sh
-duckdb /path/to/empty.duckdb < service/src/courtlistener/sql/create_tables.sql
-duckdb /path/to/empty.duckdb 'DESCRIBE opinions;'
+duckdb -bail /path/to/empty.duckdb < metadata_import/courtlistener/create_tables.sql
+duckdb -bail /path/to/empty.duckdb 'DESCRIBE opinions;'
 ```
 
 This creates empty tables only. It does not import data or create a completed
