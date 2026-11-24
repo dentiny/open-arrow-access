@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add Gutenberg whole-book Arrow rows retaining every advertised file's original bytes, MIME types and URI, plus exact RDF metadata for unmapped fields. Keep the metadata-only schema unchanged.
+
 ## 0.21.6 - 2026-11-24
 
 - Batch wide BHL metadata joins into 8,192-request ranges after scoping source tables once, avoiding spill exhaustion on large conversion requests while retaining global page-version selection and output order.

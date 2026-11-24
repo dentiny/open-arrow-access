@@ -176,55 +176,95 @@ an explicit member-extraction contract is implemented.
 
 ## Current library support and remaining work
 
-The existing `service-gutenberg` feature reads one caller-selected RDF document.
-It does not discover the corpus, synchronize rsync mirrors or follow book links.
-Its typed metadata schema below contains selected mapped fields; it is not a
-lossless encoding of all upstream RDF. For example, the repository fixture has
-an unmapped `pgterms:marc520` element. Retain the complete RDF separately, or a
-complete parsed representation retaining unknown fields, alongside typed columns.
+The `service-gutenberg` feature offers two explicit views:
 
-| Layer | Available now | Still needed for corpus ingestion |
+| View | Output | Content behavior |
 | --- | --- | --- |
-| Metadata | `GutenbergAccessor`: one RDF → one metadata row | Frozen corpus membership; complete metadata retention |
-| Original files | Shared byte access and [binary attachments](../docs/attachments.md) can preserve a caller-selected TXT, HTML, EPUB, Kindle, PDF or ZIP object | Gutenberg-aware selection/resolution and metadata/content association |
-| Parsing | Shared XML/archive machinery can be composed explicitly | Each format's documented book-content contract; raw-byte access alone is not text extraction |
-| Sharding | Explicit file sets can wrap independent RDF documents and use native file partitions | Gutenberg corpus planner and persisted book-grouped manifests |
-| Recovery | Shared storage retry/reader contracts | Corpus checkpoints, missing-file policy and count reconciliation |
+| `GutenbergAccessor` / `schema()` | Existing nine-field metadata row | File URIs remain metadata; no payload downloads |
+| `GutenbergBooks` / `book_schema()` | Metadata, exact `raw_rdf`, and `files[].data` | Every advertised file is read as unchanged original bytes |
 
-`GutenbergAccessor` aliases `DocumentAccessor`; its native scan plan is one
-whole-input partition, with no within-document parallelism or provider listing.
-A caller can wrap it in `FileSetAccessor` and execute independent RDF partitions
-through `ParallelReadLayer` or the shared crawl executor. The generic machinery
-does not automatically create Gutenberg shard membership or download content.
-The [parallel-reading guide](../docs/parallel-read.md) describes execution.
+Neither view discovers corpus membership or synchronizes rsync mirrors. Supply
+one RDF locator per request and freeze the catalogue/mirror for reproducible reads.
+The typed metadata is a selected mapping, not all upstream RDF properties. The
+book view's exact `raw_rdf: LargeBinary` retains unknown elements, attributes,
+contributor roles and author properties such as `pgterms:webpage` without loss.
+Those properties are not automatically added as typed columns.
 
-Generic binary document reads buffer the complete selected object before
-emitting its `data: LargeBinary` value. Memory depends on active file sizes and
-concurrency; byte/batch targets do not make one huge book a streaming value.
-Supplying a frozen Fs/S3/HTTP mirror uses existing storage contracts; rsync can
-remain an acquisition step rather than a new Rust storage backend.
+## All-format book schema and API
 
-Relevant implementation: [Gutenberg decoder](src/gutenberg/mod.rs),
-[whole-document planning](../core/src/document.rs) and
-[file-set planning](../dataset/src/file_set/accessor.rs).
+`book_schema()` contains the same metadata fields as `schema()`, with these
+additions (non-null unless marked `?`):
 
-## Format-specific implementation follow-ups
+```text
+raw_rdf: LargeBinary
+files: List<Struct<
+  uri: Utf8,
+  format: List<Utf8>,
+  extent: UInt64?,
+  modified: Utf8?,
+  data: LargeBinary
+>>
+```
 
-Keep support for each format in a separate implementation PR, after this
-documentation. Each PR should specify selection, original-byte output versus
-decoded records, encoding/container behavior, book identity and missing/corrupt
-input policy. TXT, HTML/HTML ZIP, EPUB/EPUB3, Kindle KF8/MOBI and PDF/TeX are
-separate representation families; uncommon advertised formats should remain
-explicitly identifiable and preservable through original-byte access.
-A shared binary reader is useful infrastructure, not proof that all of those
-Gutenberg format routes have already been implemented.
+`GutenbergBooks::new(rdf_storage, file_storage).open(ReadRequest)` reads the RDF
+from `request.object`. It passes every advertised `files[].uri` unchanged to
+`file_storage`; configure a URL-capable byte accessor or an explicit frozen
+mirror mapping keyed by the original URI. A root-relative filesystem/OpenDAL
+accessor alone does not translate absolute catalogue URLs. Historical
+`cache/generated` to `cache/epub` aliases also require an explicit mapping.
+Request byte options reach both RDF and payload reads.
+
+```rust,no_run
+use open_arrow_access::{Accessor, ByteReadRequest, ByteReader, ReadRequest, Result};
+use open_arrow_access::service::gutenberg::GutenbergBooks;
+
+async fn read_complete_book<R, F>(rdf_storage: R, file_storage: F, rdf_key: &str) -> Result<()>
+where
+    R: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,
+    F: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,
+{
+    let books = GutenbergBooks::new(rdf_storage, file_storage);
+    let mut reader = books.open(ReadRequest::new(rdf_key)).await?;
+    let batch = reader.next().await?.expect("one RDF produces one book");
+    println!("original files: {:?}", batch.column_by_name("files"));
+    Ok(())
+}
+```
+
+There is no format allowlist or fallback: TXT (including non-UTF-8), HTML,
+HTML ZIP, EPUB/EPUB3, KF8/MOBI, PDF, TeX, images, audio and unrecognized advertised
+formats all use the same original-byte contract. MIME lists, duplicate file
+entries and RDF order are retained. Empty files are valid non-null binary values;
+a book with no advertised files still produces one row with an empty list.
+The reader follows advertised files only, not arbitrary HTML image references;
+selecting packaged HTML ZIP/EPUB preserves their contained dependencies.
+
+Opening/metadata inspection does no I/O. Consumption validates the RDF first,
+then reads payloads sequentially, and emits one complete book row. Any missing
+or corrupt read fails that book; no partial row or silent file omission is
+returned. `extent` and `modified` remain upstream declarations, not verified
+lengths/checksums or snapshot guarantees. Raw bytes do not imply format validity.
+Projection is top-level: omitting `files` skips all payload I/O; selecting
+`files` includes its payloads. Empty projection retains one zero-column row.
+
+The row buffers the complete RDF and all advertised files for one book. Peak
+memory depends on total book bytes and concurrent books, not the Arrow batch
+size target. `LargeBinary` is ordinary Arrow binary, not a Lance blob extension.
+No archive extraction, rendering, OCR, charset conversion, text extraction or
+header/footer removal occurs. Those are separate format-specific operations.
+
+The native scan plan has one whole-book partition. A caller can wrap independent
+RDF requests in `FileSetAccessor` and execute them using `ParallelReadLayer` or
+the shared crawl executor; this does not create corpus membership or checkpoints.
+See the [parallel-reading guide](../docs/parallel-read.md).
 
 ## Evidence and limits
 
 This guide follows the hierarchy/sharding structure of [arXiv](arxiv.md).
 The current implementation and existing synthetic Gutenberg RDF fixtures were
-inspected. No live full-corpus inventory, book-payload read, sharding benchmark,
-production conversion or deployment was performed for this documentation.
+inspected. The all-format book reader is covered by deterministic integration tests for
+original-byte preservation, unknown MIME types, projection and failures. No live
+full-corpus conversion or sharding benchmark was performed for this implementation.
 The displayed tree is illustrative; official documentation establishes the two
 collection layouts, not availability of every format for every ID.
 

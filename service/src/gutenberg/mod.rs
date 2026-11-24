@@ -1,7 +1,9 @@
 //! One book per row, using the fields mapped from RDF.
 
+mod books;
 mod error;
 mod metadata;
+pub use books::{GutenbergBooks, book_schema};
 use error::{decode, decode_source};
 
 use std::sync::{Arc, OnceLock};
