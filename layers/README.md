@@ -14,7 +14,7 @@ Byte decompression layers use the same contract but require [codec features](../
 | `AttachmentFallbackLayer` | Choose a typed attachment cell per logical item | Uses the alternate only when that cell is absent; returns one cell, not batches |
 | `MetricsLayer` | Observe byte/record reads | In-memory aggregates by default; optional OpenDAL instrumentation |
 | `SchemaEvolutionLayer` | Add computed columns, remove, rename, or cast top-level columns | Ordered DataFusion Expr / SQL operations; fixed output schema |
-| `FilterLayer` | Apply row predicates to selected columns | AND semantics; reads hidden dependencies; preserves schema and row order |
+| `FilterLayer` | Filter rows or mask individual cells | Boolean rules; reads hidden dependencies; cell targets become nullable |
 | `LimitLayer` | Keep at most N rows | One budget per open; stops and releases the source at the limit |
 | `SamplingLayer` | Seeded Bernoulli row sampling | Approximate count; preserves selected row order |
 | `PrefetchLayer` | Read ahead while the caller processes batches | Per-open row and/or estimated-byte queue budgets; preserves batch boundaries |
@@ -88,7 +88,7 @@ read only the source columns needed by all changes and the final output. Without
 it, adding, removing or renaming columns requires reading the full source schema.
 All configured computations run before final projection.
 
-## Filter rows
+## Filter rows and cells
 
 `FilterLayer::new(Vec<Expr>)` retains a row only when every DataFusion predicate
 returns `true`. A predicate may reference one or multiple columns and may call a
@@ -97,7 +97,7 @@ an expression for alternatives, or `is_null().or(...)` to explicitly retain null
 
 Like generated-column expressions, predicates accept caller-provided DataFusion
 scalar UDFs through `udf.call(...)`. The UDF owns its input types, configuration
-and logic; the filter requires a Boolean result and applies it to the whole row.
+and logic; each rule requires a Boolean result.
 
 ```rust
 use datafusion::{logical_expr::ScalarUDF, prelude::{col, lit}};
@@ -116,15 +116,40 @@ where
 }
 ```
 
+Use `FilterLayer::with_rules(Vec<FilterRule>)` to mix row and cell filtering:
+
+```rust
+use datafusion::prelude::{col, lit};
+use open_arrow_access_layers::{FilterLayer, FilterRule};
+
+let filter = FilterLayer::with_rules(vec![
+    FilterRule::Row(col("score").gt(lit(0_i64))),
+    FilterRule::Cell {
+        column: "data".into(),
+        predicate: col("size").lt_eq(lit(1024_i64)),
+    },
+]);
+```
+
+`FilterRule::Row` discards the whole row when its predicate is false or null.
+`FilterRule::Cell` replaces only the target cell with null, preserving the row
+and other cells. Targets are top-level column names and become nullable in the
+output schema, even when the input field is non-nullable. Union and RunEndEncoded
+targets are rejected before reading because they lack a top-level validity bitmap.
+Data types and field/schema metadata are preserved. Multiple rules for a target combine with
+AND. Every predicate sees the original batch, including values masked by an
+earlier rule; cell masking never changes a later rule's input.
+
 For a cell-size rule, the caller can provide a Boolean UDF that compares each
 cell's byte length with a captured limit. A UDF can also take multiple columns,
 reference generated columns from an inner `SchemaEvolutionLayer`, or return a
 scalar Boolean that expands to every row in the batch. The layer provides no
 built-in domain-specific predicates.
 
-Predicate dependencies are added to an explicit input projection, then hidden
-from output unless requested. Caller column order, field/schema metadata and
-zero-column row counts are preserved. Predicates compile once per open or scan;
+Predicate dependencies and cell targets are added to an explicit input projection,
+then hidden from output unless requested. Caller column order, field/schema metadata and
+zero-column row counts are preserved (except for rows discarded by row rules).
+Predicates compile once per open or scan;
 unknown columns, non-Boolean results, aggregates, windows, subqueries and volatile
 functions fail before batches are consumed. All predicates evaluate on the original
 batch in vector order; do not depend on short-circuiting to guard failing casts.

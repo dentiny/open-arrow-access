@@ -24,7 +24,7 @@ mod limit;
 pub use limit::{LimitAccessor, LimitLayer};
 
 mod filter;
-pub use filter::{FilterAccessor, FilterLayer};
+pub use filter::{FilterAccessor, FilterLayer, FilterRule};
 
 mod sampling;
 pub use sampling::{SamplingAccessor, SamplingLayer};
