@@ -28,6 +28,9 @@ impl ArxivMetadataDatabase {
         drop(connection);
         let batch =
             arrow_select::concat::concat_batches(&schema, &batches).map_err(error::arrow_error)?;
+        if batch.num_rows() == 0 {
+            return Err(error::missing_content_metadata(&article));
+        }
         validation::validate_metadata_record_count(batch.num_rows())?;
         let metadata = arrow_cast::cast(
             &StructArray::from(batch),
@@ -81,7 +84,9 @@ mod tests {
             assert_eq!(raw["arxiv:title"].as_string::<i32>().value(0), title);
         }
         // An empty result must not leave the cached statement's old row behind.
-        assert!(database.article("2410.99999").is_err());
+        let missing = database.article("2410.99999").err().unwrap();
+        assert!(missing.to_string().contains("2410.99999"));
+        assert!(missing.to_string().contains("no matching metadata"));
         assert!(database.article("2410.00001").is_ok());
     }
 }
