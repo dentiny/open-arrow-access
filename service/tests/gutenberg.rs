@@ -134,7 +134,7 @@ async fn rdf_metadata_can_exceed_the_previous_size_limit() {
 // retention rather than repeating the same reader test for each file extension.
 #[tokio::test]
 async fn books_keep_original_bytes_rdf_and_file_order() {
-    use open_arrow_access_service::gutenberg::{GutenbergBooks, book_schema};
+    use open_arrow_access_service::gutenberg::{GutenbergBookDecoder, GutenbergBooks, book_schema};
     let raw = String::from_utf8(fixture!("gutenberg", "book.rdf").await)
         .unwrap()
         .replace("application/zip", "application/x-future-format")
@@ -144,7 +144,7 @@ async fn books_keep_original_bytes_rdf_and_file_order() {
         let rdf_observed = rdf.observations.clone();
         let files = MemoryAccessor::new(payload, 2);
         let observed = files.observations.clone();
-        let books = GutenbergBooks::new(rdf, files);
+        let books = GutenbergBooks::new(rdf, GutenbergBookDecoder::new(files));
         let options = ByteReadOptions {
             io_concurrency: NonZeroUsize::new(2).unwrap(),
             ..Default::default()
@@ -188,7 +188,7 @@ async fn books_keep_original_bytes_rdf_and_file_order() {
 
 #[tokio::test]
 async fn books_skip_unselected_or_absent_files() {
-    use open_arrow_access_service::gutenberg::GutenbergBooks;
+    use open_arrow_access_service::gutenberg::{GutenbergBookDecoder, GutenbergBooks};
     for (fixture_name, projection) in [
         ("book.rdf", Some(vec!["raw_rdf".into(), "ebook_id".into()])),
         ("book.rdf", Some(vec![])),
@@ -197,7 +197,10 @@ async fn books_skip_unselected_or_absent_files() {
         let raw = fixture!("gutenberg", fixture_name).await;
         let files = MemoryAccessor::new(b"", 1).with_open_failure(ErrorKind::NotFound);
         let observed = files.observations.clone();
-        let books = GutenbergBooks::new(MemoryAccessor::new(&raw, 17), files);
+        let books = GutenbergBooks::new(
+            MemoryAccessor::new(&raw, 17),
+            GutenbergBookDecoder::new(files),
+        );
         let options = ReadOptions {
             projection: projection.clone(),
             ..Default::default()
@@ -224,7 +227,7 @@ async fn books_skip_unselected_or_absent_files() {
 
 #[tokio::test]
 async fn books_propagate_payload_errors() {
-    use open_arrow_access_service::gutenberg::GutenbergBooks;
+    use open_arrow_access_service::gutenberg::{GutenbergBookDecoder, GutenbergBooks};
     let raw = fixture!("gutenberg", "book.rdf").await;
     for (files, expected) in [
         (
@@ -236,7 +239,10 @@ async fn books_propagate_payload_errors() {
             ErrorKind::Io,
         ),
     ] {
-        let books = GutenbergBooks::new(MemoryAccessor::new(&raw, 17), files);
+        let books = GutenbergBooks::new(
+            MemoryAccessor::new(&raw, 17),
+            GutenbergBookDecoder::new(files),
+        );
         let mut reader = books.open(request()).await.unwrap();
         assert_eq!(reader.next().await.unwrap_err().kind(), expected);
         assert!(reader.next().await.unwrap().is_none());
@@ -245,13 +251,13 @@ async fn books_propagate_payload_errors() {
 
 #[tokio::test]
 async fn books_validate_projection_before_io_and_rdf_before_files() {
-    use open_arrow_access_service::gutenberg::GutenbergBooks;
+    use open_arrow_access_service::gutenberg::{GutenbergBookDecoder, GutenbergBooks};
     let raw = fixture!("gutenberg", "bad_date.rdf").await;
     let rdf = MemoryAccessor::new(&raw, 17);
     let rdf_observed = rdf.observations.clone();
     let files = MemoryAccessor::new(b"content", 3);
     let files_observed = files.observations.clone();
-    let books = GutenbergBooks::new(rdf, files);
+    let books = GutenbergBooks::new(rdf, GutenbergBookDecoder::new(files));
     open_arrow_access_test_support::expect_err_kind(
         books.open(request().with_projection(["missing"])).await,
         ErrorKind::InvalidInput,

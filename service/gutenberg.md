@@ -206,7 +206,8 @@ files: List<Struct<
 >>
 ```
 
-`GutenbergBooks::new(rdf_storage, file_storage).open(ReadRequest)` reads the RDF
+`GutenbergBooks::new(rdf_storage, GutenbergBookDecoder::new(file_storage))`
+uses the shared `DocumentAccessor` and reads the RDF on consumption
 from `request.object`. It passes every advertised `files[].uri` unchanged to
 `file_storage`; configure a URL-capable byte accessor or an explicit frozen
 mirror mapping keyed by the original URI. A root-relative filesystem/OpenDAL
@@ -216,14 +217,14 @@ Request byte options reach both RDF and payload reads.
 
 ```rust,no_run
 use open_arrow_access::{Accessor, ByteReadRequest, ByteReader, ReadRequest, Result};
-use open_arrow_access::service::gutenberg::GutenbergBooks;
+use open_arrow_access::service::gutenberg::{GutenbergBookDecoder, GutenbergBooks};
 
 async fn read_complete_book<R, F>(rdf_storage: R, file_storage: F, rdf_key: &str) -> Result<()>
 where
     R: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,
     F: Accessor<Request = ByteReadRequest, Reader = dyn ByteReader> + 'static,
 {
-    let books = GutenbergBooks::new(rdf_storage, file_storage);
+    let books = GutenbergBooks::new(rdf_storage, GutenbergBookDecoder::new(file_storage));
     let mut reader = books.open(ReadRequest::new(rdf_key)).await?;
     let batch = reader.next().await?.expect("one RDF produces one book");
     println!("original files: {:?}", batch.column_by_name("files"));

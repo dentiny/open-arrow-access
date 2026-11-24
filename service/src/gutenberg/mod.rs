@@ -3,7 +3,7 @@
 mod books;
 mod error;
 mod metadata;
-pub use books::{GutenbergBooks, book_schema};
+pub use books::{GutenbergBookDecoder, GutenbergBooks, book_schema};
 use error::{decode, decode_source};
 
 use std::sync::{Arc, OnceLock};
