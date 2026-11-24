@@ -8,6 +8,57 @@ const ITEM: &str = "ocr/item-2/item-2-3-5.txt";
 const PART: &str = "ocr/part-8/part-8-3-1.txt";
 const MISSING: &str = "ocr/item-20/item-20-30-1.txt";
 
+#[tokio::test]
+async fn scoped_join_preserves_full_results_for_items_parts_and_missing_targets() {
+    let metadata = load_with_sql(
+        "INSERT INTO page SELECT * REPLACE ('999999' AS PageID) FROM page LIMIT 1;
+         INSERT INTO pagename VALUES ('99','unrelated','999999','');
+         INSERT INTO creator VALUES ('1','10','Author','second','');
+         INSERT INTO creatoridentifier VALUES ('10','other','identifier','');
+         INSERT INTO doi VALUES ('PAGE','3','second page DOI','');
+         INSERT INTO doi VALUES ('item','20','missing item DOI','');",
+    )
+    .await;
+    let connection = metadata.query_connection().unwrap();
+    connection.execute_batch(
+        "CREATE TEMP TABLE bhl_selection AS
+         SELECT 0::UBIGINT request_id,'item' entity_type,2::UBIGINT entity_id,3::UBIGINT page_id,5::UBIGINT AS \"sequence\"
+         UNION ALL SELECT 1,'part',8,3,1
+         UNION ALL SELECT 2,'item',20,30,1;"
+    ).unwrap();
+    let sql = format!(
+        "SELECT count(*), bit_xor(hash(request_id,metadata,missing,conflicts,canonical_id,canonical_matches)) FROM ({})",
+        include_str!("join.sql")
+    );
+    let checksum = || {
+        connection
+            .query_row(&sql, [], |row| {
+                Ok((row.get::<_, u64>(0)?, row.get::<_, u64>(1)?))
+            })
+            .unwrap()
+    };
+    let original = checksum();
+    scope::prepare(&connection).unwrap();
+    assert_eq!(checksum(), original);
+    assert_eq!(original.0, 3);
+    let unrelated: u64 = connection
+        .query_row(
+            "SELECT count(*) FROM bhl_page WHERE __key=999999",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(unrelated, 0);
+    let source_rows: u64 = connection
+        .query_row(
+            "SELECT count(*) FROM main.page WHERE bhl_id(PageID)=999999",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(source_rows, 1);
+}
+
 async fn source(title: &str) -> (tempfile::TempDir, OpenDalAccessor) {
     source_table("title", title).await
 }

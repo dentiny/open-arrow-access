@@ -94,6 +94,7 @@ pub(super) fn for_each(
         }
         appender.flush().map_err(error::duckdb)?;
     }
+    super::scope::prepare(connection)?;
     let schema = page_schema();
     let field = schema.field_with_name("metadata").expect("fixed metadata");
     let mut statement = connection
