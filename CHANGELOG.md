@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.21.4 - 2026-11-23
+
+- Scope BHL metadata relations to selected pages and related parents before correlated joins build wide intermediate results.
+- Add optional native numeric BHL lookup keys and ART indexes, preserving source values and relation order; prepare the metadata snapshot before distributing it.
+- Simplify BHL database initialization with fixed SQL scripts and query-local helpers, retaining compatibility with existing snapshots.
+- Clarify that remote DuckDB on-disk caches remain private and temporary until the final connection clone closes.
+- Release all eight public workspace crates at 0.21.4 with aligned internal dependency requirements.
+
 ## 0.21.3 - 2026-11-23
 
 - Add a common `FilterLayer` accepting caller-defined DataFusion predicates and scalar UDFs, with hidden projection dependencies and lazy partition support.
