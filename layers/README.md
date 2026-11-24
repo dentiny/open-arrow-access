@@ -95,28 +95,32 @@ returns `true`. A predicate may reference one or multiple columns and may call a
 custom scalar UDF. False and null results discard the entire row. Use `or` within
 an expression for alternatives, or `is_null().or(...)` to explicitly retain nulls.
 
-```rust
-use datafusion::prelude::{col, lit};
-use open_arrow_access_core::{Accessor, AccessorExt, ReadOptionsProvider, RecordReader};
-use open_arrow_access_layers::{FilterAccessor, FilterLayer, cell_byte_length};
+Like generated-column expressions, predicates accept caller-provided DataFusion
+scalar UDFs through `udf.call(...)`. The UDF owns its input types, configuration
+and logic; the filter requires a Boolean result and applies it to the whole row.
 
-fn filter<A>(source: A) -> FilterAccessor<A>
+```rust
+use datafusion::{logical_expr::ScalarUDF, prelude::{col, lit}};
+use open_arrow_access_core::{Accessor, AccessorExt, ReadOptionsProvider, RecordReader};
+use open_arrow_access_layers::{FilterAccessor, FilterLayer};
+
+fn filter<A>(source: A, predicate: ScalarUDF) -> FilterAccessor<A>
 where
     A: Accessor<Reader = dyn RecordReader>,
     A::Request: ReadOptionsProvider,
 {
     source.layer(FilterLayer::new(vec![
-        cell_byte_length(col("data")).lt_eq(lit(1024_u64 * 1024)),
+        predicate.call(vec![col("data")]),
         col("score").gt(lit(0_i64)),
     ]))
 }
 ```
 
-This drops rows whose `data` cell exceeds 1 MiB or whose `score` is not positive.
-`cell_byte_length` counts payload bytes for Utf8/Binary, LargeUtf8/LargeBinary,
-Utf8View/BinaryView and FixedSizeBinary, without decoding binary as UTF-8.
-Empty cells have length zero; null cells have null length. UTF-8 length counts
-bytes, not characters. This is distinct from Arrow allocation or buffer size.
+For a cell-size rule, the caller can provide a Boolean UDF that compares each
+cell's byte length with a captured limit. A UDF can also take multiple columns,
+reference generated columns from an inner `SchemaEvolutionLayer`, or return a
+scalar Boolean that expands to every row in the batch. The layer provides no
+built-in domain-specific predicates.
 
 Predicate dependencies are added to an explicit input projection, then hidden
 from output unless requested. Caller column order, field/schema metadata and

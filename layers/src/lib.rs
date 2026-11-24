@@ -23,9 +23,6 @@ pub use unordered_emission::{UnorderedEmissionAccessor, UnorderedEmissionLayer};
 mod limit;
 pub use limit::{LimitAccessor, LimitLayer};
 
-mod cell_byte_length;
-pub use cell_byte_length::cell_byte_length;
-
 mod filter;
 pub use filter::{FilterAccessor, FilterLayer};
 

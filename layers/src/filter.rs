@@ -19,6 +19,22 @@ use open_arrow_access_core::{
 /// An empty vector passes the original reader through. Empty filtered batches
 /// are skipped. Filtering happens after decoding, so it does not bound decoder
 /// memory or avoid loading an oversized cell.
+///
+/// As with generated columns, callers supply scalar UDF expressions using
+/// `udf.call(...)`; input columns are the UDF arguments. The UDF must return
+/// Boolean (an array or a scalar expanded to the batch row count).
+///
+/// ```
+/// use datafusion::{logical_expr::ScalarUDF, prelude::{col, lit}};
+/// use open_arrow_access_layers::FilterLayer;
+///
+/// fn custom_filter(predicate: ScalarUDF) -> FilterLayer {
+///     FilterLayer::new(vec![
+///         predicate.call(vec![col("data"), col("content_type")]),
+///         col("score").gt(lit(0_i64)),
+///     ])
+/// }
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct FilterLayer {
     predicates: Arc<[Expr]>,
