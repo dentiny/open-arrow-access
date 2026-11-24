@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.21.6 - 2026-11-24
+
+- Batch wide BHL metadata joins into 8,192-request ranges after scoping source tables once, avoiding spill exhaustion on large conversion requests while retaining global page-version selection and output order.
+- Keep the batch selection query in a dedicated SQL file.
+- Release all eight public workspace crates at 0.21.6 with aligned internal dependency requirements.
+
 ## 0.21.5 - 2026-11-24
 
 - Bound BHL snapshot queries to a 1 GiB DuckDB buffer budget, two threads and 1 GiB of spill, and use a 128 MiB remote memory cache with request fanout limited to four.
