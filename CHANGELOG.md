@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.21.3 - 2026-11-23
+
+- Add a common `FilterLayer` accepting caller-defined DataFusion predicates and scalar UDFs, with hidden projection dependencies and lazy partition support.
+- Separate CSV framing from scan planning and reuse framing for bounded schema inference.
+- Report the article ID when an arXiv database lookup returns no matching metadata.
+- Release all eight public workspace crates at 0.21.3 with aligned internal dependency requirements.
+
 ## 0.21.2 - 2026-11-23
 
 - Expose TAR link entries as non-file entries so arXiv source readers can skip linked attachments without following their targets. Continue rejecting file reads of links and unsupported sparse or special entries.
