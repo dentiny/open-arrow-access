@@ -1,6 +1,16 @@
 -- DuckDB v1.5.6. Run against a NEW database with -bail.
--- Input is the extracted Cornell/Kaggle JSON Lines metadata snapshot.
--- Replace the path below. This script performs no OAI requests.
+-- Download the input JSON (Cornell/Kaggle arXiv metadata snapshot):
+-- 1. Open https://www.kaggle.com/datasets/Cornell-University/arxiv/versions/313
+--    and click Download (sign in to Kaggle if prompted). Version 313 is the
+--    snapshot used for the original import; keep this version for reproducibility.
+-- 2. Extract arxiv-metadata-oai-snapshot.json from the downloaded ZIP:
+--      unzip /path/to/arxiv.zip arxiv-metadata-oai-snapshot.json -d /path/to/data
+--    Replace arxiv.zip with the downloaded archive's name. The extracted file
+--    is JSON Lines (one article per line), not a JSON array.
+-- 3. Replace /path/to/arxiv-metadata-oai-snapshot.json below with the extracted
+--    file's absolute path, then run from the repository root:
+--      duckdb -bail /path/to/arxiv.duckdb < metadata_import/arxiv/ingest-arxiv-metadata.sql
+-- This script performs no OAI requests.
 SET preserve_insertion_order = false;
 
 -- Preserve every source field. Explicit string extraction protects IDs/leading zeros.
