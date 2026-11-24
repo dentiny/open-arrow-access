@@ -14,6 +14,7 @@ Byte decompression layers use the same contract but require [codec features](../
 | `AttachmentFallbackLayer` | Choose a typed attachment cell per logical item | Uses the alternate only when that cell is absent; returns one cell, not batches |
 | `MetricsLayer` | Observe byte/record reads | In-memory aggregates by default; optional OpenDAL instrumentation |
 | `SchemaEvolutionLayer` | Add computed columns, remove, rename, or cast top-level columns | Ordered DataFusion Expr / SQL operations; fixed output schema |
+| `FilterLayer` | Apply row predicates to selected columns | AND semantics; reads hidden dependencies; preserves schema and row order |
 | `LimitLayer` | Keep at most N rows | One budget per open; stops and releases the source at the limit |
 | `SamplingLayer` | Seeded Bernoulli row sampling | Approximate count; preserves selected row order |
 | `PrefetchLayer` | Read ahead while the caller processes batches | Per-open row and/or estimated-byte queue budgets; preserves batch boundaries |
@@ -86,6 +87,50 @@ Stable expressions such as `now()` use the same planned value across partitions.
 read only the source columns needed by all changes and the final output. Without
 it, adding, removing or renaming columns requires reading the full source schema.
 All configured computations run before final projection.
+
+## Filter rows
+
+`FilterLayer::new(Vec<Expr>)` retains a row only when every DataFusion predicate
+returns `true`. A predicate may reference one or multiple columns and may call a
+custom scalar UDF. False and null results discard the entire row. Use `or` within
+an expression for alternatives, or `is_null().or(...)` to explicitly retain nulls.
+
+```rust
+use datafusion::prelude::{col, lit};
+use open_arrow_access_core::{Accessor, AccessorExt, ReadOptionsProvider, RecordReader};
+use open_arrow_access_layers::{FilterAccessor, FilterLayer, cell_byte_length};
+
+fn filter<A>(source: A) -> FilterAccessor<A>
+where
+    A: Accessor<Reader = dyn RecordReader>,
+    A::Request: ReadOptionsProvider,
+{
+    source.layer(FilterLayer::new(vec![
+        cell_byte_length(col("data")).lt_eq(lit(1024_u64 * 1024)),
+        col("score").gt(lit(0_i64)),
+    ]))
+}
+```
+
+This drops rows whose `data` cell exceeds 1 MiB or whose `score` is not positive.
+`cell_byte_length` counts payload bytes for Utf8/Binary, LargeUtf8/LargeBinary,
+Utf8View/BinaryView and FixedSizeBinary, without decoding binary as UTF-8.
+Empty cells have length zero; null cells have null length. UTF-8 length counts
+bytes, not characters. This is distinct from Arrow allocation or buffer size.
+
+Predicate dependencies are added to an explicit input projection, then hidden
+from output unless requested. Caller column order, field/schema metadata and
+zero-column row counts are preserved. Predicates compile once per open or scan;
+unknown columns, non-Boolean results, aggregates, windows, subqueries and volatile
+functions fail before batches are consumed. All predicates evaluate on the original
+batch in vector order; do not depend on short-circuiting to guard failing casts.
+Filtered empty batches are skipped; an empty predicate vector is a pass-through.
+Errors terminate reading and release the source.
+
+Filtering takes place after decoding and does not avoid loading oversized cells
+or cap decoder memory. Place the filter inside `ParallelReadLayer` to filter in
+partition workers with a shared compiled plan, or outside it to filter after merge.
+The planner retains source partitioning, execution settings and ordering.
 
 ## Coalesce small batches
 

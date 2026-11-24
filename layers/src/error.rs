@@ -1,6 +1,30 @@
 use arrow_schema::ArrowError;
 use open_arrow_access_core::{Error, ErrorKind};
 
+pub(crate) fn filter_plan_error(error: datafusion::error::DataFusionError) -> Error {
+    Error::new(ErrorKind::InvalidInput, "plan_filter", error.to_string()).with_source(error)
+}
+
+pub(crate) fn filter_predicate_type(actual: &arrow_schema::DataType) -> Error {
+    Error::new(
+        ErrorKind::InvalidInput,
+        "plan_filter",
+        format!("filter predicate must return Boolean, got {actual}"),
+    )
+}
+
+pub(crate) fn filter_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {
+    Error::new(ErrorKind::Decode, "filter", error.to_string()).with_source(error)
+}
+
+pub(crate) fn filter_schema_mismatch() -> Error {
+    Error::new(
+        ErrorKind::Decode,
+        "filter",
+        "source batch schema differs from the opened schema",
+    )
+}
+
 pub(crate) fn coalesce_error(error: ArrowError) -> Error {
     Error::new(ErrorKind::Decode, "coalesce_batches", error.to_string()).with_source(error)
 }
