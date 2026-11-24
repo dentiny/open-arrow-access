@@ -5,12 +5,10 @@ pub(crate) fn filter_plan_error(error: datafusion::error::DataFusionError) -> Er
     Error::new(ErrorKind::InvalidInput, "plan_filter", error.to_string()).with_source(error)
 }
 
-pub(crate) fn filter_predicate_type(actual: &arrow_schema::DataType) -> Error {
-    Error::new(
-        ErrorKind::InvalidInput,
-        "plan_filter",
-        format!("filter predicate must return Boolean, got {actual}"),
-    )
+pub(crate) fn filter_predicate_type(actual: &arrow_schema::DataType) -> ArrowError {
+    ArrowError::ComputeError(format!(
+        "filter predicate must return Boolean, got {actual}"
+    ))
 }
 
 pub(crate) fn filter_error(error: impl std::error::Error + Send + Sync + 'static) -> Error {

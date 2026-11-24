@@ -1,11 +1,10 @@
 use std::sync::{Arc, atomic::Ordering};
 
 use arrow_array::{
-    ArrayRef, BinaryArray, BooleanArray, Int64Array, RecordBatch, StringArray, cast::AsArray,
-    types::Int64Type,
+    ArrayRef, BinaryArray, BooleanArray, Int64Array, RecordBatch, cast::AsArray, types::Int64Type,
 };
+use arrow_schema::DataType;
 use datafusion::{
-    functions::string::expr_fn::octet_length,
     logical_expr::{ColumnarValue, Expr, Volatility, create_udf},
     prelude::{col, lit},
 };
@@ -14,24 +13,16 @@ use open_arrow_access_core::*;
 use open_arrow_access_layers::{
     ColumnEvolution, FilterLayer, ParallelReadLayer, SchemaEvolutionLayer,
 };
-use open_arrow_access_test_support::{MemoryRecordAccessor, record::collect_column};
+use open_arrow_access_test_support::{
+    MemoryRecordAccessor,
+    record::{collect_column, collect_values},
+};
 
 fn batch() -> RecordBatch {
     RecordBatch::try_from_iter([
         (
             "id",
             Arc::new(Int64Array::from(vec![0, 1, 2, 3, 4, 5])) as ArrayRef,
-        ),
-        (
-            "text",
-            Arc::new(StringArray::from(vec![
-                Some(""),
-                Some("abc"),
-                Some("你好"),
-                None,
-                Some("x"),
-                Some("long"),
-            ])) as ArrayRef,
         ),
         (
             "data",
@@ -49,7 +40,7 @@ fn batch() -> RecordBatch {
 }
 
 #[tokio::test]
-async fn predicates_and_byte_size_keep_boundary_and_filter_whole_rows() {
+async fn multiple_predicates_filter_whole_rows_in_order() {
     let batch = batch();
     let memory = MemoryRecordAccessor::new(vec![
         batch.slice(0, 2),
@@ -57,28 +48,20 @@ async fn predicates_and_byte_size_keep_boundary_and_filter_whole_rows() {
         batch.slice(4, 2),
     ]);
     let source = memory.clone().layer(FilterLayer::new(vec![
-        octet_length(col("text")).lt_eq(lit(3i32)),
+        size_predicate(3),
         col("id").gt(lit(0i64)),
     ]));
-    let mut reader = source.open(ReadRequest::new("input")).await.unwrap();
+    let reader = source.open(ReadRequest::new("input")).await.unwrap();
     assert_eq!(memory.polls.load(Ordering::SeqCst), 0);
     assert_eq!(reader.metadata().schema, batch.schema());
     assert_eq!(reader.capability(), memory.capability());
-    let mut ids = Vec::new();
-    while let Some(output) = reader.next().await.unwrap() {
-        assert!(output.num_rows() > 0);
-        assert_eq!(output.num_columns(), 3);
-        ids.extend_from_slice(
-            output
-                .column(0)
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .unwrap()
-                .values(),
-        );
-    }
-    assert_eq!(ids, [1, 4]); // Unicode is six bytes; null is not true.
-    assert!(reader.next().await.unwrap().is_none());
+    let batches: Vec<_> = into_stream(reader).try_collect().await.unwrap();
+    assert!(
+        batches
+            .iter()
+            .all(|output| output.num_rows() > 0 && output.schema() == batch.schema())
+    );
+    assert_eq!(collect_values::<Int64Type>(&batches, 0), [1, 2, 4]);
 }
 
 // The caller owns the predicate logic and captured configuration. The layer
@@ -86,8 +69,8 @@ async fn predicates_and_byte_size_keep_boundary_and_filter_whole_rows() {
 fn size_predicate(max_bytes: usize) -> Expr {
     create_udf(
         "within_size_limit",
-        vec![arrow_schema::DataType::Binary],
-        arrow_schema::DataType::Boolean,
+        vec![DataType::Binary],
+        DataType::Boolean,
         Volatility::Immutable,
         Arc::new(move |args| {
             let arrays = ColumnarValue::values_to_arrays(args)?;
@@ -114,15 +97,8 @@ async fn caller_udf_reads_hidden_dependency_and_supports_empty_projection() {
     assert_eq!(*reader.metadata(), metadata);
     assert_eq!(collect_column::<Int64Type>(reader, 0).await, [0, 1, 2, 4]);
     assert_eq!(
-        memory
-            .projections
-            .lock()
-            .unwrap()
-            .last()
-            .unwrap()
-            .as_ref()
-            .unwrap(),
-        &["id", "data"]
+        memory.projections.lock().unwrap().last(),
+        Some(&Some(vec!["id".into(), "data".into()]))
     );
     let mut reader = source
         .open(ReadRequest::new("input").with_projection(Vec::<String>::new()))
@@ -134,30 +110,43 @@ async fn caller_udf_reads_hidden_dependency_and_supports_empty_projection() {
 }
 
 #[tokio::test]
-async fn scalar_predicates_and_empty_vector() {
-    for predicate in [
-        lit(true),
-        lit(false),
-        lit(datafusion::common::ScalarValue::Boolean(None)),
-    ] {
-        let memory = MemoryRecordAccessor::new(vec![batch().slice(0, 0), batch()]);
-        let source = memory.layer(FilterLayer::new(vec![predicate.clone()]));
-        let batches: Vec<RecordBatch> =
-            into_stream(source.open(ReadRequest::new("input")).await.unwrap())
-                .try_collect()
-                .await
-                .unwrap();
-        assert_eq!(
-            batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
-            if predicate == lit(true) { 6 } else { 0 }
+async fn scalar_literals_and_udfs_expand_to_the_batch_row_count() {
+    for (value, expected_rows) in [(Some(true), 6), (Some(false), 0), (None, 0)] {
+        let scalar = datafusion::common::ScalarValue::Boolean(value);
+        let result = scalar.clone();
+        let udf = create_udf(
+            "constant",
+            vec![DataType::Int64],
+            DataType::Boolean,
+            Volatility::Stable,
+            Arc::new(move |_| Ok(ColumnarValue::Scalar(result.clone()))),
         );
-        assert!(batches.iter().all(|batch| batch.num_rows() > 0));
+        for predicate in [lit(scalar), udf.call(vec![col("id")])] {
+            let memory = MemoryRecordAccessor::new(vec![batch().slice(0, 0), batch()]);
+            let source = memory.layer(FilterLayer::new(vec![predicate]));
+            let batches: Vec<_> =
+                into_stream(source.open(ReadRequest::new("input")).await.unwrap())
+                    .try_collect()
+                    .await
+                    .unwrap();
+            assert_eq!(
+                batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
+                expected_rows
+            );
+            assert!(batches.iter().all(|batch| batch.num_rows() > 0));
+        }
     }
+}
+
+#[tokio::test]
+async fn empty_vector_preserves_batches() {
     let empty = batch().slice(0, 0);
     let source =
         MemoryRecordAccessor::new(vec![empty.clone(), batch()]).layer(FilterLayer::default());
     let mut reader = source.open(ReadRequest::new("input")).await.unwrap();
     assert_eq!(reader.next().await.unwrap(), Some(empty));
+    assert_eq!(reader.next().await.unwrap(), Some(batch()));
+    assert!(reader.next().await.unwrap().is_none());
 }
 
 #[tokio::test]
@@ -206,9 +195,7 @@ impl ScanPlanner for PlannedSource {
 #[tokio::test]
 async fn filters_lazy_parallel_partitions_and_restores_projection() {
     let source = PlannedSource(MemoryRecordAccessor::new(vec![batch()]))
-        .layer(FilterLayer::new(vec![
-            octet_length(col("text")).lt_eq(lit(3i32)),
-        ]))
+        .layer(FilterLayer::new(vec![size_predicate(3)]))
         .layer(ParallelReadLayer::new(
             std::num::NonZeroUsize::new(2).unwrap(),
             std::num::NonZeroUsize::MIN,
@@ -219,7 +206,7 @@ async fn filters_lazy_parallel_partitions_and_restores_projection() {
         .unwrap();
     assert_eq!(
         collect_column::<Int64Type>(reader, 0).await,
-        [0, 1, 4, 0, 1, 4]
+        [0, 1, 2, 4, 0, 1, 2, 4]
     );
 }
 
@@ -265,8 +252,8 @@ async fn multi_column_udf_composes_with_generated_columns() {
     let observed = calls.clone();
     let predicate = create_udf(
         "keep_pair",
-        vec![arrow_schema::DataType::Int64, arrow_schema::DataType::Int64],
-        arrow_schema::DataType::Boolean,
+        vec![DataType::Int64, DataType::Int64],
+        DataType::Boolean,
         Volatility::Stable,
         Arc::new(move |args| {
             observed.fetch_add(1, Ordering::SeqCst);
@@ -303,46 +290,23 @@ async fn multi_column_udf_composes_with_generated_columns() {
 }
 
 #[tokio::test]
-async fn custom_udf_can_return_a_scalar_boolean() {
-    let predicate = create_udf(
-        "keep_all",
-        vec![arrow_schema::DataType::Int64],
-        arrow_schema::DataType::Boolean,
-        Volatility::Stable,
-        Arc::new(|_| {
-            Ok(ColumnarValue::Scalar(
-                datafusion::common::ScalarValue::Boolean(Some(true)),
-            ))
-        }),
-    );
-    let source = MemoryRecordAccessor::new(vec![batch()])
-        .layer(FilterLayer::new(vec![predicate.call(vec![col("id")])]));
-    assert_eq!(
-        collect_column::<Int64Type>(source.open(ReadRequest::new("input")).await.unwrap(), 0).await,
-        [0, 1, 2, 3, 4, 5]
-    );
-}
-
-#[tokio::test]
 async fn malformed_or_failing_custom_predicate_terminates_reader() {
-    use datafusion::{
-        error::DataFusionError,
-        logical_expr::{ColumnarValue, Volatility, create_udf},
-    };
-    for malformed in [false, true] {
+    use datafusion::error::DataFusionError;
+    for output in [
+        None,
+        Some(Arc::new(BooleanArray::from(vec![true])) as ArrayRef),
+        Some(Arc::new(Int64Array::from(vec![0; 6])) as ArrayRef),
+    ] {
         let udf = create_udf(
             "custom_filter",
-            vec![arrow_schema::DataType::Int64],
-            arrow_schema::DataType::Boolean,
+            vec![DataType::Int64],
+            DataType::Boolean,
             Volatility::Stable,
             Arc::new(move |_| {
-                if malformed {
-                    Ok(ColumnarValue::Array(Arc::new(
-                        arrow_array::BooleanArray::from(vec![true]),
-                    )))
-                } else {
-                    Err(DataFusionError::Execution("predicate failed".into()))
-                }
+                output
+                    .clone()
+                    .map(ColumnarValue::Array)
+                    .ok_or_else(|| DataFusionError::Execution("predicate failed".into()))
             }),
         );
         let memory = MemoryRecordAccessor::new(vec![batch(), batch()]);

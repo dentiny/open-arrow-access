@@ -208,8 +208,8 @@ impl FilterPlan {
                     .plan(expr.clone(), &input)
                     .map_err(crate::error::filter_plan_error)?;
                 if compiled.output.data_type() != &DataType::Boolean {
-                    return Err(crate::error::filter_predicate_type(
-                        compiled.output.data_type(),
+                    return Err(crate::error::filter_plan_error(
+                        crate::error::filter_predicate_type(compiled.output.data_type()).into(),
                     ));
                 }
                 Ok(compiled.expression)
@@ -228,10 +228,8 @@ impl FilterPlan {
             &self.schema,
             crate::error::filter_schema_mismatch,
         )?;
-        let metadata = RecordMetadata {
-            schema: self.output.schema.clone(),
-            source: reader.metadata().source.clone(),
-        };
+        let mut metadata = reader.metadata().clone();
+        metadata.schema = self.output.schema.clone();
         let capability = reader.capability();
         let stream =
             into_stream(reader).try_filter_map(move |batch| future::ready(self.apply(batch)));
@@ -260,25 +258,20 @@ impl FilterPlan {
             let mask = values
                 .as_any()
                 .downcast_ref::<BooleanArray>()
-                .ok_or_else(|| crate::error::filter_predicate_type(values.data_type()))?;
+                .ok_or_else(|| crate::error::filter_predicate_type(values.data_type()))
+                .map_err(crate::error::filter_error)?;
             for (keep, value) in keep.iter_mut().zip(mask.iter()) {
                 *keep &= value == Some(true);
             }
         }
-        if !keep.iter().any(|&value| value) {
-            return Ok(None);
-        }
-        let batch = if keep.iter().all(|&value| value) {
-            batch
-        } else {
-            filter_record_batch(&batch, &BooleanArray::from(keep))
-                .map_err(crate::error::filter_error)?
-        };
-        project_batch(
+        // Predicate-only columns are no longer needed; filter only the output.
+        let batch = project_batch(
             batch,
             self.output.indices.as_deref(),
             self.output.schema.clone(),
-        )
-        .map(Some)
+        )?;
+        let batch = filter_record_batch(&batch, &BooleanArray::from(keep))
+            .map_err(crate::error::filter_error)?;
+        Ok((batch.num_rows() != 0).then_some(batch))
     }
 }
