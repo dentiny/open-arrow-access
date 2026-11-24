@@ -1,6 +1,39 @@
+-- Run this complete CREATE + IMPORT script against a NEW database with DuckDB -bail.
+-- Tested with DuckDB 2.0.0 and the published compression_fs extension.
+-- httpfs supplies HTTPS; compression_fs supplies .bz2 decoding.
+INSTALL httpfs;
+LOAD httpfs;
+INSTALL compression_fs FROM community;
+LOAD compression_fs;
+
+-- Review the source headers against the explicit table definitions below before changing the date.
+SET VARIABLE courtlistener_export_date = '2026-09-30';
+SET VARIABLE courtlistener_bulk_root =
+    'https://com-courtlistener-storage.s3-us-west-2.amazonaws.com/bulk-data';
+SET preserve_insertion_order = true;
+
+CREATE TEMP MACRO courtlistener_csv(table_name) AS TABLE
+SELECT *
+FROM read_csv(
+    getvariable('courtlistener_bulk_root') || '/' || table_name || '-' ||
+        getvariable('courtlistener_export_date') || '.csv.bz2',
+    header = true,
+    delim = ',',
+    quote = '"',
+    escape = '\',
+    all_varchar = true,
+    nullstr = '',
+    allow_quoted_nulls = false,
+    parallel = false,
+    hive_partitioning = false,
+    max_line_size = 67108864,
+    buffer_size = 67108864
+);
+
+
 -- Default source schema pinned to the 2026-09-30 CSV headers and companion SQL.
--- Creates empty tables. The importer supplies typed Arrow batches and ordinals.
--- Existing tables are not dropped or replaced. Historical overrides use reviewed DDL.
+-- Tables are populated by the read_csv INSERT statements later in this script.
+-- Existing tables are not dropped or replaced; other export schemas require review.
 
 CREATE TABLE opinions (
     "id" BIGINT NOT NULL,
@@ -149,3 +182,39 @@ CREATE TABLE courts (
     "parent_court_id" VARCHAR,
     "__courtlistener_ordinal" UBIGINT NOT NULL
 );
+
+-- INSERT casts into the explicit types/NOT NULL constraints above.
+-- Read each file sequentially so ordinals retain original CSV record order.
+BEGIN TRANSACTION;
+INSERT INTO opinions BY NAME
+SELECT *, (row_number() OVER () - 1)::UBIGINT AS __courtlistener_ordinal
+FROM courtlistener_csv('opinions');
+SELECT CASE WHEN count(*) = count(DISTINCT id) THEN true
+    ELSE error('duplicate IDs in opinions') END FROM opinions;
+COMMIT;
+
+BEGIN TRANSACTION;
+INSERT INTO opinion_clusters BY NAME
+SELECT *, (row_number() OVER () - 1)::UBIGINT AS __courtlistener_ordinal
+FROM courtlistener_csv('opinion-clusters');
+SELECT CASE WHEN count(*) = count(DISTINCT id) THEN true
+    ELSE error('duplicate IDs in opinion_clusters') END FROM opinion_clusters;
+COMMIT;
+
+BEGIN TRANSACTION;
+INSERT INTO dockets BY NAME
+SELECT *, (row_number() OVER () - 1)::UBIGINT AS __courtlistener_ordinal
+FROM courtlistener_csv('dockets');
+SELECT CASE WHEN count(*) = count(DISTINCT id) THEN true
+    ELSE error('duplicate IDs in dockets') END FROM dockets;
+COMMIT;
+
+BEGIN TRANSACTION;
+INSERT INTO courts BY NAME
+SELECT *, (row_number() OVER () - 1)::UBIGINT AS __courtlistener_ordinal
+FROM courtlistener_csv('courts');
+SELECT CASE WHEN count(*) = count(DISTINCT id) THEN true
+    ELSE error('duplicate IDs in courts') END FROM courts;
+COMMIT;
+
+CHECKPOINT;

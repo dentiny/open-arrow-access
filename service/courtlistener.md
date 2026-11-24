@@ -446,11 +446,12 @@ provide the schema above. Same-date tables are not an atomic database snapshot.
 For public S3, callers configure the `com-courtlistener-storage` bucket,
 region and unsigned access on their OpenDAL operator; local mirrors work too.
 
-## Prepared database SQL reference
+## Standalone SQL import
 
-The [full four-table DDL and creation sequence](../metadata_import/courtlistener/README.md)
-document the local prepared database layout. These standalone SQL files create
-empty typed tables; CSV loading and file publication are separate steps.
+The [standalone SQL importer](../metadata_import/courtlistener/ingest-courtlistener.sql)
+creates and populates all four typed tables directly from the HTTPS CSV.bz2 exports.
+See its [instructions](../metadata_import/courtlistener/README.md) for extensions,
+configuration and differences from the prepared-reader workflow.
 
 ## Typed table records
 

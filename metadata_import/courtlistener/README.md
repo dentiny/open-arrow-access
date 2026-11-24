@@ -1,65 +1,45 @@
-# CourtListener database creation SQL
+# CourtListener bulk import
 
-These files are an executable SQL reference for the prepared local database
-layout. They do not change the runtime importer or automatically load CSV data.
+[ingest-courtlistener.sql](ingest-courtlistener.sql) creates **and populates**
+`opinions`, `opinion_clusters`, `dockets` and `courts` in a new DuckDB file.
+It reads the public HTTPS `.csv.bz2` exports directly, using `httpfs` for HTTP
+and the community `compression_fs` extension for bzip2 decompression.
 
-| File | Purpose |
-| --- | --- |
-| [create_tables.sql](create_tables.sql) | Full default DDL for opinions, opinion_clusters, dockets and courts |
-| [create_snapshot.sql](create_snapshot.sql) | Completion/provenance table, created after successful imports |
-| [insert_snapshot.sql](insert_snapshot.sql) | Insert the single completed snapshot with four bound parameters |
-
-The default DDL is pinned to the 2026-09-30 export: 22 opinion, 36 cluster,
-54 docket and 20 court source fields. Every table also has
-`__courtlistener_ordinal: UBIGINT NOT NULL`, the zero-based logical CSV row
-number excluding the header. These columns match the default Arrow source
-schema; historical schema variants require their own reviewed DDL.
-
-## How the database is created
-
-1. Rust opens a new staging DuckDB file on the destination filesystem.
-   Opening the file creates the database; there is no separate SQL
-   `CREATE DATABASE` statement.
-2. Execute `create_tables.sql` to create four empty typed tables.
-3. For each table, execute `BEGIN TRANSACTION`, parse the source PostgreSQL
-   COPY CSV into strictly typed Arrow batches, append the batches and original
-   ordinals using DuckDB's Arrow appender, flush, then `COMMIT`.
-   These data writes use the appender API, not `read_csv` or SQL `INSERT`
-   statements. Quoted empty strings and unquoted NULLs stay distinct.
-4. Reject duplicate IDs in each imported table. For example:
-
-   ```sql
-   SELECT id, count(*)
-   FROM opinions
-   GROUP BY id
-   HAVING count(*) > 1;
-   ```
-
-   The importer checks all four tables. Cross-table foreign keys are not
-   enforced: upstream exports can have missing matches, which remain nullable
-   LEFT JOINs at read time.
-5. Execute `create_snapshot.sql`, then `insert_snapshot.sql` with parameters
-   in this order: application format version (`1`), export date, source URI
-   root, and the exact serialized source-schema contract.
-6. Execute `CHECKPOINT`, close DuckDB, then publish the file atomically without
-   replacing an existing destination. File publication is a filesystem action,
-   not a SQL statement.
-
-TEXT, HTML and XML are stored in their original columns. PDF paths/URLs are
-stored as references; PDF downloading remains with the sink. No joined wide
-table is materialized. Read-time joins follow the same opinion → cluster →
-docket → court relationship as the provider.
-
-## Inspect just the schema with the DuckDB CLI
+Tested with DuckDB 2.0.0. Run from the repository root against a new file:
 
 ```sh
-duckdb -bail /path/to/empty.duckdb < metadata_import/courtlistener/create_tables.sql
-duckdb -bail /path/to/empty.duckdb 'DESCRIBE opinions;'
+duckdb -bail -storage-version v1.5.0 /path/to/courtlistener.duckdb \
+  < metadata_import/courtlistener/ingest-courtlistener.sql
 ```
 
-This creates empty tables only. It does not import data or create a completed
-snapshot row. Populate the tables using the typed CSV readers and DuckDB Arrow
-appender, then write the bound snapshot row and checkpoint the file as described
-above. Pass the completed file path to the generic `DuckDbDatabase::open(path)`
-for SQL queries. The provider-specific prepared-file reader is implemented
-separately in [PR #727](https://github.com/dentiny/open-arrow-access/pull/727).
+The script installs/loads both extensions, creates the four explicit typed
+tables, inserts rows through `read_csv()`, rejects duplicate IDs and checkpoints
+the database. No Rust importer or second SQL file is needed. The storage-version
+flag keeps the file readable by the library's DuckDB 1.5.x binding.
+
+The default export date is `2026-09-30`. Edit `courtlistener_export_date` and
+`courtlistener_bulk_root` near the top to select another reviewed snapshot or a
+local mirror with the same `<table>-<date>.csv.bz2` filenames. The DDL pins all
+132 source fields, their types and nullable flags; review headers before changing
+the date. For an uncompressed local mirror, remove `.bz2` from the macro's suffix
+and the compression_fs INSTALL/LOAD statements.
+
+The SQL reads every source column as text, then INSERT casts into the explicit
+table types and enforces NOT NULL constraints. Backslash quote escaping,
+multiline text, unquoted NULL and quoted empty strings are preserved. Native
+DuckDB cast rules apply; this is not the provider's stricter lexical validator.
+Sequential CSV reads plus `preserve_insertion_order` retain zero-based logical
+record ordinals in `__courtlistener_ordinal`. The 64 MiB line/buffer limit is
+explicit and may need increasing for larger legitimate records; parse errors
+fail instead of dropping rows.
+
+TEXT/HTML/XML remain inline. PDF paths/URLs remain references; no PDF download
+occurs. Source exports are full snapshots and may contain missing foreign-key
+matches. They are not delta files or an atomic cross-table snapshot.
+
+Use the generic `DuckDbDatabase::open(path)` to query the resulting tables.
+This standalone script does not write the versioned `courtlistener_snapshot`
+header required by the separate prepared-reader workflow in
+[PR #727](https://github.com/dentiny/open-arrow-access/pull/727), matching the
+standalone-import distinction documented for BHL. Run once with `-bail`; a failed
+import can leave previously committed tables, so rebuild a new database on retry.
