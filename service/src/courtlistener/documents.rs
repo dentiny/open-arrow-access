@@ -2,6 +2,7 @@
 use super::{
     CourtListenerDatePartitionAccessor,
     error::{arrow_error, records_error, schema_error},
+    validation::{http_url, validate_media_root},
 };
 use arrow_array::{Array, ArrayRef, RecordBatch, StringArray, StructArray};
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef};
@@ -36,12 +37,7 @@ impl<A> CourtListenerDatePartitionAccessor<A> {
     ) -> Result<CourtListenerDocumentAccessor<A>> {
         let mut media_root = Url::parse(media_root.as_ref())
             .map_err(|_| schema_error("media root must be an absolute HTTP(S) URL"))?;
-        if !http_url(&media_root) || media_root.query().is_some() || media_root.fragment().is_some()
-        {
-            return Err(schema_error(
-                "media root must be an HTTP(S) URL without credentials, query or fragment",
-            ));
-        }
+        validate_media_root(&media_root)?;
         if !media_root.path().ends_with('/') {
             media_root.set_path(&format!("{}/", media_root.path()));
         }
@@ -69,12 +65,6 @@ fn document_fields() -> Fields {
         Field::new("cluster_pdf_url", DataType::Utf8, true),
     ]
     .into()
-}
-fn http_url(url: &Url) -> bool {
-    matches!(url.scheme(), "http" | "https")
-        && url.host_str().is_some()
-        && url.username().is_empty()
-        && url.password().is_none()
 }
 fn resolve(root: &Url, value: Option<&str>) -> Result<Option<String>> {
     let Some(value) = value.filter(|v| !v.is_empty()) else {

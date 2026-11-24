@@ -3,7 +3,7 @@ use super::{
     CourtListenerCopyDialect, CourtListenerSchemas, CourtListenerSnapshot,
     ingest::{TABLES, ingest},
     query::query,
-    valdiation::{validate_join_schema, validate_source_root},
+    validation::{validate_join_schema, validate_source_root},
 };
 use futures::stream;
 use open_arrow_access_core::{

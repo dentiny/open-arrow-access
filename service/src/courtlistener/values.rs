@@ -1,7 +1,7 @@
 //! Arrow scalar conversion and array construction.
 use super::{
     error::invalid_value,
-    valdiation::{validate_array, validate_values},
+    validation::{validate_array, validate_values},
 };
 use arrow_array::{ArrayRef, StringArray};
 use arrow_cast::{CastOptions, cast_with_options};

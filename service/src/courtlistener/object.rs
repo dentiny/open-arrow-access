@@ -1,5 +1,5 @@
 //! CourtListener bulk object path parsing.
-use super::valdiation::validate_snapshot;
+use super::validation::validate_snapshot;
 
 pub(super) struct SnapshotObject<'a> {
     pub table: &'a str,

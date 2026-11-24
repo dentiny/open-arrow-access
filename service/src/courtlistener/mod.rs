@@ -13,7 +13,7 @@ pub use documents::CourtListenerDocumentAccessor;
 mod object;
 mod schema;
 mod table;
-mod valdiation;
+mod validation;
 mod values;
 pub use copy_csv::CourtListenerCopyDialect;
 pub use schema::CourtListenerSchemas;
@@ -22,7 +22,7 @@ pub use table::CourtListenerTableAccessor;
 use std::sync::Arc;
 
 use object::{SnapshotObject, parse_object};
-use valdiation::{validate_snapshot, validate_table};
+use validation::{validate_snapshot, validate_table};
 
 use open_arrow_access_core::{
     Accessor, ByteAccessor, ByteReadRequest, ByteReader, Capability, ListRequest, ObjectRef,

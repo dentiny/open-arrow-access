@@ -4,7 +4,7 @@ use super::{
     copy_csv::{CopyCsv, CourtListenerCopyDialect},
     error::arrow_error,
     object::parse_object,
-    valdiation::{validate_columns, validate_header},
+    validation::{validate_columns, validate_header},
     values,
 };
 use arrow_array::{RecordBatch, StringArray};
