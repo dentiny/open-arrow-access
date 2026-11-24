@@ -10,6 +10,48 @@ pub(super) fn validate_database_destination(exists: bool) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn validate_lookup_file(is_file: bool) -> Result<()> {
+    if !is_file {
+        return Err(error::invalid(
+            "BHL lookup requires an existing database file",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_lookup_header(count: u64, version: Option<u64>) -> Result<()> {
+    if (count, version) != (1, Some(1)) {
+        return Err(error::invalid(
+            "unsupported or incomplete BHL lookup profile",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_lookup_schema(table: &Table, columns: &[TableColumn]) -> Result<()> {
+    if columns.len() != table.fields.len() + 2 {
+        return Err(error::invalid("invalid BHL lookup table schema"));
+    }
+    validate_table_schema(table, &columns[..table.fields.len()])?;
+    let ordinal = &columns[table.fields.len()];
+    let key = &columns[table.fields.len() + 1];
+    if ordinal.name != "__source_rowid"
+        || ordinal.data_type != "UBIGINT"
+        || key.name != "__key"
+        || key.data_type != "UBIGINT"
+    {
+        return Err(error::invalid("invalid BHL lookup key or source ordinal"));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_lookup_rows(raw_count: u64, prepared_count: u64) -> Result<()> {
+    if raw_count != prepared_count {
+        return Err(error::invalid("incomplete BHL lookup table"));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_database_snapshot_id(snapshot_id: &str) -> Result<()> {
     if snapshot_id.trim().is_empty() {
         return Err(error::invalid("database snapshot_id must not be blank"));
@@ -26,11 +68,15 @@ pub(super) fn validate_database_header(count: u64, version: u64) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn validate_title_keys(valid: bool) -> Result<()> {
-    if !valid {
+pub(super) fn validate_title_keys(rows: u64, numeric_keys: u64) -> Result<()> {
+    if rows != numeric_keys {
         return Err(error::invalid("invalid or duplicate numeric key in title"));
     }
     Ok(())
+}
+
+pub(super) fn validate_source_key(value: &str) -> Result<()> {
+    super::super::pages::identity::number(value).map(|_| ())
 }
 
 pub(super) fn validate_database_manifest(

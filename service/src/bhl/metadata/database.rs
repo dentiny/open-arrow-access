@@ -1,5 +1,5 @@
 //! Persistent DuckDB storage for reusable BHL metadata.
-use super::{BhlMetadata, BhlMetadataInfo, error, source, tables, validation};
+use super::{BhlMetadata, BhlMetadataInfo, error, tables, validation};
 use crate::duckdb::{DuckDbDatabase, ManagedConnection};
 use ::duckdb::{Connection, params};
 use open_arrow_access_core::{ByteAccessor, Result};
@@ -32,6 +32,32 @@ fn check_sources(connection: &ManagedConnection, info: &BhlMetadataInfo) -> Resu
 }
 
 impl BhlMetadata {
+    /// Resolve and validate the immutable query source once per database handle.
+    /// Query clones only install private SQL helpers; they do not recheck every
+    /// lookup table or regenerate view SQL for each request.
+    pub(super) fn from_connection(
+        connection: ManagedConnection,
+        info: BhlMetadataInfo,
+    ) -> Result<Self> {
+        connection
+            .execute_batch(include_str!("id.sql"))
+            .map_err(error::duckdb)?;
+        let (title_rows, title_keys): (u64, u64) = connection
+            .query_row(
+                "SELECT count(*), count(DISTINCT bhl_id(TitleID)) FROM main.title",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(error::duckdb)?;
+        validation::validate_title_keys(title_rows, title_keys)?;
+        let query_sql = super::lookup::query_sql(&connection)?;
+        Ok(Self {
+            connection: Mutex::new(connection),
+            info,
+            query_sql,
+        })
+    }
+
     /// Create a persistent metadata database by importing the 13 source tables.
     /// Write directly to the requested path, rejecting an existing destination.
     /// Await successful completion before opening readers: data and provenance
@@ -42,7 +68,11 @@ impl BhlMetadata {
         path: impl AsRef<Path>,
     ) -> Result<()> {
         let path = path.as_ref().to_path_buf();
-        validation::validate_database_destination(path.try_exists().map_err(error::database_io)?)?;
+        validation::validate_database_destination(
+            tokio::fs::try_exists(&path)
+                .await
+                .map_err(error::database_io)?,
+        )?;
         let connection = ManagedConnection::open(&path, false)?;
         let metadata = Self::import(storage, connection).await?;
         tokio::task::spawn_blocking(move || {
@@ -74,10 +104,7 @@ impl BhlMetadata {
         let connection = ManagedConnection::open(path, true)?;
         let info = read_info(&connection)?;
         check_sources(&connection, &info)?;
-        Ok(Self {
-            connection: Mutex::new(connection),
-            info,
-        })
+        Self::from_connection(connection, info)
     }
 
     /// Open a caller-created DuckDB file containing the 13 BHL source tables.
@@ -90,6 +117,36 @@ impl BhlMetadata {
     /// It is not presented as a checksum of the original TSV rows.
     pub fn open_tables(path: impl AsRef<Path>, snapshot_id: impl Into<String>) -> Result<Self> {
         Self::from_tables_database(DuckDbDatabase::open(path)?, snapshot_id)
+    }
+
+    /// Prepare numeric lookup keys and ART indexes after the 13 source tables
+    /// are finalized. This opt-in operation writes additional tables, preserving
+    /// every original lexical column and source row ordinal. It requires enough
+    /// disk/memory for the derived tables and indexes. Distribute the completed
+    /// immutable file only after this method returns; never modify raw tables
+    /// without rebuilding the snapshot and its lookup tables together.
+    /// Existing lookup profiles are rejected rather than overwritten. Filesystem
+    /// checks are asynchronous; synchronous DuckDB work runs on a blocking worker.
+    pub async fn prepare_lookup(path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref().to_path_buf();
+        let file = tokio::fs::metadata(&path)
+            .await
+            .map_err(error::database_io)?;
+        validation::validate_lookup_file(file.is_file())?;
+        tokio::task::spawn_blocking(move || {
+            let connection = ManagedConnection::open(path, false)?;
+            for table in tables() {
+                let columns = connection.table_columns(&table.name)?;
+                validation::validate_table_schema(&table, &columns)?;
+            }
+            if let Err(source) = connection.execute_batch(include_str!("prepare_lookup.sql")) {
+                let _ = connection.execute_batch("ROLLBACK");
+                return Err(error::duckdb(source));
+            }
+            connection.close()
+        })
+        .await
+        .map_err(error::task)?
     }
 
     /// Bind a shared local or remote DuckDB database to BHL tables.
@@ -105,22 +162,13 @@ impl BhlMetadata {
             let columns = connection.table_columns(&table.name)?;
             validation::validate_table_schema(&table, &columns)?;
         }
-        source::create_id_macro(&connection, true)?;
-        let valid_title_keys: bool = connection
-            .query_row(
-                "SELECT count(*) = count(DISTINCT bhl_id(TitleID)) FROM main.title",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(error::duckdb)?;
-        validation::validate_title_keys(valid_title_keys)?;
-        Ok(Self {
-            connection: Mutex::new(connection),
-            info: BhlMetadataInfo {
+        Self::from_connection(
+            connection,
+            BhlMetadataInfo {
                 source_root: super::super::OPEN_DATA_BUCKET_URL.to_owned(),
                 fingerprint: snapshot_id,
                 sources: Default::default(),
             },
-        })
+        )
     }
 }

@@ -18,6 +18,7 @@ arxiv = [
     "open-arrow-access-decompression/gzip",
 ]
 bhl = [
+    "tokio/fs",
     "tokio/sync",
     "opendal/services-s3",
     "dep:arrow-cast",

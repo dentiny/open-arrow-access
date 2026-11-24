@@ -98,4 +98,3 @@ WHERE (lower(EntityType) = 'title' AND __key IN (SELECT bhl_id(TitleID) FROM bhl
    OR (lower(EntityType) = 'part' AND __key IN (SELECT entity_id FROM bhl_selection WHERE entity_type = 'part'));
 CREATE OR REPLACE TEMP VIEW bhl_doi AS
 SELECT * FROM bhl_scope_doi;
-
