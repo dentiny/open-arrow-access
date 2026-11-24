@@ -9,6 +9,7 @@ use datafusion::{
     prelude::{col, lit},
 };
 use futures::TryStreamExt;
+use more_asserts::assert_gt;
 use open_arrow_access_core::{Accessor, AccessorExt, ErrorKind, ReadRequest, into_stream};
 use open_arrow_access_layers::FilterLayer;
 use open_arrow_access_test_support::{
@@ -54,11 +55,10 @@ async fn multiple_predicates_filter_whole_rows_in_order() {
     assert_eq!(reader.metadata().schema, batch.schema());
     assert_eq!(reader.capability(), memory.capability());
     let batches: Vec<_> = into_stream(reader).try_collect().await.unwrap();
-    assert!(
-        batches
-            .iter()
-            .all(|output| output.num_rows() > 0 && output.schema() == batch.schema())
-    );
+    for output in &batches {
+        assert_gt!(output.num_rows(), 0);
+        assert_eq!(output.schema(), batch.schema());
+    }
     assert_eq!(collect_values::<Int64Type>(&batches, 0), [1, 2, 4]);
 }
 
@@ -131,7 +131,9 @@ async fn scalar_literals_and_udfs_expand_to_the_batch_row_count() {
                 batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
                 expected_rows
             );
-            assert!(batches.iter().all(|batch| batch.num_rows() > 0));
+            for batch in &batches {
+                assert_gt!(batch.num_rows(), 0);
+            }
         }
     }
 }
