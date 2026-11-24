@@ -420,3 +420,14 @@ A query that scans most of a database can still fetch most blocks on demand.
 The attached source is read-only; the control database and connection-local
 temporary objects remain writable. BHL consumes the same loader through
 `BhlMetadata::from_tables_database(database, snapshot_id)`.
+
+Read-only BHL snapshots apply a query budget of 1 GiB for DuckDB's buffer
+manager, two execution threads and at most 1 GiB of spill files, shared by all
+query clones. Arrow output, OCR reads and the Lance writer need additional
+memory; this is not a process RSS limit. BHL switches an already-loaded
+`cache_httpfs` to a bounded 128 MiB in-memory block cache before querying,
+instead of retaining a separate multi-GB on-disk snapshot cache per conversion
+worker. HTTP request fanout is limited to four subrequests per read. Large
+working sets can re-fetch evicted remote blocks. Generic `DuckDbDatabase`
+queries retain the on-disk cache behavior described above, and metadata imports
+and lookup preparation retain their existing resource settings.
