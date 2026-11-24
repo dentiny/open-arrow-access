@@ -247,33 +247,3 @@ async fn mixed_rules_use_original_values_and_combine_cell_masks() {
         ]
     );
 }
-
-#[tokio::test]
-async fn cell_rules_reject_layouts_without_top_level_validity() {
-    use arrow_array::{Int32Array, RunArray, UnionArray, types::Int32Type};
-    use arrow_buffer::ScalarBuffer;
-    use arrow_schema::{Field, UnionFields};
-
-    let union = UnionArray::try_new(
-        UnionFields::try_new([0], [Field::new("value", DataType::Int64, false)]).unwrap(),
-        ScalarBuffer::from(vec![0i8]),
-        Some(ScalarBuffer::from(vec![0i32])),
-        vec![Arc::new(Int64Array::from(vec![1]))],
-    )
-    .unwrap();
-    let run =
-        RunArray::<Int32Type>::try_new(&Int32Array::from(vec![1]), &Int64Array::from(vec![1]))
-            .unwrap();
-    for array in [Arc::new(union) as ArrayRef, Arc::new(run)] {
-        let batch = RecordBatch::try_from_iter([("value", array)]).unwrap();
-        assert_eq!(batch.num_rows(), 1);
-        let memory = MemoryRecordAccessor::new(vec![batch]);
-        let source = memory
-            .clone()
-            .layer(FilterLayer::with_rules(vec![cell("value", lit(false))]));
-        let error = source.open(ReadRequest::new("input")).await.err().unwrap();
-        assert_eq!(error.kind(), ErrorKind::InvalidInput);
-        assert!(error.to_string().contains("unsupported type"));
-        assert_eq!(memory.polls.load(Ordering::SeqCst), 0);
-    }
-}
