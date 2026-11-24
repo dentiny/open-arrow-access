@@ -1,13 +1,15 @@
 //! CourtListener bulk table discovery and decoded CSV byte access.
-//! Storage is rooted above `bulk-data/`; schemas and record conversion remain
-//! with the consumer. See the service README for public S3 configuration.
+//! Typed table/date readers preserve source text, HTML and XML. The optional
+//! document reader adds URLs for sink-side downloads without fetching document bytes.
 
 mod copy_csv;
 mod date;
+mod documents;
 mod error;
 mod ingest;
 mod query;
 pub use date::CourtListenerDatePartitionAccessor;
+pub use documents::CourtListenerDocumentAccessor;
 mod object;
 mod schema;
 mod table;

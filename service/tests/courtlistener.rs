@@ -338,6 +338,161 @@ async fn consume(mut reader: Box<dyn RecordReader>) -> Result<usize> {
     }
     Ok(count)
 }
+
+#[tokio::test]
+async fn documents_preserve_all_representations_and_defer_downloads_to_sink() -> Result<()> {
+    let (root, source) = joined_fixture().await;
+    write_bz(
+        root.path(),
+        "opinions",
+        include_str!("../../testdata/courtlistener/documents/opinion.csv"),
+    )
+    .await;
+    write_bz(
+        root.path(),
+        "opinion-clusters",
+        include_str!("../../testdata/courtlistener/documents/cluster.csv"),
+    )
+    .await;
+    // There are no media files, and .invalid URLs must never be fetched by this reader.
+    let source = source.with_document_urls("https://media.invalid/base")?;
+    let request = ReadRequest::new("2026-09-30").with_batch_size(NonZeroUsize::new(2).unwrap());
+    let schema = source.schema();
+    assert_eq!(schema.fields().len(), 7);
+    assert_eq!(
+        source
+            .plan_scan(request.clone())
+            .await?
+            .partitions
+            .size_hint()
+            .0,
+        1
+    );
+    let mut reader = source.open(request).await?;
+    let mut batches = Vec::new();
+    while let Some(batch) = reader.next().await? {
+        assert!(batch.num_rows() <= 2);
+        batches.push(batch);
+    }
+    let batch = concat_batches(&schema, &batches).unwrap();
+    assert_eq!(batch.num_rows(), 5);
+    let opinion = batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .unwrap();
+    assert_eq!(opinion.num_columns(), 22);
+    assert_eq!(
+        child::<StringArray>(opinion, "plain_text").value(0),
+        "line1\nline2 \"quoted\" \\ slash"
+    );
+    assert_eq!(
+        child::<StringArray>(opinion, "xml_harvard").value(0),
+        "<opinion>XML &amp; text</opinion>"
+    );
+    assert_eq!(
+        child::<StringArray>(opinion, "xml_scan").value(0),
+        "<scan>different representation</scan>"
+    );
+    assert_eq!(
+        child::<StringArray>(opinion, "html").value(0),
+        "<p>HTML</p>"
+    );
+    assert_eq!(
+        child::<StringArray>(opinion, "local_path").value(0),
+        "pdf/opinion 1.pdf"
+    );
+    let documents = batch
+        .column(6)
+        .as_any()
+        .downcast_ref::<StructArray>()
+        .unwrap();
+    let files = child::<StringArray>(documents, "opinion_file_url");
+    let pdfs = child::<StringArray>(documents, "cluster_pdf_url");
+    assert_eq!(
+        files.value(0),
+        "https://media.invalid/base/pdf/opinion%201.pdf"
+    );
+    assert_eq!(
+        files.value(1),
+        "https://publisher.invalid/opinion.pdf?sig=a%2Fb"
+    );
+    assert_eq!(
+        files.value(2),
+        "https://mirror.invalid/original.pdf?sig=x%2Fy"
+    );
+    assert!(files.is_null(3));
+    assert_eq!(
+        pdfs.value(0),
+        "https://media.invalid/base/harvard_pdf/cluster.pdf"
+    );
+    assert_eq!(pdfs.value(4), pdfs.value(0)); // Same cluster PDF shared by two opinions.
+    assert!(pdfs.is_null(1)); // Missing cluster.
+    assert!(pdfs.is_null(2)); // Present cluster, absent PDF path.
+    assert!(reader.next().await?.is_none());
+    let mut projected = source
+        .open(ReadRequest::new("2026-09-30").with_projection(["documents", "opinion"]))
+        .await?;
+    assert_eq!(
+        projected.next().await?.unwrap().schema().field(0).name(),
+        "documents"
+    );
+    assert_eq!(
+        consume(
+            source
+                .open(ReadRequest::new("2026-09-30").with_projection(Vec::<String>::new()))
+                .await?
+        )
+        .await?,
+        5
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn document_plans_are_lazy_and_invalid_references_fail_without_dropping_rows() -> Result<()> {
+    for root in [
+        "",
+        "file:///tmp/media",
+        "https://user:password@example/media",
+        "https://example/media?x=1",
+        "https://example/media#x",
+    ] {
+        let bytes = MemoryAccessor::new(b"", 1);
+        assert!(
+            CourtListenerDatePartitionAccessor::new(bytes, "s3://source")?
+                .with_document_urls(root)
+                .is_err()
+        );
+    }
+    let bytes = MemoryAccessor::new(b"", 1);
+    let observed = bytes.observations.clone();
+    let source = CourtListenerDatePartitionAccessor::new(bytes, "s3://source")?
+        .with_document_urls("https://media.invalid/")?;
+    source.plan_scan(ReadRequest::new("2026-09-30")).await?;
+    assert!(
+        source
+            .metadata(ReadRequest::new("2026-09-30").with_projection(["missing"]))
+            .await
+            .is_err()
+    );
+    assert!(
+        source
+            .plan_scan(ReadRequest::new("2026-02-30"))
+            .await
+            .is_err()
+    );
+    assert!(observed.requests.lock().unwrap().is_empty());
+    let (root, source) = joined_fixture().await;
+    let raw = include_str!("../../testdata/courtlistener/documents/opinion.csv")
+        .replace("pdf/opinion 1.pdf", "../escape.pdf");
+    write_bz(root.path(), "opinions", &raw).await;
+    let source = source.with_document_urls("https://media.invalid/")?;
+    let mut reader = source.open(ReadRequest::new("2026-09-30")).await?;
+    assert!(reader.next().await.is_err());
+    assert!(reader.next().await?.is_none());
+    Ok(())
+}
 fn child<'a, T: Array + 'static>(s: &'a StructArray, name: &str) -> &'a T {
     s.column_by_name(name)
         .unwrap()
