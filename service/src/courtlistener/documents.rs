@@ -2,7 +2,7 @@
 use super::{
     CourtListenerDatePartitionAccessor,
     error::{arrow_error, records_error, schema_error},
-    validation::{http_url, validate_media_root},
+    validation::{http_url, validate_media_root, validate_relative_document_path},
 };
 use arrow_array::{Array, ArrayRef, RecordBatch, StringArray, StructArray};
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef};
@@ -80,12 +80,7 @@ fn resolve(root: &Url, value: Option<&str>) -> Result<Option<String>> {
         return Err(records_error("unsupported absolute document URL"));
     }
     // FileField values are raw keys, not URL-encoded paths.
-    if value.contains(['\\', ':'])
-        || value.chars().any(char::is_control)
-        || value.split('/').any(|part| matches!(part, "" | "." | ".."))
-    {
-        return Err(records_error("invalid relative document path"));
-    }
+    validate_relative_document_path(value)?;
     let mut url = root.clone();
     let mut segments = url
         .path_segments_mut()

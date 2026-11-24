@@ -240,3 +240,13 @@ pub(super) fn validate_media_root(media_root: &Url) -> Result<()> {
     }
     Ok(())
 }
+
+pub(super) fn validate_relative_document_path(value: &str) -> Result<()> {
+    if value.contains(['\\', ':'])
+        || value.chars().any(char::is_control)
+        || value.split('/').any(|part| matches!(part, "" | "." | ".."))
+    {
+        return Err(records_error("invalid relative document path"));
+    }
+    Ok(())
+}
