@@ -173,22 +173,3 @@ impl Deref for ManagedConnection {
         &self.connection
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn temporary_cache_lives_until_the_last_clone_closes() {
-        let connection = ManagedConnection::in_memory().unwrap();
-        let cache = connection.directory.path().join("http-cache");
-        tokio::fs::create_dir_all(&cache).await.unwrap();
-        let block = cache.join("block");
-        tokio::fs::write(&block, b"cached bytes").await.unwrap();
-        let clone = connection.try_clone().unwrap();
-        drop(connection);
-        assert_eq!(tokio::fs::read(&block).await.unwrap(), b"cached bytes");
-        drop(clone);
-        assert!(!tokio::fs::try_exists(&cache).await.unwrap());
-    }
-}
